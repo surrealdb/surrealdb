@@ -1,6 +1,6 @@
 //! This file defines the endpoints for the ML API for uploading models and performing inference on the models for either raw tensors or buffered computes.
 // Standard library imports
-use std::collections::HashMap;
+use std::{collections::HashMap, env};
 
 // External crates imports
 use axum::{
@@ -11,12 +11,12 @@ use axum::{
 	Extension, Router, TypedHeader,
 };
 use bytes::Bytes;
-use serde_json;
 use futures_util::StreamExt;
 use http::StatusCode;
 use http_body::Body as HttpBody;
 use hyper::Response;
 use serde::Deserialize;
+use serde_json;
 use serde_json::from_slice;
 use surrealdb::{
 	dbs::Session,
@@ -39,6 +39,23 @@ use crate::net::output;
 
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
+/// Gets the local database path from the environment variable `SURREAL_DB_LOCAL_KV`.
+///
+/// # Notes
+/// The local database path is used for the key value store for the ML API. The key
+/// is the model id and the value is the hash of the model. The hash is used to get
+/// the model from the object storage.
+///
+/// # Returns
+/// * `String` - The local database path
+fn get_local_kv_path() -> String {
+	match env::var("SURREAL_DB_LOCAL_KV") {
+		Ok(value) => return value,
+		Err(_) => {}
+	};
+	return "file://ml_cache.db".to_string();
+}
+
 /// The router definition for the ML API endpoints.
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -60,9 +77,6 @@ async fn import(
 	_maybe_output: Option<TypedHeader<Accept>>,
 	mut stream: BodyStream,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-	// if false == true {
-	// 	return Err(output::json::<String>(&"Not implemented".to_string()));
-	// }
 	let mut buffer = Vec::new();
 	while let Some(chunk) = stream.next().await {
 		let chunk = chunk.unwrap();
@@ -98,7 +112,7 @@ async fn import(
 		InsertStatus::AlreadyExists(hash) => hash,
 	};
 
-	let ds = match Datastore::new("file://ml_cache.db").await {
+	let ds = match Datastore::new(get_local_kv_path().as_str()).await {
 		Ok(ds) => ds,
 		Err(err) => {
 			let datastore_error_response = Response::builder()
@@ -138,10 +152,7 @@ async fn import(
 			return Err(commit_error_response);
 		}
 	};
-	let response = Response::builder()
-		.status(StatusCode::CREATED)
-		.body(id)
-		.unwrap();
+	let response = Response::builder().status(StatusCode::CREATED).body(id).unwrap();
 	Ok(response)
 }
 
@@ -167,7 +178,7 @@ async fn raw_compute(
 	let body: RawComputeBody = from_slice(&body.to_vec()).expect("Failed to deserialize");
 	let response: String;
 	{
-		let ds = Datastore::new("file://ml_cache.db")
+		let ds = Datastore::new(get_local_kv_path().as_str())
 			.await
 			.map_err(|e| output::json::<String>(&e.to_string()))?;
 		let mut tx = ds
@@ -197,10 +208,8 @@ async fn raw_compute(
 
 	let output_tensor = compute_unit.raw_compute(tensor, dims).unwrap();
 	let json = serde_json::to_string(&output_tensor).unwrap();
-	let response = Response::builder()
-		.status(StatusCode::OK)
-		.body(boxed(Body::from(json)))
-		.unwrap();
+	let response =
+		Response::builder().status(StatusCode::OK).body(boxed(Body::from(json))).unwrap();
 	Ok(response)
 }
 
@@ -224,7 +233,7 @@ async fn buffered_compute(
 
 	let response: String;
 	{
-		let ds = Datastore::new("file://ml_cache.db").await.unwrap();
+		let ds = Datastore::new(get_local_kv_path().as_str()).await.unwrap();
 		let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 		response = String::from_utf8(tx.get(body.id).await.unwrap().unwrap()).unwrap();
 	}
@@ -243,9 +252,7 @@ async fn buffered_compute(
 
 	let output_tensor = compute_unit.buffered_compute(&mut body.input).unwrap();
 	let json = serde_json::to_string(&output_tensor).unwrap();
-	let response = Response::builder()
-		.status(StatusCode::OK)
-		.body(boxed(Body::from(json)))
-		.unwrap();
+	let response =
+		Response::builder().status(StatusCode::OK).body(boxed(Body::from(json))).unwrap();
 	Ok(response)
 }

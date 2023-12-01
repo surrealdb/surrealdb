@@ -212,7 +212,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Run HTTP integration tests
+      - name: Run ML integration tests
         run: cargo make ci-ml-integration
 
   ws-server:

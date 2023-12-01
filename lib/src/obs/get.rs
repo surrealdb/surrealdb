@@ -1,6 +1,7 @@
 //! Defines the get for object storage. Right now the only supported object storage is local file
 //! system so we are keeping it to a simple function call but will add more in the future.
 use super::get_object_storage;
+use crate::err::Error;
 use object_store::path::Path;
 use object_store::GetResultPayload;
 use object_store::ObjectStore;
@@ -16,24 +17,26 @@ use std::io::Read;
 ///
 /// # Returns
 /// * `Vec<u8>` - The bytes of the file.
-pub async fn get_local_file(file_hash: String) -> Result<Vec<u8>, String> {
-	let local_file = get_object_storage();
+pub async fn get_local_file(file_hash: String) -> Result<Vec<u8>, Error> {
+	let local_file = get_object_storage()?;
 	let object_path: Path = file_hash
 		.try_into()
-		.map_err(|e| format!("Error converting path to object store path: {}", e))?;
+		.map_err(|e| Error::Ds(format!("Failed to convert file hash to path: {}", e)))?;
 	let file_data = local_file
 		.get(&object_path)
 		.await
-		.map_err(|e| format!("Error getting file from local file system: {}", e))?
+		.map_err(|e| Error::Ds(format!("Failed get local file: {}", e)))?
 		.payload;
 	match file_data {
 		GetResultPayload::File(mut file, _) => {
 			let mut buffer = vec![];
 			file.read_to_end(&mut buffer)
-				.map_err(|e| format!("Error reading file from local file system: {}", e))?;
+				.map_err(|e| Error::Ds(format!("Failed to read file: {}", e)))?;
 			return Ok(buffer);
 		}
-		GetResultPayload::Stream(_) => return Err("Stream not supported yet".to_string()),
+		GetResultPayload::Stream(_) => {
+			return Err(Error::Ds("Stream not supported yet".to_string()))
+		}
 	};
 }
 

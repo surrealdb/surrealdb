@@ -1,5 +1,6 @@
 //! This module contains the functions for inserting files into the object storage.
 use super::{get_local_store_path, get_object_storage};
+use crate::err::Error;
 use bytes::Bytes;
 use object_store::path::Path;
 use object_store::ObjectStore;
@@ -54,22 +55,21 @@ pub fn hash_file(data: &Vec<u8>) -> String {
 ///
 /// # Returns
 /// * The status of the insert operation which contains the hash of the file
-pub async fn insert_local_file(file_data: Vec<u8>) -> Result<InsertStatus, String> {
+pub async fn insert_local_file(file_data: Vec<u8>) -> Result<InsertStatus, Error> {
 	let hash = hash_file(&file_data);
-	let local_file = get_object_storage();
-	let local_path =
-		get_local_store_path().map_err(|e| format!("Error getting local store path: {}", e))?;
+	let local_file = get_object_storage()?;
+	let local_path = get_local_store_path()?;
 	let file_path = local_path.join(&hash);
 
 	if !file_path.exists() {
 		let object_path: Path = hash
 			.clone()
 			.try_into()
-			.map_err(|e| format!("Error converting path to object store path: {}", e))?;
+			.map_err(|e| Error::Ds(format!("Failed to get the path: {}", e)))?;
 		local_file
 			.put(&object_path, Bytes::from(file_data))
 			.await
-			.map_err(|e| format!("Error inserting file into object storage: {}", e))?;
+			.map_err(|e| Error::Ds(format!("Error inserting file into object storage: {}", e)))?;
 		Ok(InsertStatus::Inserted(hash))
 	} else {
 		Ok(InsertStatus::AlreadyExists(hash))
