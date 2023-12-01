@@ -2,6 +2,7 @@ mod helpers;
 
 mod memory_tests {
 	use crate::helpers::new_ds;
+	use std::sync::atomic::{AtomicI8, AtomicUsize, Ordering};
 	extern crate peak_alloc;
 	use peak_alloc::PeakAlloc;
 	use surrealdb::dbs::Session;
@@ -9,6 +10,31 @@ mod memory_tests {
 
 	#[global_allocator]
 	static GLOBAL: PeakAlloc = PeakAlloc;
+
+	#[tokio::test]
+	// This test controls that memory is stable when we really do (quite) nothing
+	async fn test_validation() -> Result<(), Error> {
+		let mut start_memory = 0;
+		let mut memory_usage = 0;
+		let let_do_something = AtomicUsize::new(0);
+		for i in 0..10000 {
+			let_do_something.fetch_add(1, Ordering::Relaxed);
+			if start_memory == 0 {
+				start_memory = GLOBAL.current_usage();
+			} else {
+				memory_usage = GLOBAL.current_usage();
+				if i % 1000 == 0 {
+					println!("{}", GLOBAL.current_usage());
+				}
+			}
+		}
+		assert!(
+			(memory_usage - start_memory) < 100_000,
+			"Before: {start_memory} - After: {memory_usage} - {:?}",
+			let_do_something
+		);
+		Ok(())
+	}
 
 	#[tokio::test]
 	async fn one_dbs_for_all() -> Result<(), Error> {
