@@ -92,9 +92,9 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
-	// Whether authentication levels are enabled on this datastore.
+	// Whether authentication level is enabled on this datastore.
 	// TODO(gguillemas): Remove this field once the legacy basic auth is deprecated in v2.0.0
-	auth_levels_enabled: bool,
+	auth_level_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -344,7 +344,7 @@ impl Datastore {
 			strict: false,
 			auth_enabled: false,
 			// TODO(gguillemas): Remove this field once the legacy basic auth is deprecated in v2.0.0
-			auth_levels_enabled: false,
+			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -392,8 +392,8 @@ impl Datastore {
 
 	/// Set whether authentication levels are enabled for this Datastore
 	/// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
-	pub fn with_auth_levels_enabled(mut self, enabled: bool) -> Self {
-		self.auth_levels_enabled = enabled;
+	pub fn with_auth_level_enabled(mut self, enabled: bool) -> Self {
+		self.auth_level_enabled = enabled;
 		self
 	}
 
@@ -408,10 +408,10 @@ impl Datastore {
 		self.auth_enabled
 	}
 
-	/// Are authentication levels enabled for this Datastore?
+	/// Is authentication level enabled for this Datastore?
 	/// TODO(gguillemas): Remove this method once the legacy basic auth is deprecated in v2.0.0
-	pub fn is_auth_levels_enabled(&self) -> bool {
-		self.auth_levels_enabled
+	pub fn is_auth_level_enabled(&self) -> bool {
+		self.auth_level_enabled
 	}
 
 	/// Setup the initial credentials

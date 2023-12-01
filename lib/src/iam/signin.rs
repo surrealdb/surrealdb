@@ -194,7 +194,7 @@ pub async fn db(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	let verify_creds = if kvs.is_auth_levels_enabled() {
+	let verify_creds = if kvs.is_auth_level_enabled() {
 		verify_db_creds(kvs, &ns, &db, &user, &pass).await
 	} else {
 		// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0
@@ -245,7 +245,7 @@ pub async fn ns(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	let verify_creds = if kvs.is_auth_levels_enabled() {
+	let verify_creds = if kvs.is_auth_level_enabled() {
 		verify_ns_creds(kvs, &ns, &user, &pass).await
 	} else {
 		// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0
@@ -294,7 +294,7 @@ pub async fn root(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	let verify_creds = if kvs.is_auth_levels_enabled() {
+	let verify_creds = if kvs.is_auth_level_enabled() {
 		verify_root_creds(kvs, &user, &pass).await
 	} else {
 		// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0

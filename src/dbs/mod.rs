@@ -27,14 +27,14 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_AUTH", long = "auth")]
 	#[arg(default_value_t = false)]
 	auth_enabled: bool,
-	#[arg(
-		help = "Whether to enable authentication levels",
-		help_heading = "Authentication Levels"
-	)]
-	#[arg(env = "SURREAL_AUTH_LEVELS", long = "auth-levels")]
-	#[arg(default_value_t = false)]
 	// TODO(gguillemas): Remove this argument once the legacy basic auth is deprecated in v2.0.0
-	auth_levels_enabled: bool,
+	#[arg(
+		help = "Whether to enable explicit authentication level selection",
+		help_heading = "Authentication"
+	)]
+	#[arg(env = "SURREAL_AUTH_LEVEL_ENABLED", long = "auth-level-enabled")]
+	#[arg(default_value_t = false)]
+	auth_level_enabled: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
@@ -213,7 +213,7 @@ pub async fn init(
 		transaction_timeout,
 		auth_enabled,
 		// TODO(gguillemas): Remove this field once the legacy basic auth is deprecated in v2.0.0
-		auth_levels_enabled,
+		auth_level_enabled,
 		caps,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
@@ -237,7 +237,7 @@ pub async fn init(
 	}
 	// Log whether authentication levels are enabled
 	// TODO(gguillemas): Remove this condition once the legacy basic auth is deprecated in v2.0.0
-	if auth_levels_enabled {
+	if auth_level_enabled {
 		info!("Authentication levels are enabled");
 	}
 
@@ -252,6 +252,7 @@ pub async fn init(
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(auth_enabled)
+		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
 
 	dbs.bootstrap().await?;
