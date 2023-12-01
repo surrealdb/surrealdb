@@ -151,12 +151,10 @@ pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
 
 pub fn knn(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = char('<')(i)?;
-	cut(|i| {
-		let (i, k) = u16(i)?;
-		let (i, dist) = opt(knn_distance)(i)?;
-		let (i, _) = char('>')(i)?;
-		Ok((i, Operator::Knn(k, dist)))
-	})(i)
+	let (i, k) = u16(i)?;
+	let (i, dist) = opt(knn_distance)(i)?;
+	let (i, _) = char('>')(i)?;
+	Ok((i, Operator::Knn(k, dist)))
 }
 
 pub fn dir(i: &str) -> IResult<&str, Dir> {
