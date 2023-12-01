@@ -122,6 +122,7 @@ jobs:
   crate:
     name: Publish surrealdb-nightly to crates.io
     needs: [test, lint]
+    environment: crate-nightly
     if: ${{ inputs.publish || github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     steps:
