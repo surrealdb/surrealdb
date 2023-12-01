@@ -1,90 +1,83 @@
 mod helpers;
 
+// We use a separated package so that only these package is using PeakAlloc
 mod memory_tests {
 	use crate::helpers::new_ds;
-	use std::sync::atomic::{AtomicI8, AtomicUsize, Ordering};
 	extern crate peak_alloc;
 	use peak_alloc::PeakAlloc;
 	use surrealdb::dbs::Session;
 	use surrealdb::err::Error;
+	use surrealdb::syn;
 
 	#[global_allocator]
 	static GLOBAL: PeakAlloc = PeakAlloc;
 
 	#[tokio::test]
 	// This test controls that memory is stable when we really do (quite) nothing
-	async fn test_validation() -> Result<(), Error> {
-		let mut start_memory = 0;
-		let mut memory_usage = 0;
-		let let_do_something = AtomicUsize::new(0);
-		for i in 0..10000 {
-			let_do_something.fetch_add(1, Ordering::Relaxed);
-			if start_memory == 0 {
-				start_memory = GLOBAL.current_usage();
-			} else {
-				memory_usage = GLOBAL.current_usage();
-				if i % 1000 == 0 {
-					println!("{}", GLOBAL.current_usage());
-				}
-			}
+	async fn nmemory_control_test() -> Result<(), Error> {
+		let mut mem = MemCollector::default();
+		for _ in 0..10000 {
+			mem.collect();
 		}
-		assert!(
-			(memory_usage - start_memory) < 100_000,
-			"Before: {start_memory} - After: {memory_usage} - {:?}",
-			let_do_something
-		);
-		Ok(())
+		mem.check()
 	}
 
 	#[tokio::test]
-	async fn one_dbs_for_all() -> Result<(), Error> {
+	async fn memory_test_dbs() -> Result<(), Error> {
 		let dbs = new_ds().await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
-		let mut start_memory = 0;
-		let mut memory_usage = 0;
-		for i in 0..10000 {
+
+		let mut mem = MemCollector::default();
+		for _ in 0..10000 {
 			let res = &mut dbs.execute("SELECT * FROM nothing", &ses, None).await?;
 			assert_eq!(res.len(), 1);
 			let _ = res.remove(0).result?;
-			if start_memory == 0 {
-				start_memory = GLOBAL.current_usage();
-			} else {
-				memory_usage = GLOBAL.current_usage();
-				if i % 1000 == 0 {
-					println!("{}", GLOBAL.current_usage());
-				}
-			}
+			mem.collect();
 		}
-		assert!(
-			(memory_usage - start_memory) < 100_000,
-			"Before: {start_memory} - After: {memory_usage}"
-		);
-		Ok(())
+		mem.check()
 	}
 
 	#[tokio::test]
-	async fn one_dbs_per_request() -> Result<(), Error> {
-		let mut start_memory = 0;
-		let mut memory_usage = 0;
-		for i in 0..10000 {
-			let dbs = new_ds().await?;
-			let ses = Session::owner().with_ns("test").with_db("test");
-			let res = &mut dbs.execute("SELECT * FROM nothing", &ses, None).await?;
-			assert_eq!(res.len(), 1);
-			let _ = res.remove(0).result?;
-			if start_memory == 0 {
-				start_memory = GLOBAL.current_usage();
+	// This test controls that memory is stable when we really do (quite) nothing
+	async fn memory_test_parser() -> Result<(), Error> {
+		let mut mem = MemCollector::default();
+		for _ in 0..10000 {
+			let ast = syn::parse("SELECT * FROM nothing")?;
+			assert_eq!(ast.to_string(), "SELECT * FROM nothing;");
+			mem.collect();
+		}
+		mem.check()
+	}
+
+	#[derive(Default)]
+	struct MemCollector {
+		i: usize,
+		start_mem: usize,
+		current_mem: usize,
+	}
+
+	impl MemCollector {
+		fn collect(&mut self) {
+			self.i += 1;
+			if self.start_mem == 0 {
+				self.start_mem = GLOBAL.current_usage();
 			} else {
-				memory_usage = GLOBAL.current_usage();
-				if i % 1000 == 0 {
+				self.current_mem = GLOBAL.current_usage();
+				if self.i % 1000 == 0 {
 					println!("{}", GLOBAL.current_usage());
 				}
 			}
 		}
-		assert!(
-			(memory_usage - start_memory) < 100_000,
-			"Before: {start_memory} - After: {memory_usage}"
-		);
-		Ok(())
+
+		fn check(&self) -> Result<(), Error> {
+			assert!(
+				(self.current_mem - self.start_mem) < 100_000,
+				"Before: {} - After: {} - Idx: {}",
+				self.start_mem,
+				self.current_mem,
+				self.i
+			);
+			Ok(())
+		}
 	}
 }
