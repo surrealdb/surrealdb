@@ -178,10 +178,9 @@ mod cli_integration {
 
 		info!("* Pass only ns");
 		{
-			let throwaway = Ulid::new();
-			let args = format!("sql --conn http://{addr} {creds} --ns {throwaway}");
+			let args = format!("sql --conn http://{addr} {creds} --ns {ns}");
 			let output = common::run(&args)
-				.input("USE DB `{throwaway}`; SELECT * FROM thing:one;\n")
+				.input(&format!("USE DB `{db}`; SELECT * FROM thing:one;\n"))
 				.output()
 				.expect("only ns");
 			assert!(output.contains("thing:one"), "missing thing:one in {output}");
