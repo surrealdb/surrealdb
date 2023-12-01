@@ -748,6 +748,230 @@ mod http_integration {
 
 	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
+		let url = &format!("http://{addr}/signin");
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Create a DB user
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(r#"DEFINE USER user_db ON DB PASSWORD 'pass_db'"#)
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+		}
+
+		// Signin with valid DB credentials and get the token
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_db",
+					"pass": "pass_db",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+		}
+
+		// Signin with invalid DB credentials returns 403
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_db",
+					"pass": "invalid_pass",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		// Create a NS user
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(r#"DEFINE USER user_ns ON NS PASSWORD 'pass_ns'"#)
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+		}
+
+		// Signin with valid NS credentials specifying NS and DB and get the token
+		// This should fail because authentication will be attempted at DB level
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_ns",
+					"pass": "pass_ns",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		// Signin with valid NS credentials specifying NS and get the token
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"user": "user_ns",
+					"pass": "pass_ns",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+		}
+
+		// Signin with invalid NS credentials returns 403
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_ns",
+					"pass": "invalid_pass",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		// Create a ROOT user
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(r#"DEFINE USER user_root ON ROOT PASSWORD 'pass_root'"#)
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+		}
+
+		// Signin with valid ROOT credentials specifying NS and DB and get the token
+		// This should fail because authentication will be attempted at DB level
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_root",
+					"pass": "pass_root",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		// Signin with valid ROOT credentials specifying NS and get the token
+		// This should fail because authentication will be attempted at NS level
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"user": "user_root",
+					"pass": "pass_root",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		// Signin with valid ROOT credentials without specifying NS nor DB and get the token
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"user": "user_root",
+					"pass": "pass_root",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+		}
+
+		// Signin with invalid ROOT credentials returns 403
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_root",
+					"pass": "invalid_pass",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn signin_endpoint_legacy() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/signin");
 
@@ -764,25 +988,25 @@ mod http_integration {
 			.default_headers(headers)
 			.build()?;
 
-		// Create a user
+		// Create a DB user
 		{
 			let res = client
 				.post(format!("http://{addr}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body(r#"DEFINE USER user ON DB PASSWORD 'pass'"#)
+				.body(r#"DEFINE USER user_db ON DB PASSWORD 'pass_db'"#)
 				.send()
 				.await?;
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
 		}
 
-		// Signin with valid credentials and get the token
+		// Signin with valid DB credentials and get the token
 		{
 			let req_body = serde_json::to_string(
 				json!({
 					"ns": ns,
 					"db": db,
-					"user": "user",
-					"pass": "pass",
+					"user": "user_db",
+					"pass": "pass_db",
 				})
 				.as_object()
 				.unwrap(),
@@ -796,13 +1020,113 @@ mod http_integration {
 			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 		}
 
-		// Signin with invalid credentials returns 403
+		// Signin with invalid DB credentials returns 403
 		{
 			let req_body = serde_json::to_string(
 				json!({
 					"ns": ns,
 					"db": db,
-					"user": "user",
+					"user": "user_db",
+					"pass": "invalid_pass",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		// Create a NS user
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(r#"DEFINE USER user_ns ON ROOT PASSWORD 'pass_ns'"#)
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+		}
+
+		// Signin with valid NS credentials specifying NS and DB and get the token
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_ns",
+					"pass": "pass_ns",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+		}
+
+		// Signin with invalid NS credentials returns 403
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_ns",
+					"pass": "invalid_pass",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
+		}
+
+		// Create a ROOT user
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(r#"DEFINE USER user_root ON ROOT PASSWORD 'pass_root'"#)
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+		}
+
+		// Signin with valid ROOT credentials specifying NS and DB and get the token
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_root",
+					"pass": "pass_root",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+
+			let res = client.post(url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
+		}
+
+		// Signin with invalid ROOT credentials returns 403
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"user": "user_root",
 					"pass": "invalid_pass",
 				})
 				.as_object()
