@@ -15,12 +15,12 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use crate::sync::Mutex;
 use channel::Receiver;
 use futures::StreamExt;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
-use tokio::sync::Mutex;
 use tracing::instrument;
 use trice::Instant;
 #[cfg(target_arch = "wasm32")]
@@ -55,7 +55,7 @@ impl<'a> Executor<'a> {
 			Some(_) => false,
 			None => match self.kvs.transaction(write, Optimistic).await {
 				Ok(v) => {
-					self.txn = Some(Arc::new(Mutex::new(v)));
+					self.txn = Some(Arc::new(Mutex::new(v, "executor.rs::begin")));
 					true
 				}
 				Err(_) => {

@@ -22,6 +22,8 @@ use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::sync::Mutex;
+use crate::sync::RwLock;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
 use channel::Sender;
@@ -44,8 +46,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 pub(crate) const NO_LIMIT: u32 = 0;
@@ -148,7 +148,7 @@ impl Transaction {
 	}
 
 	pub fn enclose(self) -> Arc<Mutex<Self>> {
-		Arc::new(Mutex::new(self))
+		Arc::new(Mutex::new(self, "tx.rs:enclose"))
 	}
 
 	// --------------------------------------------------
