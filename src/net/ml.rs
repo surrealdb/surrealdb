@@ -11,6 +11,7 @@ use axum::{
 	Extension, Router, TypedHeader,
 };
 use bytes::Bytes;
+use serde_json;
 use futures_util::StreamExt;
 use http::StatusCode;
 use http_body::Body as HttpBody;
@@ -137,7 +138,11 @@ async fn import(
 			return Err(commit_error_response);
 		}
 	};
-	Ok(output::json(&output::simplify(id)))
+	let response = Response::builder()
+		.status(StatusCode::CREATED)
+		.body(id)
+		.unwrap();
+	Ok(response)
 }
 
 /// The body for the raw compute endpoint on the ML API for a model.
@@ -191,7 +196,12 @@ async fn raw_compute(
 	}
 
 	let output_tensor = compute_unit.raw_compute(tensor, dims).unwrap();
-	Ok(output::json(&output::simplify(output_tensor)))
+	let json = serde_json::to_string(&output_tensor).unwrap();
+	let response = Response::builder()
+		.status(StatusCode::OK)
+		.body(boxed(Body::from(json)))
+		.unwrap();
+	Ok(response)
 }
 
 /// The body for the buffered compute endpoint on the ML API for a model.
@@ -232,5 +242,10 @@ async fn buffered_compute(
 	}
 
 	let output_tensor = compute_unit.buffered_compute(&mut body.input).unwrap();
-	Ok(output::json(&output::simplify(output_tensor)))
+	let json = serde_json::to_string(&output_tensor).unwrap();
+	let response = Response::builder()
+		.status(StatusCode::OK)
+		.body(boxed(Body::from(json)))
+		.unwrap();
+	Ok(response)
 }

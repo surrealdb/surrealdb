@@ -54,7 +54,7 @@ mod ml_integration {
 
 		// assert the response is correct
 		let body_string = String::from_utf8(body_bytes.to_vec())?;
-		assert_eq!(body_string, "\"Prediction-0.0.1\"");
+		assert_eq!(body_string, "Prediction-0.0.1");
 		Ok(())
 	}
 
