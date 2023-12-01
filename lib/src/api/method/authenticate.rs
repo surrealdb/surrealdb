@@ -1,9 +1,11 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
-use crate::api::conn::Router;
+use crate::api::method::OnceLockExt;
 use crate::api::opt::auth::Jwt;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::Surreal;
+use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::pin::Pin;
@@ -12,7 +14,7 @@ use std::pin::Pin;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Authenticate<'r, C: Connection> {
-	pub(super) router: Result<&'r Router<C>>,
+	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) token: Jwt,
 }
 
@@ -25,7 +27,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.router?;
+			let router = self.client.router.extract()?;
 			let mut conn = Client::new(Method::Authenticate);
 			conn.execute_unit(router, Param::new(vec![self.token.0.into()])).await
 		})
