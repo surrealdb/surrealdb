@@ -796,7 +796,7 @@ mod http_integration {
 			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 		}
 
-		// Signin with invalid DB credentials returns 403
+		// Signin with invalid DB credentials returns 401
 		{
 			let req_body = serde_json::to_string(
 				json!({
@@ -864,7 +864,7 @@ mod http_integration {
 			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 		}
 
-		// Signin with invalid NS credentials returns 403
+		// Signin with invalid NS credentials returns 401
 		{
 			let req_body = serde_json::to_string(
 				json!({
@@ -949,7 +949,7 @@ mod http_integration {
 			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 		}
 
-		// Signin with invalid ROOT credentials returns 403
+		// Signin with invalid ROOT credentials returns 401
 		{
 			let req_body = serde_json::to_string(
 				json!({
@@ -1021,7 +1021,7 @@ mod http_integration {
 			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 		}
 
-		// Signin with invalid DB credentials returns 403
+		// Signin with invalid DB credentials returns 401
 		{
 			let req_body = serde_json::to_string(
 				json!({
@@ -1071,7 +1071,7 @@ mod http_integration {
 			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 		}
 
-		// Signin with invalid NS credentials returns 403
+		// Signin with invalid NS credentials returns 401
 		{
 			let req_body = serde_json::to_string(
 				json!({
@@ -1121,7 +1121,7 @@ mod http_integration {
 			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
 		}
 
-		// Signin with invalid ROOT credentials returns 403
+		// Signin with invalid ROOT credentials returns 401
 		{
 			let req_body = serde_json::to_string(
 				json!({
