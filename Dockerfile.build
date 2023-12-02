@@ -1,0 +1,9 @@
+FROM rust:latest as build
+RUN apt-get update && apt-get install -y clang
+WORKDIR /surreal
+COPY . .
+RUN cargo build --release
+
+FROM cgr.dev/chainguard/glibc-dynamic
+COPY --from=build --chown=nonroot:nonroot /surreal/target/release/surreal /surreal/
+ENTRYPOINT ["/surreal"]
