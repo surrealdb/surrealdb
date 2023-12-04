@@ -31,7 +31,7 @@ impl DefineParamStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = txn.lock().unwrap();
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement

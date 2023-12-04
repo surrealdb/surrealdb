@@ -31,7 +31,7 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = txn.lock().unwrap();
 		// Clear the cache
 		run.clear_cache();
 		// Set the id

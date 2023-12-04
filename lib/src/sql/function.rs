@@ -164,7 +164,7 @@ impl Function {
 				// Get the function definition
 				let val = {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = txn.lock().unwrap();
 					// Get the function definition
 					run.get_and_cache_db_function(opt.ns(), opt.db(), s).await?
 				};

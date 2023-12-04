@@ -104,7 +104,7 @@ impl FtIndex {
 		p: &SearchParams,
 		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
 		Self::with_analyzer(&mut tx, az, index_key_base, p, store_type).await
 	}
@@ -172,7 +172,7 @@ impl FtIndex {
 		txn: &Transaction,
 		rid: &Thing,
 	) -> Result<(), Error> {
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		// Extract and remove the doc_id (if any)
 		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(&mut tx, rid.into()).await? {
 			self.state.doc_count -= 1;
@@ -219,7 +219,7 @@ impl FtIndex {
 		content: Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		let resolved = self.doc_ids.write().await.resolve_doc_id(&mut tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
 		drop(tx);
@@ -241,7 +241,7 @@ impl FtIndex {
 		};
 
 		// Set the doc length
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		let mut dl = self.doc_lengths.write().await;
 		if resolved.was_existing() {
 			if let Some(old_doc_length) = dl.get_doc_length(&mut tx, doc_id).await? {
@@ -433,7 +433,7 @@ impl FtIndex {
 
 	pub(crate) async fn statistics(&self, txn: &Transaction) -> Result<FtStatistics, Error> {
 		// TODO do parallel execution
-		let mut run = txn.lock().await;
+		let mut run = txn.lock().unwrap();
 		Ok(FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(&mut run).await?,
 			terms: self.terms.read().await.statistics(&mut run).await?,
@@ -443,7 +443,7 @@ impl FtIndex {
 	}
 
 	pub(crate) async fn finish(self, tx: &Transaction) -> Result<(), Error> {
-		let mut run = tx.lock().await;
+		let mut run = tx.lock().unwrap();
 		self.doc_ids.write().await.finish(&mut run).await?;
 		self.doc_lengths.write().await.finish(&mut run).await?;
 		self.postings.write().await.finish(&mut run).await?;
@@ -503,7 +503,7 @@ mod tests {
 		scr: BM25Scorer,
 		e: Vec<(&Thing, Option<Score>)>,
 	) {
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		if let Some(mut hits) = hits {
 			let mut map = HashMap::new();
 			while let Some((k, d)) = hits.next(&mut tx).await.unwrap() {
@@ -527,7 +527,7 @@ mod tests {
 		qs: &str,
 	) -> (Option<HitsIterator>, BM25Scorer) {
 		let t = fti.extract_terms(ctx, opt, txn, qs.to_string()).await.unwrap();
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		let td = Arc::new(fti.get_terms_docs(&mut tx, &t).await.unwrap());
 		drop(tx);
 		let scr = fti.new_scorer(td.clone()).unwrap().unwrap();
@@ -545,7 +545,7 @@ mod tests {
 		let write = matches!(store_type, TreeStoreType::Write);
 		let tx = ds.transaction(write.into(), Optimistic).await.unwrap();
 		let txn = Arc::new(Mutex::new(tx));
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		let fti = FtIndex::with_analyzer(
 			&mut tx,
 			az.clone(),
@@ -569,7 +569,7 @@ mod tests {
 
 	pub(super) async fn finish(txn: &Transaction, fti: FtIndex) {
 		fti.finish(txn).await.unwrap();
-		txn.lock().await.commit().await.unwrap();
+		txn.lock().unwrap().commit().await.unwrap();
 	}
 
 	#[test(tokio::test)]

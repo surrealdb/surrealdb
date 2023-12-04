@@ -47,7 +47,7 @@ impl KillStatement {
 			}
 		};
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = txn.lock().unwrap();
 		// Fetch the live query key
 		let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
 		// Fetch the live query key if it exists

@@ -31,7 +31,7 @@ pub async fn analyze(
 ) -> Result<Value, Error> {
 	if let (Some(txn), Some(opt), Value::Strand(az), Value::Strand(val)) = (txn, opt, az, val) {
 		let az: Analyzer =
-			txn.lock().await.get_db_analyzer(opt.ns(), opt.db(), az.as_str()).await?.into();
+			txn.lock().unwrap().get_db_analyzer(opt.ns(), opt.db(), az.as_str()).await?.into();
 		az.analyze(ctx, opt, txn, val.0).await
 	} else {
 		Ok(Value::None)

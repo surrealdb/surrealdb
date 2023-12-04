@@ -64,7 +64,7 @@ impl IndexEqualThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let min = beg.clone();
 		let max = end.to_owned();
-		let res = txn.lock().await.scan(min..max, limit).await?;
+		let res = txn.lock().unwrap().scan(min..max, limit).await?;
 		if let Some((key, _)) = res.last() {
 			let mut key = key.clone();
 			key.push(0x00);
@@ -176,7 +176,7 @@ impl IndexRangeThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
-		let res = txn.lock().await.scan(min..max, limit).await?;
+		let res = txn.lock().unwrap().scan(min..max, limit).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg = key.clone();
 			self.r.beg.push(0x00);
@@ -246,7 +246,7 @@ impl UniqueEqualThingIterator {
 
 	async fn next_batch(&mut self, txn: &Transaction) -> Result<Vec<(Thing, DocId)>, Error> {
 		if let Some(key) = self.key.take() {
-			if let Some(val) = txn.lock().await.get(key).await? {
+			if let Some(val) = txn.lock().unwrap().get(key).await? {
 				return Ok(vec![(val.into(), NO_DOC_ID)]);
 			}
 		}
@@ -310,7 +310,7 @@ impl UniqueRangeThingIterator {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
 		limit += 1;
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		let res = tx.scan(min..max, limit).await?;
 		let mut r = Vec::with_capacity(res.len());
 		for (k, v) in res {
@@ -353,7 +353,7 @@ impl MatchesThingIterator {
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let mut res = vec![];
 		if let Some(hits) = &mut self.hits {
-			let mut run = txn.lock().await;
+			let mut run = txn.lock().unwrap();
 			while limit > 0 {
 				if let Some(hit) = hits.next(&mut run).await? {
 					res.push(hit);
@@ -385,7 +385,7 @@ impl DocIdsIterator {
 		mut limit: u32,
 	) -> Result<Vec<(Thing, DocId)>, Error> {
 		let mut res = vec![];
-		let mut tx = txn.lock().await;
+		let mut tx = txn.lock().unwrap();
 		while limit > 0 {
 			if let Some(doc_id) = self.res.pop_front() {
 				if let Some(doc_key) =

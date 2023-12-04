@@ -137,10 +137,10 @@ impl<'a> Processor<'a> {
 		v: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		txn.lock().unwrap().check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-		let val = txn.clone().lock().await.get(key).await?;
+		let val = txn.clone().lock().unwrap().get(key).await?;
 		// Parse the data from the store
 		let val = Operable::Value(match val {
 			Some(v) => Value::from(v),
@@ -167,7 +167,7 @@ impl<'a> Processor<'a> {
 		v: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		txn.lock().unwrap().check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
 			ir: None,
@@ -190,10 +190,10 @@ impl<'a> Processor<'a> {
 		o: Value,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		txn.lock().unwrap().check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-		let val = txn.clone().lock().await.get(key).await?;
+		let val = txn.clone().lock().unwrap().get(key).await?;
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -225,10 +225,10 @@ impl<'a> Processor<'a> {
 		w: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		txn.lock().unwrap().check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-		let val = txn.clone().lock().await.get(key).await?;
+		let val = txn.clone().lock().unwrap().get(key).await?;
 		// Parse the data from the store
 		let x = match val {
 			Some(v) => Value::from(v),
@@ -257,7 +257,7 @@ impl<'a> Processor<'a> {
 		v: Table,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
+		txn.lock().unwrap().check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns(), opt.db(), &v);
 		let end = thing::suffix(opt.ns(), opt.db(), &v);
@@ -274,13 +274,13 @@ impl<'a> Processor<'a> {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone().lock().unwrap().scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone().lock().unwrap().scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 			};
 			// If there are key-value entries then fetch them
@@ -329,7 +329,7 @@ impl<'a> Processor<'a> {
 		v: Range,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+		txn.lock().unwrap().check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Prepare the range start key
 		let beg = match &v.beg {
 			Bound::Unbounded => thing::prefix(opt.ns(), opt.db(), &v.tb),
@@ -363,13 +363,13 @@ impl<'a> Processor<'a> {
 				None => {
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone().lock().unwrap().scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 				Some(ref mut beg) => {
 					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+					txn.clone().lock().unwrap().scan(min..max, PROCESSOR_BATCH_SIZE).await?
 				}
 			};
 			// If there are key-value entries then fetch them
@@ -500,13 +500,13 @@ impl<'a> Processor<'a> {
 					None => {
 						let min = beg.clone();
 						let max = end.clone();
-						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+						txn.lock().unwrap().scan(min..max, PROCESSOR_BATCH_SIZE).await?
 					}
 					Some(ref mut beg) => {
 						beg.push(0x00);
 						let min = beg.clone();
 						let max = end.clone();
-						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
+						txn.lock().unwrap().scan(min..max, PROCESSOR_BATCH_SIZE).await?
 					}
 				};
 				// If there are key-value entries then fetch them
@@ -531,7 +531,7 @@ impl<'a> Processor<'a> {
 						let gra: graph::Graph = (&k).into();
 						// Fetch the data from the store
 						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
-						let val = txn.lock().await.get(key).await?;
+						let val = txn.lock().unwrap().get(key).await?;
 						let rid = Thing::from((gra.ft, gra.fk));
 						// Parse the data from the store
 						let val = Operable::Value(match val {
@@ -567,7 +567,7 @@ impl<'a> Processor<'a> {
 		ir: IteratorRef,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
+		txn.lock().unwrap().check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(pla) = ctx.get_query_planner() {
 			if let Some(exe) = pla.get_query_executor(&table.0) {
 				if let Some(mut iterator) = exe.new_iterator(opt, ir).await? {
@@ -591,7 +591,7 @@ impl<'a> Processor<'a> {
 
 							// Fetch the data from the store
 							let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
-							let val = txn.lock().await.get(key.clone()).await?;
+							let val = txn.lock().unwrap().get(key.clone()).await?;
 							let rid = Thing::from((key.tb, key.id));
 							// Parse the data from the store
 							let val = Operable::Value(match val {

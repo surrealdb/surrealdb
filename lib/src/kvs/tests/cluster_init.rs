@@ -11,8 +11,10 @@ use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
 use crate::sql::{Fields, Value};
 use test_log::test;
-use tokio::sync::Mutex;
-use tokio::sync::RwLock;
+// use tokio::sync::Mutex;
+// use tokio::sync::RwLock;
+use tracing_mutex::stdsync::Mutex;
+use tracing_mutex::stdsync::RwLock;
 use uuid;
 
 #[tokio::test]

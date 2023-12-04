@@ -29,7 +29,7 @@ impl RemoveUserStatement {
 		match self.base {
 			Base::Root => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Clear the cache
 				run.clear_cache();
 				// Process the statement
@@ -40,7 +40,7 @@ impl RemoveUserStatement {
 			}
 			Base::Ns => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition
@@ -51,7 +51,7 @@ impl RemoveUserStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition

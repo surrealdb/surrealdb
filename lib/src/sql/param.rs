@@ -68,7 +68,7 @@ impl Param {
 				None => {
 					let val = {
 						// Claim transaction
-						let mut run = txn.lock().await;
+						let mut run = txn.lock().unwrap();
 						// Get the param definition
 						run.get_and_cache_db_param(opt.ns(), opt.db(), v).await
 					};

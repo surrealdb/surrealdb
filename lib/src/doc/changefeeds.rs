@@ -22,7 +22,7 @@ impl<'a> Document<'a> {
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = run.lock().unwrap();
 		// Get the database and the table for the record
 		let db = run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
 		// Check if changefeeds are enabled

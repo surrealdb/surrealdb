@@ -36,7 +36,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Create the result set
 				let mut res = Object::default();
 				// Process the namespaces
@@ -58,7 +58,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Create the result set
 				let mut res = Object::default();
 				// Process the databases
@@ -86,7 +86,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Create the result set
 				let mut res = Object::default();
 				// Process the users
@@ -138,7 +138,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Create the result set
 				let mut res = Object::default();
 				// Process the tokens
@@ -154,7 +154,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Create the result set
 				let mut res = Object::default();
 				// Process the events
@@ -196,7 +196,7 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = txn.lock().unwrap();
 				// Process the user
 				let res = match base {
 					Base::Root => run.get_root_user(user).await?,

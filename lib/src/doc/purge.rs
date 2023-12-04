@@ -27,7 +27,7 @@ impl<'a> Document<'a> {
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = run.lock().unwrap();
 		// Get the record id
 		if let Some(rid) = self.id {
 			// Purge the record data

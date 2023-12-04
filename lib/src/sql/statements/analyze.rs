@@ -40,7 +40,7 @@ impl AnalyzeStatement {
 				// Read the index
 				let ix = txn
 					.lock()
-					.await
+					.unwrap()
 					.get_and_cache_tb_index(opt.ns(), opt.db(), tb.as_str(), idx.as_str())
 					.await?;
 				let ikb = IndexKeyBase::new(opt, &ix);
@@ -54,7 +54,7 @@ impl AnalyzeStatement {
 						ft.statistics(txn).await?.into()
 					}
 					Index::MTree(p) => {
-						let mut tx = txn.lock().await;
+						let mut tx = txn.lock().unwrap();
 						let mt = MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Traversal).await?;
 						mt.statistics(&mut tx).await?.into()
 					}

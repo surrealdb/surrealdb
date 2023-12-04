@@ -5152,6 +5152,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
+ "tracing-mutex",
  "tracing-subscriber",
  "trice",
  "ulid",
@@ -5822,6 +5823,12 @@ dependencies = [
  "once_cell",
  "tracing-core",
 ]
+
+[[package]]
+name = "tracing-mutex"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c3cee86884622e131719fff27539a520d0a5fee90e2a70691d9cc18789abce5"
 
 [[package]]
 name = "tracing-opentelemetry"

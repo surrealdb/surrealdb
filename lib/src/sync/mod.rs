@@ -4,6 +4,8 @@ use std::sync::MutexGuard as RealMutexGuard;
 use std::sync::RwLock as RealRwLock;
 use std::sync::RwLockWriteGuard as RealRwLockWriteGuard;
 use std::sync::{Arc, Mutex as RealMutex};
+use tracing_mutex::stdsync::Mutex as TracingMutex;
+use tracing_mutex::stdsync::RwLock as TracingRwLock;
 use ulid::Ulid;
 
 static mut LOCKS: lockfree::map::Map<Ulid, LockState> = lockfree::map::Map::new();

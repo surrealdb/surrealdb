@@ -85,7 +85,7 @@ impl LiveStatement {
 		};
 		let id = stm.id.0;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = txn.lock().unwrap();
 		// Process the live query table
 		match stm.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {

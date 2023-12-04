@@ -22,6 +22,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
+use tokio::task::LocalSet;
 
 pub(crate) enum Iterable {
 	Value(Value),
@@ -629,9 +630,12 @@ impl Iterator {
 					for v in vals {
 						// Distinct is passed only for iterators that really requires it
 						let dis = AsyncDistinct::requires_distinct(ctx, distinct.as_ref(), &v);
-						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), dis))
-							// Ensure we detach the spawned task
-							.detach();
+						let ls = LocalSet::new();
+						// e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), dis))
+						let optc = opt.clone();
+						let t = ls.spawn_local(v.channel(ctx, &optc, txn, stm, chn.clone(), dis));
+						// Ensure we detach the spawned task
+						e.spawn(t).detach();
 					}
 					// Drop the uncloned channel instance
 					drop(chn);
@@ -642,9 +646,11 @@ impl Iterator {
 				let avals = async {
 					// Process all received values
 					while let Ok(pro) = docs.recv().await {
-						e.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), pro))
-							// Ensure we detach the spawned task
-							.detach();
+						let ls = LocalSet::new();
+						let t =
+							ls.spawn_local(Document::compute(ctx, opt, txn, stm, chn.clone(), pro));
+						// Ensure we detach the spawned task
+						e.spawn(t).detach();
 					}
 					// Drop the uncloned channel instance
 					drop(chn);
