@@ -120,6 +120,46 @@ mod tests {
 	}
 
 	#[test]
+	fn parse_ok_recursion_ifelse() {
+		let depth = 20;
+		let sql = format!("{} {}", "IF A {".repeat(depth), "}".repeat(depth));
+		syn::parse(&sql).unwrap();
+	}
+
+	#[test]
+	fn parse_ko_recursion_ifelse() {
+		use crate::err::Error;
+		let depth = 2000;
+		let sql = format!("{} {}", "IF A {".repeat(depth), "}".repeat(depth));
+		let err = syn::parse(&sql).unwrap_err();
+		assert!(
+			matches!(err, Error::InvalidQuery(_)),
+			"expected invalid query due to computation depth exceeded, got {:?}",
+			err
+		);
+	}
+
+	#[test]
+	fn parse_ok_recursion_basic_idiom() {
+		let depth = 2;
+		let sql = format!("{}{}", "[a".repeat(depth), "]".repeat(depth));
+		syn::parse(&sql).unwrap();
+	}
+
+	#[test]
+	fn parse_ko_recursion_basic_idiom() {
+		use crate::err::Error;
+		let depth = 2000;
+		let sql = format!("{}{}", "[a".repeat(depth), "]".repeat(depth));
+		let err = syn::parse(&sql).unwrap_err();
+		assert!(
+			matches!(err, Error::InvalidQuery(_)),
+			"expected invalid query due to computation depth exceeded, got {:?}",
+			err
+		);
+	}
+
+	#[test]
 	fn parse_recursion_cast() {
 		for n in [10, 100, 500] {
 			recursive("SELECT * FROM ", "<int>", "5", "", n, n > 50);
