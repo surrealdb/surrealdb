@@ -500,12 +500,15 @@ mod tests {
 	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
-	use crate::sql::{Statement, Thing, Value};
+	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
 	use futures::lock::Mutex;
 	use std::collections::HashMap;
+	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::sync::Arc;
+	use std::time::Duration;
 	use test_log::test;
+	use tokio::time::sleep;
 
 	async fn check_hits(
 		txn: &Transaction,
@@ -829,5 +832,38 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index_bm_25_with_highlighting() {
 		test_ft_index_bm_25(true).await;
+	}
+
+	async fn concurrent_task(
+		run: Arc<AtomicBool>,
+		ds: Arc<Datastore>,
+		az: DefineAnalyzerStatement,
+	) {
+		let btree_order = 5;
+		let doc1: Thing = ("t", "doc1").into();
+		let content1 = Value::from(Array::from(vec!["Enter a search term","Welcome","Docusaurus blogging features are powered by the blog plugin.","Simply add Markdown files (or folders) to the blog directory.","blog","Regular blog authors can be added to authors.yml.","authors.yml","The blog post date can be extracted from filenames, such as:","2019-05-30-welcome.md","2019-05-30-welcome/index.md","A blog post folder can be convenient to co-locate blog post images:","The blog supports tags as well!","And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.","blog: false","MDX Blog Post","Blog posts support Docusaurus Markdown features, such as MDX.","Use the power of React to create interactive blog posts.","Long Blog Post","This is the summary of a very long blog post,","Use a <!-- truncate --> comment to limit blog post size in the list view.","<!--","truncate","-->","First Blog Post","Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+		while run.clone().load(Ordering::Relaxed) {
+			let (ctx, opt, txn, mut fti) =
+				tx_fti(ds.as_ref(), TreeStoreType::Write, &az, btree_order, false).await;
+			fti.remove_document(&txn, &doc1).await.unwrap();
+			fti.index_document(&ctx, &opt, &txn, &doc1, vec![content1.clone()]).await.unwrap();
+			finish(&txn, fti).await;
+		}
+	}
+	#[test(tokio::test)]
+	async fn concurrent_test() {
+		let run = Arc::new(AtomicBool::new(true));
+
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			panic!()
+		};
+
+		let task1 = tokio::spawn(concurrent_task(run.clone(), ds.clone(), az.clone()));
+		let task2 = tokio::spawn(concurrent_task(run.clone(), ds.clone(), az.clone()));
+		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
+
+		sleep(Duration::from_secs(5)).await;
 	}
 }
