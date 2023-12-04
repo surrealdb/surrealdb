@@ -8,8 +8,6 @@ USER root
 RUN apk update
 RUN apk add patch clang curl cmake
 
-RUN cargo install cargo-make
-
 RUN mkdir /surrealdb
 WORKDIR /surrealdb
 COPY . /surrealdb/

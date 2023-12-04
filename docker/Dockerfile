@@ -10,8 +10,6 @@ RUN apk add patch clang curl gcc cmake
 
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-unknown-linux-gnu-gcc
 
-RUN cargo install cargo-make
-
 RUN mkdir /surrealdb
 WORKDIR /surrealdb
 COPY . /surrealdb/
