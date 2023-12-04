@@ -1,4 +1,4 @@
-use crate::sql::escape::quote_str;
+use crate::sql::escape::quote_plain_str;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -58,7 +58,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&quote_str(&self.0), f)
+		Display::fmt(&quote_plain_str(&self.0), f)
 	}
 }
 
@@ -123,5 +123,24 @@ pub(crate) mod no_nul_bytes {
 		}
 
 		deserializer.deserialize_string(NoNulBytesVisitor)
+	}
+}
+
+#[cfg(test)]
+mod test {
+
+	#[cfg(not(feature = "experimental_parser"))]
+	#[test]
+	fn ensure_strands_are_prefixed() {
+		use super::Strand;
+
+		let strand = Strand("a:b".to_owned());
+		assert_eq!(strand.to_string().as_str(), "s'a:b'");
+
+		let strand = Strand("2012-04-23T18:25:43.0000511Z".to_owned());
+		assert_eq!(strand.to_string().as_str(), "s'2012-04-23T18:25:43.0000511Z'");
+
+		let strand = Strand("b19bc00b-aa98-486c-ae37-c8e1c54295b1".to_owned());
+		assert_eq!(strand.to_string().as_str(), "s'b19bc00b-aa98-486c-ae37-c8e1c54295b1'");
 	}
 }
