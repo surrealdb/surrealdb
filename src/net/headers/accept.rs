@@ -1,32 +1,7 @@
-use crate::cnf::PKG_NAME;
-use crate::cnf::PKG_VERSION;
 use axum::headers;
 use axum::headers::Header;
 use http::HeaderName;
 use http::HeaderValue;
-use surrealdb::cnf::SERVER_NAME;
-use tower_http::set_header::SetResponseHeaderLayer;
-
-pub(super) const ID: &str = "ID";
-pub(super) const NS: &str = "NS";
-pub(super) const DB: &str = "DB";
-const SERVER: &str = "server";
-const VERSION: &str = "version";
-
-pub fn add_version_header() -> SetResponseHeaderLayer<HeaderValue> {
-	let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
-	SetResponseHeaderLayer::if_not_present(
-		HeaderName::from_static(VERSION),
-		HeaderValue::try_from(val).unwrap(),
-	)
-}
-
-pub fn add_server_header() -> SetResponseHeaderLayer<HeaderValue> {
-	SetResponseHeaderLayer::if_not_present(
-		HeaderName::from_static(SERVER),
-		HeaderValue::try_from(SERVER_NAME).unwrap(),
-	)
-}
 
 /// Typed header implementation for the `Accept` header.
 pub enum Accept {

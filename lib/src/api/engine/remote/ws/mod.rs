@@ -14,6 +14,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Notification;
 use crate::dbs::Status;
+use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -102,8 +103,7 @@ impl From<Failure> for Error {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct QueryMethodResponse {
-	#[allow(dead_code)]
-	time: String,
+	time: Duration,
 	status: Status,
 	result: Value,
 }
@@ -115,12 +115,18 @@ impl DbResponse {
 			Data::Query(results) => Ok(DbResponse::Query(api::Response(
 				results
 					.into_iter()
-					.map(|response| match response.status {
-						Status::Ok => Ok(response.result),
-						Status::Err => match response.result {
-							Value::Strand(Strand(message)) => Err(Error::Query(message).into()),
-							message => Err(Error::Query(message.to_string()).into()),
-						},
+					.map(|response| {
+						let stats = Stats {
+							execution_time: response.time,
+						};
+						let result = match response.status {
+							Status::Ok => Ok(response.result),
+							Status::Err => match response.result {
+								Value::Strand(Strand(message)) => Err(Error::Query(message).into()),
+								message => Err(Error::Query(message.to_string()).into()),
+							},
+						};
+						(stats, result)
 					})
 					.enumerate()
 					.collect(),

@@ -92,6 +92,9 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
+	// Whether authentication level is enabled on this datastore.
+	// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
+	auth_level_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -205,6 +208,7 @@ impl Datastore {
 		path: &str,
 		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
+		#[allow(unused_variables)]
 		let default_clock: Arc<RwLock<SizedClock>> =
 			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 		// Initiate the desired datastore
@@ -339,6 +343,8 @@ impl Datastore {
 			inner,
 			strict: false,
 			auth_enabled: false,
+			// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
+			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -384,6 +390,13 @@ impl Datastore {
 		self
 	}
 
+	/// Set whether authentication levels are enabled for this Datastore
+	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
+	pub fn with_auth_level_enabled(mut self, enabled: bool) -> Self {
+		self.auth_level_enabled = enabled;
+		self
+	}
+
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
@@ -393,6 +406,12 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
+	}
+
+	/// Is authentication level enabled for this Datastore?
+	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
+	pub fn is_auth_level_enabled(&self) -> bool {
+		self.auth_level_enabled
 	}
 
 	/// Setup the initial credentials

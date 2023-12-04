@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
+use super::Kind;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -189,12 +191,20 @@ impl Function {
 				}
 				// Return the value
 				// Check the function arguments
-				if x.len() != val.args.len() {
+				let max_args_len = val.args.len();
+				let mut min_args_len = 0;
+				val.args.iter().rev().for_each(|(_, kind)| match kind {
+					Kind::Option(_) if min_args_len == 0 => {}
+					_ => min_args_len += 1,
+				});
+
+				if x.len() < min_args_len || max_args_len < x.len() {
 					return Err(Error::InvalidArguments {
 						name: format!("fn::{}", val.name),
-						message: match val.args.len() {
-							1 => String::from("The function expects 1 argument."),
-							l => format!("The function expects {l} arguments."),
+						message: match (min_args_len, max_args_len) {
+							(1, 1) => String::from("The function expects 1 argument."),
+							(r, t) if r == t => format!("The function expects {r} arguments."),
+							(r, t) => format!("The function expects {r} to {t} arguments."),
 						},
 					});
 				}

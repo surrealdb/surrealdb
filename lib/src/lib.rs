@@ -143,6 +143,9 @@ pub mod syn;
 
 #[doc(inline)]
 pub use api::engine;
+#[cfg(feature = "protocol-http")]
+#[doc(hidden)]
+pub use api::headers;
 #[doc(inline)]
 pub use api::method;
 #[doc(inline)]

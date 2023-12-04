@@ -2704,10 +2704,14 @@ async fn function_parse_meta_table() -> Result<(), Error> {
 	Ok(())
 }
 
+// --------------------------------------------------
+// object
+// --------------------------------------------------
+
 #[tokio::test]
-async fn function_parse_meta_tb() -> Result<(), Error> {
+async fn function_object_entries() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::tb("person:tobie");
+		RETURN object::entries({ a: 1, b: 2 });
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2715,7 +2719,75 @@ async fn function_parse_meta_tb() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("person");
+	let val = Value::parse("[ [ 'a', 1 ], [ 'b', 2 ] ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_from_entries() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::from_entries([ [ 'a', 1 ], [ 'b', 2 ] ]);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("{ a: 1, b: 2 }");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_keys() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::keys({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[ 'a', 'b' ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_len() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::len({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("2");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_values() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::values({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[ 1, 2 ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -6270,5 +6342,95 @@ pub async fn function_http_disabled() -> Result<(), Error> {
 	let res = test_queries("RETURN http::delete({})", &["NONE"]).await;
 	assert!(matches!(res, Err(Error::HttpDisabled)));
 
+	Ok(())
+}
+
+// Tests for custom defined functions
+
+#[tokio::test]
+async fn function_custom_optional_args() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE FUNCTION fn::zero_arg() { [] };
+		DEFINE FUNCTION fn::one_arg($a: bool) { [$a] };
+		DEFINE FUNCTION fn::last_option($a: bool, $b: option<bool>) { [$a, $b] };
+		DEFINE FUNCTION fn::middle_option($a: bool, $b: option<bool>, $c: bool) { [$a, $b, $c] };
+
+		RETURN fn::zero_arg();
+		RETURN fn::one_arg();
+		RETURN fn::last_option();
+		RETURN fn::middle_option();
+
+		RETURN fn::zero_arg(true);
+		RETURN fn::one_arg(true);
+		RETURN fn::last_option(true);
+		RETURN fn::last_option(true, false);
+		RETURN fn::middle_option(true, false, true);
+		RETURN fn::middle_option(true, NONE, true);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 14);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::one_arg" && message == "The function expects 1 argument." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::a(). The function expects 1 argument.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::last_option" && message == "The function expects 1 to 2 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::last_option(). The function expects 1 to 2 arguments.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::middle_option" && message == "The function expects 3 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::middle_option(). The function expects 3 arguments.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::zero_arg" && message == "The function expects 0 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments.")
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, NONE]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, false]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, false, true]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, NONE, true]");
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
