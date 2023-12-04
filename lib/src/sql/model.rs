@@ -50,7 +50,7 @@ impl fmt::Display for Model {
 }
 
 impl Model {
-	/// This function unpacks a Value into a f32. This is used for unpacking the arguements passed
+	/// This function unpacks a Value into a f32. This is used for unpacking the arguments passed
 	/// into the ML model from the SQL statement.
 	///
 	/// # Arguments
