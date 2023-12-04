@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::add_handle;
 use crate::dbs::response::Response;
 use crate::dbs::Notification;
 use crate::dbs::Options;
@@ -31,7 +32,6 @@ pub(crate) struct Executor<'a> {
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
 }
-
 impl<'a> Executor<'a> {
 	pub fn new(kvs: &'a Datastore) -> Executor<'a> {
 		Executor {
@@ -141,12 +141,12 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Consume the live query notifications
-	async fn clear(&self, _: &Context<'_>, _rcv: Receiver<Notification>) {
-		// spawn(async move {
-		// 	while rcv.next().await.is_some() {
-		// 		// Ignore notification
-		// 	}
-		// });
+	async fn clear(&self, _: &Context<'_>, mut rcv: Receiver<Notification>) {
+		add_handle(spawn(async move {
+			while rcv.next().await.is_some() {
+				// Ignore notification
+			}
+		}));
 	}
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.

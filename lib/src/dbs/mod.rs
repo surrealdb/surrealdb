@@ -30,5 +30,35 @@ pub use self::capabilities::Capabilities;
 pub mod node;
 
 mod processor;
+
+use lazy_static::lazy_static;
+use std::sync::Mutex;
+use tokio::task::JoinHandle;
+
+lazy_static! {
+	pub static ref CLEAR_HANDLES: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+}
+
+pub fn add_handle(h: JoinHandle<()>) {
+	#[cfg(debug_assertions)]
+	CLEAR_HANDLES.lock().unwrap().push(h);
+}
+
+#[cfg(debug_assertions)]
+async fn await_handles_async() {
+	let mut handles = CLEAR_HANDLES.lock().unwrap();
+	println!("Handles: {}", handles.len());
+	for h in handles.drain(..) {
+		h.await.unwrap();
+	}
+}
+
+pub fn await_handles() {
+	#[cfg(debug_assertions)]
+	tokio::task::block_in_place(|| {
+		tokio::runtime::Runtime::new().unwrap().block_on(await_handles_async());
+	});
+}
+
 #[cfg(test)]
 pub(crate) mod test;

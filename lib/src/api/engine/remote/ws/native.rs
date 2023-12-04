@@ -17,6 +17,7 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::add_handle;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::sql::serde::{deserialize, serialize};
@@ -171,7 +172,7 @@ pub(crate) fn router(
 	mut socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 	route_rx: Receiver<Option<Route>>,
 ) {
-	tokio::spawn(async move {
+	let h = tokio::spawn(async move {
 		let ping = {
 			let mut request = BTreeMap::new();
 			request.insert("method".to_owned(), PING_METHOD.into());
@@ -504,6 +505,7 @@ pub(crate) fn router(
 			}
 		}
 	});
+	add_handle(h);
 }
 
 impl Response {

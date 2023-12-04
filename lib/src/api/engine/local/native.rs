@@ -11,6 +11,7 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::add_handle;
 use crate::dbs::Session;
 use crate::engine::IntervalStream;
 use crate::iam::Level;
@@ -98,7 +99,7 @@ pub(crate) fn router(
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Option<Route>>,
 ) {
-	tokio::spawn(async move {
+	let h = tokio::spawn(async move {
 		let configured_root = match address.config.auth {
 			Level::Root => Some(Root {
 				username: &address.config.username,
@@ -203,10 +204,11 @@ pub(crate) fn router(
 		// Stop maintenance tasks
 		let _ = maintenance_tx.into_send_async(()).await;
 	});
+	add_handle(h);
 }
 
 fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
-	tokio::spawn(async move {
+	let h = tokio::spawn(async move {
 		let mut interval = time::interval(tick_interval);
 		// Don't bombard the database if we miss some ticks
 		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -226,4 +228,5 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 			}
 		}
 	});
+	add_handle(h);
 }

@@ -2,8 +2,8 @@ use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::{
-	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Variables,
+	await_handles, node::Timestamp, Attach, Capabilities, Executor, Notification, Options,
+	Response, Session, Variables,
 };
 use crate::err::Error;
 use crate::iam::{Action, Auth, Error as IamError, ResourceKind, Role};
@@ -1257,5 +1257,12 @@ impl Datastore {
 		}
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
+	}
+}
+
+impl Drop for Datastore {
+	fn drop(&mut self) {
+		await_handles();
+		self.notification_channel = None
 	}
 }

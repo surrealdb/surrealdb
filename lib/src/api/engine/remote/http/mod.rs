@@ -21,7 +21,7 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Status;
+use crate::dbs::{add_handle, Status};
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
@@ -277,13 +277,14 @@ async fn export(
 		(None, Some(tx)) => {
 			let mut response = request.send().await?.error_for_status()?.bytes_stream();
 
-			tokio::spawn(async move {
+			let h = tokio::spawn(async move {
 				while let Ok(Some(bytes)) = response.try_next().await {
 					if tx.send(Ok(bytes.to_vec())).await.is_err() {
 						break;
 					}
 				}
 			});
+			add_handle(h);
 		}
 		_ => unreachable!(),
 	}

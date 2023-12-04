@@ -12,6 +12,7 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::add_handle;
 use flume::Receiver;
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -100,7 +101,7 @@ impl Connection for Client {
 }
 
 pub(crate) fn router(base_url: Url, client: reqwest::Client, route_rx: Receiver<Option<Route>>) {
-	tokio::spawn(async move {
+	add_handle(tokio::spawn(async move {
 		let mut headers = HeaderMap::new();
 		let mut vars = IndexMap::new();
 		let mut auth = None;
@@ -118,5 +119,5 @@ pub(crate) fn router(base_url: Url, client: reqwest::Client, route_rx: Receiver<
 			.await;
 			let _ = route.response.into_send_async(result).await;
 		}
-	});
+	}))
 }

@@ -5305,6 +5305,7 @@ dependencies = [
  "indexmap 1.9.3",
  "indxdb",
  "ipnet",
+ "lazy_static",
  "lexicmp",
  "lru",
  "md-5",

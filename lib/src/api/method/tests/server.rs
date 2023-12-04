@@ -3,6 +3,7 @@ use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
 use crate::api::conn::Route;
 use crate::api::Response as QueryResponse;
+use crate::dbs::add_handle;
 use crate::sql::to_value;
 use crate::sql::Array;
 use crate::sql::Value;
@@ -10,7 +11,7 @@ use flume::Receiver;
 use futures::StreamExt;
 
 pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
-	tokio::spawn(async move {
+	let h = tokio::spawn(async move {
 		let mut stream = route_rx.into_stream();
 
 		while let Some(Some(Route {
@@ -89,4 +90,5 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 			}
 		}
 	});
+	add_handle(h);
 }

@@ -41,6 +41,7 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::add_handle;
 use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
@@ -611,7 +612,7 @@ async fn router(
 				(None, Some(backup)) => {
 					let kvs = kvs.clone();
 					let session = session.clone();
-					tokio::spawn(async move {
+					let h = tokio::spawn(async move {
 						let export = async {
 							if let Err(error) = export(&kvs, &session, ns, db, tx).await {
 								let _ = backup.send(Err(error)).await;
@@ -628,6 +629,7 @@ async fn router(
 
 						tokio::join!(export, bridge);
 					});
+					add_handle(h);
 				}
 				_ => unreachable!(),
 			}
