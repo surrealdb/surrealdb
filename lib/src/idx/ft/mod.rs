@@ -504,8 +504,11 @@ mod tests {
 	use crate::syn;
 	use futures::lock::Mutex;
 	use std::collections::HashMap;
+	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::sync::Arc;
+	use std::time::Duration;
 	use test_log::test;
+	use tokio::time::sleep;
 
 	async fn check_hits(
 		txn: &Transaction,
