@@ -42,7 +42,7 @@ pub fn value(input: &str) -> Result<Value, Error> {
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
-pub fn value_legacy_string(input: &str) -> Result<Value, Error> {
+pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	debug!("parsing value, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	parser.allow_legacy_strand(true);
@@ -54,6 +54,15 @@ pub fn value_legacy_string(input: &str) -> Result<Value, Error> {
 pub fn json(input: &str) -> Result<Value, Error> {
 	debug!("parsing json, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
+	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+}
+
+/// Parses JSON into an inert SurrealQL [`Value`]
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
+	debug!("parsing json, input = {input}");
+	let mut parser = Parser::new(input.as_bytes());
+	parser.allow_legacy_strand(true);
 	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 /// Parses a SurrealQL Subquery [`Subquery`]

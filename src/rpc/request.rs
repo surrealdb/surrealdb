@@ -39,9 +39,9 @@ pub async fn parse_request(msg: Message) -> Result<Request, Failure> {
 		Message::Text(ref val) => {
 			// Parse the SurrealQL object
 			#[cfg(not(feature = "experimental_parser"))]
-			let value = surrealdb::sql::value(val);
+			let value = surrealdb::syn::value(val);
 			#[cfg(feature = "experimental_parser")]
-			let value = surrealdb::sql::value_legacy_strand(val);
+			let value = surrealdb::syn::value_legacy_strand(val);
 
 			match value {
 				// The SurrealQL message parsed ok

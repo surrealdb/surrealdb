@@ -284,4 +284,16 @@ impl Parser<'_> {
 	pub fn token_value<V: TokenValue>(&mut self, token: Token) -> ParseResult<V> {
 		V::from_token(self, token)
 	}
+
+	pub fn peek_can_be_ident(&mut self) -> bool {
+		matches!(
+			self.peek_kind(),
+			TokenKind::Keyword(_)
+				| TokenKind::Language(_)
+				| TokenKind::Algorithm(_)
+				| TokenKind::Distance(_)
+				| TokenKind::Identifier
+				| t!("{") | t!("[")
+		)
+	}
 }

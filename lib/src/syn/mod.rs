@@ -11,7 +11,10 @@ pub use v1::{datetime_raw, duration, idiom, json, parse, range, subquery, thing,
 #[cfg(feature = "experimental_parser")]
 pub mod v2;
 #[cfg(feature = "experimental_parser")]
-pub use v2::{datetime_raw, duration, idiom, json, parse, range, subquery, thing, value};
+pub use v2::{
+	datetime_raw, duration, idiom, json, json_legacy_strand, parse, range, subquery, thing, value,
+	value_legacy_strand,
+};
 
 #[cfg(test)]
 pub trait Parse<T> {

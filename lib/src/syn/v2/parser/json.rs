@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	sql::{Array, Object, Strand, Value},
+	sql::{Array, Ident, Object, Strand, Value},
 	syn::v2::{
 		parser::mac::expected,
 		token::{t, Span, TokenKind},
@@ -30,7 +30,10 @@ impl Parser<'_> {
 			}
 			TokenKind::Number(_) => self.token_value(token).map(Value::Number),
 			TokenKind::Uuid => self.token_value(token).map(Value::Uuid),
-			_ => self.parse_thing().map(Value::Thing),
+			_ => {
+				let ident = self.token_value::<Ident>(token)?.0;
+				self.parse_thing_from_ident(ident).map(Value::Thing)
+			}
 		}
 	}
 

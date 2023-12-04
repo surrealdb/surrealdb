@@ -37,28 +37,56 @@ impl Parser<'_> {
 
 	pub fn parse_thing_or_range(&mut self, ident: String) -> ParseResult<Value> {
 		expected!(self, ":");
-		let exclusive = self.eat(t!(">"));
-		let id = self.parse_id()?;
+
 		if self.eat(t!("..")) {
-			let inclusive = self.eat(t!("="));
-			let end = self.parse_id()?;
+			let end = if self.eat(t!("=")) {
+				Bound::Included(self.parse_id()?)
+			} else if self.peek_can_be_ident()
+				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
+			{
+				Bound::Excluded(self.parse_id()?)
+			} else {
+				Bound::Unbounded
+			};
+			return Ok(Value::Range(Box::new(Range {
+				tb: ident,
+				beg: Bound::Unbounded,
+				end,
+			})));
+		}
+
+		let beg = if self.peek_can_be_ident()
+			|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
+		{
+			let id = self.parse_id()?;
+			if self.eat(t!(">")) {
+				Bound::Excluded(id)
+			} else {
+				Bound::Included(id)
+			}
+		} else {
+			Bound::Unbounded
+		};
+
+		if self.eat(t!("..")) {
+			let end = if self.eat(t!("=")) {
+				Bound::Included(self.parse_id()?)
+			} else if self.peek_can_be_ident()
+				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
+			{
+				Bound::Excluded(self.parse_id()?)
+			} else {
+				Bound::Unbounded
+			};
 			Ok(Value::Range(Box::new(Range {
 				tb: ident,
-				beg: if exclusive {
-					Bound::Excluded(id)
-				} else {
-					Bound::Included(id)
-				},
-				end: if inclusive {
-					Bound::Included(end)
-				} else {
-					Bound::Excluded(end)
-				},
+				beg,
+				end,
 			})))
 		} else {
-			if exclusive {
+			let Bound::Included(id) = beg else {
 				unexpected!(self, self.peek_kind(), "the range operator '..'")
-			}
+			};
 			Ok(Value::Thing(Thing {
 				tb: ident,
 				id,
