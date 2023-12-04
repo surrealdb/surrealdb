@@ -17,10 +17,9 @@ defaults:
 jobs:
   # Build the Docker image but don't push it.
   docker:
-    uses: ./.github/workflows/_docker.yml
+    uses: ./.github/workflows/reusable_docker.yml
     with:
       git-ref: ${{ github.ref }}
-      image-prefix: surrealdb
       tag-prefix: ${{ github.head_ref || github.ref_name }}
       build: true
       push: false

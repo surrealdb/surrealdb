@@ -40,6 +40,7 @@ jobs:
         run: |
           git tag -l | grep -w $GIT_REF || (echo "The provided git_ref '$GIT_REF' is not a tag" && exit 1)
 
+<<<<<<< HEAD
   test:
     name: Test
     needs: [checks]
@@ -129,10 +130,12 @@ jobs:
       - name: Check clippy
         run: cargo make ci-clippy
 
+=======
+>>>>>>> be54897b (reusable dir. Put test and lint inside publish_version)
   release:
     name: Prepare release
-    needs: [test, lint]
-    uses: ./.github/workflows/_publish_version.yml
+    needs: [checks]
+    uses: ./.github/workflows/reusable_publish_version.yml
     with:
       git-ref: ${{ inputs.git-ref || github.ref_name }}
       latest: ${{ inputs.latest || github.event_name == 'push' }}

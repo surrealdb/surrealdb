@@ -44,11 +44,88 @@ jobs:
           echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
           # If the name is not provided, use the git_ref (i.e. v1.0.0)
           echo "name=${{ inputs.name || inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
+  test:
+    name: Test
+    needs: [prepare-vars]
+    runs-on: ubuntu-latest-16-cores
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.71.1
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ needs.prepare-vars.outputs.git-ref == 'main' }}
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test workspace + coverage
+        run: cargo make ci-workspace-coverage
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 5
+
+  lint:
+    name: Lint
+    needs: [prepare-vars]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.71.1
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Check workspace
+        run: cargo make ci-check
+
+      - name: Check format
+        run: cargo make ci-format
+
+      - name: Check wasm
+        run: cargo make ci-check-wasm
+
+      - name: Check clippy
+        run: cargo make ci-clippy
 
   docker-build:
     name: Build Docker images
     needs: [prepare-vars]
-    uses: ./.github/workflows/_docker.yml
+    uses: ./.github/workflows/reusable_docker.yml
     with:
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
@@ -202,7 +279,7 @@ jobs:
 
   publish:
     name: Publish artifacts binaries
-    needs: [build, docker-build, prepare-vars]
+    needs: [prepare-vars, test, lint, build, docker-build]
     if: ${{ inputs.publish }}
     environment: ${{ needs.prepare-vars.outputs.name == 'nightly' && 'nightly' || 'release' }}
     runs-on: ubuntu-latest
@@ -243,8 +320,8 @@ jobs:
 
   docker-publish:
     name: Publish Docker images
-    needs: [publish, prepare-vars]
-    uses: ./.github/workflows/_docker.yml
+    needs: [prepare-vars, publish]
+    uses: ./.github/workflows/reusable_docker.yml
     with:
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
@@ -255,7 +332,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [publish, prepare-vars]
+    needs: [prepare-vars, publish]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
