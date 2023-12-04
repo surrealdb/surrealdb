@@ -10,6 +10,7 @@ pub struct RenderedError {
 
 impl fmt::Display for RenderedError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		dbg!(self);
 		writeln!(f, "{}", self.text)?;
 		for s in self.snippets.iter() {
 			writeln!(f, "{}", s)?;
@@ -172,7 +173,7 @@ impl fmt::Display for Snippet {
 			} else {
 				0
 			};
-		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "",)?;
+		write!(f, "{:>spacing$} |{:>error_offset$} ", "", "",)?;
 		for _ in 0..self.length {
 			write!(f, "^")?;
 		}
