@@ -668,31 +668,31 @@ mod http_integration {
 				-- --------------------------------
 				-- OPTION
 				-- ------------------------------
-	
+
 				OPTION IMPORT;
-	
+
 				-- ------------------------------
 				-- TABLE: foo
 				-- ------------------------------
-	
+
 				DEFINE TABLE foo SCHEMALESS PERMISSIONS NONE;
-	
+
 				-- ------------------------------
 				-- TRANSACTION
 				-- ------------------------------
-	
+
 				BEGIN TRANSACTION;
-	
+
 				-- ------------------------------
 				-- TABLE DATA: foo
 				-- ------------------------------
-	
+
 				UPDATE foo:bvklxkhtxumyrfzqoc5i CONTENT { id: foo:bvklxkhtxumyrfzqoc5i };
-	
+
 				-- ------------------------------
 				-- TRANSACTION
 				-- ------------------------------
-	
+
 				COMMIT TRANSACTION;
 			"#;
 			let res = client.post(url).basic_auth(USER, Some(PASS)).body(data).send().await?;
@@ -1084,7 +1084,7 @@ mod http_integration {
 		let res = client
 			.post(format!("http://{addr}/sql"))
 			.basic_auth(USER, Some(PASS))
-			.body(format!("CREATE |{table}:1..{num_records}| SET default = 'content'"))
+			.body(format!("CREATE |`{table}`:1..{num_records}| SET default = 'content'"))
 			.send()
 			.await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
