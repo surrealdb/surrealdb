@@ -71,7 +71,7 @@ impl Model {
 	/// # Returns
 	/// * `String` - The key of the model.
 	pub fn key(&self) -> String {
-		format!("{}{}", self.name, self.version)
+		format!("{}@{}", self.name, self.version)
 	}
 
 	#[cfg(feature = "ml")]
