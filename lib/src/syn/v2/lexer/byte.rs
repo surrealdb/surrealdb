@@ -9,7 +9,6 @@ use crate::syn::v2::{
 impl<'a> Lexer<'a> {
 	/// Eats a single line comment and returns the next token.
 	pub fn eat_single_line_comment(&mut self) {
-		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.next() else {
 				break;
@@ -43,12 +42,12 @@ impl<'a> Lexer<'a> {
 				_ => {}
 			}
 		}
+		self.set_whitespace_span(self.current_span());
 		self.skip_offset();
 	}
 
 	/// Eats a multi line comment and returns the next token.
 	pub fn eat_multi_line_comment(&mut self) -> Result<(), Error> {
-		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.next() else {
 				return Err(Error::UnexpectedEof);
@@ -58,6 +57,7 @@ impl<'a> Lexer<'a> {
 					return Err(Error::UnexpectedEof);
 				};
 				if b'/' == byte {
+					self.set_whitespace_span(self.current_span());
 					self.skip_offset();
 					return Ok(());
 				}
@@ -66,7 +66,6 @@ impl<'a> Lexer<'a> {
 	}
 
 	pub fn eat_whitespace(&mut self) {
-		self.ate_whitespace = true;
 		loop {
 			let Some(byte) = self.reader.peek() else {
 				return;
@@ -100,6 +99,7 @@ impl<'a> Lexer<'a> {
 				_ => break,
 			}
 		}
+		self.set_whitespace_span(self.current_span());
 		self.skip_offset();
 	}
 

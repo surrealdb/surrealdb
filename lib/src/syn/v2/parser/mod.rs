@@ -184,6 +184,14 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
+	fn no_whitespace(&mut self) -> ParseResult<()> {
+		if let Some(span) = self.lexer.whitespace_span() {
+			Err(ParseError::new(ParseErrorKind::NoWhitespace, span))
+		} else {
+			Ok(())
+		}
+	}
+
 	/// Recover the parser state to before a given span.
 	pub fn backup_before(&mut self, span: Span) {
 		self.token_buffer.clear();
@@ -255,7 +263,7 @@ impl<'a> Parser<'a> {
 			}) => {
 				// Ensure the we are sure that the last token was fully parsed.
 				self.backup_after(at);
-				if self.peek().kind != TokenKind::Eof || self.lexer.ate_whitespace() {
+				if self.peek().kind != TokenKind::Eof || self.lexer.whitespace_span().is_some() {
 					// if there is a next token or we ate whitespace after the eof we can be sure
 					// that the error is not the result of a token only being partially present.
 					return PartialResult::Ready {

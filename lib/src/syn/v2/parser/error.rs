@@ -49,6 +49,7 @@ pub enum ParseErrorKind {
 	InvalidPath {
 		possibly: Option<&'static str>,
 	},
+	NoWhitespace,
 	/// A path in the parser which was not yet finished.
 	/// Should eventually be removed.
 	Todo,
@@ -186,6 +187,15 @@ impl ParseError {
 				ref error,
 			} => {
 				let text = format!("failed to parse decimal number, {error}");
+				let locations = Location::range_of_span(source, self.at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::NoWhitespace => {
+				let text = "Whitespace is dissallowed in this position";
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {

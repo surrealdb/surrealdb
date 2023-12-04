@@ -67,7 +67,7 @@ pub struct Lexer<'a> {
 	last_offset: u32,
 	/// A buffer used to build the value of tokens which can't be read straight from the source.
 	/// like for example strings with escape characters.
-	ate_whitespace: bool,
+	whitespace_span: Option<Span>,
 	scratch: String,
 
 	// below are a collection of storage for values produced by tokens.
@@ -95,7 +95,7 @@ impl<'a> Lexer<'a> {
 		Lexer {
 			reader,
 			last_offset: 0,
-			ate_whitespace: false,
+			whitespace_span: None,
 			scratch: String::new(),
 			string: None,
 			datetime: None,
@@ -109,6 +109,7 @@ impl<'a> Lexer<'a> {
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
+		self.whitespace_span = None;
 		self.datetime = None;
 		self.duration = None;
 		self.regex = None;
@@ -122,7 +123,7 @@ impl<'a> Lexer<'a> {
 		Lexer {
 			reader,
 			last_offset: 0,
-			ate_whitespace: false,
+			whitespace_span: None,
 			scratch: self.scratch,
 			string: self.string,
 			datetime: self.datetime,
@@ -133,15 +134,23 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	pub fn ate_whitespace(&self) -> bool {
-		self.ate_whitespace
+	pub fn whitespace_span(&self) -> Option<Span> {
+		self.whitespace_span
+	}
+
+	fn set_whitespace_span(&mut self, span: Span) {
+		if let Some(existing) = self.whitespace_span.as_mut() {
+			*existing = existing.covers(span);
+		} else {
+			self.whitespace_span = Some(span);
+		}
 	}
 
 	/// Returns the next token, driving the lexer forward.
 	///
 	/// If the lexer is at the end the source it will always return the Eof token.
 	pub fn next_token(&mut self) -> Token {
-		self.ate_whitespace = false;
+		self.whitespace_span = None;
 		self.next_token_inner()
 	}
 

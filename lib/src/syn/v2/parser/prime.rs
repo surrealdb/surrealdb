@@ -135,10 +135,10 @@ impl Parser<'_> {
 			TokenKind::Strand => {
 				self.pop_peek();
 				if self.legacy_strands {
+					return self.parse_legacy_strand();
+				} else {
 					let strand = self.token_value(token)?;
 					return Ok(Value::Strand(strand));
-				} else {
-					return self.parse_legacy_strand();
 				}
 			}
 			TokenKind::Duration => {

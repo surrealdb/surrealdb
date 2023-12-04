@@ -38,12 +38,17 @@ impl Parser<'_> {
 	pub fn parse_thing_or_range(&mut self, ident: String) -> ParseResult<Value> {
 		expected!(self, ":");
 
+		self.peek();
+		self.no_whitespace()?;
+
 		if self.eat(t!("..")) {
 			let end = if self.eat(t!("=")) {
+				self.no_whitespace()?;
 				Bound::Included(self.parse_id()?)
 			} else if self.peek_can_be_ident()
 				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 			{
+				self.no_whitespace()?;
 				Bound::Excluded(self.parse_id()?)
 			} else {
 				Bound::Unbounded
@@ -59,7 +64,9 @@ impl Parser<'_> {
 			|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 		{
 			let id = self.parse_id()?;
+
 			if self.eat(t!(">")) {
+				self.no_whitespace()?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Included(id)
@@ -70,10 +77,12 @@ impl Parser<'_> {
 
 		if self.eat(t!("..")) {
 			let end = if self.eat(t!("=")) {
+				self.no_whitespace()?;
 				Bound::Included(self.parse_id()?)
 			} else if self.peek_can_be_ident()
 				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 			{
+				self.no_whitespace()?;
 				Bound::Excluded(self.parse_id()?)
 			} else {
 				Bound::Unbounded
@@ -96,11 +105,32 @@ impl Parser<'_> {
 
 	pub fn parse_range(&mut self) -> ParseResult<Range> {
 		let tb = self.parse_token_value::<Ident>()?.0;
+
 		expected!(self, ":");
+
+		self.peek();
+		self.no_whitespace()?;
+
 		let exclusive = self.eat(t!(">"));
+
+		self.peek();
+		self.no_whitespace()?;
+
 		let id = self.parse_id()?;
+
+		self.peek();
+		self.no_whitespace()?;
+
 		expected!(self, "..");
+
+		self.peek();
+		self.no_whitespace()?;
+
 		let inclusive = self.eat(t!("="));
+
+		self.peek();
+		self.no_whitespace()?;
+
 		let end = self.parse_id()?;
 		Ok(Range {
 			tb,
@@ -124,6 +154,10 @@ impl Parser<'_> {
 
 	pub fn parse_thing_from_ident(&mut self, ident: String) -> ParseResult<Thing> {
 		expected!(self, ":");
+
+		self.peek();
+		self.no_whitespace()?;
+
 		let id = self.parse_id()?;
 		Ok(Thing {
 			tb: ident,
