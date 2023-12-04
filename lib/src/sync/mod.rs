@@ -121,7 +121,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 			name: self.name,
 			id: self.id,
 			lock_event_id: request_event,
-			guard: Arc::new(guard),
+			guard: Arc::new(RealRwLock::new(guard)),
 			_phantom: Default::default(),
 		};
 		unsafe {
@@ -139,15 +139,17 @@ impl<T: ?Sized + Send> Mutex<T> {
 }
 
 #[must_use = "if unused the RwLock will immediately unlock"]
-#[must_not_suspend = "holding a RwLockWriteGuard across suspend \
-                      points can cause deadlocks, delays, \
-                      and cause Future's to not implement `Send`"]
+// experimental
+// #[must_not_suspend = "holding a RwLockWriteGuard across suspend \
+//                       points can cause deadlocks, delays, \
+//                       and cause Future's to not implement `Send`"]
 #[clippy::has_significant_drop]
 pub struct MutexGuard<'a, T: ?Sized + 'a + Send> {
 	name: &'static str,
 	id: Ulid,
 	lock_event_id: Ulid,
-	guard: Arc<RealMutexGuard<'a, T>>,
+	// The absolute irony that this must be Send across threads
+	guard: Arc<RealRwLock<RealMutexGuard<'a, T>>>,
 	_phantom: PhantomData<&'a T>,
 }
 
@@ -173,13 +175,13 @@ impl<T: Send> Deref for MutexGuard<'_, T> {
 	type Target = T;
 
 	fn deref(&self) -> &T {
-		self.guard.deref()
+		self.guard.read().unwrap().deref()
 	}
 }
 
 impl<T: Send> DerefMut for MutexGuard<'_, T> {
 	fn deref_mut(&mut self) -> &mut T {
-		self.guard.deref_mut()
+		self.guard.write().unwrap().deref_mut()
 	}
 }
 
@@ -261,9 +263,10 @@ impl<T: ?Sized + Send> RwLock<T> {
 }
 
 #[must_use = "if unused the RwLock will immediately unlock"]
-#[must_not_suspend = "holding a RwLockWriteGuard across suspend \
-                      points can cause deadlocks, delays, \
-                      and cause Future's to not implement `Send`"]
+// experimental
+// #[must_not_suspend = "holding a RwLockWriteGuard across suspend \
+//                       points can cause deadlocks, delays, \
+//                       and cause Future's to not implement `Send`"]
 pub struct RwLockWriteGuard<'a, T: ?Sized + 'a + Send> {
 	name: &'static str,
 	id: Ulid,
