@@ -6,7 +6,7 @@ FROM cgr.dev/chainguard/rust:latest-dev as builder
 
 USER root
 RUN apk update
-RUN apk add patch clang curl gcc
+RUN apk add patch clang curl gcc cmake
 
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-unknown-linux-gnu-gcc
 
