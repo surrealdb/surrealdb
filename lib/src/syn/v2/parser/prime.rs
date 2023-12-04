@@ -3,10 +3,11 @@ use geo::Point;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{
-		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Subquery, Table,
-		Value,
+		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Strand, Subquery,
+		Table, Value,
 	},
 	syn::v2::{
+		lexer::Lexer,
 		parser::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
@@ -133,8 +134,12 @@ impl Parser<'_> {
 			}
 			TokenKind::Strand => {
 				self.pop_peek();
-				let strand = self.token_value(token)?;
-				return Ok(Value::Strand(strand));
+				if self.legacy_strands {
+					let strand = self.token_value(token)?;
+					return Ok(Value::Strand(strand));
+				} else {
+					return self.parse_legacy_strand();
+				}
 			}
 			TokenKind::Duration => {
 				self.pop_peek();
@@ -445,6 +450,20 @@ impl Parser<'_> {
 			self.expect_closing_delimiter(t!(")"), start)?;
 		}
 		Ok(res)
+	}
+
+	pub fn parse_legacy_strand(&mut self) -> ParseResult<Value> {
+		let text = self.lexer.string.take().unwrap();
+		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing() {
+			return Ok(Value::Thing(x));
+		}
+		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_datetime() {
+			return Ok(Value::Datetime(x));
+		}
+		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_uuid() {
+			return Ok(Value::Uuid(x));
+		}
+		Ok(Value::Strand(Strand(text)))
 	}
 
 	fn parse_script(&mut self) -> ParseResult<Function> {

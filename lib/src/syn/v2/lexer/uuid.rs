@@ -31,6 +31,24 @@ impl<'a> Lexer<'a> {
 	}
 
 	pub fn lex_uuid_err(&mut self, double: bool) -> Result<Uuid, Error> {
+		let uuid = self.lex_uuid_err_inner()?;
+
+		let end_char = if double {
+			b'"'
+		} else {
+			b'\''
+		};
+		// closing strand character
+		if !self.eat(end_char) {
+			return Err(Error::ExpectedStrandEnd);
+		}
+
+		Ok(uuid)
+	}
+
+	pub fn lex_uuid_err_inner(&mut self) -> Result<Uuid, Error> {
+		let start = self.reader.offset();
+
 		if !self.lex_hex(8) {
 			return Err(Error::MissingDigits);
 		}
@@ -75,23 +93,9 @@ impl<'a> Lexer<'a> {
 			return Err(Error::MissingDigits);
 		}
 
-		let end_char = if double {
-			b'"'
-		} else {
-			b'\''
-		};
-		// closing strand character
-		if !self.eat(end_char) {
-			return Err(Error::ExpectedStrandEnd);
-		}
-
-		let mut span = self.current_span();
-		// subtract the first `u` and both `"`.
-		span.len -= 3;
-		// move over the first `u"`
-		span.offset += 2;
+		let end = self.reader.offset();
 		// The lexer ensures that the section of bytes is valid utf8 so this should never panic.
-		let uuid_str = std::str::from_utf8(self.reader.span(span)).unwrap();
+		let uuid_str = std::str::from_utf8(&self.reader.full()[start..end]).unwrap();
 		// The lexer ensures that the bytes are a valid uuid so this should never panic.
 		Ok(Uuid(uuid::Uuid::try_from(uuid_str).unwrap()))
 	}

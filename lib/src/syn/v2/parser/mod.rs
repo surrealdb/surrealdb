@@ -69,6 +69,7 @@ pub struct Parser<'a> {
 	last_span: Span,
 	token_buffer: TokenBuffer<4>,
 	table_as_field: bool,
+	legacy_strands: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -79,7 +80,12 @@ impl<'a> Parser<'a> {
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
 			table_as_field: false,
+			legacy_strands: false,
 		}
+	}
+
+	pub fn allow_legacy_strand(&mut self, value: bool) {
+		self.legacy_strands = value;
 	}
 
 	pub fn reset(&mut self) {
@@ -95,6 +101,7 @@ impl<'a> Parser<'a> {
 			lexer: self.lexer.change_source(source),
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
+			legacy_strands: self.legacy_strands,
 			table_as_field: false,
 		}
 	}

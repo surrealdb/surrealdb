@@ -27,6 +27,7 @@ use parser::{ParseError, ParseErrorKind, Parser};
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
+	debug!("parsing query, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_query().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
@@ -34,19 +35,31 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn value(input: &str) -> Result<Value, Error> {
+	debug!("parsing value, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
+	parser.parse_value().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+}
+
+/// Parses a SurrealQL [`Value`].
+#[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
+pub fn value_legacy_string(input: &str) -> Result<Value, Error> {
+	debug!("parsing value, input = {input}");
+	let mut parser = Parser::new(input.as_bytes());
+	parser.allow_legacy_strand(true);
 	parser.parse_value().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
+	debug!("parsing json, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 /// Parses a SurrealQL Subquery [`Subquery`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn subquery(input: &str) -> Result<Subquery, Error> {
+	debug!("parsing subquery, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_full_subquery().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
@@ -54,11 +67,13 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 /// Parses a SurrealQL [`Idiom`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn idiom(input: &str) -> Result<Idiom, Error> {
+	debug!("parsing idiom, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_plain_idiom().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
+	debug!("parsing datetime, input = {input}");
 	let mut lexer = Lexer::new(input.as_bytes());
 	lexer
 		.lex_datetime_raw_err()
@@ -73,6 +88,7 @@ pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 }
 
 pub fn duration(input: &str) -> Result<Duration, Error> {
+	debug!("parsing duration, input = {input}");
 	let mut lexer = Lexer::new(input.as_bytes());
 	lexer
 		.lex_only_duration()
@@ -82,11 +98,13 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 }
 
 pub fn range(input: &str) -> Result<Range, Error> {
+	debug!("parsing range, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_range().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 pub fn thing(input: &str) -> Result<Thing, Error> {
+	debug!("parsing thing, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_thing().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }

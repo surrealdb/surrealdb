@@ -326,7 +326,7 @@ mod ws_integration {
 
 		// Insert
 		let id = "A23A05ABC15C420E9A7E13D2C8657890";
-		let query = format!(r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#, table_name, id);
+		let query = format!(r#"INSERT INTO `{}` {{"id": "{}", "name": "ok"}};"#, table_name, id);
 		let created = common::ws_query(socket2, query.as_str()).await.unwrap();
 		assert_eq!(created.len(), 1);
 
@@ -363,7 +363,7 @@ mod ws_integration {
 		// Verify we have a ROOT session
 		let res = common::ws_query(
 			socket,
-			&format!("DEFINE NAMESPACE {throwaway}", throwaway = Ulid::new()),
+			&format!("DEFINE NAMESPACE `{throwaway}`", throwaway = Ulid::new()),
 		)
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
@@ -383,7 +383,7 @@ mod ws_integration {
 		// Verify we invalidated the root session
 		let res = common::ws_query(
 			socket,
-			&format!("DEFINE NAMESPACE {throwaway}", throwaway = Ulid::new()),
+			&format!("DEFINE NAMESPACE `{throwaway}`", throwaway = Ulid::new()),
 		)
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
@@ -437,7 +437,7 @@ mod ws_integration {
 		// Verify we have a ROOT session
 		let res = common::ws_query(
 			socket,
-			&format!("DEFINE NAMESPACE {throwaway}", throwaway = Ulid::new()),
+			&format!("DEFINE NAMESPACE `{throwaway}`", throwaway = Ulid::new()),
 		)
 		.await;
 		assert!(res.is_ok(), "result: {:?}", res);
@@ -550,7 +550,7 @@ mod ws_integration {
 		let live_id = live_res["result"].as_str().unwrap();
 
 		// KILL query via kill endpoint
-		let kill_query = format!("KILL '{live_id}'");
+		let kill_query = format!("KILL u'{live_id}'");
 		common::ws_send_msg(
 			socket,
 			serde_json::to_string(&json!({

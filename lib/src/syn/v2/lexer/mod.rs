@@ -346,6 +346,10 @@ impl<'a> Lexer<'a> {
 			None => Err(Error::UnexpectedEof),
 		}
 	}
+
+	pub fn lex_only_uuid(&mut self) -> Result<Uuid, Error> {
+		Ok(self.lex_uuid_err_inner()?)
+	}
 }
 
 impl Iterator for Lexer<'_> {
