@@ -9,7 +9,7 @@ use super::super::super::{
 	value::value,
 	IResult,
 };
-use crate::sql::{statements::DefineFieldStatement, Kind, Permissions, Strand, Value, Permission};
+use crate::sql::{statements::DefineFieldStatement, Kind, Permission, Permissions, Strand, Value};
 use nom::{
 	branch::alt,
 	bytes::complete::tag_no_case,
