@@ -36,12 +36,12 @@ strip = false
 [dependencies]
 argon2 = "0.5.2"
 axum = { version = "0.6.20", features = ["tracing", "ws", "headers"] }
-axum-client-ip = "0.4.2"
+axum-client-ip = "0.5.0"
 axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
-clap = { version = "4.4.8", features = ["env", "derive", "wrap_help", "unicode"] }
+clap = { version = "4.4.11", features = ["env", "derive", "wrap_help", "unicode"] }
 futures = "0.3.29"
 futures-util = "0.3.29"
 glob = "0.3.1"
@@ -55,7 +55,7 @@ opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
 rand = "0.8.5"
 reqwest = { version = "0.11.22", default-features = false, features = ["blocking", "gzip"] }
-rustyline = { version = "11.0.0", features = ["derive"] }
+rustyline = { version = "12.0.0", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.108"
@@ -74,7 +74,10 @@ urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = "0.26.4"
+nix = { version = "0.27.1", features = ["user"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.27.1", features = ["signal", "user"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
 snmalloc-rs = "0.3.4"
@@ -86,7 +89,7 @@ jemallocator = "0.5.4"
 assert_fs = "1.0.13"
 env_logger = "0.10.1"
 opentelemetry-proto = { version = "0.2.0", features = ["gen-tonic", "traces", "metrics", "logs"] }
-rcgen = "0.10.0"
+rcgen = "0.11.3"
 serial_test = "2.0.0"
 temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }
@@ -94,7 +97,7 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = { version = "0.20.1" }
 tonic = "0.8.3"
 ulid = "1.1.0"
-wiremock = "0.5.21"
+wiremock = "0.5.22"
 
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
