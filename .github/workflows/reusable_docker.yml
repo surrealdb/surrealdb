@@ -74,7 +74,7 @@ jobs:
               ########
               # Binary image
               ########
-              - name: Binary image (amd64)
+              - name: Binary image
                 dockerfile: Dockerfile.binary
                 platform: amd64
                 runner: ubuntu-latest-4-cores
