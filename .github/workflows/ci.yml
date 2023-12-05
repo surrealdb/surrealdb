@@ -1,5 +1,7 @@
 name: Continuous integration
 
+run-name: "CI run '${{ github.head_ref || github.ref_name }}'"
+
 on:
   workflow_dispatch:
   push:
@@ -13,6 +15,16 @@ defaults:
     shell: bash
 
 jobs:
+  # TODO: Do not run it on CI because it's very slow right now.
+  # Build the Docker image but don't push it.
+  # docker:
+  #   uses: ./.github/workflows/reusable_docker.yml
+  #   with:
+  #     git-ref: ${{ github.ref }}
+  #     tag-prefix: ${{ github.head_ref || github.ref_name }}
+  #     build: true
+  #     push: false
+  #   secrets: inherit
 
   format:
     name: Check format
@@ -26,7 +38,7 @@ jobs:
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -50,7 +62,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -79,7 +91,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -104,7 +116,7 @@ jobs:
           components: clippy
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -132,7 +144,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -170,7 +182,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -226,7 +238,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -254,7 +266,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -305,7 +317,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -342,7 +354,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -379,7 +391,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -416,7 +428,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -440,7 +452,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -464,7 +476,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -488,7 +500,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -512,7 +524,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -556,7 +568,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2

@@ -40,7 +40,6 @@ Temporary Items
 .vscode/
 /result
 /bin/
-/docker/
 /.direnv/
 
 # -----------------------------------

@@ -8,15 +8,15 @@ pub static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[cfg(target_os = "ios")]
 #[global_allocator]
-pub static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(target_os = "linux")]
 #[global_allocator]
-pub static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(target_os = "macos")]
 #[global_allocator]
-pub static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+pub static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(target_os = "netbsd")]
 #[global_allocator]
