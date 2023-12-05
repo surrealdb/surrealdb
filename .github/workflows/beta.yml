@@ -45,6 +45,8 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          set -x
+
           # Configure git
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions"

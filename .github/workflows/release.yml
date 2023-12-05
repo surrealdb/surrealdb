@@ -33,7 +33,7 @@ jobs:
     name: Pre-release checks
     runs-on: ubuntu-latest
     outputs:
-      is-beta: ${{ steps.checks.outputs.is-beta }}
+      is-beta: ${{ steps.outputs.outputs.is-beta }}
     env:
       GIT_REF: ${{ inputs.git-ref || github.ref_name }}
     steps:
@@ -41,6 +41,7 @@ jobs:
         if: ${{ inputs.publish || github.event_name == 'push' }}
         id: outputs
         run: |
+          set -x
           git tag -l | grep -w $GIT_REF || (echo "The provided git_ref '$GIT_REF' is not a tag" && exit 1)
           if [[ $GIT_REF == *"-beta"* ]]; then
             echo "is-beta=true" >> $GITHUB_OUTPUT
@@ -54,7 +55,7 @@ jobs:
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       git-ref: ${{ inputs.git-ref || github.ref_name }}
-      latest: ${{ inputs.latest || (github.event_name == 'push' && !needs.checks.outputs.is-beta) }}
+      latest: ${{ inputs.latest || (github.event_name == 'push' && needs.checks.outputs.is-beta == 'false') }}
       publish: ${{ inputs.publish || github.event_name == 'push' }}
       create-release: ${{ inputs.publish || github.event_name == 'push' }}
     secrets: inherit
