@@ -246,8 +246,10 @@ jobs:
         if: ${{ always() }}
         run: |
           set -x
+          set +e # Don't fail, do what we can
+          docker system prune -f
           docker image rm ${{ steps.build.outputs.imageid }}
-          docker image rm ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }} || true
+          docker image rm ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
           docker system prune -f
 
           docker image ls
