@@ -26,7 +26,14 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 		value((), char(',')),   // [1, 2]
 		value((), char('[')),   // thing:1[foo]
 		value((), tag("..")),   // thing:1..2
-		value((), tuple((char('.'), mightbespace, satisfy(|x| x.is_alphanumeric())))), // thing:1.foo
+		value(
+			(),
+			tuple((
+				char('.'),
+				mightbespace,
+				satisfy(|x| x.is_alphanumeric() || x == '$' || x == '*'),
+			)),
+		), // thing:1.foo
 		value((), eof),         // SET a = 1
 	)))(i)
 }

@@ -276,7 +276,7 @@ pub fn bracketed_value(i: &str) -> IResult<&str, Part> {
 #[cfg(test)]
 mod tests {
 
-	use crate::sql::{Dir, Expression, Id, Number, Param, Table, Thing};
+	use crate::sql::{Dir, Expression, Id, Number, Param, Strand, Table, Thing};
 	use crate::syn::test::Parse;
 
 	use super::*;
@@ -583,7 +583,7 @@ mod tests {
 	}
 
 	#[test]
-	fn idiom_thing_number_path() {
+	fn idiom_thing_number() {
 		let sql = "test:1.foo";
 		let res = idiom(sql);
 		let out = res.unwrap().1;
@@ -595,6 +595,40 @@ mod tests {
 					id: Id::Number(1),
 				})),
 				Part::from("foo"),
+			])
+		);
+	}
+
+	#[test]
+	fn idiom_thing_index() {
+		let sql = "test:1['foo']";
+		let res = idiom(sql);
+		let out = res.unwrap().1;
+		assert_eq!(
+			out,
+			Idiom(vec![
+				Part::Start(Value::Thing(Thing {
+					tb: "test".to_owned(),
+					id: Id::Number(1),
+				})),
+				Part::Value(Value::Strand(Strand("foo".to_owned()))),
+			])
+		);
+	}
+
+	#[test]
+	fn idiom_thing_all() {
+		let sql = "test:1.*";
+		let res = idiom(sql);
+		let out = res.unwrap().1;
+		assert_eq!(
+			out,
+			Idiom(vec![
+				Part::Start(Value::Thing(Thing {
+					tb: "test".to_owned(),
+					id: Id::Number(1),
+				})),
+				Part::All
 			])
 		);
 	}
