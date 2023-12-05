@@ -117,6 +117,8 @@ trice = "0.3.1"
 ulid = { version = "1.1.0", features = ["serde"] }
 url = "2.5.0"
 lockfree = "0.5.1"
+lock_api = "0.4.11"
+async-std = "1.12.0"
 
 [dev-dependencies]
 criterion = { version="0.5.1", features= ["async_tokio"] }

@@ -1,12 +1,14 @@
+use async_std::sync::Mutex as RealMutex;
+use async_std::sync::MutexGuard as RealMutexGuard;
+use async_std::sync::RwLock as RealRwLock;
+use async_std::sync::RwLockWriteGuard as RealRwLockWriteGuard;
+use once_cell::sync::Lazy;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::MutexGuard as RealMutexGuard;
-use std::sync::RwLock as RealRwLock;
-use std::sync::RwLockWriteGuard as RealRwLockWriteGuard;
-use std::sync::{Arc, Mutex as RealMutex};
 use ulid::Ulid;
 
-static mut LOCKS: lockfree::map::Map<Ulid, LockState> = lockfree::map::Map::new();
+static mut LOCKS: Lazy<lockfree::map::Map<Ulid, LockState>> =
+	Lazy::new(|| lockfree::map::Map::new());
 
 enum LockState {
 	RwLock(RwLockState),
@@ -62,7 +64,7 @@ enum MutexLockState {
 	},
 }
 
-pub struct Mutex<T: ?Sized> {
+pub struct Mutex<T: ?Sized + Send> {
 	name: &'static str,
 	id: Ulid,
 	mutex: RealMutex<T>,
@@ -74,7 +76,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 	/// Creates a new instance of a `Mutex<T>` which is unlocked.
 	/// This particular implementation is for traceability
 	#[track_caller]
-	pub fn new(value: T, name: &str) -> Mutex<T>
+	pub fn new(value: T, name: &'static str) -> Mutex<T>
 	where
 		T: Sized,
 	{
@@ -109,19 +111,12 @@ impl<T: ?Sized + Send> Mutex<T> {
 				}),
 			);
 		}
-		let guard = loop {
-			match self.mutex.try_lock() {
-				Ok(guard) => break guard,
-				Err(_) => {
-					tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-				}
-			}
-		};
+		let guard = self.mutex.lock().await;
 		let guard = MutexGuard {
 			name: self.name,
 			id: self.id,
 			lock_event_id: request_event,
-			guard: Arc::new(RealRwLock::new(guard)),
+			guard,
 			_phantom: Default::default(),
 		};
 		unsafe {
@@ -138,6 +133,14 @@ impl<T: ?Sized + Send> Mutex<T> {
 	}
 }
 
+impl<T: ?Sized + Send> Drop for Mutex<T> {
+	fn drop(&mut self) {
+		unsafe {
+			LOCKS.remove(&self.id);
+		}
+	}
+}
+
 #[must_use = "if unused the RwLock will immediately unlock"]
 // experimental
 // #[must_not_suspend = "holding a RwLockWriteGuard across suspend \
@@ -149,7 +152,7 @@ pub struct MutexGuard<'a, T: ?Sized + 'a + Send> {
 	id: Ulid,
 	lock_event_id: Ulid,
 	// The absolute irony that this must be Send across threads
-	guard: Arc<RealRwLock<RealMutexGuard<'a, T>>>,
+	guard: RealMutexGuard<'a, T>,
 	_phantom: PhantomData<&'a T>,
 }
 
@@ -175,13 +178,13 @@ impl<T: Send> Deref for MutexGuard<'_, T> {
 	type Target = T;
 
 	fn deref(&self) -> &T {
-		self.guard.read().unwrap().deref()
+		self.guard.deref()
 	}
 }
 
 impl<T: Send> DerefMut for MutexGuard<'_, T> {
 	fn deref_mut(&mut self) -> &mut T {
-		self.guard.write().unwrap().deref_mut()
+		self.guard.deref_mut()
 	}
 }
 
@@ -197,7 +200,7 @@ impl<T: ?Sized + Send> RwLock<T> {
 	/// Creates a new instance of an `RwLock<T>` which is unlocked.
 	/// This particular implementation is for traceability
 	#[track_caller]
-	pub fn new(value: T, name: &str) -> RwLock<T>
+	pub fn new(value: T, name: &'static str) -> RwLock<T>
 	where
 		T: Sized,
 	{
@@ -232,14 +235,7 @@ impl<T: ?Sized + Send> RwLock<T> {
 				}),
 			);
 		}
-		let guard = loop {
-			match self.rwlock.try_write() {
-				Ok(guard) => break guard,
-				Err(_) => {
-					tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-				}
-			}
-		};
+		let guard = self.rwlock.write().await;
 		let guard = RwLockWriteGuard {
 			name: self.name,
 			id: self.id,
