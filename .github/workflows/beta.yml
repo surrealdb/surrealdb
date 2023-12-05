@@ -38,23 +38,44 @@ jobs:
       - name: Install release-plz
         run: cargo install --force --locked --version 0.3.30 release-plz
 
-      - name: Create beta branch
-        run: git checkout -b beta
+      - name: Install Taplo
+        run: cargo install taplo-cli --locked
 
       - name: Prepare beta crate
         run: |
           # Bump the version
           /home/runner/.cargo/bin/release-plz update --config .config/release-plz.toml
+          
+          # Save the new version
+          newVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          version=${newVersion}-beta.1
+          
+          # Stash the Cargo.toml
+          tempDir=$(mktemp -d /tmp/cargo-toml.XXXXXXXXXXXXXXXXXX)
+          mv lib/Cargo.toml $tempDir/
+
+          # Temporarily revert the change and create the tag
+          git checkout -- lib/Cargo.toml
+          git tag -a v${version} -m "Release ${version}"
+
+          # Unstash Cargo.toml
+          mv $tempDir/Cargo.toml lib/
 
           # Replace the crate name
           # We are just going to replace the first occurance of surrealdb
           sed -i "0,/surrealdb/s//surrealdb-beta/" lib/Cargo.toml
 
+          # Commit changes
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+          git checkout -b beta
+          git add lib/Cargo.toml
+          git commit -m "Prepare the beta crate"
+
       - name: Perfom release checks
         if: ${{ !inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: /home/runner/.cargo/bin/release-plz release --dry-run --config .config/release-plz.toml
 
       - name: Publish the crate
@@ -63,15 +84,10 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
-          # Commit changes
-          git config --local user.email "actions@users.noreply.github.com"
-          git config --local user.name "github-actions"
-          git remote add upstream https://tobiemh:${{ secrets.RELEASE_PLZ_TOKEN }}@github.com/surrealdb/surrealdb.git
-          git add lib/Cargo.toml
-          git commit -m "Prepare the beta crate"
-
-          # Upload the crate and prepare the `surrealdb-beta-v*.*.*` tag
+          # Upload the crate
           /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
 
-          # Push the new branch
+          # Push the new branch and tag
+          git remote add upstream https://tobiemh:${{ secrets.RELEASE_PLZ_TOKEN }}@github.com/surrealdb/surrealdb.git
           git push upstream
+          git push upstream --tags
