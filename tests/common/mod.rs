@@ -215,7 +215,7 @@ pub async fn start_server(
 	}
 
 	if enable_auth_level {
-		extra_args.push_str(" --enable-auth-level");
+		extra_args.push_str(" --auth-level-enabled");
 	}
 
 	if !tick_interval.is_zero() {

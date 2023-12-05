@@ -76,6 +76,12 @@ uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 [target.'cfg(unix)'.dependencies]
 nix = "0.26.4"
 
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
+mimalloc = { version = "0.1.39", default-features = false }
+
+[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+jemallocator = "0.5.4"
+
 [dev-dependencies]
 assert_fs = "1.0.13"
 env_logger = "0.10.1"

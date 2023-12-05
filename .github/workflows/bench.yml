@@ -46,7 +46,7 @@ jobs:
           cargo install --quiet --locked critcmp cargo-make
 
       - name: Checkout changes
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Run benchmark
         run: |
@@ -115,7 +115,7 @@ jobs:
           #   features: "protocol-ws"
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
