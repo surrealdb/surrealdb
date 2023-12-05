@@ -215,7 +215,19 @@ impl Connection {
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
 				// Remove any completed tasks
-				Some(_) = tasks.join_next() => continue,
+				Some(out) = tasks.join_next() => match out{
+					// The task completed successfully
+					Ok(_) => continue,
+					// There was an uncaught panic in the task
+					Err(err) => {
+						// There was an error with the task
+						trace!("WebSocket request error: {:?}", err);
+						// Cancel the WebSocket tasks
+						rpc.read().await.canceller.cancel();
+						// Exit out of the loop
+						break;
+					}
+				},
 				// Wait for the next message to read
 				Some(msg) = receiver.next() => {
 					// Process the received WebSocket message
