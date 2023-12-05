@@ -518,6 +518,9 @@ where
 	) -> Result<(bool, bool, Key, NodeId), Error> {
 		// CLRS 3a
 		let child_idx = keys.get_child_idx(&key_to_delete);
+		if child_idx >= children.len() {
+			return Err(Error::CorruptedIndex);
+		}
 		let child_id = children[child_idx];
 		let child_stored_node = store.get_node_mut(tx, child_id).await?;
 		if child_stored_node.n.keys().len() < self.state.minimum_degree {
@@ -784,13 +787,14 @@ mod tests {
 		ds: &Datastore,
 		t: &BTree<BK>,
 		tt: TransactionType,
+		cache_size: usize,
 	) -> (Transaction, BTreeStore<FstKeys>)
 	where
 		BK: BKeys + Debug + Clone,
 	{
 		let st = ds
 			.index_store()
-			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, 20)
+			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
 			.await;
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		(tx, st)
@@ -820,17 +824,17 @@ mod tests {
 		let mut t = BTree::new(BState::new(5));
 
 		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
 			insertions_test::<_, FstKeys>(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			check_insertions(tx, st, &mut t, 100, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -884,17 +888,17 @@ mod tests {
 		samples.shuffle(&mut rng);
 
 		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
 			insertions_test(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			check_insertions(tx, st, &mut t, 100, |i| get_key_value(samples[i])).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			let s = t.statistics(&mut tx, &mut st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
@@ -934,17 +938,17 @@ mod tests {
 		let mut t = BTree::new(BState::new(60));
 
 		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
 			insertions_test(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			check_insertions(tx, st, &mut t, 10000, get_key_value).await;
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			assert_eq!(
 				t.statistics(&mut tx, &mut st).await.unwrap(),
 				BStatistics {
@@ -1009,14 +1013,14 @@ mod tests {
 		let mut t = BTree::new(BState::new(default_minimum_degree));
 
 		{
-			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write).await;
+			let (tx, st) = new_operation_fst(&ds, &t, TransactionType::Write, 20).await;
 			insertions_test(tx, st, &mut t, REAL_WORLD_TERMS.len(), |i| {
 				(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 			})
 			.await;
 		}
 
-		let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read).await;
+		let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
 		tx.cancel().await.unwrap();
 		statistics
@@ -1406,6 +1410,146 @@ mod tests {
 		// There should not be any record in the database
 		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await?.len());
 		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn test_term_id_bug() -> Result<(), Error> {
+		let ds = Datastore::new("memory").await?;
+		let mut t = BTree::<FstKeys>::new(BState::new(3));
+
+		let terms = [
+			"aliquam",
+			"delete",
+			"if",
+			"from",
+			"Docusaurus",
+			"amet,",
+			"don't",
+			"And",
+			"interactive",
+			"well!",
+			"supports",
+			"ultricies.",
+			"Fusce",
+			"consequat.",
+			"just",
+			"use",
+			"elementum",
+			"term",
+			"blogging",
+			"to",
+			"want",
+			"added",
+			"Lorem",
+			"ipsum",
+			"blog:",
+			"MDX.",
+			"posts.",
+			"features",
+			"posts",
+			"features,",
+			"truncate",
+			"images:",
+			"Long",
+			"Pellentesque",
+			"authors.yml.",
+			"filenames,",
+			"such",
+			"co-locate",
+			"you",
+			"can",
+			"the",
+			"-->",
+			"comment",
+			"tags",
+			"A",
+			"React",
+			"The",
+			"adipiscing",
+			"consectetur",
+			"very",
+			"this",
+			"and",
+			"sit",
+			"directory,",
+			"Regular",
+			"Markdown",
+			"Simply",
+			"blog",
+			"MDX",
+			"list",
+			"extracted",
+			"summary",
+			"amet",
+			"plugin.",
+			"your",
+			"long",
+			"First",
+			"power",
+			"post,",
+			"convenient",
+			"folders)",
+			"of",
+			"date",
+			"powered",
+			"2019-05-30-welcome.md",
+			"view.",
+			"are",
+			"be",
+			"<!--",
+			"Welcome",
+			"is",
+			"2019-05-30-welcome/index.md",
+			"by",
+			"directory.",
+			"folder",
+			"Use",
+			"search",
+			"authors",
+			"false",
+			"as:",
+			"tempor",
+			"files",
+			"config.",
+			"dignissim",
+			"as",
+			"a",
+			"in",
+			"This",
+			"authors.yml",
+			"create",
+			"dolor",
+			"Enter",
+			"support",
+			"add",
+			"eros",
+			"post",
+			"Post",
+			"size",
+			"(or",
+			"rhoncus",
+			"Blog",
+			"limit",
+			"elit.",
+		];
+		{
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			for term in terms {
+				t.insert(&mut tx, &mut st, term.into(), 0).await?;
+			}
+			st.finish(&mut tx).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+		{
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			for term in terms {
+				info!("Delete {term}");
+				t.delete(&mut tx, &mut st, term.into()).await?;
+			}
+			st.finish(&mut tx).await.unwrap();
+			tx.commit().await.unwrap();
+		}
 		Ok(())
 	}
 

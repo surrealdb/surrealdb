@@ -44,6 +44,9 @@ where
 		{
 			debug!("GET: {}", node_id);
 			self.out.insert(node_id);
+			if self.removed.contains_key(&node_id) {
+				return Err(Error::Unreachable("TreeTransactionWrite::get_node_mut"));
+			}
 		}
 		if let Some(n) = self.nodes.remove(&node_id) {
 			return Ok(n);
@@ -55,7 +58,7 @@ where
 	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
-			debug!("SET: {} {} {:?}", node.id, updated, node.n);
+			debug!("SET: {} {}", node.id, updated);
 			self.out.remove(&node.id);
 		}
 		if updated {
@@ -124,8 +127,12 @@ where
 	N: TreeNode + Debug + Clone,
 {
 	fn drop(&mut self) {
-		assert!(self.updated.is_empty(), "TreeWrite::finish not called?: updated not empty");
-		assert!(self.removed.is_empty(), "TreeWrite::finish not called?: removed not empty");
+		if !self.updated.is_empty() {
+			warn!("TreeWrite::finish not called?: updated not empty: {:?}", self.updated);
+		}
+		if !self.removed.is_empty() {
+			warn!("TreeWrite::finish not called?: removed not empty: {:?}", self.removed);
+		}
 	}
 }
 
@@ -153,7 +160,7 @@ where
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		let r = self.cache.get_node(tx, node_id).await?;
 		#[cfg(debug_assertions)]
-		debug!("GET: {} {:?}", node_id, r.n);
+		debug!("GET: {}", node_id);
 		Ok(r)
 	}
 }
