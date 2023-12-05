@@ -7,12 +7,18 @@ FROM docker.io/ubuntu:18.04
 ARG CARGO_EXTRA_FEATURES="http-compression,storage-tikv"
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y curl patch clang gpg build-essential git cmake && apt-get clean
+RUN apt-get update && apt-get install -y curl patch clang gpg build-essential git software-properties-common lsb-release
+
+# Install cmake. ubuntu 18.04 has cmake 3.10, but we need >3.14.
+RUN curl -o - https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor - > /etc/apt/trusted.gpg.d/kitware.gpg
+RUN apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main"
+RUN apt-get update && apt-get install -y cmake
 
 # Install rust
 COPY docker/files/rustup-init.sh /tmp/rustup-init.sh
 RUN /tmp/rustup-init.sh -y
 ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install cargo-make
 
 RUN mkdir /surrealdb
 WORKDIR /surrealdb
