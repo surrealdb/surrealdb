@@ -228,40 +228,37 @@ impl Connection {
 						break;
 					}
 				},
-				// Wait for the next message to read
-				Some(msg) = receiver.next() => {
-					// Process the received WebSocket message
-					match msg {
-						// We've received a message from the client
-						Ok(msg) => match msg {
-							Message::Text(_) => {
-								tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
-							}
-							Message::Binary(_) => {
-								tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
-							}
-							Message::Close(_) => {
-								// Respond with a close message
-								if let Err(err) = internal_sender.send(Message::Close(None)).await {
-									trace!("WebSocket error when replying to the Close frame: {:?}", err);
-								};
-								// Cancel the WebSocket tasks
-								rpc.read().await.canceller.cancel();
-								// Exit out of the loop
-								break;
-							}
-							_ => {
-								// Ignore everything else
-							}
-						},
-						Err(err) => {
-							// There was an error with the WebSocket
-							trace!("WebSocket error: {:?}", err);
+				// Wait for the next received message
+				Some(msg) = receiver.next() => match msg {
+					// We've received a message from the client
+					Ok(msg) => match msg {
+						Message::Text(_) => {
+							tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+						}
+						Message::Binary(_) => {
+							tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+						}
+						Message::Close(_) => {
+							// Respond with a close message
+							if let Err(err) = internal_sender.send(Message::Close(None)).await {
+								trace!("WebSocket error when replying to the Close frame: {:?}", err);
+							};
 							// Cancel the WebSocket tasks
 							rpc.read().await.canceller.cancel();
 							// Exit out of the loop
 							break;
 						}
+						_ => {
+							// Ignore everything else
+						}
+					},
+					Err(err) => {
+						// There was an error with the WebSocket
+						trace!("WebSocket error: {:?}", err);
+						// Cancel the WebSocket tasks
+						rpc.read().await.canceller.cancel();
+						// Exit out of the loop
+						break;
 					}
 				}
 			}
