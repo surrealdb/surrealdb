@@ -138,18 +138,19 @@ jobs:
                 tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-dev
                 tag-latest: latest-dev
 
-              ########################################
-              # FoundationDB images (FDB client library is only available for amd64)
-              ########################################
-              # Prod images
-              - &fdb_image
-                platforms: linux/amd64
-                tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-fdb
-                tag-latest: latest-fdb
-              # Dev images
-              - <<: *fdb_image
-                tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-fdb-dev
-                tag-latest: latest-fdb-dev
+              # TODO: Decide whether or not we want a dedicated image for FoundationDB
+              # ########################################
+              # # FoundationDB images (FDB client library is only available for amd64)
+              # ########################################
+              # # Prod images
+              # - &fdb_image
+              #   platforms: linux/amd64
+              #   tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-fdb
+              #   tag-latest: latest-fdb
+              # # Dev images
+              # - <<: *fdb_image
+              #   tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-fdb-dev
+              #   tag-latest: latest-fdb-dev
 
         run: |
           echo '${{ env.BUILD_MATRIX }}' > build-matrix.yaml
