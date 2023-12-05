@@ -48,6 +48,18 @@ jobs:
       build-matrix: ${{ steps.set-matrix.outputs.build-matrix }}
       push-matrix: ${{ steps.set-matrix.outputs.push-matrix }}
     steps:
+      - name: Cleanup
+        if: ${{ always() }}
+        run: |
+          set -x
+          set +e # Don't fail, do what we can
+          docker system prune -f
+          docker image prune -a -f
+
+          docker image ls
+          docker ps -a
+          df -h
+
       - name: Check if AWS credentials are set
         id: aws-credentials
         run: |
