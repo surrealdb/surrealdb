@@ -176,7 +176,7 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest-16-cores
+            runner: ["self-hosted", "amd64", "builder"]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
@@ -196,7 +196,7 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: ["self-hosted", "arm64", "4-cores"]
+            runner: ["self-hosted", "arm64", "builder"]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
             build-step: |
               # Build
