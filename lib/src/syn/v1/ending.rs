@@ -20,8 +20,8 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 		value((), char(')')),   // (1)
 		value((), char(']')),   // a[1]
 		value((), char('}')),   // {k: 1}
-		value((), char('"')),   // When does this happen?
-		value((), char('\'')),  // When does this happen?
+		value((), char('"')),   // r"foo:1"
+		value((), char('\'')),  // r'foo:1'
 		value((), char(';')),   // SET a = 1;
 		value((), char(',')),   // [1, 2]
 		value((), char('[')),   // thing:1[foo]
