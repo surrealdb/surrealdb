@@ -119,7 +119,7 @@ fn table_comment(i: &str) -> IResult<&str, DefineTableOption> {
 
 fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = permissions(i, Some(Permission::None))?;
+	let (i, v) = permissions(i, Permission::None)?;
 	Ok((i, DefineTableOption::Permissions(v)))
 }
 
