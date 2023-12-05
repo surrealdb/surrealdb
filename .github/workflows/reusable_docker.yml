@@ -120,7 +120,7 @@ jobs:
               # Dev AMD64 image
               - <<: *fdb_image
                 build-target: dev
-                tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-dev-fdb
+                tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-fdb-dev
 
           PUSH_MATRIX: |
             include:
@@ -148,8 +148,8 @@ jobs:
                 tag-latest: latest-fdb
               # Dev images
               - <<: *fdb_image
-                tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-dev-fdb
-                tag-latest: latest-dev-fdb
+                tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-fdb-dev
+                tag-latest: latest-fdb-dev
 
         run: |
           echo '${{ env.BUILD_MATRIX }}' > build-matrix.yaml
