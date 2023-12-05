@@ -43,7 +43,7 @@ jobs:
   release:
     name: Prepare release
     needs: [checks]
-    uses: ./.github/workflows/reusable/publish_version.yml
+    uses: ./.github/workflows/reusable_publish_version.yml
     with:
       git-ref: ${{ inputs.git-ref || github.ref_name }}
       latest: ${{ inputs.latest || github.event_name == 'push' }}
