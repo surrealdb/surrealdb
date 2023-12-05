@@ -13,7 +13,6 @@ defaults:
     shell: bash
 
 jobs:
-
   build-static:
     name: Build static Linux binary
     if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}

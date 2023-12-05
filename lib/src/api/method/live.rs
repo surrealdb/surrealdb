@@ -30,6 +30,7 @@ use crate::Surreal;
 use channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
+use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -44,10 +45,23 @@ const ID: &str = "id";
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Live<'r, C: Connection, R> {
-	pub(super) client: &'r Surreal<C>,
+	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+impl<C, R> Live<'_, C, R>
+where
+	C: Connection,
+{
+	/// Converts to an owned type which can easily be moved to a different thread
+	pub fn into_owned(self) -> Live<'static, C, R> {
+		Live {
+			client: Cow::Owned(self.client.into_owned()),
+			..self
+		}
+	}
 }
 
 macro_rules! into_future {
@@ -94,7 +108,7 @@ macro_rules! into_future {
 					},
 				}
 				let query = Query {
-					router: Ok(router),
+					client: client.clone(),
 					query: vec![Ok(vec![Statement::Live(stmt)])],
 					bindings: Ok(Default::default()),
 				};
@@ -107,7 +121,7 @@ macro_rules! into_future {
 				Ok(Stream {
 					id,
 					rx,
-					client: client.clone(),
+					client,
 					response_type: PhantomData,
 				})
 			})
@@ -213,7 +227,7 @@ impl<'r, Client> IntoFuture for Live<'r, Client, Value>
 where
 	Client: Connection,
 {
-	type Output = Result<Stream<Client, Value>>;
+	type Output = Result<Stream<'r, Client, Value>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	into_future! {}
@@ -224,7 +238,7 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<Client, Option<R>>>;
+	type Output = Result<Stream<'r, Client, Option<R>>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	into_future! {}
@@ -235,7 +249,7 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<Stream<Client, Vec<R>>>;
+	type Output = Result<Stream<'r, Client, Vec<R>>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	into_future! {}
@@ -244,17 +258,25 @@ where
 /// A stream of live query notifications
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
-pub struct Stream<C: Connection, R> {
-	client: Surreal<C>,
+pub struct Stream<'r, C: Connection, R> {
+	client: Cow<'r, Surreal<C>>,
 	id: Value,
 	rx: Receiver<dbs::Notification>,
 	response_type: PhantomData<R>,
 }
 
-impl<Client, R> Stream<Client, R>
+impl<Client, R> Stream<'_, Client, R>
 where
 	Client: Connection,
 {
+	/// Converts to an owned type which can easily be moved to a different thread
+	pub fn into_owned(self) -> Stream<'static, Client, R> {
+		Stream {
+			client: Cow::Owned(self.client.into_owned()),
+			..self
+		}
+	}
+
 	/// Close the live query stream
 	///
 	/// This kills the live query process responsible for this stream.
@@ -283,7 +305,7 @@ macro_rules! poll_next {
 	};
 }
 
-impl<C> futures::Stream for Stream<C, Value>
+impl<C> futures::Stream for Stream<'_, C, Value>
 where
 	C: Connection,
 {
@@ -305,7 +327,7 @@ macro_rules! poll_next_and_convert {
 	};
 }
 
-impl<C, R> futures::Stream for Stream<C, Option<R>>
+impl<C, R> futures::Stream for Stream<'_, C, Option<R>>
 where
 	C: Connection,
 	R: DeserializeOwned + Unpin,
@@ -315,7 +337,7 @@ where
 	poll_next_and_convert! {}
 }
 
-impl<C, R> futures::Stream for Stream<C, Vec<R>>
+impl<C, R> futures::Stream for Stream<'_, C, Vec<R>>
 where
 	C: Connection,
 	R: DeserializeOwned + Unpin,

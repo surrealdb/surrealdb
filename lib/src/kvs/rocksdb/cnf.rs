@@ -55,3 +55,10 @@ pub static ROCKSDB_MIN_BLOB_SIZE: Lazy<u64> = Lazy::new(|| {
 		.map(|v| v.parse::<u64>().unwrap_or(default))
 		.unwrap_or(default)
 });
+
+pub static ROCKSDB_KEEP_LOG_FILE_NUM: Lazy<usize> = Lazy::new(|| {
+	let default = 20;
+	std::env::var("SURREAL_ROCKSDB_KEEP_LOG_FILE_NUM")
+		.map(|v| v.parse::<usize>().unwrap_or(default))
+		.unwrap_or(default)
+});

@@ -10,6 +10,7 @@ use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
 use serde::de::DeserializeOwned;
+use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -19,10 +20,23 @@ use std::pin::Pin;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Select<'r, C: Connection, R> {
-	pub(super) client: &'r Surreal<C>,
+	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+impl<C, R> Select<'_, C, R>
+where
+	C: Connection,
+{
+	/// Converts to an owned type which can easily be moved to a different thread
+	pub fn into_owned(self) -> Select<'static, C, R> {
+		Select {
+			client: Cow::Owned(self.client.into_owned()),
+			..self
+		}
+	}
 }
 
 macro_rules! into_future {

@@ -101,6 +101,9 @@ pub fn local(i: &str) -> IResult<&str, Idiom> {
 ///
 /// Doesnt allow flatten, computed values or where selectors.
 pub fn basic(i: &str) -> IResult<&str, Idiom> {
+	use super::depth;
+	// Limit recursion depth.
+	let _diving = depth::dive(i)?;
 	expected("a basic idiom", |i| {
 		let (i, p) = first(i).explain("graphs are not allowed in a basic idioms.", dir)?;
 		let (i, mut v) = many0(basic_part)(i)?;

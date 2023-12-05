@@ -7,6 +7,9 @@ use nom::{
 };
 
 pub fn ifelse(i: &str) -> IResult<&str, IfelseStatement> {
+	use super::super::depth;
+	// Limit recursion depth.
+	let _diving = depth::dive(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, cond) = value(i)?;
