@@ -15,15 +15,16 @@ defaults:
     shell: bash
 
 jobs:
+  # TODO: Do not run it on CI because it's very slow right now.
   # Build the Docker image but don't push it.
-  docker:
-    uses: ./.github/workflows/reusable_docker.yml
-    with:
-      git-ref: ${{ github.ref }}
-      tag-prefix: ${{ github.head_ref || github.ref_name }}
-      build: true
-      push: false
-    secrets: inherit
+  # docker:
+  #   uses: ./.github/workflows/reusable_docker.yml
+  #   with:
+  #     git-ref: ${{ github.ref }}
+  #     tag-prefix: ${{ github.head_ref || github.ref_name }}
+  #     build: true
+  #     push: false
+  #   secrets: inherit
 
   format:
     name: Check format
