@@ -92,16 +92,16 @@ impl Model {
 					match values.get(key).unwrap() {
 						Value::Number(number) => {
 							map.insert(key.to_string(), Self::unpack_number(number));
-						},
+						}
 						Value::Idiom(idiom) => {
 							let value = idiom.compute(ctx, opt, txn, doc).await?;
 							match value {
 								Value::Number(number) => {
 									map.insert(key.to_string(), Self::unpack_number(&number));
-								},
+								}
 								_ => return Err(Thrown("idiom needs to be a number".to_string())),
 							}
-						},
+						}
 						_ => return Err(Thrown(
 							"args need to be either a number or an object or a vector of numbers"
 								.to_string(),
@@ -144,10 +144,10 @@ impl Model {
 							match value {
 								Value::Number(number) => {
 									buffer.push(Self::unpack_number(&number));
-								},
+								}
 								_ => return Err(Thrown("idiom needs to be a number".to_string())),
 							}
-						},
+						}
 						_ => {
 							println!("Not a number");
 						}

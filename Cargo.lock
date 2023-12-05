@@ -1822,7 +1822,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall 0.3.5",
- "windows-sys",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -5239,8 +5239,8 @@ dependencies = [
  "hyper 0.14.27",
  "ipnet",
  "jemallocator",
- "ndarray",
  "mimalloc",
+ "ndarray",
  "nix 0.27.1",
  "once_cell",
  "opentelemetry",
@@ -5305,9 +5305,8 @@ dependencies = [
  "futures",
  "futures-concurrency",
  "fuzzy-matcher",
- "geo 0.25.1",
- "hex",
  "geo 0.27.0",
+ "hex",
  "indexmap 2.1.0",
  "indxdb",
  "ipnet",
