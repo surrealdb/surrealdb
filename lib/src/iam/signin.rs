@@ -1,4 +1,4 @@
-use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
+use super::verify::{verify_creds_legacy, verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level};
 use crate::cnf::{INSECURE_FORWARD_SCOPE_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
@@ -194,7 +194,16 @@ pub async fn db(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
+	let verify_creds = if kvs.is_auth_level_enabled() {
+		verify_db_creds(kvs, &ns, &db, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, Some(&ns), Some(&db), &user, &pass).await {
+			Ok((_, u)) => Ok(u),
+			Err(e) => Err(e),
+		}
+	};
+	match verify_creds {
 		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
@@ -236,7 +245,16 @@ pub async fn ns(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	match verify_ns_creds(kvs, &ns, &user, &pass).await {
+	let verify_creds = if kvs.is_auth_level_enabled() {
+		verify_ns_creds(kvs, &ns, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, Some(&ns), None, &user, &pass).await {
+			Ok((_, u)) => Ok(u),
+			Err(e) => Err(e),
+		}
+	};
+	match verify_creds {
 		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
@@ -276,7 +294,16 @@ pub async fn root(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	match verify_root_creds(kvs, &user, &pass).await {
+	let verify_creds = if kvs.is_auth_level_enabled() {
+		verify_root_creds(kvs, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, None, None, &user, &pass).await {
+			Ok((_, u)) => Ok(u),
+			Err(e) => Err(e),
+		}
+	};
+	match verify_creds {
 		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
