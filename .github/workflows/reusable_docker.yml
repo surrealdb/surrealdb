@@ -79,7 +79,6 @@ jobs:
                 platform: amd64
                 runner: ubuntu-latest-4-cores
                 tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-binary
-                test: false
               ########################################
               # Base images
               ########################################
@@ -205,7 +204,6 @@ jobs:
 
       # Start the docker image as server and wait until it is ready
       - name: Test the Docker image
-        if: ${{ matrix.test != 'false' }}
         run: |
           docker run --net=host --rm ${{ steps.build.outputs.imageid }} start 2>&1 >surreal.log &
 

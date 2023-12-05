@@ -19,3 +19,8 @@ WORKDIR /surrealdb
 COPY . /surrealdb/
 
 RUN cargo build --features ${CARGO_EXTRA_FEATURES} --release --locked
+
+# For testing purposes
+RUN cp target/release/surreal /surreal
+
+ENTRYPOINT ["/surreal"]
