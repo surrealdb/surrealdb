@@ -180,19 +180,17 @@ impl Connection {
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
 				// Wait for the next message to send
-				msg = internal_receiver.next() => {
-					if let Some(res) = msg {
-						// Send the message to the client
-						if let Err(err) = sender.send(res).await {
-							// Output any errors if not a close error
-							if err.to_string() != CONN_CLOSED_ERR {
-								debug!("WebSocket error: {:?}", err);
-							}
-							// Cancel the WebSocket tasks
-							rpc.read().await.canceller.cancel();
-							// Exit out of the loop
-							break;
+				Some(res) = internal_receiver.next() => {
+					// Send the message to the client
+					if let Err(err) = sender.send(res).await {
+						// Output any errors if not a close error
+						if err.to_string() != CONN_CLOSED_ERR {
+							debug!("WebSocket error: {:?}", err);
 						}
+						// Cancel the WebSocket tasks
+						rpc.read().await.canceller.cancel();
+						// Exit out of the loop
+						break;
 					}
 				},
 			}
@@ -216,52 +214,48 @@ impl Connection {
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
+				//
+				Some(_) = tasks.join_next() => continue,
 				// Wait for the next message to read
-				msg = receiver.next() => {
-					if let Some(msg) = msg {
-						// Process the received WebSocket message
-						match msg {
-							// We've received a message from the client
-							Ok(msg) => match msg {
-								Message::Text(_) => {
-									tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
-								}
-								Message::Binary(_) => {
-									tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
-								}
-								Message::Close(_) => {
-									// Respond with a close message
-									if let Err(err) = internal_sender.send(Message::Close(None)).await {
-										trace!("WebSocket error when replying to the Close frame: {:?}", err);
-									};
-									// Cancel the WebSocket tasks
-									rpc.read().await.canceller.cancel();
-									// Exit out of the loop
-									break;
-								}
-								_ => {
-									// Ignore everything else
-								}
-							},
-							Err(err) => {
-								// There was an error with the WebSocket
-								trace!("WebSocket error: {:?}", err);
+				Some(msg) = receiver.next() => {
+					// Process the received WebSocket message
+					match msg {
+						// We've received a message from the client
+						Ok(msg) => match msg {
+							Message::Text(_) => {
+								tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							}
+							Message::Binary(_) => {
+								tasks.spawn(Connection::handle_message(rpc.clone(), msg, internal_sender.clone()));
+							}
+							Message::Close(_) => {
+								// Respond with a close message
+								if let Err(err) = internal_sender.send(Message::Close(None)).await {
+									trace!("WebSocket error when replying to the Close frame: {:?}", err);
+								};
 								// Cancel the WebSocket tasks
 								rpc.read().await.canceller.cancel();
 								// Exit out of the loop
 								break;
 							}
+							_ => {
+								// Ignore everything else
+							}
+						},
+						Err(err) => {
+							// There was an error with the WebSocket
+							trace!("WebSocket error: {:?}", err);
+							// Cancel the WebSocket tasks
+							rpc.read().await.canceller.cancel();
+							// Exit out of the loop
+							break;
 						}
 					}
 				}
 			}
 		}
-		// Wait for all tasks to finish
-		while let Some(res) = tasks.join_next().await {
-			if let Err(err) = res {
-				error!("Error while handling RPC message: {}", err);
-			}
-		}
+		// Abort all tasks
+		tasks.shutdown().await;
 	}
 
 	/// Send live query notifications to the client
