@@ -4339,7 +4339,7 @@ async fn function_time_format() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(" '1987-06-22' ");
+	let val = Value::parse("'1987-06-22'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -4834,8 +4834,8 @@ async fn function_type_bool() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_datetime() -> Result<(), Error> {
 	let sql = r#"
-		RETURN type::datetime(d"1987-06-22");
-		RETURN type::datetime(d"2022-08-01");
+		RETURN type::datetime("1987-06-22");
+		RETURN type::datetime("2022-08-01");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

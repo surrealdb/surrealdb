@@ -102,7 +102,6 @@ async fn create_with_id() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	#[cfg(feature = "experimental_parser")]
 	let val = Value::parse(
 		"[
 			{

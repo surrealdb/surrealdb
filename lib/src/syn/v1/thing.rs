@@ -233,6 +233,6 @@ mod tests {
 		let res = id(sql);
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100test"), out);
-		assert_eq!("100test", format!("{}", out));
+		assert_eq!("⟨100test⟩", format!("{}", out));
 	}
 }

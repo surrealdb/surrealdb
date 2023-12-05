@@ -9,8 +9,8 @@ use surrealdb::sql::Value;
 #[tokio::test]
 async fn datetimes_conversion() -> Result<(), Error> {
 	let sql = r#"
-		SELECT * FROM d"2012-01-01";
-		SELECT * FROM <datetime> d"2012-01-01";
+		SELECT * FROM "2012-01-01";
+		SELECT * FROM <datetime> "2012-01-01";
 		SELECT * FROM <string> d"2012-01-01T08:00:00Z" + "-test";
 	"#;
 	let dbs = new_ds().await?;
@@ -21,7 +21,7 @@ async fn datetimes_conversion() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
-			d'2012-01-01'
+			'2012-01-01'
 		]",
 	);
 	assert_eq!(tmp, val);
