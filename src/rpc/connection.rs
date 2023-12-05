@@ -263,6 +263,13 @@ impl Connection {
 				}
 			}
 		}
+		// Wait for all tasks to finish
+		while let Some(res) = tasks.join_next().await {
+			if let Err(err) = res {
+				// There was an error with the task
+				trace!("WebSocket request error: {:?}", err);
+			}
+		}
 		// Abort all tasks
 		tasks.shutdown().await;
 	}
