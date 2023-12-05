@@ -130,7 +130,7 @@ mod tests {
 
 	#[test]
 	fn define_table_with_changefeed() {
-		let sql = "TABLE mytable SCHEMALESS CHANGEFEED 1h";
+		let sql = "TABLE mytable SCHEMALESS CHANGEFEED 1h PERMISSIONS NONE";
 		let res = table(sql);
 		let out = res.unwrap().1;
 		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
