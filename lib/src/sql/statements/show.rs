@@ -40,7 +40,7 @@ impl ShowStatement {
 		// Clone transaction
 		let txn = txn.clone();
 		// Claim transaction
-		let mut run = txn.lock().unwrap();
+		let mut run = txn.lock().await;
 		// Process the show query
 		let tb = self.table.as_deref();
 		let r = crate::cf::read(

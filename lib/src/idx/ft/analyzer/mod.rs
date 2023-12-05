@@ -51,7 +51,7 @@ impl Analyzer {
 		}
 		// Now we can extract the term ids
 		let mut res = Vec::with_capacity(terms.len());
-		let mut tx = txn.lock().unwrap();
+		let mut tx = txn.lock().await;
 		for term in terms {
 			let opt_term_id = t.get_term_id(&mut tx, tokens.get_token_string(term)?).await?;
 			res.push(opt_term_id);
@@ -92,7 +92,7 @@ impl Analyzer {
 		}
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tf.len());
-		let mut tx = txn.lock().unwrap();
+		let mut tx = txn.lock().await;
 		for (t, f) in tf {
 			tfid.push((terms.resolve_term_id(&mut tx, t).await?, f));
 		}
@@ -133,7 +133,7 @@ impl Analyzer {
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tfos.len());
 		let mut osid = Vec::with_capacity(tfos.len());
-		let mut tx = txn.lock().unwrap();
+		let mut tx = txn.lock().await;
 		for (t, o) in tfos {
 			let id = terms.resolve_term_id(&mut tx, t).await?;
 			tfid.push((id, o.len() as TermFrequency));

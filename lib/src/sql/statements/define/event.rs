@@ -31,7 +31,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().unwrap();
+		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Process the statement

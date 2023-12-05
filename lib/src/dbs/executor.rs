@@ -22,7 +22,6 @@ use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
 use tracing::instrument;
-use tracing_mutex::stdsync::Mutex as TracingMutex;
 use trice::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -56,8 +55,7 @@ impl<'a> Executor<'a> {
 			Some(_) => false,
 			None => match self.kvs.transaction(write, Optimistic).await {
 				Ok(v) => {
-					// self.txn = Some(Arc::new(Mutex::new(v, "executor.rs::begin")));
-					self.txn = Some(Arc::new(TracingMutex::new(v)));
+					self.txn = Some(Arc::new(Mutex::new(v, "executor.rs::begin")));
 					true
 				}
 				Err(_) => {
@@ -78,7 +76,7 @@ impl<'a> Executor<'a> {
 		if local {
 			// Extract the transaction
 			if let Some(txn) = self.txn.take() {
-				let mut txn = txn.lock().unwrap();
+				let mut txn = txn.lock().await;
 				if self.err {
 					// Cancel and ignore any error because the error flag was
 					// already set
@@ -107,7 +105,7 @@ impl<'a> Executor<'a> {
 		if local {
 			// Extract the transaction
 			if let Some(txn) = self.txn.take() {
-				let mut txn = txn.lock().unwrap();
+				let mut txn = txn.lock().await;
 				if txn.cancel().await.is_err() {
 					self.err = true;
 				}

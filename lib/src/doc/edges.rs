@@ -23,7 +23,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Claim transaction
-		let mut run = txn.lock().unwrap();
+		let mut run = txn.lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record edges

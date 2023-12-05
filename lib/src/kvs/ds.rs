@@ -396,7 +396,7 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.rollback_with_panic().enclose();
 		// Fetch the root users from the storage
-		let users = txn.lock().unwrap().all_root_users().await;
+		let users = txn.lock().await.all_root_users().await;
 		// Process credentials, depending on existing users
 		match users {
 			Ok(v) if v.is_empty() => {
@@ -408,7 +408,7 @@ impl Datastore {
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
 				// We added a new user, so commit the transaction
-				txn.lock().unwrap().commit().await?;
+				txn.lock().await.commit().await?;
 				// Everything ok
 				Ok(())
 			}
@@ -417,13 +417,13 @@ impl Datastore {
 				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", creds.username);
 				warn!("Consider removing the --user and --pass arguments from the server start command");
 				// We didn't write anything, so just rollback
-				txn.lock().unwrap().cancel().await?;
+				txn.lock().await.cancel().await?;
 				// Everything ok
 				Ok(())
 			}
 			Err(e) => {
 				// There was an unexpected error, so rollback
-				txn.lock().unwrap().cancel().await?;
+				txn.lock().await.cancel().await?;
 				// Return any error
 				Err(e)
 			}
@@ -1105,9 +1105,9 @@ impl Datastore {
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.lock().unwrap().commit().await?,
+			(true, true) => txn.lock().await.commit().await?,
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.lock().unwrap().cancel().await?,
+			(_, _) => txn.lock().await.cancel().await?,
 		};
 		// Return result
 		res
@@ -1174,9 +1174,9 @@ impl Datastore {
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.lock().unwrap().commit().await?,
+			(true, true) => txn.lock().await.commit().await?,
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.lock().unwrap().cancel().await?,
+			(_, _) => txn.lock().await.cancel().await?,
 		};
 		// Return result
 		res

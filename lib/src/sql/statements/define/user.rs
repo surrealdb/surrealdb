@@ -60,7 +60,7 @@ impl DefineUserStatement {
 		match self.base {
 			Base::Root => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Process the statement
@@ -71,7 +71,7 @@ impl DefineUserStatement {
 			}
 			Base::Ns => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Process the statement
@@ -83,7 +83,7 @@ impl DefineUserStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Process the statement

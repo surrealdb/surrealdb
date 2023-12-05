@@ -46,7 +46,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-use tracing_mutex::stdsync::Mutex as TracingMutex;
 use uuid::Uuid;
 
 pub(crate) const NO_LIMIT: u32 = 0;
@@ -148,9 +147,8 @@ impl Transaction {
 		self
 	}
 
-	pub fn enclose(self) -> Arc<TracingMutex<Self>> {
-		// Arc::new(TracingMutex::new(self, "tx.rs:enclose"))
-		Arc::new(TracingMutex::new(self))
+	pub fn enclose(self) -> Arc<Mutex<Self>> {
+		Arc::new(Mutex::new(self, "tx.rs:enclose"))
 	}
 
 	// --------------------------------------------------

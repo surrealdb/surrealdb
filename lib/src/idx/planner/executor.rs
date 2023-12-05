@@ -106,7 +106,7 @@ impl QueryExecutor {
 					}
 					Index::MTree(p) => {
 						if let IndexOperator::Knn(a, k) = io.op() {
-							let mut tx = txn.lock().unwrap();
+							let mut tx = txn.lock().await;
 							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
 								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
 							} else {
@@ -312,7 +312,7 @@ impl QueryExecutor {
 		// Does the record id match this executor's table?
 		if thg.tb.eq(&self.table) {
 			if let Some(ft) = self.exp_entries.get(exp) {
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				let doc_key: Key = thg.into();
 				if let Some(doc_id) =
 					ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await?
@@ -371,7 +371,7 @@ impl QueryExecutor {
 		doc: &Value,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(match_ref) {
-			let mut run = txn.lock().unwrap();
+			let mut run = txn.lock().await;
 			return ft
 				.highlight(
 					&mut run,
@@ -394,7 +394,7 @@ impl QueryExecutor {
 		match_ref: &Value,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(match_ref) {
-			let mut run = txn.lock().unwrap();
+			let mut run = txn.lock().await;
 			return ft.extract_offsets(&mut run, thg, &e.0.terms).await;
 		}
 		Ok(Value::None)
@@ -409,7 +409,7 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				if doc_id.is_none() {
 					let key: Key = rid.into();
 					doc_id = e.0.doc_ids.read().await.get_doc_id(&mut run, key).await?;
@@ -447,7 +447,7 @@ impl FtEntry {
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
 			let terms = ft.extract_terms(ctx, opt, txn, qs.to_owned()).await?;
-			let mut tx = txn.lock().unwrap();
+			let mut tx = txn.lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,

@@ -25,7 +25,7 @@ impl RemoveNamespaceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 		// Claim transaction
-		let mut run = txn.lock().unwrap();
+		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Delete the definition

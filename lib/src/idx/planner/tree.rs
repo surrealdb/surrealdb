@@ -78,7 +78,7 @@ impl<'a> TreeBuilder<'a> {
 				.txn
 				.clone()
 				.lock()
-				.unwrap()
+				.await
 				.all_tb_indexes(self.opt.ns(), self.opt.db(), &self.table.0)
 				.await?;
 			self.indexes = Some(indexes);

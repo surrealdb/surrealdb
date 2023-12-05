@@ -29,7 +29,7 @@ impl RemoveTokenStatement {
 		match &self.base {
 			Base::Ns => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition
@@ -40,7 +40,7 @@ impl RemoveTokenStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition
@@ -51,7 +51,7 @@ impl RemoveTokenStatement {
 			}
 			Base::Sc(sc) => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Delete the definition

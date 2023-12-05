@@ -33,7 +33,7 @@ impl DefineTokenStatement {
 		match &self.base {
 			Base::Ns => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Process the statement
@@ -45,7 +45,7 @@ impl DefineTokenStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Process the statement
@@ -58,7 +58,7 @@ impl DefineTokenStatement {
 			}
 			Base::Sc(sc) => {
 				// Claim transaction
-				let mut run = txn.lock().unwrap();
+				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Process the statement

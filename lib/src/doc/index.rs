@@ -255,7 +255,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_unique(&mut self, txn: &Transaction) -> Result<(), Error> {
-		let mut run = txn.lock().unwrap();
+		let mut run = txn.lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -287,7 +287,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_non_unique(&mut self, txn: &Transaction) -> Result<(), Error> {
-		let mut run = txn.lock().unwrap();
+		let mut run = txn.lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -346,7 +346,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_mtree(&mut self, txn: &Transaction, p: &MTreeParams) -> Result<(), Error> {
-		let mut tx = txn.lock().unwrap();
+		let mut tx = txn.lock().await;
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let mut mt = MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Write).await?;
 		// Delete the old index data
