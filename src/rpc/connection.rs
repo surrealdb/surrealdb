@@ -214,7 +214,7 @@ impl Connection {
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				//
+				// Remove any completed tasks
 				Some(_) = tasks.join_next() => continue,
 				// Wait for the next message to read
 				Some(msg) = receiver.next() => {
