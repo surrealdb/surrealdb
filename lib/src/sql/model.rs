@@ -79,10 +79,10 @@ impl Model {
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&'async_recursion CursorDoc<'_>>,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&'async_recursion CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match &self.args[0] {
 			// performing a buffered compute
@@ -92,7 +92,16 @@ impl Model {
 					match values.get(key).unwrap() {
 						Value::Number(number) => {
 							map.insert(key.to_string(), Self::unpack_number(number));
-						}
+						},
+						Value::Idiom(idiom) => {
+							let value = idiom.compute(ctx, opt, txn, doc).await?;
+							match value {
+								Value::Number(number) => {
+									map.insert(key.to_string(), Self::unpack_number(&number));
+								},
+								_ => return Err(Thrown("idiom needs to be a number".to_string())),
+							}
+						},
 						_ => return Err(Thrown(
 							"args need to be either a number or an object or a vector of numbers"
 								.to_string(),
@@ -130,6 +139,15 @@ impl Model {
 						Value::Number(number) => {
 							buffer.push(Self::unpack_number(number));
 						}
+						Value::Idiom(idiom) => {
+							let value = idiom.compute(ctx, opt, txn, doc).await?;
+							match value {
+								Value::Number(number) => {
+									buffer.push(Self::unpack_number(&number));
+								},
+								_ => return Err(Thrown("idiom needs to be a number".to_string())),
+							}
+						},
 						_ => {
 							println!("Not a number");
 						}
