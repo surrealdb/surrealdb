@@ -9,7 +9,7 @@ use super::super::super::{
 	value::value,
 	IResult,
 };
-use crate::sql::{statements::DefineFieldStatement, Kind, Permission, Permissions, Strand, Value};
+use crate::sql::{statements::DefineFieldStatement, Kind, Permissions, Strand, Value};
 use nom::{
 	branch::alt,
 	bytes::complete::tag_no_case,
@@ -39,7 +39,6 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let mut res = DefineFieldStatement {
 		name,
 		what,
-		permissions: Permissions::full(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -142,7 +141,7 @@ fn field_comment(i: &str) -> IResult<&str, DefineFieldOption> {
 
 fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = permissions(i, Some(Permission::Full))?;
+	let (i, v) = permissions(i, None)?;
 	println!("perms {:?}", v);
 	Ok((i, DefineFieldOption::Permissions(v)))
 }
