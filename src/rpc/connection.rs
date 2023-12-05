@@ -215,7 +215,7 @@ impl Connection {
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
 				// Remove any completed tasks
-				Some(out) = tasks.join_next() => match out{
+				Some(out) = tasks.join_next() => match out {
 					// The task completed successfully
 					Ok(_) => continue,
 					// There was an uncaught panic in the task
