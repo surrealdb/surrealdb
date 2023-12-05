@@ -165,7 +165,7 @@ impl TokenValue for Number {
 					return Ok(Number::Int(x));
 				}
 				// integer overflowed, fallback to floating point
-				// TODO: Figure out if this can actually fail.
+				// As far as I can tell this will never fail for valid integers.
 				let x = source.parse().map_err(|e| {
 					ParseError::new(
 						ParseErrorKind::InvalidFloat {
@@ -180,7 +180,7 @@ impl TokenValue for Number {
 				NumberKind::Mantissa | NumberKind::MantissaExponent | NumberKind::Float,
 			) => {
 				let source = parser.lexer.string.take().unwrap();
-				// TODO: Figure out if this can actually fail.
+				// As far as I can tell this will never fail for valid integers.
 				let x = source.parse().map_err(|e| {
 					ParseError::new(
 						ParseErrorKind::InvalidFloat {
@@ -193,7 +193,7 @@ impl TokenValue for Number {
 			}
 			TokenKind::Number(NumberKind::Decimal) => {
 				let source = parser.lexer.string.take().unwrap();
-				// TODO: Figure out if this can actually fail.
+				// As far as I can tell this will never fail for valid integers.
 				let x: rust_decimal::Decimal = source.parse().map_err(|error| {
 					ParseError::new(
 						ParseErrorKind::InvalidDecimal {

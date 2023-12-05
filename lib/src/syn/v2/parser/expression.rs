@@ -1,11 +1,11 @@
 //! This module defines the pratt parser for operators.
-use crate::sql::{value::TryNeg, Cast, Expression, Operator, Value};
+use super::mac::unexpected;
+use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
 use crate::syn::v2::{
 	parser::{mac::expected, ParseResult, Parser},
-	token::{t, TokenKind},
+	token::{t, NumberKind, TokenKind},
 };
-
-use super::mac::unexpected;
+use std::cmp::Ordering;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -125,6 +125,8 @@ impl Parser<'_> {
 	}
 
 	fn parse_prefix_op(&mut self, min_bp: u8) -> ParseResult<Value> {
+		const I64_ABS_MAX: u64 = 9223372036854775808;
+
 		let token = self.next();
 		let operator = match token.kind {
 			t!("+") => Operator::Add,
@@ -139,14 +141,34 @@ impl Parser<'_> {
 			// should be unreachable as we previously check if the token was a prefix op.
 			_ => unreachable!(),
 		};
+
+		// HACK: The way we handle numbers in the parser has one downside: We can't parse i64::MIN
+		// directly.
+		// The tokens [`-`, `1232`] are parsed independently where - is parsed as a unary operator then 1232
+		// as a positive i64 integer. This results in a proble when 9223372036854775808 is the
+		// positive integer. This is larger then i64::MAX so the parser fallsback to parsing a
+		// floating point number. However -9223372036854775808 does fit in a i64 but the parser is,
+		// when parsing the number, unaware that the number will be negative.
+		// To handle this correctly we parse negation operator followed by an integer here so we can
+		// make sure this specific case is handled correctly.
+		if let Operator::Neg = operator {
+			// parse -12301230 immediately as a negative number,
+			if let TokenKind::Number(NumberKind::Integer) = self.peek_kind() {
+				let token = self.next();
+				let number = self.token_value::<u64>(token)?;
+				let number = match number.cmp(&I64_ABS_MAX) {
+					Ordering::Less => Number::Int(-(number as i64)),
+					Ordering::Equal => Number::Int(i64::MIN),
+					Ordering::Greater => self.token_value::<Number>(token)?.try_neg().unwrap(),
+				};
+				return Ok(Value::Number(number));
+			}
+		}
+
 		let v = self.pratt_parse_expr(min_bp)?;
 
 		// HACK: For compatiblity with the old parser apply + and - operator immediately if the
 		// left value is a number.
-		// FIXME: This has the problem that you can't specify the full range of an integer. All numbers
-		// are currently parsed as positive numbers and the range of values for positive numbers
-		// is one smaller then the range positive values, resulting in an overflow if you try to
-		// use the max negative value.
 		if let Value::Number(number) = v {
 			if let Operator::Neg = operator {
 				// this can only panic if `number` is i64::MIN which currently can't be parsed.
