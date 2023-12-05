@@ -142,6 +142,5 @@ fn field_comment(i: &str) -> IResult<&str, DefineFieldOption> {
 fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i, None)?;
-	println!("perms {:?}", v);
 	Ok((i, DefineFieldOption::Permissions(v)))
 }
