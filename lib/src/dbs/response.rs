@@ -3,6 +3,7 @@ use crate::sql::value::Value;
 use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt::{self, Display, Formatter};
 use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
@@ -85,5 +86,11 @@ impl From<Response> for ApiResponse {
 			status,
 			result,
 		}
+	}
+}
+
+impl Display for ApiResponse {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", serde_json::to_string(self).unwrap())
 	}
 }

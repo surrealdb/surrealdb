@@ -393,6 +393,16 @@ impl Number {
 		}
 	}
 
+	pub fn to_bigint(&self) -> I256 {
+		match self {
+			Number::Int(v) => I256::try_from(*v).unwrap_or_default(),
+			Number::Float(v) => I256::try_from(*v).unwrap_or_default(),
+			Number::Decimal(v) => I256::try_from(v.to_string()).unwrap_or_default(),
+			Number::BigInt(v) => *v,
+		}
+	}
+
+
 	// -----------------------------------
 	//
 	// -----------------------------------
@@ -588,6 +598,12 @@ macro_rules! impl_simple_try_op {
 					),
 					(Number::Int(v), Number::Float(w)) => Number::Float((v as f64).$unchecked(w)),
 					(Number::Float(v), Number::Int(w)) => Number::Float(v.$unchecked(w as f64)),
+					(Number::BigInt(v), Number::BigInt(w)) => Number::BigInt(
+						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+					),
+					(Number::BigInt(v), w) => Number::BigInt(
+						v.$checked(w.to_bigint()).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+					),
 					(v, w) => Number::Decimal(
 						v.to_decimal()
 							.$checked(w.to_decimal())
@@ -768,6 +784,7 @@ impl<'a, 'b> ops::Sub<&'b Number> for &'a Number {
 impl ops::Mul for Number {
 	type Output = Self;
 	fn mul(self, other: Self) -> Self {
+		info!("Multiplying {} * {}", self, other);
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
@@ -793,6 +810,7 @@ impl ops::Mul for Number {
 impl<'a, 'b> ops::Mul<&'b Number> for &'a Number {
 	type Output = Number;
 	fn mul(self, other: &'b Number) -> Number {
+		info!("Multiplying {} * {}", self, other);
 		match (self, other) {
 			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
@@ -902,6 +920,7 @@ impl Product<Self> for Number {
 	where
 		I: Iterator<Item = Self>,
 	{
+		info!("Calculating product");
 		iter.fold(Number::Int(1), |a, b| a * b)
 	}
 }
@@ -911,6 +930,7 @@ impl<'a> Product<&'a Self> for Number {
 	where
 		I: Iterator<Item = &'a Self>,
 	{
+		info!("Calculating product");
 		iter.fold(Number::Int(1), |a, b| &a * b)
 	}
 }

@@ -25,7 +25,13 @@ pub struct I256(alloy_primitives::I256);
 
 impl Serialize for I256 {
 	fn serialize<S: SerdeSerializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		serializer.serialize_str(&self.0.to_string())
+		let mut hex = self.0.to_hex_string();
+		if hex.starts_with('-') {
+			hex = "-0x".to_owned() + hex[3..].trim_start_matches('0');
+		} else {
+			hex = "0x".to_owned() + hex[2..].trim_start_matches('0');
+		}
+		serializer.serialize_str(hex.as_str())
 	}
 }
 
@@ -211,7 +217,6 @@ impl I256 {
 
 	pub fn from_str(s: &str) -> Result<Self, alloy_primitives::ParseSignedError> {
 		let v = alloy_primitives::I256::from_str(s)?;
-		info!("parsed: {}", v);
 		Ok(I256(v))
 	}
 
@@ -261,6 +266,26 @@ impl I256 {
     I256(alloy_primitives::I256::ONE)
   }
 
+	// checked arithmetic
+	pub fn checked_add(self, rhs: Self) -> Option<Self> {
+		self.0.checked_add(rhs.0).map(I256)
+	}
+
+	pub fn checked_sub(self, rhs: Self) -> Option<Self> {
+		self.0.checked_sub(rhs.0).map(I256)
+	}
+
+	pub fn checked_mul(self, rhs: Self) -> Option<Self> {
+		self.0.checked_mul(rhs.0).map(I256)
+	}
+
+	pub fn checked_div(self, rhs: Self) -> Option<Self> {
+		self.0.checked_div(rhs.0).map(I256)
+	}
+
+	pub fn checked_rem(self, rhs: Self) -> Option<Self> {
+		self.0.checked_rem(rhs.0).map(I256)
+	}
 }
 
 impl Neg for I256 {
@@ -275,7 +300,6 @@ impl Add<Self> for I256 {
 	type Output = Self;
 	#[inline]
 	fn add(self, rhs: Self) -> Self {
-		// todo: [zyre] handle overflow
 		self.0.overflowing_add(rhs.0).0.into()
 	}
 }
@@ -284,7 +308,6 @@ impl <'a, 'b> Add<&'b I256> for &'a I256 {
 	type Output = I256;
 	#[inline]
 	fn add(self, rhs: &'b I256) -> I256 {
-		// todo: [zyre] handle overflow
 		self.0.overflowing_add(rhs.0).0.into()
 	}
 }
@@ -293,7 +316,6 @@ impl Sub<Self> for I256 {
 	type Output = Self;
 	#[inline]
 	fn sub(self, rhs: Self) -> Self {
-		// todo: [zyre] handle overflow
 		self.0.overflowing_sub(rhs.0).0.into()
 	}
 }
@@ -302,7 +324,6 @@ impl <'a, 'b> Sub<&'b I256> for &'a I256 {
 	type Output = I256;
 	#[inline]
 	fn sub(self, rhs: &'b I256) -> I256 {
-		// todo: [zyre] handle overflow
 		self.0.overflowing_sub(rhs.0).0.into()
 	}
 }
@@ -311,8 +332,7 @@ impl Mul<Self> for I256 {
 	type Output = Self;
 	#[inline]
 	fn mul(self, rhs: Self) -> Self {
-		// todo: [zyre] handle overflow
-		self.0.overflowing_mul(rhs.0).0.into()
+		self.0.mul(rhs.0).into()
 	}
 }
 
@@ -320,8 +340,7 @@ impl <'a, 'b> Mul<&'b I256> for &'a I256 {
 	type Output = I256;
 	#[inline]
 	fn mul(self, rhs: &'b I256) -> I256 {
-		// todo: [zyre] handle overflow
-		self.0.overflowing_mul(rhs.0).0.into()
+		self.0.mul(rhs.0).into()
 	}
 }
 
@@ -329,8 +348,7 @@ impl Div<Self> for I256 {
 	type Output = Self;
 	#[inline]
 	fn div(self, rhs: Self) -> Self {
-		// todo: [zyre] handle overflow
-		self.0.overflowing_div(rhs.0).0.into()
+		self.0.div(rhs.0).into()
 	}
 }
 
@@ -338,8 +356,7 @@ impl <'a, 'b> Div<&'b I256> for &'a I256 {
 	type Output = I256;
 	#[inline]
 	fn div(self, rhs: &'b I256) -> I256 {
-		// todo: [zyre] handle overflow
-		self.0.overflowing_div(rhs.0).0.into()
+		self.0.div(rhs.0).into()
 	}
 }
 
@@ -347,8 +364,7 @@ impl Rem<Self> for I256 {
 	type Output = Self;
   #[inline]
 	fn rem(self, rhs: Self) -> Self {
-		// todo: [zyre] handle overflow
-		self.0.overflowing_rem(rhs.0).0.into()
+		self.0.rem(rhs.0).into()
 	}
 }
 
@@ -394,23 +410,44 @@ impl Display for I256 {
 	}
 }
 
+fn unsafe_u64_to_u8_slice(slice: &[u64]) -> &[u8] {
+	unsafe {
+			std::slice::from_raw_parts(
+					slice.as_ptr() as *const u8,
+					slice.len() * std::mem::size_of::<u64>(),
+			)
+	}
+}
+
+// fn u64_to_u8_slice(slice: &[u64]) -> &[u8] {
+// 		let mut bytes = [0u8; 32];
+// 		for (i, limb) in slice.iter().enumerate() {
+// 			let lbytes = limb.to_le_bytes();
+// 			for (j, b) in lbytes.iter().enumerate() {
+// 				bytes[(i*8)+j] = *b;
+// 			}
+// 		}
+// 		&bytes
+// }
+
 impl Revisioned for I256 {
 	fn revision() -> u16 {
 		1
 	}
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(&self, w: &mut W) -> Result<(), RevisionError> {
-		match w.write(self.0.to_string().as_bytes()) {
-			Ok(_) => Ok(()),
-			Err(_) => Err(RevisionError::Serialize("I256".to_string())),
-		}
+		let limbs = self.0.as_limbs();
+		let bytes = unsafe_u64_to_u8_slice(limbs);
+		w.write_all(bytes)
+		.map_err(|e| RevisionError::Io(e.raw_os_error().unwrap_or(0)))
 	}
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(r: &mut R) -> Result<Self, RevisionError> {
-		info!("Deserialziosndoisad");
-		let mut buf = String::new();
-		let _ = r.read_to_string(&mut buf);
-		Ok(I256(alloy_primitives::I256::from_str(buf.as_str()).unwrap()))
+		let mut v = [0u8; 32];
+		r
+			.read_exact(v.as_mut_slice())
+			.map_err(|e| RevisionError::Io(e.raw_os_error().unwrap_or(0)))?;
+		Ok(I256(alloy_primitives::I256::from_le_bytes(v)))
 	}
 }
 
