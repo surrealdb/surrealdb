@@ -77,7 +77,7 @@ jobs:
               - name: Binary image
                 dockerfile: Dockerfile.binary
                 platform: amd64
-                runner: ubuntu-latest-4-cores
+                runner: ["self-hosted", "amd64", "builder"]
                 tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-binary
               ########################################
               # Base images
@@ -88,12 +88,12 @@ jobs:
                 dockerfile: Dockerfile
                 build-target: prod
                 platform: amd64
-                runner: ubuntu-latest-4-cores
+                runner: ["self-hosted", "amd64", "builder"]
                 tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}
               # Prod ARM64 image
               - <<: *base_image
                 platform: arm64
-                runner: ["self-hosted", "arm64", "4-cores"]
+                runner: ["self-hosted", "arm64", "builder"]
                 tag: arm64-${{ steps.tag-prefix.outputs.tag-prefix }}
               # Dev AMD64 image
               - <<: *base_image
@@ -103,7 +103,7 @@ jobs:
               - <<: *base_image
                 build-target: dev
                 platform: arm64
-                runner: ["self-hosted", "arm64", "4-cores"]
+                runner: ["self-hosted", "arm64", "builder"]
                 tag: arm64-${{ steps.tag-prefix.outputs.tag-prefix }}-dev
 
               ########################################
@@ -115,7 +115,7 @@ jobs:
                 dockerfile: Dockerfile.fdb
                 build-target: prod
                 platform: amd64
-                runner: ubuntu-latest-4-cores
+                runner: ["self-hosted", "amd64", "builder"]
                 tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-fdb
               # Dev AMD64 image
               - <<: *fdb_image
