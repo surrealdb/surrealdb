@@ -8,7 +8,9 @@ use crate::{
 };
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::{fmt, ops::Deref, str};
+use tokio::task::LocalSet;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
@@ -70,7 +72,12 @@ impl Param {
 						// Claim transaction
 						let mut run = txn.lock().unwrap();
 						// Get the param definition
-						run.get_and_cache_db_param(opt.ns(), opt.db(), v).await
+						run.get_and_cache_db_param(
+							opt.ns().to_string(),
+							opt.db().to_string(),
+							v.to_string(),
+						)
+						.await
 					};
 					// Check if the param has been set globally
 					match val {
