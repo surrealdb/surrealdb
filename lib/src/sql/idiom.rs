@@ -141,8 +141,7 @@ impl Idiom {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Start(v)) => {
-				v.compute(ctx, opt, txn, doc)
-					.await?
+				dbg!(v.compute(ctx, opt, txn, doc).await?)
 					.get(ctx, opt, txn, doc, self.as_ref().next())
 					.await?
 					.compute(ctx, opt, txn, doc)
