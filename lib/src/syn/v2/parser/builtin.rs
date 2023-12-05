@@ -11,7 +11,7 @@ use unicase::UniCase;
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;
 const MAX_FUNCTION_NAME_LEN: usize = 33;
-const LEVENSTHEIN_ARRAY_SIZE: usize = MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEIN_CUT_OFF as usize;
+const LEVENSTHEIN_ARRAY_SIZE: usize = 1 + MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEIN_CUT_OFF as usize;
 
 // simple function calculating levenshtein distance with a cut-off.
 //
@@ -19,8 +19,8 @@ const LEVENSTHEIN_ARRAY_SIZE: usize = MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEIN_CU
 // isn't that long and the function names aren't that long. Additionally this function also uses a
 // cut off for quick rejection of strings which won't lower the minimum searched distance.
 //
-// Function uses stack allocated array's of size S. S should the largest size in the haystack +
-// maximum cut_off
+// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE. LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
+// maximum cut_off + 1 for the additional value required during calculation
 fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	debug_assert!(LEVENSTHEIN_ARRAY_SIZE < u8::MAX as usize);
 	let mut distance_array = [[0u8; LEVENSTHEIN_ARRAY_SIZE]; 2];
@@ -31,6 +31,8 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 		return cut_off + 1;
 	}
 
+	// at this point a and b shouldn't be larger then LEVENSTHEIN_ARRAY_SIZE
+	// because otherwise they would have been rejected by the previous if statement.
 	assert!(a.len() < LEVENSTHEIN_ARRAY_SIZE);
 	assert!(b.len() < LEVENSTHEIN_ARRAY_SIZE);
 
@@ -414,7 +416,7 @@ impl Parser<'_> {
 				.map(|x| Value::Function(Box::new(x))),
 			None => {
 				// don't search further if the levenshtein distance is further then 10.
-				let mut cut_off = 4;
+				let mut cut_off = MAX_LEVENSTHEIN_CUT_OFF;
 
 				let possibly = PATHS
 					.keys()
@@ -426,7 +428,7 @@ impl Parser<'_> {
 					})
 					.map(|x| x.into_inner());
 
-				if cut_off == 4 {
+				if cut_off == MAX_LEVENSTHEIN_CUT_OFF {
 					// couldn't find a value which lowered the cut off,
 					// any suggestion probably will be nonsensical so don't give any.
 					return Err(ParseError::new(
