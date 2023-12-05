@@ -61,8 +61,6 @@ pub struct Transaction {
 	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
 
-unsafe impl Send for Transaction {}
-
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
 	#[cfg(feature = "kv-mem")]
@@ -2161,14 +2159,11 @@ impl Transaction {
 	/// Retrieve a specific param definition.
 	pub async fn get_and_cache_db_param(
 		&mut self,
-		// ns: &str,
-		// db: &str,
-		// pa: &str,
-		ns: String,
-		db: String,
-		pa: String,
+		ns: &str,
+		db: &str,
+		pa: &str,
 	) -> Result<Arc<DefineParamStatement>, Error> {
-		let key = crate::key::database::pa::new(&ns, &db, &pa).encode()?;
+		let key = crate::key::database::pa::new(ns, db, pa).encode()?;
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Pa(v) = e {
 				v
