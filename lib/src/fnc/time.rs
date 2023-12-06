@@ -147,10 +147,12 @@ pub fn month((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 }
 
 pub fn nano((val,): (Option<Datetime>,)) -> Result<Value, Error> {
-	Ok(match val {
-		Some(v) => v.timestamp_nanos().into(),
-		None => Datetime::default().timestamp_nanos().into(),
-	})
+	let time_opt = match val {
+		Some(v) => v.timestamp_nanos_opt(),
+		None => Datetime::default().timestamp_nanos_opt(),
+	};
+
+	Ok(time_opt.ok_or(Error::Internal("error in nanosecond time".to_string()))?.into())
 }
 
 pub fn now(_: ()) -> Result<Value, Error> {
