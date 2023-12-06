@@ -68,6 +68,7 @@ impl Parser<'_> {
 
 			// Equality operators have same binding power.
 			t!("=")
+			| t!("IS")
 			| t!("==")
 			| t!("!=")
 			| t!("*=")
