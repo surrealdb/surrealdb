@@ -2028,3 +2028,48 @@ async fn permissions_checks_define_index() {
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
+
+#[tokio::test]
+async fn define_statement_table_permissions() -> Result<(), Error> {
+	// Permissions for tables, unlike other resources, are restrictive (NONE) by default.
+	// This test ensures that behaviour
+	let sql = "
+		DEFINE TABLE default;
+		DEFINE TABLE select_full PERMISSIONS FOR select FULL;
+		DEFINE TABLE full PERMISSIONS FULL;
+		INFO FOR DB;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: {
+					default: 'DEFINE TABLE default SCHEMALESS PERMISSIONS NONE',
+					full: 'DEFINE TABLE full SCHEMALESS',
+					select_full: 'DEFINE TABLE select_full SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
+			},
+			tokens: {},
+			users: {}
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
