@@ -28,13 +28,13 @@ use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Idiom, Object, Thing, Value};
+use crate::sync::RwLock;
 use revision::revisioned;
 use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::ops::BitAnd;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(crate) type MatchRef = u8;
 
@@ -124,15 +124,19 @@ impl FtIndex {
 		};
 		let doc_ids = Arc::new(RwLock::new(
 			DocIds::new(run, index_key_base.clone(), p.doc_ids_order, store_type).await?,
+			"idxft doc_ids",
 		));
 		let doc_lengths = Arc::new(RwLock::new(
 			DocLengths::new(run, index_key_base.clone(), p.doc_lengths_order, store_type).await?,
+			"idxft doc_lengths",
 		));
 		let postings = Arc::new(RwLock::new(
 			Postings::new(run, index_key_base.clone(), p.postings_order, store_type).await?,
+			"idxft postings",
 		));
 		let terms = Arc::new(RwLock::new(
 			Terms::new(run, index_key_base.clone(), p.terms_order, store_type).await?,
+			"idxft terms",
 		));
 		let termdocs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());

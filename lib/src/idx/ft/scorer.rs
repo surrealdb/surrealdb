@@ -5,8 +5,8 @@ use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::Bm25Params;
 use crate::kvs::Transaction;
+use crate::sync::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(super) type Score = f32;
 

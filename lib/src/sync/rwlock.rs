@@ -1,5 +1,6 @@
 use crate::sync::{write_file, LockState, LOCKS};
 use async_std::sync::RwLock as RealRwLock;
+use async_std::sync::RwLockReadGuard as RealRwLockReadGuard;
 use async_std::sync::RwLockWriteGuard as RealRwLockWriteGuard;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -71,7 +72,7 @@ impl<T: ?Sized + Send> RwLock<T> {
 
 	pub async fn write(&self) -> RwLockWriteGuard<T> {
 		let request_event = Ulid::new();
-		RwLock::<T>::lock_requested_event(self.id, self.name, request_event);
+		RwLock::<T>::write_lock_requested_event(self.id, self.name, request_event);
 		let guard = self.rwlock.write().await;
 		let guard = RwLockWriteGuard {
 			name: self.name,
@@ -80,11 +81,19 @@ impl<T: ?Sized + Send> RwLock<T> {
 			guard,
 			_phantom: Default::default(),
 		};
-		RwLock::<T>::lock_ack_event(self.id, self.name, request_event);
+		RwLock::<T>::write_lock_ack_event(self.id, self.name, request_event);
 		guard
 	}
 
-	pub fn lock_requested_event(id: Ulid, name: &'static str, request_event: Ulid) {
+	pub async fn read(&self) -> async_std::sync::RwLockReadGuard<'_, T> {
+		let request_event = Ulid::new();
+		RwLock::<T>::write_lock_requested_event(self.id, self.name, request_event);
+		let guard = self.rwlock.read().await;
+		RwLock::<T>::write_lock_ack_event(self.id, self.name, request_event);
+		guard
+	}
+
+	pub fn write_lock_requested_event(id: Ulid, name: &'static str, request_event: Ulid) {
 		unsafe {
 			let lock_state = LockState::RwLock(RwLockState::RwLockRequested {
 				name,
@@ -96,7 +105,32 @@ impl<T: ?Sized + Send> RwLock<T> {
 		}
 	}
 
-	pub fn lock_ack_event(id: Ulid, name: &'static str, request_event: Ulid) {
+	pub fn read_lock_requested_event(id: Ulid, name: &'static str, request_event: Ulid) {
+		unsafe {
+			let lock_state = LockState::RwLock(RwLockState::RwReadRequested {
+				name,
+				id,
+				event_id: request_event,
+			});
+			write_file(&lock_state);
+			LOCKS.insert(id, lock_state);
+		}
+	}
+
+	pub fn write_lock_ack_event(id: Ulid, name: &'static str, request_event: Ulid) {
+		unsafe {
+			let lock_state = LockState::RwLock(RwLockState::RwLocked {
+				name,
+				id,
+				event_id: Ulid::new(),
+				lock_event_id: request_event,
+			});
+			write_file(&lock_state);
+			LOCKS.insert(id, lock_state);
+		}
+	}
+
+	pub fn read_lock_ack_event(id: Ulid, name: &'static str, request_event: Ulid) {
 		unsafe {
 			let lock_state = LockState::RwLock(RwLockState::RwLocked {
 				name,
@@ -167,5 +201,31 @@ impl<T: Send> Deref for RwLockWriteGuard<'_, T> {
 impl<T: Send> DerefMut for RwLockWriteGuard<'_, T> {
 	fn deref_mut(&mut self) -> &mut T {
 		self.guard.deref_mut()
+	}
+}
+#[must_use = "if unused the RwLock will immediately unlock"]
+// experimental
+// #[must_not_suspend = "holding a RwLockWriteGuard across suspend \
+//                       points can cause deadlocks, delays, \
+//                       and cause Future's to not implement `Send`"]
+pub struct RwLockReadGuard<'a, T: ?Sized + 'a + Send> {
+	name: &'static str,
+	id: Ulid,
+	lock_event_id: Ulid,
+	guard: RealRwLockReadGuard<'a, T>,
+	_phantom: PhantomData<&'a T>,
+}
+
+impl<'a, T: ?Sized + 'a + Send> Drop for RwLockReadGuard<'a, T> {
+	fn drop(&mut self) {
+		RwLock::<T>::unlock_event(self.id, self.name, Some(self.lock_event_id))
+	}
+}
+
+impl<T: Send> Deref for RwLockReadGuard<'_, T> {
+	type Target = T;
+
+	fn deref(&self) -> &T {
+		self.guard.deref()
 	}
 }

@@ -8,9 +8,9 @@ use crate::key::index::Index;
 use crate::kvs::Key;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Thing, Value};
+use crate::sync::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),

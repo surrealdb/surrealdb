@@ -21,9 +21,9 @@ use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Object, Table, Thing, Value};
+use crate::sync::RwLock;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(crate) struct QueryExecutor {
 	table: String,

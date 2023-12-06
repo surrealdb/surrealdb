@@ -29,15 +29,15 @@ pub enum MutexLockState {
 	},
 }
 
-pub struct Mutex<T: ?Sized + Send> {
+pub struct Mutex<T: ?Sized> {
 	name: &'static str,
 	id: Ulid,
 	mutex: RealMutex<T>,
 }
 
-unsafe impl<T: ?Sized + Send> Send for Mutex<T> {}
+// unsafe impl<T: ?Sized + Send> Send for Mutex<T> {}
 
-impl<T: ?Sized + Send> Mutex<T> {
+impl<T: ?Sized> Mutex<T> {
 	/// Creates a new instance of a `Mutex<T>` which is unlocked.
 	/// This particular implementation is for traceability
 	#[track_caller]
@@ -67,6 +67,22 @@ impl<T: ?Sized + Send> Mutex<T> {
 		};
 		Mutex::<T>::lock_ack_event(self.id, self.name);
 		guard
+	}
+
+	pub fn try_lock(&self) -> Result<MutexGuard<T>, ()> {
+		let request_event = Ulid::new();
+		// TODO annotate that not real? Or only after acqui?
+		Mutex::<T>::lock_request_event(self.id, self.name, request_event);
+		let guard = self.mutex.try_lock().ok_or(())?;
+		let guard = MutexGuard {
+			name: self.name,
+			id: self.id,
+			lock_event_id: request_event,
+			guard,
+			_phantom: Default::default(),
+		};
+		Mutex::<T>::lock_ack_event(self.id, self.name);
+		Ok(guard)
 	}
 
 	fn create_event(id: Ulid, name: &'static str) {
@@ -119,7 +135,13 @@ impl<T: ?Sized + Send> Mutex<T> {
 	}
 }
 
-impl<T: ?Sized + ?Send> Drop for Mutex<T> {
+impl<T: ?Sized + Default> Default for Mutex<T> {
+	fn default() -> Self {
+		Self::new(Default::default(), "default")
+	}
+}
+
+impl<T: ?Sized> Drop for Mutex<T> {
 	fn drop(&mut self) {
 		unsafe {
 			let lock_state = LockState::Mutex(MutexLockState::MutexDestroyed {
@@ -139,7 +161,7 @@ impl<T: ?Sized + ?Send> Drop for Mutex<T> {
 //                       points can cause deadlocks, delays, \
 //                       and cause Future's to not implement `Send`"]
 #[clippy::has_significant_drop]
-pub struct MutexGuard<'a, T: ?Sized + 'a + Send> {
+pub struct MutexGuard<'a, T: ?Sized + 'a> {
 	name: &'static str,
 	id: Ulid,
 	lock_event_id: Ulid,
@@ -148,9 +170,9 @@ pub struct MutexGuard<'a, T: ?Sized + 'a + Send> {
 	_phantom: PhantomData<&'a T>,
 }
 
-unsafe impl<T: ?Sized + Send> Send for MutexGuard<'_, T> {}
+// unsafe impl<T: ?Sized + Send> Send for MutexGuard<'_, T> {}
 
-impl<'a, T: ?Sized + 'a + Send> Drop for MutexGuard<'a, T> {
+impl<'a, T: ?Sized + 'a> Drop for MutexGuard<'a, T> {
 	fn drop(&mut self) {
 		unsafe {
 			let lock_state = LockState::Mutex(MutexLockState::MutexUnlocked {

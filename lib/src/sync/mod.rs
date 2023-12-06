@@ -22,8 +22,8 @@ static mut LOCKS: Lazy<lockfree::map::Map<Ulid, LockState>> =
 	Lazy::new(|| lockfree::map::Map::new());
 
 static mut LOG: RealRwLock<Lazy<File>> = RealRwLock::new(Lazy::new(|| {
-	println!("Creating lock.log");
-	let mut file = File::create("lock.log").unwrap();
+	println!("\n\nCreating lock.csv\n\n");
+	let mut file = File::create("lock.csv").unwrap();
 	write_header(&mut file);
 	file
 }));
@@ -38,7 +38,7 @@ fn write_header(bw: &mut File) {
 		"id,\
 		name,\
 		event_type,\
-		previous_event,\n
+		previous_event,
 		\n"
 	);
 	bw.write(header.as_bytes()).unwrap();
@@ -62,11 +62,13 @@ unsafe fn write_file_raw(msg: String) {
 		// After the read something can come in and acquire the lock - it is a lockless read.
 		// But we don't care about it, as it is here only to prevent consecutive writes leading to
 		// infinite loop of consuming events during leader write.
-		if let false = BLOCKED_CHAN.load(Ordering::Relaxed) {
+		println!("\n\nChecking blocked chan\n\n");
+		if let true = BLOCKED_CHAN.load(Ordering::Relaxed) {
 			// tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 			sleep(std::time::Duration::from_millis(1));
 			continue;
 		}
+		println!("\n\nSending lock even msg\n\n");
 		match FILE_BUF_CHAN.0.try_send(msg.clone()) {
 			Ok(_) => {
 				break;

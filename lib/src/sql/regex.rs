@@ -32,11 +32,12 @@ fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
 		let cache_size: usize = env::var("SURREAL_REGEX_CACHE_SIZE")
 			.map_or(1000, |v| v.parse().unwrap_or(1000))
 			.max(10); // The minimum cache size is 10
-		Mutex::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()))
+		Mutex::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()), "regex_cache")
 	});
-	let mut cache = match REGEX_CACHE.lock() {
+	let mut cache = match REGEX_CACHE.try_lock() {
 		Ok(guard) => guard,
-		Err(poisoned) => poisoned.into_inner(),
+		// Err(poisoned) => poisoned.into_inner(),
+		Err(poisoned) => panic!("poisoned: {:?}", poisoned),
 	};
 	if let Some(re) = cache.get(str) {
 		return Ok(re.clone());
