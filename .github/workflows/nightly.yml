@@ -34,9 +34,7 @@ jobs:
 
   crate:
     name: Publish surrealdb-nightly to crates.io
-    needs: [release]
     environment: crate-nightly
-    if: ${{ inputs.publish || github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -49,9 +47,10 @@ jobs:
         with:
           ref: ${{ inputs.git-ref || github.ref_name }}
 
-      - name: Publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Install release-plz
+        run: cargo install --force --locked --version 0.3.30 release-plz
+
+      - name:  Prepare nightly crate
         run: |
           # Replace the crate name
           # We are just going to replace the first occurance of surrealdb
@@ -80,8 +79,14 @@ jobs:
           git commit -am 'Prepare nightly release'
           git checkout -b nightly
 
-          # Install release-plz
-          cargo install --force --locked --version 0.3.30 release-plz
+      - name: Perfom release checks
+        if: ${{ !(inputs.publish || github.event_name == 'schedule') }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: /home/runner/.cargo/bin/release-plz release --dry-run --config .config/release-plz.toml
 
-          # Publish cargo crate
-          /home/runner/.cargo/bin/release-plz release --config .config/release-nightly-plz.toml
+      - name: Publish the crate
+        if: ${{ inputs.publish || github.event_name == 'schedule' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
