@@ -15,6 +15,7 @@ use std::fmt::{self, Write};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 pub struct DefineModelStatement {
+	pub hash: String,
 	pub name: Ident,
 	pub version: String,
 	pub comment: Option<Strand>,
