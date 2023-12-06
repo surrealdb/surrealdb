@@ -86,6 +86,7 @@ jobs:
 
       - name: Publish the crate
         if: ${{ inputs.publish }}
+        environment: crate-beta
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
