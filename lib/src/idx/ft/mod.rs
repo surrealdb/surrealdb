@@ -492,10 +492,10 @@ mod tests {
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
 	use crate::sql::{Statement, Thing, Value};
 	use crate::syn;
+	use crate::sync::Mutex;
 	use std::collections::HashMap;
 	use std::sync::Arc;
 	use test_log::test;
-	use tokio::sync::Mutex;
 
 	async fn check_hits(
 		txn: &Transaction,
@@ -544,7 +544,7 @@ mod tests {
 	) -> (Context<'a>, Options, Transaction, FtIndex) {
 		let write = matches!(store_type, TreeStoreType::Write);
 		let tx = ds.transaction(write.into(), Optimistic).await.unwrap();
-		let txn = Arc::new(Mutex::new(tx));
+		let txn = Arc::new(Mutex::new(tx, "fti mod test"));
 		let mut tx = txn.lock().await;
 		let fti = FtIndex::with_analyzer(
 			&mut tx,

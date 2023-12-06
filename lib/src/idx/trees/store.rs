@@ -1,12 +1,12 @@
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, Val};
+use crate::sync::Mutex;
 use lru::LruCache;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub type NodeId = u64;
 
@@ -38,11 +38,14 @@ where
 		store_type: TreeStoreType,
 		read_size: usize,
 	) -> Arc<Mutex<Self>> {
-		Arc::new(Mutex::new(match store_type {
-			TreeStoreType::Write => Self::Write(TreeWriteCache::new(keys)),
-			TreeStoreType::Read => Self::Read(TreeReadCache::new(keys, read_size)),
-			TreeStoreType::Traversal => Self::Traversal(keys),
-		}))
+		Arc::new(Mutex::new(
+			match store_type {
+				TreeStoreType::Write => Self::Write(TreeWriteCache::new(keys)),
+				TreeStoreType::Read => Self::Read(TreeReadCache::new(keys, read_size)),
+				TreeStoreType::Traversal => Self::Traversal(keys),
+			},
+			"tree node store",
+		))
 	}
 
 	pub(super) async fn get_node(

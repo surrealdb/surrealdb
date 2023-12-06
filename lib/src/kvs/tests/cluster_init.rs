@@ -10,9 +10,9 @@ use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
 use crate::sql::{Fields, Value};
+use crate::sync::Mutex;
+use crate::sync::RwLock;
 use test_log::test;
-use tokio::sync::Mutex;
-use tokio::sync::RwLock;
 use uuid;
 
 #[tokio::test]

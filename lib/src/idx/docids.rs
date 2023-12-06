@@ -8,7 +8,8 @@ use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+// use tokio::sync::Mutex;
+use crate::sync::Mutex;
 
 pub type DocId = u64;
 

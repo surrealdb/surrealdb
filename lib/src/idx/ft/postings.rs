@@ -6,8 +6,8 @@ use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::sync::Mutex;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub(super) type TermFrequency = u64;
 

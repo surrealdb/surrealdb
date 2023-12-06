@@ -7,6 +7,7 @@ use crate::key::error::KeyCategory;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use crate::sync::Mutex;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use rocksdb::{
 	DBCompactionStyle, DBCompressionType, LogLevel, OptimisticTransactionDB,
@@ -15,7 +16,6 @@ use rocksdb::{
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct Datastore {
@@ -150,7 +150,7 @@ impl Datastore {
 			done: false,
 			write,
 			check,
-			inner: Arc::new(Mutex::new(Some(inner))),
+			inner: Arc::new(Mutex::new(Some(inner), "rocksdb inner transaction")),
 			ro,
 			_db: self.db.clone(),
 		})

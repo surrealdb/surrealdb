@@ -1,4 +1,4 @@
-use crate::sync::{write_file, CsvEntry, LockState, LOCKS};
+use crate::sync::{write_file, LockState, LOCKS};
 use async_std::sync::Mutex as RealMutex;
 use async_std::sync::MutexGuard as RealMutexGuard;
 use std::marker::PhantomData;
@@ -46,7 +46,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 		T: Sized,
 	{
 		let id = Ulid::new();
-		Mutex::create_event(id, name);
+		Mutex::<T>::create_event(id, name);
 		Mutex {
 			name,
 			id,
@@ -56,7 +56,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 
 	pub async fn lock(&self) -> MutexGuard<T> {
 		let request_event = Ulid::new();
-		Mutex::lock_request_event(self.id, self.name, request_event).await;
+		Mutex::<T>::lock_request_event(self.id, self.name, request_event);
 		let guard = self.mutex.lock().await;
 		let guard = MutexGuard {
 			name: self.name,
@@ -65,7 +65,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 			guard,
 			_phantom: Default::default(),
 		};
-		Mutex::lock_ack_event(self.id, self.name).await;
+		Mutex::<T>::lock_ack_event(self.id, self.name);
 		guard
 	}
 
@@ -82,7 +82,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 		}
 	}
 
-	fn lock_request_event(id: Ulid, name: &str, request_event: Ulid) {
+	fn lock_request_event(id: Ulid, name: &'static str, request_event: Ulid) {
 		unsafe {
 			let lock_state = LockState::Mutex(MutexLockState::MutexRequested {
 				name,
@@ -94,7 +94,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 		}
 	}
 
-	fn lock_ack_event(id: Ulid, name: &str) {
+	fn lock_ack_event(id: Ulid, name: &'static str) {
 		unsafe {
 			let lock_state = LockState::Mutex(MutexLockState::MutexLocked {
 				name,
@@ -106,7 +106,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 		}
 	}
 
-	fn lock_destroy_event(id: Ulid, name: &str) {
+	fn lock_destroy_event(id: Ulid, name: &'static str) {
 		unsafe {
 			let lock_state = LockState::Mutex(MutexLockState::MutexDestroyed {
 				name,
@@ -119,7 +119,7 @@ impl<T: ?Sized + Send> Mutex<T> {
 	}
 }
 
-impl<T: ?Sized + Send> Drop for Mutex<T> {
+impl<T: ?Sized + ?Send> Drop for Mutex<T> {
 	fn drop(&mut self) {
 		unsafe {
 			let lock_state = LockState::Mutex(MutexLockState::MutexDestroyed {

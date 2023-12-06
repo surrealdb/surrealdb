@@ -9,7 +9,8 @@ use async_recursion::async_recursion;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
+// use tokio::sync::{Mutex, RwLock};
+use crate::sync::{Mutex, RwLock};
 
 use crate::err::Error;
 
@@ -40,8 +41,10 @@ impl MTreeIndex {
 		p: &MTreeParams,
 		st: TreeStoreType,
 	) -> Result<Self, Error> {
-		let doc_ids =
-			Arc::new(RwLock::new(DocIds::new(tx, ikb.clone(), p.doc_ids_order, st).await?));
+		let doc_ids = Arc::new(RwLock::new(
+			DocIds::new(tx, ikb.clone(), p.doc_ids_order, st).await?,
+			"mtree doc_ids lock",
+		));
 		let state_key = ikb.new_vm_key(None);
 		let state: MState = if let Some(val) = tx.get(state_key.clone()).await? {
 			MState::try_from_val(val)?
@@ -50,7 +53,8 @@ impl MTreeIndex {
 		};
 
 		let store = TreeNodeStore::new(TreeNodeProvider::Vector(ikb), st, 20);
-		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
+		let mtree =
+			Arc::new(RwLock::new(MTree::new(state, p.distance.clone()), "mtree constructor lock"));
 		Ok(Self {
 			state_key,
 			dim: p.dimension as usize,
@@ -1599,7 +1603,9 @@ mod tests {
 
 	use crate::err::Error;
 	use test_log::test;
-	use tokio::sync::{Mutex, MutexGuard};
+	// use tokio::sync::{Mutex, MutexGuard};
+	use crate::sync::mutex::MutexGuard;
+	use crate::sync::Mutex;
 
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::mtree::{

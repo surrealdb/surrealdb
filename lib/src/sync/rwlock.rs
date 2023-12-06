@@ -1,4 +1,4 @@
-use crate::sync::{write_file, CsvEntry, LockState, LOCKS};
+use crate::sync::{write_file, LockState, LOCKS};
 use async_std::sync::RwLock as RealRwLock;
 use async_std::sync::RwLockWriteGuard as RealRwLockWriteGuard;
 use std::marker::PhantomData;
@@ -23,11 +23,15 @@ pub enum RwLockState {
 		event_id: Ulid,
 		previous_guard: Option<Ulid>,
 	},
+	#[allow(unused)]
+	// We don't plug into the read hooks
 	RwReadRequested {
 		name: &'static str,
 		id: Ulid,
 		event_id: Ulid,
 	},
+	#[allow(unused)]
+	// We don't plug into the read hooks
 	RwReadLocked {
 		name: &'static str,
 		id: Ulid,
@@ -57,7 +61,7 @@ impl<T: ?Sized + Send> RwLock<T> {
 		T: Sized,
 	{
 		let id = Ulid::new();
-		RwLock::unlock_event(id, name, None);
+		RwLock::<T>::unlock_event(id, name, None);
 		RwLock {
 			name,
 			id,
@@ -67,7 +71,7 @@ impl<T: ?Sized + Send> RwLock<T> {
 
 	pub async fn write(&self) -> RwLockWriteGuard<T> {
 		let request_event = Ulid::new();
-		RwLock::lock_requested_event(self.id, self.name, request_event);
+		RwLock::<T>::lock_requested_event(self.id, self.name, request_event);
 		let guard = self.rwlock.write().await;
 		let guard = RwLockWriteGuard {
 			name: self.name,
@@ -76,7 +80,7 @@ impl<T: ?Sized + Send> RwLock<T> {
 			guard,
 			_phantom: Default::default(),
 		};
-		RwLock::lock_ack_event(self.id, self.name, request_event);
+		RwLock::<T>::lock_ack_event(self.id, self.name, request_event);
 		guard
 	}
 
@@ -105,7 +109,7 @@ impl<T: ?Sized + Send> RwLock<T> {
 		}
 	}
 
-	pub fn unlock_event(id: Ulid, name: &str, lock_event_id: Option<Ulid>) {
+	pub fn unlock_event(id: Ulid, name: &'static str, lock_event_id: Option<Ulid>) {
 		unsafe {
 			let lock_state = LockState::RwLock(RwLockState::RwUnlocked {
 				name,
@@ -122,12 +126,12 @@ impl<T: ?Sized + Send> RwLock<T> {
 impl<T: ?Sized + Send> Drop for RwLock<T> {
 	fn drop(&mut self) {
 		unsafe {
-			let lock_state = LockState::RwLock(RwLockState::RwUnlocked {
+			let lock_state = LockState::RwLock(RwLockState::RwDestroyed {
 				name: self.name,
 				id: self.id,
 				event_id: Ulid::new(),
-				previous_guard: None,
 			});
+			write_file(&lock_state);
 			LOCKS.insert(self.id, lock_state);
 		}
 	}
@@ -148,7 +152,7 @@ pub struct RwLockWriteGuard<'a, T: ?Sized + 'a + Send> {
 
 impl<'a, T: ?Sized + 'a + Send> Drop for RwLockWriteGuard<'a, T> {
 	fn drop(&mut self) {
-		RwLock::unlock_event(self.id, self.name, Some(self.lock_event_id))
+		RwLock::<T>::unlock_event(self.id, self.name, Some(self.lock_event_id))
 	}
 }
 

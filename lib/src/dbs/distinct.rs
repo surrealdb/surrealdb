@@ -6,7 +6,8 @@ use std::default::Default;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
-use tokio::sync::Mutex;
+// use tokio::sync::Mutex;
+use crate::sync::Mutex;
 
 // TODO: This is currently processed in memory. In the future is should be on disk (mmap?)
 type Distinct = Trie<Key, bool>;

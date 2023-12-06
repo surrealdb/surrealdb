@@ -4,11 +4,11 @@ use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::sync::Mutex;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 pub(crate) type TermId = u64;
 
 pub(super) struct Terms {

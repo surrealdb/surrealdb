@@ -248,12 +248,13 @@ mod tests {
 		syn,
 	};
 	use std::sync::Arc;
-	use tokio::sync::Mutex;
+	// use tokio::sync::Mutex;
+	use crate::sync::Mutex;
 
 	pub(super) async fn test_analyzer(def: &str, input: &str, expected: &[&str]) {
 		let ds = Datastore::new("memory").await.unwrap();
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-		let txn: Transaction = Arc::new(Mutex::new(tx));
+		let txn: Transaction = Arc::new(Mutex::new(tx, "analyzer mod test"));
 
 		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
 		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {

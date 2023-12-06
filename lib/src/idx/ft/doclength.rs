@@ -6,7 +6,8 @@ use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+// use tokio::sync::Mutex;
+use crate::sync::Mutex;
 
 pub(super) type DocLength = u64;
 

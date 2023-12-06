@@ -1,14 +1,12 @@
-mod mutex;
+pub(crate) mod mutex;
 mod rwlock;
 
-use async_std::fs::File;
-use async_std::io::{BufWriter, WriteExt};
-use async_std::sync::{RwLock as RealRwLock, RwLockWriteGuard};
-use futures::AsyncWriteExt;
+use async_std::sync::RwLock as RealRwLock;
 use once_cell::sync::Lazy;
 use std::fmt::{Display, Formatter};
+use std::fs::File;
+use std::io::Write;
 use std::ops::{Deref, DerefMut};
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
 use tokio::sync::mpsc::error::TrySendError;
@@ -23,23 +21,19 @@ pub use rwlock::RwLockState;
 static mut LOCKS: Lazy<lockfree::map::Map<Ulid, LockState>> =
 	Lazy::new(|| lockfree::map::Map::new());
 
-static mut LOG: RealRwLock<Lazy<BufWriter<File>>> = RealRwLock::new(Lazy::new(|| {
-	let file = File::create("lock.log").unwrap();
-	let mut bw = BufWriter::new(file);
-	write_header(&mut bw);
-	bw
+static mut LOG: RealRwLock<Lazy<File>> = RealRwLock::new(Lazy::new(|| {
+	println!("Creating lock.log");
+	let mut file = File::create("lock.log").unwrap();
+	write_header(&mut file);
+	file
 }));
 
-static mut file_buf_chan: (Sender<String>, Receiver<String>) = tokio::sync::mpsc::channel(100);
-static mut blocked_chan: AtomicBool = AtomicBool::new(false);
+static mut FILE_BUF_CHAN: Lazy<(Sender<String>, Receiver<String>)> =
+	Lazy::new(|| tokio::sync::mpsc::channel(100));
+static mut BLOCKED_CHAN: AtomicBool = AtomicBool::new(false);
 
-struct CsvEntry<'a> {
-	pub id: Ulid,
-	pub name: &'a str,
-	pub event_type: &'a LockState,
-}
-
-fn write_header(bw: &mut BufWriter<File>) {
+fn write_header(bw: &mut File) {
+	println!("Writing header");
 	let header = format!(
 		"id,\
 		name,\
@@ -47,15 +41,17 @@ fn write_header(bw: &mut BufWriter<File>) {
 		previous_event,\n
 		\n"
 	);
-	bw.write(header.as_bytes());
+	bw.write(header.as_bytes()).unwrap();
 }
 
 unsafe fn write_file(lock_state: &LockState) {
+	println!("Writing lock state");
 	let id = lock_state.id();
 	let name = lock_state.name();
 	let event_type = lock_state.to_string();
-	let previous_event = lock_state.previous_event();
-	let msg = format!("{id},{name},{event_type}\n",);
+	let previous_event =
+		lock_state.previous_event().map(|id| id.to_string()).unwrap_or("".to_string());
+	let msg = format!("{id},{name},{event_type},{previous_event}\n",);
 	write_file_raw(msg);
 }
 
@@ -66,19 +62,19 @@ unsafe fn write_file_raw(msg: String) {
 		// After the read something can come in and acquire the lock - it is a lockless read.
 		// But we don't care about it, as it is here only to prevent consecutive writes leading to
 		// infinite loop of consuming events during leader write.
-		if let false = blocked_chan.load(Ordering::Relaxed) {
+		if let false = BLOCKED_CHAN.load(Ordering::Relaxed) {
 			// tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 			sleep(std::time::Duration::from_millis(1));
 			continue;
 		}
-		match file_buf_chan.0.try_send(msg.clone()) {
+		match FILE_BUF_CHAN.0.try_send(msg.clone()) {
 			Ok(_) => {
 				break;
 			}
 			Err(TrySendError::Full(_string)) => {
 				// block and prevent other writer leaders
 				if let Err(e) =
-					blocked_chan.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+					BLOCKED_CHAN.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
 				{
 					// Something else acquired the lock, so we become a writer follower by continuing the loop
 					continue;
@@ -89,21 +85,22 @@ unsafe fn write_file_raw(msg: String) {
 						None => {
 							sleep(std::time::Duration::from_millis(1));
 						}
-						Some(log_lock) => {
-							while let Some(msg) = file_buf_chan.1.try_recv() {
-								log_lock.write(msg.as_bytes()).unwrap();
+						Some(mut log_lock) => {
+							while let Ok(msg) = FILE_BUF_CHAN.1.try_recv() {
+								let file = log_lock.deref_mut().deref_mut();
+								file.write(msg.as_bytes()).unwrap();
 							}
 							break;
 						}
 					}
 				}
 				// unblock other writers; this shouldn't actually fail
-				blocked_chan
+				BLOCKED_CHAN
 					.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
 					.unwrap();
 			}
 			Err(TrySendError::Closed(_string)) => {
-				panic!("file_buf_chan closed");
+				panic!("FILE_BUF_CHAN closed");
 			}
 		}
 	}
@@ -205,7 +202,19 @@ impl LockState {
 		}
 	}
 
-	pub fn
+	pub fn previous_event(&self) -> &Option<Ulid> {
+		match self {
+			LockState::RwLock(RwLockState::RwUnlocked {
+				previous_guard,
+				..
+			}) => previous_guard,
+			LockState::Mutex(MutexLockState::MutexUnlocked {
+				previous_guard,
+				..
+			}) => previous_guard,
+			_ => &None,
+		}
+	}
 }
 
 impl Display for LockState {
@@ -238,6 +247,9 @@ impl Display for LockState {
 			LockState::Mutex(MutexLockState::MutexDestroyed {
 				..
 			}) => f.write_str("MutexDestroyed")?,
+			LockState::RwLock(RwLockState::RwDestroyed {
+				..
+			}) => f.write_str("RwDestroyed")?,
 		}
 		Ok(())
 	}

@@ -1,3 +1,4 @@
+use crate::sync::Mutex;
 use lru::LruCache;
 use once_cell::sync::Lazy;
 use revision::revisioned;
@@ -11,7 +12,6 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::Mutex;
 use std::{env, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";

@@ -1,10 +1,10 @@
 //! System time based versionstamp.
 //! This module provides a kind of Hybrid Logical Clock (HLC) based on system time.
 
+use crate::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
@@ -58,7 +58,7 @@ impl Oracle {
 	#[allow(unused)]
 	pub fn systime_counter() -> Self {
 		Oracle::SysTimeCounter(SysTimeCounter {
-			state: Mutex::new((0, 0)),
+			state: Mutex::new((0, 0), "timestamp oracle counter"),
 			stale: (0, 0),
 		})
 	}
