@@ -575,7 +575,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 	let val = Value::parse(
 		r#"{
 			events: {},
-			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
+			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR' PERMISSIONS FULL" },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -608,7 +608,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			events: {},
-			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
+			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/ PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -641,7 +641,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 	let val = Value::parse(
 		r#"{
 			events: {},
-			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
+			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/ PERMISSIONS FULL" },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -1175,7 +1175,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			},
 			tokens: {},
 			functions: {
-				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); }"
+				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); } PERMISSIONS FULL"
 			},
 			params: {},
 			scopes: {},
@@ -1496,7 +1496,7 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; }\" }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
 		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
@@ -1832,7 +1832,7 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo'\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
 		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
@@ -1955,7 +1955,7 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
@@ -2062,7 +2062,7 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 			scopes: {},
 			tables: {
 					default: 'DEFINE TABLE default SCHEMALESS PERMISSIONS NONE',
-					full: 'DEFINE TABLE full SCHEMALESS',
+					full: 'DEFINE TABLE full SCHEMALESS PERMISSIONS FULL',
 					select_full: 'DEFINE TABLE select_full SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
 			},
 			tokens: {},
