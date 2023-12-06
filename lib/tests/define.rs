@@ -86,7 +86,7 @@ async fn define_statement_function() -> Result<(), Error> {
 		"{
 			analyzers: {},
 			tokens: {},
-			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; }' },
+			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; } PERMISSIONS FULL' },
 			params: {},
 			scopes: {},
 			params: {},
@@ -509,7 +509,7 @@ async fn define_statement_field() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			events: {},
-			fields: { test: 'DEFINE FIELD test ON user' },
+			fields: { test: 'DEFINE FIELD test ON user PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -542,7 +542,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			events: {},
-			fields: { test: 'DEFINE FIELD test ON user TYPE string' },
+			fields: { test: 'DEFINE FIELD test ON user TYPE string PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},
