@@ -641,6 +641,10 @@ pub enum Error {
 	#[error("Utf8 error: {0}")]
 	Utf8Error(#[from] FromUtf8Error),
 
+	/// There was an error with model computation
+	#[error("There was an error with model computation: {0}")]
+	ModelComputation(String),
+
 	/// The feature has not yet being implemented
 	#[error("Feature not yet implemented: {feature}")]
 	FeatureNotYetImplemented {
