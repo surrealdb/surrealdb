@@ -1,302 +1,244 @@
-use async_std::sync::Mutex as RealMutex;
-use async_std::sync::MutexGuard as RealMutexGuard;
-use async_std::sync::RwLock as RealRwLock;
-use async_std::sync::RwLockWriteGuard as RealRwLockWriteGuard;
+mod mutex;
+mod rwlock;
+
+use async_std::fs::File;
+use async_std::io::{BufWriter, WriteExt};
+use async_std::sync::{RwLock as RealRwLock, RwLockWriteGuard};
+use futures::AsyncWriteExt;
 use once_cell::sync::Lazy;
-use std::marker::PhantomData;
+use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::sleep;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::mpsc::{Receiver, Sender};
 use ulid::Ulid;
+
+pub use mutex::Mutex;
+pub use mutex::MutexLockState;
+pub use rwlock::RwLock;
+pub use rwlock::RwLockState;
 
 static mut LOCKS: Lazy<lockfree::map::Map<Ulid, LockState>> =
 	Lazy::new(|| lockfree::map::Map::new());
+
+static mut LOG: RealRwLock<Lazy<BufWriter<File>>> = RealRwLock::new(Lazy::new(|| {
+	let file = File::create("lock.log").unwrap();
+	let mut bw = BufWriter::new(file);
+	write_header(&mut bw);
+	bw
+}));
+
+static mut file_buf_chan: (Sender<String>, Receiver<String>) = tokio::sync::mpsc::channel(100);
+static mut blocked_chan: AtomicBool = AtomicBool::new(false);
+
+struct CsvEntry<'a> {
+	pub id: Ulid,
+	pub name: &'a str,
+	pub event_type: &'a LockState,
+}
+
+fn write_header(bw: &mut BufWriter<File>) {
+	let header = format!(
+		"id,\
+		name,\
+		event_type,\
+		previous_event,\n
+		\n"
+	);
+	bw.write(header.as_bytes());
+}
+
+unsafe fn write_file(lock_state: &LockState) {
+	let id = lock_state.id();
+	let name = lock_state.name();
+	let event_type = lock_state.to_string();
+	let previous_event = lock_state.previous_event();
+	let msg = format!("{id},{name},{event_type}\n",);
+	write_file_raw(msg);
+}
+
+unsafe fn write_file_raw(msg: String) {
+	loop {
+		// We don't need to maintain lock, only prevent excessive constant writes
+		// NOTE this isn't safe, as it isn't a lock.
+		// After the read something can come in and acquire the lock - it is a lockless read.
+		// But we don't care about it, as it is here only to prevent consecutive writes leading to
+		// infinite loop of consuming events during leader write.
+		if let false = blocked_chan.load(Ordering::Relaxed) {
+			// tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+			sleep(std::time::Duration::from_millis(1));
+			continue;
+		}
+		match file_buf_chan.0.try_send(msg.clone()) {
+			Ok(_) => {
+				break;
+			}
+			Err(TrySendError::Full(_string)) => {
+				// block and prevent other writer leaders
+				if let Err(e) =
+					blocked_chan.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+				{
+					// Something else acquired the lock, so we become a writer follower by continuing the loop
+					continue;
+				}
+				// as writer leader, now we need to write previous messages
+				loop {
+					match LOG.try_write() {
+						None => {
+							sleep(std::time::Duration::from_millis(1));
+						}
+						Some(log_lock) => {
+							while let Some(msg) = file_buf_chan.1.try_recv() {
+								log_lock.write(msg.as_bytes()).unwrap();
+							}
+							break;
+						}
+					}
+				}
+				// unblock other writers; this shouldn't actually fail
+				blocked_chan
+					.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+					.unwrap();
+			}
+			Err(TrySendError::Closed(_string)) => {
+				panic!("file_buf_chan closed");
+			}
+		}
+	}
+}
 
 enum LockState {
 	RwLock(RwLockState),
 	Mutex(MutexLockState),
 }
 
-enum RwLockState {
-	RwLockRequested {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-	},
-	RwLocked {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-		lock_event_id: Ulid,
-	},
-	RwUnlocked {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-		previous_guard: Option<Ulid>,
-	},
-	RwReadRequested {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-	},
-	RwReadLocked {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-	},
-}
-
-enum MutexLockState {
-	MutexRequested {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-	},
-	MutexLocked {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-	},
-	MutexUnlocked {
-		name: &'static str,
-		id: Ulid,
-		event_id: Ulid,
-		previous_guard: Option<Ulid>,
-	},
-}
-
-pub struct Mutex<T: ?Sized + Send> {
-	name: &'static str,
-	id: Ulid,
-	mutex: RealMutex<T>,
-}
-
-unsafe impl<T: ?Sized + Send> Send for Mutex<T> {}
-
-impl<T: ?Sized + Send> Mutex<T> {
-	/// Creates a new instance of a `Mutex<T>` which is unlocked.
-	/// This particular implementation is for traceability
-	#[track_caller]
-	pub fn new(value: T, name: &'static str) -> Mutex<T>
-	where
-		T: Sized,
-	{
-		let id = Ulid::new();
-		unsafe {
-			LOCKS.insert(
+impl LockState {
+	pub fn id(&self) -> &Ulid {
+		match self {
+			LockState::RwLock(RwLockState::RwLocked {
 				id,
-				LockState::Mutex(MutexLockState::MutexUnlocked {
-					name,
-					id,
-					event_id: Ulid::new(),
-					previous_guard: None,
-				}),
-			);
-		}
-		Mutex {
-			name,
-			id,
-			mutex: RealMutex::new(value),
-		}
-	}
-
-	pub async fn lock(&self) -> MutexGuard<T> {
-		let request_event = Ulid::new();
-		unsafe {
-			LOCKS.insert(
-				self.id,
-				LockState::Mutex(MutexLockState::MutexRequested {
-					name: self.name,
-					id: self.id,
-					event_id: request_event,
-				}),
-			);
-		}
-		let guard = self.mutex.lock().await;
-		let guard = MutexGuard {
-			name: self.name,
-			id: self.id,
-			lock_event_id: request_event,
-			guard,
-			_phantom: Default::default(),
-		};
-		unsafe {
-			LOCKS.insert(
-				self.id,
-				LockState::Mutex(MutexLockState::MutexLocked {
-					name: self.name,
-					id: self.id,
-					event_id: Ulid::new(),
-				}),
-			);
-		}
-		guard
-	}
-}
-
-impl<T: ?Sized + Send> Drop for Mutex<T> {
-	fn drop(&mut self) {
-		unsafe {
-			LOCKS.remove(&self.id);
-		}
-	}
-}
-
-#[must_use = "if unused the RwLock will immediately unlock"]
-// experimental
-// #[must_not_suspend = "holding a RwLockWriteGuard across suspend \
-//                       points can cause deadlocks, delays, \
-//                       and cause Future's to not implement `Send`"]
-#[clippy::has_significant_drop]
-pub struct MutexGuard<'a, T: ?Sized + 'a + Send> {
-	name: &'static str,
-	id: Ulid,
-	lock_event_id: Ulid,
-	// The absolute irony that this must be Send across threads
-	guard: RealMutexGuard<'a, T>,
-	_phantom: PhantomData<&'a T>,
-}
-
-unsafe impl<T: ?Sized + Send> Send for MutexGuard<'_, T> {}
-
-impl<'a, T: ?Sized + 'a + Send> Drop for MutexGuard<'a, T> {
-	fn drop(&mut self) {
-		unsafe {
-			LOCKS.insert(
-				self.id,
-				LockState::Mutex(MutexLockState::MutexUnlocked {
-					name: self.name,
-					id: self.id,
-					event_id: Ulid::new(),
-					previous_guard: Some(self.lock_event_id),
-				}),
-			);
-		}
-	}
-}
-
-impl<T: Send> Deref for MutexGuard<'_, T> {
-	type Target = T;
-
-	fn deref(&self) -> &T {
-		self.guard.deref()
-	}
-}
-
-impl<T: Send> DerefMut for MutexGuard<'_, T> {
-	fn deref_mut(&mut self) -> &mut T {
-		self.guard.deref_mut()
-	}
-}
-
-pub struct RwLock<T: ?Sized + Send> {
-	name: &'static str,
-	id: Ulid,
-	rwlock: RealRwLock<T>,
-}
-
-unsafe impl<T: ?Sized + Send> Send for RwLock<T> {}
-
-impl<T: ?Sized + Send> RwLock<T> {
-	/// Creates a new instance of an `RwLock<T>` which is unlocked.
-	/// This particular implementation is for traceability
-	#[track_caller]
-	pub fn new(value: T, name: &'static str) -> RwLock<T>
-	where
-		T: Sized,
-	{
-		let id = Ulid::new();
-		unsafe {
-			LOCKS.insert(
+				..
+			}) => id,
+			LockState::RwLock(RwLockState::RwLockRequested {
 				id,
-				LockState::RwLock(RwLockState::RwUnlocked {
-					name,
-					id,
-					event_id: Ulid::new(),
-					previous_guard: None,
-				}),
-			);
+				..
+			}) => id,
+			LockState::RwLock(RwLockState::RwUnlocked {
+				id,
+				..
+			}) => id,
+			LockState::RwLock(RwLockState::RwReadRequested {
+				id,
+				..
+			}) => id,
+			LockState::RwLock(RwLockState::RwReadLocked {
+				id,
+				..
+			}) => id,
+			LockState::Mutex(MutexLockState::MutexRequested {
+				id,
+				..
+			}) => id,
+			LockState::Mutex(MutexLockState::MutexLocked {
+				id,
+				..
+			}) => id,
+			LockState::Mutex(MutexLockState::MutexUnlocked {
+				id,
+				..
+			}) => id,
+			LockState::Mutex(MutexLockState::MutexDestroyed {
+				id,
+				..
+			}) => id,
+			LockState::RwLock(RwLockState::RwDestroyed {
+				id,
+				..
+			}) => id,
 		}
-		RwLock {
-			name,
-			id,
-			rwlock: RealRwLock::new(value),
+	}
+
+	pub fn name(&self) -> &str {
+		match self {
+			LockState::RwLock(RwLockState::RwLocked {
+				name,
+				..
+			}) => name,
+			LockState::RwLock(RwLockState::RwLockRequested {
+				name,
+				..
+			}) => name,
+			LockState::RwLock(RwLockState::RwUnlocked {
+				name,
+				..
+			}) => name,
+			LockState::RwLock(RwLockState::RwReadRequested {
+				name,
+				..
+			}) => name,
+			LockState::RwLock(RwLockState::RwReadLocked {
+				name,
+				..
+			}) => name,
+			LockState::Mutex(MutexLockState::MutexRequested {
+				name,
+				..
+			}) => name,
+			LockState::Mutex(MutexLockState::MutexLocked {
+				name,
+				..
+			}) => name,
+			LockState::Mutex(MutexLockState::MutexUnlocked {
+				name,
+				..
+			}) => name,
+			LockState::Mutex(MutexLockState::MutexDestroyed {
+				name,
+				..
+			}) => name,
+			LockState::RwLock(RwLockState::RwDestroyed {
+				name,
+				..
+			}) => name,
 		}
 	}
 
-	pub async fn write(&self) -> RwLockWriteGuard<T> {
-		let request_event = Ulid::new();
-		unsafe {
-			LOCKS.insert(
-				self.id,
-				LockState::RwLock(RwLockState::RwLockRequested {
-					name: self.name,
-					id: self.id,
-					event_id: request_event,
-				}),
-			);
+	pub fn
+}
+
+impl Display for LockState {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			LockState::RwLock(RwLockState::RwLocked {
+				..
+			}) => f.write_str("RwLocked")?,
+			LockState::RwLock(RwLockState::RwLockRequested {
+				..
+			}) => f.write_str("RwLockRequested")?,
+			LockState::RwLock(RwLockState::RwUnlocked {
+				..
+			}) => f.write_str("RwUnlocked")?,
+			LockState::RwLock(RwLockState::RwReadRequested {
+				..
+			}) => f.write_str("RwReadRequested")?,
+			LockState::RwLock(RwLockState::RwReadLocked {
+				..
+			}) => f.write_str("RwReadLocked")?,
+			LockState::Mutex(MutexLockState::MutexRequested {
+				..
+			}) => f.write_str("MutexRequested")?,
+			LockState::Mutex(MutexLockState::MutexLocked {
+				..
+			}) => f.write_str("MutexLocked")?,
+			LockState::Mutex(MutexLockState::MutexUnlocked {
+				..
+			}) => f.write_str("MutexUnlocked")?,
+			LockState::Mutex(MutexLockState::MutexDestroyed {
+				..
+			}) => f.write_str("MutexDestroyed")?,
 		}
-		let guard = self.rwlock.write().await;
-		let guard = RwLockWriteGuard {
-			name: self.name,
-			id: self.id,
-			lock_event_id: request_event,
-			guard,
-			_phantom: Default::default(),
-		};
-		unsafe {
-			LOCKS.insert(
-				self.id,
-				LockState::RwLock(RwLockState::RwLocked {
-					name: self.name,
-					id: self.id,
-					event_id: Ulid::new(),
-					lock_event_id: request_event,
-				}),
-			);
-		}
-		guard
-	}
-}
-
-#[must_use = "if unused the RwLock will immediately unlock"]
-// experimental
-// #[must_not_suspend = "holding a RwLockWriteGuard across suspend \
-//                       points can cause deadlocks, delays, \
-//                       and cause Future's to not implement `Send`"]
-pub struct RwLockWriteGuard<'a, T: ?Sized + 'a + Send> {
-	name: &'static str,
-	id: Ulid,
-	lock_event_id: Ulid,
-	guard: RealRwLockWriteGuard<'a, T>,
-	_phantom: PhantomData<&'a T>,
-}
-
-impl<'a, T: ?Sized + 'a + Send> Drop for RwLockWriteGuard<'a, T> {
-	fn drop(&mut self) {
-		unsafe {
-			LOCKS.insert(
-				self.id,
-				LockState::RwLock(RwLockState::RwUnlocked {
-					name: self.name,
-					id: self.id,
-					event_id: Ulid::new(),
-					previous_guard: Some(self.lock_event_id),
-				}),
-			);
-		}
-	}
-}
-
-impl<T: Send> Deref for RwLockWriteGuard<'_, T> {
-	type Target = T;
-
-	fn deref(&self) -> &T {
-		self.guard.deref()
-	}
-}
-
-impl<T: Send> DerefMut for RwLockWriteGuard<'_, T> {
-	fn deref_mut(&mut self) -> &mut T {
-		self.guard.deref_mut()
+		Ok(())
 	}
 }
