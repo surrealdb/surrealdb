@@ -122,7 +122,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
+			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -153,7 +153,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMALESS' },
+			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -188,7 +188,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -219,7 +219,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			functions: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -259,8 +259,8 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL',
-				view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL',
+				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
+				view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -272,7 +272,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			events: {},
 			fields: {},
-			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL' },
+			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
 		}",
@@ -291,7 +291,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL',
+				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -1866,7 +1866,7 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS' }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
 		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
