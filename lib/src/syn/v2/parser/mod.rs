@@ -1,3 +1,4 @@
+use self::token_buffer::TokenBuffer;
 use crate::{
 	sql,
 	syn::v2::{
@@ -7,25 +8,23 @@ use crate::{
 	},
 };
 
-use self::token_buffer::TokenBuffer;
-
 mod basic;
+mod builtin;
 mod error;
 mod expression;
+mod function;
 mod idiom;
+mod json;
 mod kind;
 mod mac;
 mod object;
 mod prime;
 mod stmt;
+mod thing;
 mod token_buffer;
 
-mod builtin;
-mod function;
-mod json;
 #[cfg(test)]
 mod test;
-mod thing;
 
 pub use error::{IntErrorKind, ParseError, ParseErrorKind};
 
@@ -84,10 +83,12 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	/// Set whether to parse strands as legacy strands.
 	pub fn allow_legacy_strand(&mut self, value: bool) {
 		self.legacy_strands = value;
 	}
 
+	/// Reset the parser state. Doesnt change the position of the parser in buffer.
 	pub fn reset(&mut self) {
 		self.last_span = Span::empty();
 		self.token_buffer.clear();
@@ -184,6 +185,7 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
+	/// Ensure that there was no whitespace parser between the last token and the current one.
 	fn no_whitespace(&mut self) -> ParseResult<()> {
 		if let Some(span) = self.lexer.whitespace_span() {
 			Err(ParseError::new(ParseErrorKind::NoWhitespace, span))

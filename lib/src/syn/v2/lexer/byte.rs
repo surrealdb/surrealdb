@@ -65,6 +65,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Eat whitespace like spaces tables and new-lines.
 	pub fn eat_whitespace(&mut self) {
 		loop {
 			let Some(byte) = self.reader.peek() else {

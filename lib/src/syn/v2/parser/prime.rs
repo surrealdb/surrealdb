@@ -82,6 +82,10 @@ impl Parser<'_> {
 			t!("fn") => self.parse_custom_function().map(|x| Value::Function(Box::new(x))),
 			t!("ml") => self.parse_model().map(|x| Value::MlModel(Box::new(x))),
 			_ => {
+				if !self.peek_can_be_ident() {
+					unexpected!(self, x, "a value")
+				}
+
 				let token = self.next();
 				match self.peek_kind() {
 					t!("::") | t!("(") => self.parse_builtin(token.span),

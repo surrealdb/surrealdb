@@ -19,6 +19,9 @@ pub enum Error {
 }
 
 impl<'a> Lexer<'a> {
+	/// Lex a uuid strand with either double or single quotes.
+	///
+	/// Expects the first delimiter to already have been eaten.
 	pub fn lex_uuid(&mut self, double: bool) -> Token {
 		match self.lex_uuid_err(double) {
 			Ok(x) => {
@@ -30,6 +33,10 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Lex a uuid strand with either double or single quotes but return an result instead of a
+	/// token.
+	///
+	/// Expects the first delimiter to already have been eaten.
 	pub fn lex_uuid_err(&mut self, double: bool) -> Result<Uuid, Error> {
 		let uuid = self.lex_uuid_err_inner()?;
 
@@ -46,6 +53,10 @@ impl<'a> Lexer<'a> {
 		Ok(uuid)
 	}
 
+	/// Lex a uuid strand without delimiting quotes but return an result instead of a
+	/// token.
+	///
+	/// Expects the first delimiter to already have been eaten.
 	pub fn lex_uuid_err_inner(&mut self) -> Result<Uuid, Error> {
 		let start = self.reader.offset();
 

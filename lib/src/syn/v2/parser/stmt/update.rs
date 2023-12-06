@@ -27,9 +27,3 @@ impl Parser<'_> {
 		})
 	}
 }
-
-#[cfg(test)]
-mod test {
-	#[test]
-	fn parse_update() {}
-}

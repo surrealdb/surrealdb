@@ -7,6 +7,7 @@ use crate::syn::v2::token::{Token, TokenKind};
 use super::{unicode::chars, Error, Lexer};
 
 impl<'a> Lexer<'a> {
+	/// Lex a plain strand with either single or double quotes.
 	pub fn lex_strand(&mut self, is_double: bool) -> Token {
 		match self.lex_strand_err(is_double) {
 			Ok(x) => x,
@@ -17,7 +18,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	/// Lex a strand with either double or single quotes.
+	/// Lex a strand with either double or single quotes but return an result instead of a token.
 	pub fn lex_strand_err(&mut self, is_double: bool) -> Result<Token, Error> {
 		loop {
 			let Some(x) = self.reader.next() else {

@@ -55,6 +55,7 @@ pub enum Error {
 }
 
 impl<'a> Lexer<'a> {
+	/// Lex a date-time strand.
 	pub fn lex_datetime(&mut self, double: bool) -> Token {
 		match self.lex_datetime_err(double) {
 			Ok(x) => {
@@ -65,6 +66,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Lex datetime without enclosing `"` or `'` but return a result or parser error.
 	pub fn lex_datetime_raw_err(&mut self) -> Result<Datetime, Error> {
 		let negative = match self.reader.peek() {
 			Some(b'+') => {
@@ -212,6 +214,7 @@ impl<'a> Lexer<'a> {
 		Ok(Datetime(datetime))
 	}
 
+	/// Lex full datetime but return an result instead of a token.
 	pub fn lex_datetime_err(&mut self, double: bool) -> Result<Datetime, Error> {
 		let datetime = self.lex_datetime_raw_err()?;
 

@@ -2,25 +2,25 @@ use crate::{
 	sql::{Datetime, Duration, Regex, Uuid},
 	syn::v2::token::{Span, Token, TokenKind},
 };
+use thiserror::Error;
 
 mod byte;
 mod char;
+mod datetime;
 mod duration;
 mod ident;
+mod js;
 mod keywords;
 mod number;
 mod reader;
-mod unicode;
-
-mod datetime;
-mod js;
 mod strand;
-#[cfg(test)]
-mod test;
+mod unicode;
 mod uuid;
 
+#[cfg(test)]
+mod test;
+
 pub use reader::{BytesReader, CharError};
-use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -65,9 +65,10 @@ pub struct Lexer<'a> {
 	pub reader: BytesReader<'a>,
 	/// The one past the last character of the previous token.
 	last_offset: u32,
+	/// The span of whitespace if it was read between two tokens.
+	whitespace_span: Option<Span>,
 	/// A buffer used to build the value of tokens which can't be read straight from the source.
 	/// like for example strings with escape characters.
-	whitespace_span: Option<Span>,
 	scratch: String,
 
 	// below are a collection of storage for values produced by tokens.
@@ -87,8 +88,7 @@ impl<'a> Lexer<'a> {
 	/// Create a new lexer.
 	///
 	/// # Panic
-	///
-	/// Will panic if the size of the provided slice exceeds `u32::MAX`.
+	/// This function will panic if the source is longer then u32::MAX.
 	pub fn new(source: &'a [u8]) -> Lexer<'a> {
 		let reader = BytesReader::new(source);
 		assert!(reader.len() <= u32::MAX as usize, "source code exceeded maximum size");
@@ -106,6 +106,9 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Reset the state of the lexer.
+	///
+	/// Doesn't change the state of the reader.
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
@@ -117,6 +120,12 @@ impl<'a> Lexer<'a> {
 		self.error = None;
 	}
 
+	/// Change the used source from the lexer to a new buffer.
+	///
+	/// Usefull for reusing buffers.
+	///
+	/// # Panic
+	/// This function will panic if the source is longer then u32::MAX.
 	pub fn change_source<'b>(self, source: &'b [u8]) -> Lexer<'b> {
 		let reader = BytesReader::<'b>::new(source);
 		assert!(reader.len() <= u32::MAX as usize, "source code exceeded maximum size");
@@ -134,10 +143,13 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// return the whitespace of the last token buffered, either peeked or poped.
 	pub fn whitespace_span(&self) -> Option<Span> {
 		self.whitespace_span
 	}
 
+	/// Used for seting the span of whitespace between tokens. Will extend the current whitespace
+	/// if there already is one.
 	fn set_whitespace_span(&mut self, span: Span) {
 		if let Some(existing) = self.whitespace_span.as_mut() {
 			*existing = existing.covers(span);
@@ -334,10 +346,18 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Lex only a datetime without enclosing delimiters.
+	///
+	/// Used for reusing lexer lexing code for parsing datetimes. Should not be called during
+	/// normal parsing.
 	pub fn lex_only_datetime(&mut self) -> Result<Datetime, Error> {
 		self.lex_datetime_raw_err().map_err(Error::DateTime)
 	}
 
+	/// Lex only a duration.
+	///
+	/// Used for reusing lexer lexing code for parsing durations. Should not be used during normal
+	/// parsing.
 	pub fn lex_only_duration(&mut self) -> Result<Duration, Error> {
 		match self.reader.next() {
 			Some(x @ b'0'..=b'9') => {
@@ -356,6 +376,10 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Lex only a UUID.
+	///
+	/// Used for reusing lexer lexing code for parsing UUID's. Should not be used during normal
+	/// parsing.
 	pub fn lex_only_uuid(&mut self) -> Result<Uuid, Error> {
 		Ok(self.lex_uuid_err_inner()?)
 	}

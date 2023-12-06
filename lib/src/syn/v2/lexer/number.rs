@@ -76,6 +76,7 @@ impl Lexer<'_> {
 		}
 	}
 
+	/// Lex a number suffix, either 'f' or 'dec'.
 	fn lex_suffix(&mut self, can_be_duration: bool) -> Result<Token, Error> {
 		match self.reader.peek() {
 			Some(b'f') => {

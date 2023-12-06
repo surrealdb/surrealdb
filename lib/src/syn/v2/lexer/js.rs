@@ -3,10 +3,14 @@ use crate::syn::v2::token::Span;
 use super::{unicode::chars::JS_LINE_TERIMATORS, Error, Lexer};
 
 impl Lexer<'_> {
+	/// Lex the body of a js functions.
+	///
+	/// This function will never be called while lexing normally.
 	pub fn lex_js_function_body(&mut self) -> Result<String, (Error, Span)> {
 		self.lex_js_function_body_inner().map_err(|e| (e, self.current_span()))
 	}
 
+	/// Lex the body of a js function.
 	fn lex_js_function_body_inner(&mut self) -> Result<String, Error> {
 		let mut block_depth = 1;
 		loop {
@@ -50,6 +54,7 @@ impl Lexer<'_> {
 		Ok(source)
 	}
 
+	/// lex a js string with the given delimiter.
 	fn lex_js_string(&mut self, enclosing_byte: u8) -> Result<(), Error> {
 		loop {
 			let byte = self.reader.next().ok_or(Error::UnexpectedEof)?;
@@ -64,6 +69,7 @@ impl Lexer<'_> {
 		}
 	}
 
+	/// lex a single line js comment.
 	fn lex_js_single_comment(&mut self) -> Result<(), Error> {
 		loop {
 			let Some(byte) = self.reader.next() else {
@@ -76,6 +82,7 @@ impl Lexer<'_> {
 		}
 	}
 
+	/// lex a multi line js comment.
 	fn lex_js_multi_comment(&mut self) -> Result<(), Error> {
 		loop {
 			let byte = self.reader.next().ok_or(Error::UnexpectedEof)?;

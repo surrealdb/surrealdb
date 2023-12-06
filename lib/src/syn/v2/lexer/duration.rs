@@ -20,6 +20,9 @@ pub enum Error {
 }
 
 impl<'a> Lexer<'a> {
+	/// Lex a duration.
+	///
+	/// Expect the lexer to have already eaten the digits starting the duration.
 	pub fn lex_duration(&mut self) -> Token {
 		match self.lex_duration_err() {
 			Ok(x) => {

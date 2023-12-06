@@ -81,8 +81,14 @@ impl Parser<'_> {
 					res.push(Part::Graph(self.parse_graph(Dir::In)?))
 				}
 				t!("..") => {
-					// TODO: error message suggesting `..`
-					to_do!(self)
+					return Err(ParseError::new(
+						ParseErrorKind::UnexpectedSuggested {
+							found: t!(".."),
+							expected: "an idiom",
+							suggestion: "...",
+						},
+						self.current_span(),
+					))
 				}
 				_ => break,
 			}
@@ -126,8 +132,14 @@ impl Parser<'_> {
 					}
 				}
 				t!("..") => {
-					// TODO: error message suggesting `..`
-					to_do!(self)
+					return Err(ParseError::new(
+						ParseErrorKind::UnexpectedSuggested {
+							found: t!(".."),
+							expected: "an idiom",
+							suggestion: "...",
+						},
+						self.current_span(),
+					))
 				}
 				_ => break,
 			}
@@ -306,10 +318,17 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!("...")) {
+			let span = self.current_span();
 			parts.push(Part::Flatten);
 			if let t!(".") | t!("[") = self.peek_kind() {
-				// TODO: Error message that flatten can only be last.
-				to_do!(self)
+				return Err(ParseError::new(ParseError::new(
+					ParseErrorKind::unexpectedExplain {
+						found: t!("..."),
+						expected: "local idiom to end.",
+						explain: "Flattening can only be done at the end of a local idiom.",
+					},
+					span,
+				)));
 			}
 		}
 

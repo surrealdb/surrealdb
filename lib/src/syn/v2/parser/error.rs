@@ -25,20 +25,29 @@ pub enum ParseErrorKind {
 		found: TokenKind,
 		expected: &'static str,
 	},
+	UnexpectedExplain {
+		found: TokenKind,
+		expected: &'static str,
+		explained: &'static str,
+	},
 	/// The parser encountered an unexpected token.
 	UnexpectedEof {
 		expected: &'static str,
 	},
+	/// An error for an unclosed delimiter with a span of the token which should be closed.
 	UnclosedDelimiter {
 		expected: TokenKind,
 		should_close: Span,
 	},
+	/// An error for parsing an integer
 	InvalidInteger {
 		error: ParseIntError,
 	},
+	/// An error for parsing an float
 	InvalidFloat {
 		error: ParseFloatError,
 	},
+	/// An error for parsing an decimal.
 	InvalidDecimal {
 		error: rust_decimal::Error,
 	},
@@ -55,24 +64,24 @@ pub enum ParseErrorKind {
 	Todo,
 }
 
+/// A parsing error.
 #[derive(Debug)]
 pub struct ParseError {
 	pub kind: ParseErrorKind,
 	pub at: Span,
-	pub backtrace: std::backtrace::Backtrace,
 }
 
 impl ParseError {
+	/// Create a new parse error.
 	pub fn new(kind: ParseErrorKind, at: Span) -> Self {
 		ParseError {
 			kind,
 			at,
-			backtrace: std::backtrace::Backtrace::force_capture(),
 		}
 	}
 
+	/// Create a rendered error from the string this error was generated from.
 	pub fn render_on(&self, source: &str) -> RenderedError {
-		println!("FOUND ERROR: {}", self.backtrace);
 		match &self.kind {
 			ParseErrorKind::Unexpected {
 				found,
@@ -81,6 +90,23 @@ impl ParseError {
 				let text = format!("Unexpected token '{}' expected {}", found.as_str(), expected);
 				let locations = Location::range_of_span(source, self.at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::UnexpectedExplain {
+				found,
+				expected,
+				explain,
+			} => {
+				let text = format!("Unexpected token '{}' expected {}", found.as_str(), expected);
+				let locations = Location::range_of_span(source, self.at);
+				let snippet = Snippet::from_source_location_range(
+					source,
+					locations,
+					Some(explain.to_string()),
+				);
 				RenderedError {
 					text,
 					snippets: vec![snippet],

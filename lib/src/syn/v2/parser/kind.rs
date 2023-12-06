@@ -54,7 +54,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_concrete_kind(&mut self) -> ParseResult<Kind> {
+	fn parse_concrete_kind(&mut self) -> ParseResult<Kind> {
 		match self.next().kind {
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NULL") => Ok(Kind::Null),
@@ -151,7 +151,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_geometry_kind(&mut self) -> ParseResult<String> {
+	fn parse_geometry_kind(&mut self) -> ParseResult<String> {
 		match self.next().kind {
 			TokenKind::Keyword(
 				x @ (Keyword::Feature

@@ -88,6 +88,7 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	parser.parse_plain_idiom().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
+/// Parse a datetime without enclosing delimiters from a string.
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	debug!("parsing datetime, input = {input}");
 	println!("{}", std::backtrace::Backtrace::force_capture());
@@ -104,6 +105,7 @@ pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+/// Parse a duration from a string.
 pub fn duration(input: &str) -> Result<Duration, Error> {
 	debug!("parsing duration, input = {input}");
 	println!("{}", std::backtrace::Backtrace::force_capture());
@@ -115,6 +117,7 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 		.map_err(Error::InvalidQuery)
 }
 
+/// Parse a range
 pub fn range(input: &str) -> Result<Range, Error> {
 	debug!("parsing range, input = {input}");
 	println!("{}", std::backtrace::Backtrace::force_capture());
@@ -122,6 +125,7 @@ pub fn range(input: &str) -> Result<Range, Error> {
 	parser.parse_range().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
+/// Parse a record id.
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	debug!("parsing thing, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());

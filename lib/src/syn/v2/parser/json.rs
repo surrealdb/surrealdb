@@ -37,7 +37,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_json_object(&mut self, start: Span) -> ParseResult<Object> {
+	fn parse_json_object(&mut self, start: Span) -> ParseResult<Object> {
 		let mut obj = BTreeMap::new();
 		loop {
 			if self.eat(t!("}")) {
@@ -55,7 +55,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_json_array(&mut self, start: Span) -> ParseResult<Array> {
+	fn parse_json_array(&mut self, start: Span) -> ParseResult<Array> {
 		let mut array = Vec::new();
 		loop {
 			if self.eat(t!("]")) {

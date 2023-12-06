@@ -1590,8 +1590,7 @@ impl ObjectProperties {
 
 impl VersionedSerdeState for MState {}
 
-//#[cfg(test)]
-#[cfg(feature = "foo")]
+#[cfg(test)]
 mod tests {
 	use rand::prelude::StdRng;
 	use rand::{Rng, SeedableRng};

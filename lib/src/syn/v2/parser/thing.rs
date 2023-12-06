@@ -111,12 +111,23 @@ impl Parser<'_> {
 		self.peek();
 		self.no_whitespace()?;
 
-		let exclusive = self.eat(t!(">"));
+		let beg = if self.peek_can_be_ident() {
+			self.peek();
+			self.no_whitespace()?;
 
-		self.peek();
-		self.no_whitespace()?;
+			let id = self.parse_id()?;
 
-		let id = self.parse_id()?;
+			self.peek();
+			self.no_whitespace()?;
+
+			if self.eat(t!(">")) {
+				Bound::Excluded(id)
+			} else {
+				Bound::Included(id)
+			}
+		} else {
+			Bound::Unbounded
+		};
 
 		self.peek();
 		self.no_whitespace()?;
@@ -131,19 +142,21 @@ impl Parser<'_> {
 		self.peek();
 		self.no_whitespace()?;
 
-		let end = self.parse_id()?;
+		let end = if self.peek_can_be_ident() {
+			let id = self.parse_id()?;
+			if inclusive {
+				Bound::Included(id)
+			} else {
+				Bound::Excluded(id)
+			}
+		} else {
+			Bound::Unbounded
+		};
+
 		Ok(Range {
 			tb,
-			beg: if exclusive {
-				Bound::Excluded(id)
-			} else {
-				Bound::Included(id)
-			},
-			end: if inclusive {
-				Bound::Included(end)
-			} else {
-				Bound::Excluded(end)
-			},
+			beg,
+			end,
 		})
 	}
 

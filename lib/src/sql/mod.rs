@@ -1,8 +1,5 @@
 //! The full type definitions for the SurrealQL query language
 
-#[doc(hidden)]
-pub mod index;
-
 pub(crate) mod algorithm;
 pub(crate) mod array;
 pub(crate) mod base;
@@ -32,6 +29,7 @@ pub(crate) mod group;
 pub(crate) mod id;
 pub(crate) mod ident;
 pub(crate) mod idiom;
+pub mod index;
 pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;

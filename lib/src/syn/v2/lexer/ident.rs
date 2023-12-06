@@ -70,6 +70,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	/// Lex an ident which is surround by delimiters.
 	pub fn lex_surrounded_ident(&mut self, is_backtick: bool) -> Token {
 		match self.lex_surrounded_ident_err(is_backtick) {
 			Ok(x) => x,

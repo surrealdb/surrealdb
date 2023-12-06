@@ -5,6 +5,7 @@ use crate::{
 use phf::phf_map;
 use unicase::UniCase;
 
+/// A map for mapping keyword strings to a tokenkind,
 pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map! {
 	// Keywords
 	UniCase::ascii("AFTER") => TokenKind::Keyword(Keyword::After),
@@ -274,7 +275,4 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MANHATTAN") => TokenKind::Distance(DistanceKind::Manhattan),
 	UniCase::ascii("HAMMING") => TokenKind::Distance(DistanceKind::Hamming),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
-
-	// Geometry
-
 };

@@ -69,11 +69,13 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	return distance_array[b.len() & 1][a.len()];
 }
 
+/// The kind of a parsed path.
 pub enum PathKind {
 	Constant(Constant),
 	Function,
 }
 
+/// A map of path strings for parsing paths.
 pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::add") => PathKind::Function,
 		UniCase::ascii("array::all") => PathKind::Function,
@@ -395,6 +397,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 };
 
 impl Parser<'_> {
+	/// Parse a builtin path.
 	pub fn parse_builtin(&mut self, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
@@ -415,6 +418,7 @@ impl Parser<'_> {
 				.parse_builtin_function(k.into_inner().to_owned())
 				.map(|x| Value::Function(Box::new(x))),
 			None => {
+				// Generate an suggestion.
 				// don't search further if the levenshtein distance is further then 10.
 				let mut cut_off = MAX_LEVENSTHEIN_CUT_OFF;
 
@@ -449,6 +453,7 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parse a call to a builtin function.
 	pub fn parse_builtin_function(&mut self, name: String) -> ParseResult<Function> {
 		let start = expected!(self, "(").span;
 		let mut args = Vec::new();

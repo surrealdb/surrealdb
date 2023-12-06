@@ -10,6 +10,7 @@ use crate::{
 
 use super::{ParseError, ParseErrorKind, ParseResult, Parser};
 
+/// A trait for parsing single tokens with a specific value.
 pub trait TokenValue: Sized {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self>;
 }
@@ -272,6 +273,7 @@ impl TokenValue for Regex {
 }
 
 impl Parser<'_> {
+	/// Parse a token value from the next token in the parser.
 	pub fn parse_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
 		let next = self.peek();
 		let res = V::from_token(self, next);
@@ -281,10 +283,12 @@ impl Parser<'_> {
 		res
 	}
 
+	/// Parse a token value from the given token.
 	pub fn token_value<V: TokenValue>(&mut self, token: Token) -> ParseResult<V> {
 		V::from_token(self, token)
 	}
 
+	/// Returns if the peeked token can be a identifier.
 	pub fn peek_can_be_ident(&mut self) -> bool {
 		matches!(
 			self.peek_kind(),
@@ -293,7 +297,6 @@ impl Parser<'_> {
 				| TokenKind::Algorithm(_)
 				| TokenKind::Distance(_)
 				| TokenKind::Identifier
-				| t!("{") | t!("[")
 		)
 	}
 }
