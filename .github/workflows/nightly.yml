@@ -34,6 +34,7 @@ jobs:
 
   crate:
     name: Publish surrealdb-nightly to crates.io
+    environment: crate-nightly
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
