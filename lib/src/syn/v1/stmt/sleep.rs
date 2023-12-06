@@ -17,9 +17,6 @@ pub fn sleep(i: &str) -> IResult<&str, SleepStatement> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::dbs::test::mock;
-	use crate::sql::Value;
-	use std::time::SystemTime;
 
 	#[test]
 	fn test_sleep_statement_sec() {
@@ -35,16 +32,5 @@ mod tests {
 		let res = sleep(sql);
 		let out = res.unwrap().1;
 		assert_eq!("SLEEP 500ms", format!("{}", out))
-	}
-
-	#[tokio::test]
-	async fn test_sleep_compute() {
-		let sql = "SLEEP 500ms";
-		let time = SystemTime::now();
-		let (ctx, opt, txn) = mock().await;
-		let (_, stm) = sleep(sql).unwrap();
-		let value = stm.compute(&ctx, &opt, &txn, None).await.unwrap();
-		assert!(time.elapsed().unwrap() >= time::Duration::microseconds(500));
-		assert_eq!(value, Value::None);
 	}
 }
