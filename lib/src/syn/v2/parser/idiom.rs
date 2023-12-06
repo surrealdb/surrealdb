@@ -1,12 +1,9 @@
 use crate::{
 	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
-	syn::v2::{
-		parser::mac::to_do,
-		token::{t, Span, TokenKind},
-	},
+	syn::v2::token::{t, Span, TokenKind},
 };
 
-use super::{mac::unexpected, ParseResult, Parser};
+use super::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser};
 
 impl Parser<'_> {
 	pub fn parse_fields(&mut self) -> ParseResult<Fields> {
@@ -82,12 +79,12 @@ impl Parser<'_> {
 				}
 				t!("..") => {
 					return Err(ParseError::new(
-						ParseErrorKind::UnexpectedSuggested {
+						ParseErrorKind::UnexpectedExplain {
 							found: t!(".."),
 							expected: "an idiom",
-							suggestion: "...",
+							explain: "Did you maybe mean the flatten operator `...`",
 						},
-						self.current_span(),
+						self.last_span(),
 					))
 				}
 				_ => break,
@@ -133,12 +130,12 @@ impl Parser<'_> {
 				}
 				t!("..") => {
 					return Err(ParseError::new(
-						ParseErrorKind::UnexpectedSuggested {
+						ParseErrorKind::UnexpectedExplain {
 							found: t!(".."),
 							expected: "an idiom",
-							suggestion: "...",
+							explain: "Did you maybe mean the flatten operator `...`",
 						},
-						self.current_span(),
+						self.last_span(),
 					))
 				}
 				_ => break,
@@ -318,17 +315,17 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!("...")) {
-			let span = self.current_span();
+			let span = self.last_span();
 			parts.push(Part::Flatten);
 			if let t!(".") | t!("[") = self.peek_kind() {
-				return Err(ParseError::new(ParseError::new(
-					ParseErrorKind::unexpectedExplain {
+				return Err(ParseError::new(
+					ParseErrorKind::UnexpectedExplain {
 						found: t!("..."),
 						expected: "local idiom to end.",
 						explain: "Flattening can only be done at the end of a local idiom.",
 					},
 					span,
-				)));
+				));
 			}
 		}
 

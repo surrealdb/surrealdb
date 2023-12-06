@@ -28,7 +28,7 @@ pub enum ParseErrorKind {
 	UnexpectedExplain {
 		found: TokenKind,
 		expected: &'static str,
-		explained: &'static str,
+		explain: &'static str,
 	},
 	/// The parser encountered an unexpected token.
 	UnexpectedEof {
@@ -102,11 +102,7 @@ impl ParseError {
 			} => {
 				let text = format!("Unexpected token '{}' expected {}", found.as_str(), expected);
 				let locations = Location::range_of_span(source, self.at);
-				let snippet = Snippet::from_source_location_range(
-					source,
-					locations,
-					Some(explain.to_string()),
-				);
+				let snippet = Snippet::from_source_location_range(source, locations, Some(explain));
 				RenderedError {
 					text,
 					snippets: vec![snippet],

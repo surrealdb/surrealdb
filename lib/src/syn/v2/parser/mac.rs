@@ -64,16 +64,6 @@ macro_rules! expected {
 	}};
 }
 
-/// A macro for indicating a path in the parser which is not yet implemented.
-macro_rules! to_do {
-	($parser:expr) => {
-		return Err($crate::syn::v2::parser::ParseError::new(
-			$crate::syn::v2::parser::ParseErrorKind::Todo,
-			$parser.last_span(),
-		))
-	};
-}
-
 #[cfg(test)]
 macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
@@ -83,7 +73,6 @@ macro_rules! test_parse {
 }
 
 pub(super) use expected;
-pub(super) use to_do;
 pub(super) use unexpected;
 
 #[cfg(test)]

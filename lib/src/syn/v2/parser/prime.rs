@@ -81,7 +81,7 @@ impl Parser<'_> {
 			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x))),
 			t!("fn") => self.parse_custom_function().map(|x| Value::Function(Box::new(x))),
 			t!("ml") => self.parse_model().map(|x| Value::MlModel(Box::new(x))),
-			_ => {
+			x => {
 				if !self.peek_can_be_ident() {
 					unexpected!(self, x, "a value")
 				}

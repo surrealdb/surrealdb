@@ -28,7 +28,6 @@ use parser::{ParseError, ParseErrorKind, Parser};
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	debug!("parsing query, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_query().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
@@ -37,7 +36,6 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn value(input: &str) -> Result<Value, Error> {
 	debug!("parsing value, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_value().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
@@ -46,7 +44,6 @@ pub fn value(input: &str) -> Result<Value, Error> {
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	debug!("parsing value, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.allow_legacy_strand(true);
 	parser.parse_value().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
@@ -56,7 +53,6 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
 	debug!("parsing json, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
@@ -65,7 +61,6 @@ pub fn json(input: &str) -> Result<Value, Error> {
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	debug!("parsing json, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.allow_legacy_strand(true);
 	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
@@ -74,7 +69,6 @@ pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn subquery(input: &str) -> Result<Subquery, Error> {
 	debug!("parsing subquery, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_full_subquery().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
@@ -83,7 +77,6 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	debug!("parsing idiom, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_plain_idiom().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
@@ -91,7 +84,6 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 /// Parse a datetime without enclosing delimiters from a string.
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	debug!("parsing datetime, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut lexer = Lexer::new(input.as_bytes());
 	lexer
 		.lex_datetime_raw_err()
@@ -108,7 +100,6 @@ pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 /// Parse a duration from a string.
 pub fn duration(input: &str) -> Result<Duration, Error> {
 	debug!("parsing duration, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut lexer = Lexer::new(input.as_bytes());
 	lexer
 		.lex_only_duration()
@@ -120,7 +111,6 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 /// Parse a range
 pub fn range(input: &str) -> Result<Range, Error> {
 	debug!("parsing range, input = {input}");
-	println!("{}", std::backtrace::Backtrace::force_capture());
 	let mut parser = Parser::new(input.as_bytes());
 	parser.parse_range().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
