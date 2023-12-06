@@ -23,7 +23,6 @@ defaults:
 jobs:
   crate:
     name: Publish surrealdb to crates.io
-    environment: crate-beta
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
