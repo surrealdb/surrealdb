@@ -50,6 +50,18 @@ args = [
 	"--skip", "ws_integration"
 ]
 
+
+[tasks.test-experimental-parser]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+args = [
+	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,experimental_parser", "--workspace", "--",
+	"--skip", "api_integration",
+	"--skip", "cli_integration",
+	"--skip", "http_integration",
+	"--skip", "ws_integration"
+]
+
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
@@ -199,7 +211,7 @@ script = """
 
     echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
     cat /tmp/tiup.log
-    
+
     exit 1
 """
 
