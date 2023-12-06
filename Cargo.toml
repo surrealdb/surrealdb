@@ -8,7 +8,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 # Public features
-default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
+default = ["storage-mem", "storage-rocksdb", "scripting", "http", "ml"]
 storage-mem = ["surrealdb/kv-mem", "has-storage"]
 storage-rocksdb = ["surrealdb/kv-rocksdb", "has-storage"]
 storage-speedb = ["surrealdb/kv-speedb", "has-storage"]
@@ -19,7 +19,7 @@ http = ["surrealdb/http"]
 http-compression = []
 # Private features
 has-storage = []
-ml = ["surrealml-core", "ndarray", "surrealdb/ml"]
+ml = ["surrealml-core", "surrealdb/ml"]
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]

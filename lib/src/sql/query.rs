@@ -1,6 +1,5 @@
 use crate::sql::fmt::Pretty;
 use crate::sql::statement::{Statement, Statements};
-use crate::sql::Value;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -28,12 +27,6 @@ impl IntoIterator for Query {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
-	}
-}
-
-impl From<Query> for Value {
-	fn from(q: Query) -> Self {
-		Value::Query(q)
 	}
 }
 

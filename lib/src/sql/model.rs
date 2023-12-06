@@ -2,15 +2,18 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::Action;
 use crate::sql::value::Value;
-use crate::sql::Permission;
 use derive::Store;
-use futures::future::try_join_all;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[cfg(feature = "ml")]
+use crate::iam::Action;
+#[cfg(feature = "ml")]
+use crate::sql::Permission;
+#[cfg(feature = "ml")]
+use futures::future::try_join_all;
 #[cfg(feature = "ml")]
 use std::collections::HashMap;
 #[cfg(feature = "ml")]
@@ -18,6 +21,7 @@ use surrealml_core::execution::compute::ModelComputation;
 #[cfg(feature = "ml")]
 use surrealml_core::storage::surml_file::SurMlFile;
 
+#[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -108,7 +112,7 @@ impl Model {
 						message: ARGUMENTS.into(),
 					})?;
 				// Get the model file as bytes
-				let bytes = crate::obs::cache::get(&val.hash).await?;
+				let bytes = crate::obs::get(&val.hash).await?;
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).unwrap();
@@ -131,7 +135,7 @@ impl Model {
 					message: ARGUMENTS.into(),
 				})?;
 				// Get the model file as bytes
-				let bytes = crate::obs::cache::get(&val.hash).await?;
+				let bytes = crate::obs::get(&val.hash).await?;
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
@@ -159,7 +163,7 @@ impl Model {
 						message: ARGUMENTS.into(),
 					})?;
 				// Get the model file as bytes
-				let bytes = crate::obs::cache::get(&val.hash).await?;
+				let bytes = crate::obs::get(&val.hash).await?;
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
@@ -191,6 +195,6 @@ impl Model {
 		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Thrown("ML is not enabled".to_string()))
+		Err(Error::Unimplemented("ML is not enabled".to_string()))
 	}
 }

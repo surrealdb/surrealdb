@@ -10,9 +10,9 @@ use crate::sql::{
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Thing, Uuid,
+	statements, Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression,
+	Function, Future, Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query,
+	Range, Regex, Statement, Statements, Strand, Subquery, Table, Thing, Uuid,
 };
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
@@ -501,6 +501,24 @@ impl From<Id> for Value {
 				Gen::Uuid => Id::uuid().into(),
 			},
 		}
+	}
+}
+
+impl From<Query> for Value {
+	fn from(q: Query) -> Self {
+		Value::Query(q)
+	}
+}
+
+impl From<statements::DefineStatement> for Value {
+	fn from(s: statements::DefineStatement) -> Self {
+		Value::Query(Query(Statements(vec![Statement::Define(s)])))
+	}
+}
+
+impl From<statements::RemoveStatement> for Value {
+	fn from(s: statements::RemoveStatement) -> Self {
+		Value::Query(Query(Statements(vec![Statement::Remove(s)])))
 	}
 }
 
