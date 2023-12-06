@@ -48,6 +48,7 @@ jobs:
       build-matrix: ${{ steps.set-matrix.outputs.build-matrix }}
       push-matrix: ${{ steps.set-matrix.outputs.push-matrix }}
     steps:
+
       - name: Check if AWS credentials are set
         id: aws-credentials
         run: |
@@ -77,7 +78,7 @@ jobs:
               - name: Binary image
                 dockerfile: Dockerfile.binary
                 platform: amd64
-                runner: ubuntu-latest-4-cores
+                runner: ["self-hosted", "amd64", "builder"]
                 tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-binary
               ########################################
               # Base images
@@ -88,12 +89,12 @@ jobs:
                 dockerfile: Dockerfile
                 build-target: prod
                 platform: amd64
-                runner: ubuntu-latest-4-cores
+                runner: ["self-hosted", "amd64", "builder"]
                 tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}
               # Prod ARM64 image
               - <<: *base_image
                 platform: arm64
-                runner: ["self-hosted", "arm64", "4-cores"]
+                runner: ["self-hosted", "arm64", "builder"]
                 tag: arm64-${{ steps.tag-prefix.outputs.tag-prefix }}
               # Dev AMD64 image
               - <<: *base_image
@@ -103,7 +104,7 @@ jobs:
               - <<: *base_image
                 build-target: dev
                 platform: arm64
-                runner: ["self-hosted", "arm64", "4-cores"]
+                runner: ["self-hosted", "arm64", "builder"]
                 tag: arm64-${{ steps.tag-prefix.outputs.tag-prefix }}-dev
 
               ########################################
@@ -115,7 +116,7 @@ jobs:
                 dockerfile: Dockerfile.fdb
                 build-target: prod
                 platform: amd64
-                runner: ubuntu-latest-4-cores
+                runner: ["self-hosted", "amd64", "builder"]
                 tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-fdb
               # Dev AMD64 image
               - <<: *fdb_image
@@ -188,6 +189,18 @@ jobs:
           mv _docker/.dockerignore .
           rm -rf _docker
 
+      - name: Cleanup
+        if: ${{ always() }}
+        run: |
+          set -x
+          set +e # Don't fail, do what we can
+          docker system prune -f
+          docker image prune -a -f
+
+          docker image ls
+          docker ps -a
+          df -h
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -241,6 +254,20 @@ jobs:
         run: |
           docker tag ${{ steps.build.outputs.imageid }} ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
           docker push ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
+      
+      - name: Cleanup
+        if: ${{ always() }}
+        run: |
+          set -x
+          set +e # Don't fail, do what we can
+          docker system prune -f
+          docker image rm ${{ steps.build.outputs.imageid }}
+          docker image rm ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
+          docker system prune -f
+
+          docker image ls
+          docker ps -a
+          df -h
 
   # Push a multi-arch manifest to the CI registry
   push-all-to-ecr-ci:

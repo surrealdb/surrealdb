@@ -46,3 +46,23 @@ impl fmt::Display for SleepStatement {
 		write!(f, "SLEEP {}", self.duration)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::dbs::test::mock;
+	use crate::sql::{Duration, Value};
+	use std::time::{self, SystemTime};
+
+	#[tokio::test]
+	async fn test_sleep_compute() {
+		let time = SystemTime::now();
+		let (ctx, opt, txn) = mock().await;
+		let stm = SleepStatement {
+			duration: Duration(time::Duration::from_micros(500)),
+		};
+		let value = stm.compute(&ctx, &opt, &txn, None).await.unwrap();
+		assert!(time.elapsed().unwrap() >= time::Duration::from_micros(500));
+		assert_eq!(value, Value::None);
+	}
+}

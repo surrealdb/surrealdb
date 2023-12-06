@@ -6,9 +6,9 @@ use super::{
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
-	character::complete::{char, multispace1},
+	character::complete::{char, multispace1, satisfy},
 	combinator::{eof, peek, value},
-	sequence::preceded,
+	sequence::{preceded, tuple},
 };
 
 pub fn number(i: &str) -> IResult<&str, ()> {
@@ -20,12 +20,21 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 		value((), char(')')),   // (1)
 		value((), char(']')),   // a[1]
 		value((), char('}')),   // {k: 1}
-		value((), char('"')),
-		value((), char('\'')),
-		value((), char(';')), // SET a = 1;
-		value((), char(',')), // [1, 2]
-		value((), tag("..")), // thing:1..2
-		value((), eof),       // SET a = 1
+		value((), char('"')),   // r"foo:1"
+		value((), char('\'')),  // r'foo:1'
+		value((), char(';')),   // SET a = 1;
+		value((), char(',')),   // [1, 2]
+		value((), char('[')),   // thing:1[foo]
+		value((), tag("..")),   // thing:1..2
+		value(
+			(),
+			tuple((
+				char('.'),
+				mightbespace,
+				satisfy(|x| x.is_alphanumeric() || x == '$' || x == '*'),
+			)),
+		), // thing:1.foo
+		value((), eof),         // SET a = 1
 	)))(i)
 }
 
