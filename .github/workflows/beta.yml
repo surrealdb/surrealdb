@@ -1,0 +1,99 @@
+name: Beta release
+
+run-name: "Beta release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        required: true
+        type: string
+        description: "The github ref of this beta version (i.e. main, 1234567)"
+        default: main
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the beta release"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  crate:
+    name: Publish surrealdb to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref || github.ref_name }}
+
+      - name: Install release-plz
+        run: cargo install --force --locked --version 0.3.30 release-plz
+
+      - name: Install Taplo
+        run: cargo install taplo-cli --locked
+
+      - name: Prepare beta crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -x
+
+          # Configure git
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+
+          # Bump the version
+          /home/runner/.cargo/bin/release-plz update --config .config/release-plz.toml
+          
+          # Save the new version
+          newVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          version=${newVersion}-beta.1
+          
+          # Stash the Cargo.toml
+          tempDir=$(mktemp -d /tmp/cargo-toml.XXXXXXXXXXXXXXXXXX)
+          mv lib/Cargo.toml $tempDir/
+
+          # Temporarily revert the change and create the tag
+          git checkout -- lib/Cargo.toml
+          git tag -a v${version} -m "Release ${version}"
+
+          # Unstash Cargo.toml
+          mv $tempDir/Cargo.toml lib/
+
+          # Replace the crate name
+          # We are just going to replace the first occurance of surrealdb
+          sed -i "0,/surrealdb/s//surrealdb-beta/" lib/Cargo.toml
+
+          # Commit changes
+          git checkout -b beta
+          git add lib/Cargo.toml
+          git commit -m "Prepare the beta crate"
+
+      - name: Perfom release checks
+        if: ${{ !inputs.publish }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: /home/runner/.cargo/bin/release-plz release --dry-run --config .config/release-plz.toml
+
+      - name: Publish the crate
+        if: ${{ inputs.publish }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          # Upload the crate
+          /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
+
+          # Push the new branch and tag
+          git remote add upstream https://tobiemh:${{ secrets.RELEASE_PLZ_TOKEN }}@github.com/surrealdb/surrealdb.git
+          git push upstream
+          git push upstream --tags
