@@ -2,6 +2,7 @@
 //! crate. This will enable the user to store objects using local file storage, or cloud storage such as S3 or GCS.
 use crate::err::Error;
 use bytes::Bytes;
+use futures::stream::BoxStream;
 use object_store::local::LocalFileSystem;
 use object_store::parse_url;
 use object_store::path::Path;
@@ -36,6 +37,16 @@ static CACHE: Lazy<LocalFileSystem> = Lazy::new(|| {
 	}
 	LocalFileSystem::new_with_prefix(path).unwrap()
 });
+
+/// Gets the file from the local file system object storage.
+pub async fn stream(
+	file: String,
+) -> Result<BoxStream<'static, Result<Bytes, object_store::Error>>, Error> {
+	match CACHE.get(&Path::from(file.as_str())).await {
+		Ok(data) => Ok(data.into_stream()),
+		_ => Ok(STORE.get(&Path::from(file.as_str())).await?.into_stream()),
+	}
+}
 
 /// Gets the file from the local file system object storage.
 pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
