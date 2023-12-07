@@ -168,7 +168,7 @@ jobs:
             betaNum=$(($betaNum + 1))
             version=${major}.${minor}.${betaNum}
             betaVersion=${major}.${minor}.${patchAndMeta}.${betaNum}
-            
+
             # Create the tag
             git tag -a v${betaVersion} -m "Release ${betaVersion}"
 
@@ -181,7 +181,7 @@ jobs:
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
             version=${major}.$(($minor + 1)).0
             betaVersion=${version}-beta.1
-            
+
             # Create the tag
             git tag -a v${betaVersion} -m "Release ${betaVersion}"
 
@@ -191,6 +191,7 @@ jobs:
           fi
 
       - name: Commit changes
+        if: ${{ inputs.environment == 'beta' }}
         run: git commit -am "Prepare release"
 
       - name: Patch beta crate version
