@@ -1,15 +1,12 @@
+# Use this workflow to trigger beta releases, both initial beta.1 and subsequent beta.x releases
+
 name: Beta release
 
-run-name: "Beta release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }})"
+run-name: "Beta release (publish: ${{ inputs.publish }})"
 
 on:
   workflow_dispatch:
     inputs:
-      git-ref:
-        required: true
-        type: string
-        description: "The github ref of this beta version (i.e. main, 1234567)"
-        default: main
       publish:
         required: false
         type: boolean
@@ -24,13 +21,27 @@ permissions:
   contents: write
 
 jobs:
+  checks:
+    name: Pre-release checks
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.outputs.outputs.branch }}
+    steps:
+      - name: Determine the correct branch
+        id: outputs
+        run: |
+          set -x
+          git branch -r | grep -w 'releases/beta' || (echo "branch=main" >> $GITHUB_OUTPUT && exit 0)
+          echo "branch=releases/beta" >> $GITHUB_OUTPUT
+
   release:
     name: Prepare beta release
+    needs: [checks]
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       name: beta
       environment: beta
-      git-ref: ${{ inputs.git-ref }}
+      git-ref: ${{ needs.checks.outputs.branch }}
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
     secrets: inherit

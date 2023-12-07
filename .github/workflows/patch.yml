@@ -1,3 +1,5 @@
+# Use this workflow to create a patch branch and use the release workflow to release the patch once ready
+
 name: Patch release
 
 run-name: "Patch release '${{ inputs.git-tag }}'"

@@ -1,3 +1,5 @@
+# This workflow triggers nightly releases
+
 name: Nightly release
 
 run-name: "Nightly release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
