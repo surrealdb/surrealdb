@@ -272,7 +272,7 @@ pub async fn ws_send_msg(socket: &mut WsStream, msg_req: String) -> Result<(), B
 		_ = time::sleep(time::Duration::from_millis(500)) => {
 			return Err("timeout after 500ms waiting for the request to be sent".into());
 		}
-		res = send_task => {
+		res = socket.send(Message::Text(msg_req)) => {
 			debug!("Message sent in {:?}", now.elapsed());
 			if let Err(err) = res {
 				return Err(format!("Error sending the message: {}", err).into());
@@ -291,7 +291,7 @@ pub async fn ws_recv_msg(socket: &mut WsStream) -> Result<serde_json::Value, Box
 /// This method captures all the expected messages before the given timeout. The result can be inspected later on to find the desired message.
 pub async fn ws_recv_all_msgs(
 	socket: &mut WsStream,
-	expected: usize,
+	expected: Option<usize>,
 	timeout: Duration,
 ) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
 	let mut res = Vec::new();
@@ -300,16 +300,20 @@ pub async fn ws_recv_all_msgs(
 		tokio::select! {
 			_ = time::sleep_until(deadline) => {
 				debug!("Waited for {:?} and received {} messages", timeout, res.len());
-				if res.len() != expected {
-					return Err(format!("Expected {} messages but got {} after {:?}: {:?}", expected, res.len(), timeout, res).into());
+				if let Some(expected) = expected {
+					 if res.len() != expected {
+						 return Err(format!("Expected {} messages but got {} after {:?}: {:?}", expected, res.len(), timeout, res).into());
+					 }
 				}
 			}
 			msg = ws_recv_msg(socket) => {
 				res.push(msg?);
 			}
 		}
-		if res.len() == expected {
-			return Ok(res);
+		if let Some(expected) = expected {
+			if res.len() == expected {
+				return Ok(res);
+			}
 		}
 	}
 }

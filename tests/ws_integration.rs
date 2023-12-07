@@ -5,20 +5,21 @@ mod ws_integration {
 	use futures_util::StreamExt;
 	use serde::Deserialize;
 	use std::ops::DerefMut;
-	use std::sync::mpsc::{Receiver, Sender};
+	use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 	use std::sync::{mpsc, Arc, RwLock};
 	use std::time::Duration;
 
 	use serde_json::json;
-	use surreal::cli;
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::method::Stream;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::sql::{Id, Thing};
 	use surrealdb::{Notification, Surreal};
 	use test_log::test;
-	use tokio::task::LocalSet;
+	use tokio::task::{JoinHandle, LocalSet};
+	use tokio::time::error::Elapsed;
 	use tokio::time::interval;
+	use tonic::codegen::StdError;
 	use ulid::Ulid;
 
 	use super::common::{self, PASS, USER};
@@ -501,7 +502,7 @@ mod ws_integration {
 		.await?;
 
 		// Verify we killed the query
-		let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(1000)).await?;
+		let msgs = common::ws_recv_all_msgs(socket, Some(1), Duration::from_millis(1000)).await?;
 		assert!(
 			msgs.iter().all(|v| v["error"].is_null()),
 			"Unexpected error received: {:#?}",
@@ -523,7 +524,7 @@ mod ws_integration {
 		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
 		// Wait some time for all messages to arrive, and then verify we didn't get any notification
-		let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(500)).await?;
+		let msgs = common::ws_recv_all_msgs(socket, Some(1), Duration::from_millis(500)).await?;
 		assert!(
 			msgs.iter().all(|v| v["error"].is_null()),
 			"Unexpected error received: {:#?}",
@@ -578,7 +579,7 @@ mod ws_integration {
 		.await?;
 
 		// Verify we killed the query
-		let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(1000)).await?;
+		let msgs = common::ws_recv_all_msgs(socket, Some(1), Duration::from_millis(1000)).await?;
 		assert!(
 			msgs.iter().all(|v| v["error"].is_null()),
 			"Unexpected error received: {:#?}",
@@ -600,7 +601,7 @@ mod ws_integration {
 		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
 		// Wait some time for all messages to arrive, and then verify we didn't get any notification
-		let msgs = common::ws_recv_all_msgs(socket, 1, Duration::from_millis(500)).await?;
+		let msgs = common::ws_recv_all_msgs(socket, Some(1), Duration::from_millis(500)).await?;
 		assert!(
 			msgs.iter().all(|v| v["error"].is_null()),
 			"Unexpected error received: {:#?}",
@@ -651,7 +652,7 @@ mod ws_integration {
 		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
 		// Wait some time for all messages to arrive, and then search for the notification message
-		let msgs = common::ws_recv_all_msgs(socket, 2, Duration::from_millis(500)).await;
+		let msgs = common::ws_recv_all_msgs(socket, Some(2), Duration::from_millis(500)).await;
 		assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
 		let msgs = msgs.unwrap();
 		assert!(
@@ -725,7 +726,7 @@ mod ws_integration {
 		common::ws_send_msg(socket, serde_json::to_string(&json).unwrap()).await?;
 
 		// Wait some time for all messages to arrive, and then search for the notification message
-		let msgs = common::ws_recv_all_msgs(socket, 2, Duration::from_millis(500)).await;
+		let msgs = common::ws_recv_all_msgs(socket, Some(2), Duration::from_millis(500)).await;
 		assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
 		let msgs = msgs.unwrap();
 		assert!(
@@ -1549,7 +1550,7 @@ mod ws_integration {
 		}
 
 		// Wait for queries to complete and verify they all completed within 2 seconds (assume they are executed concurrently)
-		let msgs = common::ws_recv_all_msgs(socket, 5, Duration::from_secs(2)).await;
+		let msgs = common::ws_recv_all_msgs(socket, Some(5), Duration::from_secs(2)).await;
 		assert!(msgs.is_ok(), "Error waiting for messages: {:?}", msgs.err());
 
 		let msgs = msgs.unwrap();
@@ -1619,21 +1620,23 @@ mod ws_integration {
 		let tb = table_name.to_string();
 		let sock = socket.clone();
 		let local_set = LocalSet::new();
-		let pt_publish = async move {
-			let mut interval = interval(Duration::from_millis(100));
-			loop {
-				interval.tick().await;
+		let messages = 100;
+		let pt_publish_creates = async move {
+			for _ in 0..messages {
 				let query = format!(
 					r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#,
 					tb.clone(),
 					Ulid::new().to_string()
 				);
+				let randid = uuid::Uuid::new_v4();
+				let randid = randid.as_u128().to_string();
 				let json = json!({
-					"id": "1",
+					"id": randid,
 					"method": "query",
 					"params": [query],
 				});
-				let mut write_lock = sock.write().unwrap();
+				let mut write_lock =
+					sock.write().map_err(|e| format!("Error getting write lock: {}", e)).unwrap();
 				common::ws_send_msg(write_lock.deref_mut(), serde_json::to_string(&json).unwrap())
 					.await
 					.unwrap();
@@ -1642,12 +1645,14 @@ mod ws_integration {
 		let sock = socket.clone();
 		let (pt_recv_send, pt_recv_recv): (Sender<serde_json::Value>, Receiver<serde_json::Value>) =
 			mpsc::channel();
-		let pt_receive = async move {
-			loop {
+
+		let pt_receive_create_resp = async move {
+			for _ in 0..messages {
+				// TODO incorrect
 				let vals = common::ws_recv_all_msgs(
 					sock.write().unwrap().deref_mut(),
-					1,
-					Duration::from_secs(1),
+					None,
+					Duration::from_secs(10),
 				)
 				.await
 				.unwrap();
@@ -1656,15 +1661,13 @@ mod ws_integration {
 				}
 			}
 		};
-		local_set.spawn_local(pt_publish);
-		local_set.spawn_local(pt_receive);
+		let pt_pub_task = local_set.spawn_local(pt_publish_creates);
+		let pt_recv_task = local_set.spawn_local(pt_receive_create_resp);
 
 		// Repeatedly create binary updates
 		let publish_binary = binary.clone();
 		let bin_publish = async move {
-			let mut interval = interval(Duration::from_millis(100));
-			loop {
-				interval.tick().await;
+			for _ in 0..messages {
 				let record = RecordId {
 					id: Thing::from((table_name, Id::uuid())),
 				};
@@ -1675,7 +1678,7 @@ mod ws_integration {
 					.unwrap();
 			}
 		};
-		let bin_task = tokio::spawn(bin_publish);
+		let bin_pub_task = tokio::spawn(bin_publish);
 
 		let (bin_recv_send, bin_recv_recv): (
 			Sender<Notification<RecordId>>,
@@ -1691,28 +1694,63 @@ mod ws_integration {
 		};
 		let bin_recv_task = tokio::spawn(bin_recv);
 
+		let mut total_msg_bin: Arc<RwLock<Vec<Notification<RecordId>>>> =
+			Arc::new(RwLock::new(vec![]));
+		let mut total_msg_pt: Arc<RwLock<Vec<serde_json::Value>>> = Arc::new(RwLock::new(vec![]));
+		let total_messages = (total_msg_bin.clone(), total_msg_pt.clone());
 		let check_messages = async move {
-			let mut total_msg_bin: Vec<Notification<RecordId>> = vec![];
-			let mut total_msg_pt: Vec<serde_json::Value> = vec![];
 			loop {
 				// blocking
-				match bin_recv_recv.recv() {
+				let bin_ended = match bin_recv_recv.try_recv() {
 					Ok(val) => {
-						total_msg_bin.push(val);
+						total_msg_bin.write().unwrap().push(val);
+						false
 					}
-					Err(e) => panic!("Error receiving message: {:?}", e),
-				}
+					Err(TryRecvError::Disconnected) => true,
+					Err(TryRecvError::Empty) => false,
+				};
 				// blocking
-				match pt_recv_recv.recv() {
+				let pt_ended = match pt_recv_recv.try_recv() {
 					Ok(val) => {
-						total_msg_pt.push(val);
+						total_msg_pt.write().unwrap().push(val);
+						false
 					}
-					Err(e) => panic!("Error receiving message: {:?}", e),
+					Err(TryRecvError::Disconnected) => true,
+					Err(TryRecvError::Empty) => false,
+				};
+				if bin_ended && pt_ended {
+					break;
 				}
-				tokio::time::sleep(Duration::from_millis(100)).await;
+				tokio::time::sleep(Duration::from_millis(1)).await;
 			}
 		};
-		tokio::join!(local_set, bin_task, bin_recv_task, check_messages);
+		let check_msg_task = tokio::spawn(check_messages);
+		match tokio::time::timeout(
+			Duration::from_secs(10),
+			task_join_async_clojure(
+				pt_pub_task,
+				pt_recv_task,
+				bin_pub_task,
+				bin_recv_task,
+				check_msg_task,
+			),
+		)
+		.await
+		{
+			Ok((a, b, c, d, e)) => {
+				a.unwrap();
+				b.unwrap();
+				c.unwrap();
+				d.unwrap();
+				e.unwrap();
+			}
+			Err(e) => {
+				panic!("Timed out waiting for test to complete");
+			}
+		}
+
+		assert_eq!(messages * 2, total_messages.0.read().unwrap().len());
+		assert_eq!(messages * 2, total_messages.1.read().unwrap().len());
 
 		Ok(())
 	}
@@ -1720,5 +1758,29 @@ mod ws_integration {
 	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 	struct RecordId {
 		id: Thing,
+	}
+
+	async fn task_join_async_clojure(
+		pt_pub_task: JoinHandle<()>,
+		pt_recv_task: JoinHandle<()>,
+		bin_pub_task: JoinHandle<()>,
+		bin_recv_task: JoinHandle<()>,
+		check_msg_task: JoinHandle<()>,
+	) -> (
+		Result<(), String>,
+		Result<(), String>,
+		Result<(), String>,
+		Result<(), String>,
+		Result<(), String>,
+	) {
+		let (res_ptp, res_ptr, res_binp, res_binr, res_chk) =
+			tokio::join!(pt_pub_task, pt_recv_task, bin_pub_task, bin_recv_task, check_msg_task);
+		(
+			res_ptp.map_err(|e| e.to_string()),
+			res_ptr.map_err(|e| e.to_string()),
+			res_binp.map_err(|e| e.to_string()),
+			res_binr.map_err(|e| e.to_string()),
+			res_chk.map_err(|e| e.to_string()),
+		)
 	}
 }
