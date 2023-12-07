@@ -23,50 +23,12 @@ defaults:
     shell: bash
 
 jobs:
-  nightly-branch:
-    name: Create nightly branch
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.git-ref || github.ref_name }}
-
-      - name:  Prepare nightly crate
-        run: |
-          # Get the date and time of the last commit
-          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
-          time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
-
-          # Update the version to a nightly one
-          # This sets the nightly version to something like `1.20231117.1130416`
-          # The 1 at the beginning of the patch number is just so it never starts with zero
-          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" Cargo.toml
-          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" lib/Cargo.toml
-
-          # Bump lock file without updating dependencies and ensure crate still compiles
-          cargo check --no-default-features --features storage-mem
-
-          # Commit changes
-          # We are not going to push these changes. We do this because
-          # some git commands `release-plz` runs do not work in detached state.
-          git config --local user.email "actions@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git checkout -b nightly
-          git commit -am 'Prepare nightly release'
-
   release:
     name: Prepare nightly release
-    needs: [nightly-branch]
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       name: nightly
       environment: nightly
-      git-ref: nightly
+      git-ref: ${{ inputs.git-ref || github.ref_name }}
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit

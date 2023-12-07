@@ -15,121 +15,19 @@ on:
         type: boolean
         default: false
         description: "Publish the beta release"
-      patch:
-        required: false
-        type: boolean
-        default: false
-        description: "Patch the current beta release"
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  beta-branch:
-    name: Create or patch the beta branch
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        if: ${{ !inputs.patch }}
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.git-ref }}
-
-      - name: Checkout beta sources
-        if: ${{ inputs.patch }}
-        uses: actions/checkout@v4
-        with:
-          ref: beta
-
-      - name: Install a TOML parser
-        run: cargo install --force --locked --version 0.8.1 taplo-cli
-
-      - name: Configure git
-        run: |
-          git config --local user.email "actions@users.noreply.github.com"
-          git config --local user.name "github-actions"
-
-      - name: Prepare new beta
-        if: ${{ !inputs.patch }}
-        run: |
-          set -x
-
-          # Calculate new version
-          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
-          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          version=${major}.$(($minor + 1)).0
-          betaVersion=${version}-beta.1
-          
-          # Create the tag
-          git tag -a v${betaVersion} -m "Release ${betaVersion}"
-
-          # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
-
-      - name: Patch beta
-        if: ${{ inputs.patch }}
-        run: |
-          set -x
-
-          # Calculate new version
-          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
-          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
-          betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-          betaNum=$(($betaNum + 1))
-          version=${major}.${minor}.${betaNum}
-          betaVersion=${major}.${minor}.${patchAndMeta}.${betaNum}
-          
-          # Create the tag
-          git tag -a v${betaVersion} -m "Release ${betaVersion}"
-
-          # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
-
-      - name: Commit changes
-        run: |
-          # Bump lock file without updating dependencies and ensure crate still compiles
-          cargo check --no-default-features --features storage-mem
-
-          # Commit changes
-          git checkout -b beta
-          git commit -am "Prepare release"
-
   release:
     name: Prepare beta release
-    needs: [beta-branch]
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       name: beta
       environment: beta
-      git-ref: beta
+      git-ref: ${{ inputs.git-ref }}
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
-    secrets: inherit
-
-  release-tag:
-    name: Push release tag
-    needs: [release]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: beta
-
-      - name: Push the new branch and tag
-        if: ${{ inputs.publish }}
-        run: |
-          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
-          git push upstream
-          git push upstream --tags
+    secrets: inherit     

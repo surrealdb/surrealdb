@@ -72,4 +72,4 @@ jobs:
         run: |
           git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
           git push upstream --tags
-          git push origin --delete ${{ inputs.branch }}
+          git push upstream --delete ${{ inputs.branch }}

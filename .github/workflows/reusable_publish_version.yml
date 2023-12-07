@@ -13,7 +13,7 @@ on:
       git-ref:
         required: true
         type: string
-        description: "The git ref of this release version. All non-crate 'actions/checkout' steps will use it"
+        description: "The git ref of this release version. All 'actions/checkout' steps will use it"
       latest:
         required: false
         type: boolean
@@ -128,8 +128,7 @@ jobs:
 
   crate:
     name: Publish crate to crates.io
-    needs: [test, lint]
-    environment: ${{ inputs.environment }}
+    needs: [test, lint, prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -145,22 +144,56 @@ jobs:
       - name: Install release-plz
         run: cargo install --force --locked --version 0.3.30 release-plz
 
-      - name: Patch crate name and description
-        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
-        run: |
-          set -x
-
-          # Patch crate name
-          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" lib/Cargo.toml
-
-          # Patch the description
-          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
-
       - name: Install a TOML parser
         if: ${{ inputs.environment == 'beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
-      - name: Patch crate version
+      - name: Configure git
+        run: |
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+
+      - name: Create or patch beta branch
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          if [[ $currentVersion == *"-beta"* ]]; then
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+            betaNum=$(($betaNum + 1))
+            version=${major}.${minor}.${betaNum}
+            betaVersion=${major}.${minor}.${patchAndMeta}.${betaNum}
+            
+            # Create the tag
+            git tag -a v${betaVersion} -m "Release ${betaVersion}"
+
+            # Bump the crate version
+            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+          else
+            git checkout -b beta
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            version=${major}.$(($minor + 1)).0
+            betaVersion=${version}-beta.1
+            
+            # Create the tag
+            git tag -a v${betaVersion} -m "Release ${betaVersion}"
+
+            # Bump the crate version
+            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+          fi
+
+      - name: Commit changes
+        run: git commit -am "Prepare release"
+
+      - name: Patch beta crate version
         if: ${{ inputs.environment == 'beta' }}
         run: |
           set -x
@@ -177,6 +210,29 @@ jobs:
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
 
+      - name:  Patch nightly crate version
+        if: ${{ inputs.environment == 'nightly' }}
+        run: |
+          # Get the date and time of the last commit
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
+
+          # Update the version to a nightly one
+          # This sets the nightly version to something like `1.20231117.1130416`
+          # The 1 at the beginning of the patch number is just so it never starts with zero
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" lib/Cargo.toml
+
+      - name: Patch crate name and description
+        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          # Patch crate name
+          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" lib/Cargo.toml
+
+          # Patch the description
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
+
       - name: Perfom release checks
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -187,6 +243,13 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
+
+      - name: Push the new branch and tag
+        if: ${{ inputs.publish }}
+        run: |
+          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
+          git push upstream
+          git push upstream --tags
 
   docker-build:
     name: Build Docker images
