@@ -181,6 +181,9 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
 
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
       - name: Commit changes
         if: ${{ inputs.environment == 'beta' }}
         run: git commit -am "Prepare release"
