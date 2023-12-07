@@ -34,9 +34,6 @@ defaults:
   run:
     shell: bash
 
-permissions:
-  contents: write
-
 jobs:
   prepare-vars:
     name: Prepare vars

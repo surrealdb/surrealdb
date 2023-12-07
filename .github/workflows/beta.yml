@@ -20,6 +20,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: write
+
 jobs:
   release:
     name: Prepare beta release
