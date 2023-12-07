@@ -27,12 +27,19 @@ jobs:
     outputs:
       branch: ${{ steps.outputs.outputs.branch }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Determine the correct branch
         id: outputs
         run: |
           set -x
-          git branch -r | grep -w 'releases/beta' || (echo "branch=main" >> $GITHUB_OUTPUT && exit 0)
-          echo "branch=releases/beta" >> $GITHUB_OUTPUT
+          if git branch -r | grep -w 'releases/beta'; then
+            echo "branch=releases/beta" >> $GITHUB_OUTPUT
+          else
+            echo "branch=main" >> $GITHUB_OUTPUT
+          fi
 
   release:
     name: Prepare beta release

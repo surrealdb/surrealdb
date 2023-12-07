@@ -24,6 +24,10 @@ jobs:
     name: Tag check
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Verify that the provided git_tag is a tag
         run: git tag -l | grep -w ${{ inputs.git-tag }} || (echo "The provided git_tag '${{ inputs.git-tag }}' is not a tag" && exit 1)
 
