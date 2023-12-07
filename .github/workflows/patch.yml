@@ -1,0 +1,69 @@
+name: Patch release
+
+run-name: "Patch release '${{ inputs.git-tag }}'"
+
+on:
+  workflow_dispatch:
+    inputs:
+      git-tag:
+        required: true
+        type: string
+        description: "The github tag of the release you want to patch (i.e. v1.0.0)."
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tag-check:
+    name: Tag check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify that the provided git_tag is a tag
+        run: git tag -l | grep -w ${{ inputs.git-tag }} || (echo "The provided git_tag '${{ inputs.git-tag }}' is not a tag" && exit 1)
+
+  patch-branch:
+    name: Create security patch branch
+    needs: [tag-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-tag }}
+
+      - name: Install a TOML parser
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Prepare patch branch
+        run: |
+          set -x
+
+          # Configure git
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+
+          # Calculate new version
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+          patch=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+          version=${major}.${minor}.$(($patch + 1))
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+          # Commit changes
+          git checkout -b ${major}.${minor}
+          git commit -am "Bump version"
+
+      - name: Push the new branch
+        run: |
+          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
+          git push upstream
