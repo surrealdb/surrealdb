@@ -1,4 +1,4 @@
-//! This file defines the endpoints for the ML API for uploading models and performing inference on the models for either raw tensors or buffered computes.
+//! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
 use super::headers::Accept;
 use crate::dbs::DB;
 use crate::err::Error;
