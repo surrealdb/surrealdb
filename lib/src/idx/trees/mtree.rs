@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -1398,6 +1398,15 @@ impl MTreeNode {
 					e.insert(p);
 				}
 			}
+		}
+	}
+}
+
+impl Display for MTreeNode {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			MTreeNode::Internal(i) => write!(f, "Internal: {i:?}"),
+			MTreeNode::Leaf(l) => write!(f, "Leaf: {l:?}"),
 		}
 	}
 }

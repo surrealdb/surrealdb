@@ -3,7 +3,7 @@ use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 pub struct TreeWrite<N>
@@ -19,9 +19,9 @@ where
 	out: HashSet<NodeId>,
 }
 
-impl<N: Debug> TreeWrite<N>
+impl<N> TreeWrite<N>
 where
-	N: TreeNode + Clone,
+	N: TreeNode + Clone + Debug + Display,
 {
 	pub(super) fn new(keys: TreeNodeProvider, cache: TreeCache<N>) -> Self {
 		Self {
@@ -49,23 +49,27 @@ where
 			}
 		}
 		if let Some(n) = self.nodes.remove(&node_id) {
+			#[cfg(debug_assertions)]
+			debug!("GET (NODES): {}", n.n);
 			return Ok(n);
 		}
 		let r = self.cache.get_node(tx, node_id).await?;
+		#[cfg(debug_assertions)]
+		debug!("GET (CACHE): {}", r.n);
 		Ok(StoredNode::new(r.n.clone(), r.id, r.key.clone(), r.size))
 	}
 
 	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
-			debug!("SET: {} {}", node.id, updated);
+			debug!("SET: {} {} ({}) {}", node.id, updated, self.updated.contains(&node.id), node.n);
 			self.out.remove(&node.id);
 		}
 		if updated {
 			self.updated.insert(node.id);
 		}
 		if self.removed.contains_key(&node.id) {
-			return Err(Error::Unreachable("TreeTransactionWrite::set_node"));
+			return Err(Error::Unreachable("TreeTransactionWrite::set_node(2)"));
 		}
 		self.nodes.insert(node.id, node);
 		Ok(())
@@ -98,6 +102,7 @@ where
 		let update = !self.updated.is_empty() || !self.removed.is_empty();
 		#[cfg(debug_assertions)]
 		{
+			debug!("finish");
 			if !self.out.is_empty() {
 				debug!("OUT: {:?}", self.out);
 				return Err(Error::Unreachable("TreeTransactionWrite::finish(1)"));
@@ -105,6 +110,8 @@ where
 		}
 		for node_id in &self.updated {
 			if let Some(node) = self.nodes.remove(node_id) {
+				#[cfg(debug_assertions)]
+				debug!("finish: tx.save {node_id}");
 				self.np.save(tx, node).await?;
 			} else {
 				return Err(Error::Unreachable("TreeTransactionWrite::finish(2)"));
@@ -114,6 +121,8 @@ where
 		let node_ids: Vec<NodeId> = self.removed.keys().copied().collect();
 		for node_id in node_ids {
 			if let Some(node_key) = self.removed.remove(&node_id) {
+				#[cfg(debug_assertions)]
+				debug!("finish: tx.del {node_id}");
 				tx.del(node_key).await?;
 			}
 		}

@@ -12,7 +12,7 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 pub type NodeId = u64;
@@ -29,7 +29,7 @@ where
 
 impl<N> TreeStore<N>
 where
-	N: TreeNode + Debug + Clone,
+	N: TreeNode + Debug + Display + Clone,
 {
 	pub async fn new(keys: TreeNodeProvider, cache: TreeCache<N>, tt: TransactionType) -> Self {
 		match tt {

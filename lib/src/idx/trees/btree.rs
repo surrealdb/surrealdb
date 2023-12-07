@@ -7,7 +7,7 @@ use crate::sql::{Object, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::marker::PhantomData;
 
@@ -170,6 +170,29 @@ where
 			}
 		}
 	}
+	#[cfg(debug_assertions)]
+	fn check(&self) {
+		match self {
+			BTreeNode::Internal(k, c) => {
+				if (k.len() + 1) as usize != c.len() {
+					panic!("{}", self);
+				}
+			}
+			BTreeNode::Leaf(_) => {}
+		}
+	}
+}
+
+impl<BK> Display for BTreeNode<BK>
+where
+	BK: BKeys + Clone,
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match self {
+			BTreeNode::Internal(k, c) => write!(f, "Internal - keys: {} - children: {:?}", k, c),
+			BTreeNode::Leaf(k) => write!(f, "Leaf - keys: {}", k),
+		}
+	}
 }
 
 struct SplitResult {
@@ -266,6 +289,8 @@ where
 			let new_root_id = self.state.new_node_id();
 			let new_root_node =
 				store.new_node(new_root_id, BTreeNode::Leaf(BK::with_key_val(key, payload)?))?;
+			#[cfg(debug_assertions)]
+			new_root_node.n.check();
 			store.set_node(new_root_node, true).await?;
 			self.state.set_root(Some(new_root_id));
 		}
@@ -292,6 +317,8 @@ where
 				BTreeNode::Internal(keys, children) => {
 					if keys.get(&key).is_some() {
 						keys.insert(key, payload);
+						#[cfg(debug_assertions)]
+						node.n.check();
 						store.set_node(node, true).await?;
 						return Ok(());
 					}
@@ -341,11 +368,17 @@ where
 		// Save the mutated split child with half the (lower) keys
 		let left_node_id = child_node.id;
 		let left_node = store.new_node(left_node_id, left_node)?;
+		#[cfg(debug_assertions)]
+		left_node.n.check();
 		store.set_node(left_node, true).await?;
 		// Save the new child with half the (upper) keys
 		let right_node = store.new_node(right_node_id, right_node)?;
+		#[cfg(debug_assertions)]
+		right_node.n.check();
 		store.set_node(right_node, true).await?;
 		// Save the parent node
+		#[cfg(debug_assertions)]
+		parent_node.n.check();
 		store.set_node(parent_node, true).await?;
 		Ok(SplitResult {
 			left_node_id,
@@ -389,9 +422,17 @@ where
 
 			while let Some((is_main_key, key_to_delete, node_id)) = next_node.take() {
 				let mut node = store.get_node_mut(tx, node_id).await?;
+				#[cfg(debug_assertions)]
+				debug!(
+					"Delete loop - n_id: {} - key: {}",
+					node_id,
+					String::from_utf8(key_to_delete.clone())?
+				);
 				match &mut node.n {
 					BTreeNode::Leaf(keys) => {
 						// CLRS: 1
+						#[cfg(debug_assertions)]
+						debug!("CLRS: 1");
 						if let Some(payload) = keys.get(&key_to_delete) {
 							if is_main_key {
 								deleted_payload = Some(payload);
@@ -405,6 +446,8 @@ where
 									self.state.set_root(None);
 								}
 							} else {
+								#[cfg(debug_assertions)]
+								node.n.check();
 								store.set_node(node, true).await?;
 							}
 						} else {
@@ -413,6 +456,8 @@ where
 					}
 					BTreeNode::Internal(keys, children) => {
 						// CLRS: 2
+						#[cfg(debug_assertions)]
+						debug!("CLRS: 2");
 						if let Some(payload) = keys.get(&key_to_delete) {
 							if is_main_key {
 								deleted_payload = Some(payload);
@@ -427,9 +472,13 @@ where
 								)
 								.await?,
 							);
+							#[cfg(debug_assertions)]
+							node.n.check();
 							store.set_node(node, true).await?;
 						} else {
 							// CLRS: 3
+							#[cfg(debug_assertions)]
+							debug!("CLRS: 3");
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
 								.deleted_traversal(
 									tx,
@@ -450,6 +499,8 @@ where
 								store.remove_node(node.id, node.key).await?;
 								self.state.set_root(Some(next_stored_node));
 							} else {
+								#[cfg(debug_assertions)]
+								node.n.check();
 								store.set_node(node, node_update).await?;
 							}
 							next_node.replace((is_main_key, key_to_delete, next_stored_node));
@@ -474,9 +525,13 @@ where
 		let mut left_node = store.get_node_mut(tx, left_id).await?;
 		if left_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
+			#[cfg(debug_assertions)]
+			debug!("CLRS: 2a");
 			if let Some((key_prim, payload_prim)) = left_node.n.keys().get_last_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
+				#[cfg(debug_assertions)]
+				left_node.n.check();
 				store.set_node(left_node, true).await?;
 				return Ok((false, key_prim, left_id));
 			}
@@ -487,9 +542,13 @@ where
 		let right_node = store.get_node_mut(tx, right_id).await?;
 		if right_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2b -> right_node is name `z` in the book
+			#[cfg(debug_assertions)]
+			debug!("CLRS: 2b");
 			if let Some((key_prim, payload_prim)) = right_node.n.keys().get_first_key() {
 				keys.remove(&key_to_delete);
 				keys.insert(key_prim.clone(), payload_prim);
+				#[cfg(debug_assertions)]
+				right_node.n.check();
 				store.set_node(left_node, false).await?;
 				store.set_node(right_node, true).await?;
 				return Ok((false, key_prim, right_id));
@@ -498,8 +557,14 @@ where
 
 		// CLRS: 2c
 		// Merge children
-		// The payload is set to 0. The value does not matter, as the key will be deleted after anyway.
+		// The payload is set to 0. The payload does not matter, as the key will be deleted after anyway.
+		#[cfg(debug_assertions)]
+		left_node.n.check();
+		#[cfg(debug_assertions)]
+		debug!("CLRS: 2c");
 		left_node.n.append(key_to_delete.clone(), 0, right_node.n)?;
+		#[cfg(debug_assertions)]
+		left_node.n.check();
 		store.set_node(left_node, true).await?;
 		store.remove_node(right_id, right_node.key).await?;
 		keys.remove(&key_to_delete);
@@ -517,6 +582,8 @@ where
 		is_main_key: bool,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
 		// CLRS 3a
+		#[cfg(debug_assertions)]
+		debug!("CLRS 3a");
 		let child_idx = keys.get_child_idx(&key_to_delete);
 		if child_idx >= children.len() {
 			return Err(Error::CorruptedIndex);
@@ -526,6 +593,8 @@ where
 		if child_stored_node.n.keys().len() < self.state.minimum_degree {
 			// right child (successor)
 			if child_idx < children.len() - 1 {
+				#[cfg(debug_assertions)]
+				debug!("right child (successor)");
 				let right_child_stored_node =
 					store.get_node_mut(tx, children[child_idx + 1]).await?;
 				return if right_child_stored_node.n.keys().len() >= self.state.minimum_degree {
@@ -541,6 +610,8 @@ where
 					.await
 				} else {
 					// CLRS 3b successor
+					#[cfg(debug_assertions)]
+					debug!("CLRS 3b successor");
 					Self::merge_nodes(
 						store,
 						keys,
@@ -557,6 +628,8 @@ where
 
 			// left child (predecessor)
 			if child_idx > 0 {
+				#[cfg(debug_assertions)]
+				debug!("left child (predecessor)");
 				let child_idx = child_idx - 1;
 				let left_child_stored_node = store.get_node_mut(tx, children[child_idx]).await?;
 				return if left_child_stored_node.n.keys().len() >= self.state.minimum_degree {
@@ -600,6 +673,8 @@ where
 		mut child_stored_node: BStoredNode<BK>,
 		mut right_child_stored_node: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
+		debug!("{}", child_stored_node.n);
+		debug!("{}", right_child_stored_node.n);
 		if let Some((ascending_key, ascending_payload)) =
 			right_child_stored_node.n.keys().get_first_key()
 		{
@@ -607,8 +682,19 @@ where
 			if let Some(descending_key) = keys.get_key(child_idx) {
 				if let Some(descending_payload) = keys.remove(&descending_key) {
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
+					if let BTreeNode::Internal(_, rc) = &mut right_child_stored_node.n {
+						if let BTreeNode::Internal(_, lc) = &mut child_stored_node.n {
+							lc.push(rc.remove(0))
+						}
+					}
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
+					debug!("{}", child_stored_node.n);
+					debug!("{}", right_child_stored_node.n);
+					#[cfg(debug_assertions)]
+					child_stored_node.n.check();
+					#[cfg(debug_assertions)]
+					right_child_stored_node.n.check();
 					store.set_node(child_stored_node, true).await?;
 					store.set_node(right_child_stored_node, true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
@@ -635,8 +721,18 @@ where
 			if let Some(descending_key) = keys.get_key(child_idx) {
 				if let Some(descending_payload) = keys.remove(&descending_key) {
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
+					if let BTreeNode::Internal(_, rc) = &mut left_child_stored_node.n {
+						if let BTreeNode::Internal(_, lc) = &mut child_stored_node.n {
+							lc.push(rc.remove(rc.len() - 1));
+						}
+					}
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
+					#[cfg(debug_assertions)]
+					{
+						child_stored_node.n.check();
+						left_child_stored_node.n.check();
+					}
 					store.set_node(child_stored_node, true).await?;
 					store.set_node(left_child_stored_node, true).await?;
 					return Ok((true, is_main_key, key_to_delete, child_id));
@@ -663,6 +759,8 @@ where
 				children.remove(child_idx + 1);
 				let left_id = left_child.id;
 				left_child.n.append(descending_key, descending_payload, right_child.n)?;
+				#[cfg(debug_assertions)]
+				left_child.n.check();
 				store.set_node(left_child, true).await?;
 				store.remove_node(right_child.id, right_child.key).await?;
 				return Ok((true, is_main_key, key_to_delete, left_id));
@@ -1414,7 +1512,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_term_id_bug() -> Result<(), Error> {
+	async fn test_delete_adjust() -> Result<(), Error> {
 		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<FstKeys>::new(BState::new(3));
 
@@ -1550,7 +1648,11 @@ mod tests {
 			st.finish(&mut tx).await.unwrap();
 			tx.commit().await.unwrap();
 		}
-		Ok(())
+		{
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 100).await;
+			print_tree(&mut tx, &mut st, &t).await;
+			Ok(())
+		}
 	}
 
 	/////////////
