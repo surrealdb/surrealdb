@@ -143,15 +143,7 @@ impl<T: ?Sized + Default> Default for Mutex<T> {
 
 impl<T: ?Sized> Drop for Mutex<T> {
 	fn drop(&mut self) {
-		unsafe {
-			let lock_state = LockState::Mutex(MutexLockState::MutexDestroyed {
-				name: self.name,
-				id: self.id,
-				event_id: Ulid::new(),
-			});
-			write_file(&lock_state);
-			LOCKS.remove(&self.id);
-		}
+		Mutex::<T>::lock_destroy_event(self.id, self.name);
 	}
 }
 

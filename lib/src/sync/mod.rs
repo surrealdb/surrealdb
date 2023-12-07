@@ -22,7 +22,6 @@ static mut LOCKS: Lazy<lockfree::map::Map<Ulid, LockState>> =
 	Lazy::new(|| lockfree::map::Map::new());
 
 static mut LOG: RealRwLock<Lazy<File>> = RealRwLock::new(Lazy::new(|| {
-	println!("\n\nCreating lock.csv\n\n");
 	let mut file = File::create("lock.csv").unwrap();
 	write_header(&mut file);
 	file
@@ -35,24 +34,43 @@ static mut BLOCKED_CHAN: AtomicBool = AtomicBool::new(false);
 fn write_header(bw: &mut File) {
 	println!("Writing header");
 	let header = format!(
-		"id,\
-		name,\
-		event_type,\
-		previous_event,
+		"\
+		timestamp\
+		,id\
+		,name\
+		,event_type\
+		,event_id\
+		,previous_event\
+		,current_event\
+		,metadata\
 		\n"
 	);
 	bw.write(header.as_bytes()).unwrap();
 }
 
-unsafe fn write_file(lock_state: &LockState) {
-	println!("Writing lock state");
-	let id = lock_state.id();
-	let name = lock_state.name();
-	let event_type = lock_state.to_string();
-	let previous_event =
-		lock_state.previous_event().map(|id| id.to_string()).unwrap_or("".to_string());
-	let msg = format!("{id},{name},{event_type},{previous_event}\n",);
-	write_file_raw(msg);
+pub fn write_file(lock_state: &LockState) {
+	unsafe {
+		let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+		let id = lock_state.id();
+		let name = lock_state.name();
+		let event_type = lock_state.to_string();
+		let event_id = lock_state.event_id().map_or("".to_string(), |id| id.to_string());
+		let previous_event =
+			lock_state.previous_event().map(|id| id.to_string()).unwrap_or("".to_string());
+		let current_event = id
+			.map(|id| LOCKS.get(id))
+			.flatten()
+			.map(|state| state.val().event_id().copied())
+			.flatten()
+			.map_or("".to_string(), |id| id.to_string());
+		let metadata = lock_state.metadata();
+
+		let id = id.map_or("".to_string(), |id| id.to_string());
+
+		let msg = format!(
+		"{timestamp},{id},{name},{event_type},{event_id},{previous_event},{current_event},{metadata}\n");
+		write_file_raw(msg);
+	}
 }
 
 unsafe fn write_file_raw(msg: String) {
@@ -62,13 +80,11 @@ unsafe fn write_file_raw(msg: String) {
 		// After the read something can come in and acquire the lock - it is a lockless read.
 		// But we don't care about it, as it is here only to prevent consecutive writes leading to
 		// infinite loop of consuming events during leader write.
-		println!("\n\nChecking blocked chan\n\n");
 		if let true = BLOCKED_CHAN.load(Ordering::Relaxed) {
 			// tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
 			sleep(std::time::Duration::from_millis(1));
 			continue;
 		}
-		println!("\n\nSending lock even msg\n\n");
 		match FILE_BUF_CHAN.0.try_send(msg.clone()) {
 			Ok(_) => {
 				break;
@@ -108,54 +124,62 @@ unsafe fn write_file_raw(msg: String) {
 	}
 }
 
-enum LockState {
+pub(crate) enum LockState {
 	RwLock(RwLockState),
 	Mutex(MutexLockState),
+	Metadata {
+		name: &'static str,
+		event_id: Ulid,
+		metadata: String,
+	},
 }
 
 impl LockState {
-	pub fn id(&self) -> &Ulid {
+	pub fn id(&self) -> Option<&Ulid> {
 		match self {
 			LockState::RwLock(RwLockState::RwLocked {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::RwLock(RwLockState::RwLockRequested {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::RwLock(RwLockState::RwUnlocked {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::RwLock(RwLockState::RwReadRequested {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::RwLock(RwLockState::RwReadLocked {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::Mutex(MutexLockState::MutexRequested {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::Mutex(MutexLockState::MutexLocked {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::Mutex(MutexLockState::MutexUnlocked {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::Mutex(MutexLockState::MutexDestroyed {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
 			LockState::RwLock(RwLockState::RwDestroyed {
 				id,
 				..
-			}) => id,
+			}) => Some(id),
+			LockState::Metadata {
+				..
+			} => None,
 		}
 	}
 
@@ -201,6 +225,59 @@ impl LockState {
 				name,
 				..
 			}) => name,
+			LockState::Metadata {
+				name,
+				..
+			} => name,
+		}
+	}
+
+	pub fn event_id(&self) -> Option<&Ulid> {
+		match self {
+			LockState::RwLock(RwLockState::RwLocked {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::RwLock(RwLockState::RwLockRequested {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::RwLock(RwLockState::RwUnlocked {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::RwLock(RwLockState::RwReadRequested {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::RwLock(RwLockState::RwReadLocked {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::Mutex(MutexLockState::MutexRequested {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::Mutex(MutexLockState::MutexLocked {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::Mutex(MutexLockState::MutexUnlocked {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::Mutex(MutexLockState::MutexDestroyed {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::RwLock(RwLockState::RwDestroyed {
+				event_id,
+				..
+			}) => Some(event_id),
+			LockState::Metadata {
+				event_id,
+				..
+			} => Some(event_id),
 		}
 	}
 
@@ -215,6 +292,16 @@ impl LockState {
 				..
 			}) => previous_guard,
 			_ => &None,
+		}
+	}
+
+	pub fn metadata(&self) -> &str {
+		match self {
+			LockState::Metadata {
+				metadata,
+				..
+			} => metadata,
+			_ => "",
 		}
 	}
 }
@@ -252,6 +339,11 @@ impl Display for LockState {
 			LockState::RwLock(RwLockState::RwDestroyed {
 				..
 			}) => f.write_str("RwDestroyed")?,
+			LockState::Metadata {
+				..
+			} => {
+				f.write_str("Metadata")?;
+			}
 		}
 		Ok(())
 	}

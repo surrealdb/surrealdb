@@ -15,8 +15,8 @@ use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_
 use crate::opt::auth::Root;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
-use crate::sync::Mutex;
 use crate::sync::RwLock;
+use crate::sync::{LockState, Mutex};
 use crate::vs::Oracle;
 use channel::{Receiver, Sender};
 use futures::Future;
@@ -29,6 +29,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::instrument;
 use tracing::trace;
+use ulid::Ulid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
@@ -998,6 +999,14 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
+		let query = ast.to_string();
+		let event_id = Ulid::new();
+		let lock_state = LockState::Metadata {
+			name: "datastore::process::enter",
+			event_id,
+			metadata: query.clone(),
+		};
+		crate::sync::write_file(&lock_state);
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
@@ -1035,7 +1044,14 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		let res = exe.execute(ctx, opt, ast).await;
+		let lock_state = LockState::Metadata {
+			name: "datastore::process::return",
+			event_id,
+			metadata: query,
+		};
+		crate::sync::write_file(&lock_state);
+		res
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -1204,13 +1220,6 @@ impl Datastore {
 	#[instrument(level = "debug", skip_all)]
 	pub fn notifications(&self) -> Option<Receiver<Notification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
-	}
-
-	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<Notification>>>> {
-		self.notification_channel
-			.as_ref()
-			.map(|v| Arc::new(RwLock::new(v.0.clone(), "ds.rs:live_sender")))
 	}
 
 	/// Performs a full database export as SQL

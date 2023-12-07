@@ -15,7 +15,7 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
-use crate::sync::Mutex;
+use crate::sync::{LockState, Mutex};
 use channel::Receiver;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -151,10 +151,18 @@ impl<'a> Executor<'a> {
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
+	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>, metadata: &str) {
 		let sender = ctx.notifications();
+		let event_id = ulid::Ulid::new();
+		let owned = metadata.to_owned();
 		spawn(async move {
 			while let Some(notification) = rcv.next().await {
+				let lock_state = LockState::Metadata {
+					name: "executor::send_notification",
+					event_id,
+					metadata: owned.clone(),
+				};
+				crate::sync::write_file(&lock_state);
 				if let Some(chn) = &sender {
 					if chn.send(notification).await.is_err() {
 						break;
@@ -248,7 +256,8 @@ impl<'a> Executor<'a> {
 				Statement::Commit(_) => {
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
-					self.flush(&ctx, recv.clone()).await;
+					let stm_str = stm.to_string();
+					self.flush(&ctx, recv.clone(), &stm_str).await;
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
 					self.txn = None;
@@ -280,6 +289,7 @@ impl<'a> Executor<'a> {
 									// Check if writeable
 									let writeable = stm.writeable();
 									// Set the parameter
+									let stm_str = stm.to_string();
 									ctx.add_value(stm.name, val);
 									// Finalise transaction, returning nothing unless it couldn't commit
 									if writeable {
@@ -293,7 +303,7 @@ impl<'a> Executor<'a> {
 											}
 											Ok(_) => {
 												// Flush live query notifications
-												self.flush(&ctx, recv.clone()).await;
+												self.flush(&ctx, recv.clone(), &stm_str).await;
 												Ok(Value::None)
 											}
 										}
@@ -361,7 +371,8 @@ impl<'a> Executor<'a> {
 										})
 									} else {
 										// Flush the live query change notifications
-										self.flush(&ctx, recv.clone()).await;
+										let stm_str = stm.to_string();
+										self.flush(&ctx, recv.clone(), &stm_str).await;
 										// Successful, committed result
 										res
 									}
