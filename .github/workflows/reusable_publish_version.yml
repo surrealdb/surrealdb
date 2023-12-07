@@ -34,6 +34,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: write
+
 jobs:
   prepare-vars:
     name: Prepare vars
@@ -152,6 +155,7 @@ jobs:
         run: |
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions"
+          git config --local --add --bool push.autoSetupRemote true
 
       - name: Create or patch beta branch
         if: ${{ inputs.environment == 'beta' }}
@@ -165,30 +169,20 @@ jobs:
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
             patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
             betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-            betaNum=$(($betaNum + 1))
-            version=${major}.${minor}.${betaNum}
-            betaVersion=${major}.${minor}.${patchAndMeta}.${betaNum}
-
-            # Create the tag
-            git tag -a v${betaVersion} -m "Release ${betaVersion}"
-
-            # Bump the crate version
-            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+            betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
           else
-            git checkout -b beta
+            git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            version=${major}.$(($minor + 1)).0
-            betaVersion=${version}-beta.1
-
-            # Create the tag
-            git tag -a v${betaVersion} -m "Release ${betaVersion}"
-
-            # Bump the crate version
-            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-            sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+            betaVersion=${major}.$(($minor + 1)).0-beta.1
           fi
+
+          # Create the tag
+          git tag -a v${betaVersion} -m "Release ${betaVersion}"
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
 
       - name: Commit changes
         if: ${{ inputs.environment == 'beta' }}
@@ -199,14 +193,12 @@ jobs:
         run: |
           set -x
 
-          # Calculate new version
+          # Derive crate version
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-          patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
           betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-          betaNum=$(($betaNum - 1))
-          version=${major}.${minor}.${betaNum}
+          version=${major}.${minor}.$(($betaNum - 1))
 
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
@@ -248,9 +240,8 @@ jobs:
       - name: Push the new branch and tag
         if: ${{ inputs.publish }}
         run: |
-          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
-          git push upstream
-          git push upstream --tags
+          git push
+          git push --tags
 
   docker-build:
     name: Build Docker images

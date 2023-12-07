@@ -9,7 +9,7 @@ on:
         required: true
         type: string
         description: "The github branch of this release."
-        default: beta
+        default: releases/beta
       latest:
         required: false
         type: boolean
@@ -24,6 +24,9 @@ on:
 defaults:
   run:
     shell: bash
+
+permissions:
+  contents: write
 
 jobs:
   release:
@@ -70,6 +73,5 @@ jobs:
       - name: Push the new tag and delete the release branch
         if: ${{ inputs.publish }}
         run: |
-          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
-          git push upstream --tags
-          git push upstream --delete ${{ inputs.branch }}
+          git push --tags
+          git push --delete ${{ inputs.branch }}

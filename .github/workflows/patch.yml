@@ -14,6 +14,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: write
+
 jobs:
   tag-check:
     name: Tag check
@@ -47,6 +50,7 @@ jobs:
           # Configure git
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions"
+          git config --local --add --bool push.autoSetupRemote true
 
           # Calculate new version
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
@@ -60,10 +64,8 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
 
           # Commit changes
-          git checkout -b ${major}.${minor}
+          git checkout -b patches/${major}.${minor}
           git commit -am "Bump version"
 
       - name: Push the new branch
-        run: |
-          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
-          git push upstream
+        run: git push
