@@ -307,9 +307,9 @@ fn parse_define_table() {
 						r: Value::Number(Number::Int(1))
 					}
 				))),
-				create: Permission::Full,
-				update: Permission::Full,
-				delete: Permission::Full,
+				create: Permission::None,
+				update: Permission::None,
+				delete: Permission::None,
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1)
@@ -341,7 +341,7 @@ fn parse_define_event() {
 fn parse_define_field() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#
+		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE FULL, FOR create WHERE true"#
 	).unwrap();
 
 	assert_eq!(
@@ -363,10 +363,10 @@ fn parse_define_field() {
 			assert: Some(Value::Bool(true)),
 			default: Some(Value::Bool(false)),
 			permissions: Permissions {
-				delete: Permission::None,
-				update: Permission::None,
+				delete: Permission::Full,
+				update: Permission::Full,
 				create: Permission::Specific(Value::Bool(true)),
-				select: Permission::Full,
+				select: Permission::None,
 			},
 			comment: None
 		}))
