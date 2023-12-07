@@ -66,7 +66,7 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 			return cut_off + 1;
 		}
 	}
-	return distance_array[b.len() & 1][a.len()];
+	distance_array[b.len() & 1][a.len()]
 }
 
 /// The kind of a parsed path.

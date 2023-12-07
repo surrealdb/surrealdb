@@ -158,7 +158,7 @@ impl Parser<'_> {
 			t!("NONE") => Ok(Permissions::none()),
 			t!("FULL") => Ok(Permissions::full()),
 			t!("FOR") => {
-				let mut permission = Permissions::default();
+				let mut permission = Permissions::none();
 				self.parse_specific_permission(&mut permission)?;
 				self.eat(t!(","));
 				while self.eat(t!("FOR")) {

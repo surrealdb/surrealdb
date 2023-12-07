@@ -9,7 +9,7 @@ use crate::{
 			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
 		},
 		tokenizer::Tokenizer,
-		Ident, Idioms, Index, Param, Scoring, Strand, Values,
+		Ident, Idioms, Index, Param, Permissions, Scoring, Strand, Values,
 	},
 	syn::v2::{
 		parser::{
@@ -263,6 +263,7 @@ impl Parser<'_> {
 		let name = self.parse_token_value()?;
 		let mut res = DefineTableStatement {
 			name,
+			permissions: Permissions::none(),
 			..Default::default()
 		};
 
@@ -357,6 +358,7 @@ impl Parser<'_> {
 		let mut res = DefineFieldStatement {
 			name,
 			what,
+			permissions: Permissions::none(),
 			..Default::default()
 		};
 
