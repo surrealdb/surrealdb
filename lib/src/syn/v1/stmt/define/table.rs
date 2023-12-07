@@ -6,7 +6,9 @@ use super::super::super::{
 	part::{changefeed, permission::permissions, view},
 	IResult,
 };
-use crate::sql::{statements::DefineTableStatement, ChangeFeed, Permissions, Strand, View};
+use crate::sql::{
+	statements::DefineTableStatement, ChangeFeed, Permission, Permissions, Strand, View,
+};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
@@ -21,6 +23,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	// Create the base statement
 	let mut res = DefineTableStatement {
 		name,
+		permissions: Permissions::none(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -116,7 +119,7 @@ fn table_comment(i: &str) -> IResult<&str, DefineTableOption> {
 
 fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = permissions(i)?;
+	let (i, v) = permissions(i, Permission::None)?;
 	Ok((i, DefineTableOption::Permissions(v)))
 }
 
@@ -127,7 +130,7 @@ mod tests {
 
 	#[test]
 	fn define_table_with_changefeed() {
-		let sql = "TABLE mytable SCHEMALESS CHANGEFEED 1h";
+		let sql = "TABLE mytable SCHEMALESS CHANGEFEED 1h PERMISSIONS NONE";
 		let res = table(sql);
 		let out = res.unwrap().1;
 		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));

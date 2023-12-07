@@ -79,6 +79,8 @@ impl Datastore {
 		opts.set_use_fsync(false);
 		// Only use warning log level
 		opts.set_log_level(LogLevel::Warn);
+		// Set the number of log files to keep
+		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		// Create database if missing
 		opts.create_if_missing(true);
 		// Create column families if missing

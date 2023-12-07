@@ -15,7 +15,6 @@ use surrealdb::{
 };
 use tower_http::auth::AsyncAuthorizeRequest;
 
-use crate::cli::CF;
 use crate::{dbs::DB, err::Error};
 
 use super::{
@@ -140,10 +139,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {
-		// Get local copy of options
-		let opt = CF.get().unwrap();
-
-		if opt.enable_auth_level {
+		if kvs.is_auth_level_enabled() {
 			basic(
 				kvs,
 				&mut session,

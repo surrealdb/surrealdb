@@ -23,6 +23,7 @@ mod cnf;
 mod dbs;
 mod env;
 mod err;
+mod mem;
 #[cfg(feature = "has-storage")]
 mod net;
 #[cfg(feature = "has-storage")]

@@ -102,7 +102,7 @@ nix profile install github:surrealdb/surrealdb
 You can target a specific branch, tag or commit by appending it to above commands separated by `/`. For example
 
 ```
-nix run github:surrealdb/surrealdb/v1.0.0-beta.9
+nix run github:surrealdb/surrealdb/v1.0.0
 ```
 
 If you just want to build the binary, without running it, you can use `nix build` instead of `nix run`. You will then find the binary in `result/bin`.
