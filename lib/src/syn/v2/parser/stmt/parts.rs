@@ -153,12 +153,16 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
-	pub fn parse_permission(&mut self) -> ParseResult<Permissions> {
+	pub fn parse_permission(&mut self, permissive: bool) -> ParseResult<Permissions> {
 		match self.next().kind {
 			t!("NONE") => Ok(Permissions::none()),
 			t!("FULL") => Ok(Permissions::full()),
 			t!("FOR") => {
-				let mut permission = Permissions::none();
+				let mut permission = if permissive {
+					Permissions::full()
+				} else {
+					Permissions::none()
+				};
 				self.parse_specific_permission(&mut permission)?;
 				self.eat(t!(","));
 				while self.eat(t!("FOR")) {

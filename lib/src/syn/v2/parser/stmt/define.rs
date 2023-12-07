@@ -287,7 +287,7 @@ impl Parser<'_> {
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = self.parse_permission()?;
+					res.permissions = self.parse_permission(false)?;
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
@@ -358,7 +358,6 @@ impl Parser<'_> {
 		let mut res = DefineFieldStatement {
 			name,
 			what,
-			permissions: Permissions::none(),
 			..Default::default()
 		};
 
@@ -387,7 +386,7 @@ impl Parser<'_> {
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = self.parse_permission()?;
+					res.permissions = self.parse_permission(true)?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

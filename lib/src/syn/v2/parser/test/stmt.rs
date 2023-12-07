@@ -341,7 +341,7 @@ fn parse_define_event() {
 fn parse_define_field() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE FULL, FOR create WHERE true"#
+		r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true"#
 	).unwrap();
 
 	assert_eq!(
@@ -363,10 +363,10 @@ fn parse_define_field() {
 			assert: Some(Value::Bool(true)),
 			default: Some(Value::Bool(false)),
 			permissions: Permissions {
-				delete: Permission::Full,
-				update: Permission::Full,
+				delete: Permission::None,
+				update: Permission::None,
 				create: Permission::Specific(Value::Bool(true)),
-				select: Permission::None,
+				select: Permission::Full,
 			},
 			comment: None
 		}))

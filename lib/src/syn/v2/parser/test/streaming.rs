@@ -49,7 +49,7 @@ static SOURCE: &str = r#"
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
-	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE FULL, FOR create WHERE true;
+	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true;
 	DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2) DOC_IDS_ORDER 1 DOC_LENGTHS_ORDER 2 POSTINGS_ORDER 3 TERMS_ORDER 4 HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
 	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7;
@@ -253,10 +253,10 @@ fn statements() -> Vec<Statement> {
 			assert: Some(Value::Bool(true)),
 			default: Some(Value::Bool(false)),
 			permissions: Permissions {
-				delete: Permission::Full,
-				update: Permission::Full,
+				delete: Permission::None,
+				update: Permission::None,
 				create: Permission::Specific(Value::Bool(true)),
-				select: Permission::None,
+				select: Permission::Full,
 			},
 			comment: None,
 		})),
