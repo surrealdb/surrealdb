@@ -1,6 +1,6 @@
 name: Beta release
 
-run-name: "Beta release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish }})"
+run-name: "Beta release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }})"
 
 on:
   workflow_dispatch:
@@ -15,14 +15,19 @@ on:
         type: boolean
         default: false
         description: "Publish the beta release"
+      patch:
+        required: false
+        type: boolean
+        default: false
+        description: "Patch the current beta release"
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  crate:
-    name: Publish surrealdb to crates.io
+  beta-branch:
+    name: Create or patch the beta branch
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -31,25 +36,29 @@ jobs:
           toolchain: stable
 
       - name: Checkout sources
+        if: ${{ !inputs.patch }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.git-ref || github.ref_name }}
+          ref: ${{ inputs.git-ref }}
 
-      - name: Install release-plz
-        run: cargo install --force --locked --version 0.3.30 release-plz
+      - name: Checkout beta sources
+        if: ${{ inputs.patch }}
+        uses: actions/checkout@v4
+        with:
+          ref: beta
 
-      - name: Install Taplo
-        run: cargo install taplo-cli --locked
+      - name: Install a TOML parser
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
 
-      - name: Prepare beta crate
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Configure git
         run: |
-          set -x
-
-          # Configure git
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions"
+
+      - name: Prepare new beta
+        if: ${{ !inputs.patch }}
+        run: |
+          set -x
 
           # Calculate new version
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
@@ -61,33 +70,66 @@ jobs:
           # Create the tag
           git tag -a v${betaVersion} -m "Release ${betaVersion}"
 
-          # Replace the crate name
-          # We are just going to replace the first occurance of surrealdb
-          sed -i "0,/surrealdb/s//surrealdb-beta/" lib/Cargo.toml
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+
+      - name: Patch beta
+        if: ${{ inputs.patch }}
+        run: |
+          set -x
+
+          # Calculate new version
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+          patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+          betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+          betaNum=$(($betaNum + 1))
+          version=${major}.${minor}.${betaNum}
+          betaVersion=${major}.${minor}.${patchAndMeta}.${betaNum}
+          
+          # Create the tag
+          git tag -a v${betaVersion} -m "Release ${betaVersion}"
 
           # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+
+      - name: Commit changes
+        run: |
+          # Bump lock file without updating dependencies and ensure crate still compiles
+          cargo check --no-default-features --features storage-mem
 
           # Commit changes
           git checkout -b beta
-          git add lib/Cargo.toml
-          git commit -m "Prepare the beta crate"
+          git commit -am "Prepare release"
 
-      - name: Perfom release checks
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: /home/runner/.cargo/bin/release-plz release --dry-run --config .config/release-plz.toml
+  release:
+    name: Prepare beta release
+    needs: [beta-branch]
+    uses: ./.github/workflows/reusable_publish_version.yml
+    with:
+      name: beta
+      environment: beta
+      git-ref: beta
+      publish: ${{ inputs.publish }}
+      create-release: ${{ inputs.publish }}
+    secrets: inherit
 
-      - name: Publish the crate
+  release-tag:
+    name: Push release tag
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+
+      - name: Push the new branch and tag
         if: ${{ inputs.publish }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          GIT_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
-          # Upload the crate
-          /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
-
-          # Push the new branch and tag
-          git remote add upstream https://tobiemh:${{ secrets.RELEASE_PLZ_TOKEN }}@github.com/surrealdb/surrealdb.git
+          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
           git push upstream
           git push upstream --tags

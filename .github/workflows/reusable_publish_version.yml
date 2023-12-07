@@ -6,10 +6,14 @@ on:
         required: false
         type: string
         description: "The name of this release version. It can be a 'nightly' version or a semver version that represents a tag (i.e. 'v1.0.0')"
+      environment:
+        required: true
+        type: string
+        description: "The name of this release environment. It can be a 'nightly', 'beta' or 'release'"
       git-ref:
         required: true
         type: string
-        description: "The git ref of this release version. All 'actions/checkout' steps will use it"
+        description: "The git ref of this release version. All non-crate 'actions/checkout' steps will use it"
       latest:
         required: false
         type: boolean
@@ -121,6 +125,68 @@ jobs:
 
       - name: Check clippy
         run: cargo make ci-clippy
+
+  crate:
+    name: Publish crate to crates.io
+    needs: [test, lint]
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Install release-plz
+        run: cargo install --force --locked --version 0.3.30 release-plz
+
+      - name: Patch crate name and description
+        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          # Patch crate name
+          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" lib/Cargo.toml
+
+          # Patch the description
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
+
+      - name: Install a TOML parser
+        if: ${{ inputs.environment == 'beta' }}
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Patch crate version
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          # Calculate new version
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+          patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+          betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+          betaNum=$(($betaNum - 1))
+          version=${major}.${minor}.${betaNum}
+
+          # Update crate version
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+      - name: Perfom release checks
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: /home/runner/.cargo/bin/release-plz release --dry-run --config .config/release-plz.toml
+
+      - name: Publish the crate
+        if: ${{ inputs.publish }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
 
   docker-build:
     name: Build Docker images
@@ -281,7 +347,7 @@ jobs:
     name: Publish artifacts binaries
     needs: [prepare-vars, test, lint, build, docker-build]
     if: ${{ inputs.publish }}
-    environment: ${{ needs.prepare-vars.outputs.name == 'nightly' && 'nightly' || 'release' }}
+    environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts

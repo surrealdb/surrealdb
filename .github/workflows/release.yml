@@ -1,61 +1,75 @@
-name: Tag release
+name: Stable release
 
-run-name: "Tag release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'push' }}, latest: ${{ inputs.latest || github.event_name == 'schedule' }})"
+run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
 
 on:
   workflow_dispatch:
     inputs:
-      git-ref:
+      branch:
         required: true
         type: string
-        description: "The github ref of this release. If you are publishing it, use a tag (i.e. v1.0.0)."
-        default: main
+        description: "The github branch of this release."
+        default: beta
       latest:
         required: false
         type: boolean
-        default: false
+        default: true
         description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
       publish:
         required: false
         type: boolean
         default: false
         description: "Publish the release"
-  push:
-    tags:
-      - "v*.*.*"
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  checks:
-    name: Pre-release checks
-    runs-on: ubuntu-latest
-    outputs:
-      is-beta: ${{ steps.outputs.outputs.is-beta }}
-    env:
-      GIT_REF: ${{ inputs.git-ref || github.ref_name }}
-    steps:
-      - name: Verify that the provided git_ref is a tag when 'publish' is true
-        if: ${{ inputs.publish || github.event_name == 'push' }}
-        id: outputs
-        run: |
-          set -x
-          git tag -l | grep -w $GIT_REF || (echo "The provided git_ref '$GIT_REF' is not a tag" && exit 1)
-          if [[ $GIT_REF == *"-beta"* ]]; then
-            echo "is-beta=true" >> $GITHUB_OUTPUT
-          else
-            echo "is-beta=false" >> $GITHUB_OUTPUT
-          fi
-
   release:
     name: Prepare release
-    needs: [checks]
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
-      git-ref: ${{ inputs.git-ref || github.ref_name }}
-      latest: ${{ inputs.latest || (github.event_name == 'push' && needs.checks.outputs.is-beta == 'false') }}
-      publish: ${{ inputs.publish || github.event_name == 'push' }}
-      create-release: ${{ inputs.publish || github.event_name == 'push' }}
+      environment: release
+      git-ref: ${{ inputs.branch }}
+      latest: ${{ inputs.latest }}
+      publish: ${{ inputs.publish }}
+      create-release: ${{ inputs.publish }}
     secrets: inherit
+
+  release-tag:
+    name: Push release tag
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Install a TOML parser
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Prepare tag
+        run: |
+          set -x
+
+          # Configure git
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+
+          # Create the tag
+          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          git tag -a v${version} -m "Release ${version}"
+
+      - name: Push the new tag and delete the release branch
+        if: ${{ inputs.publish }}
+        run: |
+          git remote add upstream https://tobiemh:${{ secrets.GITHUB_TOKEN }}@github.com/surrealdb/surrealdb.git
+          git push upstream --tags
+          git push origin --delete ${{ inputs.branch }}

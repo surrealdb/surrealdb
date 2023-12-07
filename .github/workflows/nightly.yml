@@ -23,17 +23,8 @@ defaults:
     shell: bash
 
 jobs:
-  release:
-    name: Prepare nightly release
-    uses: ./.github/workflows/reusable_publish_version.yml
-    with:
-      name: nightly
-      git-ref: ${{ inputs.git-ref || github.ref_name }}
-      publish: ${{ inputs.publish || github.event_name == 'schedule' }}
-    secrets: inherit
-
-  crate:
-    name: Publish surrealdb-nightly to crates.io
+  nightly-branch:
+    name: Create nightly branch
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -46,15 +37,8 @@ jobs:
         with:
           ref: ${{ inputs.git-ref || github.ref_name }}
 
-      - name: Install release-plz
-        run: cargo install --force --locked --version 0.3.30 release-plz
-
       - name:  Prepare nightly crate
         run: |
-          # Replace the crate name
-          # We are just going to replace the first occurance of surrealdb
-          sed -i "0,/surrealdb/s//surrealdb-nightly/" lib/Cargo.toml
-
           # Get the date and time of the last commit
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
           time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
@@ -62,29 +46,27 @@ jobs:
           # Update the version to a nightly one
           # This sets the nightly version to something like `1.20231117.1130416`
           # The 1 at the beginning of the patch number is just so it never starts with zero
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" Cargo.toml
           sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" lib/Cargo.toml
 
-          # Get the short commit
-          shortRev=$(git rev-parse --short HEAD)
-
-          # Update the description
-          sed -i "s#^description = \".*\"#description = \"A nightly release of the surrealdb crate based on commit ${shortRev}\"#" lib/Cargo.toml
+          # Bump lock file without updating dependencies and ensure crate still compiles
+          cargo check --no-default-features --features storage-mem
 
           # Commit changes
           # We are not going to push these changes. We do this because
           # some git commands `release-plz` runs do not work in detached state.
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git commit -am 'Prepare nightly release'
           git checkout -b nightly
+          git commit -am 'Prepare nightly release'
 
-      - name: Perfom release checks
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: /home/runner/.cargo/bin/release-plz release --dry-run --config .config/release-plz.toml
-
-      - name: Publish the crate
-        if: ${{ inputs.publish || github.event_name == 'schedule' }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
+  release:
+    name: Prepare nightly release
+    needs: [nightly-branch]
+    uses: ./.github/workflows/reusable_publish_version.yml
+    with:
+      name: nightly
+      environment: nightly
+      git-ref: nightly
+      publish: ${{ inputs.publish || github.event_name == 'schedule' }}
+    secrets: inherit
