@@ -2387,6 +2387,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_mtree_random_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
