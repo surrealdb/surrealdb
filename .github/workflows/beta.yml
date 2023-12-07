@@ -20,25 +20,9 @@ defaults:
   run:
     shell: bash
 
-permissions:
-  contents: write
-
 jobs:
-  upstream-test:
-    name: Test pushing to upstream
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.git-ref }}
-
-      - name: Push the new branch
-        run: git push upstream --delete releases/beta
-
   release:
     name: Prepare beta release
-    if: false
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       name: beta
