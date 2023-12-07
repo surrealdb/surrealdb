@@ -65,7 +65,7 @@ impl Datastore {
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
 		#[cfg(debug_assertions)]
-		let check = Check::Panic;
+		let check = Check::Warn;
 		// Create a new transaction
 		match self.db.begin(write).await {
 			Ok(inner) => Ok(Transaction {
