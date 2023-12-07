@@ -1864,6 +1864,21 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific model definition from a database.
+	pub async fn get_db_model(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ml: &str,
+		vn: &str,
+	) -> Result<DefineModelStatement, Error> {
+		let key = crate::key::database::ml::new(ns, db, ml, vn);
+		let val = self.get(key).await?.ok_or(Error::MlNotFound {
+			value: format!("{ml}<{vn}>"),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific database token definition.
 	pub async fn get_db_token(
 		&mut self,

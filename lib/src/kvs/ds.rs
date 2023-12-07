@@ -1232,9 +1232,29 @@ impl Datastore {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
-	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<Notification>>>> {
-		self.notification_channel.as_ref().map(|v| Arc::new(RwLock::new(v.0.clone())))
+	/// Checks the required permissions level for this session
+	#[instrument(level = "debug", skip(self, sess))]
+	pub async fn check(&self, sess: &Session) -> Result<(String, String), Error> {
+		// Ensure that a namespace was specified
+		let ns = match sess.ns.clone() {
+			Some(ns) => ns,
+			None => return Err(Error::NsEmpty),
+		};
+		// Ensure that a database was specified
+		let db = match sess.db.clone() {
+			Some(db) => db,
+			None => return Err(Error::DbEmpty),
+		};
+		// Skip auth for Anonymous users if auth is disabled
+		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
+		if !skip_auth {
+			sess.au.is_allowed(
+				Action::Edit,
+				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
+			)?;
+		}
+		// All ok
+		Ok((ns, db))
 	}
 
 	/// Performs a full database export as SQL
@@ -1242,15 +1262,10 @@ impl Datastore {
 	pub async fn export(
 		&self,
 		sess: &Session,
-		ns: String,
-		db: String,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
-		// Skip auth for Anonymous users if auth is disabled
-		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
-		if !skip_auth {
-			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
-		}
+		// Check the permissions level
+		let (ns, db) = self.check(sess).await?;
 		// Create a new readonly transaction
 		let mut txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
@@ -1265,14 +1280,8 @@ impl Datastore {
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", skip(self, sess, sql))]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
-		// Skip auth for Anonymous users if auth is disabled
-		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
-		if !skip_auth {
-			sess.au.is_allowed(
-				Action::Edit,
-				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
-			)?;
-		}
+		// Check the permissions level
+		let _ = self.check(sess).await?;
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}

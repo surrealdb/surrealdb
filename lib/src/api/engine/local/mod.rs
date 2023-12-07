@@ -402,14 +402,8 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn export(
-	kvs: &Datastore,
-	sess: &Session,
-	ns: String,
-	db: String,
-	chn: channel::Sender<Vec<u8>>,
-) -> Result<()> {
-	if let Err(error) = kvs.export(sess, ns, db, chn).await?.await {
+async fn export(kvs: &Datastore, sess: &Session, chn: channel::Sender<Vec<u8>>) -> Result<()> {
+	if let Err(error) = kvs.export(sess, chn).await?.await {
 		if let crate::error::Db::Channel(message) = error {
 			// This is not really an error. Just logging it for improved visibility.
 			trace!("{message}");
@@ -563,8 +557,6 @@ async fn router(
 		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
-			let ns = session.ns.clone().unwrap_or_default();
-			let db = session.db.clone().unwrap_or_default();
 			let (tx, rx) = crate::channel::bounded(1);
 
 			match (param.file, param.bytes_sender) {
@@ -572,7 +564,7 @@ async fn router(
 					let (mut writer, mut reader) = io::duplex(10_240);
 
 					// Write to channel.
-					let export = export(kvs, session, ns, db, tx);
+					let export = export(kvs, session, tx);
 
 					// Read from channel and write to pipe.
 					let bridge = async move {
@@ -613,7 +605,7 @@ async fn router(
 					let session = session.clone();
 					tokio::spawn(async move {
 						let export = async {
-							if let Err(error) = export(&kvs, &session, ns, db, tx).await {
+							if let Err(error) = export(&kvs, &session, tx).await {
 								let _ = backup.send(Err(error)).await;
 							}
 						};
