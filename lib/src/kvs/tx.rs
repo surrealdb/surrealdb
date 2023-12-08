@@ -2233,7 +2233,7 @@ impl Transaction {
 				unreachable!();
 			}
 		} else {
-			let val = self.get(key.clone()).await?.ok_or(Error::FcNotFound {
+			let val = self.get(key.clone()).await?.ok_or(Error::MlNotFound {
 				value: format!("{ml}<{vn}>"),
 			})?;
 			let val: Arc<DefineModelStatement> = Arc::new(val.into());
