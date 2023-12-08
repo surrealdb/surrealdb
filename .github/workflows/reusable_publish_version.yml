@@ -246,7 +246,10 @@ jobs:
         run: git reset --hard HEAD~1
 
       - name: Push the new branch and tag
-        run: git push
+        if: ${{ inputs.publish }}
+        run: |
+          git push
+          git push --tags
 
   docker-build:
     name: Build Docker images
