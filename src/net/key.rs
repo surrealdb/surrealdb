@@ -68,7 +68,7 @@ where
 
 async fn select_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -88,7 +88,7 @@ async fn select_all(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -105,7 +105,7 @@ async fn select_all(
 
 async fn create_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 	body: Bytes,
@@ -127,7 +127,7 @@ async fn create_all(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -147,7 +147,7 @@ async fn create_all(
 
 async fn update_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 	body: Bytes,
@@ -169,7 +169,7 @@ async fn update_all(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -189,7 +189,7 @@ async fn update_all(
 
 async fn modify_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 	body: Bytes,
@@ -211,7 +211,7 @@ async fn modify_all(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -231,7 +231,7 @@ async fn modify_all(
 
 async fn delete_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -246,7 +246,7 @@ async fn delete_all(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -267,7 +267,7 @@ async fn delete_all(
 
 async fn select_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -291,7 +291,7 @@ async fn select_one(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -308,7 +308,7 @@ async fn select_one(
 
 async fn create_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
 	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
@@ -336,7 +336,7 @@ async fn create_one(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -356,7 +356,7 @@ async fn create_one(
 
 async fn update_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
 	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
@@ -384,7 +384,7 @@ async fn update_one(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -404,7 +404,7 @@ async fn update_one(
 
 async fn modify_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
 	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
@@ -432,7 +432,7 @@ async fn modify_one(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -452,7 +452,7 @@ async fn modify_one(
 
 async fn delete_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
@@ -471,7 +471,7 @@ async fn delete_one(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),

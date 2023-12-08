@@ -32,7 +32,7 @@ where
 
 async fn handler(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	sql: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
@@ -41,15 +41,15 @@ async fn handler(
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the sql query in the database
 	match db.import(sql, &session).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
 			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
-			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// Return nothing
 			Some(Accept::ApplicationOctetStream) => Ok(output::none()),
+			// Internal serialization
+			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(Error::InvalidType),
 		},
