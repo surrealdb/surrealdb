@@ -57,11 +57,34 @@ jobs:
           git config --local user.name "github-actions"
           git config --local --add --bool push.autoSetupRemote true
 
-      - name: Prepare release tag
+      - name: Patch release version
         if: ${{ inputs.publish && inputs.environment == 'release' }}
         run: |
           set -x
-          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          if [[ $currentVersion == *"-beta"* ]]; then
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+            version=${major}.${minor}.$(($betaNum - 1))
+
+            # Bump the crate version
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+            # Update Cargo.lock without updating dependency versions
+            cargo check --no-default-features --features storage-mem
+
+            # Commit changes
+            git commit -am "Prepare release"
+            git push
+          else
+            version=${currentVersion}
+          fi
+
+          # Create the tag
           git tag -a v${version} -m "Release ${version}"
 
       - name: Create or patch beta branch
@@ -84,9 +107,6 @@ jobs:
             betaVersion=${major}.$(($minor + 1)).0-beta.1
           fi
 
-          # Create the tag
-          git tag -a v${betaVersion} -m "Release ${betaVersion}"
-
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
@@ -97,6 +117,9 @@ jobs:
           # Commit changes
           git commit -am "Prepare release"
           git push
+
+          # Create the tag
+          git tag -a v${betaVersion} -m "Release ${betaVersion}"
 
       - name: Push the new tag
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}

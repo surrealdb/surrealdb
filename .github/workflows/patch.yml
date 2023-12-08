@@ -69,6 +69,9 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
 
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
           # Commit changes
           git checkout -b patches/${major}.${minor}
           git commit -am "Bump version"
