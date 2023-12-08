@@ -43,6 +43,8 @@ async fn import(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session).await?;
 	// Create a new buffer
 	let mut buffer = Vec::new();
 	// Load all the uploaded file chunks
