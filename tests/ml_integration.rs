@@ -5,10 +5,8 @@ mod common;
 mod ml_integration {
 
 	use super::*;
-	use http::header;
-	use hyper::body::to_bytes;
-	use hyper::{Body, Request};
-	use hyper::{Client, Uri};
+	use http::{header, StatusCode};
+	use hyper::Body;
 	use serde::{Deserialize, Serialize};
 	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::time::Duration;
@@ -44,17 +42,26 @@ mod ml_integration {
 		}
 	}
 
-	async fn upload_file(uri: Uri) -> Result<(), Box<dyn std::error::Error>> {
-		let client = Client::new();
+	async fn upload_file(addr: &str, ns: &str, db: &str) -> Result<(), Box<dyn std::error::Error>> {
 		let generator = StreamAdapter::new(5, "./tests/linear_test.surml".to_string());
 		let body = Body::wrap_stream(generator);
-		let req = Request::post(uri).body(body)?;
-		let response = client.request(req).await?;
-		let body_bytes = to_bytes(response.into_body()).await?;
-
-		// assert the response is correct
-		let body_string = String::from_utf8(body_bytes.to_vec())?;
-		assert_eq!(body_string, "Prediction-0.0.1");
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_secs(1))
+			.default_headers(headers)
+			.build()?;
+		// Send HTTP request
+		let res = client
+			.post(format!("http://{addr}/ml/import"))
+			.basic_auth(common::USER, Some(common::PASS))
+			.body(body)
+			.send()
+			.await?;
+		// Check response code
+		assert_eq!(res.status(), StatusCode::OK);
 		Ok(())
 	}
 
@@ -62,8 +69,9 @@ mod ml_integration {
 	async fn upload_model() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let uri: Uri = format!("http://{addr}/ml/import").parse()?;
-		upload_file(uri).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		upload_file(&addr, &ns, &db).await?;
 		Ok(())
 	}
 
@@ -71,11 +79,11 @@ mod ml_integration {
 	async fn raw_compute() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let uri: Uri = format!("http://{addr}/ml/import").parse()?;
-		upload_file(uri).await?;
 
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
+
+		upload_file(&addr, &ns, &db).await?;
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
@@ -92,7 +100,7 @@ mod ml_integration {
 			let res = client
 				.post(format!("http://{addr}/sql"))
 				.basic_auth(common::USER, Some(common::PASS))
-				.body(r#"ml::Prediction<0.0.1>(1.0, 1.0);"#)
+				.body(r#"ml::Prediction<0.0.1>([1.0, 1.0]);"#)
 				.send()
 				.await?;
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
@@ -107,11 +115,11 @@ mod ml_integration {
 	async fn buffered_compute() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let uri: Uri = format!("http://{addr}/ml/import").parse()?;
-		upload_file(uri).await?;
 
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
+
+		upload_file(&addr, &ns, &db).await?;
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
