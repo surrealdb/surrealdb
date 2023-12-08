@@ -17,26 +17,40 @@ use url::Url;
 static STORE: Lazy<Arc<dyn ObjectStore>> =
 	Lazy::new(|| match std::env::var("SURREAL_OBJECT_STORE") {
 		Ok(url) => {
-			let url = Url::parse(&url).unwrap();
-			let (store, _) = parse_url(&url).unwrap();
+			let url = Url::parse(&url).expect("Expected a valid url for SURREAL_OBJECT_STORE");
+			let (store, _) =
+				parse_url(&url).expect("Expected a valid url for SURREAL_OBJECT_STORE");
 			Arc::new(store)
 		}
 		Err(_) => {
 			let path = env::current_dir().unwrap().join("store");
 			if !path.exists() {
-				fs::create_dir_all(&path).unwrap();
+				fs::create_dir_all(&path)
+					.expect("Unable to create directory structure for SURREAL_OBJECT_STORE");
 			}
+			// As long as the provided path is correct, the following should never panic
 			Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
 		}
 	});
 
-static CACHE: Lazy<LocalFileSystem> = Lazy::new(|| {
-	let path = env::current_dir().unwrap().join("cache");
-	if !path.exists() {
-		fs::create_dir_all(&path).unwrap();
-	}
-	LocalFileSystem::new_with_prefix(path).unwrap()
-});
+static CACHE: Lazy<Arc<dyn ObjectStore>> =
+	Lazy::new(|| match std::env::var("SURREAL_OBJECT_CACHE") {
+		Ok(url) => {
+			let url = Url::parse(&url).expect("Expected a valid url for SURREAL_OBJECT_CACHE");
+			let (store, _) =
+				parse_url(&url).expect("Expected a valid url for SURREAL_OBJECT_CACHE");
+			Arc::new(store)
+		}
+		Err(_) => {
+			let path = env::current_dir().unwrap().join("cache");
+			if !path.exists() {
+				fs::create_dir_all(&path)
+					.expect("Unable to create directory structure for SURREAL_OBJECT_CACHE");
+			}
+			// As long as the provided path is correct, the following should never panic
+			Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
+		}
+	});
 
 /// Gets the file from the local file system object storage.
 pub async fn stream(
