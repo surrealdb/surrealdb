@@ -80,7 +80,6 @@ ipnet = "2.9.0"
 js = { version = "=0.4.0-beta.4", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 lexicmp = "0.1.0"
-lru = "0.12.1"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 native-tls = { version = "0.2.11", optional = true }
