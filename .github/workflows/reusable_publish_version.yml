@@ -48,7 +48,6 @@ jobs:
           ref: ${{ inputs.git-ref || github.ref_name }}
 
       - name: Install a TOML parser
-        if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
       - name: Configure git
