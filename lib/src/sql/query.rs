@@ -1,5 +1,6 @@
 use crate::sql::fmt::Pretty;
 use crate::sql::statement::{Statement, Statements};
+use crate::sql::statements::{DefineStatement, RemoveStatement};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,18 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 #[revisioned(revision = 1)]
 #[serde(rename = "$surrealdb::private::sql::Query")]
 pub struct Query(pub Statements);
+
+impl From<DefineStatement> for Query {
+	fn from(s: DefineStatement) -> Self {
+		Query(Statements(vec![Statement::Define(s)]))
+	}
+}
+
+impl From<RemoveStatement> for Query {
+	fn from(s: RemoveStatement) -> Self {
+		Query(Statements(vec![Statement::Remove(s)]))
+	}
+}
 
 impl Deref for Query {
 	type Target = Vec<Statement>;

@@ -255,6 +255,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },

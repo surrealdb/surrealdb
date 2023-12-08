@@ -107,6 +107,12 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("functions".to_owned(), tmp.into());
+				// Process the models
+				let mut tmp = Object::default();
+				for v in run.all_db_models(opt.ns(), opt.db()).await?.iter() {
+					tmp.insert(format!("{}<{}>", v.name, v.version), v.to_string().into());
+				}
+				res.insert("models".to_owned(), tmp.into());
 				// Process the params
 				let mut tmp = Object::default();
 				for v in run.all_db_params(opt.ns(), opt.db()).await?.iter() {

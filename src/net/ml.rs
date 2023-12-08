@@ -63,7 +63,7 @@ async fn import(
 	// Insert the file data in to the store
 	surrealdb::obs::put(&hash, data).await?;
 	// Insert the model in to the database
-	db.compute(
+	db.process(
 		DefineStatement::Model(DefineModelStatement {
 			hash,
 			name: file.header.name.to_string().into(),
