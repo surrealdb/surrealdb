@@ -68,6 +68,7 @@ async fn import(
 			hash,
 			name: file.header.name.to_string().into(),
 			version: file.header.version.to_string(),
+			comment: Some(file.header.description.to_string().into()),
 			..Default::default()
 		})
 		.into(),
