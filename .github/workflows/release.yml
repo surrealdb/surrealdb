@@ -1,27 +1,16 @@
-# Use this workflow to trigger stable releases, both minor releases and patches
+# Use this workflow to create a patch branch and use the release workflow to release the patch once ready
 
-name: Stable release
+name: Patch release
 
-run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }})"
+run-name: "Patch release '${{ inputs.git-tag }}'"
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
+      git-tag:
         required: true
         type: string
-        description: "The github branch of this release. Should be 'releases/beta' or 'patches/x.y'"
-        default: releases/beta
-      latest:
-        required: false
-        type: boolean
-        default: false
-        description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
-      publish:
-        required: false
-        type: boolean
-        default: false
-        description: "Publish the release"
+        description: "The github tag of the release you want to patch (i.e. v1.0.0)."
 
 defaults:
   run:
@@ -31,42 +20,61 @@ permissions:
   contents: write
 
 jobs:
-  checks:
-    name: Pre-release checks
+  tag-check:
+    name: Tag check
     runs-on: ubuntu-latest
     steps:
-      - name: Verify that the provided branch is either a release branch or a patch branch
-        run: |
-          set -x
-          if [[ "${{ inputs.branch }}" == "releases/beta" || "${{ inputs.branch }}" == "patches/"* ]]; then
-            exit 0
-          else
-            echo "Branch should either be 'releases/beta' or 'patches/x.y'"
-            exit 1
-          fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-  release:
-    name: Prepare release
-    needs: [checks]
-    uses: ./.github/workflows/reusable_publish_version.yml
-    with:
-      environment: release
-      git-ref: ${{ inputs.branch }}
-      latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
-      publish: ${{ inputs.publish }}
-      create-release: ${{ inputs.publish }}
-    secrets: inherit
+      - name: Verify that the provided git_tag is a tag
+        run: git tag -l | grep -w ${{ inputs.git-tag }} || (echo "The provided git_tag '${{ inputs.git-tag }}' is not a tag" && exit 1)
 
-  release-branch:
-    name: Delete release branch
-    if: ${{ inputs.publish }}
-    needs: [release]
+  patch-branch:
+    name: Create security patch branch
+    needs: [tag-check]
     runs-on: ubuntu-latest
     steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ inputs.git-tag }}
 
-      - name: Delete the release branch
-        run: git push --delete ${{ inputs.branch }}
+      - name: Install a TOML parser
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Prepare patch branch
+        run: |
+          set -x
+
+          # Configure git
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+          git config --local --add --bool push.autoSetupRemote true
+
+          # Calculate new version
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+          patch=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+          version=${major}.${minor}.$(($patch + 1))
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+          # Commit changes
+          git checkout -b patches/${major}.${minor}
+          git commit -am "Bump version"
+
+      - name: Push the new branch
+        run: git push
