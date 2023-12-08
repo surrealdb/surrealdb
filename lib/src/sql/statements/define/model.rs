@@ -26,17 +26,15 @@ impl fmt::Display for DefineModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "DEFINE MODEL ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, "COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", comment)?;
 		}
-		if !self.permissions.is_full() {
-			let _indent = if is_pretty() {
-				Some(pretty_indent())
-			} else {
-				f.write_char(' ')?;
-				None
-			};
-			write!(f, "PERMISSIONS {}", self.permissions)?;
-		}
+		let _indent = if is_pretty() {
+			Some(pretty_indent())
+		} else {
+			f.write_char(' ')?;
+			None
+		};
+		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
 	}
 }
