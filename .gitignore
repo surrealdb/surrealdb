@@ -46,5 +46,7 @@ Temporary Items
 # Specific
 # -----------------------------------
 
+/cache/
+/store/
 surreal
 history.txt
