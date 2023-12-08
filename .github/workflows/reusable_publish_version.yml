@@ -48,25 +48,25 @@ jobs:
           ref: ${{ inputs.git-ref || github.ref_name }}
 
       - name: Install a TOML parser
-        if: ${{ inputs.environment == 'beta' }}
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
       - name: Configure git
-        if: ${{ inputs.environment == 'beta' || inputs.environment == 'release' }}
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
         run: |
           git config --local user.email "actions@users.noreply.github.com"
           git config --local user.name "github-actions"
           git config --local --add --bool push.autoSetupRemote true
 
       - name: Prepare release tag
-        if: ${{ inputs.environment == 'release' }}
+        if: ${{ inputs.publish && inputs.environment == 'release' }}
         run: |
           set -x
           version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
           git tag -a v${version} -m "Release ${version}"
 
       - name: Create or patch beta branch
-        if: ${{ inputs.environment == 'beta' }}
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: |
           set -x
 
@@ -218,11 +218,11 @@ jobs:
         run: cargo install --force --locked --version 0.3.30 release-plz
 
       - name: Install a TOML parser
-        if: ${{ inputs.environment == 'beta' }}
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
       - name: Patch beta crate version
-        if: ${{ inputs.environment == 'beta' }}
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: |
           set -x
 
