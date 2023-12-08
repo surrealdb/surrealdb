@@ -32,7 +32,6 @@ jobs:
     name: Prepare nightly release
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
-      name: nightly
       environment: nightly
       git-ref: ${{ inputs.git-ref || github.ref_name }}
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}

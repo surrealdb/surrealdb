@@ -57,38 +57,16 @@ jobs:
       create-release: ${{ inputs.publish }}
     secrets: inherit
 
-  release-tag:
-    name: Push release tag
+  release-branch:
+    name: Delete release branch
+    if: ${{ inputs.publish }}
     needs: [release]
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
 
-      - name: Install a TOML parser
-        run: cargo install --force --locked --version 0.8.1 taplo-cli
-
-      - name: Prepare tag
-        run: |
-          set -x
-
-          # Configure git
-          git config --local user.email "actions@users.noreply.github.com"
-          git config --local user.name "github-actions"
-
-          # Create the tag
-          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
-          git tag -a v${version} -m "Release ${version}"
-
-      - name: Push the new tag and delete the release branch
-        if: ${{ inputs.publish }}
-        run: |
-          git push --tags
-          git push --delete ${{ inputs.branch }}
+      - name: Delete the release branch
+        run: git push --delete ${{ inputs.branch }}

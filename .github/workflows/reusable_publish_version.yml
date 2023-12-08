@@ -1,11 +1,6 @@
 on:
   workflow_call:
     inputs:
-      # i.e. nightly, 1.0.0
-      name:
-        required: false
-        type: string
-        description: "The name of this release version. It can be a 'nightly' version or a semver version that represents a tag (i.e. 'v1.0.0')"
       environment:
         required: true
         type: string
@@ -42,12 +37,90 @@ jobs:
       git-ref: ${{ steps.outputs.outputs.git-ref }}
       name: ${{ steps.outputs.outputs.name }}
     steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref || github.ref_name }}
+
+      - name: Install a TOML parser
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Configure git
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        run: |
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+          git config --local --add --bool push.autoSetupRemote true
+
+      - name: Prepare release tag
+        if: ${{ inputs.publish && inputs.environment == 'release' }}
+        run: |
+          set -x
+          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          git tag -a v${version} -m "Release ${version}"
+
+      - name: Create or patch beta branch
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          if [[ $currentVersion == *"-beta"* ]]; then
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+            betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
+          else
+            git checkout -b releases/beta
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            betaVersion=${major}.$(($minor + 1)).0-beta.1
+          fi
+
+          # Create the tag
+          git tag -a v${betaVersion} -m "Release ${betaVersion}"
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+          # Commit changes
+          git commit -am "Prepare release"
+          git push
+
+      - name: Push the new tag
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        run: git push --tags
+
       - name: Set outputs
         id: outputs
         run: |
-          echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
-          # If the name is not provided, use the git_ref (i.e. v1.0.0)
-          echo "name=${{ inputs.name || inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
+          set -x
+
+          if [[ "${{ inputs.environment }}" == "beta" ]]; then
+            echo "git-ref=releases/beta" >> $GITHUB_OUTPUT
+          else
+            echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+          if [[ "${{ inputs.environment }}" == "nightly" ]]; then
+            echo "name=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+            echo "name=v${version}" >> $GITHUB_OUTPUT
+          fi
+
   test:
     name: Test
     needs: [prepare-vars]
@@ -145,57 +218,11 @@ jobs:
         run: cargo install --force --locked --version 0.3.30 release-plz
 
       - name: Install a TOML parser
-        if: ${{ inputs.environment == 'beta' }}
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
-      - name: Configure git
-        run: |
-          git config --local user.email "actions@users.noreply.github.com"
-          git config --local user.name "github-actions"
-          git config --local --add --bool push.autoSetupRemote true
-
-      - name: Create or patch beta branch
-        if: ${{ inputs.environment == 'beta' }}
-        run: |
-          set -x
-
-          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
-
-          if [[ $currentVersion == *"-beta"* ]]; then
-            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
-            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-            betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
-          else
-            git checkout -b releases/beta
-            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            betaVersion=${major}.$(($minor + 1)).0-beta.1
-          fi
-
-          # Create the tag
-          git tag -a v${betaVersion} -m "Release ${betaVersion}"
-
-          # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
-
-          # Update Cargo.lock without updating dependency versions
-          cargo check --no-default-features --features storage-mem
-
-      - name: Commit changes
-        if: ${{ inputs.environment == 'beta' }}
-        run: git commit -am "Prepare release"
-
-      - name: Push the new branch and tag
-        if: ${{ inputs.publish }}
-        run: |
-          git push
-          git push --tags
-
       - name: Patch beta crate version
-        if: ${{ inputs.environment == 'beta' }}
+        if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: |
           set -x
 
@@ -234,6 +261,8 @@ jobs:
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
           git commit -am "Name and version patches"
 
       - name: Perfom release checks

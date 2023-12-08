@@ -46,7 +46,6 @@ jobs:
     needs: [checks]
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
-      name: beta
       environment: beta
       git-ref: ${{ needs.checks.outputs.branch }}
       publish: ${{ inputs.publish }}
