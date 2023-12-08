@@ -454,9 +454,9 @@ jobs:
             artifacts/*.exe
 
       - name: Set latest version
-        if: ${{ inputs.create-release }}
+        if: ${{ inputs.create-release && inputs.latest }}
         run: |
-          echo ${{ github.ref_name }} > latest.txt
+          echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
       - name: Configure AWS
