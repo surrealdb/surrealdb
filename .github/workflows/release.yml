@@ -68,5 +68,39 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
 
+      - name: Install stable toolchain
+        if: ${{ inputs.branch == 'releases/beta' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install a TOML parser
+        if: ${{ inputs.branch == 'releases/beta' }}
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Bump main version
+        if: ${{ inputs.branch == 'releases/beta' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+
+          # Retrieve just released version
+          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          # Checkout the main branch
+          git checkout -b version-bump-v${version} main
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+          # Commit changes
+          git commit -am "Bump version"
+          gh pr create --base main --title "Bump version to ${version}" --label version-bump
+
       - name: Delete the release branch
         run: git push --delete ${{ inputs.branch }}
