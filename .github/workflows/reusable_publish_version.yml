@@ -226,6 +226,10 @@ jobs:
           # Patch the description
           sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
 
+          # Temporarily commit patches
+          # These will be reverted before pushing back to the repo
+          git commit -am "Name and version patches"
+
       - name: Perfom release checks
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -236,6 +240,10 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
+
+      - name: Revert temporary patches
+        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
+        run: git reset --hard HEAD~1
 
       - name: Push the new branch and tag
         run: git push
