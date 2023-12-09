@@ -14,7 +14,7 @@ async fn write_scan_ndlq() {
 	let tb = "table";
 	let lq =
 		sql::Uuid::from(uuid::Uuid::parse_str("4c3dca4b-ec08-4e3e-b23a-6b03b5cdc3fc").unwrap());
-	tx.putc_ndlq(nd, lq.clone().0, ns, db, tb, None).await.unwrap();
+	tx.putc_ndlq(nd, lq.0, ns, db, tb, None).await.unwrap();
 	tx.commit().await.unwrap();
 
 	// Verify scan
