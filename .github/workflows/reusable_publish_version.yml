@@ -53,8 +53,8 @@ jobs:
       - name: Configure git
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
         run: |
-          git config user.email "actions@users.noreply.github.com"
-          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
           git config --add --bool push.autoSetupRemote true
 
       - name: Patch release version
@@ -283,8 +283,8 @@ jobs:
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
-          git config user.email "actions@users.noreply.github.com"
-          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
           git commit -am "Name and version patches"
 
       - name: Perfom release checks
