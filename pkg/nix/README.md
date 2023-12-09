@@ -63,7 +63,7 @@ If you want to develop using Nix or you want to build binaries native to your pl
 
 ### Activating support for Nix Flakes (recommended)
 
-Nix Flakes are an upcoming feature of the Nix package manager. Officially, they are still considered experimental and, as such, are not enabled by default. However, they are already widely adopted by the Nix community. SurrealDB supports Nix both with and without support for Flakes.
+Nix Flakes are an upcoming feature of the Nix package manager. Officially they are still considered experimental and, as such, are not enabled by default. However, they are already widely adopted by the Nix community. SurrealDB supports Nix both with and without support for Flakes.
 
 To enable support for Flakes, edit either `~/.config/nix/nix.conf` or `/etc/nix/nix.conf` and add:
 
