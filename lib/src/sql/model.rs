@@ -91,14 +91,14 @@ impl Model {
 		// Compute the function arguments
 		let mut args =
 			try_join_all(self.args.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
-		//
+		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(Error::InvalidArguments {
 				name: format!("ml::{}<{}>", self.name, self.version),
 				message: ARGUMENTS.into(),
 			});
 		}
-		//
+		// Take the first and only specified argument
 		match args.swap_remove(0) {
 			// Perform bufferered compute
 			Value::Object(v) => {
@@ -123,8 +123,7 @@ impl Model {
 				})
 				.await
 				.unwrap()?;
-				// TODO
-				//
+				// Convert the output to a value
 				Ok(outcome[0].into())
 			}
 			// Perform raw compute
@@ -148,7 +147,7 @@ impl Model {
 				})
 				.await
 				.unwrap()?;
-				//
+				// Convert the output to a value
 				Ok(outcome[0].into())
 			}
 			// Perform raw compute
@@ -176,7 +175,7 @@ impl Model {
 				})
 				.await
 				.unwrap()?;
-				//
+				// Convert the output to a value
 				Ok(outcome[0].into())
 			}
 			//
