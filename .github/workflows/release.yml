@@ -29,6 +29,7 @@ defaults:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   checks:
@@ -59,7 +60,6 @@ jobs:
 
   release-branch:
     name: Delete release branch
-    if: ${{ inputs.publish }}
     needs: [release]
     runs-on: ubuntu-latest
     steps:
@@ -78,18 +78,22 @@ jobs:
         if: ${{ inputs.branch == 'releases/beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
-      - name: Bump main version
+      - name: Create version bump branch
+        id: bump
         if: ${{ inputs.branch == 'releases/beta' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x
 
           # Retrieve just released version
           version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          echo "version=${version}" >> $GITHUB_OUTPUT
 
           # Checkout the main branch
-          git checkout -b version-bump-v${version} main
+          git fetch origin main
+          git checkout main
+
+          # Switch to version bump branch
+          git checkout -b version-bump/v${version}
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
@@ -98,9 +102,37 @@ jobs:
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
 
+      - name: Push the branch
+        if: ${{ inputs.publish && inputs.branch == 'releases/beta' }}
+        run: |
+          # Configure git
+          git config --local user.email "actions@users.noreply.github.com"
+          git config --local user.name "github-actions"
+          git config --local --add --bool push.autoSetupRemote true
+
           # Commit changes
-          git commit -am "Bump version"
-          gh pr create --base main --title "Bump version to ${version}" --label version-bump
+          git commit -am "Bump version to v${{ steps.bump.outputs.version }}"
+          git push
+
+      - name: Create a PR
+        id: pr
+        if: ${{ inputs.publish && inputs.branch == 'releases/beta' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
+          echo "url=${url}" >> $GITHUB_OUTPUT
+
+      - name: Merge the PR
+        if: ${{ inputs.publish && inputs.branch == 'releases/beta' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
+        run: |
+          set -x
+          gh pr review ${{ steps.pr.outputs.url }} --approve
+          gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash
 
       - name: Delete the release branch
+        if: ${{ inputs.publish }}
         run: git push --delete ${{ inputs.branch }}
