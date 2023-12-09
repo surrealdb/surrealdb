@@ -54,9 +54,9 @@ jobs:
           set -x
 
           # Configure git
-          git config --local user.email "actions@users.noreply.github.com"
-          git config --local user.name "github-actions"
-          git config --local --add --bool push.autoSetupRemote true
+          git config user.email "actions@users.noreply.github.com"
+          git config user.name "github-actions"
+          git config --add --bool push.autoSetupRemote true
 
           # Calculate new version
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")

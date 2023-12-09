@@ -106,9 +106,9 @@ jobs:
         if: ${{ inputs.publish && inputs.branch == 'releases/beta' }}
         run: |
           # Configure git
-          git config --local user.email "actions@users.noreply.github.com"
-          git config --local user.name "github-actions"
-          git config --local --add --bool push.autoSetupRemote true
+          git config user.email "actions@users.noreply.github.com"
+          git config user.name "github-actions"
+          git config --add --bool push.autoSetupRemote true
 
           # Commit changes
           git commit -am "Bump version to v${{ steps.bump.outputs.version }}"
