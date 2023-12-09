@@ -78,7 +78,7 @@ jobs:
             cargo check --no-default-features --features storage-mem
 
             # Commit changes
-            git commit -am "Prepare release"
+            git commit -am "Prepare v${version} release"
             git push
           else
             version=${currentVersion}
@@ -223,7 +223,9 @@ jobs:
 
   crate:
     name: Publish crate to crates.io
+    if: ${{ inputs.publish }}
     needs: [test, lint, prepare-vars]
+    environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -240,11 +242,11 @@ jobs:
         run: cargo install --force --locked --version 0.3.30 release-plz
 
       - name: Install a TOML parser
-        if: ${{ inputs.publish && inputs.environment == 'beta' }}
+        if: ${{ inputs.environment == 'beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
       - name: Patch beta crate version
-        if: ${{ inputs.publish && inputs.environment == 'beta' }}
+        if: ${{ inputs.environment == 'beta' }}
         run: |
           set -x
 
@@ -287,13 +289,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git commit -am "Name and version patches"
 
-      - name: Perfom release checks
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: /home/runner/.cargo/bin/release-plz release --dry-run --config .config/release-plz.toml
-
       - name: Publish the crate
-        if: ${{ inputs.publish }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
