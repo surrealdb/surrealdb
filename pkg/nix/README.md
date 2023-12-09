@@ -4,7 +4,7 @@ According to [Wikipedia]
 
 > Nix is a cross-platform package manager that utilizes a purely functional deployment model where software is installed into unique directories generated through cryptographic hashes. It is also the name of the tool's programming language. A package's hash takes into account the dependencies, which is claimed to eliminate dependency hell. This package management model advertises more reliable, reproducible, and portable packages.
 
-SurrealDB has support for the Nix package manager. It makes it easier to build the project from source and setting up development environments.
+SurrealDB has support for the Nix package manager. It makes it easier to build the project from source and to set up development environments.
 
 ## Table of Contents
 
