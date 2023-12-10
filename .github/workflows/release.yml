@@ -102,37 +102,6 @@ jobs:
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
 
-      - name: Push the branch
-        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
-        run: |
-          # Configure git
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git config --add --bool push.autoSetupRemote true
-
-          # Commit changes
-          git commit -am "Bump version to v${{ steps.bump.outputs.version }}"
-          git push
-
-      - name: Create a PR
-        id: pr
-        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -x
-          url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
-          echo "url=${url}" >> $GITHUB_OUTPUT
-
-      - name: Merge the PR
-        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
-        run: |
-          set -x
-          gh pr review ${{ steps.pr.outputs.url }} --approve
-          gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash
-
       - name: Delete the release branch
         if: ${{ inputs.publish }}
-        run: git push --delete ${{ inputs.branch }}
+        run: git push origin --delete ${{ inputs.branch }}
