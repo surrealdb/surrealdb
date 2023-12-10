@@ -59,7 +59,7 @@ jobs:
     secrets: inherit
 
   release-branch:
-    name: Delete release branch
+    name: Bump main version
     needs: [release]
     runs-on: ubuntu-latest
     steps:
