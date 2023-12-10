@@ -51,14 +51,13 @@ jobs:
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
       - name: Configure git
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
         run: |
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           git config --add --bool push.autoSetupRemote true
 
       - name: Patch release version
-        if: ${{ inputs.publish && inputs.environment == 'release' }}
+        if: ${{ inputs.environment == 'release' }}
         run: |
           set -x
 
@@ -79,7 +78,6 @@ jobs:
 
             # Commit changes
             git commit -am "Prepare v${version} release"
-            git push
           else
             version=${currentVersion}
           fi
@@ -88,7 +86,7 @@ jobs:
           git tag -a v${version} -m "Release ${version}"
 
       - name: Create or patch beta branch
-        if: ${{ inputs.publish && inputs.environment == 'beta' }}
+        if: ${{ inputs.environment == 'beta' }}
         run: |
           set -x
 
@@ -115,15 +113,16 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
           # Commit changes
-          git commit -am "Prepare release"
-          git push
+          git commit -am "Prepare v${betaVersion} release"
 
           # Create the tag
           git tag -a v${betaVersion} -m "Release ${betaVersion}"
 
-      - name: Push the new tag
+      - name: Push new changes
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
-        run: git push --tags
+        run: |
+          git push
+          git push --tags
 
       - name: Set outputs
         id: outputs
@@ -141,6 +140,14 @@ jobs:
           else
             version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
             echo "name=v${version}" >> $GITHUB_OUTPUT
+          fi
+
+          if [[ "${{ inputs.environment}}" == "release" ]]; then
+            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
+          else
+            date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+            rev=$(git rev-parse --short HEAD)
+            echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
           fi
 
   test:
@@ -308,6 +315,8 @@ jobs:
   build:
     name: Build ${{ matrix.arch }} binary
     needs: [prepare-vars]
+    env:
+      SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
     strategy:
       fail-fast: false
       matrix:
