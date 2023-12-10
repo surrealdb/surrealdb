@@ -118,11 +118,15 @@ jobs:
           # Create the tag
           git tag -a v${betaVersion} -m "Release ${betaVersion}"
 
-      - name: Push new changes
+      - name: Push changes
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
-        run: |
-          git push
-          git push --tags
+        run: git push
+
+      - name: Push tag
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the tag
+        run: git push --tags
 
       - name: Set outputs
         id: outputs
@@ -137,17 +141,15 @@ jobs:
 
           if [[ "${{ inputs.environment }}" == "nightly" ]]; then
             echo "name=${{ inputs.environment }}" >> $GITHUB_OUTPUT
-          else
-            version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
-            echo "name=v${version}" >> $GITHUB_OUTPUT
-          fi
 
-          if [[ "${{ inputs.environment}}" == "release" ]]; then
-            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
-          else
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
             rev=$(git rev-parse --short HEAD)
             echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
+          else
+            version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+            echo "name=v${version}" >> $GITHUB_OUTPUT
+
+            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
           fi
 
   test:

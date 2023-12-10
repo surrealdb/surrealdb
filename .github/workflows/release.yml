@@ -135,4 +135,4 @@ jobs:
 
       - name: Delete the release branch
         if: ${{ inputs.publish }}
-        run: git push --delete ${{ inputs.branch }}
+        run: git push origin --delete ${{ inputs.branch }}
