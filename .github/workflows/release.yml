@@ -69,18 +69,18 @@ jobs:
           ref: ${{ inputs.branch }}
 
       - name: Install stable toolchain
-        if: ${{ inputs.branch == 'releases/beta' }}
+        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
       - name: Install a TOML parser
-        if: ${{ inputs.branch == 'releases/beta' }}
+        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
 
       - name: Create version bump branch
         id: bump
-        if: ${{ inputs.branch == 'releases/beta' }}
+        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
         run: |
           set -x
 
@@ -103,7 +103,7 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
       - name: Push the branch
-        if: ${{ inputs.publish && inputs.branch == 'releases/beta' }}
+        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
         run: |
           # Configure git
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -116,7 +116,7 @@ jobs:
 
       - name: Create a PR
         id: pr
-        if: ${{ inputs.publish && inputs.branch == 'releases/beta' }}
+        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -125,7 +125,7 @@ jobs:
           echo "url=${url}" >> $GITHUB_OUTPUT
 
       - name: Merge the PR
-        if: ${{ inputs.publish && inputs.branch == 'releases/beta' }}
+        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
         run: |
