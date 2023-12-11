@@ -194,6 +194,8 @@ impl Model {
 		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Unimplemented("ML is not enabled".to_string()))
+		Err(Error::InvalidModel {
+			message: String::from("Machine learning computation is not enabled."),
+		})
 	}
 }

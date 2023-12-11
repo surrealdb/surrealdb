@@ -195,6 +195,12 @@ pub enum Error {
 		message: String,
 	},
 
+	/// There was an error with the provided machine learning model
+	#[error("Problem with machine learning computation. {message}")]
+	InvalidModel {
+		message: String,
+	},
+
 	/// There was a problem running the specified function
 	#[error("There was a problem running the {name}() function. {message}")]
 	InvalidFunction {
