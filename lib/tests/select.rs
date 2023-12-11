@@ -1090,7 +1090,7 @@ async fn select_on_future() -> Result<(), Error> {
 	";
 	let mut res = dbs.execute(select_query_true, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("{ name: \"Hendrick\" }");
+	let val = Value::parse("[{ name: \"Hendrick\" }]");
 	assert_eq!(tmp, val);
 
 	let select_query_false = "
@@ -1098,7 +1098,7 @@ async fn select_on_future() -> Result<(), Error> {
 	";
 	let mut res = dbs.execute(select_query_false, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("{ name: \"Hana\" }");
+	let val = Value::parse("[{ name: \"Hana\" }]");
 	assert_eq!(tmp, val);
 
 	Ok(())
