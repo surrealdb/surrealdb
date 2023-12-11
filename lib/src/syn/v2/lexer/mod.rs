@@ -22,6 +22,10 @@ mod test;
 
 pub use reader::{BytesReader, CharError};
 
+/// A error returned by the lexer when an invalid token is encountered.
+///
+/// Can be retrieved from the `Lexer::error` field whenever it returned a [`TokenKind::Invalid`]
+/// token.
 #[derive(Error, Debug)]
 pub enum Error {
 	#[error("Lexer encountered unexpected character {0:?}")]
@@ -56,10 +60,17 @@ impl From<CharError> for Error {
 }
 
 /// The SurrealQL lexer.
-/// Takes a slice of bytes and turns it into tokens.
+/// Takes a slice of bytes and turns it into tokens. The lexer is designed with possible invalid utf-8
+/// in mind and will handle bytes which are invalid utf-8 with an error.
 ///
-/// The lexer generates tokens lazily. each time next is called on the lexer it will try to lex the
-/// next bytes in the give source as a token.
+/// The lexer generates tokens lazily. whenever [`Lexer::next_token`] is called on the lexer it will
+/// try to lex the next bytes in the give source as a token. The lexer always returns a token, even
+/// if the source contains invalid tokens or as at the end of the source. In both cases a specific
+/// type of token is returned.
+///
+/// Note that SurrealQL syntax cannot be lexed in advance. For example, record strings and regexes,
+/// both cannot be parsed correctly without knowledge of previous tokens as they are both ambigious
+/// with other tokens.
 pub struct Lexer<'a> {
 	/// The reader for reading the source bytes.
 	pub reader: BytesReader<'a>,
@@ -76,6 +87,14 @@ pub struct Lexer<'a> {
 	// As only some tokens have an additional value associated with them we don't store that value
 	// in the token itself but, instead, in the lexer ensureing a smaller size for each individual
 	// token.
+	//
+	// This does result in some additional state to keep track of as peeking a token while a token
+	// value is still in the variables below will overwrite the previous value.
+	//
+	// Both numbers and actual strings are stored as a string value.
+	// The parser can, depending on position in syntax, decide to parse a number in a variety of
+	// different precisions or formats. The only way to support all is to delay parsing the
+	// actual number value to when the parser can decide on a format.
 	pub string: Option<String>,
 	pub duration: Option<Duration>,
 	pub datetime: Option<Datetime>,
@@ -86,7 +105,6 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
 	/// Create a new lexer.
-	///
 	/// # Panic
 	/// This function will panic if the source is longer then u32::MAX.
 	pub fn new(source: &'a [u8]) -> Lexer<'a> {
@@ -113,6 +131,7 @@ impl<'a> Lexer<'a> {
 		self.last_offset = 0;
 		self.scratch.clear();
 		self.whitespace_span = None;
+		self.string = None;
 		self.datetime = None;
 		self.duration = None;
 		self.regex = None;

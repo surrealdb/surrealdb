@@ -36,14 +36,19 @@ impl Lexer<'_> {
 		self.scratch.push(next as char);
 		self.reader.next();
 
+		// eat all the ascii digits
 		while let Some(x) = self.reader.peek() {
-			if !x.is_ascii_digit() {
+			if x == b'_' {
+				self.reader.next();
+			} else if !x.is_ascii_digit() {
 				break;
+			} else {
+				self.scratch.push(x as char);
+				self.reader.next();
 			}
-			self.scratch.push(x as char);
-			self.reader.next();
 		}
 
+		// test for a suffix.
 		match self.reader.peek() {
 			Some(b'd' | b'f') => {
 				// not an integer but parse anyway for error reporting.
