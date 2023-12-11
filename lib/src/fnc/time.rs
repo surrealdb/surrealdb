@@ -148,8 +148,8 @@ pub fn month((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 
 pub fn nano((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
-		Some(v) => v.timestamp_nanos().into(),
-		None => Datetime::default().timestamp_nanos().into(),
+		Some(v) => v.timestamp_nanos_opt().unwrap_or_default().into(),
+		None => Datetime::default().timestamp_nanos_opt().unwrap_or_default().into(),
 	})
 }
 
