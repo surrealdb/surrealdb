@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use serde_json::json;
 use surrealdb::sql::{Array, Id, Object, Strand, Thing, Value};
 
-use crate::rpc::res::Failure;
+use crate::rpc::response::Failure;
 
 pub const TYPED_SURREALQL_V1: Lazy<JSONSchema> = Lazy::new(|| {
 	JSONSchema::compile(&json!({
@@ -298,7 +298,7 @@ impl Into<Value> for TypedValue {
 
 		v.insert("type".to_string(), Value::Strand(self.r#type.into()));
 		if let Some(value) = self.value {
-			v.insert("type".to_string(), value);
+			v.insert("value".to_string(), value);
 		}
 
 		Value::Object(Object(v))

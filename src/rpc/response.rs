@@ -5,16 +5,19 @@ use opentelemetry::Context as TelemetryContext;
 use serde::Serialize;
 use serde_json::{json, Value as Json};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use surrealdb::channel::Sender;
 use surrealdb::dbs;
 use surrealdb::dbs::Notification;
-use surrealdb::sql;
+use surrealdb::sql::{self, Object};
 use surrealdb::sql::Value;
 use tracing::Span;
 
+use crate::schema::Schema;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum OutputFormat {
-	Json, // JSON
+	Json(Option<Schema>), // JSON
 	Cbor, // CBOR
 	Pack, // MessagePack
 	Full, // Full type serialization
@@ -111,8 +114,25 @@ impl Response {
 		}
 
 		let (res_size, message) = match out {
-			OutputFormat::Json => {
+			OutputFormat::Json(None) => {
 				let res = serde_json::to_string(&self.simplify()).unwrap();
+				(res.len(), Message::Text(res))
+			}
+			OutputFormat::Json(Some(schema)) => {
+				let mut message: BTreeMap<String, Value> = BTreeMap::new();
+
+				message.insert("result".to_string(), match self.result.unwrap() {
+					Data::Query(vec) => sql::to_value(vec).unwrap(),
+					Data::Live(notification) => sql::to_value(notification).unwrap(),
+					Data::Other(value) => value,
+				});
+
+				if let Some(id) = self.id {
+					message.insert("id".to_string(), id.into());
+				};
+
+				let encoded = schema.encode(Value::Object(Object(message)), true).unwrap();
+				let res = serde_json::to_string(&Json::from(encoded)).unwrap();
 				(res.len(), Message::Text(res))
 			}
 			OutputFormat::Cbor => {

@@ -47,7 +47,7 @@ impl Connection {
 		// Create a new RPC variables store
 		let vars = BTreeMap::new();
 		// Set the default output format
-		let format = OutputFormat::Json;
+		let format = OutputFormat::Json(None);
 		// Enable real-time mode
 		session.rt = true;
 		// Create and store the RPC connection
@@ -517,7 +517,7 @@ impl Connection {
 
 	async fn format(&mut self, out: Strand) -> Result<Value, Error> {
 		match out.as_str() {
-			"json" | "application/json" => self.format = OutputFormat::Json,
+			"json" | "application/json" => self.format = OutputFormat::Json(None),
 			"cbor" | "application/cbor" => self.format = OutputFormat::Cbor,
 			"pack" | "application/pack" => self.format = OutputFormat::Pack,
 			_ => return Err(Error::InvalidType),

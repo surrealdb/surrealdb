@@ -1,8 +1,9 @@
-use crate::rpc::res::Failure;
+use crate::rpc::response::Failure;
 use surrealdb::sql::Value;
 
 pub mod typed_surrealql_v1;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Schema {
 	TypedSurrealQLV1,
 }

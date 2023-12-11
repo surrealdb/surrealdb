@@ -54,6 +54,7 @@ pub async fn parse_request(msg: Message) -> Result<Request, Failure> {
 								let v = Schema::TypedSurrealQLV1.decode(
 									obj.get("value").ok_or(Failure::PARSE_ERROR)?.to_owned(),
 								)?;
+								out_fmt = Some(OutputFormat::Json(Some(Schema::TypedSurrealQLV1)));
 								(v, val.len())
 							}
 							_ => (v, val.len()),
