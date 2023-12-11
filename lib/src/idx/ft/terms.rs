@@ -82,7 +82,6 @@ impl Terms {
 		}
 		let term_id = self.get_next_term_id();
 		tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
-		println!(",\"{term}\"");
 		self.btree.insert(tx, &mut self.store, term_key, term_id).await?;
 		Ok(term_id)
 	}
@@ -102,7 +101,6 @@ impl Terms {
 	) -> Result<(), Error> {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
 		if let Some(term_key) = tx.get(term_id_key.clone()).await? {
-			info!("Delete term_id {term_id}");
 			self.btree.delete(tx, &mut self.store, term_key.clone()).await?;
 			tx.del(term_id_key).await?;
 			if let Some(available_ids) = &mut self.available_ids {
