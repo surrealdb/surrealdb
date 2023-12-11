@@ -1,3 +1,4 @@
+use super::headers::Accept;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
@@ -11,9 +12,9 @@ use axum::TypedHeader;
 use bytes::Bytes;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
+use surrealdb::iam::Action::Edit;
+use surrealdb::iam::ResourceKind::Any;
 use tower_http::limit::RequestBodyLimitLayer;
-
-use super::headers::Accept;
 
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
@@ -39,6 +40,8 @@ async fn handler(
 	let db = DB.get().unwrap();
 	// Convert the body to a byte slice
 	let sql = bytes_to_utf8(&sql)?;
+	// Check the permissions level
+	db.check(&session, Edit, Any.on_level(session.au.level().to_owned()))?;
 	// Execute the sql query in the database
 	match db.import(sql, &session).await {
 		Ok(res) => match accept.as_deref() {

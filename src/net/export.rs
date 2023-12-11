@@ -9,6 +9,9 @@ use http::StatusCode;
 use http_body::Body as HttpBody;
 use hyper::body::Body;
 use surrealdb::dbs::Session;
+use surrealdb::iam::check::check_ns_db;
+use surrealdb::iam::Action::View;
+use surrealdb::iam::ResourceKind::Any;
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -23,6 +26,10 @@ async fn handler(Extension(session): Extension<Session>) -> Result<impl IntoResp
 	let db = DB.get().unwrap();
 	// Create a chunked response
 	let (mut chn, body) = Body::channel();
+	// Ensure a NS and DB are set
+	let (nsv, dbv) = check_ns_db(&session)?;
+	// Check the permissions level
+	db.check(&session, View, Any.on_db(&nsv, &dbv))?;
 	// Create a new bounded channel
 	let (snd, rcv) = surrealdb::channel::bounded(1);
 	// Start the export task
