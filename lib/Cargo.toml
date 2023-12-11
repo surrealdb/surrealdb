@@ -17,7 +17,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls", "experimental_parser"]
+default = ["protocol-ws", "rustls"]
 protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["dep:echodb", "tokio/time"]
@@ -37,9 +37,9 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
+experimental_parser = ["dep:phf", "dep:unicase"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
-experimental_parser = ["dep:phf", "dep:unicase"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
