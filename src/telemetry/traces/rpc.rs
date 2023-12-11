@@ -19,6 +19,7 @@ pub fn span_for_request(ws_id: &Uuid) -> Span {
 		rpc.request_id = field::Empty,
 		rpc.error_code = field::Empty,
 		rpc.error_message = field::Empty,
+		// TODO: Add locks? Each lock specific name and id, and value is status
 	);
 
 	span

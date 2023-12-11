@@ -60,6 +60,24 @@ services:
       - "9090"  # for prometheus
     volumes: ["./otel-collector.yaml:/etc/otel-collector.yaml"]
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    environment:
+      - discovery.type=single-node
+      - ELASTICSEARCH_USERNAME=admin
+      - ELASTICSEARCH_PASSWORD=admin
+    ports:
+      - 9200:9200
+    volumes:
+      - ./elasticsearch.yaml:/usr/share/elasticsearch/config/elasticsearch.yml
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.1
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - 5601:5601
+
 volumes:
   grafana:
     external: false

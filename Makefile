@@ -43,6 +43,7 @@ bench: check-deps
 
 .PHONY: serve
 serve: check-deps
+	@echo ${OTEL_EXPORTER_OTLP_ENDPOINT}
 	cargo make serve
 
 .PHONY: sql

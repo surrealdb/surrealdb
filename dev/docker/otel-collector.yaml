@@ -9,6 +9,11 @@ exporters:
     tls:
       insecure: true
 
+  otlp/elastic:
+    endpoint: 'elasticsearch:9200'
+    headers:
+      Authorization: "Basic base64(admin:admin)"
+
   prometheus:
     endpoint:  ':9090'
     send_timestamps: true
@@ -34,3 +39,6 @@ service:
     metrics:
       receivers: [otlp]
       exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      exporters: [otlp/elastic]

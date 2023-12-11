@@ -146,6 +146,7 @@ pub async fn init(
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
+	// TODO
 	crate::telemetry::builder().with_filter(log).init();
 	// Start metrics subsystem
 	crate::telemetry::metrics::init(&TelemetryContext::current())
