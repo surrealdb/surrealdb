@@ -74,7 +74,7 @@ pub async fn init(
 	// Use the specified namespace / database
 	client.use_ns(namespace).use_db(database).await?;
 	// Import the data into the database
-	client.import(file).await?;
+	client.import(file).ml().await?;
 	info!("The SurrealML file was imported successfully");
 	// Everything OK
 	Ok(())

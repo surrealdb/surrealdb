@@ -5,7 +5,7 @@ use crate::net::output;
 use axum::extract::{BodyStream, DefaultBodyLimit, Path};
 use axum::response::IntoResponse;
 use axum::response::Response;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Extension;
 use axum::Router;
 use bytes::Bytes;
@@ -34,7 +34,7 @@ where
 {
 	Router::new()
 		.route("/ml/import", post(import))
-		.route("/ml/export/:name/:version", post(export))
+		.route("/ml/export/:name/:version", get(export))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(MAX))
 }
