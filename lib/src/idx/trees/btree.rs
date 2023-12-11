@@ -6,7 +6,7 @@ use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::marker::PhantomData;
@@ -107,7 +107,7 @@ where
 				Ok(BTreeNode::Internal(keys, child))
 			}
 			2u8 => Ok(BTreeNode::Leaf(keys)),
-			_ => Err(Error::CorruptedIndex),
+			_ => Err(Error::CorruptedIndex("BTreeNode::try_from_val")),
 		}
 	}
 
@@ -156,7 +156,7 @@ where
 					children.append(&mut append_children);
 					Ok(())
 				} else {
-					Err(Error::CorruptedIndex)
+					Err(Error::CorruptedIndex("BTree::append(1)"))
 				}
 			}
 			BTreeNode::Leaf(keys) => {
@@ -165,7 +165,7 @@ where
 					keys.append(append_keys);
 					Ok(())
 				} else {
-					Err(Error::CorruptedIndex)
+					Err(Error::CorruptedIndex("BTree::append(2)"))
 				}
 			}
 		}
@@ -175,7 +175,7 @@ where
 		match self {
 			BTreeNode::Internal(k, c) => {
 				if (k.len() + 1) as usize != c.len() {
-					panic!("{}", self);
+					panic!("k: {} - c: {} - {}", k.len(), c.len(), self);
 				}
 			}
 			BTreeNode::Leaf(_) => {}
@@ -189,8 +189,8 @@ where
 {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match self {
-			BTreeNode::Internal(k, c) => write!(f, "Internal - keys: {} - children: {:?}", k, c),
-			BTreeNode::Leaf(k) => write!(f, "Leaf - keys: {}", k),
+			BTreeNode::Internal(k, c) => write!(f, "(I) - k: {} - c: {:?}", k, c),
+			BTreeNode::Leaf(k) => write!(f, "(L) - k: {}", k),
 		}
 	}
 }
@@ -358,7 +358,10 @@ where
 		let right_node_id = self.state.new_node_id();
 		match parent_node.n {
 			BTreeNode::Internal(ref mut keys, ref mut children) => {
-				keys.insert(median_key.clone(), median_payload);
+				if keys.insert(median_key.clone(), median_payload).is_some() {
+					#[cfg(debug_assertions)]
+					panic!("Existing key: {} - {}", String::from_utf8(median_key)?, parent_node.n)
+				}
 				children.insert(idx + 1, right_node_id);
 			}
 			BTreeNode::Leaf(ref mut keys) => {
@@ -432,7 +435,10 @@ where
 					BTreeNode::Leaf(keys) => {
 						// CLRS: 1
 						#[cfg(debug_assertions)]
-						debug!("CLRS: 1");
+						info!(
+							"CLRS: 1 - node_id: {node_id} - key_to_delete: {}",
+							String::from_utf8_lossy(&key_to_delete)
+						);
 						if let Some(payload) = keys.get(&key_to_delete) {
 							if is_main_key {
 								deleted_payload = Some(payload);
@@ -455,10 +461,13 @@ where
 						}
 					}
 					BTreeNode::Internal(keys, children) => {
-						// CLRS: 2
-						#[cfg(debug_assertions)]
-						debug!("CLRS: 2");
 						if let Some(payload) = keys.get(&key_to_delete) {
+							// CLRS: 2
+							#[cfg(debug_assertions)]
+							info!(
+								"CLRS: 2 - node_id: {node_id} - key_to_delete: {}",
+								String::from_utf8_lossy(&key_to_delete)
+							);
 							if is_main_key {
 								deleted_payload = Some(payload);
 							}
@@ -478,7 +487,10 @@ where
 						} else {
 							// CLRS: 3
 							#[cfg(debug_assertions)]
-							debug!("CLRS: 3");
+							info!(
+								"CLRS: 3 - node_id: {node_id} - key_to_delete: {}",
+								String::from_utf8_lossy(&key_to_delete)
+							);
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
 								.deleted_traversal(
 									tx,
@@ -526,33 +538,41 @@ where
 		if left_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			#[cfg(debug_assertions)]
-			debug!("CLRS: 2a");
-			if let Some((key_prim, payload_prim)) = left_node.n.keys().get_last_key() {
-				keys.remove(&key_to_delete);
-				keys.insert(key_prim.clone(), payload_prim);
+			info!(
+				"CLRS: 2a {} - left_idx: {left_idx} - left_id: {left_id}",
+				String::from_utf8_lossy(&key_to_delete)
+			);
+			let (key_prim, payload_prim) = self.find_highest(tx, store, left_node).await?;
+			info!("key_prim {}", String::from_utf8_lossy(&key_prim));
+			if keys.remove(&key_to_delete).is_none() {
 				#[cfg(debug_assertions)]
-				left_node.n.check();
-				store.set_node(left_node, true).await?;
-				return Ok((false, key_prim, left_id));
+				panic!("Remove key {} {} ", String::from_utf8(key_to_delete)?, keys);
 			}
+			if keys.insert(key_prim.clone(), payload_prim).is_some() {
+				#[cfg(debug_assertions)]
+				panic!("Insert key {} {} ", String::from_utf8(key_prim)?, keys);
+			}
+			return Ok((false, key_prim, left_id));
 		}
 
 		let right_idx = left_idx + 1;
 		let right_id = children[right_idx];
 		let right_node = store.get_node_mut(tx, right_id).await?;
 		if right_node.n.keys().len() >= self.state.minimum_degree {
+			// Cleanup 2a evaluation
+			store.set_node(left_node, false).await?;
 			// CLRS: 2b -> right_node is name `z` in the book
 			#[cfg(debug_assertions)]
-			debug!("CLRS: 2b");
-			if let Some((key_prim, payload_prim)) = right_node.n.keys().get_first_key() {
-				keys.remove(&key_to_delete);
-				keys.insert(key_prim.clone(), payload_prim);
+			info!("CLRS: 2b");
+			let (key_prim, payload_prim) = self.find_lowest(tx, store, right_node).await?;
+			if keys.remove(&key_to_delete).is_none() {
 				#[cfg(debug_assertions)]
-				right_node.n.check();
-				store.set_node(left_node, false).await?;
-				store.set_node(right_node, true).await?;
-				return Ok((false, key_prim, right_id));
+				panic!("Remove key {} {} ", String::from_utf8(key_to_delete)?, keys);
 			}
+			if keys.insert(key_prim.clone(), payload_prim).is_some() {
+				panic!("Insert key {} {} ", String::from_utf8(key_prim)?, keys);
+			}
+			return Ok((false, key_prim, right_id));
 		}
 
 		// CLRS: 2c
@@ -561,7 +581,7 @@ where
 		#[cfg(debug_assertions)]
 		left_node.n.check();
 		#[cfg(debug_assertions)]
-		debug!("CLRS: 2c");
+		info!("CLRS: 2c");
 		left_node.n.append(key_to_delete.clone(), 0, right_node.n)?;
 		#[cfg(debug_assertions)]
 		left_node.n.check();
@@ -570,6 +590,54 @@ where
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
 		Ok((false, key_to_delete, left_id))
+	}
+
+	async fn find_highest(
+		&mut self,
+		tx: &mut Transaction,
+		store: &mut BTreeStore<BK>,
+		node: StoredNode<BTreeNode<BK>>,
+	) -> Result<(Key, Payload), Error> {
+		let mut next_node = Some(node);
+		while let Some(node) = next_node.take() {
+			match &node.n {
+				BTreeNode::Internal(_, c) => {
+					let id = c[c.len() - 1];
+					let node = store.get_node_mut(tx, id).await?;
+					next_node.replace(node);
+				}
+				BTreeNode::Leaf(k) => {
+					let r = k.get_last_key();
+					store.set_node(node, false).await?;
+					return r.ok_or(Error::Unreachable("BTree::find_highest(1)"));
+				}
+			}
+		}
+		Err(Error::Unreachable("BTree::find_highest(2)"))
+	}
+
+	async fn find_lowest(
+		&mut self,
+		tx: &mut Transaction,
+		store: &mut BTreeStore<BK>,
+		node: StoredNode<BTreeNode<BK>>,
+	) -> Result<(Key, Payload), Error> {
+		let mut next_node = Some(node);
+		while let Some(node) = next_node.take() {
+			match &node.n {
+				BTreeNode::Internal(_, c) => {
+					let id = c[0];
+					let node = store.get_node_mut(tx, id).await?;
+					next_node.replace(node);
+				}
+				BTreeNode::Leaf(k) => {
+					let r = k.get_first_key();
+					store.set_node(node, false).await?;
+					return r.ok_or(Error::Unreachable("BTree::find_lowest(1)"));
+				}
+			}
+		}
+		Err(Error::Unreachable("BTree::find_lowest(2)"))
 	}
 
 	async fn deleted_traversal(
@@ -581,23 +649,25 @@ where
 		key_to_delete: Key,
 		is_main_key: bool,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
-		// CLRS 3a
-		#[cfg(debug_assertions)]
-		debug!("CLRS 3a");
+		// CLRS 3 Determine the root x.ci that must contain k
 		let child_idx = keys.get_child_idx(&key_to_delete);
-		if child_idx >= children.len() {
-			return Err(Error::CorruptedIndex);
-		}
 		let child_id = children[child_idx];
+		#[cfg(debug_assertions)]
+		info!(
+			"CLRS: 3 - key_to_delete: {} - child_idx: {child_idx} - child_id: {child_id}",
+			String::from_utf8_lossy(&key_to_delete)
+		);
 		let child_stored_node = store.get_node_mut(tx, child_id).await?;
+		// If x.ci has only t-1 keys, execute 3a or 3b
 		if child_stored_node.n.keys().len() < self.state.minimum_degree {
-			// right child (successor)
 			if child_idx < children.len() - 1 {
-				#[cfg(debug_assertions)]
-				debug!("right child (successor)");
 				let right_child_stored_node =
 					store.get_node_mut(tx, children[child_idx + 1]).await?;
 				return if right_child_stored_node.n.keys().len() >= self.state.minimum_degree {
+					#[cfg(debug_assertions)]
+					info!(
+						"CLRS: 3a - xci_child: {child_stored_node} - right_sibling_child: {right_child_stored_node}"
+					);
 					Self::delete_adjust_successor(
 						store,
 						keys,
@@ -611,7 +681,7 @@ where
 				} else {
 					// CLRS 3b successor
 					#[cfg(debug_assertions)]
-					debug!("CLRS 3b successor");
+					info!("CLRS: 3b merge (right) {child_id} {}", right_child_stored_node.id);
 					Self::merge_nodes(
 						store,
 						keys,
@@ -628,23 +698,25 @@ where
 
 			// left child (predecessor)
 			if child_idx > 0 {
-				#[cfg(debug_assertions)]
-				debug!("left child (predecessor)");
 				let child_idx = child_idx - 1;
 				let left_child_stored_node = store.get_node_mut(tx, children[child_idx]).await?;
 				return if left_child_stored_node.n.keys().len() >= self.state.minimum_degree {
+					#[cfg(debug_assertions)]
+					info!("CLRS: 3a - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}",);
 					Self::delete_adjust_predecessor(
 						store,
 						keys,
 						child_idx,
 						key_to_delete,
 						is_main_key,
-						child_stored_node,
 						left_child_stored_node,
+						child_stored_node,
 					)
 					.await
 				} else {
 					// CLRS 3b predecessor
+					#[cfg(debug_assertions)]
+					info!("CLRS: 3b merge (left) {} {child_id}", left_child_stored_node.id);
 					Self::merge_nodes(
 						store,
 						keys,
@@ -673,36 +745,41 @@ where
 		mut child_stored_node: BStoredNode<BK>,
 		mut right_child_stored_node: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
-		debug!("{}", child_stored_node.n);
-		debug!("{}", right_child_stored_node.n);
-		if let Some((ascending_key, ascending_payload)) =
-			right_child_stored_node.n.keys().get_first_key()
-		{
-			right_child_stored_node.n.keys_mut().remove(&ascending_key);
-			if let Some(descending_key) = keys.get_key(child_idx) {
-				if let Some(descending_payload) = keys.remove(&descending_key) {
-					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
-					if let BTreeNode::Internal(_, rc) = &mut right_child_stored_node.n {
-						if let BTreeNode::Internal(_, lc) = &mut child_stored_node.n {
-							lc.push(rc.remove(0))
-						}
-					}
-					keys.insert(ascending_key, ascending_payload);
-					let child_id = child_stored_node.id;
-					debug!("{}", child_stored_node.n);
-					debug!("{}", right_child_stored_node.n);
-					#[cfg(debug_assertions)]
-					child_stored_node.n.check();
-					#[cfg(debug_assertions)]
-					right_child_stored_node.n.check();
-					store.set_node(child_stored_node, true).await?;
-					store.set_node(right_child_stored_node, true).await?;
-					return Ok((true, is_main_key, key_to_delete, child_id));
-				}
+		let (ascending_key, ascending_payload) =
+			right_child_stored_node
+				.n
+				.keys()
+				.get_first_key()
+				.ok_or(Error::CorruptedIndex("BTree::delete_adjust_successor(1)"))?;
+		right_child_stored_node.n.keys_mut().remove(&ascending_key);
+		let descending_key = keys
+			.get_key(child_idx)
+			.ok_or(Error::CorruptedIndex("BTree::delete_adjust_successor(2)"))?;
+		let descending_payload = keys
+			.remove(&descending_key)
+			.ok_or(Error::CorruptedIndex("BTree::delete_adjust_successor(3)"))?;
+		if child_stored_node.n.keys_mut().insert(descending_key, descending_payload).is_some() {
+			#[cfg(debug_assertions)]
+			panic!("Duplicate insert key {} ", child_stored_node.n);
+		}
+		if let BTreeNode::Internal(_, rc) = &mut right_child_stored_node.n {
+			if let BTreeNode::Internal(_, lc) = &mut child_stored_node.n {
+				lc.push(rc.remove(0))
 			}
 		}
-		// If we reach this point, something was wrong in the BTree
-		Err(Error::CorruptedIndex)
+		if keys.insert(ascending_key, ascending_payload).is_some() {
+			#[cfg(debug_assertions)]
+			panic!("Duplicate insert key {} ", keys);
+		}
+		let child_id = child_stored_node.id;
+		#[cfg(debug_assertions)]
+		{
+			child_stored_node.n.check();
+			right_child_stored_node.n.check();
+		}
+		store.set_node(child_stored_node, true).await?;
+		store.set_node(right_child_stored_node, true).await?;
+		Ok((true, is_main_key, key_to_delete, child_id))
 	}
 
 	async fn delete_adjust_predecessor(
@@ -711,36 +788,48 @@ where
 		child_idx: usize,
 		key_to_delete: Key,
 		is_main_key: bool,
-		mut child_stored_node: BStoredNode<BK>,
 		mut left_child_stored_node: BStoredNode<BK>,
+		mut child_stored_node: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
-		if let Some((ascending_key, ascending_payload)) =
-			left_child_stored_node.n.keys().get_last_key()
-		{
-			left_child_stored_node.n.keys_mut().remove(&ascending_key);
-			if let Some(descending_key) = keys.get_key(child_idx) {
-				if let Some(descending_payload) = keys.remove(&descending_key) {
-					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
-					if let BTreeNode::Internal(_, rc) = &mut left_child_stored_node.n {
-						if let BTreeNode::Internal(_, lc) = &mut child_stored_node.n {
-							lc.push(rc.remove(rc.len() - 1));
-						}
-					}
-					keys.insert(ascending_key, ascending_payload);
-					let child_id = child_stored_node.id;
-					#[cfg(debug_assertions)]
-					{
-						child_stored_node.n.check();
-						left_child_stored_node.n.check();
-					}
-					store.set_node(child_stored_node, true).await?;
-					store.set_node(left_child_stored_node, true).await?;
-					return Ok((true, is_main_key, key_to_delete, child_id));
-				}
+		let (ascending_key, ascending_payload) = left_child_stored_node
+			.n
+			.keys()
+			.get_last_key()
+			.ok_or(Error::CorruptedIndex("BTree::delete_adjust_predecessor(1)"))?;
+		if left_child_stored_node.n.keys_mut().remove(&ascending_key).is_none() {
+			#[cfg(debug_assertions)]
+			panic!("Remove key {} {}", String::from_utf8(ascending_key)?, left_child_stored_node.n);
+		}
+		let descending_key = keys
+			.get_key(child_idx)
+			.ok_or(Error::CorruptedIndex("BTree::delete_adjust_predecessor(2)"))?;
+		let descending_payload = keys
+			.remove(&descending_key)
+			.ok_or(Error::CorruptedIndex("BTree::delete_adjust_predecessor(3)"))?;
+		if child_stored_node.n.keys_mut().insert(descending_key, descending_payload).is_some() {
+			#[cfg(debug_assertions)]
+			panic!("Insert key {}", child_stored_node.n);
+		}
+		if let BTreeNode::Internal(_, lc) = &mut left_child_stored_node.n {
+			if let BTreeNode::Internal(_, rc) = &mut child_stored_node.n {
+				rc.insert(0, lc.remove(lc.len() - 1));
 			}
 		}
-		// If we reach this point, something was wrong in the BTree
-		Err(Error::CorruptedIndex)
+		if keys.insert(ascending_key, ascending_payload).is_some() {
+			#[cfg(debug_assertions)]
+			panic!("Insert key {}", keys);
+		}
+		let child_id = child_stored_node.id;
+		#[cfg(debug_assertions)]
+		{
+			child_stored_node.n.check();
+			left_child_stored_node.n.check();
+			info!("{}", left_child_stored_node);
+			info!("{}", child_stored_node);
+		}
+		store.set_node(child_stored_node, true).await?;
+		store.set_node(left_child_stored_node, true).await?;
+		return Ok((true, is_main_key, key_to_delete, child_id));
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -754,20 +843,18 @@ where
 		mut left_child: BStoredNode<BK>,
 		right_child: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
-		if let Some(descending_key) = keys.get_key(child_idx) {
-			if let Some(descending_payload) = keys.remove(&descending_key) {
-				children.remove(child_idx + 1);
-				let left_id = left_child.id;
-				left_child.n.append(descending_key, descending_payload, right_child.n)?;
-				#[cfg(debug_assertions)]
-				left_child.n.check();
-				store.set_node(left_child, true).await?;
-				store.remove_node(right_child.id, right_child.key).await?;
-				return Ok((true, is_main_key, key_to_delete, left_id));
-			}
-		}
-		// If we reach this point, something was wrong in the BTree
-		Err(Error::CorruptedIndex)
+		let descending_key =
+			keys.get_key(child_idx).ok_or(Error::CorruptedIndex("BTree::merge_nodes(1)"))?;
+		let descending_payload =
+			keys.remove(&descending_key).ok_or(Error::CorruptedIndex("BTree::merge_nodes(2)"))?;
+		children.remove(child_idx + 1);
+		let left_id = left_child.id;
+		left_child.n.append(descending_key, descending_payload, right_child.n)?;
+		#[cfg(debug_assertions)]
+		left_child.n.check();
+		store.set_node(left_child, true).await?;
+		store.remove_node(right_child.id, right_child.key).await?;
+		Ok((true, is_main_key, key_to_delete, left_id))
 	}
 
 	pub(in crate::idx) async fn statistics(
@@ -776,6 +863,8 @@ where
 		store: &BTreeStore<BK>,
 	) -> Result<BStatistics, Error> {
 		let mut stats = BStatistics::default();
+		#[cfg(debug_assertions)]
+		let mut keys = HashSet::new();
 		let mut node_queue = VecDeque::new();
 		if let Some(node_id) = self.state.root {
 			node_queue.push_front((node_id, 1));
@@ -785,6 +874,17 @@ where
 			stats.keys_count += stored.n.keys().len() as u64;
 			if depth > stats.max_depth {
 				stats.max_depth = depth;
+			}
+			#[cfg(debug_assertions)]
+			{
+				let k = stored.n.keys();
+				for i in 0..k.len() {
+					if let Some(k) = k.get_key(i as usize) {
+						if !keys.insert(k.clone()) {
+							panic!("Duplicate key: {}", String::from_utf8(k)?);
+						}
+					}
+				}
 			}
 			stats.nodes_count += 1;
 			stats.total_size += stored.size as u64;
@@ -811,7 +911,8 @@ mod tests {
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
-	use std::collections::{HashMap, VecDeque};
+	use std::cmp::Ordering;
+	use std::collections::{BTreeMap, HashSet, VecDeque};
 	use std::fmt::Debug;
 	use std::sync::Arc;
 	use test_log::test;
@@ -1384,51 +1485,47 @@ mod tests {
 		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
-			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| {
-				debug!("{} -> {}", depth, node_id);
-				node.n.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
-				match count {
-					0 => {
-						assert_eq!(depth, 1);
-						assert_eq!(node_id, 1);
-						check_is_internal_node(
-							&node.n,
-							vec![("e", 5), ("l", 12), ("p", 16), ("t", 20), ("x", 24)],
-							vec![0, 9, 3, 4, 6, 5],
-						);
-					}
-					1 => {
-						assert_eq!(depth, 2);
-						assert_eq!(node_id, 0);
-						check_is_leaf_node(&node.n, vec![("a", 1), ("c", 3)]);
-					}
-					2 => {
-						assert_eq!(depth, 2);
-						assert_eq!(node_id, 9);
-						check_is_leaf_node(&node.n, vec![("j", 10), ("k", 11)]);
-					}
-					3 => {
-						assert_eq!(depth, 2);
-						assert_eq!(node_id, 3);
-						check_is_leaf_node(&node.n, vec![("n", 14), ("o", 15)]);
-					}
-					4 => {
-						assert_eq!(depth, 2);
-						assert_eq!(node_id, 4);
-						check_is_leaf_node(&node.n, vec![("q", 17), ("r", 18), ("s", 19)]);
-					}
-					5 => {
-						assert_eq!(depth, 2);
-						assert_eq!(node_id, 6);
-						check_is_leaf_node(&node.n, vec![("u", 21), ("v", 22)]);
-					}
-					6 => {
-						assert_eq!(depth, 2);
-						assert_eq!(node_id, 5);
-						check_is_leaf_node(&node.n, vec![("y", 25), ("z", 26)]);
-					}
-					_ => panic!("This node should not exist {}", count),
+			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| match count {
+				0 => {
+					assert_eq!(depth, 1);
+					assert_eq!(node_id, 1);
+					check_is_internal_node(
+						&node.n,
+						vec![("e", 5), ("l", 12), ("p", 16), ("t", 20), ("x", 24)],
+						vec![0, 9, 3, 4, 6, 5],
+					);
 				}
+				1 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 0);
+					check_is_leaf_node(&node.n, vec![("a", 1), ("c", 3)]);
+				}
+				2 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 9);
+					check_is_leaf_node(&node.n, vec![("j", 10), ("k", 11)]);
+				}
+				3 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 3);
+					check_is_leaf_node(&node.n, vec![("n", 14), ("o", 15)]);
+				}
+				4 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 4);
+					check_is_leaf_node(&node.n, vec![("q", 17), ("r", 18), ("s", 19)]);
+				}
+				5 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 6);
+					check_is_leaf_node(&node.n, vec![("u", 21), ("v", 22)]);
+				}
+				6 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 5);
+					check_is_leaf_node(&node.n, vec![("y", 25), ("z", 26)]);
+				}
+				_ => panic!("This node should not exist {}", count),
 			})
 			.await
 			.unwrap();
@@ -1443,7 +1540,7 @@ mod tests {
 		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
-		let mut expected_keys = HashMap::new();
+		let mut expected_keys = BTreeMap::new();
 
 		let mut check_generation = 0;
 		{
@@ -1451,6 +1548,8 @@ mod tests {
 			for (key, payload) in CLRS_EXAMPLE {
 				expected_keys.insert(key.to_string(), payload);
 				t.insert(&mut tx, &mut st, key.into(), payload).await?;
+				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(expected_keys.len(), l);
 			}
 			check_generation = check_finish_commit(
 				&mut t,
@@ -1470,11 +1569,14 @@ mod tests {
 
 		for (key, _) in CLRS_EXAMPLE {
 			debug!("------------------------");
-			debug!("Delete {}", key);
+			info!("Delete {}", key);
 			{
 				let (mut tx, mut st) =
 					new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
-				t.delete(&mut tx, &mut &mut st, key.into()).await?;
+				assert!(t.delete(&mut tx, &mut &mut st, key.into()).await?.is_some());
+				expected_keys.remove(key);
+				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(expected_keys.len(), l);
 				check_generation = check_finish_commit(
 					&mut t,
 					st,
@@ -1486,14 +1588,13 @@ mod tests {
 			}
 
 			// Check that every expected keys are still found in the tree
-			expected_keys.remove(key);
-
 			{
 				let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(
 						t.search(&mut tx, &mut st, &key.as_str().into()).await?,
-						Some(*payload)
+						Some(*payload),
+						"Can't find: {key}",
 					)
 				}
 				tx.cancel().await?;
@@ -1633,28 +1734,68 @@ mod tests {
 		];
 		{
 			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			let mut term_count = 0;
 			for term in terms {
 				t.insert(&mut tx, &mut st, term.into(), 0).await?;
+				term_count += 1;
+				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(term_count, l);
 			}
-			st.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
-		}
-		{
-			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
-			for term in terms {
-				info!("Delete {term}");
-				t.delete(&mut tx, &mut st, term.into()).await?;
-			}
-			st.finish(&mut tx).await.unwrap();
-			tx.commit().await.unwrap();
+			st.finish(&mut tx).await?;
+			tx.commit().await?;
 		}
 		{
 			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 100).await;
 			print_tree(&mut tx, &mut st, &t).await;
-			Ok(())
 		}
+		{
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			let mut term_count = terms.len();
+			for term in terms {
+				info!("Delete {term}");
+				t.delete(&mut tx, &mut st, term.into()).await?;
+				print_tree_mut(&mut tx, &mut st, &t).await;
+				term_count -= 1;
+				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(term_count, l);
+			}
+			st.finish(&mut tx).await?;
+			tx.commit().await?;
+		}
+		{
+			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
+			assert_eq!(check_btree_properties(&t, &mut tx, &mut st).await?.0, 0);
+			st.finish(&mut tx).await?;
+			tx.cancel().await?;
+		}
+		Ok(())
 	}
 
+	async fn check_btree_properties<BK>(
+		t: &BTree<BK>,
+		tx: &mut Transaction,
+		st: &mut BTreeStore<BK>,
+	) -> Result<(usize, usize), Error>
+	where
+		BK: BKeys + Clone + Debug,
+	{
+		let mut unique_keys = HashSet::new();
+		let n = t
+			.inspect_nodes_mut(tx, st, |_, _, _, sn| {
+				let keys = sn.n.keys();
+				for i in 0..keys.len() {
+					if let Some(key) = keys.get_key(i as usize) {
+						if !unique_keys.insert(key) {
+							panic!("Non unique");
+						}
+					} else {
+						panic!("No key");
+					}
+				}
+			})
+			.await?;
+		Ok((n, unique_keys.len()))
+	}
 	/////////////
 	// HELPERS //
 	/////////////
@@ -1691,12 +1832,24 @@ mod tests {
 	{
 		debug!("----------------------------------");
 		t.inspect_nodes(tx, st, |_count, depth, node_id, node| {
-			debug!("{} -> {}", depth, node_id);
-			node.n.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
+			info!("depth: {} - node_id: {} - {}", depth, node_id, node.n);
 		})
 		.await
 		.unwrap();
 		debug!("----------------------------------");
+	}
+
+	async fn print_tree_mut<BK>(tx: &mut Transaction, st: &mut BTreeStore<BK>, t: &BTree<BK>)
+	where
+		BK: BKeys + Debug + Clone,
+	{
+		info!("----------------------------------");
+		t.inspect_nodes_mut(tx, st, |_count, depth, node_id, node| {
+			info!("depth: {} - node_id: {} - {}", depth, node_id, node.n);
+		})
+		.await
+		.unwrap();
+		info!("----------------------------------");
 	}
 
 	fn check_keys<BK>(keys: &BK, expected_keys: Vec<(&str, i32)>)
@@ -1746,24 +1899,69 @@ mod tests {
 			}
 			Ok(count)
 		}
-	}
 
-	impl<BK> BTreeNode<BK>
-	where
-		BK: BKeys + Clone,
-	{
-		fn debug<F>(&self, to_string: F) -> Result<(), Error>
+		/// This is for debugging
+		async fn inspect_nodes_mut<F>(
+			&self,
+			tx: &mut Transaction,
+			st: &mut BTreeStore<BK>,
+			mut inspect_func: F,
+		) -> Result<usize, Error>
 		where
-			F: Fn(Key) -> Result<String, Error>,
+			F: FnMut(usize, usize, NodeId, &BStoredNode<BK>),
 		{
-			match self {
-				BTreeNode::Internal(keys, children) => {
-					keys.debug(to_string)?;
-					debug!("Children{:?}", children);
-					Ok(())
-				}
-				BTreeNode::Leaf(keys) => keys.debug(to_string),
+			let mut node_queue = VecDeque::new();
+			if let Some(node_id) = self.state.root {
+				node_queue.push_front((node_id, 1, None::<Key>, None::<Key>));
 			}
+			let mut count = 0;
+			while let Some((node_id, depth, left_key, right_key)) = node_queue.pop_front() {
+				let stored_node = st.get_node_mut(tx, node_id).await?;
+				if let BTreeNode::Internal(keys, children) = &stored_node.n {
+					let depth = depth + 1;
+					let mut idx = 0;
+					let mut child_right_key = None;
+					for child_id in children {
+						let child_left_key = child_right_key;
+						child_right_key = keys.get_key(idx);
+						if let Some(crk) = &child_left_key {
+							if let Some(lk) = &left_key {
+								assert_eq!(
+									lk.cmp(crk),
+									Ordering::Less,
+									"left: {} < {} - node_id: {} - {}",
+									String::from_utf8_lossy(lk),
+									String::from_utf8_lossy(crk),
+									stored_node.id,
+									stored_node.n
+								);
+							}
+							if let Some(rk) = &right_key {
+								assert_eq!(
+									crk.cmp(rk),
+									Ordering::Less,
+									"right: {} < {} - node_id: {} - {}",
+									String::from_utf8_lossy(crk),
+									String::from_utf8_lossy(rk),
+									stored_node.id,
+									stored_node.n
+								);
+							}
+						}
+						node_queue.push_back((
+							*child_id,
+							depth,
+							child_left_key.clone(),
+							child_right_key.clone(),
+						));
+						idx += 1;
+					}
+				}
+				inspect_func(count, depth, node_id, &stored_node);
+				st.set_node(stored_node, false).await?;
+				count += 1;
+			}
+			Ok(count)
 		}
 	}
 }

@@ -1515,7 +1515,7 @@ impl TreeNode for MTreeNode {
 					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Internal(entries))
 			}
-			_ => Err(Error::CorruptedIndex),
+			_ => Err(Error::CorruptedIndex("MTreeNode::try_from_val")),
 		}
 	}
 
@@ -2246,7 +2246,6 @@ mod tests {
 			vector_type: VectorType,
 			dimension: usize,
 		) -> TestCollection {
-			info!("New unique collection: {collection_size}");
 			let mut collection = vec![];
 			for doc_id in 0..collection_size as DocId {
 				collection.push((doc_id, new_vec((doc_id + 1) as i64, vector_type, dimension)));
@@ -2259,7 +2258,6 @@ mod tests {
 			vector_type: VectorType,
 			dimension: usize,
 		) -> TestCollection {
-			info!("New random collection: {collection_size}");
 			let mut rng = get_seed_rnd();
 			let mut collection = vec![];
 
@@ -2393,7 +2391,6 @@ mod tests {
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
 			for i in 0..30 {
-				info!("test_mtree_random_xs {}", i);
 				// 10, 40
 				test_mtree_collection(
 					&[3, 40],

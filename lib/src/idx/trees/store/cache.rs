@@ -6,7 +6,7 @@ use quick_cache::GuardResult;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -14,11 +14,11 @@ pub type CacheGen = u64;
 
 pub(super) struct TreeCaches<N>(Arc<RwLock<HashMap<Key, TreeCache<N>>>>)
 where
-	N: TreeNode + Debug + Clone;
+	N: TreeNode + Debug + Clone + Display;
 
 impl<N> TreeCaches<N>
 where
-	N: TreeNode + Debug + Clone,
+	N: TreeNode + Debug + Clone + Display,
 {
 	pub(super) async fn get_cache(
 		&self,
@@ -71,7 +71,7 @@ where
 
 impl<N> Default for TreeCaches<N>
 where
-	N: TreeNode + Debug + Clone,
+	N: TreeNode + Debug + Clone + Display,
 {
 	fn default() -> Self {
 		Self(Arc::new(RwLock::new(HashMap::new())))
@@ -81,7 +81,7 @@ where
 #[derive(Clone)]
 pub enum TreeCache<N>
 where
-	N: TreeNode + Debug + Clone,
+	N: TreeNode + Debug + Clone + Display,
 {
 	Lru(CacheGen, TreeLruCache<N>),
 	Full(CacheGen, TreeFullCache<N>),
@@ -89,11 +89,9 @@ where
 
 impl<N> TreeCache<N>
 where
-	N: TreeNode + Debug + Clone,
+	N: TreeNode + Debug + Clone + Display,
 {
 	pub fn new(generation: CacheGen, keys: TreeNodeProvider, cache_size: usize) -> Self {
-		#[cfg(debug_assertions)]
-		info!("New cache - size : {cache_size} - gen: {generation}");
 		if cache_size == 0 {
 			TreeCache::Full(generation, TreeFullCache::new(keys))
 		} else {
@@ -121,7 +119,7 @@ where
 
 pub struct TreeLruCache<N>
 where
-	N: TreeNode + Debug + Clone,
+	N: TreeNode + Debug + Clone + Display,
 {
 	keys: TreeNodeProvider,
 	cache: Arc<Cache<NodeId, Arc<StoredNode<N>>>>,

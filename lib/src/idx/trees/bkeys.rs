@@ -5,11 +5,11 @@ use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::ser;
 use std::collections::VecDeque;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::io;
 use std::io::Cursor;
 
-pub trait BKeys: Default + Display + Sized {
+pub trait BKeys: Default + Debug + Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> u32;
 	fn is_empty(&self) -> bool;
@@ -19,7 +19,7 @@ pub trait BKeys: Default + Display + Sized {
 	// The size of the Node should be small, therefore one instance of
 	// BKeys would never be store a large volume of keys.
 	fn collect_with_prefix(&self, prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error>;
-	fn insert(&mut self, key: Key, payload: Payload);
+	fn insert(&mut self, key: Key, payload: Payload) -> Option<Payload>;
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
 	fn split_keys(self) -> Result<SplitKeys<Self>, Error>;
@@ -30,9 +30,6 @@ pub trait BKeys: Default + Display + Sized {
 	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error>;
 	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error>;
 	fn compile(&mut self) {}
-	fn debug<F>(&self, to_string: F) -> Result<(), Error>
-	where
-		F: Fn(Key) -> Result<String, Error>;
 }
 
 pub struct SplitKeys<BK>
@@ -107,11 +104,12 @@ impl BKeys for FstKeys {
 		Err(Error::Unreachable("BKeys/FSTKeys::collect_with_prefix"))
 	}
 
-	fn insert(&mut self, key: Key, payload: Payload) {
+	fn insert(&mut self, key: Key, payload: Payload) -> Option<Payload> {
 		self.edit();
 		if let Inner::Trie(t) = &mut self.i {
-			t.insert(key, payload);
+			return t.insert(key, payload);
 		}
+		unreachable!()
 	}
 
 	fn append(&mut self, keys: Self) {
@@ -245,30 +243,6 @@ impl BKeys for FstKeys {
 			)))
 		}
 	}
-
-	fn debug<F>(&self, to_string: F) -> Result<(), Error>
-	where
-		F: Fn(Key) -> Result<String, Error>,
-	{
-		match &self.i {
-			Inner::Map(m) => {
-				let mut s = String::new();
-				let mut iter = m.stream();
-				let mut start = true;
-				while let Some((k, p)) = iter.next() {
-					if !start {
-						s.push(',');
-					} else {
-						start = false;
-					}
-					s.push_str(&format!("{}={}", to_string(k.to_vec())?.as_str(), p));
-				}
-				debug!("FSTKeys[{}]", s);
-				Ok(())
-			}
-			Inner::Trie(t) => t.debug(to_string),
-		}
-	}
 }
 
 impl TryFrom<MapBuilder<Vec<u8>>> for FstKeys {
@@ -288,6 +262,7 @@ impl TryFrom<Vec<u8>> for FstKeys {
 	}
 }
 
+#[cfg(debug_assertions)]
 impl Display for FstKeys {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match &self.i {
@@ -305,7 +280,7 @@ impl Display for FstKeys {
 				}
 				Ok(())
 			}
-			Inner::Trie(t) => t.fmt(f),
+			Inner::Trie(t) => write!(f, "{}", t),
 		}
 	}
 }
@@ -315,6 +290,7 @@ pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }
 
+#[cfg(debug_assertions)]
 impl Display for TrieKeys {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let mut start = true;
@@ -372,8 +348,8 @@ impl BKeys for TrieKeys {
 		Ok(r)
 	}
 
-	fn insert(&mut self, key: Key, payload: Payload) {
-		self.keys.insert(key, payload);
+	fn insert(&mut self, key: Key, payload: Payload) -> Option<Payload> {
+		self.keys.insert(key, payload)
 	}
 
 	fn append(&mut self, keys: Self) {
@@ -466,24 +442,6 @@ impl BKeys for TrieKeys {
 			io::copy(&mut uncompressed.as_slice(), &mut wtr)?;
 		}
 		bincode::serialize_into(c, &compressed)?;
-		Ok(())
-	}
-
-	fn debug<F>(&self, to_string: F) -> Result<(), Error>
-	where
-		F: Fn(Key) -> Result<String, Error>,
-	{
-		let mut s = String::new();
-		let mut start = true;
-		for (k, p) in self.keys.iter() {
-			if !start {
-				s.push(',');
-			} else {
-				start = false;
-			}
-			s.push_str(&format!("{}={}", to_string(k.to_vec())?.as_str(), p));
-		}
-		debug!("TrieKeys[{}]", s);
 		Ok(())
 	}
 }

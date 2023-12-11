@@ -116,6 +116,7 @@ tracing = "0.1.40"
 trice = "0.3.1"
 ulid = { version = "1.1.0", features = ["serde"] }
 url = "2.5.0"
+tracing-subscriber = "0.3.18"
 
 [dev-dependencies]
 criterion = { version="0.5.1", features= ["async_tokio"] }

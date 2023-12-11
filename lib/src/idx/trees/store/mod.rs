@@ -12,7 +12,7 @@ use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 pub type NodeId = u64;
@@ -129,13 +129,13 @@ impl TreeNodeProvider {
 			let node = N::try_from_val(val)?;
 			Ok(StoredNode::new(node, id, key, size))
 		} else {
-			Err(Error::CorruptedIndex)
+			Err(Error::CorruptedIndex("TreeStore::load"))
 		}
 	}
 
 	async fn save<N>(&self, tx: &mut Transaction, mut node: StoredNode<N>) -> Result<(), Error>
 	where
-		N: TreeNode + Clone,
+		N: TreeNode + Clone + Display,
 	{
 		let val = node.n.try_into_val()?;
 		tx.set(node.key, val).await?;
@@ -145,7 +145,7 @@ impl TreeNodeProvider {
 
 pub struct StoredNode<N>
 where
-	N: Clone,
+	N: Clone + Display,
 {
 	pub(super) n: N,
 	pub(super) id: NodeId,
@@ -155,7 +155,7 @@ where
 
 impl<N> StoredNode<N>
 where
-	N: Clone,
+	N: Clone + Display,
 {
 	pub(super) fn new(n: N, id: NodeId, key: Key, size: u32) -> Self {
 		Self {
@@ -167,7 +167,16 @@ where
 	}
 }
 
-pub trait TreeNode {
+impl<N> Display for StoredNode<N>
+where
+	N: Clone + Display,
+{
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "node_id: {} - {}", self.id, self.n)
+	}
+}
+
+pub trait TreeNode: Debug + Clone + Display {
 	fn try_from_val(val: Val) -> Result<Self, Error>
 	where
 		Self: Sized;
