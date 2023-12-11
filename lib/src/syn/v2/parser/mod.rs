@@ -24,7 +24,7 @@ mod thing;
 mod token_buffer;
 
 #[cfg(test)]
-mod test;
+pub mod test;
 
 pub use error::{IntErrorKind, ParseError, ParseErrorKind};
 
@@ -192,12 +192,6 @@ impl<'a> Parser<'a> {
 		} else {
 			Ok(())
 		}
-	}
-
-	/// Recover the parser state to before a given span.
-	pub fn backup_before(&mut self, span: Span) {
-		self.token_buffer.clear();
-		self.lexer.backup_before(span);
 	}
 
 	/// Recover the parser state to after a given span.

@@ -203,4 +203,13 @@ mod tests {
 		assert_eq!("<5>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(5));
 	}
+
+	#[test]
+	fn test_knn_with_prefix() {
+		let res = knn("knn<5>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<5>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(5));
+	}
 }

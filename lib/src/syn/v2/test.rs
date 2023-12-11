@@ -49,7 +49,7 @@ impl Parse<Self> for Thing {
 impl Parse<Self> for Expression {
 	fn parse(val: &str) -> Self {
 		let mut parser = Parser::new(val.as_bytes());
-		let value = parser.parse_value().unwrap();
+		let value = parser.parse_value_field().unwrap();
 		if let Value::Expression(x) = value {
 			return *x;
 		}

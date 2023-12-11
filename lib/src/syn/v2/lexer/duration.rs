@@ -33,6 +33,17 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
+	fn invalid_suffix_duration(&mut self) -> Error {
+		// eat the whole suffix.
+		while let Some(x) = self.reader.peek() {
+			if !x.is_ascii_alphanumeric() {
+				break;
+			}
+			self.reader.next();
+		}
+		Error::InvalidSuffix
+	}
+
 	/// Lex a duration,
 	///
 	/// Should only be called from lexing a number.
@@ -79,11 +90,11 @@ impl<'a> Lexer<'a> {
 					// Second byte of 'µ'.
 					// Always consume as the next byte will always be part of a two byte character.
 					if !self.eat(0xb5) {
-						return Err(Error::InvalidSuffix);
+						return Err(self.invalid_suffix_duration());
 					}
 
 					if !self.eat(b's') {
-						return Err(Error::InvalidSuffix);
+						return Err(self.invalid_suffix_duration());
 					}
 
 					StdDuration::from_micros(current_value)
@@ -129,7 +140,7 @@ impl<'a> Lexer<'a> {
 					new_duration
 				}
 				_ => {
-					return Err(Error::InvalidSuffix);
+					return Err(self.invalid_suffix_duration());
 				}
 			};
 
@@ -139,7 +150,9 @@ impl<'a> Lexer<'a> {
 			match next {
 				// there was some remaining alphabetic characters after the valid suffix, so the
 				// suffix is invalid.
-				Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => return Err(Error::InvalidSuffix),
+				Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => {
+					return Err(self.invalid_suffix_duration())
+				}
 				Some(b'0'..=b'9') => {} // Duration continues.
 				_ => return Ok(Duration(duration)),
 			}

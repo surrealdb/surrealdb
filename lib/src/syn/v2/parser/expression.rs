@@ -296,3 +296,104 @@ impl Parser<'_> {
 		Ok(lhs)
 	}
 }
+
+#[cfg(test)]
+mod test {
+	use super::*;
+	use crate::sql::{Block, Future, Kind};
+	use crate::syn::Parse;
+
+	#[test]
+	fn cast_int() {
+		let sql = "<int>1.2345";
+		let out = Value::parse(sql);
+		assert_eq!("<int> 1.2345f", format!("{}", out));
+		assert_eq!(out, Value::from(Cast(Kind::Int, 1.2345.into())));
+	}
+
+	#[test]
+	fn cast_string() {
+		let sql = "<string>1.2345";
+		let out = Value::parse(sql);
+		assert_eq!("<string> 1.2345f", format!("{}", out));
+		assert_eq!(out, Value::from(Cast(Kind::String, 1.2345.into())));
+	}
+
+	#[test]
+	fn expression_statement() {
+		let sql = "true AND false";
+		let out = Value::parse(sql);
+		assert_eq!("true AND false", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_left_opened() {
+		let sql = "3 * 3 * 3 = 27";
+		let out = Value::parse(sql);
+		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_left_closed() {
+		let sql = "(3 * 3 * 3) = 27";
+		let out = Value::parse(sql);
+		assert_eq!("(3 * 3 * 3) = 27", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_right_opened() {
+		let sql = "27 = 3 * 3 * 3";
+		let out = Value::parse(sql);
+		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_right_closed() {
+		let sql = "27 = (3 * 3 * 3)";
+		let out = Value::parse(sql);
+		assert_eq!("27 = (3 * 3 * 3)", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_both_opened() {
+		let sql = "3 * 3 * 3 = 3 * 3 * 3";
+		let out = Value::parse(sql);
+		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_both_closed() {
+		let sql = "(3 * 3 * 3) = (3 * 3 * 3)";
+		let out = Value::parse(sql);
+		assert_eq!("(3 * 3 * 3) = (3 * 3 * 3)", format!("{}", out));
+	}
+
+	#[test]
+	fn expression_unary() {
+		let sql = "-a";
+		let out = Value::parse(sql);
+		assert_eq!(sql, format!("{}", out));
+	}
+
+	#[test]
+	fn expression_with_unary() {
+		let sql = "-(5) + 5";
+		let out = Value::parse(sql);
+		assert_eq!(sql, format!("{}", out));
+	}
+
+	#[test]
+	fn parse_expression() {
+		let sql = "<future> { 5 + 10 }";
+		let out = Value::parse(sql);
+		assert_eq!("<future> { 5 + 10 }", format!("{}", out));
+		assert_eq!(
+			out,
+			Value::from(Future(Block::from(Value::from(Expression::Binary {
+				l: Value::Number(Number::Int(5)),
+				o: Operator::Add,
+				r: Value::Number(Number::Int(10))
+			}))))
+		);
+	}
+}

@@ -393,6 +393,7 @@ impl Parser<'_> {
 					self.expect_closing_delimiter(t!(")"), start)?;
 					Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))))
 				} else {
+					self.expect_closing_delimiter(t!(")"), start)?;
 					Ok(Value::Subquery(Box::new(Subquery::Value(Value::Number(x)))))
 				}
 			}
@@ -491,5 +492,87 @@ impl Parser<'_> {
 			.lex_js_function_body()
 			.map_err(|(e, span)| ParseError::new(ParseErrorKind::InvalidToken(e), span))?;
 		Ok(Function::Script(Script(body), args))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::syn::Parse;
+
+	#[test]
+	fn subquery_expression_statement() {
+		let sql = "(1 + 2 + 3)";
+		let out = Value::parse(sql);
+		assert_eq!("(1 + 2 + 3)", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_ifelse_statement() {
+		let sql = "IF true THEN false END";
+		let out = Value::parse(sql);
+		assert_eq!("IF true THEN false END", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_select_statement() {
+		let sql = "(SELECT * FROM test)";
+		let out = Value::parse(sql);
+		assert_eq!("(SELECT * FROM test)", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_define_statement() {
+		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
+		let out = Value::parse(sql);
+		assert_eq!(
+			"(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))",
+			format!("{}", out)
+		)
+	}
+
+	#[test]
+	fn subquery_remove_statement() {
+		let sql = "(REMOVE EVENT foo_event ON foo)";
+		let out = Value::parse(sql);
+		assert_eq!("(REMOVE EVENT foo_event ON foo)", format!("{}", out))
+	}
+
+	#[test]
+	fn mock_count() {
+		let sql = "|test:1000|";
+		let out = Value::parse(sql);
+		assert_eq!("|test:1000|", format!("{}", out));
+		assert_eq!(out, Value::from(Mock::Count(String::from("test"), 1000)));
+	}
+
+	#[test]
+	fn mock_range() {
+		let sql = "|test:1..1000|";
+		let out = Value::parse(sql);
+		assert_eq!("|test:1..1000|", format!("{}", out));
+		assert_eq!(out, Value::from(Mock::Range(String::from("test"), 1, 1000)));
+	}
+
+	#[test]
+	fn regex_simple() {
+		let sql = "/test/";
+		let out = Value::parse(sql);
+		assert_eq!("/test/", format!("{}", out));
+		let Value::Regex(regex) = out else {
+			panic!()
+		};
+		assert_eq!(regex, "test".parse().unwrap());
+	}
+
+	#[test]
+	fn regex_complex() {
+		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
+		let out = Value::parse(sql);
+		assert_eq!(r"/(?i)test/[a-z]+/\s\d\w{1}.*/", format!("{}", out));
+		let Value::Regex(regex) = out else {
+			panic!()
+		};
+		assert_eq!(regex, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
 	}
 }

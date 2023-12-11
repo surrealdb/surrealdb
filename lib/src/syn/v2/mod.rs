@@ -10,7 +10,7 @@ pub mod parser;
 pub mod token;
 
 #[cfg(test)]
-pub mod test;
+mod test;
 
 use lexer::Lexer;
 use parser::{ParseError, ParseErrorKind, Parser};
@@ -37,7 +37,7 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 pub fn value(input: &str) -> Result<Value, Error> {
 	debug!("parsing value, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_value().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	parser.parse_value_field().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 /// Parses a SurrealQL [`Value`].

@@ -612,3 +612,104 @@ impl Parser<'_> {
 		}
 	}
 }
+
+#[cfg(test)]
+mod test {
+	use super::*;
+	use crate::syn::Parse;
+
+	#[test]
+	fn block_value() {
+		let sql = "{ 80 }";
+		let out = Value::parse(sql);
+		assert_eq!(sql, out.to_string())
+	}
+
+	#[test]
+	fn block_ifelse() {
+		let sql = "{ RETURN IF true THEN 50 ELSE 40 END; }";
+		let out = Value::parse(sql);
+		assert_eq!(sql, out.to_string())
+	}
+
+	#[test]
+	fn block_multiple() {
+		let sql = r#"{
+
+	LET $person = (SELECT * FROM person WHERE first = $first AND last = $last AND birthday = $birthday);
+
+	RETURN IF $person[0].id THEN
+		$person[0]
+	ELSE
+		(CREATE person SET first = $first, last = $last, birthday = $birthday)
+	END;
+
+}"#;
+		let out = Value::parse(sql);
+		assert_eq!(sql, format!("{:#}", out))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::syn::Parse;
+
+	#[test]
+	fn simple() {
+		let sql = "(-0.118092, 51.509865)";
+		let out = Value::parse(sql);
+		assert!(matches!(out, Value::Geometry(_)));
+		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
+	}
+
+	#[test]
+	fn point() {
+		let sql = r#"{
+			type: 'Point',
+			coordinates: [-0.118092, 51.509865]
+		}"#;
+		let out = Value::parse(sql);
+		assert!(matches!(out, Value::Geometry(_)));
+		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
+	}
+
+	#[test]
+	fn polygon_exterior() {
+		let sql = r#"{
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				]
+			]
+		}"#;
+		let out = Value::parse(sql);
+		assert!(matches!(out, Value::Geometry(_)));
+		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
+	}
+
+	#[test]
+	fn polygon_interior() {
+		let sql = r#"{
+			type: 'Polygon',
+			coordinates: [
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				],
+				[
+					[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+					[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+					[-0.38314819, 51.37692386]
+				]
+			]
+		}"#;
+		let out = Value::parse(sql);
+		assert!(matches!(out, Value::Geometry(_)));
+		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]]] }", format!("{}", out));
+	}
+}

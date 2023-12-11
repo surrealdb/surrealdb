@@ -14,6 +14,49 @@ pub enum Error {
 }
 
 impl Lexer<'_> {
+	/// Lex only an integer.
+	/// Use when a number can be followed immediatly by a `.` like in a model version.
+	pub fn lex_only_integer(&mut self) -> Token {
+		match self.lex_only_integer_err() {
+			Ok(x) => x,
+			Err(e) => self.invalid_token(LexError::Number(e)),
+		}
+	}
+
+	fn lex_only_integer_err(&mut self) -> Result<Token, Error> {
+		let Some(next) = self.reader.peek() else {
+			return Ok(self.eof_token());
+		};
+
+		// not a number, return a different token kind, for error reporting.
+		if !next.is_ascii_digit() {
+			return Ok(self.next_token());
+		}
+
+		self.scratch.push(next as char);
+		self.reader.next();
+
+		while let Some(x) = self.reader.peek() {
+			if !x.is_ascii_digit() {
+				break;
+			}
+			self.scratch.push(x as char);
+			self.reader.next();
+		}
+
+		match self.reader.peek() {
+			Some(b'd' | b'f') => {
+				// not an integer but parse anyway for error reporting.
+				return self.lex_suffix(true);
+			}
+			Some(x) if x.is_ascii_alphabetic() => return Err(self.invalid_suffix()),
+			_ => {}
+		}
+
+		self.string = Some(mem::take(&mut self.scratch));
+		Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)))
+	}
+
 	pub fn lex_number(&mut self, start: u8) -> Token {
 		match self.lex_number_err(start) {
 			Ok(x) => x,
@@ -63,8 +106,7 @@ impl Lexer<'_> {
 					self.reader.next();
 				}
 				b'a'..=b'z' | b'A'..=b'Z' => {
-					self.scratch.clear();
-					return Err(Error::InvalidSuffix);
+					return Err(self.invalid_suffix());
 					// invalid token, unexpected identifier character immediatly after number.
 					// Eat all remaining identifier like characters.
 				}
@@ -76,6 +118,18 @@ impl Lexer<'_> {
 		}
 	}
 
+	fn invalid_suffix(&mut self) -> Error {
+		// eat the whole suffix.
+		while let Some(x) = self.reader.peek() {
+			if !x.is_ascii_alphanumeric() {
+				break;
+			}
+			self.reader.next();
+		}
+		self.scratch.clear();
+		Error::InvalidSuffix
+	}
+
 	/// Lex a number suffix, either 'f' or 'dec'.
 	fn lex_suffix(&mut self, can_be_duration: bool) -> Result<Token, Error> {
 		match self.reader.peek() {
@@ -83,8 +137,7 @@ impl Lexer<'_> {
 				// float suffix
 				self.reader.next();
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-					self.scratch.clear();
-					Err(Error::InvalidSuffix)
+					Err(self.invalid_suffix())
 				} else {
 					self.string = Some(mem::take(&mut self.scratch));
 					Ok(self.finish_token(TokenKind::Number(NumberKind::Float)))
@@ -99,19 +152,16 @@ impl Lexer<'_> {
 						self.reader.backup(checkpoint - 1);
 						return Ok(self.lex_duration());
 					} else {
-						self.scratch.clear();
-						return Err(Error::InvalidSuffix);
+						return Err(self.invalid_suffix());
 					}
 				}
 
 				if !self.eat(b'c') {
-					self.scratch.clear();
-					return Err(Error::InvalidSuffix);
+					return Err(self.invalid_suffix());
 				}
 
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-					self.scratch.clear();
-					Err(Error::InvalidSuffix)
+					Err(self.invalid_suffix())
 				} else {
 					self.string = Some(mem::take(&mut self.scratch));
 					Ok(self.finish_token(TokenKind::Number(NumberKind::Decimal)))

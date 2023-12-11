@@ -79,10 +79,6 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	parse_impl(input, idiom::plain)
 }
 
-pub fn datetime(input: &str) -> Result<Datetime, Error> {
-	parse_impl(input, literal::datetime)
-}
-
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	parse_impl(input, literal::datetime_all_raw)
 }

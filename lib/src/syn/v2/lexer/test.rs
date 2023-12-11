@@ -22,7 +22,7 @@ macro_rules! test_case(
 			i += 1;
 		)*
 		let _ = i;
-		assert!(lexer.next().is_none())
+		assert_eq!(lexer.next(),None)
 	};
 );
 
@@ -100,7 +100,6 @@ fn identifiers() {
 		"#
 			=> [
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Identifier,
 			t!("+"),
@@ -120,7 +119,6 @@ fn numbers() {
 		r#"
 			123123+32010230.123012031+33043030dec+33043030f+
 
-			123129decs+39349fs+394393df+32932932def+329239329z
 		"#
 			=> [
 			TokenKind::Number(NumberKind::Integer),
@@ -131,22 +129,52 @@ fn numbers() {
 			t!("+"),
 			TokenKind::Number(NumberKind::Float),
 			t!("+"),
-
-			TokenKind::Invalid,
-			TokenKind::Identifier,
-			t!("+"),
-			TokenKind::Invalid,
-			TokenKind::Identifier,
-			t!("+"),
-			TokenKind::Invalid,
-			TokenKind::Identifier,
-			t!("+"),
-			TokenKind::Invalid,
-			TokenKind::Identifier,
-			t!("+"),
-			TokenKind::Invalid,
-			TokenKind::Identifier,
 		]
+	}
+
+	test_case! {
+		"+123129decs+"
+			=> [
+				t!("+"),
+				TokenKind::Invalid,
+				t!("+"),
+			]
+	}
+
+	test_case! {
+		"+39349fs+"
+			=> [
+				t!("+"),
+				TokenKind::Invalid,
+				t!("+"),
+			]
+	}
+
+	test_case! {
+		"+394393df+"
+			=> [
+				t!("+"),
+				TokenKind::Invalid,
+				t!("+"),
+			]
+	}
+
+	test_case! {
+		"+32932932def+"
+			=> [
+				t!("+"),
+				TokenKind::Invalid,
+				t!("+"),
+			]
+	}
+
+	test_case! {
+		"+329239329z+"
+			=> [
+				t!("+"),
+				TokenKind::Invalid,
+				t!("+"),
+			]
 	}
 }
 
@@ -178,49 +206,34 @@ fn duration() {
 			TokenKind::Duration,
 
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 			t!("+"),
 			TokenKind::Invalid,
-			TokenKind::Identifier,
 		]
 	}
 }

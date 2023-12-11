@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	sql::{Array, Id, Object, Strand, Thing, Value},
+	sql::{Array, Constant, Id, Number, Object, Strand, Thing, Value},
 	syn::v2::parser::mac::test_parse,
 };
 
@@ -36,4 +36,31 @@ fn parse_record_string_2() {
 			id: Id::Array(Array(vec![Value::Strand(Strand("foo".to_owned()))]))
 		})
 	)
+}
+
+#[test]
+fn parse_i64() {
+	let res = test_parse!(parse_value, r#" -9223372036854775808 "#).unwrap();
+	assert_eq!(res, Value::Number(Number::Int(i64::MIN)));
+
+	let res = test_parse!(parse_value, r#" 9223372036854775807 "#).unwrap();
+	assert_eq!(res, Value::Number(Number::Int(i64::MAX)));
+}
+
+#[test]
+fn constant_lowercase() {
+	let out = test_parse!(parse_value, r#" math::pi "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathPi));
+}
+
+#[test]
+fn constant_uppercase() {
+	let out = test_parse!(parse_value, r#" MATH::PI "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathPi));
+}
+
+#[test]
+fn constant_mixedcase() {
+	let out = test_parse!(parse_value, r#" MaTh::Pi "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathPi));
 }
