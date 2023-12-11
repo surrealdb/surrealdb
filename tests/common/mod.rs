@@ -10,7 +10,7 @@ use serde_json::json;
 use std::error::Error;
 use std::fs::File;
 use std::future::Future;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::pin::Pin;
 use std::process::{Command, Stdio};

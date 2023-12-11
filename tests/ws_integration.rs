@@ -4,10 +4,11 @@ use thiserror::Error;
 mod common;
 
 mod ws_integration {
+	use futures_util::stream::FusedStream;
 	use futures_util::StreamExt;
 	use serde::{Deserialize, Serialize};
 	use std::future::Future;
-	use std::ops::DerefMut;
+	use std::ops::{Deref, DerefMut};
 	use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 	use std::sync::{mpsc, Arc, RwLock};
 	use std::time::Duration;
@@ -19,9 +20,13 @@ mod ws_integration {
 	use surrealdb::sql::{Id, Thing};
 	use surrealdb::{Notification, Surreal};
 	use test_log::test;
+	use tokio::io::AsyncWrite;
+	use tokio::net::TcpStream;
 	use tokio::task::{JoinHandle, LocalSet};
 	use tokio::time::error::Elapsed;
 	use tokio::time::interval;
+	use tokio_tungstenite::tungstenite::WebSocket;
+	use tokio_tungstenite::MaybeTlsStream;
 	use tonic::codegen::StdError;
 	use tower::ServiceExt;
 	use tracing::log::trace;
@@ -1626,35 +1631,10 @@ mod ws_integration {
 		let sock = socket.clone();
 		let local_set = LocalSet::new();
 		let messages = 50;
-		let pt_publish_creates = async move {
-			for msg in 0..messages {
-				trace!("Plaintext message loop {}", msg);
-				let query = format!(
-					r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#,
-					tb.clone(),
-					Ulid::new().to_string()
-				);
-				let randid = uuid::Uuid::new_v4();
-				let randid = randid.as_u128().to_string();
-				let json = json!({
-					"id": randid,
-					"method": "query",
-					"params": [query],
-				});
-				let mut write_lock =
-					sock.write().map_err(|e| format!("Error getting write lock: {}", e)).unwrap();
-				common::ws_send_msg(write_lock.deref_mut(), serde_json::to_string(&json).unwrap())
-					.await
-					.unwrap();
-			}
-		};
+		let pt_publish_creates = ();
 		let sock = socket.clone();
 		let (pt_recv_send, pt_recv_recv): (Sender<serde_json::Value>, Receiver<serde_json::Value>) =
 			mpsc::channel();
-
-		let pt_receive_create_resp = pt_receive_create_resp(sock, pt_recv_send);
-		let pt_pub_task = local_set.spawn_local(pt_publish_creates);
-		let pt_recv_task = local_set.spawn_local(pt_receive_create_resp);
 
 		// Repeatedly create binary updates
 		let publish_binary = binary.clone();
@@ -1710,23 +1690,21 @@ mod ws_integration {
 			trace!("End check message loop")
 		};
 		let check_msg_task = tokio::spawn(check_messages);
-		if let (a, b, c, d, e) = task_join_async_clojure(
+		let (a, b, c, d, e) = task_join_async_clojure(
 			local_set,
 			Duration::from_secs(10),
-			pt_pub_task,
-			pt_recv_task,
+			(sock.clone(), tb, messages),
+			(sock.clone(), pt_recv_send),
 			bin_pub_task,
 			bin_recv_task,
 			check_msg_task,
 		)
-		.await
-		{
-			a.unwrap();
-			b.unwrap();
-			c.unwrap();
-			d.unwrap();
-			e.unwrap();
-		}
+		.await;
+		a.unwrap();
+		b.unwrap();
+		c.unwrap();
+		d.unwrap();
+		e.unwrap();
 
 		assert_eq!(messages * 2, total_messages.0.read().unwrap().len() as i32);
 		assert_eq!(messages * 2, total_messages.1.read().unwrap().len() as i32);
@@ -1763,8 +1741,8 @@ mod ws_integration {
 	async fn task_join_async_clojure(
 		local_set: LocalSet,
 		timeout: Duration,
-		pt_pub_task: JoinHandle<()>,
-		pt_recv_task: JoinHandle<Result<(), String>>,
+		(ptp_sock, ptp_tb, ptp_messages): (Arc<RwLock<WsStream>>, String, i32),
+		(ptr_sock, ptr_send): (Arc<RwLock<WsStream>>, Sender<serde_json::Value>),
 		bin_pub_task: JoinHandle<Result<(), TestError>>,
 		bin_recv_task: JoinHandle<()>,
 		check_msg_task: JoinHandle<()>,
@@ -1775,19 +1753,25 @@ mod ws_integration {
 		Result<(), String>,
 		Result<(), String>,
 	) {
-		let pt_pub_task = tokio::time::timeout(timeout, pt_pub_task);
-		let pt_recv_task = tokio::time::timeout(timeout, pt_recv_task);
+		// we create the future here, because future is a trait
+		let pt_pub_fut = pt_publish_create_req(ptp_sock, ptp_tb, ptp_messages);
+		let pt_pub_task = tokio::time::timeout(timeout, pt_pub_fut);
+		let pt_recv_fut = pt_receive_create_resp(ptr_sock, ptr_send);
+		let pt_recv_task = tokio::time::timeout(timeout, pt_recv_fut);
 		let bin_pub_task = tokio::time::timeout(timeout, bin_pub_task);
 		let bin_recv_task = tokio::time::timeout(timeout, bin_recv_task);
 		let check_msg_task = tokio::time::timeout(timeout, check_msg_task);
-		let (res_ptp, res_ptr, res_binp, res_binr, res_chk, _ls) = tokio::join!(
-			pt_pub_task,
-			pt_recv_task,
-			bin_pub_task,
-			bin_recv_task,
-			check_msg_task,
-			local_set
-		);
+		let local_set_fut = local_set.run_until(async {
+			// We need to call these within `run_until` because otherwise they aren't parallel
+			// with spawn_local
+			let r = tokio::join! {
+				pt_pub_task,
+				pt_recv_task,
+			};
+			return r;
+		});
+		let (res_binp, res_binr, res_chk, (res_ptp, res_ptr)) =
+			tokio::join!(bin_pub_task, bin_recv_task, check_msg_task, local_set_fut);
 		(
 			res_ptp.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string())).map_err(
 				|e| {
@@ -1799,11 +1783,8 @@ mod ws_integration {
 				// map timeout err to string
 				.map_err(|e| e.to_string())
 				// flatten Ok(Err(String)) to Err(String)
-				.and_then(|e| match e {
-					Ok(Err(e)) => Err(e),
-					Ok(Ok(_)) => Ok(()),
-					Err(e) => Err(e.to_string()),
-				})
+				.and_then(|r| r)
+				// add error context
 				.map_err(|e| {
 					// We want the Err to be String
 					return format!("Failed plaintext receive: {}", e).to_string();
@@ -1845,19 +1826,46 @@ mod ws_integration {
 	) -> Result<(), String> {
 		let mut count = 0;
 		loop {
-			// TODO incorrect
-			let vals = common::ws_recv_all_msgs(
-				sock.write().unwrap().deref_mut(),
-				None,
-				Duration::from_secs(10),
-			)
-			.await
-			.map_err(|e| format!("Error waiting for message {}: {:?}", count, e))?;
-			for val in vals {
-				count += 1;
-				trace!("Text received message {count}");
-				pt_recv_send.send(val).unwrap();
+			// Read raw values from the buffer
+			let term = FusedStream::is_terminated(sock.read().unwrap().deref());
+			if term {
+				return Err("Socket terminated".to_string());
 			}
+			let val = common::ws_recv_msg(sock.write().unwrap().deref_mut())
+				.await
+				.map_err(|e| format!("Error waiting for websocket message {}: {:?}", count, e))?;
+			pt_recv_send.send(val).map_err(|e| {
+				format!("Error sending message to result channel {}: {:?}", count, e)
+			})?;
+			count += 1;
 		}
+	}
+
+	async fn pt_publish_create_req(
+		sock: Arc<RwLock<WsStream>>,
+		tb: String,
+		messages: i32,
+	) -> Result<(), String> {
+		for msg in 0..messages {
+			trace!("Plaintext message loop {}", msg);
+			let query = format!(
+				r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#,
+				tb.clone(),
+				Ulid::new().to_string()
+			);
+			let randid = uuid::Uuid::new_v4();
+			let randid = randid.as_u128().to_string();
+			let json = json!({
+				"id": randid,
+				"method": "query",
+				"params": [query],
+			});
+			let mut write_lock =
+				sock.write().map_err(|e| format!("Error getting write lock: {}", e)).unwrap();
+			common::ws_send_msg(write_lock.deref_mut(), serde_json::to_string(&json).unwrap())
+				.await
+				.unwrap();
+		}
+		Ok(())
 	}
 }
