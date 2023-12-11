@@ -175,13 +175,10 @@ impl Connection for Any {
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
 						let config = WebSocketConfig {
-							max_send_queue: match capacity {
-								0 => None,
-								capacity => Some(capacity),
-							},
 							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
 							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
-							accept_unmasked_frames: false,
+							max_write_buffer_size: engine::remote::ws::native::MAX_MESSAGE_SIZE,
+							..Default::default()
 						};
 						let socket = engine::remote::ws::native::connect(
 							&url,
