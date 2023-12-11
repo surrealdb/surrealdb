@@ -13,6 +13,7 @@ use http_body::Body as HttpBody;
 use serde::Deserialize;
 use std::str;
 use surrealdb::dbs::Session;
+use surrealdb::iam::Action::{Edit, View};
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -74,6 +75,8 @@ async fn select_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, View).await?;
 	// Specify the request statement
 	let sql = match query.fields {
 		None => "SELECT * FROM type::table($table) LIMIT $limit START $start",
@@ -112,6 +115,8 @@ async fn create_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
@@ -154,6 +159,8 @@ async fn update_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
@@ -196,6 +203,8 @@ async fn modify_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
@@ -237,6 +246,8 @@ async fn delete_all(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Specify the request statement
 	let sql = "DELETE type::table($table) RETURN BEFORE";
 	// Specify the request variables
@@ -273,6 +284,8 @@ async fn select_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, View).await?;
 	// Specify the request statement
 	let sql = match query.fields {
 		None => "SELECT * FROM type::thing($table, $id)",
@@ -315,6 +328,8 @@ async fn create_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
@@ -363,6 +378,8 @@ async fn update_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
@@ -411,6 +428,8 @@ async fn modify_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
@@ -457,6 +476,8 @@ async fn delete_one(
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Check the permissions level
+	let _ = db.check(&session, Edit).await?;
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
