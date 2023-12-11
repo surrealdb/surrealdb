@@ -19,7 +19,7 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 fn rt() -> &'static Runtime {
 	RUNTIME.get_or_init(|| {
 		tokio::runtime::Builder::new_multi_thread()
-			.worker_threads(WORKER_THREADS.clone())
+			.worker_threads(*WORKER_THREADS)
 			.enable_all()
 			.build()
 			.unwrap()
