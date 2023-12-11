@@ -1,11 +1,10 @@
 on:
   workflow_call:
     inputs:
-      # i.e. nightly, 1.0.0
-      name:
-        required: false
+      environment:
+        required: true
         type: string
-        description: "The name of this release version. It can be a 'nightly' version or a semver version that represents a tag (i.e. 'v1.0.0')"
+        description: "The name of this release environment. It can be a 'nightly', 'beta' or 'release'"
       git-ref:
         required: true
         type: string
@@ -38,12 +37,121 @@ jobs:
       git-ref: ${{ steps.outputs.outputs.git-ref }}
       name: ${{ steps.outputs.outputs.name }}
     steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref || github.ref_name }}
+
+      - name: Install a TOML parser
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Configure git
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config --add --bool push.autoSetupRemote true
+
+      - name: Patch release version
+        if: ${{ inputs.environment == 'release' }}
+        run: |
+          set -x
+
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          if [[ $currentVersion == *"-beta"* ]]; then
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+            version=${major}.${minor}.$(($betaNum - 1))
+
+            # Bump the crate version
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+            # Update Cargo.lock without updating dependency versions
+            cargo check --no-default-features --features storage-mem
+
+            # Commit changes
+            git commit -am "Prepare v${version} release"
+          else
+            version=${currentVersion}
+          fi
+
+          # Create the tag
+          git tag -a v${version} -m "Release ${version}"
+
+      - name: Create or patch beta branch
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          if [[ $currentVersion == *"-beta"* ]]; then
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+            betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
+          else
+            git checkout -b releases/beta
+            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+            betaVersion=${major}.$(($minor + 1)).0-beta.1
+          fi
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+          # Commit changes
+          git commit -am "Prepare v${betaVersion} release"
+
+          # Create the tag
+          git tag -a v${betaVersion} -m "Release ${betaVersion}"
+
+      - name: Push changes
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        run: git push
+
+      - name: Push tag
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the tag
+        run: git push --tags
+
       - name: Set outputs
         id: outputs
         run: |
-          echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
-          # If the name is not provided, use the git_ref (i.e. v1.0.0)
-          echo "name=${{ inputs.name || inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
+          set -x
+
+          if [[ "${{ inputs.environment }}" == "beta" && "${{ inputs.publish }}" == "true" ]]; then
+            echo "git-ref=releases/beta" >> $GITHUB_OUTPUT
+          else
+            echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+          if [[ "${{ inputs.environment }}" == "nightly" ]]; then
+            echo "name=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+
+            date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+            rev=$(git rev-parse --short HEAD)
+            echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
+          else
+            version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+            echo "name=v${version}" >> $GITHUB_OUTPUT
+
+            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
+          fi
+
   test:
     name: Test
     needs: [prepare-vars]
@@ -122,6 +230,79 @@ jobs:
       - name: Check clippy
         run: cargo make ci-clippy
 
+  crate:
+    name: Publish crate to crates.io
+    if: ${{ inputs.publish }}
+    needs: [test, lint, prepare-vars]
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Install release-plz
+        run: cargo install --force --locked --version 0.3.30 release-plz
+
+      - name: Install a TOML parser
+        if: ${{ inputs.environment == 'beta' }}
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Patch beta crate version
+        if: ${{ inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          # Derive crate version
+          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+          betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+          version=${major}.${minor}.$(($betaNum - 1))
+
+          # Update crate version
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+      - name:  Patch nightly crate version
+        if: ${{ inputs.environment == 'nightly' }}
+        run: |
+          # Get the date and time of the last commit
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          time=$(git show --no-patch --format=%ad --date=format:%H%M%S)
+
+          # Update the version to a nightly one
+          # This sets the nightly version to something like `1.20231117.1130416`
+          # The 1 at the beginning of the patch number is just so it never starts with zero
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" lib/Cargo.toml
+
+      - name: Patch crate name and description
+        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
+        run: |
+          set -x
+
+          # Patch crate name
+          sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" lib/Cargo.toml
+
+          # Patch the description
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
+
+          # Temporarily commit patches
+          # These should not be pushed back to the repo
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git commit -am "Name and version patches"
+
+      - name: Publish the crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
+
   docker-build:
     name: Build Docker images
     needs: [prepare-vars]
@@ -136,6 +317,8 @@ jobs:
   build:
     name: Build ${{ matrix.arch }} binary
     needs: [prepare-vars]
+    env:
+      SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
     strategy:
       fail-fast: false
       matrix:
@@ -281,7 +464,7 @@ jobs:
     name: Publish artifacts binaries
     needs: [prepare-vars, test, lint, build, docker-build]
     if: ${{ inputs.publish }}
-    environment: ${{ needs.prepare-vars.outputs.name == 'nightly' && 'nightly' || 'release' }}
+    environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -300,9 +483,9 @@ jobs:
             artifacts/*.exe
 
       - name: Set latest version
-        if: ${{ inputs.create-release }}
+        if: ${{ inputs.create-release && inputs.latest }}
         run: |
-          echo ${{ github.ref_name }} > latest.txt
+          echo ${{ needs.prepare-vars.outputs.git-ref }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
       - name: Configure AWS
