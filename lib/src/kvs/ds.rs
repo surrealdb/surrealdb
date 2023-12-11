@@ -1234,7 +1234,7 @@ impl Datastore {
 
 	/// Checks the required permissions level for this session
 	#[instrument(level = "debug", skip(self, sess))]
-	pub async fn check(&self, sess: &Session) -> Result<(String, String), Error> {
+	pub async fn check(&self, sess: &Session, action: Action) -> Result<(String, String), Error> {
 		// Ensure that a namespace was specified
 		let ns = match sess.ns.clone() {
 			Some(ns) => ns,
@@ -1248,10 +1248,7 @@ impl Datastore {
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
-			sess.au.is_allowed(
-				Action::Edit,
-				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
-			)?;
+			sess.au.is_allowed(action, &ResourceKind::Any.on_level(sess.au.level().to_owned()))?;
 		}
 		// All ok
 		Ok((ns, db))
@@ -1265,7 +1262,7 @@ impl Datastore {
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
 		// Check the permissions level
-		let (ns, db) = self.check(sess).await?;
+		let (ns, db) = self.check(sess, Action::View).await?;
 		// Create a new readonly transaction
 		let mut txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
@@ -1281,7 +1278,7 @@ impl Datastore {
 	#[instrument(level = "debug", skip(self, sess, sql))]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Check the permissions level
-		let _ = self.check(sess).await?;
+		let _ = self.check(sess, Action::Edit).await?;
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}

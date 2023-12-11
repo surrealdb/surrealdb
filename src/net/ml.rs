@@ -14,6 +14,7 @@ use http::StatusCode;
 use http_body::Body as HttpBody;
 use hyper::body::Body;
 use surrealdb::dbs::Session;
+use surrealdb::iam::Action::{Edit, View};
 use surrealdb::kvs::{LockType::Optimistic, TransactionType::Read};
 use surrealdb::sql::statements::{DefineModelStatement, DefineStatement};
 use surrealml_core::storage::surml_file::SurMlFile;
@@ -44,7 +45,7 @@ async fn import(
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	// Check the permissions level
-	let _ = db.check(&session).await?;
+	let _ = db.check(&session, Edit).await?;
 	// Create a new buffer
 	let mut buffer = Vec::new();
 	// Load all the uploaded file chunks
@@ -88,7 +89,7 @@ async fn export(
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	// Check the permissions level
-	let (nsv, dbv) = db.check(&session).await?;
+	let (nsv, dbv) = db.check(&session, View).await?;
 	// Start a new readonly transaction
 	let mut tx = db.transaction(Read, Optimistic).await?;
 	// Attempt to get the model definition

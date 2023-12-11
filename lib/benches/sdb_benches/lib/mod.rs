@@ -44,15 +44,15 @@ pub(super) async fn init(target: &str) {
 }
 
 pub(super) fn benchmark_group(c: &mut Criterion, target: String) {
-	let num_ops = super::NUM_OPS.clone();
+	let num_ops = *super::NUM_OPS;
 	let runtime = super::rt();
 
 	runtime.block_on(async { init(&target).await });
 
 	let mut group = c.benchmark_group(target);
 
-	group.measurement_time(Duration::from_secs(super::DURATION_SECS.clone()));
-	group.sample_size(super::SAMPLE_SIZE.clone());
+	group.measurement_time(Duration::from_secs(*super::DURATION_SECS));
+	group.sample_size(*super::SAMPLE_SIZE);
 	group.throughput(Throughput::Elements(1));
 
 	group.bench_function("reads", |b| {

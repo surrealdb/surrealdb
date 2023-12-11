@@ -6,7 +6,6 @@
 .DS_Store
 .AppleDouble
 .LSOverride
-localstore/
 
 # Thumbnail files
 ._*
@@ -51,3 +50,4 @@ Temporary Items
 surreal
 history.txt
 store/
+localstore/
