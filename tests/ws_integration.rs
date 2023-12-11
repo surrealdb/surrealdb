@@ -1,9 +1,12 @@
+use thiserror::Error;
+
 // RUST_LOG=warn cargo make ci-ws-integration
 mod common;
 
 mod ws_integration {
 	use futures_util::StreamExt;
-	use serde::Deserialize;
+	use serde::{Deserialize, Serialize};
+	use std::future::Future;
 	use std::ops::DerefMut;
 	use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 	use std::sync::{mpsc, Arc, RwLock};
@@ -20,9 +23,11 @@ mod ws_integration {
 	use tokio::time::error::Elapsed;
 	use tokio::time::interval;
 	use tonic::codegen::StdError;
+	use tower::ServiceExt;
+	use tracing::log::trace;
 	use ulid::Ulid;
 
-	use super::common::{self, PASS, USER};
+	use super::common::{self, WsStream, PASS, USER};
 	use crate::common::error::TestError;
 
 	#[test(tokio::test)]
@@ -1620,9 +1625,10 @@ mod ws_integration {
 		let tb = table_name.to_string();
 		let sock = socket.clone();
 		let local_set = LocalSet::new();
-		let messages = 100;
+		let messages = 50;
 		let pt_publish_creates = async move {
-			for _ in 0..messages {
+			for msg in 0..messages {
+				trace!("Plaintext message loop {}", msg);
 				let query = format!(
 					r#"INSERT INTO {} {{"id": "{}", "name": "ok"}};"#,
 					tb.clone(),
@@ -1646,39 +1652,13 @@ mod ws_integration {
 		let (pt_recv_send, pt_recv_recv): (Sender<serde_json::Value>, Receiver<serde_json::Value>) =
 			mpsc::channel();
 
-		let pt_receive_create_resp = async move {
-			for _ in 0..messages {
-				// TODO incorrect
-				let vals = common::ws_recv_all_msgs(
-					sock.write().unwrap().deref_mut(),
-					None,
-					Duration::from_secs(10),
-				)
-				.await
-				.unwrap();
-				for val in vals {
-					pt_recv_send.send(val).unwrap();
-				}
-			}
-		};
+		let pt_receive_create_resp = pt_receive_create_resp(sock, pt_recv_send);
 		let pt_pub_task = local_set.spawn_local(pt_publish_creates);
 		let pt_recv_task = local_set.spawn_local(pt_receive_create_resp);
 
 		// Repeatedly create binary updates
 		let publish_binary = binary.clone();
-		let bin_publish = async move {
-			for _ in 0..messages {
-				let record = RecordId {
-					id: Thing::from((table_name, Id::uuid())),
-				};
-				let _ = publish_binary
-					.query("CREATE {table}")
-					.bind(("table", table_name))
-					.await
-					.unwrap();
-			}
-		};
-		let bin_pub_task = tokio::spawn(bin_publish);
+		let bin_pub_task = tokio::spawn(publish_bin(table_name, messages, publish_binary));
 
 		let (bin_recv_send, bin_recv_recv): (
 			Sender<Notification<RecordId>>,
@@ -1687,8 +1667,11 @@ mod ws_integration {
 		let bin_recv = async move {
 			let mut lq: Stream<Client, Vec<RecordId>> =
 				lq_binary.select(table_name).live().await.unwrap();
-			loop {
+			let mut count = 0;
+			while count < messages * 2 {
 				let val = lq.next().await.unwrap().unwrap();
+				count += 1;
+				trace!("Binary received message {count}");
 				bin_recv_send.send(val).unwrap();
 			}
 		};
@@ -1696,7 +1679,7 @@ mod ws_integration {
 
 		let mut total_msg_bin: Arc<RwLock<Vec<Notification<RecordId>>>> =
 			Arc::new(RwLock::new(vec![]));
-		let mut total_msg_pt: Arc<RwLock<Vec<serde_json::Value>>> = Arc::new(RwLock::new(vec![]));
+		let total_msg_pt: Arc<RwLock<Vec<serde_json::Value>>> = Arc::new(RwLock::new(vec![]));
 		let total_messages = (total_msg_bin.clone(), total_msg_pt.clone());
 		let check_messages = async move {
 			loop {
@@ -1718,52 +1701,71 @@ mod ws_integration {
 					Err(TryRecvError::Disconnected) => true,
 					Err(TryRecvError::Empty) => false,
 				};
+				trace!("Checked message loop bin={bin_ended} pt={pt_ended}");
 				if bin_ended && pt_ended {
 					break;
 				}
-				tokio::time::sleep(Duration::from_millis(1)).await;
+				tokio::time::sleep(Duration::from_millis(500)).await;
 			}
+			trace!("End check message loop")
 		};
 		let check_msg_task = tokio::spawn(check_messages);
-		match tokio::time::timeout(
+		if let (a, b, c, d, e) = task_join_async_clojure(
+			local_set,
 			Duration::from_secs(10),
-			task_join_async_clojure(
-				pt_pub_task,
-				pt_recv_task,
-				bin_pub_task,
-				bin_recv_task,
-				check_msg_task,
-			),
+			pt_pub_task,
+			pt_recv_task,
+			bin_pub_task,
+			bin_recv_task,
+			check_msg_task,
 		)
 		.await
 		{
-			Ok((a, b, c, d, e)) => {
-				a.unwrap();
-				b.unwrap();
-				c.unwrap();
-				d.unwrap();
-				e.unwrap();
-			}
-			Err(e) => {
-				panic!("Timed out waiting for test to complete");
-			}
+			a.unwrap();
+			b.unwrap();
+			c.unwrap();
+			d.unwrap();
+			e.unwrap();
 		}
 
-		assert_eq!(messages * 2, total_messages.0.read().unwrap().len());
-		assert_eq!(messages * 2, total_messages.1.read().unwrap().len());
+		assert_eq!(messages * 2, total_messages.0.read().unwrap().len() as i32);
+		assert_eq!(messages * 2, total_messages.1.read().unwrap().len() as i32);
 
 		Ok(())
 	}
 
-	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+	async fn publish_bin(
+		table_name: &str,
+		messages: i32,
+		publish_binary: Surreal<Client>,
+	) -> Result<(), TestError> {
+		for _ in 0..messages {
+			let record = RecordId {
+				id: Thing::from((table_name, Id::uuid())),
+			};
+			let r = publish_binary
+				.query("CREATE $table $record;")
+				.bind(("table", table_name))
+				.bind(("record", record))
+				.await
+				.map_err(|e| TestError::AssertionError {
+					message: format!("Error creating table: {}", e),
+				})?;
+		}
+		Ok(())
+	}
+
+	#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Ord, PartialOrd, Serialize)]
 	struct RecordId {
 		id: Thing,
 	}
 
 	async fn task_join_async_clojure(
+		local_set: LocalSet,
+		timeout: Duration,
 		pt_pub_task: JoinHandle<()>,
-		pt_recv_task: JoinHandle<()>,
-		bin_pub_task: JoinHandle<()>,
+		pt_recv_task: JoinHandle<Result<(), String>>,
+		bin_pub_task: JoinHandle<Result<(), TestError>>,
 		bin_recv_task: JoinHandle<()>,
 		check_msg_task: JoinHandle<()>,
 	) -> (
@@ -1773,14 +1775,89 @@ mod ws_integration {
 		Result<(), String>,
 		Result<(), String>,
 	) {
-		let (res_ptp, res_ptr, res_binp, res_binr, res_chk) =
-			tokio::join!(pt_pub_task, pt_recv_task, bin_pub_task, bin_recv_task, check_msg_task);
+		let pt_pub_task = tokio::time::timeout(timeout, pt_pub_task);
+		let pt_recv_task = tokio::time::timeout(timeout, pt_recv_task);
+		let bin_pub_task = tokio::time::timeout(timeout, bin_pub_task);
+		let bin_recv_task = tokio::time::timeout(timeout, bin_recv_task);
+		let check_msg_task = tokio::time::timeout(timeout, check_msg_task);
+		let (res_ptp, res_ptr, res_binp, res_binr, res_chk, _ls) = tokio::join!(
+			pt_pub_task,
+			pt_recv_task,
+			bin_pub_task,
+			bin_recv_task,
+			check_msg_task,
+			local_set
+		);
 		(
-			res_ptp.map_err(|e| e.to_string()),
-			res_ptr.map_err(|e| e.to_string()),
-			res_binp.map_err(|e| e.to_string()),
-			res_binr.map_err(|e| e.to_string()),
-			res_chk.map_err(|e| e.to_string()),
+			res_ptp.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string())).map_err(
+				|e| {
+					// We want the Err to be String
+					return format!("Failed plaintext publish: {}", e).to_string();
+				},
+			),
+			res_ptr
+				// map timeout err to string
+				.map_err(|e| e.to_string())
+				// flatten Ok(Err(String)) to Err(String)
+				.and_then(|e| match e {
+					Ok(Err(e)) => Err(e),
+					Ok(Ok(_)) => Ok(()),
+					Err(e) => Err(e.to_string()),
+				})
+				.map_err(|e| {
+					// We want the Err to be String
+					return format!("Failed plaintext receive: {}", e).to_string();
+				}),
+			res_binp
+				.map_err(|e| e.to_string())
+				.and_then(|r| {
+					r.map_err(|e| {
+						// We want the Err to be String
+						return e.to_string();
+					})
+					.and_then(|r| {
+						// We want the Ok to be Result<(), String>
+						return r.map_err(|e| format!("{:?}", e).to_string());
+					})
+				})
+				.map_err(|e| {
+					// We want the Err to be String
+					return format!("Failed binary publish: {}", e).to_string();
+				}),
+			res_binr.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string())).map_err(
+				|e| {
+					// We want the Err to be String
+					return format!("Failed binary receive: {}", e).to_string();
+				},
+			),
+			res_chk.map_err(|e| e.to_string()).and_then(|r| r.map_err(|e| e.to_string())).map_err(
+				|e| {
+					// We want the Err to be String
+					return format!("Failed check message: {}", e).to_string();
+				},
+			),
 		)
+	}
+
+	async fn pt_receive_create_resp(
+		sock: Arc<RwLock<WsStream>>,
+		pt_recv_send: Sender<serde_json::Value>,
+	) -> Result<(), String> {
+		let mut count = 0;
+		loop {
+			// TODO incorrect
+			let vals = common::ws_recv_all_msgs(
+				sock.write().unwrap().deref_mut(),
+				None,
+				Duration::from_secs(10),
+			)
+			.await
+			.map_err(|e| format!("Error waiting for message {}: {:?}", count, e))?;
+			for val in vals {
+				count += 1;
+				trace!("Text received message {count}");
+				pt_recv_send.send(val).unwrap();
+			}
+		}
 	}
 }

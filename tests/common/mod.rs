@@ -257,7 +257,7 @@ pub async fn start_server(
 	Err("server failed to start".into())
 }
 
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub async fn connect_ws(addr: &str) -> Result<WsStream, Box<dyn Error>> {
 	let url = format!("ws://{}/rpc", addr);
@@ -304,15 +304,15 @@ pub async fn ws_recv_all_msgs(
 					 if res.len() != expected {
 						 return Err(format!("Expected {} messages but got {} after {:?}: {:?}", expected, res.len(), timeout, res).into());
 					 }
+				} else {
+					return Ok(res);
 				}
 			}
 			msg = ws_recv_msg(socket) => {
 				res.push(msg?);
-			}
-		}
-		if let Some(expected) = expected {
-			if res.len() == expected {
-				return Ok(res);
+				if expected.map_or(true, |value| res.len() == value) {
+					return Ok(res);
+				}
 			}
 		}
 	}
