@@ -75,7 +75,7 @@ urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 
 # ml integration ====================================
-surrealml-core = { version = "0.0.1", optional = true}
+surrealml-core = { version = "0.0.2", optional = true}
 ndarray = { version = "0.15.6", optional = true }
 # ml integration ====================================
 

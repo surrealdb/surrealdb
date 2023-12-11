@@ -121,7 +121,7 @@ url = "2.5.0"
 # ml integration ====================================
 object_store = { version = "0.8.0", optional = false }
 hex = { version = "0.4.3", optional = false }
-surrealml-core = { version = "0.0.1", optional = true }
+surrealml-core = { version = "0.0.2", optional = true }
 ndarray = { version = "0.15.6", optional = true }
 # ml integration ====================================
 
