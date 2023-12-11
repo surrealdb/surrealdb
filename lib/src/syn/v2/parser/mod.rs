@@ -1,3 +1,21 @@
+//! Module implementing the SurrealQL parser.
+//!
+//! The SurrealQL parse is a relatively simple recursive decent parser.
+//! Most of the functions of the SurrealQL parser peek a token from the lexer and then decide to
+//! take a path depending on which token is next.
+//!
+//! There are a bunch of common patterns for which this module has some confinence functions.
+//! - Whenever only one token can be next you should use the [`expected!`] macro. This macro
+//! ensures that the given token type is next and if not returns a parser error.
+//! - Whenever a limited set of tokens can be next it is common to match the token kind and then
+//! have a catch all arm which calles the macro [`unexpected!`]. This macro will raise an parse
+//! error with information about the type of token it recieves and what it expected.
+//! - If a single token can be optionally next use [`Parser::eat`] this function returns a bool
+//! depending on if the given tokenkind was eaten.
+//! - If a closing delimiting token is expected use [`Parser::expect_closing_delimiter`]. This
+//! function will raise an error if the expected delimiter isn't the next token. This error will
+//! also point to which delimiter the parser expected to be closed.
+
 use self::token_buffer::TokenBuffer;
 use crate::{
 	sql,
@@ -52,17 +70,6 @@ pub enum PartialResult<T> {
 }
 
 /// The SurrealQL parser.
-///
-/// The SurrealQL parse is a relatively simple recursive decent parser.
-/// At every point in the parser the next branch to pick is chosen by looking at the comming
-/// tokens. The parser allows looking up to 4 tokens in the future. Practically the max the parser
-/// needs to look forward is 3 tokens. Based on these future tokens the parser picks which function
-/// to choose.
-///
-/// Most of the methods in the parser are implemented by first calling either [`Parser::peek`]
-/// returning the next token or [`Parser::next`] which also advances the parser forward on token.
-/// Most other methods, other then those actually implementing the parser, of the parser are
-/// shorthands for common operations done on tokens after peeking or calling next.
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,
