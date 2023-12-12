@@ -69,6 +69,8 @@ jobs:
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
+            git push origin --delete releases/stable || true
+            git checkout -b releases/stable
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
             betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
@@ -143,7 +145,7 @@ jobs:
           set -x
 
           if [[ "${{ inputs.environment }}" == "beta" && "${{ inputs.publish }}" == "true" ]]; then
-            echo "git-ref=releases/beta" >> $GITHUB_OUTPUT
+            echo "git-ref=releases/stable" >> $GITHUB_OUTPUT
           else
             echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
           fi
