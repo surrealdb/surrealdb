@@ -24,7 +24,7 @@ static STORE: Lazy<Arc<dyn ObjectStore>> =
 		}
 		Err(_) => {
 			let path = env::current_dir().unwrap().join("store");
-			if !path.exists() {
+			if !path.exists() || !path.is_dir() {
 				fs::create_dir_all(&path)
 					.expect("Unable to create directory structure for SURREAL_OBJECT_STORE");
 			}
@@ -43,7 +43,7 @@ static CACHE: Lazy<Arc<dyn ObjectStore>> =
 		}
 		Err(_) => {
 			let path = env::current_dir().unwrap().join("cache");
-			if !path.exists() {
+			if !path.exists() || !path.is_dir() {
 				fs::create_dir_all(&path)
 					.expect("Unable to create directory structure for SURREAL_OBJECT_CACHE");
 			}
