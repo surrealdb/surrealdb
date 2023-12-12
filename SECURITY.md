@@ -15,7 +15,7 @@ all legitimate reports and do our best to quickly fix the problem.
 
 Please report any issues or vulnerabilities via [Github Security
 Advisories](https://github.com/surrealdb/surrealdb/security/advisories) instead of posting a public issue in GitHub.
-You can also send security commuications to [security@surrealdb.com](mailto:security@surrealdb.com). Please include the
+You can also send security communications to [security@surrealdb.com](mailto:security@surrealdb.com). Please include the
 version identifier (obtained by running `surrealdb version` on the command line) and details on how the vulnerability
 can be exploited.
 
@@ -43,11 +43,13 @@ can be exploited.
 
 SurrealDB strives to provide timely updates and clear communication regarding any security issues that may impact users
 of its binaries, libraries and platforms using [Github Security
-Advisories](https://github.com/surrealdb/surrealdb/security/advisories) and other available communication channels.
-Generally, vulnerabilities will be discussed and resolved privately to minimize risk of exploitation. Security
-advisories will generally be published once a SurrealDB version including a fix for the relevant vulnerability is
-available. The goal of a security advisory is to inform users of the risks involved with using a vulnerable version and
-to provide information for resolving the issue or implementing any possible workarounds.
+Advisories](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/creating-a-repository-security-advisory)
+and other available communication channels.  Generally, vulnerabilities will be discussed and [resolved
+privately](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/collaborating-in-a-temporary-private-fork-to-resolve-a-repository-security-vulnerability)
+to minimize risk of exploitation. Security advisories will generally be published once a SurrealDB version including a
+fix for the relevant vulnerability is available. The goal of a security advisory is to inform users of the risks
+involved with using a vulnerable version and to provide information for resolving the issue or implementing any possible
+workarounds.
 
 Vulnerabilities in third-party dependencies may only be independently published by SurrealDB when they affect a
 SurrealDB binary or platform. In those cases, the original CVE identifier will be referenced. Vulnerabilities affecting
@@ -73,9 +75,9 @@ breaking changes should be rare and will always be clearly stated in the changel
 stable API, these sort of breaking changes will only be included in major and minor releases; never in patch releases as
 stated in the previous paragraph.
 
-When an LTS (Long-Term Support) version of SurrealDB becomes available, we will strive to backport security patches to
-that version as well. This will be possible without breaking backward compatibility once no unstable crates are part of
-the public API of SurrealDB.
+If and when an LTS (Long-Term Support) version of SurrealDB becomes available, we will strive to backport security
+patches to that version as well. This will be possible without breaking any sort of backward compatibility once no
+unstable crates are part of the public API of SurrealDB.
 
 ## Automation
 
