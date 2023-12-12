@@ -144,10 +144,10 @@ jobs:
         run: |
           set -x
 
-          if [[ "${{ inputs.environment }}" == "beta" && "${{ inputs.publish }}" == "true" ]]; then
-            echo "git-ref=releases/beta" >> $GITHUB_OUTPUT
-          elif [[ "${{ inputs.environment }}" == "release" && "${{ inputs.git-ref }}" == "releases/beta" && "${{ inputs.publish }}" == "true" ]]; then
-            echo "git-ref=releases/stable" >> $GITHUB_OUTPUT
+          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+
+          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "release")  ]]; then
+            echo "git-ref=v${version}" >> $GITHUB_OUTPUT
           else
             echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
           fi
@@ -159,7 +159,6 @@ jobs:
             rev=$(git rev-parse --short HEAD)
             echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
           else
-            version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
             echo "name=v${version}" >> $GITHUB_OUTPUT
 
             echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
@@ -489,7 +488,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         if: ${{ inputs.create-release }}
         with:
-          name: "Release ${{ github.ref_name }}"
+          name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
           files: |
             LICENSE
             artifacts/*.tgz
