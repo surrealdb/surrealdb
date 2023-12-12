@@ -496,6 +496,7 @@ jobs:
         if: ${{ inputs.create-release }}
         with:
           name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
+          tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
           files: |
             LICENSE
             artifacts/*.tgz
