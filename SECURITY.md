@@ -87,7 +87,7 @@ SurrealDB is [integrated](https://github.com/google/oss-fuzz/tree/master/project
 [OSS-Fuzz](https://google.github.io/oss-fuzz/) project. As part of this integration, both [the SurrealQL parser and
 query executor](https://github.com/surrealdb/surrealdb/tree/main/lib/fuzz/fuzz_targets) are continuously fuzzed to
 identify security and performance bugs in SurrealQL. We aim to resolve all [security-relevant
-bugs](https://google.github.io/oss-fuzz/advanced-topics/bug-fixing-guidance#security-issues) before its disclosure
+bugs](https://google.github.io/oss-fuzz/advanced-topics/bug-fixing-guidance#security-issues) before their disclosure
 deadline. Other bugs (e.g. crashes or performance bugs) that may have some availability impact will be prioritized and
 resolved as any other bug regardless of the disclosure deadline.
 
