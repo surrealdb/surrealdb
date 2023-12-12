@@ -424,13 +424,13 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
-	pub(crate) async fn scan<K>(
+	pub(crate) async fn scan<K, const S: usize>(
 		&mut self,
-		rng: Range<K>,
+		rng: &Range<K>,
 		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(Key<S>, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key<S>>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -440,12 +440,12 @@ impl Transaction {
 		let inner = self.inner.lock().await;
 		let inner = inner.as_ref().unwrap();
 		// Convert the range to bytes
-		let rng: Range<Key> = Range {
+		let rng: Range<Key<S>> = Range {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
 		// Create result set
-		let mut res = vec![];
+		let mut res: Vec<(Key<S>, Val)> = vec![];
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();

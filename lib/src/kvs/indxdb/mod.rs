@@ -308,7 +308,7 @@ impl Transaction {
 	/// Retrieve a range of keys from the databases
 	pub(crate) async fn scan<K>(
 		&mut self,
-		rng: Range<K>,
+		rng: &Range<K>,
 		limit: u32,
 	) -> Result<Vec<(Key, Val)>, Error>
 	where

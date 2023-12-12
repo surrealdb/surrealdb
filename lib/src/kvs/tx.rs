@@ -56,7 +56,7 @@ pub enum Limit {
 
 pub struct ScanPage<K>
 where
-	K: Into<Key> + Debug + Clone,
+	K: Into<Key> + Debug,
 {
 	pub range: Range<K>,
 	pub limit: Limit,
@@ -73,7 +73,7 @@ impl From<Range<Vec<u8>>> for ScanPage<Vec<u8>> {
 
 pub struct ScanResult<K>
 where
-	K: Into<Key> + Debug + Clone,
+	K: Into<Key> + Debug,
 {
 	pub next_page: Option<ScanPage<K>>,
 	pub values: Vec<(Key, Val)>,
@@ -683,8 +683,8 @@ impl Transaction {
 		K: Into<Key> + From<Vec<u8>> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Scan {:?} - {:?}", rng.start, rng.end);
-		let range = page.range.clone();
+		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
+		let range = &page.range;
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -727,7 +727,7 @@ impl Transaction {
 					values: tup_vec,
 				}
 			} else {
-				let mut rng = page.range.clone();
+				let (mut rng, limit) = (page.range, page.limit);
 				rng.start = match tup_vec.last() {
 					Some((k, _)) => K::from(k.clone().add(0)),
 					None => rng.start,
@@ -735,7 +735,7 @@ impl Transaction {
 				ScanResult {
 					next_page: Some(ScanPage {
 						range: rng,
-						limit: page.limit,
+						limit,
 					}),
 					values: tup_vec,
 				}
