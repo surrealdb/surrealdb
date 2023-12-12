@@ -502,7 +502,8 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             LICENSE
-            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.{tgz,exe}
+            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.tgz
+            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.exe
 
       - name: Set latest release version
         if: ${{ inputs.create-release && inputs.latest }}
