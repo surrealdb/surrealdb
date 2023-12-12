@@ -1,8 +1,11 @@
 use std::fmt::Display;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].
+pub type KeyHeap = Vec<u8>;
+
+/// The key part of a key-value pair. Stack allocated.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
-pub struct Key<const S: usize> {
+pub struct KeyStack<const S: usize> {
 	/// The key
 	pub key: [u8; S],
 	/// Since the key size must be known at compile time, we need to track the size in case it is
@@ -10,7 +13,7 @@ pub struct Key<const S: usize> {
 	pub size: usize,
 }
 
-impl<const S: usize> From<&[u8]> for Key<S> {
+impl<const S: usize> From<&[u8]> for KeyStack<S> {
 	fn from(value: &[u8]) -> Self {
 		if value.len() > S {
 			panic!("Key too long");
@@ -24,8 +27,8 @@ impl<const S: usize> From<&[u8]> for Key<S> {
 	}
 }
 
-impl<const F: usize, const T: usize> From<Key<F>> for Key<T> {
-	fn from(value: Key<F>) -> Self {
+impl<const F: usize, const T: usize> From<KeyStack<F>> for KeyStack<T> {
+	fn from(value: KeyStack<F>) -> Self {
 		if value.size > T {
 			panic!("Key too long");
 		}
@@ -38,7 +41,16 @@ impl<const F: usize, const T: usize> From<Key<F>> for Key<T> {
 	}
 }
 
-impl<const S: usize> Display for Key<S> {
+impl<const S: usize> Into<KeyHeap> for KeyStack<S> {
+	fn into(self) -> KeyHeap {
+		// Fixed size vec
+		let mut result = vec![0; S];
+		result[..self.size].copy_from_slice(&self.key[..self.size]);
+		result
+	}
+}
+
+impl<const S: usize> Display for KeyStack<S> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		for &byte in &self.key[..self.size] {
 			write!(f, "{}", byte as char)?;
@@ -47,8 +59,8 @@ impl<const S: usize> Display for Key<S> {
 	}
 }
 
-impl<const S: usize> Add<&Key<S>> for &Key<S> {
-	fn add(self, v: &Key<S>) -> Self {
+impl<const S: usize> Add<&KeyStack<S>> for &KeyStack<S> {
+	fn add(self, v: &KeyStack<S>) -> Self {
 		if self.size + v.size > S {
 			panic!("Key too long");
 		}
@@ -91,7 +103,7 @@ pub(super) trait Convert<T> {
 	fn convert(self) -> T;
 }
 
-impl<T> Convert<Vec<T>> for Vec<(Key<128>, Val)>
+impl<T> Convert<Vec<T>> for Vec<(KeyStack<128>, Val)>
 where
 	T: From<Val>,
 {

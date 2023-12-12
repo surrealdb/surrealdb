@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeStore};
 use crate::idx::VersionedSerdeState;
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{KeyStack, Transaction, Val};
 use crate::sql::{Object, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -64,7 +64,7 @@ impl BState {
 	pub(in crate::idx) async fn finish(
 		&self,
 		tx: &mut Transaction,
-		key: &Key,
+		key: &KeyStack,
 	) -> Result<(), Error> {
 		if self.updated {
 			tx.set(key.clone(), self.try_to_val()?).await?;
@@ -155,7 +155,12 @@ where
 		}
 	}
 
-	fn append(&mut self, key: Key, payload: Payload, node: BTreeNode<BK>) -> Result<(), Error> {
+	fn append(
+		&mut self,
+		key: KeyStack,
+		payload: Payload,
+		node: BTreeNode<BK>,
+	) -> Result<(), Error> {
 		match self {
 			BTreeNode::Internal(keys, children) => {
 				if let BTreeNode::Internal(append_keys, mut append_children) = node {
@@ -183,7 +188,7 @@ where
 struct SplitResult {
 	left_node_id: NodeId,
 	right_node_id: NodeId,
-	median_key: Key,
+	median_key: KeyStack,
 }
 
 impl<BK> BTree<BK>
@@ -202,7 +207,7 @@ where
 		&self,
 		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
-		searched_key: &Key,
+		searched_key: &KeyStack,
 	) -> Result<Option<Payload>, Error> {
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
@@ -224,7 +229,7 @@ where
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
-		key: Key,
+		key: KeyStack,
 		payload: Payload,
 	) -> Result<(), Error> {
 		if let Some(root_id) = self.state.root {
@@ -260,13 +265,13 @@ where
 		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
 		node_id: NodeId,
-		key: Key,
+		key: KeyStack,
 		payload: Payload,
 	) -> Result<(), Error> {
 		let mut next_node_id = Some(node_id);
 		while let Some(node_id) = next_node_id.take() {
 			let mut node = store.get_node(tx, node_id).await?;
-			let key: Key = key.clone();
+			let key: KeyStack = key.clone();
 			match &mut node.n {
 				BTreeNode::Leaf(keys) => {
 					keys.insert(key, payload);
@@ -341,7 +346,7 @@ where
 		&mut self,
 		keys: BK,
 		mut left_children: Vec<NodeId>,
-	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
+	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, KeyStack, Payload), Error> {
 		let r = keys.split_keys()?;
 		let right_children = left_children.split_off(r.median_idx + 1);
 		let left_node = BTreeNode::Internal(r.left, left_children);
@@ -352,7 +357,7 @@ where
 	fn split_leaf_node(
 		&mut self,
 		keys: BK,
-	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
+	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, KeyStack, Payload), Error> {
 		let r = keys.split_keys()?;
 		let left_node = BTreeNode::Leaf(r.left);
 		let right_node = BTreeNode::Leaf(r.right);
@@ -363,7 +368,7 @@ where
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut BTreeNodeStore<BK>,
-		key_to_delete: Key,
+		key_to_delete: KeyStack,
 	) -> Result<Option<Payload>, Error> {
 		let mut deleted_payload = None;
 
@@ -452,8 +457,8 @@ where
 		store: &mut BTreeNodeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
-		key_to_delete: Key,
-	) -> Result<(bool, Key, NodeId), Error> {
+		key_to_delete: KeyStack,
+	) -> Result<(bool, KeyStack, NodeId), Error> {
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
 		let mut left_node = store.get_node(tx, left_id).await?;
@@ -498,9 +503,9 @@ where
 		store: &mut BTreeNodeStore<BK>,
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
-		key_to_delete: Key,
+		key_to_delete: KeyStack,
 		is_main_key: bool,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, KeyStack, NodeId), Error> {
 		// CLRS 3a
 		let child_idx = keys.get_child_idx(&key_to_delete);
 		let child_id = children[child_idx];
@@ -576,11 +581,11 @@ where
 		store: &mut BTreeNodeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
-		key_to_delete: Key,
+		key_to_delete: KeyStack,
 		is_main_key: bool,
 		mut child_stored_node: BStoredNode<BK>,
 		mut right_child_stored_node: BStoredNode<BK>,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, KeyStack, NodeId), Error> {
 		if let Some((ascending_key, ascending_payload)) =
 			right_child_stored_node.n.keys().get_first_key()
 		{
@@ -604,11 +609,11 @@ where
 		store: &mut BTreeNodeStore<BK>,
 		keys: &mut BK,
 		child_idx: usize,
-		key_to_delete: Key,
+		key_to_delete: KeyStack,
 		is_main_key: bool,
 		mut child_stored_node: BStoredNode<BK>,
 		mut left_child_stored_node: BStoredNode<BK>,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, KeyStack, NodeId), Error> {
 		if let Some((ascending_key, ascending_payload)) =
 			left_child_stored_node.n.keys().get_last_key()
 		{
@@ -634,11 +639,11 @@ where
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		child_idx: usize,
-		key_to_delete: Key,
+		key_to_delete: KeyStack,
 		is_main_key: bool,
 		mut left_child: BStoredNode<BK>,
 		right_child: BStoredNode<BK>,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, KeyStack, NodeId), Error> {
 		if let Some(descending_key) = keys.get_key(child_idx) {
 			if let Some(descending_payload) = keys.remove(&descending_key) {
 				children.remove(child_idx + 1);
@@ -699,7 +704,7 @@ mod tests {
 	};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::TransactionType::*;
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
+	use crate::kvs::{Datastore, KeyStack, LockType::*, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::collections::{HashMap, VecDeque};
@@ -738,7 +743,7 @@ mod tests {
 		samples_size: usize,
 		sample_provider: F,
 	) where
-		F: Fn(usize) -> (Key, Payload),
+		F: Fn(usize) -> (KeyStack, Payload),
 		BK: BKeys + Debug,
 	{
 		for i in 0..samples_size {
@@ -750,7 +755,7 @@ mod tests {
 		}
 	}
 
-	fn get_key_value(idx: usize) -> (Key, Payload) {
+	fn get_key_value(idx: usize) -> (KeyStack, Payload) {
 		(format!("{}", idx).into(), (idx * 10) as Payload)
 	}
 
@@ -1396,7 +1401,7 @@ mod tests {
 	{
 		fn debug<F>(&self, to_string: F) -> Result<(), Error>
 		where
-			F: Fn(Key) -> Result<String, Error>,
+			F: Fn(KeyStack) -> Result<String, Error>,
 		{
 			match self {
 				BTreeNode::Internal(keys, children) => {

@@ -6,7 +6,7 @@ use std::time::Duration;
 use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 use surrealdb::idx::trees::btree::{BState, BTree, Payload};
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
-use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
+use surrealdb::kvs::{Datastore, KeyStack, LockType::*, TransactionType::*};
 use tokio::runtime::Runtime;
 macro_rules! get_key_value {
 	($idx:expr) => {{
@@ -49,7 +49,7 @@ fn setup() -> (usize, Vec<usize>) {
 
 async fn bench<F, BK>(samples_size: usize, sample_provider: F)
 where
-	F: Fn(usize) -> (Key, Payload),
+	F: Fn(usize) -> (KeyStack, Payload),
 	BK: BKeys + Default + Debug,
 {
 	let ds = Datastore::new("memory").await.unwrap();

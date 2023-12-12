@@ -5,14 +5,14 @@ use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{KeyStack, Transaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub(super) type TermFrequency = u64;
 
 pub(super) struct Postings {
-	state_key: Key,
+	state_key: KeyStack,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
 	store: Arc<Mutex<BTreeNodeStore<TrieKeys>>>,
@@ -25,7 +25,7 @@ impl Postings {
 		order: u32,
 		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bp_key(None);
+		let state_key: KeyStack = index_key_base.new_bp_key(None);
 		let state: BState = if let Some(val) = tx.get(state_key.clone()).await? {
 			BState::try_from_val(val)?
 		} else {

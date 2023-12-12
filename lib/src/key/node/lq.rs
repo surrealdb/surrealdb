@@ -1,7 +1,7 @@
 //! Stores a LIVE SELECT query definition on the cluster
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -34,18 +34,18 @@ pub fn new<'a>(nd: Uuid, lq: Uuid, ns: &'a str, db: &'a str) -> Lq<'a> {
 	Lq::new(nd, lq, ns, db)
 }
 
-pub fn prefix_nd(nd: &Uuid) -> Key<SIZE> {
+pub fn prefix_nd(nd: &Uuid) -> KeyStack<SIZE> {
 	let mut k = [b'/', b'$'].to_vec();
 	k.extend_from_slice(nd.as_bytes());
 	k.extend_from_slice(&[0x00]);
-	Key::<SIZE>::from(&k)
+	KeyStack::<SIZE>::from(&k)
 }
 
-pub fn suffix_nd(nd: &Uuid) -> Key<SIZE> {
+pub fn suffix_nd(nd: &Uuid) -> KeyStack<SIZE> {
 	let mut k = [b'/', b'$'].to_vec();
 	k.extend_from_slice(nd.as_bytes());
 	k.extend_from_slice(&[0xff]);
-	Key::<SIZE>::from(&k)
+	KeyStack::<SIZE>::from(&k)
 }
 
 impl KeyRequirements for Lq<'_> {

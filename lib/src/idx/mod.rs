@@ -20,7 +20,7 @@ use crate::key::index::bs::Bs;
 use crate::key::index::bt::Bt;
 use crate::key::index::bu::Bu;
 use crate::key::index::vm::Vm;
-use crate::kvs::{Key, Val};
+use crate::kvs::{KeyStack, Val};
 use crate::sql::statements::DefineIndexStatement;
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
@@ -52,7 +52,7 @@ impl IndexKeyBase {
 		}
 	}
 
-	fn new_bc_key(&self, term_id: TermId) -> Key {
+	fn new_bc_key(&self, term_id: TermId) -> KeyStack {
 		Bc::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -63,7 +63,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bd_key(&self, node_id: Option<NodeId>) -> Key {
+	fn new_bd_key(&self, node_id: Option<NodeId>) -> KeyStack {
 		Bd::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -74,7 +74,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bi_key(&self, doc_id: DocId) -> Key {
+	fn new_bi_key(&self, doc_id: DocId) -> KeyStack {
 		Bi::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -85,7 +85,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bk_key(&self, doc_id: DocId) -> Key {
+	fn new_bk_key(&self, doc_id: DocId) -> KeyStack {
 		Bk::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -96,7 +96,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bl_key(&self, node_id: Option<NodeId>) -> Key {
+	fn new_bl_key(&self, node_id: Option<NodeId>) -> KeyStack {
 		Bl::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -107,7 +107,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Key {
+	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> KeyStack {
 		Bo::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -119,7 +119,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bp_key(&self, node_id: Option<NodeId>) -> Key {
+	fn new_bp_key(&self, node_id: Option<NodeId>) -> KeyStack {
 		Bp::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -130,7 +130,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Key {
+	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> KeyStack {
 		Bf::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -142,7 +142,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bt_key(&self, node_id: Option<NodeId>) -> Key {
+	fn new_bt_key(&self, node_id: Option<NodeId>) -> KeyStack {
 		Bt::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -153,7 +153,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bs_key(&self) -> Key {
+	fn new_bs_key(&self) -> KeyStack {
 		Bs::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -163,7 +163,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_bu_key(&self, term_id: TermId) -> Key {
+	fn new_bu_key(&self, term_id: TermId) -> KeyStack {
 		Bu::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -174,7 +174,7 @@ impl IndexKeyBase {
 		.into()
 	}
 
-	fn new_vm_key(&self, node_id: Option<NodeId>) -> Key {
+	fn new_vm_key(&self, node_id: Option<NodeId>) -> KeyStack {
 		Vm::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),

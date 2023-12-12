@@ -1,6 +1,6 @@
 use super::kv::Add;
 use super::kv::Convert;
-use super::Key;
+use super::KeyStack;
 use super::Val;
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
@@ -288,7 +288,7 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn del<K, const S: usize>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Del {:?}", key);
@@ -332,7 +332,7 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn exi<K, const S: usize>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Exi {:?}", key);
@@ -376,7 +376,7 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn get<K, const S: usize>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Get {:?}", key);
@@ -420,7 +420,7 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn set<K, V, const S: usize>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -473,7 +473,7 @@ impl Transaction {
 		lock: bool,
 	) -> Result<Versionstamp, Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Get Timestamp {:?}", key);
@@ -525,10 +525,10 @@ impl Transaction {
 		suffix: K,
 	) -> Result<Vec<u8>, Error>
 	where
-		K: Into<Key<S>>,
+		K: Into<KeyStack<S>>,
 	{
-		let prefix: Key<S> = prefix.into();
-		let suffix: Key<S> = suffix.into();
+		let prefix: KeyStack<S> = prefix.into();
+		let suffix: KeyStack<S> = suffix.into();
 		let ts = self.get_non_monotonic_versionstamp().await?;
 		Ok(prefix + ts.to_vec() + suffix)
 	}
@@ -543,7 +543,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -608,7 +608,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -657,9 +657,9 @@ impl Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-	) -> Result<Vec<(Key<S>, Val)>, Error>
+	) -> Result<Vec<(KeyStack<S>, Val)>, Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", rng.start, rng.end);
@@ -708,7 +708,7 @@ impl Transaction {
 		chk: Option<V>,
 	) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -753,7 +753,7 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn delc<K, V, const S: usize>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -805,17 +805,17 @@ impl Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-	) -> Result<Vec<(Key<S>, Val)>, Error>
+	) -> Result<Vec<(KeyStack<S>, Val)>, Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
-		let beg: Key<S> = rng.start.into();
-		let end: Key<S> = rng.end.into();
-		let mut nxt: Option<Key<S>> = None;
+		let beg: KeyStack<S> = rng.start.into();
+		let end: KeyStack<S> = rng.end.into();
+		let mut nxt: Option<KeyStack<S>> = None;
 		let mut num = limit;
-		let mut out: Vec<(Key<S>, Val)> = vec![];
+		let mut out: Vec<(KeyStack<S>, Val)> = vec![];
 		// Start processing
 		while num > 0 {
 			// Get records batch
@@ -859,7 +859,7 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delr<K, const S: usize>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
@@ -884,11 +884,11 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	async fn _delr<K, const S: usize>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
-		let beg: Key<S> = rng.start.into();
-		let end: Key<S> = rng.end.into();
-		let mut nxt: Option<Key<S>> = None;
+		let beg: KeyStack<S> = rng.start.into();
+		let end: KeyStack<S> = rng.end.into();
+		let mut nxt: Option<KeyStack<S>> = None;
 		let mut num = limit;
 		// Start processing
 		while num > 0 {
@@ -935,17 +935,17 @@ impl Transaction {
 		&mut self,
 		key: K,
 		limit: u32,
-	) -> Result<Vec<(Key<S>, Val)>, Error>
+	) -> Result<Vec<(KeyStack<S>, Val)>, Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getp {:?} (limit: {limit})", key);
-		let beg: Key<S> = key.into();
-		let end: Key<S> = beg.into() + [0xff].into();
-		let mut nxt: Option<Key<S>> = None;
+		let beg: KeyStack<S> = key.into();
+		let end: KeyStack<S> = beg.into() + [0xff].into();
+		let mut nxt: Option<KeyStack<S>> = None;
 		let mut num = limit;
-		let mut out: Vec<(Key<S>, Val)> = vec![];
+		let mut out: Vec<(KeyStack<S>, Val)> = vec![];
 		// Start processing
 		while num > 0 {
 			// Get records batch
@@ -989,12 +989,12 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delp<K, const S: usize>(&mut self, key: K, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key<S>> + Debug,
+		K: Into<KeyStack<S>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delp {:?} (limit: {limit})", key);
-		let beg: Key<S> = key.into();
-		let end: Key<S> = beg.into() + [0xff].into();
+		let beg: KeyStack<S> = key.into();
+		let end: KeyStack<S> = beg.into() + [0xff].into();
 		let min = beg.clone();
 		let max = end.clone();
 		let num = std::cmp::min(1000, limit);
@@ -1009,10 +1009,10 @@ impl Transaction {
 	/// Clear any cache entry for the specified key.
 	pub async fn clr<K, const S: usize>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key<S>>,
+		K: Into<KeyStack<S>>,
 	{
-		let key: Key<S> = key.into();
-		let sized: Key<128> = Key::<128>::from(key);
+		let key: KeyStack<S> = key.into();
+		let sized: KeyStack<128> = KeyStack::<128>::from(key);
 		self.cache.del(&sized);
 		Ok(())
 	}
@@ -1105,11 +1105,11 @@ impl Transaction {
 		limit: u32,
 	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
 		const S: usize = 29;
-		let beg: Key<S> = crate::key::root::hb::Hb::prefix();
-		let end: Key<S> = crate::key::root::hb::Hb::suffix(time_to);
+		let beg: KeyStack<S> = crate::key::root::hb::Hb::prefix();
+		let end: KeyStack<S> = crate::key::root::hb::Hb::suffix(time_to);
 		trace!("Scan start: {} ({:?})", beg.to_string(), &beg);
 		trace!("Scan end: {} ({:?})", end.to_string(), &end);
-		let mut nxt: Option<Key<S>> = None;
+		let mut nxt: Option<KeyStack<S>> = None;
 		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
@@ -1159,11 +1159,11 @@ impl Transaction {
 	/// setting limit to 0 will result in scanning all entries
 	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
 		const S: usize = 20;
-		let beg: Key<S> = crate::key::root::nd::Nd::prefix();
-		let end: Key<S> = crate::key::root::nd::Nd::suffix();
+		let beg: KeyStack<S> = crate::key::root::nd::Nd::prefix();
+		let end: KeyStack<S> = crate::key::root::nd::Nd::suffix();
 		trace!("Scan start: {} ({:?})", beg.to_string(), &beg);
 		trace!("Scan end: {} ({:?})", end.to_string(), &end);
-		let mut nxt: Option<Key<S>> = None;
+		let mut nxt: Option<KeyStack<S>> = None;
 		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
@@ -1224,16 +1224,16 @@ impl Transaction {
 	pub async fn del_tblq(&mut self, ns: &str, db: &str, tb: &str, lv: Uuid) -> Result<(), Error> {
 		trace!("del_lv: ns={:?} db={:?} tb={:?} lv={:?}", ns, db, tb, lv);
 		let key = crate::key::table::lq::new(ns, db, tb, lv);
-		self.cache.del(&key.clone().into());
+		self.cache.del(&key.into());
 		self.del(key).await
 	}
 
 	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
 		const S: usize = 128;
-		let beg: Key<S> = crate::key::node::lq::prefix_nd(node);
-		let end: Key<S> = crate::key::node::lq::suffix_nd(node);
+		let beg: KeyStack<S> = crate::key::node::lq::prefix_nd(node);
+		let end: KeyStack<S> = crate::key::node::lq::suffix_nd(node);
 		trace!("Scanning range from pref={}, suff={}", beg, end);
-		let mut nxt: Option<Key<S>> = None;
+		let mut nxt: Option<KeyStack<S>> = None;
 		let mut num = limit;
 		let mut out: Vec<LqValue> = vec![];
 		while limit == NO_LIMIT || num > 0 {
@@ -1294,10 +1294,10 @@ impl Transaction {
 		limit: u32,
 	) -> Result<Vec<LqValue>, Error> {
 		const S: usize = 128;
-		let beg: Key<S> = crate::key::table::lq::prefix(ns, db, tb);
-		let end: Key<S> = crate::key::table::lq::suffix(ns, db, tb);
+		let beg: KeyStack<S> = crate::key::table::lq::prefix(ns, db, tb);
+		let end: KeyStack<S> = crate::key::table::lq::suffix(ns, db, tb);
 		trace!("Scanning range from pref={}, suff={}", beg, end);
-		let mut nxt: Option<Key<S>> = None;
+		let mut nxt: Option<KeyStack<S>> = None;
 		let mut num = limit;
 		let mut out: Vec<LqValue> = vec![];
 		while limit == NO_LIMIT || num > 0 {
@@ -1360,7 +1360,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		let key_enc = Key::<128>::from(key_enc);
+		let key_enc = KeyStack::<128>::from(key_enc);
 		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key::<S>::(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}
@@ -1389,8 +1389,9 @@ impl Transaction {
 
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
-		let key = crate::key::root::ns::prefix();
-		Ok(if let Some(e) = self.cache.get(&key) {
+		const SIZE: usize = 64;
+		let key: KeyStack<SIZE> = crate::key::root::ns::prefix();
+		Ok(if let Some(e) = self.cache.get(key.into()) {
 			if let Entry::Nss(v) = e {
 				v
 			} else {
@@ -2594,7 +2595,7 @@ impl Transaction {
 		self.cf.define_table(ns, db, tb, dt)
 	}
 
-	pub(crate) async fn get_idg<const S: usize>(&mut self, key: Key<S>) -> Result<U32, Error> {
+	pub(crate) async fn get_idg<const S: usize>(&mut self, key: KeyStack<S>) -> Result<U32, Error> {
 		let seq = if let Some(e) = self.cache.get(&key) {
 			if let Entry::Seq(v) = e {
 				v

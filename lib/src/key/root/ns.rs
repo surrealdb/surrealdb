@@ -1,8 +1,11 @@
 //! Stores a DEFINE NAMESPACE config definition
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
+use crate::kvs::KeyStack;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+
+const SIZE: usize = 64;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Ns<'a> {
@@ -17,16 +20,16 @@ pub fn new(ns: &str) -> Ns<'_> {
 	Ns::new(ns)
 }
 
-pub fn prefix() -> Vec<u8> {
+pub fn prefix() -> KeyStack<SIZE> {
 	let mut k = super::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b's', 0x00]);
-	k
+	KeyStack::<SIZE>::from(k)
 }
 
-pub fn suffix() -> Vec<u8> {
+pub fn suffix() -> KeyStack<SIZE> {
 	let mut k = super::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b's', 0xff]);
-	k
+	KeyStack::<SIZE>::from(k)
 }
 
 impl KeyRequirements for Ns<'_> {

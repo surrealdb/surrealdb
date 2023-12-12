@@ -20,12 +20,12 @@ use crate::idx::trees::store::{
 };
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{KeyStack, Transaction, Val};
 use crate::sql::index::{Distance, MTreeParams, VectorType};
 use crate::sql::{Array, Object, Thing, Value};
 
 pub(crate) struct MTreeIndex {
-	state_key: Key,
+	state_key: KeyStack,
 	dim: usize,
 	vector_type: VectorType,
 	doc_ids: Arc<RwLock<DocIds>>,
@@ -532,7 +532,7 @@ impl MTree {
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		node_key: Key,
+		node_key: KeyStack,
 		mut node: InternalNode,
 		parent_center: &Option<SharedVector>,
 		object: SharedVector,
@@ -643,7 +643,7 @@ impl MTree {
 		&mut self,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		node_key: Key,
+		node_key: KeyStack,
 		mut node: LeafNode,
 		parent_center: &Option<SharedVector>,
 		object: SharedVector,
@@ -695,7 +695,7 @@ impl MTree {
 		&mut self,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		node_key: Key,
+		node_key: KeyStack,
 		mut node: N,
 	) -> Result<(SharedVector, RoutingProperties, SharedVector, RoutingProperties), Error>
 	where
@@ -932,7 +932,7 @@ impl MTree {
 		tx: &mut Transaction,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		node_key: Key,
+		node_key: KeyStack,
 		mut n_node: InternalNode,
 		parent_center: &Option<SharedVector>,
 		od: SharedVector,
@@ -1014,7 +1014,7 @@ impl MTree {
 		&mut self,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		node_key: Key,
+		node_key: KeyStack,
 		n_node: InternalNode,
 		n_updated: bool,
 	) -> Result<DeletionResult, Error> {
@@ -1035,7 +1035,7 @@ impl MTree {
 	fn set_stored_node(
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		node_key: Key,
+		node_key: KeyStack,
 		node: MTreeNode,
 		updated: bool,
 	) -> Result<(), Error> {
@@ -1204,7 +1204,7 @@ impl MTree {
 		&mut self,
 		store: &mut MTreeNodeStore,
 		node_id: NodeId,
-		node_key: Key,
+		node_key: KeyStack,
 		mut leaf_node: LeafNode,
 		parent_center: &Option<SharedVector>,
 		od: SharedVector,
@@ -1252,7 +1252,7 @@ impl MTree {
 		}
 	}
 
-	async fn finish(&self, tx: &mut Transaction, key: Key) -> Result<(), Error> {
+	async fn finish(&self, tx: &mut Transaction, key: KeyStack) -> Result<(), Error> {
 		if self.updated {
 			tx.set(key, self.state.try_to_val()?).await?;
 		}

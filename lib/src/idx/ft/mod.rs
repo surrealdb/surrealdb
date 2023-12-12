@@ -23,7 +23,7 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -40,7 +40,7 @@ pub(crate) type MatchRef = u8;
 
 pub(crate) struct FtIndex {
 	analyzer: Analyzer,
-	state_key: Key,
+	state_key: KeyStack,
 	index_key_base: IndexKeyBase,
 	state: State,
 	bm25: Option<Bm25Params>,
@@ -116,7 +116,7 @@ impl FtIndex {
 		p: &SearchParams,
 		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bs_key();
+		let state_key: KeyStack = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = run.get(state_key.clone()).await? {
 			State::try_from_val(val)?
 		} else {
@@ -397,7 +397,7 @@ impl FtIndex {
 		idiom: &Idiom,
 		doc: &Value,
 	) -> Result<Value, Error> {
-		let doc_key: Key = thg.into();
+		let doc_key: KeyStack = thg.into();
 		if let Some(doc_id) = self.doc_ids.read().await.get_doc_id(tx, doc_key).await? {
 			let mut hl = Highlighter::new(prefix, suffix, idiom, doc);
 			for term_id in terms.iter().flatten() {
@@ -417,7 +417,7 @@ impl FtIndex {
 		thg: &Thing,
 		terms: &[Option<TermId>],
 	) -> Result<Value, Error> {
-		let doc_key: Key = thg.into();
+		let doc_key: KeyStack = thg.into();
 		if let Some(doc_id) = self.doc_ids.read().await.get_doc_id(tx, doc_key).await? {
 			let mut or = Offseter::default();
 			for term_id in terms.iter().flatten() {

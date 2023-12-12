@@ -3,7 +3,7 @@
 use crate::err::Error;
 use crate::key::error::KeyCategory;
 use crate::kvs::Check;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
@@ -161,7 +161,7 @@ impl Transaction {
 		lock: bool,
 	) -> Result<Versionstamp, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -173,7 +173,7 @@ impl Transaction {
 		let verbytes = u64_to_versionstamp(ver);
 		// Write the timestamp to the "last-write-timestamp" key
 		// to ensure that no other transactions can commit with older timestamps.
-		let k: Key = key.into();
+		let k: KeyStack = key.into();
 		if lock {
 			let prev = self.inner.get(k.clone()).await?;
 			if let Some(prev) = prev {
@@ -203,7 +203,7 @@ impl Transaction {
 		suffix: K,
 	) -> Result<Vec<u8>, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -222,7 +222,7 @@ impl Transaction {
 	/// Check if a key exists
 	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -236,7 +236,7 @@ impl Transaction {
 	/// Fetch a key from the database
 	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -250,7 +250,7 @@ impl Transaction {
 	/// Insert or update a key in the database
 	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -274,7 +274,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -300,7 +300,7 @@ impl Transaction {
 	/// Insert a key if it doesn't exist in the database
 	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -329,7 +329,7 @@ impl Transaction {
 	/// Delete a key
 	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -347,7 +347,7 @@ impl Transaction {
 	/// Delete a key
 	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -376,29 +376,29 @@ impl Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(KeyStack, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Convert the range to bytes
-		let rng: Range<Key> = Range {
+		let rng: Range<KeyStack> = Range {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
 		// Scan the keys
 		let res = self.inner.scan(rng, limit).await?;
-		let res = res.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		let res = res.map(|kv| (KeyStack::from(kv.0), kv.1)).collect();
 		// Return result
 		Ok(res)
 	}
 	/// Delete a range of keys from the databases
 	pub(crate) async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -409,7 +409,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Convert the range to bytes
-		let rng: Range<Key> = Range {
+		let rng: Range<KeyStack> = Range {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};

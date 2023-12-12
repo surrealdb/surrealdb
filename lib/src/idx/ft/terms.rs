@@ -3,7 +3,7 @@ use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{KeyStack, Transaction};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 pub(crate) type TermId = u64;
 
 pub(super) struct Terms {
-	state_key: Key,
+	state_key: KeyStack,
 	index_key_base: IndexKeyBase,
 	btree: BTree<FstKeys>,
 	store: Arc<Mutex<BTreeNodeStore<FstKeys>>>,
@@ -28,7 +28,7 @@ impl Terms {
 		default_btree_order: u32,
 		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bt_key(None);
+		let state_key: KeyStack = index_key_base.new_bt_key(None);
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
 			State::try_from_val(val)?
 		} else {

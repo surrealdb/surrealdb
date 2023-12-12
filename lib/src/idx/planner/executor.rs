@@ -17,7 +17,7 @@ use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Object, Table, Thing, Value};
@@ -313,7 +313,7 @@ impl QueryExecutor {
 		if thg.tb.eq(&self.table) {
 			if let Some(ft) = self.exp_entries.get(exp) {
 				let mut run = txn.lock().await;
-				let doc_key: Key = thg.into();
+				let doc_key: KeyStack = thg.into();
 				if let Some(doc_id) =
 					ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await?
 				{
@@ -411,7 +411,7 @@ impl QueryExecutor {
 			if let Some(scorer) = &e.0.scorer {
 				let mut run = txn.lock().await;
 				if doc_id.is_none() {
-					let key: Key = rid.into();
+					let key: KeyStack = rid.into();
 					doc_id = e.0.doc_ids.read().await.get_doc_id(&mut run, key).await?;
 				};
 				if let Some(doc_id) = doc_id {

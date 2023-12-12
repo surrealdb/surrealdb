@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{KeyStack, Transaction, Val};
 use lru::LruCache;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -79,7 +79,7 @@ where
 		}
 	}
 
-	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
+	pub(super) fn remove_node(&mut self, node_id: NodeId, node_key: KeyStack) -> Result<(), Error> {
 		match self {
 			TreeNodeStore::Write(w) => w.remove_node(node_id, node_key),
 			_ => Err(Error::Unreachable),
@@ -102,7 +102,7 @@ where
 	np: TreeNodeProvider,
 	nodes: HashMap<NodeId, StoredNode<N>>,
 	updated: HashSet<NodeId>,
-	removed: HashMap<NodeId, Key>,
+	removed: HashMap<NodeId, KeyStack>,
 	#[cfg(debug_assertions)]
 	out: HashSet<NodeId>,
 }
@@ -168,7 +168,7 @@ where
 		}
 	}
 
-	fn remove_node(&mut self, node_id: NodeId, node_key: Key) -> Result<(), Error> {
+	fn remove_node(&mut self, node_id: NodeId, node_key: KeyStack) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("REMOVE: {}", node_id);
@@ -255,7 +255,7 @@ pub enum TreeNodeProvider {
 }
 
 impl TreeNodeProvider {
-	pub(in crate::idx) fn get_key(&self, node_id: NodeId) -> Key {
+	pub(in crate::idx) fn get_key(&self, node_id: NodeId) -> KeyStack {
 		match self {
 			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
 			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
@@ -298,12 +298,12 @@ impl TreeNodeProvider {
 pub(super) struct StoredNode<N> {
 	pub(super) n: N,
 	pub(super) id: NodeId,
-	pub(super) key: Key,
+	pub(super) key: KeyStack,
 	pub(super) size: u32,
 }
 
 impl<N> StoredNode<N> {
-	pub(super) fn new(n: N, id: NodeId, key: Key, size: u32) -> Self {
+	pub(super) fn new(n: N, id: NodeId, key: KeyStack, size: u32) -> Self {
 		Self {
 			n,
 			id,

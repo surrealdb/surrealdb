@@ -5,7 +5,7 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::key::index::Index;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Thing, Value};
 use std::collections::VecDeque;
@@ -110,7 +110,7 @@ impl RangeScan {
 		}
 	}
 
-	fn matches(&mut self, k: &Key) -> bool {
+	fn matches(&mut self, k: &KeyStack) -> bool {
 		if let Some(b) = &self.beg_excl {
 			if b.eq(k) {
 				self.beg_excl = None;
@@ -232,7 +232,7 @@ impl IndexUnionThingIterator {
 }
 
 pub(crate) struct UniqueEqualThingIterator {
-	key: Option<Key>,
+	key: Option<KeyStack>,
 }
 
 impl UniqueEqualThingIterator {

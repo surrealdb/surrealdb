@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::kvs::{Key, Val};
+use crate::kvs::{KeyStack, Val};
 use roaring::RoaringBitmap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -13,14 +13,14 @@ pub(crate) type Id = u32;
 // It is used to generate ids for any SurrealDB objects that need aliases (e.g. namespaces, databases, tables, indexes, etc.)
 #[derive(Clone)]
 pub struct U32 {
-	state_key: Key,
+	state_key: KeyStack,
 	available_ids: Option<RoaringBitmap>,
 	next_id: Id,
 	updated: bool,
 }
 
 impl U32 {
-	pub(crate) async fn new(state_key: Key, v: Option<Val>) -> Result<Self, Error> {
+	pub(crate) async fn new(state_key: KeyStack, v: Option<Val>) -> Result<Self, Error> {
 		let state: State = if let Some(val) = v {
 			State::try_from_val(val)?
 		} else {
@@ -64,7 +64,7 @@ impl U32 {
 		self.updated = true;
 	}
 
-	pub(crate) fn finish(&mut self) -> Option<(Key, Val)> {
+	pub(crate) fn finish(&mut self) -> Option<(KeyStack, Val)> {
 		if self.updated {
 			let state = State {
 				available_ids: self.available_ids.take(),

@@ -1,7 +1,7 @@
 //! Stores a LIVE SELECT query definition on the table
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -32,13 +32,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Lq<'a> {
 	Lq::new(ns, db, tb, lq)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Key<SIZE> {
+pub fn prefix(ns: &str, db: &str, tb: &str) -> KeyStack<SIZE> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'q', 0x00]);
-	Key::<SIZE>::from(&k)
+	KeyStack::<SIZE>::from(&k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Key<SIZE> {
+pub fn suffix(ns: &str, db: &str, tb: &str) -> KeyStack<SIZE> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'q']);
 	k.extend_from_slice(Uuid::max().as_ref());
@@ -46,7 +46,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Key<SIZE> {
 	// so it wouldn't match max UUIDs because it doesn't check for equal matches
 	// on the upper bound. Adding an extra byte to bring max into range as well.
 	k.push(0x00);
-	Key::<SIZE>::from(&k)
+	KeyStack::<SIZE>::from(&k)
 }
 
 impl KeyRequirements for Lq<'_> {

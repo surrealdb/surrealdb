@@ -1,5 +1,5 @@
 use crate::cf::{TableMutation, TableMutations};
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -95,9 +95,10 @@ impl Writer {
 			mutations,
 		) in self.buf.b.iter()
 		{
-			let ts_key: Key = crate::key::database::vs::new(ns, db).into();
-			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db);
-			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
+			let ts_key: KeyStack = crate::key::database::vs::new(ns, db).into();
+			let tc_key_prefix: KeyStack = crate::key::change::versionstamped_key_prefix(ns, db);
+			let tc_key_suffix: KeyStack =
+				crate::key::change::versionstamped_key_suffix(tb.as_str());
 
 			r.push((ts_key, tc_key_prefix, tc_key_suffix, mutations.into()))
 		}

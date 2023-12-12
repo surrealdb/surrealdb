@@ -1,6 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Processed};
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use radix_trie::Trie;
 use std::default::Default;
 #[cfg(not(target_arch = "wasm32"))]
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 // TODO: This is currently processed in memory. In the future is should be on disk (mmap?)
-type Distinct = Trie<Key, bool>;
+type Distinct = Trie<KeyStack, bool>;
 
 #[derive(Default)]
 pub(crate) struct SyncDistinct {

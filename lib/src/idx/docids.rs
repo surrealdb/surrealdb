@@ -3,7 +3,7 @@ use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BStatistics, BTree, BTreeNodeStore};
 use crate::idx::trees::store::{TreeNodeProvider, TreeNodeStore, TreeStoreType};
 use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{KeyStack, Transaction};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ pub type DocId = u64;
 pub(crate) const NO_DOC_ID: u64 = u64::MAX;
 
 pub(crate) struct DocIds {
-	state_key: Key,
+	state_key: KeyStack,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
 	store: Arc<Mutex<BTreeNodeStore<TrieKeys>>>,
@@ -31,7 +31,7 @@ impl DocIds {
 		default_btree_order: u32,
 		store_type: TreeStoreType,
 	) -> Result<Self, Error> {
-		let state_key: Key = index_key_base.new_bd_key(None);
+		let state_key: KeyStack = index_key_base.new_bd_key(None);
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
 			State::try_from_val(val)?
 		} else {
@@ -70,7 +70,7 @@ impl DocIds {
 	pub(crate) async fn get_doc_id(
 		&self,
 		tx: &mut Transaction,
-		doc_key: Key,
+		doc_key: KeyStack,
 	) -> Result<Option<DocId>, Error> {
 		let mut store = self.store.lock().await;
 		self.btree.search(tx, &mut store, &doc_key).await
@@ -81,7 +81,7 @@ impl DocIds {
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: Key,
+		doc_key: KeyStack,
 	) -> Result<Resolved, Error> {
 		{
 			let mut store = self.store.lock().await;
@@ -100,7 +100,7 @@ impl DocIds {
 	pub(in crate::idx) async fn remove_doc(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: Key,
+		doc_key: KeyStack,
 	) -> Result<Option<DocId>, Error> {
 		let mut store = self.store.lock().await;
 		if let Some(doc_id) = self.btree.delete(tx, &mut store, doc_key).await? {
@@ -123,7 +123,7 @@ impl DocIds {
 		&self,
 		tx: &mut Transaction,
 		doc_id: DocId,
-	) -> Result<Option<Key>, Error> {
+	) -> Result<Option<KeyStack>, Error> {
 		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
 		if let Some(val) = tx.get(doc_id_key).await? {
 			Ok(Some(val))

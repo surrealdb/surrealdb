@@ -1,7 +1,7 @@
 //! Stores cluster membership information
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -37,16 +37,16 @@ impl Nd {
 		}
 	}
 
-	pub fn prefix() -> Key<SIZE> {
+	pub fn prefix() -> KeyStack<SIZE> {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'n', b'd', 0x00]);
-		Key::<SIZE>::from(&k) // TODO
+		KeyStack::<SIZE>::from(&k) // TODO
 	}
 
-	pub fn suffix() -> Key<SIZE> {
+	pub fn suffix() -> KeyStack<SIZE> {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'n', b'd', 0xff]);
-		Key::<SIZE>::from(&k) // TODO
+		KeyStack::<SIZE>::from(&k) // TODO
 	}
 }
 

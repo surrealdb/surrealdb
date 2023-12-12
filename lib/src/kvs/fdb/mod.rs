@@ -2,7 +2,7 @@
 
 use crate::err::Error;
 use crate::kvs::Check;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
 use foundationdb::options;
@@ -206,7 +206,7 @@ impl Transaction {
 	/// Check if a key exists
 	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -231,7 +231,7 @@ impl Transaction {
 	/// Fetch a key from the database
 	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -279,7 +279,7 @@ impl Transaction {
 	/// Inserts or update a key in the database
 	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -318,7 +318,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -346,7 +346,7 @@ impl Transaction {
 	/// Insert a key if it doesn't exist in the database
 	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -392,7 +392,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -430,7 +430,7 @@ impl Transaction {
 	/// Delete a key
 	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -452,7 +452,7 @@ impl Transaction {
 	/// Delete a key
 	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -487,16 +487,16 @@ impl Transaction {
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
+	) -> Result<Vec<(KeyStack, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Convert the range to bytes
-		let rng: Range<Key> = Range {
+		let rng: Range<KeyStack> = Range {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
@@ -515,12 +515,12 @@ impl Transaction {
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
 		let mut stream = inner.get_ranges_keyvalues(opt, self.snapshot());
-		let mut res: Vec<(Key, Val)> = vec![];
+		let mut res: Vec<(KeyStack, Val)> = vec![];
 		loop {
 			let x = stream.try_next().await;
 			match x {
 				Ok(Some(v)) => {
-					let x = (Key::from(v.key()), Val::from(v.value()));
+					let x = (KeyStack::from(v.key()), Val::from(v.value()));
 					res.push(x)
 				}
 				Ok(None) => break,
@@ -533,7 +533,7 @@ impl Transaction {
 	/// Delete a range of keys from the databases
 	pub(crate) async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {

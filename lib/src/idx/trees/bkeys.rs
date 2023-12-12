@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::trees::btree::Payload;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::ser;
@@ -10,29 +10,32 @@ use std::io;
 use std::io::Cursor;
 
 pub trait BKeys: Default + Display + Sized {
-	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
+	fn with_key_val(key: KeyStack, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> u32;
 	fn is_empty(&self) -> bool;
-	fn get(&self, key: &Key) -> Option<Payload>;
+	fn get(&self, key: &KeyStack) -> Option<Payload>;
 	// It is okay to return a owned Vec rather than an iterator,
 	// because BKeys are intended to be stored as Node in the BTree.
 	// The size of the Node should be small, therefore one instance of
 	// BKeys would never be store a large volume of keys.
-	fn collect_with_prefix(&self, prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error>;
-	fn insert(&mut self, key: Key, payload: Payload);
+	fn collect_with_prefix(
+		&self,
+		prefix_key: &KeyStack,
+	) -> Result<VecDeque<(KeyStack, Payload)>, Error>;
+	fn insert(&mut self, key: KeyStack, payload: Payload);
 	fn append(&mut self, keys: Self);
-	fn remove(&mut self, key: &Key) -> Option<Payload>;
+	fn remove(&mut self, key: &KeyStack) -> Option<Payload>;
 	fn split_keys(self) -> Result<SplitKeys<Self>, Error>;
-	fn get_key(&self, idx: usize) -> Option<Key>;
-	fn get_child_idx(&self, searched_key: &Key) -> usize;
-	fn get_first_key(&self) -> Option<(Key, Payload)>;
-	fn get_last_key(&self) -> Option<(Key, Payload)>;
+	fn get_key(&self, idx: usize) -> Option<KeyStack>;
+	fn get_child_idx(&self, searched_key: &KeyStack) -> usize;
+	fn get_first_key(&self) -> Option<(KeyStack, Payload)>;
+	fn get_last_key(&self) -> Option<(KeyStack, Payload)>;
 	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error>;
 	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error>;
 	fn compile(&mut self) {}
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
-		F: Fn(Key) -> Result<String, Error>;
+		F: Fn(KeyStack) -> Result<String, Error>;
 }
 
 pub struct SplitKeys<BK>
@@ -42,7 +45,7 @@ where
 	pub(in crate::idx) left: BK,
 	pub(in crate::idx) right: BK,
 	pub(in crate::idx) median_idx: usize,
-	pub(in crate::idx) median_key: Key,
+	pub(in crate::idx) median_key: KeyStack,
 	pub(in crate::idx) median_payload: Payload,
 }
 
@@ -75,7 +78,7 @@ impl Default for FstKeys {
 }
 
 impl BKeys for FstKeys {
-	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
+	fn with_key_val(key: KeyStack, payload: Payload) -> Result<Self, Error> {
 		let i = Inner::Trie(TrieKeys::with_key_val(key, payload)?);
 		Ok(Self {
 			i,
@@ -96,18 +99,21 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn get(&self, key: &Key) -> Option<Payload> {
+	fn get(&self, key: &KeyStack) -> Option<Payload> {
 		match &self.i {
 			Inner::Map(m) => m.get(key),
 			Inner::Trie(t) => t.get(key),
 		}
 	}
 
-	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
+	fn collect_with_prefix(
+		&self,
+		_prefix_key: &KeyStack,
+	) -> Result<VecDeque<(KeyStack, Payload)>, Error> {
 		Err(Error::Unreachable)
 	}
 
-	fn insert(&mut self, key: Key, payload: Payload) {
+	fn insert(&mut self, key: KeyStack, payload: Payload) {
 		self.edit();
 		if let Inner::Trie(t) = &mut self.i {
 			t.insert(key, payload);
@@ -134,7 +140,7 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn remove(&mut self, key: &Key) -> Option<Payload> {
+	fn remove(&mut self, key: &KeyStack) -> Option<Payload> {
 		self.edit();
 		if let Inner::Trie(t) = &mut self.i {
 			t.remove(key)
@@ -163,7 +169,7 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn get_key(&self, mut idx: usize) -> Option<Key> {
+	fn get_key(&self, mut idx: usize) -> Option<KeyStack> {
 		match &self.i {
 			Inner::Map(m) => {
 				let mut s = m.keys().into_stream();
@@ -179,7 +185,7 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn get_child_idx(&self, searched_key: &Key) -> usize {
+	fn get_child_idx(&self, searched_key: &KeyStack) -> usize {
 		match &self.i {
 			Inner::Map(m) => {
 				let searched_key = searched_key.as_slice();
@@ -197,14 +203,14 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn get_first_key(&self) -> Option<(Key, Payload)> {
+	fn get_first_key(&self) -> Option<(KeyStack, Payload)> {
 		match &self.i {
 			Inner::Map(m) => m.stream().next().map(|(k, p)| (k.to_vec(), p)),
 			Inner::Trie(t) => t.get_first_key(),
 		}
 	}
 
-	fn get_last_key(&self) -> Option<(Key, Payload)> {
+	fn get_last_key(&self) -> Option<(KeyStack, Payload)> {
 		match &self.i {
 			Inner::Map(m) => {
 				let mut last = None;
@@ -248,7 +254,7 @@ impl BKeys for FstKeys {
 
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
-		F: Fn(Key) -> Result<String, Error>,
+		F: Fn(KeyStack) -> Result<String, Error>,
 	{
 		match &self.i {
 			Inner::Map(m) => {
@@ -312,7 +318,7 @@ impl Display for FstKeys {
 
 #[derive(Default, Debug)]
 pub struct TrieKeys {
-	keys: Trie<Key, Payload>,
+	keys: Trie<KeyStack, Payload>,
 }
 
 impl Display for TrieKeys {
@@ -343,7 +349,7 @@ impl From<&Map<Vec<u8>>> for TrieKeys {
 }
 
 impl BKeys for TrieKeys {
-	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
+	fn with_key_val(key: KeyStack, payload: Payload) -> Result<Self, Error> {
 		let mut trie_keys = Self {
 			keys: Trie::default(),
 		};
@@ -359,11 +365,14 @@ impl BKeys for TrieKeys {
 		self.keys.is_empty()
 	}
 
-	fn get(&self, key: &Key) -> Option<Payload> {
+	fn get(&self, key: &KeyStack) -> Option<Payload> {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix(&self, prefix: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
+	fn collect_with_prefix(
+		&self,
+		prefix: &KeyStack,
+	) -> Result<VecDeque<(KeyStack, Payload)>, Error> {
 		let mut i = KeysIterator::new(prefix, &self.keys);
 		let mut r = VecDeque::new();
 		while let Some((k, p)) = i.next() {
@@ -372,7 +381,7 @@ impl BKeys for TrieKeys {
 		Ok(r)
 	}
 
-	fn insert(&mut self, key: Key, payload: Payload) {
+	fn insert(&mut self, key: KeyStack, payload: Payload) {
 		self.keys.insert(key, payload);
 	}
 
@@ -382,7 +391,7 @@ impl BKeys for TrieKeys {
 		}
 	}
 
-	fn remove(&mut self, key: &Key) -> Option<Payload> {
+	fn remove(&mut self, key: &KeyStack) -> Option<Payload> {
 		self.keys.remove(key)
 	}
 
@@ -415,7 +424,7 @@ impl BKeys for TrieKeys {
 		})
 	}
 
-	fn get_key(&self, mut idx: usize) -> Option<Key> {
+	fn get_key(&self, mut idx: usize) -> Option<KeyStack> {
 		for key in self.keys.keys() {
 			if idx == 0 {
 				return Some(key.clone());
@@ -425,7 +434,7 @@ impl BKeys for TrieKeys {
 		None
 	}
 
-	fn get_child_idx(&self, searched_key: &Key) -> usize {
+	fn get_child_idx(&self, searched_key: &KeyStack) -> usize {
 		let mut child_idx = 0;
 		for key in self.keys.keys() {
 			if searched_key.le(key) {
@@ -436,11 +445,11 @@ impl BKeys for TrieKeys {
 		child_idx
 	}
 
-	fn get_first_key(&self) -> Option<(Key, Payload)> {
+	fn get_first_key(&self) -> Option<(KeyStack, Payload)> {
 		self.keys.iter().next().map(|(k, p)| (k.clone(), *p))
 	}
 
-	fn get_last_key(&self) -> Option<(Key, Payload)> {
+	fn get_last_key(&self) -> Option<(KeyStack, Payload)> {
 		self.keys.iter().last().map(|(k, p)| (k.clone(), *p))
 	}
 
@@ -471,7 +480,7 @@ impl BKeys for TrieKeys {
 
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
-		F: Fn(Key) -> Result<String, Error>,
+		F: Fn(KeyStack) -> Result<String, Error>,
 	{
 		let mut s = String::new();
 		let mut start = true;
@@ -488,8 +497,8 @@ impl BKeys for TrieKeys {
 	}
 }
 
-impl From<Trie<Key, Payload>> for TrieKeys {
-	fn from(keys: Trie<Key, Payload>) -> Self {
+impl From<Trie<KeyStack, Payload>> for TrieKeys {
+	fn from(keys: Trie<KeyStack, Payload>) -> Self {
 		Self {
 			keys,
 		}
@@ -497,13 +506,13 @@ impl From<Trie<Key, Payload>> for TrieKeys {
 }
 
 struct KeysIterator<'a> {
-	prefix: &'a Key,
-	node_queue: VecDeque<SubTrie<'a, Key, Payload>>,
-	current_node: Option<SubTrie<'a, Key, Payload>>,
+	prefix: &'a KeyStack,
+	node_queue: VecDeque<SubTrie<'a, KeyStack, Payload>>,
+	current_node: Option<SubTrie<'a, KeyStack, Payload>>,
 }
 
 impl<'a> KeysIterator<'a> {
-	fn new(prefix: &'a Key, keys: &'a Trie<Key, Payload>) -> Self {
+	fn new(prefix: &'a KeyStack, keys: &'a Trie<KeyStack, Payload>) -> Self {
 		let start_node = keys.get_raw_descendant(prefix);
 		Self {
 			prefix,
@@ -512,7 +521,7 @@ impl<'a> KeysIterator<'a> {
 		}
 	}
 
-	fn next(&mut self) -> Option<(&Key, Payload)> {
+	fn next(&mut self) -> Option<(&KeyStack, Payload)> {
 		loop {
 			if let Some(node) = self.current_node.take() {
 				for children in node.children() {
@@ -537,12 +546,12 @@ impl<'a> KeysIterator<'a> {
 mod tests {
 	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::trees::btree::Payload;
-	use crate::kvs::Key;
+	use crate::kvs::KeyStack;
 	use std::collections::{HashMap, HashSet, VecDeque};
 	use std::io::Cursor;
 
 	fn test_keys_serde<BK: BKeys>(expected_size: usize) {
-		let key: Key = "a".as_bytes().into();
+		let key: KeyStack = "a".as_bytes().into();
 		let mut keys = BK::with_key_val(key.clone(), 130).unwrap();
 		keys.compile();
 		// Serialize
@@ -576,7 +585,7 @@ mod tests {
 		let mut term_set = HashSet::new();
 		for term in terms {
 			term_set.insert(term.to_string());
-			let key: Key = term.into();
+			let key: KeyStack = term.into();
 			keys.insert(key.clone(), i);
 			keys.compile();
 			assert_eq!(keys.get(&key), Some(i));
@@ -621,7 +630,7 @@ mod tests {
 		test_keys_deletions(TrieKeys::default())
 	}
 
-	fn check_keys(r: VecDeque<(Key, Payload)>, e: Vec<(Key, Payload)>) {
+	fn check_keys(r: VecDeque<(KeyStack, Payload)>, e: Vec<(KeyStack, Payload)>) {
 		let mut map = HashMap::new();
 		for (k, p) in r {
 			map.insert(k, p);
@@ -696,7 +705,7 @@ mod tests {
 		keys.compile();
 		let r = keys.split_keys().unwrap();
 		assert_eq!(r.median_payload, 3);
-		let c: Key = "c".into();
+		let c: KeyStack = "c".into();
 		assert_eq!(r.median_key, c);
 		assert_eq!(r.median_idx, 2);
 		assert_eq!(r.left.len(), 2);

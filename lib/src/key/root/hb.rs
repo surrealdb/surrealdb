@@ -2,7 +2,7 @@
 use crate::dbs::node::{KeyTimestamp, Timestamp};
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
-use crate::kvs::Key;
+use crate::kvs::KeyStack;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -40,13 +40,13 @@ impl Hb {
 		}
 	}
 
-	pub fn prefix() -> Key<SIZE> {
+	pub fn prefix() -> KeyStack<SIZE> {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'h', b'b', 0x00]);
-		Key::<SIZE>::from(&k)
+		KeyStack::<SIZE>::from(&k)
 	}
 
-	pub fn suffix(ts: &Timestamp) -> Key<SIZE> {
+	pub fn suffix(ts: &Timestamp) -> KeyStack<SIZE> {
 		// Add one to timestamp so we get a complete range inclusive of provided timestamp
 		// Also convert type
 		let tskey: KeyTimestamp = KeyTimestamp {
@@ -55,7 +55,7 @@ impl Hb {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'h', b'b']);
 		k.extend_from_slice(tskey.encode().unwrap().as_ref());
-		Key::<SIZE>::from(&k)
+		KeyStack::<SIZE>::from(&k)
 	}
 }
 
