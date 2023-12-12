@@ -8,7 +8,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 # Public features
-default = ["storage-mem", "storage-rocksdb", "scripting", "http", "ml"]
+default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
 storage-mem = ["surrealdb/kv-mem", "has-storage"]
 storage-rocksdb = ["surrealdb/kv-rocksdb", "has-storage"]
 storage-speedb = ["surrealdb/kv-speedb", "has-storage"]
