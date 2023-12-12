@@ -12,6 +12,7 @@ use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
+use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use std::io::Error as IoError;
@@ -194,6 +195,12 @@ pub enum Error {
 		message: String,
 	},
 
+	/// There was an error with the provided machine learning model
+	#[error("Problem with machine learning computation. {message}")]
+	InvalidModel {
+		message: String,
+	},
+
 	/// There was a problem running the specified function
 	#[error("There was a problem running the {name}() function. {message}")]
 	InvalidFunction {
@@ -313,6 +320,12 @@ pub enum Error {
 	/// The requested function does not exist
 	#[error("The function 'fn::{value}' does not exist")]
 	FcNotFound {
+		value: String,
+	},
+
+	/// The requested model does not exist
+	#[error("The model 'ml::{value}' does not exist")]
+	MlNotFound {
 		value: String,
 	},
 
@@ -634,6 +647,14 @@ pub enum Error {
 	/// Represents an underlying error while reading UTF8 characters
 	#[error("Utf8 error: {0}")]
 	Utf8Error(#[from] FromUtf8Error),
+
+	/// Represents an underlying error with the Object Store
+	#[error("Object Store error: {0}")]
+	ObsError(#[from] ObjectStoreError),
+
+	/// There was an error with model computation
+	#[error("There was an error with model computation: {0}")]
+	ModelComputation(String),
 
 	/// The feature has not yet being implemented
 	#[error("Feature not yet implemented: {feature}")]
