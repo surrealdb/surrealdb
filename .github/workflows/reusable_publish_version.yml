@@ -157,11 +157,8 @@ jobs:
 
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
             rev=$(git rev-parse --short HEAD)
-            echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
           else
             echo "name=v${version}" >> $GITHUB_OUTPUT
-
-            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
           fi
 
   test:
@@ -329,8 +326,6 @@ jobs:
   build:
     name: Build ${{ matrix.arch }} binary
     needs: [prepare-vars]
-    env:
-      SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
     strategy:
       fail-fast: false
       matrix:
