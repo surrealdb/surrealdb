@@ -310,7 +310,14 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
+        run: |
+          set -x
+
+          # Create a temporary branch
+          git checkout -b crate
+
+          # Publish the crate
+          /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
 
   docker-build:
     name: Build Docker images
@@ -474,6 +481,11 @@ jobs:
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
       - name: Download artifacts
         uses: actions/download-artifact@v3
         with:
