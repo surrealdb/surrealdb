@@ -850,7 +850,7 @@ where
 		}
 		store.set_node(child_stored_node, true).await?;
 		store.set_node(left_child_stored_node, true).await?;
-		return Ok((true, is_main_key, key_to_delete, child_id));
+		Ok((true, is_main_key, key_to_delete, child_id))
 	}
 
 	#[allow(clippy::too_many_arguments)]
