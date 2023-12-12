@@ -32,28 +32,25 @@ pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 /// What is the maximum WebSocket frame size (defaults to 16 MiB)
 #[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
-	let default = 16 << 20;
-	std::env::var("SURREAL_WEBSOCKET_MAX_FRAME_SIZE")
-		.map(|v| v.parse::<usize>().unwrap_or(default))
-		.unwrap_or(default)
+	option_env!("SURREAL_WEBSOCKET_MAX_FRAME_SIZE")
+		.and_then(|s| s.parse::<usize>().ok())
+		.unwrap_or(16 << 20)
 });
 
 /// What is the maximum WebSocket message size (defaults to 128 MiB)
 #[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
-	let default = 128 << 20;
-	std::env::var("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE")
-		.map(|v| v.parse::<usize>().unwrap_or(default))
-		.unwrap_or(default)
+	option_env!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE")
+		.and_then(|s| s.parse::<usize>().ok())
+		.unwrap_or(128 << 20)
 });
 
 /// How many concurrent tasks can be handled on each WebSocket (defaults to 24)
 #[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> = Lazy::new(|| {
-	let default = 24;
-	std::env::var("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS")
-		.map(|v| v.parse::<usize>().unwrap_or(default))
-		.unwrap_or(default)
+	option_env!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS")
+		.and_then(|s| s.parse::<usize>().ok())
+		.unwrap_or(24)
 });
 
 /// What is the runtime thread memory stack size (defaults to 10MiB)
@@ -65,18 +62,17 @@ pub static RUNTIME_STACK_SIZE: Lazy<usize> = Lazy::new(|| {
 	} else {
 		10 * 1024 * 1024 // 10MiB in release mode
 	};
-	std::env::var("SURREAL_RUNTIME_STACK_SIZE")
-		.map(|v| v.parse::<usize>().unwrap_or(default))
+	option_env!("SURREAL_RUNTIME_STACK_SIZE")
+		.and_then(|s| s.parse::<usize>().ok())
 		.unwrap_or(default)
 });
 
 /// How many threads which can be started for blocking operations (defaults to 512)
 #[cfg(feature = "has-storage")]
 pub static RUNTIME_MAX_BLOCKING_THREADS: Lazy<usize> = Lazy::new(|| {
-	let default = 512;
-	std::env::var("SURREAL_RUNTIME_MAX_BLOCKING_THREADS")
-		.map(|v| v.parse::<usize>().unwrap_or(default))
-		.unwrap_or(default)
+	option_env!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS")
+		.and_then(|s| s.parse::<usize>().ok())
+		.unwrap_or(512)
 });
 
 /// The version identifier of this build
