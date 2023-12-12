@@ -345,7 +345,7 @@ jobs:
               brew install protobuf
 
               # Build
-              cargo build --features storage-tikv,http-compression --release --locked --target x86_64-apple-darwin
+              cargo build --features storage-tikv,http-compression,ml --release --locked --target x86_64-apple-darwin
 
               # Package
               cp target/x86_64-apple-darwin/release/surreal surreal
@@ -362,7 +362,7 @@ jobs:
               brew install protobuf
 
               # Build
-              cargo build --features storage-tikv,http-compression --release --locked --target aarch64-apple-darwin
+              cargo build --features storage-tikv,http-compression,ml --release --locked --target aarch64-apple-darwin
 
               # Package
               cp target/aarch64-apple-darwin/release/surreal surreal
@@ -378,7 +378,7 @@ jobs:
               # Build
               docker build \
                 --platform linux/amd64 \
-                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression" \
+                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression,ml" \
                 -t binary \
                 -f docker/Dockerfile.binary \
                 .
@@ -398,7 +398,7 @@ jobs:
               # Build
               docker build \
                 --platform linux/arm64 \
-                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression" \
+                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression,ml" \
                 -t binary \
                 -f docker/Dockerfile.binary \
                 .
