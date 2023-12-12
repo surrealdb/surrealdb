@@ -1,5 +1,3 @@
-use crate::sql::statements::live::live;
-
 #[tokio::test]
 #[serial]
 async fn archive_lv_for_node_archives() {
@@ -20,8 +18,8 @@ async fn archive_lv_for_node_archives() {
 	let key = crate::key::node::lq::new(node_id, lv_id.0, namespace, database);
 	tx.putc(key, table, None).await.unwrap();
 
-	let (_, mut stm) = live(format!("LIVE SELECT * FROM {}", table).as_str()).unwrap();
-	stm.id = lv_id.clone();
+	let mut stm = LiveStatement::from_source_parts(Fields::all(), Table(table.into()), None, None);
+	stm.id = lv_id;
 	tx.putc_tblq(namespace, database, table, stm, None).await.unwrap();
 
 	let this_node_id = crate::sql::uuid::Uuid::from(Uuid::from_bytes([
@@ -35,7 +33,7 @@ async fn archive_lv_for_node_archives() {
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let results = test
 		.db
-		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id), this_node_id.clone())
+		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id), this_node_id)
 		.await
 		.unwrap();
 	assert_eq!(results.len(), 1);

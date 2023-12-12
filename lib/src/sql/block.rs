@@ -2,38 +2,18 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::mightbespace;
-use crate::sql::common::{closebraces, colons, openbraces};
-use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::statements::create::{create, CreateStatement};
-use crate::sql::statements::define::{define, DefineStatement};
-use crate::sql::statements::delete::{delete, DeleteStatement};
-use crate::sql::statements::foreach::{foreach, ForeachStatement};
-use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
-use crate::sql::statements::insert::{insert, InsertStatement};
-use crate::sql::statements::output::{output, OutputStatement};
-use crate::sql::statements::r#break::{r#break, BreakStatement};
-use crate::sql::statements::r#continue::{r#continue, ContinueStatement};
-use crate::sql::statements::relate::{relate, RelateStatement};
-use crate::sql::statements::remove::{remove, RemoveStatement};
-use crate::sql::statements::select::{select, SelectStatement};
-use crate::sql::statements::set::{set, SetStatement};
-use crate::sql::statements::throw::{throw, ThrowStatement};
-use crate::sql::statements::update::{update, UpdateStatement};
-use crate::sql::value::{value, Value};
-use nom::branch::alt;
-use nom::combinator::map;
-use nom::multi::many0;
-use nom::multi::separated_list0;
-use nom::sequence::delimited;
+use crate::sql::statements::{
+	BreakStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
+	ForeachStatement, IfelseStatement, InsertStatement, OutputStatement, RelateStatement,
+	RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+};
+use crate::sql::value::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
-
-use super::util::expect_delimited;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
@@ -184,18 +164,6 @@ impl Display for Block {
 	}
 }
 
-pub fn block(i: &str) -> IResult<&str, Block> {
-	expect_delimited(
-		openbraces,
-		|i| {
-			let (i, v) = separated_list0(colons, entry)(i)?;
-			let (i, _) = many0(colons)(i)?;
-			Ok((i, Block(v)))
-		},
-		closebraces,
-	)(i)
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 pub enum Entry {
@@ -268,82 +236,5 @@ impl Display for Entry {
 			Self::Continue(v) => write!(f, "{v}"),
 			Self::Foreach(v) => write!(f, "{v}"),
 		}
-	}
-}
-
-pub fn entry(i: &str) -> IResult<&str, Entry> {
-	delimited(
-		mightbespace,
-		alt((
-			map(set, Entry::Set),
-			map(output, Entry::Output),
-			map(ifelse, Entry::Ifelse),
-			map(select, Entry::Select),
-			map(create, Entry::Create),
-			map(update, Entry::Update),
-			map(relate, Entry::Relate),
-			map(delete, Entry::Delete),
-			map(insert, Entry::Insert),
-			map(define, Entry::Define),
-			map(remove, Entry::Remove),
-			map(throw, Entry::Throw),
-			map(r#break, Entry::Break),
-			map(r#continue, Entry::Continue),
-			map(foreach, Entry::Foreach),
-			map(value, Entry::Value),
-		)),
-		mightbespace,
-	)(i)
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn block_empty() {
-		let sql = "{}";
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
-	}
-
-	#[test]
-	fn block_value() {
-		let sql = "{ 80 }";
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
-	}
-
-	#[test]
-	fn block_ifelse() {
-		let sql = "{ RETURN IF true THEN 50 ELSE 40 END; }";
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
-	}
-
-	#[test]
-	fn block_multiple() {
-		let sql = r#"{
-
-	LET $person = (SELECT * FROM person WHERE first = $first AND last = $last AND birthday = $birthday);
-
-	RETURN IF $person[0].id THEN
-		$person[0]
-	ELSE
-		(CREATE person SET first = $first, last = $last, birthday = $birthday)
-	END;
-
-}"#;
-		let res = block(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{:#}", out))
 	}
 }

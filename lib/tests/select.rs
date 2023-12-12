@@ -1008,3 +1008,69 @@ async fn check_permissions_auth_disabled() {
 		);
 	}
 }
+
+#[tokio::test]
+async fn select_only() -> Result<(), Error> {
+	let sql: &str = "
+		SELECT * FROM ONLY 1;
+		SELECT * FROM ONLY NONE;
+		SELECT * FROM ONLY [];
+		SELECT * FROM ONLY [1];
+		SELECT * FROM ONLY [1, 2];
+		SELECT * FROM ONLY [] LIMIT 1;
+		SELECT * FROM ONLY [1] LIMIT 1;
+		SELECT * FROM ONLY [1, 2] LIMIT 1;
+		SELECT * FROM ONLY 1, 2;
+		SELECT * FROM ONLY 1, 2 LIMIT 1;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 10);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("NONE");
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("NONE");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

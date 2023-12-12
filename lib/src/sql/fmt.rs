@@ -278,7 +278,7 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{array::array, object::object, parse, value::value};
+	use crate::syn::{parse, value};
 
 	#[test]
 	fn pretty_query() {
@@ -299,21 +299,14 @@ mod tests {
 
 	#[test]
 	fn pretty_value() {
-		let value = value("{foo: [1, 2, 3]};").unwrap().1;
+		let value = value("{foo: [1, 2, 3]}").unwrap();
 		assert_eq!(format!("{}", value), "{ foo: [1, 2, 3] }");
 		assert_eq!(format!("{:#}", value), "{\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n}");
 	}
 
 	#[test]
-	fn pretty_object() {
-		let object = object("{foo: [1, 2, 3]};").unwrap().1;
-		assert_eq!(format!("{}", object), "{ foo: [1, 2, 3] }");
-		assert_eq!(format!("{:#}", object), "{\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n}");
-	}
-
-	#[test]
 	fn pretty_array() {
-		let array = array("[1, 2, 3];").unwrap().1;
+		let array = value("[1, 2, 3]").unwrap();
 		assert_eq!(format!("{}", array), "[1, 2, 3]");
 		assert_eq!(format!("{:#}", array), "[\n\t1,\n\t2,\n\t3\n]");
 	}

@@ -1,0 +1,370 @@
+on:
+  workflow_call:
+    inputs:
+      git-ref:
+        required: true
+        type: string
+        description: "The github ref to checkout for building the Docker images."
+      tag-prefix:
+        required: true
+        type: string
+        description: "The prefix of the Docker image tag. i.e. 'nightly' for 'surrealdb/surrealdb:nightly-dev' or 'surrealdb/surrealdb:nightly-fdb'."
+      build:
+        required: false
+        type: boolean
+        default: true
+        description: "Build the Docker images."
+      push:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the Docker images."
+      latest:
+        required: false
+        type: boolean
+        default: false
+        description: "Update the latest tag of the Docker image."
+    secrets:
+      DOCKER_USER:
+        required: false
+      DOCKER_PASS:
+        required: false
+      AWS_CI_ACCESS_KEY_ID:
+        required: false
+      AWS_CI_SECRET_ACCESS_KEY:
+        required: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    name: Prepare steps
+    runs-on: ubuntu-latest
+    outputs:
+      with-ecr: ${{ steps.aws-credentials.outputs.with-ecr }}
+      tag-prefix: ${{ steps.tag-prefix.outputs.tag-prefix }}
+      build-matrix: ${{ steps.set-matrix.outputs.build-matrix }}
+      push-matrix: ${{ steps.set-matrix.outputs.push-matrix }}
+    steps:
+
+      - name: Check if AWS credentials are set
+        id: aws-credentials
+        run: |
+          if [[ "${{ secrets.AWS_CI_ACCESS_KEY_ID }}" == "" ]]; then
+            echo "###"
+            echo "### AWS credentials are not set. Will skip any AWS ECR action."
+            echo "###"
+
+            echo "with-ecr=false" >> $GITHUB_OUTPUT
+          else
+            echo "with-ecr=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Sanitize tag name
+        id: tag-prefix
+        run: |
+          echo "tag-prefix=$(echo '${{ inputs.tag-prefix }}' | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+      
+      # Define matrix here so we don't need to search for it when making changes
+      - name: Set matrix
+        id: set-matrix
+        env:
+          BUILD_MATRIX: |
+            include:
+              ########
+              # Binary image
+              ########
+              - name: Binary image
+                dockerfile: Dockerfile.binary
+                platform: amd64
+                runner: ["self-hosted", "amd64", "builder"]
+                tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-binary
+              ########################################
+              # Base images
+              ########################################
+              # Prod AMD64 image
+              - &base_image
+                name: Base image
+                dockerfile: Dockerfile
+                build-target: prod
+                platform: amd64
+                runner: ["self-hosted", "amd64", "builder"]
+                tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}
+              # Prod ARM64 image
+              - <<: *base_image
+                platform: arm64
+                runner: ["self-hosted", "arm64", "builder"]
+                tag: arm64-${{ steps.tag-prefix.outputs.tag-prefix }}
+              # Dev AMD64 image
+              - <<: *base_image
+                build-target: dev
+                tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-dev
+              # Dev ARM64 image
+              - <<: *base_image
+                build-target: dev
+                platform: arm64
+                runner: ["self-hosted", "arm64", "builder"]
+                tag: arm64-${{ steps.tag-prefix.outputs.tag-prefix }}-dev
+
+              ########################################
+              # FoundationDB images (FDB client library is only available for amd64)
+              ########################################
+              # Prod AMD64 image
+              - &fdb_image
+                name: FDB image
+                dockerfile: Dockerfile.fdb
+                build-target: prod
+                platform: amd64
+                runner: ["self-hosted", "amd64", "builder"]
+                tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-fdb
+              # Dev AMD64 image
+              - <<: *fdb_image
+                build-target: dev
+                tag: amd64-${{ steps.tag-prefix.outputs.tag-prefix }}-fdb-dev
+
+          PUSH_MATRIX: |
+            include:
+              ########################################
+              # Base images
+              ########################################
+              # Prod images
+              - &base_image
+                platforms: linux/amd64,linux/arm64
+                tag: ${{ steps.tag-prefix.outputs.tag-prefix }}
+                tag-latest: latest
+              # Dev images
+              - <<: *base_image
+                platforms: linux/amd64,linux/arm64
+                tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-dev
+                tag-latest: latest-dev
+
+              # TODO: Decide whether or not we want a dedicated image for FoundationDB
+              # ########################################
+              # # FoundationDB images (FDB client library is only available for amd64)
+              # ########################################
+              # # Prod images
+              # - &fdb_image
+              #   platforms: linux/amd64
+              #   tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-fdb
+              #   tag-latest: latest-fdb
+              # # Dev images
+              # - <<: *fdb_image
+              #   tag: ${{ steps.tag-prefix.outputs.tag-prefix }}-fdb-dev
+              #   tag-latest: latest-fdb-dev
+
+        run: |
+          echo '${{ env.BUILD_MATRIX }}' > build-matrix.yaml
+          echo "build-matrix=$(yq -o json -I=0 build-matrix.yaml)" >> $GITHUB_OUTPUT
+          echo '${{ env.PUSH_MATRIX }}' > push-matrix.yaml
+          echo "push-matrix=$(yq -o json -I=0 push-matrix.yaml)" >> $GITHUB_OUTPUT
+          
+  build:
+    name: Build ${{ matrix.name }} (${{ matrix.build-target || 'default' }}, ${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    needs: prepare
+    if: ${{ inputs.build }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.build-matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref }}
+      
+      - name: Checkout docker
+        uses: actions/checkout@v4
+        with:
+          path: _docker
+
+      # Replace docker files. It allows us to test new Dockerfiles with workflow_dispatch and a custom git ref.
+      # When triggered by a push or a schedule, this git ref will be the same as 'inputs.git-ref'
+      - name: Replace docker files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf docker .dockerignore
+          mv _docker/docker .
+          mv _docker/.dockerignore .
+          rm -rf _docker
+
+      - name: Cleanup
+        if: ${{ always() }}
+        run: |
+          set -x
+          set +e # Don't fail, do what we can
+          docker system prune -f
+          docker image prune -a -f
+
+          docker image ls
+          docker ps -a
+          df -h
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and export to Docker.
+        uses: docker/build-push-action@v5
+        id: build
+        with:
+          context: .
+          load: true
+          platforms: linux/${{ matrix.platform }}
+          file: docker/${{ matrix.dockerfile }}
+          target: ${{ matrix.build-target }}
+          tags: surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
+
+      # Start the docker image as server and wait until it is ready
+      - name: Test the Docker image
+        run: |
+          docker run --net=host --rm ${{ steps.build.outputs.imageid }} start 2>&1 >surreal.log &
+
+          retries=5
+          until docker run --net=host --rm ${{ steps.build.outputs.imageid }} is-ready; do
+            retries=$((retries-1))
+            if [[ $retries -eq 0 ]]; then
+              echo "###"
+              echo "### The container is not ready after 5 seconds!"
+              echo "###"
+              cat surreal.log
+              echo "###"
+              echo "### ERROR: The docker image is not valid. Aborting."
+              echo "###"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Configure AWS credentials
+        if: ${{ needs.prepare.outputs.with-ecr == 'true' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        if: ${{ needs.prepare.outputs.with-ecr == 'true' }}
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push individual images to CI registry.
+        if: ${{ needs.prepare.outputs.with-ecr == 'true' }}
+        run: |
+          docker tag ${{ steps.build.outputs.imageid }} ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
+          docker push ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
+      
+      - name: Cleanup
+        if: ${{ always() }}
+        run: |
+          set -x
+          set +e # Don't fail, do what we can
+          docker system prune -f
+          docker image rm ${{ steps.build.outputs.imageid }}
+          docker image rm ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}-${{ github.run_id }}
+          docker system prune -f
+
+          docker image ls
+          docker ps -a
+          df -h
+
+  # Push a multi-arch manifest to the CI registry
+  push-all-to-ecr-ci:
+    name: Push ${{ matrix.tag }} to CI registry
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    if: ${{ inputs.build && needs.prepare.outputs.with-ecr == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.push-matrix) }}
+    steps:
+      # Checkout the workflow code, we don't need the code to build SurrealDB, that's why we don't checkout "input.git-ref" here
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Push multi-arch Docker manifest to CI registry
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.multi-arch
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/surrealdb-ci:${{ matrix.tag }}
+          build-args: |
+            IMAGE_REPO=${{ steps.login-ecr.outputs.registry }}/surrealdb-ci
+            TAG=${{ matrix.tag }}-${{ github.run_id }}
+
+  # Push a multi-arch manifest to DockerHub
+  push-all-to-dockerhub:
+    name: Push ${{ matrix.tag }} to DockerHub
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    if: ${{ inputs.push }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.push-matrix) }}
+    steps:
+      # Checkout the workflow code, we don't need the code to build SurrealDB, that's why we don't checkout "input.git-ref" here
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASS }}
+
+      - name: Push multi-arch Docker manifest to DockerHub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.multi-arch
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: surrealdb/surrealdb:${{ matrix.tag }}
+          build-args: |
+            IMAGE_REPO=${{ steps.login-ecr.outputs.registry }}/surrealdb-ci
+            TAG=${{ matrix.tag }}-${{ github.run_id }}
+
+      - name: Tag multi-arch Docker manifest as latest
+        uses: docker/build-push-action@v5
+        if: ${{ inputs.latest }}
+        with:
+          context: .
+          file: ./docker/Dockerfile.multi-arch
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: surrealdb/surrealdb:${{ matrix.tag-latest }}
+          build-args: |
+            IMAGE_REPO=${{ steps.login-ecr.outputs.registry }}/surrealdb-ci
+            TAG=${{ matrix.tag }}-${{ github.run_id }}
+    

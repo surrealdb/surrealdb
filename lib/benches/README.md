@@ -1,22 +1,63 @@
 # Benchmarks
 
 This directory contains some micro-benchmarks that can help objectively
-establish the performance implications of a change.
+establish the performance implications of a change, and also benchmarks that
+test the performance of different datastores using both the library and the SDK
 
 ## Manual usage
+
+### Common
 
 Execute the following command at the top level of the repository:
 
 ```console
-cargo bench --package surrealdb --no-default-features --features kv-mem,scripting,http
+$ cargo make bench
 ```
+
+### Specific datastore
+Execute the following commands at the top level of the repository:
+
+* Memory datastore using the lib or the SDK
+```console
+$ cargo make bench-lib-mem
+$ cargo make bench-sdk-mem
+```
+
+* RocksDB datastore using the lib or the SDK
+```console
+$ cargo make bench-lib-rocksdb
+$ cargo make bench-sdk-rocksdb
+```
+
+* FoundationDB datastore using the lib or the SDK
+    * Start FoundationDB
+    ```
+    $ docker run -ti -e FDB_NETWORKING_MODE=host --net=host foundationdb/foundationdb:7.1.30
+    ```
+    * Run the benchmarks
+    ```console
+    $ cargo make bench-lib-rocksdb
+    $ cargo make bench-sdk-rocksdb
+    ```
+
+* WebSocket remote server using the SDK
+    * Start SurrealDB server
+    ```
+    $ cargo make build
+    $ ./target/release/surreal start
+    ```
+    * Run the benchmarks
+    ```console
+    $ cargo make bench-sdk-ws
+    ```
+
 
 ## Profiling
 
 Some of the benchmarks support CPU profiling:
 
 ```console
-cargo bench --package surrealdb --no-default-features --features kv-mem,scripting,http -- --profile-time=5
+cargo make bench --profile-time=5
 ```
 
 Once complete, check the `target/criterion/**/profile/flamegraph.svg` files.

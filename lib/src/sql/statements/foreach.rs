@@ -2,15 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::block::{block, Block, Entry};
-use crate::sql::comment::{mightbespace, shouldbespace};
-use crate::sql::error::{expect_tag_no_case, IResult};
-use crate::sql::param::{param, Param};
-use crate::sql::value::{value, Value};
+use crate::sql::{block::Entry, Block, Param, Value};
 use async_recursion::async_recursion;
 use derive::Store;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -100,42 +94,5 @@ impl ForeachStatement {
 impl Display for ForeachStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
-	}
-}
-
-pub fn foreach(i: &str) -> IResult<&str, ForeachStatement> {
-	let (i, _) = tag_no_case("FOR")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, param) = param(i)?;
-	let (i, (range, block)) = cut(|i| {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = expect_tag_no_case("IN")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, range) = value(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, block) = block(i)?;
-		Ok((i, (range, block)))
-	})(i)?;
-	Ok((
-		i,
-		ForeachStatement {
-			param,
-			range,
-			block,
-		},
-	))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn foreach_statement_first() {
-		let sql = "FOR $test IN [1, 2, 3, 4, 5] { UPDATE person:test SET scores += $test; }";
-		let res = foreach(sql);
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out))
 	}
 }

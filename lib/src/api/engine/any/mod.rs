@@ -248,12 +248,14 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 		response_type: PhantomData,
 	}
 }
+
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 	use super::*;
 	use crate::dbs::Capabilities;
 	use crate::opt::auth::Root;
-	use crate::sql::{test::Parse, value::Value};
+	use crate::sql::Value;
+	use crate::syn::test::Parse;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {

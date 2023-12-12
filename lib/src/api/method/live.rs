@@ -1,12 +1,12 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
-use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Range;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::dbs;
+use crate::method::OnceLockExt;
 use crate::method::Query;
 use crate::opt::from_value;
 use crate::opt::Resource;
@@ -26,9 +26,11 @@ use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
 use crate::Notification;
+use crate::Surreal;
 use channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
+use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -43,23 +45,36 @@ const ID: &str = "id";
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Live<'r, C: Connection, R> {
-	pub(super) router: Result<&'r Router<C>>,
+	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+impl<C, R> Live<'_, C, R>
+where
+	C: Connection,
+{
+	/// Converts to an owned type which can easily be moved to a different thread
+	pub fn into_owned(self) -> Live<'static, C, R> {
+		Live {
+			client: Cow::Owned(self.client.into_owned()),
+			..self
+		}
+	}
 }
 
 macro_rules! into_future {
 	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Live {
-				router,
+				client,
 				resource,
 				range,
 				..
 			} = self;
 			Box::pin(async move {
-				let router = router?;
+				let router = client.router.extract()?;
 				if !router.features.contains(&ExtraFeatures::LiveQueries) {
 					return Err(Error::LiveQueriesNotSupported.into());
 				}
@@ -93,7 +108,7 @@ macro_rules! into_future {
 					},
 				}
 				let query = Query {
-					router: Ok(router),
+					client: client.clone(),
 					query: vec![Ok(vec![Statement::Live(stmt)])],
 					bindings: Ok(Default::default()),
 				};
@@ -104,9 +119,9 @@ macro_rules! into_future {
 				param.other = vec![id.clone()];
 				conn.execute_unit(router, param).await?;
 				Ok(Stream {
-					router,
 					id,
 					rx,
+					client,
 					response_type: PhantomData,
 				})
 			})
@@ -244,7 +259,7 @@ where
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
 pub struct Stream<'r, C: Connection, R> {
-	router: &'r Router<C>,
+	client: Cow<'r, Surreal<C>>,
 	id: Value,
 	rx: Receiver<dbs::Notification>,
 	response_type: PhantomData<R>,
@@ -254,14 +269,23 @@ impl<Client, R> Stream<'_, Client, R>
 where
 	Client: Connection,
 {
+	/// Converts to an owned type which can easily be moved to a different thread
+	pub fn into_owned(self) -> Stream<'static, Client, R> {
+		Stream {
+			client: Cow::Owned(self.client.into_owned()),
+			..self
+		}
+	}
+
 	/// Close the live query stream
 	///
 	/// This kills the live query process responsible for this stream.
 	/// If the stream is dropped without calling this method, the process
 	/// will be killed next time it tries to send a notification to the stream.
 	pub async fn close(self) -> Result<()> {
+		let router = self.client.router.extract()?;
 		let mut conn = Client::new(Method::Kill);
-		conn.execute_unit(self.router, Param::new(vec![self.id])).await
+		conn.execute_unit(router, Param::new(vec![self.id])).await
 	}
 }
 

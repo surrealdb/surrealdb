@@ -317,10 +317,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Into<Vec<u8>> + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
+		trace!("Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -571,7 +571,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -680,8 +680,10 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
+		K: Into<Key> + From<Vec<u8>> + Debug,
 	{
+		#[cfg(debug_assertions)]
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
 		let range = page.range.clone();
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
@@ -748,6 +750,8 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		#[cfg(debug_assertions)]
+		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -838,7 +842,7 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);

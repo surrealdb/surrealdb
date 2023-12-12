@@ -1,36 +1,15 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::iam::Role;
-use crate::sql::base::{base, Base};
-use crate::sql::comment::shouldbespace;
-use crate::sql::common::commas;
-use crate::sql::ending;
-use crate::sql::error::expect_tag_no_case;
-use crate::sql::error::expected;
-use crate::sql::error::IResult;
-use crate::sql::error::ParseError as SqlError;
-use crate::sql::escape::quote_str;
-use crate::sql::fmt::Fmt;
-use crate::sql::ident::{ident, Ident};
-use crate::sql::strand::{strand, strand_raw, Strand};
-use crate::sql::value::Value;
-use argon2::password_hash::{PasswordHasher, SaltString};
-use argon2::Argon2;
+use crate::iam::{Action, ResourceKind};
+use crate::sql::{escape::quote_str, fmt::Fmt, Base, Ident, Strand, Value};
+use argon2::{
+	password_hash::{PasswordHasher, SaltString},
+	Argon2,
+};
 use derive::Store;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
-use nom::multi::many0;
-use nom::multi::separated_list1;
-use nom::Err::Failure;
-use rand::distributions::Alphanumeric;
-use rand::rngs::OsRng;
-use rand::Rng;
+use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -138,103 +117,4 @@ impl Display for DefineUserStatement {
 		}
 		Ok(())
 	}
-}
-
-pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
-	let (i, _) = tag_no_case("USER")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, (name, base, opts)) = cut(|i| {
-		let (i, name) = ident(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = expect_tag_no_case("ON")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, base) = base(i)?;
-		let (i, opts) = user_opts(i)?;
-		let (i, _) = expected("PASSWORD, PASSHASH, ROLES, or COMMENT", ending::query)(i)?;
-		Ok((i, (name, base, opts)))
-	})(i)?;
-	// Create the base statement
-	let mut res = DefineUserStatement {
-		name,
-		base,
-		roles: vec!["Viewer".into()], // New users get the viewer role by default
-		code: rand::thread_rng()
-			.sample_iter(&Alphanumeric)
-			.take(128)
-			.map(char::from)
-			.collect::<String>(),
-		..Default::default()
-	};
-	// Assign any defined options
-	for opt in opts {
-		match opt {
-			DefineUserOption::Password(v) => {
-				res.hash = Argon2::default()
-					.hash_password(v.as_ref(), &SaltString::generate(&mut OsRng))
-					.unwrap()
-					.to_string()
-			}
-			DefineUserOption::Passhash(v) => {
-				res.hash = v;
-			}
-			DefineUserOption::Roles(v) => {
-				res.roles = v;
-			}
-			DefineUserOption::Comment(v) => {
-				res.comment = Some(v);
-			}
-		}
-	}
-	// Return the statement
-	Ok((i, res))
-}
-
-enum DefineUserOption {
-	Password(String),
-	Passhash(String),
-	Roles(Vec<Ident>),
-	Comment(Strand),
-}
-
-fn user_opts(i: &str) -> IResult<&str, Vec<DefineUserOption>> {
-	many0(alt((user_pass, user_hash, user_roles, user_comment)))(i)
-}
-
-fn user_pass(i: &str) -> IResult<&str, DefineUserOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("PASSWORD")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(strand_raw)(i)?;
-	Ok((i, DefineUserOption::Password(v)))
-}
-
-fn user_hash(i: &str) -> IResult<&str, DefineUserOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("PASSHASH")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(strand_raw)(i)?;
-	Ok((i, DefineUserOption::Passhash(v)))
-}
-
-fn user_comment(i: &str) -> IResult<&str, DefineUserOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("COMMENT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(strand)(i)?;
-	Ok((i, DefineUserOption::Comment(v)))
-}
-
-fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ROLES")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, roles) = separated_list1(commas, |i| {
-		let (i, v) = cut(ident)(i)?;
-		// Verify the role is valid
-		Role::try_from(v.as_str()).map_err(|_| Failure(SqlError::Role(i, v.to_string())))?;
-
-		Ok((i, v))
-	})(i)?;
-
-	Ok((i, DefineUserOption::Roles(roles)))
 }

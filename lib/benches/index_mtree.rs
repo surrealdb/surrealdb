@@ -3,6 +3,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Thro
 use futures::executor::block_on;
 use rand::prelude::ThreadRng;
 use rand::{thread_rng, Rng};
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::idx::docids::DocId;
 use surrealdb::idx::trees::mtree::{MState, MTree};
@@ -116,7 +117,7 @@ async fn knn_lookup_objects(ds: &Datastore, samples_size: usize, vector_size: us
 	let s = TreeNodeStore::new(TreeNodeProvider::Debug, TreeStoreType::Read, 20);
 	let mut s = s.lock().await;
 	for _ in 0..samples_size {
-		let object = random_object(&mut rng, vector_size);
+		let object = Arc::new(random_object(&mut rng, vector_size));
 		// Insert the sample
 		t.knn_search(&mut tx, &mut s, &object, knn).await.unwrap();
 	}

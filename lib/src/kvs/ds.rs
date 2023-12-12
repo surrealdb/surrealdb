@@ -1,34 +1,23 @@
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
-use crate::dbs::node::Timestamp;
-use crate::dbs::Attach;
-use crate::dbs::Capabilities;
-use crate::dbs::Executor;
-use crate::dbs::Notification;
-use crate::dbs::Options;
-use crate::dbs::Response;
-use crate::dbs::Session;
-use crate::dbs::Variables;
+use crate::dbs::{
+	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
+	Variables,
+};
 use crate::err::Error;
-use crate::iam::ResourceKind;
-use crate::iam::{Action, Auth, Error as IamError, Role};
+use crate::iam::{Action, Auth, Error as IamError, ResourceKind, Role};
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::opt::auth::Root;
-use crate::sql;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::Base;
-use crate::sql::Value;
-use crate::sql::{Query, Uuid};
+use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::syn;
 use crate::vs::Oracle;
-use channel::Receiver;
-use channel::Sender;
-use futures::lock::Mutex;
-use futures::Future;
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -103,6 +92,9 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
+	// Whether authentication level is enabled on this datastore.
+	// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
+	auth_level_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -216,6 +208,9 @@ impl Datastore {
 		path: &str,
 		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
+		#[allow(unused_variables)]
+		let default_clock: Arc<RwLock<SizedClock>> =
+			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
 			"memory" => {
@@ -336,8 +331,8 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				// use clock_override to remove warning when no kv is enabled.
-				let _ = clock_override;
+				// use clock_override and default_clock to remove warning when no kv is enabled.
+				let _ = (clock_override, default_clock);
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
@@ -348,6 +343,8 @@ impl Datastore {
 			inner,
 			strict: false,
 			auth_enabled: false,
+			// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
+			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -393,6 +390,13 @@ impl Datastore {
 		self
 	}
 
+	/// Set whether authentication levels are enabled for this Datastore
+	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
+	pub fn with_auth_level_enabled(mut self, enabled: bool) -> Self {
+		self.auth_level_enabled = enabled;
+		self
+	}
+
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
@@ -402,6 +406,12 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
+	}
+
+	/// Is authentication level enabled for this Datastore?
+	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
+	pub fn is_auth_level_enabled(&self) -> bool {
+		self.auth_level_enabled
 	}
 
 	/// Setup the initial credentials
@@ -985,7 +995,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = sql::parse(txt)?;
+		let ast = syn::parse(txt)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}

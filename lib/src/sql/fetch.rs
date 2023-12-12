@@ -1,11 +1,5 @@
-use crate::sql::comment::shouldbespace;
-use crate::sql::common::commas;
-use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::{plain as idiom, Idiom};
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
-use nom::multi::separated_list1;
+use crate::sql::idiom::Idiom;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -50,45 +44,5 @@ impl Deref for Fetch {
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
-	}
-}
-
-pub fn fetch(i: &str) -> IResult<&str, Fetchs> {
-	let (i, _) = tag_no_case("FETCH")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(separated_list1(commas, fetch_raw))(i)?;
-	Ok((i, Fetchs(v)))
-}
-
-fn fetch_raw(i: &str) -> IResult<&str, Fetch> {
-	let (i, v) = idiom(i)?;
-	Ok((i, Fetch(v)))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::sql::test::Parse;
-
-	#[test]
-	fn fetch_statement() {
-		let sql = "FETCH field";
-		let res = fetch(sql);
-		let out = res.unwrap().1;
-		assert_eq!(out, Fetchs(vec![Fetch(Idiom::parse("field"))]));
-		assert_eq!("FETCH field", format!("{}", out));
-	}
-
-	#[test]
-	fn fetch_statement_multiple() {
-		let sql = "FETCH field, other.field";
-		let res = fetch(sql);
-		let out = res.unwrap().1;
-		assert_eq!(
-			out,
-			Fetchs(vec![Fetch(Idiom::parse("field")), Fetch(Idiom::parse("other.field")),])
-		);
-		assert_eq!("FETCH field, other.field", format!("{}", out));
 	}
 }

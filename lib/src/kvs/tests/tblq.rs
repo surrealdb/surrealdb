@@ -20,7 +20,7 @@ async fn write_scan_tblq() {
 		let tb = "table";
 		let live_id = sql::Uuid::from(live_id);
 		let live_stm = LiveStatement {
-			id: live_id.clone(),
+			id: live_id,
 			node: sql::Uuid::from(node_id),
 			expr: Default::default(),
 			what: Default::default(),

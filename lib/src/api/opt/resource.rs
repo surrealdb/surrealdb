@@ -1,15 +1,7 @@
-use crate::api::err::Error;
-use crate::api::Result;
-use crate::sql;
-use crate::sql::Array;
-use crate::sql::Edges;
-use crate::sql::Id;
-use crate::sql::Object;
-use crate::sql::Table;
-use crate::sql::Thing;
-use crate::sql::Value;
-use std::ops;
-use std::ops::Bound;
+use crate::api::{err::Error, Result};
+use crate::sql::{self, Array, Edges, Id, Object, Table, Thing, Value};
+use crate::syn;
+use std::ops::{self, Bound};
 
 /// A database resource
 #[derive(Debug)]
@@ -104,7 +96,7 @@ impl From<&Edges> for Resource {
 
 impl From<&str> for Resource {
 	fn from(s: &str) -> Self {
-		match sql::thing(s) {
+		match syn::thing(s) {
 			Ok(thing) => Self::RecordId(thing),
 			Err(_) => Self::Table(s.into()),
 		}
@@ -119,7 +111,7 @@ impl From<&String> for Resource {
 
 impl From<String> for Resource {
 	fn from(s: String) -> Self {
-		match sql::thing(s.as_str()) {
+		match syn::thing(s.as_str()) {
 			Ok(thing) => Self::RecordId(thing),
 			Err(_) => Self::Table(s.into()),
 		}

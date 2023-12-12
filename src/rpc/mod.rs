@@ -1,8 +1,7 @@
 pub mod args;
 pub mod connection;
-pub mod processor;
 pub mod request;
-pub mod res;
+pub mod response;
 
 use std::{collections::HashMap, time::Duration};
 
