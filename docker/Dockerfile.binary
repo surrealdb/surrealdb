@@ -2,7 +2,7 @@
 # Dockerfile that builds the SurrealDB Linux binary and makes it depend on GLIBC 2.17.
 #
 
-FROM docker.io/ubuntu:18.04
+FROM docker.io/ubuntu:20.04
 
 ARG CARGO_EXTRA_FEATURES="http-compression,storage-tikv"
 
