@@ -262,7 +262,6 @@ impl TryFrom<Vec<u8>> for FstKeys {
 	}
 }
 
-#[cfg(debug_assertions)]
 impl Display for FstKeys {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match &self.i {
@@ -290,7 +289,6 @@ pub struct TrieKeys {
 	keys: Trie<Key, Payload>,
 }
 
-#[cfg(debug_assertions)]
 impl Display for TrieKeys {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let mut start = true;

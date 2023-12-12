@@ -62,7 +62,9 @@ where
 	pub(super) fn set_node(&mut self, node: StoredNode<N>, updated: bool) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		{
-			info!("SET {updated}: {node}");
+			if updated {
+				info!("SET {updated}: {node}");
+			}
 			self.out.remove(&node.id);
 		}
 		if updated {

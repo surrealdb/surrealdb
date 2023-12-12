@@ -6,7 +6,9 @@ use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+#[cfg(debug_assertions)]
+use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::marker::PhantomData;
@@ -147,23 +149,26 @@ where
 		}
 	}
 
-	fn append(&mut self, key: Key, payload: Payload, node: BTreeNode<BK>) -> Result<(), Error> {
+	fn append(
+		&mut self,
+		key: Key,
+		payload: Payload,
+		node: BTreeNode<BK>,
+	) -> Result<Option<Payload>, Error> {
 		match self {
 			BTreeNode::Internal(keys, children) => {
 				if let BTreeNode::Internal(append_keys, mut append_children) = node {
-					keys.insert(key, payload);
 					keys.append(append_keys);
 					children.append(&mut append_children);
-					Ok(())
+					Ok(keys.insert(key, payload))
 				} else {
 					Err(Error::CorruptedIndex("BTree::append(1)"))
 				}
 			}
 			BTreeNode::Leaf(keys) => {
 				if let BTreeNode::Leaf(append_keys) = node {
-					keys.insert(key, payload);
 					keys.append(append_keys);
-					Ok(())
+					Ok(keys.insert(key, payload))
 				} else {
 					Err(Error::CorruptedIndex("BTree::append(2)"))
 				}
@@ -426,17 +431,16 @@ where
 			while let Some((is_main_key, key_to_delete, node_id)) = next_node.take() {
 				let mut node = store.get_node_mut(tx, node_id).await?;
 				#[cfg(debug_assertions)]
-				debug!(
-					"Delete loop - n_id: {} - key: {}",
-					node_id,
-					String::from_utf8(key_to_delete.clone())?
+				info!(
+					"Delete loop - key_to_delete: {} - {node}",
+					String::from_utf8_lossy(&key_to_delete)
 				);
 				match &mut node.n {
 					BTreeNode::Leaf(keys) => {
 						// CLRS: 1
 						#[cfg(debug_assertions)]
 						info!(
-							"CLRS: 1 - node_id: {node_id} - key_to_delete: {}",
+							"CLRS: 1 - node: {node_id} - key_to_delete: {} - keys: {keys}",
 							String::from_utf8_lossy(&key_to_delete)
 						);
 						if let Some(payload) = keys.get(&key_to_delete) {
@@ -465,7 +469,7 @@ where
 							// CLRS: 2
 							#[cfg(debug_assertions)]
 							info!(
-								"CLRS: 2 - node_id: {node_id} - key_to_delete: {}",
+								"CLRS: 2 - node: {node_id} - key_to_delete: {} - k: {keys} - c: {children:?}",
 								String::from_utf8_lossy(&key_to_delete)
 							);
 							if is_main_key {
@@ -488,7 +492,7 @@ where
 							// CLRS: 3
 							#[cfg(debug_assertions)]
 							info!(
-								"CLRS: 3 - node_id: {node_id} - key_to_delete: {}",
+								"CLRS: 3 - node: {node_id} - key_to_delete: {} - keys: {keys}",
 								String::from_utf8_lossy(&key_to_delete)
 							);
 							let (node_update, is_main_key, key_to_delete, next_stored_node) = self
@@ -532,18 +536,23 @@ where
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
 	) -> Result<(bool, Key, NodeId), Error> {
+		#[cfg(debug_assertions)]
+		info!(
+			"Delete from internal - key_to_delete: {} - keys: {keys}",
+			String::from_utf8_lossy(&key_to_delete)
+		);
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
 		let mut left_node = store.get_node_mut(tx, left_id).await?;
+		// if the child y that precedes k in nodexx has at least t keys
 		if left_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			#[cfg(debug_assertions)]
 			info!(
-				"CLRS: 2a {} - left_idx: {left_idx} - left_id: {left_id}",
+				"CLRS: 2a - key_to_delete: {} - left: {left_node} - keys: {keys}",
 				String::from_utf8_lossy(&key_to_delete)
 			);
 			let (key_prim, payload_prim) = self.find_highest(tx, store, left_node).await?;
-			info!("key_prim {}", String::from_utf8_lossy(&key_prim));
 			if keys.remove(&key_to_delete).is_none() {
 				#[cfg(debug_assertions)]
 				panic!("Remove key {} {} ", String::from_utf8(key_to_delete)?, keys);
@@ -552,6 +561,10 @@ where
 				#[cfg(debug_assertions)]
 				panic!("Insert key {} {} ", String::from_utf8(key_prim)?, keys);
 			}
+			info!(
+				"CLRS: 2a BIS - key_to_delete: {} - keys: {keys}",
+				String::from_utf8_lossy(&key_to_delete)
+			);
 			return Ok((false, key_prim, left_id));
 		}
 
@@ -563,7 +576,10 @@ where
 			store.set_node(left_node, false).await?;
 			// CLRS: 2b -> right_node is name `z` in the book
 			#[cfg(debug_assertions)]
-			info!("CLRS: 2b");
+			info!(
+				"CLRS: 2b - key_to_delete: {} - right: {right_node} - keys: {keys}",
+				String::from_utf8_lossy(&key_to_delete)
+			);
 			let (key_prim, payload_prim) = self.find_lowest(tx, store, right_node).await?;
 			if keys.remove(&key_to_delete).is_none() {
 				#[cfg(debug_assertions)]
@@ -603,13 +619,16 @@ where
 			match &node.n {
 				BTreeNode::Internal(_, c) => {
 					let id = c[c.len() - 1];
+					store.set_node(node, false).await?;
 					let node = store.get_node_mut(tx, id).await?;
 					next_node.replace(node);
 				}
 				BTreeNode::Leaf(k) => {
-					let r = k.get_last_key();
+					let (key, payload) =
+						k.get_last_key().ok_or(Error::Unreachable("BTree::find_highest(1)"))?;
+					info!("Find highest: {} - node: {}", String::from_utf8_lossy(&key), node);
 					store.set_node(node, false).await?;
-					return r.ok_or(Error::Unreachable("BTree::find_highest(1)"));
+					return Ok((key, payload));
 				}
 			}
 		}
@@ -627,13 +646,16 @@ where
 			match &node.n {
 				BTreeNode::Internal(_, c) => {
 					let id = c[0];
+					store.set_node(node, false).await?;
 					let node = store.get_node_mut(tx, id).await?;
 					next_node.replace(node);
 				}
 				BTreeNode::Leaf(k) => {
-					let r = k.get_first_key();
+					let (key, payload) =
+						k.get_first_key().ok_or(Error::Unreachable("BTree::find_lowest(1)"))?;
+					info!("Find lowest: {} - node: {}", String::from_utf8_lossy(&key), node.id);
 					store.set_node(node, false).await?;
-					return r.ok_or(Error::Unreachable("BTree::find_lowest(1)"));
+					return Ok((key, payload));
 				}
 			}
 		}
@@ -654,7 +676,7 @@ where
 		let child_id = children[child_idx];
 		#[cfg(debug_assertions)]
 		info!(
-			"CLRS: 3 - key_to_delete: {} - child_idx: {child_idx} - child_id: {child_id}",
+			"CLRS: 3 - key_to_delete: {} - child_id: {child_id}",
 			String::from_utf8_lossy(&key_to_delete)
 		);
 		let child_stored_node = store.get_node_mut(tx, child_id).await?;
@@ -681,7 +703,7 @@ where
 				} else {
 					// CLRS 3b successor
 					#[cfg(debug_assertions)]
-					info!("CLRS: 3b merge (right) {child_id} {}", right_child_stored_node.id);
+					info!("CLRS: 3b merge - keys: {keys} - xci_child: {child_stored_node} - right_sibling_child: {right_child_stored_node}");
 					Self::merge_nodes(
 						store,
 						keys,
@@ -716,7 +738,7 @@ where
 				} else {
 					// CLRS 3b predecessor
 					#[cfg(debug_assertions)]
-					info!("CLRS: 3b merge (left) {} {child_id}", left_child_stored_node.id);
+					info!("CLRS: 3b merge - keys: {keys} - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}");
 					Self::merge_nodes(
 						store,
 						keys,
@@ -843,13 +865,19 @@ where
 		mut left_child: BStoredNode<BK>,
 		right_child: BStoredNode<BK>,
 	) -> Result<(bool, bool, Key, NodeId), Error> {
+		#[cfg(debug_assertions)]
+		info!("Keys: {keys}");
 		let descending_key =
 			keys.get_key(child_idx).ok_or(Error::CorruptedIndex("BTree::merge_nodes(1)"))?;
 		let descending_payload =
 			keys.remove(&descending_key).ok_or(Error::CorruptedIndex("BTree::merge_nodes(2)"))?;
+		info!("descending_key: {}", String::from_utf8_lossy(&descending_key));
 		children.remove(child_idx + 1);
 		let left_id = left_child.id;
-		left_child.n.append(descending_key, descending_payload, right_child.n)?;
+		if left_child.n.append(descending_key, descending_payload, right_child.n)?.is_some() {
+			#[cfg(debug_assertions)]
+			panic!("Key already present");
+		}
 		#[cfg(debug_assertions)]
 		left_child.n.check();
 		store.set_node(left_child, true).await?;
@@ -912,7 +940,7 @@ mod tests {
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::cmp::Ordering;
-	use std::collections::{BTreeMap, HashSet, VecDeque};
+	use std::collections::{BTreeMap, VecDeque};
 	use std::fmt::Debug;
 	use std::sync::Arc;
 	use test_log::test;
@@ -1548,8 +1576,8 @@ mod tests {
 			for (key, payload) in CLRS_EXAMPLE {
 				expected_keys.insert(key.to_string(), payload);
 				t.insert(&mut tx, &mut st, key.into(), payload).await?;
-				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
-				assert_eq!(expected_keys.len(), l);
+				let (_, tree_keys) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(expected_keys, tree_keys);
 			}
 			check_generation = check_finish_commit(
 				&mut t,
@@ -1575,8 +1603,8 @@ mod tests {
 					new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
 				assert!(t.delete(&mut tx, &mut &mut st, key.into()).await?.is_some());
 				expected_keys.remove(key);
-				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
-				assert_eq!(expected_keys.len(), l);
+				let (_, tree_keys) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(expected_keys, tree_keys);
 				check_generation = check_finish_commit(
 					&mut t,
 					st,
@@ -1732,14 +1760,14 @@ mod tests {
 			"limit",
 			"elit.",
 		];
+		let mut keys = BTreeMap::new();
 		{
 			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
-			let mut term_count = 0;
 			for term in terms {
 				t.insert(&mut tx, &mut st, term.into(), 0).await?;
-				term_count += 1;
-				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
-				assert_eq!(term_count, l);
+				keys.insert(term.to_string(), 0);
+				let (_, tree_keys) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(keys, tree_keys);
 			}
 			st.finish(&mut tx).await?;
 			tx.commit().await?;
@@ -1750,14 +1778,13 @@ mod tests {
 		}
 		{
 			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Write, 100).await;
-			let mut term_count = terms.len();
 			for term in terms {
 				info!("Delete {term}");
 				t.delete(&mut tx, &mut st, term.into()).await?;
 				print_tree_mut(&mut tx, &mut st, &t).await;
-				term_count -= 1;
-				let (_, l) = check_btree_properties(&t, &mut tx, &mut st).await?;
-				assert_eq!(term_count, l);
+				keys.remove(term);
+				let (_, tree_keys) = check_btree_properties(&t, &mut tx, &mut st).await?;
+				assert_eq!(keys, tree_keys);
 			}
 			st.finish(&mut tx).await?;
 			tx.commit().await?;
@@ -1775,27 +1802,26 @@ mod tests {
 		t: &BTree<BK>,
 		tx: &mut Transaction,
 		st: &mut BTreeStore<BK>,
-	) -> Result<(usize, usize), Error>
+	) -> Result<(usize, BTreeMap<String, Payload>), Error>
 	where
 		BK: BKeys + Clone + Debug,
 	{
-		let mut unique_keys = HashSet::new();
+		let mut unique_keys = BTreeMap::new();
 		let n = t
 			.inspect_nodes_mut(tx, st, |_, _, _, sn| {
 				let keys = sn.n.keys();
 				for i in 0..keys.len() {
-					if let Some(key) = keys.get_key(i as usize) {
-						if !unique_keys.insert(key) {
-							panic!("Non unique");
-						}
-					} else {
-						panic!("No key");
+					let key = keys.get_key(i as usize).unwrap_or_else(|| panic!("No key"));
+					let payload = keys.get(&key).unwrap_or_else(|| panic!("No payload"));
+					if unique_keys.insert(String::from_utf8(key).unwrap(), payload).is_some() {
+						panic!("Non unique");
 					}
 				}
 			})
 			.await?;
-		Ok((n, unique_keys.len()))
+		Ok((n, unique_keys))
 	}
+
 	/////////////
 	// HELPERS //
 	/////////////
@@ -1832,7 +1858,7 @@ mod tests {
 	{
 		debug!("----------------------------------");
 		t.inspect_nodes(tx, st, |_count, depth, node_id, node| {
-			info!("depth: {} - node_id: {} - {}", depth, node_id, node.n);
+			info!("depth: {} - node: {} - {}", depth, node_id, node.n);
 		})
 		.await
 		.unwrap();
@@ -1845,7 +1871,7 @@ mod tests {
 	{
 		info!("----------------------------------");
 		t.inspect_nodes_mut(tx, st, |_count, depth, node_id, node| {
-			info!("depth: {} - node_id: {} - {}", depth, node_id, node.n);
+			info!("depth: {} - node: {} - {}", depth, node_id, node.n);
 		})
 		.await
 		.unwrap();
@@ -1929,7 +1955,7 @@ mod tests {
 								assert_eq!(
 									lk.cmp(crk),
 									Ordering::Less,
-									"left: {} < {} - node_id: {} - {}",
+									"left: {} < {} - node: {} - {}",
 									String::from_utf8_lossy(lk),
 									String::from_utf8_lossy(crk),
 									stored_node.id,
@@ -1940,7 +1966,7 @@ mod tests {
 								assert_eq!(
 									crk.cmp(rk),
 									Ordering::Less,
-									"right: {} < {} - node_id: {} - {}",
+									"right: {} < {} - node: {} - {}",
 									String::from_utf8_lossy(crk),
 									String::from_utf8_lossy(rk),
 									stored_node.id,
