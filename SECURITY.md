@@ -41,13 +41,13 @@ can be exploited.
 
 ## Security Advisories
 
-SurrealDB strives to provide timely updates and clear communication regarding any security issues that may impact users
-of its binaries, libraries and platforms using [Github Security
+SurrealDB strives to provide timely and clear communication regarding any security issues that may impact users of its
+binaries, libraries and platforms using [Github Security
 Advisories](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/creating-a-repository-security-advisory)
 and other available communication channels.  Generally, vulnerabilities will be discussed and [resolved
 privately](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/collaborating-in-a-temporary-private-fork-to-resolve-a-repository-security-vulnerability)
 to minimize the risk of exploitation. Security advisories will generally be published once a SurrealDB version including
-a fix for the relevant vulnerability is available. The goal of publishing security advisories is to inform users of the
+a fix for the relevant vulnerability is available. The goal of publishing security advisories is to notify users of the
 risks involved with using a vulnerable version and to provide information for resolving the issue or implementing any
 possible workarounds.
 
@@ -69,7 +69,7 @@ Regular security updates can be released as part of a minor release (e.g. `1.999
 should not break backward compatibility either and we encourage updating whenever possible. However, due to the youth of
 the Rust ecosystem, there are a few security-sensitive dependencies (e.g. `rustls` or `native_tls`) that are part of the
 public API of SurrealDB but are still in an unstable version, meaning that they can break backward compatibility. We do
-not consider these types (e.g.  the [TLS enumeration](https://docs.rs/surrealdb/latest/surrealdb/opt/enum.Tls.html))
+not consider these types (e.g.  the [TLS enumeration](https://docs.rs/surrealdb/1.0.0/surrealdb/opt/enum.Tls.html))
 part of the SurrealDB stable API and as such their backward compatibility may be broken in a minor release. These
 breaking changes should be rare and will always be clearly stated in the changelog. Even if not considered part of the
 stable API, these types of breaking changes will only be included in major and minor releases; never in patch releases
