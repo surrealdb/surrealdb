@@ -498,6 +498,7 @@ jobs:
           name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
           tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
           token: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the release
+          prerelease: ${{ inputs.environment == 'beta' }}
           files: |
             LICENSE
             artifacts/*.tgz
