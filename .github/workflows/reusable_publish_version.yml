@@ -9,6 +9,11 @@ on:
         required: true
         type: string
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
+      bump-version:
+        required: false
+        type: boolean
+        default: false
+        description: "Bump the version of the current beta if this is not the initial one"
       latest:
         required: false
         type: boolean
@@ -93,11 +98,15 @@ jobs:
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
-            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
-            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-            betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
+            if [[ "${{ inputs.bump-version }}" == "true" ]]; then
+              major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+              minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+              patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+              betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+              betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
+            else
+              betaVersion=$currentVersion
+            fi
           else
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)

@@ -12,6 +12,11 @@ on:
         type: boolean
         default: false
         description: "Publish the beta release"
+      bump-version:
+        required: false
+        type: boolean
+        default: false
+        description: "Bump the version of the current beta if this is not the initial one"
 
 defaults:
   run:
@@ -48,6 +53,7 @@ jobs:
     with:
       environment: beta
       git-ref: ${{ needs.checks.outputs.branch }}
+      bump-version: ${{ inputs.bump-version }}
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
     secrets: inherit
