@@ -4,6 +4,7 @@ mod config;
 mod export;
 mod import;
 mod isready;
+mod ml;
 mod sql;
 #[cfg(feature = "has-storage")]
 mod start;
@@ -20,6 +21,7 @@ pub use config::CF;
 use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
+use ml::MlCommand;
 use sql::SqlCommandArguments;
 #[cfg(feature = "has-storage")]
 use start::StartCommandArguments;
@@ -68,6 +70,8 @@ enum Commands {
 	Upgrade(UpgradeCommandArguments),
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
+	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
+	Ml(MlCommand),
 	#[command(
 		about = "Check if the SurrealDB server is ready to accept connections",
 		visible_alias = "isready"
@@ -88,6 +92,7 @@ pub async fn init() -> ExitCode {
 		Commands::Version(args) => version::init(args).await,
 		Commands::Upgrade(args) => upgrade::init(args).await,
 		Commands::Sql(args) => sql::init(args).await,
+		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 	};

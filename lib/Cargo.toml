@@ -37,6 +37,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
+ml = ["surrealml-core", "ndarray"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
 
@@ -74,6 +75,7 @@ futures = "0.3.29"
 futures-concurrency = "7.4.3"
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.27.0", features = ["use-serde"] }
+hex = { version = "0.4.3", optional = false }
 indexmap = { version = "2.1.0", features = ["serde"] }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
@@ -84,8 +86,10 @@ lru = "0.12.1"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 native-tls = { version = "0.2.11", optional = true }
+ndarray = { version = "0.15.6", optional = true }
 nom = { version = "7.1.3", features = ["alloc"] }
 num_cpus = "1.16.0"
+object_store = { version = "0.8.0", optional = false }
 once_cell = "1.18.0"
 path-clean = "1.0.1"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
@@ -109,6 +113,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
+surrealml-core = { version = "0.0.2", optional = true }
 thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tokio-util = { version = "0.7.10", optional = true, features = ["compat"] }

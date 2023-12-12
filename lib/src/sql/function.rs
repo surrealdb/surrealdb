@@ -159,8 +159,10 @@ impl Function {
 				fnc::run(ctx, opt, txn, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
+				// Get the full name of this function
+				let name = format!("fn::{s}");
 				// Check this function is allowed
-				ctx.check_allowed_function(format!("fn::{s}").as_str())?;
+				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
 				let val = {
 					// Claim transaction
@@ -189,15 +191,16 @@ impl Function {
 						}
 					}
 				}
-				// Return the value
-				// Check the function arguments
+				// Get the number of function arguments
 				let max_args_len = val.args.len();
+				// Track the number of required arguments
 				let mut min_args_len = 0;
+				// Check for any final optional arguments
 				val.args.iter().rev().for_each(|(_, kind)| match kind {
 					Kind::Option(_) if min_args_len == 0 => {}
 					_ => min_args_len += 1,
 				});
-
+				// Check the necessary arguments are passed
 				if x.len() < min_args_len || max_args_len < x.len() {
 					return Err(Error::InvalidArguments {
 						name: format!("fn::{}", val.name),

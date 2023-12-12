@@ -51,7 +51,7 @@ where
 
 async fn handler(
 	Extension(mut session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get a database reference
@@ -65,15 +65,15 @@ async fn handler(
 			match surrealdb::iam::signin::signin(kvs, &mut session, vars).await.map_err(Error::from)
 			{
 				// Authentication was successful
-				Ok(v) => match maybe_output.as_deref() {
+				Ok(v) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&Success::new(v))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&Success::new(v))),
 					Some(Accept::ApplicationPack) => Ok(output::pack(&Success::new(v))),
-					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
 					// Text serialization
 					Some(Accept::TextPlain) => Ok(output::text(v.unwrap_or_default())),
+					// Internal serialization
+					Some(Accept::Surrealdb) => Ok(output::full(&Success::new(v))),
 					// Return nothing
 					None => Ok(output::none()),
 					// An incorrect content-type was requested

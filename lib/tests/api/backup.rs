@@ -23,3 +23,17 @@ async fn export_import() {
 	db.import(&file).await.unwrap();
 	remove_file(file).await.unwrap();
 }
+
+#[test_log::test(tokio::test)]
+#[cfg(feature = "ml")]
+async fn ml_export_import() {
+	let (permit, db) = new_db().await;
+	let db_name = Ulid::new().to_string();
+	db.use_ns(NS).use_db(&db_name).await.unwrap();
+	db.import("../tests/linear_test.surml").ml().await.unwrap();
+	drop(permit);
+	let file = format!("{db_name}.surml");
+	db.export(&file).ml("Prediction", Version::new(0, 0, 1)).await.unwrap();
+	db.import(&file).ml().await.unwrap();
+	remove_file(file).await.unwrap();
+}
