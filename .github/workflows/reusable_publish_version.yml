@@ -9,6 +9,11 @@ on:
         required: true
         type: string
         description: "The git ref of this release version. All 'actions/checkout' steps will use it"
+      bump-version:
+        required: false
+        type: boolean
+        default: false
+        description: "Bump the version of the current beta if this is not the initial one"
       latest:
         required: false
         type: boolean
@@ -64,6 +69,8 @@ jobs:
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
+            git push origin --delete releases/stable || true
+            git checkout -b releases/stable
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
             betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
@@ -83,7 +90,7 @@ jobs:
           fi
 
           # Create the tag
-          git tag -a v${version} -m "Release ${version}"
+          git tag -a v${version} -m "Release ${version}" || true
 
       - name: Create or patch beta branch
         if: ${{ inputs.environment == 'beta' }}
@@ -93,11 +100,15 @@ jobs:
           currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
-            major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
-            minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
-            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-            betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
+            if [[ "${{ inputs.bump-version }}" == "true" ]]; then
+              major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
+              minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
+              patchAndMeta=$(echo $currentVersion | tr "." "\n" | sed -n 3p)
+              betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
+              betaVersion=${major}.${minor}.${patchAndMeta}.$(($betaNum + 1))
+            else
+              betaVersion=$currentVersion
+            fi
           else
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
@@ -113,10 +124,10 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
           # Commit changes
-          git commit -am "Prepare v${betaVersion} release"
+          git commit -am "Prepare v${betaVersion} release" || true
 
           # Create the tag
-          git tag -a v${betaVersion} -m "Release ${betaVersion}"
+          git tag -a v${betaVersion} -m "Release ${betaVersion}" || true
 
       - name: Push changes
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
@@ -126,7 +137,7 @@ jobs:
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the tag
-        run: git push --tags
+        run: git push --tags || true
 
       - name: Set outputs
         id: outputs
@@ -135,6 +146,8 @@ jobs:
 
           if [[ "${{ inputs.environment }}" == "beta" && "${{ inputs.publish }}" == "true" ]]; then
             echo "git-ref=releases/beta" >> $GITHUB_OUTPUT
+          elif [[ "${{ inputs.environment }}" == "release" && "${{ inputs.git-ref }}" == "releases/beta" && "${{ inputs.publish }}" == "true" ]]; then
+            echo "git-ref=releases/stable" >> $GITHUB_OUTPUT
           else
             echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
           fi
