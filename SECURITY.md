@@ -9,9 +9,9 @@
 
 ## Reporting a Vulnerability
 
-At SurrealDB, we take the security of the SurrealDB code, software, and cloud platform very seriously. If you believe
-you have found a security vulnerability in SurrealDB, we encourage you to let us know right away. We will investigate
-all legitimate reports and do our best to quickly fix the problem.
+We take the security of SurrealDB code, software, and cloud platform very seriously. If you believe you have found a
+security vulnerability in SurrealDB, we encourage you to let us know right away. We will investigate all legitimate
+reports and do our best to quickly fix the problem.
 
 Please report any issues or vulnerabilities via [Github Security
 Advisories](https://github.com/surrealdb/surrealdb/security/advisories) instead of posting a public issue in GitHub.
