@@ -1,15 +1,23 @@
 # <img height="25" src="/img/security.svg">&nbsp;&nbsp;Security Policy
 
-At SurrealDB, we take the security the SurrealDB code, software, and cloud platform very seriously. If you believe you
-have found a security vulnerability in SurrealDB, we encourage you to let us know right away. We will investigate all
-legitimate reports and do our best to quickly fix the problem.
-
 ## Supported Versions
 
 | Version    | Supported                                       |
 | ---------- | ----------------------------------------------- |
 | < 1.0      | -                                               |
 | >= 1.0.0   | <img width="20" src="/img/tick.svg">            |
+
+## Reporting a Vulnerability
+
+At SurrealDB, we take the security of the SurrealDB code, software, and cloud platform very seriously. If you believe
+you have found a security vulnerability in SurrealDB, we encourage you to let us know right away. We will investigate
+all legitimate reports and do our best to quickly fix the problem.
+
+Please report any issues or vulnerabilities via [Github Security
+Advisories](https://github.com/surrealdb/surrealdb/security/advisories) instead of posting a public issue in GitHub.
+You can also send security commuications to [security@surrealdb.com](mailto:security@surrealdb.com). Please include the
+version identifier (obtained by running `surrealdb version` on the command line) and details on how the vulnerability
+can be exploited.
 
 ### Do
 
@@ -23,22 +31,69 @@ legitimate reports and do our best to quickly fix the problem.
 - ❌ Run automated security tools against SurrealDB infrastructure without permission.
 - ❌ Exploit a vulnerability beyond what is strictly necessary to verify its existence.
 
-## Reporting a Vulnerability
-
-We take the security of SurrealDB code, software, and cloud platform very seriously. If you believe you have found a
-security vulnerability in SurrealDB, we encourage you to let us know right away. We will investigate all legitimate
-reports and do our best to quickly fix the problem.
-
-Please report any issues or vulnerabilities via [Github Security
-Advisories](https://github.com/surrealdb/surrealdb/security/advisories) instead of posting a public issue in GitHub.
-You can also send security commuications to [security@surrealdb.com](mailto:security@surrealdb.com). Please include the
-version identifier (obtained by running `surrealdb version` on the command line) and details on how the vulnerability
-can be exploited.
-
-## Our Goals 
+### Our Responsibility 
 
 - Acknowledge your report within 3 business days of the date of communication.
 - Verify the issue and keep you informed of the progress towards its resolution.
 - Handle your report and any data you share with us with strict confidentiality.
 - Abstain from legal action against you for any report made following this policy.
 - Credit you in any relevant public security advisory, unless you desire otherwise.
+
+## Security Advisory
+
+SurrealDB strives to provide timely updates and clear communication regarding any security issues that may impact users
+of its binaries, libraries and platforms using [Github Security
+Advisories](https://github.com/surrealdb/surrealdb/security/advisories) and other available communication channels.
+Generally, vulnerabilities will be discussed and resolved privately to minimize risk of exploitation. Security
+advisories will generally be published once a SurrealDB version including a fix for the relevant vulnerability is
+available. The goal of a security advisory is to inform users of the risks involved with using a vulnerable version and
+to provide information for resolving the issue or implementing any possible workarounds.
+
+Vulnerabilities in third-party dependencies may only be independently published by SurrealDB when they affect a
+SurrealDB binary or platform. In those cases, the original CVE identifier will be referenced. Vulnerabilities affecting
+SurrealDB libraries will not be published again by SurrealDB when an advisory already exists for the original dependency
+as security tooling (e.g. `cargo audit` or Dependabot) will already be able to track it up the dependency tree.
+
+## Security Updates
+
+As any other update, security updates to SurrealDB are released following [Semantic Versioning (AKA
+SemVer)](https://semver.org).
+
+Urgent security patches will be released for the latest SurrealDB minor release (e.g. `1.999.0`) using a patch release
+(e.g. `1.999.1`). We commit to not break any sort of backward compatibility for any reason in patch releases to ensure
+that SurrealDB users have no reservations or delays when applying security patches.
+
+Regular security updates can be released as part of a minor release (e.g. `1.999.0` to `1.1000.0`). Minor releases
+should not break backward compatibility either and we encourage updating whenever possible. However, due to the youth of
+the Rust ecosystem, there are some few security-sensitive dependencies (e.g. `rustls` or `native_tls`) that are part of the
+public API of SurrealDB but are still in an unstable version, meaning that they can break backward compatibility. We
+do not consider these types (e.g.  the [TLS enumeration](https://docs.rs/surrealdb/latest/surrealdb/opt/enum.Tls.html))
+part of the SurrealDB stable API and as such their backward compatibility may be broken in a minor release. These
+breaking changes should be rare and will always be clearly stated in the changelog. Even if not considered part of the
+stable API, these sort of breaking changes will only be included in major and minor releases; never in patch releases as
+stated in the previous paragraph.
+
+When an LTS (Long-Term Support) version of SurrealDB becomes available, we will strive to backport security patches to
+that version as well. This will be possible without breaking backward compatibility once no unstable crates are part of
+the public API of SurrealDB.
+
+## Automation
+
+### Fuzzing
+
+SurrealDB is [integrated](https://github.com/google/oss-fuzz/tree/master/projects/surrealdb) with Google's
+[OSS-Fuzz](https://google.github.io/oss-fuzz/) project. As part of this integration, both [the SurrealQL parser and
+query executor](https://github.com/surrealdb/surrealdb/tree/main/lib/fuzz/fuzz_targets) are continously fuzzed to
+identify security and performance bugs in SurrealQL. We aim to resolve all [security-relevant
+bugs](https://google.github.io/oss-fuzz/advanced-topics/bug-fixing-guidance#security-issues) before its disclosure
+deadline. Other bugs (e.g. crashes or performance bugs) that may have some availability impact will be prioritized and
+resolved as any other bug regardless of the disclosure deadline.
+
+### Dependencies
+
+Dependencies used by SurrealDB are [checked for known vulnerabilities in
+CI](https://github.com/surrealdb/surrealdb/pull/3123) using `cargo audit`. Developers are required to either update,
+replace or acknowledge vulnerable dependencies found during the approval process of every pull request. Additionally,
+SurrealDB makes use of Github's [Dependabot
+alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) to continously
+monitor its dependencies for security issues.
