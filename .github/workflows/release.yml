@@ -143,5 +143,5 @@ jobs:
         if: ${{ inputs.publish }}
         run: |
           set -x
-          git push origin --delete ${{ inputs.branch }}
-          git push origin --delete releases/stable
+          git push origin --delete ${{ inputs.branch }} || true
+          git push origin --delete releases/stable || true
