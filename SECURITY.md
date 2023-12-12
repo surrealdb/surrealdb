@@ -39,7 +39,7 @@ can be exploited.
 - Abstain from legal action against you for any report made following this policy.
 - Credit you in any relevant public security advisory, unless you desire otherwise.
 
-## Security Advisory
+## Security Advisories
 
 SurrealDB strives to provide timely updates and clear communication regarding any security issues that may impact users
 of its binaries, libraries and platforms using [Github Security
@@ -47,9 +47,9 @@ Advisories](https://docs.github.com/en/code-security/security-advisories/working
 and other available communication channels.  Generally, vulnerabilities will be discussed and [resolved
 privately](https://docs.github.com/en/code-security/security-advisories/working-with-repository-security-advisories/collaborating-in-a-temporary-private-fork-to-resolve-a-repository-security-vulnerability)
 to minimize the risk of exploitation. Security advisories will generally be published once a SurrealDB version including
-a fix for the relevant vulnerability is available. The goal of a security advisory is to inform users of the risks
-involved with using a vulnerable version and to provide information for resolving the issue or implementing any possible
-workarounds.
+a fix for the relevant vulnerability is available. The goal of publishing security advisories is to inform users of the
+risks involved with using a vulnerable version and to provide information for resolving the issue or implementing any
+possible workarounds.
 
 Vulnerabilities in third-party dependencies may only be independently published by SurrealDB when they affect a
 SurrealDB binary or platform. In those cases, the original CVE identifier will be referenced. Vulnerabilities affecting
