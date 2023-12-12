@@ -4,6 +4,7 @@ mod event;
 mod field;
 mod function;
 mod index;
+mod model;
 mod namespace;
 mod param;
 mod scope;
@@ -17,6 +18,7 @@ pub use event::RemoveEventStatement;
 pub use field::RemoveFieldStatement;
 pub use function::RemoveFunctionStatement;
 pub use index::RemoveIndexStatement;
+pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
 pub use scope::RemoveScopeStatement;
@@ -49,6 +51,7 @@ pub enum RemoveStatement {
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
 	User(RemoveUserStatement),
+	Model(RemoveModelStatement),
 }
 
 impl RemoveStatement {
@@ -77,6 +80,7 @@ impl RemoveStatement {
 			Self::Index(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn).await,
 			Self::User(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Model(ref v) => v.compute(ctx, opt, txn).await,
 		}
 	}
 }
@@ -96,6 +100,7 @@ impl Display for RemoveStatement {
 			Self::Index(v) => Display::fmt(v, f),
 			Self::Analyzer(v) => Display::fmt(v, f),
 			Self::User(v) => Display::fmt(v, f),
+			Self::Model(v) => Display::fmt(v, f),
 		}
 	}
 }

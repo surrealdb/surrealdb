@@ -113,6 +113,16 @@ pub enum DbResponse {
 	Other(Value),
 }
 
+#[derive(Debug)]
+#[allow(dead_code)] // used by ML model import and export functions
+pub(crate) enum MlConfig {
+	Import,
+	Export {
+		name: String,
+		version: String,
+	},
+}
+
 /// Holds the parameters given to the caller
 #[derive(Debug, Default)]
 #[allow(dead_code)] // used by the embedded and remote connections
@@ -122,6 +132,7 @@ pub struct Param {
 	pub(crate) file: Option<PathBuf>,
 	pub(crate) bytes_sender: Option<channel::Sender<Result<Vec<u8>>>>,
 	pub(crate) notification_sender: Option<channel::Sender<Notification>>,
+	pub(crate) ml_config: Option<MlConfig>,
 }
 
 impl Param {

@@ -39,6 +39,7 @@ async fn remove_statement_table() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
 			tables: {},
@@ -73,6 +74,7 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
 			tables: {},
@@ -222,8 +224,8 @@ async fn permissions_checks_remove_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -264,8 +266,8 @@ async fn permissions_checks_remove_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -348,8 +350,8 @@ async fn permissions_checks_remove_db_token() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: { token: \"DEFINE TOKEN token ON DATABASE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: { token: \"DEFINE TOKEN token ON DATABASE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -474,8 +476,8 @@ async fn permissions_checks_remove_db_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
     ];
 
 	let test_cases = [
@@ -516,8 +518,8 @@ async fn permissions_checks_remove_scope() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: { account: 'DEFINE SCOPE account SESSION 1h' }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: { account: 'DEFINE SCOPE account SESSION 1h' }, tables: {  }, tokens: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -558,8 +560,8 @@ async fn permissions_checks_remove_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -600,8 +602,8 @@ async fn permissions_checks_remove_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
     ];
 
 	let test_cases = [

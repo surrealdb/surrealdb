@@ -1,15 +1,18 @@
 use crate::api::conn::Method;
+use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
+use crate::method::Model;
 use crate::method::OnceLockExt;
 use crate::opt::ExportDestination;
 use crate::Surreal;
 use channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
+use semver::Version;
 use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -22,18 +25,39 @@ use std::task::Poll;
 /// A database export future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Export<'r, C: Connection, R> {
+pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) target: ExportDestination,
+	pub(super) ml_config: Option<MlConfig>,
 	pub(super) response: PhantomData<R>,
+	pub(super) export_type: PhantomData<T>,
 }
 
-impl<C, R> Export<'_, C, R>
+impl<'r, C, R> Export<'r, C, R>
+where
+	C: Connection,
+{
+	/// Export machine learning model
+	pub fn ml(self, name: &str, version: Version) -> Export<'r, C, R, Model> {
+		Export {
+			client: self.client,
+			target: self.target,
+			ml_config: Some(MlConfig::Export {
+				name: name.to_owned(),
+				version: version.to_string(),
+			}),
+			response: self.response,
+			export_type: PhantomData,
+		}
+	}
+}
+
+impl<C, R, T> Export<'_, C, R, T>
 where
 	C: Connection,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Export<'static, C, R> {
+	pub fn into_owned(self) -> Export<'static, C, R, T> {
 		Export {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -41,7 +65,7 @@ where
 	}
 }
 
-impl<'r, Client> IntoFuture for Export<'r, Client, PathBuf>
+impl<'r, Client, T> IntoFuture for Export<'r, Client, PathBuf, T>
 where
 	Client: Connection,
 {
@@ -55,15 +79,17 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Export);
-			match self.target {
-				ExportDestination::File(path) => conn.execute_unit(router, Param::file(path)).await,
+			let mut param = match self.target {
+				ExportDestination::File(path) => Param::file(path),
 				ExportDestination::Memory => unreachable!(),
-			}
+			};
+			param.ml_config = self.ml_config;
+			conn.execute_unit(router, param).await
 		})
 	}
 }
 
-impl<'r, Client> IntoFuture for Export<'r, Client, ()>
+impl<'r, Client, T> IntoFuture for Export<'r, Client, (), T>
 where
 	Client: Connection,
 {
@@ -81,7 +107,9 @@ where
 			let ExportDestination::Memory = self.target else {
 				unreachable!();
 			};
-			conn.execute_unit(router, Param::bytes_sender(tx)).await?;
+			let mut param = Param::bytes_sender(tx);
+			param.ml_config = self.ml_config;
+			conn.execute_unit(router, param).await?;
 			Ok(Backup {
 				rx,
 			})
