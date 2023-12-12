@@ -2,7 +2,7 @@
 
 name: Beta release
 
-run-name: "Beta release (publish: ${{ inputs.publish }})"
+run-name: "Beta release (publish: ${{ inputs.publish }}, bump version: ${{ inputs.bump-version }})"
 
 on:
   workflow_dispatch:
