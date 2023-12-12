@@ -1,9 +1,12 @@
 //! Stores a LIVE SELECT query definition on the cluster
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
+use crate::kvs::Key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+const SIZE: usize = 128;
 
 /// The Lq key is used to quickly discover which live queries belong to which nodes
 /// This is used in networking for clustered environments such as discovering if an event is remote or local
@@ -31,18 +34,18 @@ pub fn new<'a>(nd: Uuid, lq: Uuid, ns: &'a str, db: &'a str) -> Lq<'a> {
 	Lq::new(nd, lq, ns, db)
 }
 
-pub fn prefix_nd(nd: &Uuid) -> Vec<u8> {
+pub fn prefix_nd(nd: &Uuid) -> Key<SIZE> {
 	let mut k = [b'/', b'$'].to_vec();
 	k.extend_from_slice(nd.as_bytes());
 	k.extend_from_slice(&[0x00]);
-	k
+	Key::<SIZE>::from(&k)
 }
 
-pub fn suffix_nd(nd: &Uuid) -> Vec<u8> {
+pub fn suffix_nd(nd: &Uuid) -> Key<SIZE> {
 	let mut k = [b'/', b'$'].to_vec();
 	k.extend_from_slice(nd.as_bytes());
 	k.extend_from_slice(&[0xff]);
-	k
+	Key::<SIZE>::from(&k)
 }
 
 impl KeyRequirements for Lq<'_> {

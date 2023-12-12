@@ -47,20 +47,22 @@ pub enum Entry {
 	Seq(U32),
 }
 
+const SIZE: usize = 128;
+
 #[derive(Default)]
-pub struct Cache(pub HashMap<Key, Entry>);
+pub struct Cache(pub HashMap<Key<SIZE>, Entry>);
 
 impl Cache {
 	/// Set a key in the cache
-	pub fn set(&mut self, key: Key, val: Entry) {
+	pub fn set(&mut self, key: Key<SIZE>, val: Entry) {
 		self.0.insert(key, val);
 	}
 	/// Get a key from the cache
-	pub fn get(&mut self, key: &Key) -> Option<Entry> {
+	pub fn get(&mut self, key: &Key<SIZE>) -> Option<Entry> {
 		self.0.get(key).cloned()
 	}
 	/// Delete a key from the cache
-	pub fn del(&mut self, key: &Key) -> Option<Entry> {
+	pub fn del(&mut self, key: &Key<SIZE>) -> Option<Entry> {
 		self.0.remove(key)
 	}
 	/// Clears a cache completely

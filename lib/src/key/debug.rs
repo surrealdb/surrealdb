@@ -5,8 +5,9 @@ use crate::kvs::Key;
 
 /// sprint_key converts a key to an escaped string.
 /// This is used for logging and debugging tests and should not be used in implementation code.
-pub fn sprint_key(key: &Key) -> String {
-	key.iter()
+pub fn sprint_key<const S: usize>(key: &Key<S>) -> String {
+	key.key[..key.size]
+		.iter()
 		.flat_map(|&byte| std::ascii::escape_default(byte))
 		.map(|byte| byte as char)
 		.collect::<String>()

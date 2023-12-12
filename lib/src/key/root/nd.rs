@@ -1,9 +1,12 @@
 //! Stores cluster membership information
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
+use crate::kvs::Key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+const SIZE: usize = 4 + 16;
 
 // Represents cluster information.
 // In the future, this could also include broadcast addresses and other information.
@@ -34,16 +37,16 @@ impl Nd {
 		}
 	}
 
-	pub fn prefix() -> Vec<u8> {
+	pub fn prefix() -> Key<SIZE> {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'n', b'd', 0x00]);
-		k
+		Key::<SIZE>::from(&k) // TODO
 	}
 
-	pub fn suffix() -> Vec<u8> {
+	pub fn suffix() -> Key<SIZE> {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'n', b'd', 0xff]);
-		k
+		Key::<SIZE>::from(&k) // TODO
 	}
 }
 

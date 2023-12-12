@@ -1,9 +1,12 @@
 //! Stores a LIVE SELECT query definition on the table
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
+use crate::kvs::Key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+const SIZE: usize = 128;
 
 /// Lv is used to track a live query and is cluster independent, i.e. it is tied with a ns/db/tb combo without the cl.
 /// The live statement includes the node id, so lq can be derived purely from an lv.
@@ -29,13 +32,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Lq<'a> {
 	Lq::new(ns, db, tb, lq)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Key<SIZE> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'q', 0x00]);
-	k
+	Key::<SIZE>::from(&k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Key<SIZE> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'l', b'q']);
 	k.extend_from_slice(Uuid::max().as_ref());
@@ -43,7 +46,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	// so it wouldn't match max UUIDs because it doesn't check for equal matches
 	// on the upper bound. Adding an extra byte to bring max into range as well.
 	k.push(0x00);
-	k
+	Key::<SIZE>::from(&k)
 }
 
 impl KeyRequirements for Lq<'_> {
@@ -81,7 +84,7 @@ mod tests {
 		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let val = Lq::new("testns", "testdb", "testtb", live_query_id);
 		let enc = Lq::encode(&val).unwrap();
-		println!("{:?}", debug::sprint_key(&enc));
+		println!("{:?}", enc);
 		assert_eq!(
 			enc,
 			b"/*testns\x00*testdb\x00*testtb\x00!lq\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
