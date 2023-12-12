@@ -28,7 +28,7 @@ pub(crate) mod wasm;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
-#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
@@ -47,19 +47,25 @@ use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::iam::check::check_ns_db;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::iam::Action;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineModelStatement;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineStatement;
 use crate::sql::statements::KillStatement;
 use crate::sql::Array;
@@ -71,6 +77,7 @@ use crate::sql::Uuid;
 use crate::sql::Value;
 use channel::Sender;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
@@ -82,6 +89,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use surrealml_core::storage::surml_file::SurMlFile;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
@@ -427,6 +435,7 @@ async fn export(
 	ml_config: Option<MlConfig>,
 ) -> Result<()> {
 	match ml_config {
+		#[cfg(feature = "ml")]
 		Some(MlConfig::Export {
 			name,
 			version,
@@ -688,6 +697,7 @@ async fn router(
 				}
 			};
 			let responses = match param.ml_config {
+				#[cfg(feature = "ml")]
 				Some(MlConfig::Import) => {
 					// Ensure a NS and DB are set
 					let (nsv, dbv) = check_ns_db(session)?;

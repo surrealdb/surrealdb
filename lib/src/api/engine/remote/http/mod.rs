@@ -8,6 +8,7 @@ pub(crate) mod wasm;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
 #[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
 use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
@@ -519,6 +520,7 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
 			let path = match param.ml_config {
+				#[cfg(feature = "ml")]
 				Some(MlConfig::Export {
 					name,
 					version,
@@ -536,6 +538,7 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Import => {
 			let path = match param.ml_config {
+				#[cfg(feature = "ml")]
 				Some(MlConfig::Import) => base_url.join("ml/import")?,
 				_ => base_url.join(Method::Import.as_str())?,
 			};
