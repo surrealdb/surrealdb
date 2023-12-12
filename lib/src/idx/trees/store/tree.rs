@@ -63,7 +63,7 @@ where
 		#[cfg(debug_assertions)]
 		{
 			if updated {
-				info!("SET {updated}: {node}");
+				debug!("SET {updated}: {node}");
 			}
 			self.out.remove(&node.id);
 		}

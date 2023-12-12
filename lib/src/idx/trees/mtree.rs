@@ -2198,7 +2198,7 @@ mod tests {
 	) -> Result<(), Error> {
 		for distance in [Distance::Euclidean, Distance::Manhattan] {
 			for capacity in capacities {
-				info!(
+				debug!(
 					"Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
 					distance,
 					capacity,
@@ -2686,7 +2686,7 @@ mod tests {
 			.unwrap_or_else(|_| rand::random::<u64>().to_string())
 			.parse()
 			.expect("Failed to parse seed");
-		info!("Seed: {}", seed);
+		debug!("Seed: {}", seed);
 		// Create a seeded RNG
 		StdRng::seed_from_u64(seed)
 	}

@@ -879,7 +879,7 @@ mod tests {
 		let content = Value::from(Array::from(vec!["Enter a search term","Welcome","Docusaurus blogging features are powered by the blog plugin.","Simply add Markdown files (or folders) to the blog directory.","blog","Regular blog authors can be added to authors.yml.","authors.yml","The blog post date can be extracted from filenames, such as:","2019-05-30-welcome.md","2019-05-30-welcome/index.md","A blog post folder can be convenient to co-locate blog post images:","The blog supports tags as well!","And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.","blog: false","MDX Blog Post","Blog posts support Docusaurus Markdown features, such as MDX.","Use the power of React to create interactive blog posts.","Long Blog Post","This is the summary of a very long blog post,","Use a <!-- truncate --> comment to limit blog post size in the list view.","<!--","truncate","-->","First Blog Post","Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
 
 		for i in 0..5 {
-			info!("Attempt {i}");
+			debug!("Attempt {i}");
 			{
 				let (ctx, opt, txn, mut fti) =
 					tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
