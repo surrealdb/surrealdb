@@ -84,6 +84,12 @@ jobs:
         run: |
           set -x
 
+          # When moving from beta we are going to pull the version from the stable branch
+          if [[ "${{ inputs.branch }}" == "releases/beta" ]]; then
+            git fetch origin releases/stable
+            git checkout releases/stable
+          fi
+
           # Retrieve just released version
           version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
           echo "version=${version}" >> $GITHUB_OUTPUT
@@ -135,4 +141,7 @@ jobs:
 
       - name: Delete the release branch
         if: ${{ inputs.publish }}
-        run: git push origin --delete ${{ inputs.branch }}
+        run: |
+          set -x
+          git push origin --delete ${{ inputs.branch }} || true
+          git push origin --delete releases/stable || true
