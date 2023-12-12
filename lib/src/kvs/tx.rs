@@ -32,6 +32,7 @@ use sql::statements::DefineEventStatement;
 use sql::statements::DefineFieldStatement;
 use sql::statements::DefineFunctionStatement;
 use sql::statements::DefineIndexStatement;
+use sql::statements::DefineModelStatement;
 use sql::statements::DefineNamespaceStatement;
 use sql::statements::DefineParamStatement;
 use sql::statements::DefineScopeStatement;
@@ -1546,6 +1547,29 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve all model definitions for a specific database.
+	pub async fn all_db_models(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineModelStatement]>, Error> {
+		let key = crate::key::database::ml::prefix(ns, db);
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Mls(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::database::ml::prefix(ns, db);
+			let end = crate::key::database::ml::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Mls(Arc::clone(&val)));
+			val
+		})
+	}
+
 	/// Retrieve all scope definitions for a specific database.
 	pub async fn all_sc(
 		&mut self,
@@ -1825,6 +1849,21 @@ impl Transaction {
 			value: user.to_owned(),
 			ns: ns.to_owned(),
 			db: db.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific model definition from a database.
+	pub async fn get_db_model(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ml: &str,
+		vn: &str,
+	) -> Result<DefineModelStatement, Error> {
+		let key = crate::key::database::ml::new(ns, db, ml, vn);
+		let val = self.get(key).await?.ok_or(Error::MlNotFound {
+			value: format!("{ml}<{vn}>"),
 		})?;
 		Ok(val.into())
 	}
@@ -2163,6 +2202,31 @@ impl Transaction {
 			})?;
 			let val: Arc<DefineParamStatement> = Arc::new(val.into());
 			self.cache.set(key, Entry::Pa(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve a specific model definition.
+	pub async fn get_and_cache_db_model(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ml: &str,
+		vn: &str,
+	) -> Result<Arc<DefineModelStatement>, Error> {
+		let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ml(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::MlNotFound {
+				value: format!("{ml}<{vn}>"),
+			})?;
+			let val: Arc<DefineModelStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Ml(Arc::clone(&val)));
 			val
 		})
 	}

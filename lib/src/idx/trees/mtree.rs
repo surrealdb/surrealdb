@@ -2043,7 +2043,7 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			{
 				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Write, cache_size).await;
+					new_operation(ds, t, TransactionType::Write, cache_size).await;
 				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
 				finish_operation(t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
@@ -2051,8 +2051,8 @@ mod tests {
 			c += 1;
 			{
 				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Read, cache_size).await;
-				let p = check_tree_properties(&mut tx, &mut st, &t).await?;
+					new_operation(ds, t, TransactionType::Read, cache_size).await;
+				let p = check_tree_properties(&mut tx, &mut st, t).await?;
 				assert_eq!(p.doc_count, c);
 			}
 		}
@@ -2067,7 +2067,7 @@ mod tests {
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.as_ref().len());
 		{
-			let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Write, cache_size).await;
+			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 			for (doc_id, obj) in collection.as_ref() {
 				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
@@ -2075,8 +2075,8 @@ mod tests {
 			finish_operation(t, tx, st, true).await?;
 		}
 		{
-			let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read, cache_size).await;
-			check_tree_properties(&mut tx, &mut st, &t).await?;
+			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
+			check_tree_properties(&mut tx, &mut st, t).await?;
 		}
 		Ok(map)
 	}
@@ -2109,12 +2109,12 @@ mod tests {
 			{
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Read, cache_size).await;
-				check_tree_properties(&mut tx, &mut st, &t).await?;
+				check_tree_properties(&mut tx, &mut st, t).await?;
 			}
 		}
 
-		let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read, cache_size).await;
-		check_tree_properties(&mut tx, &mut st, &t).await?.check(0, 0, None, None, 0, 0);
+		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
+		check_tree_properties(&mut tx, &mut st, t).await?.check(0, 0, None, None, 0, 0);
 		Ok(())
 	}
 
@@ -2124,7 +2124,7 @@ mod tests {
 		collection: &TestCollection,
 		cache_size: usize,
 	) -> Result<(), Error> {
-		let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read, cache_size).await;
+		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
 		let max_knn = 20.max(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
@@ -2163,8 +2163,8 @@ mod tests {
 		map: &HashMap<DocId, SharedVector>,
 		cache_size: usize,
 	) -> Result<(), Error> {
-		let (mut st, mut tx) = new_operation(&ds, t, TransactionType::Read, cache_size).await;
-		for (_, obj) in map {
+		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
+		for obj in map.values() {
 			let res = t.knn_search(&mut tx, &mut st, obj, map.len()).await?;
 			assert_eq!(
 				map.len(),
@@ -2235,7 +2235,7 @@ mod tests {
 	impl AsRef<Vec<(DocId, SharedVector)>> for TestCollection {
 		fn as_ref(&self) -> &Vec<(DocId, SharedVector)> {
 			match self {
-				TestCollection::Unique(c) | TestCollection::NonUnique(c) => &c,
+				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
 			}
 		}
 	}

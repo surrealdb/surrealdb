@@ -1,15 +1,17 @@
-name: Tag release
+# Use this workflow to trigger stable releases, both minor releases and patches
 
-run-name: "Tag release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'push' }}, latest: ${{ inputs.latest || github.event_name == 'schedule' }})"
+name: Stable release
+
+run-name: "Stable release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }})"
 
 on:
   workflow_dispatch:
     inputs:
-      git-ref:
+      branch:
         required: true
         type: string
-        description: "The github ref of this release. If you are publishing it, use a tag (i.e. v1.0.0)."
-        default: main
+        description: "The github branch of this release. Should be 'releases/beta' or 'patches/x.y'"
+        default: releases/beta
       latest:
         required: false
         type: boolean
@@ -20,33 +22,28 @@ on:
         type: boolean
         default: false
         description: "Publish the release"
-  push:
-    tags:
-      - "v*.*.*"
 
 defaults:
   run:
     shell: bash
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   checks:
     name: Pre-release checks
     runs-on: ubuntu-latest
-    outputs:
-      is-beta: ${{ steps.outputs.outputs.is-beta }}
-    env:
-      GIT_REF: ${{ inputs.git-ref || github.ref_name }}
     steps:
-      - name: Verify that the provided git_ref is a tag when 'publish' is true
-        if: ${{ inputs.publish || github.event_name == 'push' }}
-        id: outputs
+      - name: Verify that the provided branch is either a release branch or a patch branch
         run: |
           set -x
-          git tag -l | grep -w $GIT_REF || (echo "The provided git_ref '$GIT_REF' is not a tag" && exit 1)
-          if [[ $GIT_REF == *"-beta"* ]]; then
-            echo "is-beta=true" >> $GITHUB_OUTPUT
+          if [[ "${{ inputs.branch }}" == "releases/beta" || "${{ inputs.branch }}" == "patches/"* ]]; then
+            exit 0
           else
-            echo "is-beta=false" >> $GITHUB_OUTPUT
+            echo "Branch should either be 'releases/beta' or 'patches/x.y'"
+            exit 1
           fi
 
   release:
@@ -54,8 +51,97 @@ jobs:
     needs: [checks]
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
-      git-ref: ${{ inputs.git-ref || github.ref_name }}
-      latest: ${{ inputs.latest || (github.event_name == 'push' && needs.checks.outputs.is-beta == 'false') }}
-      publish: ${{ inputs.publish || github.event_name == 'push' }}
-      create-release: ${{ inputs.publish || github.event_name == 'push' }}
+      environment: release
+      git-ref: ${{ inputs.branch }}
+      latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
+      publish: ${{ inputs.publish }}
+      create-release: ${{ inputs.publish }}
     secrets: inherit
+
+  release-branch:
+    name: Bump main version
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Install stable toolchain
+        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install a TOML parser
+        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Create version bump branch
+        id: bump
+        if: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
+        run: |
+          set -x
+
+          # When moving from beta we are going to pull the version from the stable branch
+          if [[ "${{ inputs.branch }}" == "releases/beta" ]]; then
+            git fetch origin releases/stable
+            git checkout releases/stable
+          fi
+
+          # Retrieve just released version
+          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          echo "version=${version}" >> $GITHUB_OUTPUT
+
+          # Checkout the main branch
+          git fetch origin main
+          git checkout main
+
+          # Switch to version bump branch
+          git checkout -b version-bump/v${version}
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+      - name: Push the branch
+        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
+        run: |
+          # Configure git
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config --add --bool push.autoSetupRemote true
+
+          # Commit changes
+          git commit -am "Bump version to v${{ steps.bump.outputs.version }}"
+          git push
+
+      - name: Create a PR
+        id: pr
+        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
+          echo "url=${url}" >> $GITHUB_OUTPUT
+
+      - name: Merge the PR
+        if: ${{ inputs.publish && (inputs.branch == 'releases/beta' || inputs.latest) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
+        run: |
+          set -x
+          gh pr review ${{ steps.pr.outputs.url }} --approve
+          gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash
+
+      - name: Delete the release branch
+        if: ${{ inputs.publish }}
+        run: |
+          set -x
+          git push origin --delete ${{ inputs.branch }} || true
+          git push origin --delete releases/stable || true
