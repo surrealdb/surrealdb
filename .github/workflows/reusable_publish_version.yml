@@ -90,7 +90,7 @@ jobs:
           fi
 
           # Create the tag
-          git tag -a v${version} -m "Release ${version}"
+          git tag -a v${version} -m "Release ${version}" || true
 
       - name: Create or patch beta branch
         if: ${{ inputs.environment == 'beta' }}
@@ -124,10 +124,10 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
           # Commit changes
-          git commit -am "Prepare v${betaVersion} release"
+          git commit -am "Prepare v${betaVersion} release" || true
 
           # Create the tag
-          git tag -a v${betaVersion} -m "Release ${betaVersion}"
+          git tag -a v${betaVersion} -m "Release ${betaVersion}" || true
 
       - name: Push changes
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
@@ -137,7 +137,7 @@ jobs:
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the tag
-        run: git push --tags
+        run: git push --tags || true
 
       - name: Set outputs
         id: outputs
