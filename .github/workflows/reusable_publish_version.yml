@@ -499,6 +499,7 @@ jobs:
           tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
           token: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the release
           prerelease: ${{ inputs.environment == 'beta' }}
+          fail_on_unmatched_files: true
           files: |
             LICENSE
             artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*
