@@ -24,7 +24,7 @@ impl RemoveModelStatement {
 		txn: &Transaction,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Clear the cache
