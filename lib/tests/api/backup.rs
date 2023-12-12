@@ -25,6 +25,7 @@ async fn export_import() {
 }
 
 #[test_log::test(tokio::test)]
+#[cfg(feature = "ml")]
 async fn ml_export_import() {
 	let (permit, db) = new_db().await;
 	let db_name = Ulid::new().to_string();
