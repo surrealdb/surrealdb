@@ -501,8 +501,7 @@ jobs:
           prerelease: ${{ inputs.environment == 'beta' }}
           files: |
             LICENSE
-            artifacts/*.tgz
-            artifacts/*.exe
+            artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*
 
       - name: Set latest version
         if: ${{ inputs.create-release && inputs.latest }}
