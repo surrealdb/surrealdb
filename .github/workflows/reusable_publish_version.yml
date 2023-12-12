@@ -145,6 +145,8 @@ jobs:
           set -x
 
           if [[ "${{ inputs.environment }}" == "beta" && "${{ inputs.publish }}" == "true" ]]; then
+            echo "git-ref=releases/beta" >> $GITHUB_OUTPUT
+          elif [[ "${{ inputs.environment }}" == "release" && "${{ inputs.git-ref }}" == "releases/beta" && "${{ inputs.publish }}" == "true" ]]; then
             echo "git-ref=releases/stable" >> $GITHUB_OUTPUT
           else
             echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
