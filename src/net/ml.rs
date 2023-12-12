@@ -65,8 +65,14 @@ async fn import(
 	let data = file.to_bytes();
 	// Calculate the hash of the model file
 	let hash = surrealdb::obs::hash(&data);
+	// Calculate the path of the model file
+	let path = format!(
+		"ml/{nsv}/{dbv}/{}-{}-{hash}.surml",
+		file.header.name.to_string(),
+		file.header.version.to_string()
+	);
 	// Insert the file data in to the store
-	surrealdb::obs::put(&hash, data).await?;
+	surrealdb::obs::put(&path, data).await?;
 	// Insert the model in to the database
 	db.process(
 		DefineStatement::Model(DefineModelStatement {
@@ -100,8 +106,10 @@ async fn export(
 	let mut tx = db.transaction(Read, Optimistic).await?;
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
+	// Calculate the path of the model file
+	let path = format!("ml/{nsv}/{dbv}/{name}-{version}-{}.surml", info.hash);
 	// Export the file data in to the store
-	let mut data = surrealdb::obs::stream(info.hash.to_owned()).await?;
+	let mut data = surrealdb::obs::stream(path).await?;
 	// Create a chunked response
 	let (mut chn, body) = Body::channel();
 	// Process all stream values

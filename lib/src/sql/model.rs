@@ -67,6 +67,15 @@ impl Model {
 			// Get the function definition
 			run.get_and_cache_db_model(opt.ns(), opt.db(), &self.name, &self.version).await?
 		};
+		// Calculate the model path
+		let path = format!(
+			"ml/{}/{}/{}-{}-{}.surml",
+			opt.ns(),
+			opt.db(),
+			self.name,
+			self.version,
+			val.hash
+		);
 		// Check permissions
 		if opt.check_perms(Action::View) {
 			match &val.permissions {
@@ -112,7 +121,7 @@ impl Model {
 						message: ARGUMENTS.into(),
 					})?;
 				// Get the model file as bytes
-				let bytes = crate::obs::get(&val.hash).await?;
+				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).unwrap();
@@ -134,7 +143,7 @@ impl Model {
 					message: ARGUMENTS.into(),
 				})?;
 				// Get the model file as bytes
-				let bytes = crate::obs::get(&val.hash).await?;
+				let bytes = crate::obs::get(&path).await?;
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
@@ -162,7 +171,7 @@ impl Model {
 						message: ARGUMENTS.into(),
 					})?;
 				// Get the model file as bytes
-				let bytes = crate::obs::get(&val.hash).await?;
+				let bytes = crate::obs::get(&path).await?;
 				// Convert the argument to a tensor
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task

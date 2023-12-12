@@ -90,5 +90,7 @@ pub fn hash(data: &Vec<u8>) -> String {
 	let mut hasher = Sha1::new();
 	hasher.update(data);
 	let result = hasher.finalize();
-	hex::encode(result)
+	let mut output = hex::encode(result);
+	output.truncate(6);
+	output
 }
