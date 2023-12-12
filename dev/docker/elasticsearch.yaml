@@ -1,3 +1,0 @@
-xpack.security.authc.api_key.enabled: true
-xpack.security.authc.api_key.default_enabled: true
-xpack.security.authc.api_key.key: your-bearer-token

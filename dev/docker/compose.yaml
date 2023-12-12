@@ -64,19 +64,27 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
     environment:
       - discovery.type=single-node
-      - ELASTICSEARCH_USERNAME=admin
-      - ELASTICSEARCH_PASSWORD=admin
+#      - ES_SECURITY_ENABLE=true
+#      - ELASTICSEARCH_USERNAME=admin
+#      - ELASTICSEARCH_PASSWORD=admin
     ports:
       - 9200:9200
-    volumes:
-      - ./elasticsearch.yaml:/usr/share/elasticsearch/config/elasticsearch.yml
+#    volumes:
+      # https://www.elastic.co/guide/en/elasticsearch/reference/current/docker.html#_configuration_files_must_be_readable_by_the_elasticsearch_user
+      # Must be in dir with gid=0, chmod g+rwx
+#      - ./elasticsearch/elasticsearch.yaml:/usr/share/elasticsearch/config/elasticsearch.yml
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.11.1
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+#      - ELASTICSEARCH_USERNAME=admin
+#      - ELASTICSEARCH_PASSWORD=admin
+      - ELASTICSEARCH_SSL_VERIFICATIONMODE=none
     ports:
       - 5601:5601
+    depends_on:
+      - elasticsearch
 
 volumes:
   grafana:
