@@ -24,15 +24,12 @@ can be exploited.
 - ✅ Privately disclose the details of any potential vulnerability to SurrealDB.
 - ✅ Provide enough information to reproduce the vulnerability in your report.
 - ✅ Ask permission from SurrealDB to run automated security tools against its infrastructure.
-- ✅ Report vulnerabilities that you discover in SurrealDB code, software or infrastructure.
 
 ### Do Not
 
 - ❌ Disclose the details of the vulnerability publicly or to third parties. 
 - ❌ Exploit a vulnerability beyond what is strictly necessary to verify its existence.
 - ❌ Run automated security tools against SurrealDB infrastructure without permission.
-- ❌ Report well-known vulnerabilities in [third-party dependencies](#dependencies) or disclosed by
-  [OSS-Fuzz](#fuzzing).
 
 ### Our Responsibility 
 
