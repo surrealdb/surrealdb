@@ -145,8 +145,6 @@ jobs:
 
       - name: Push tag
         if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the tag
         run: git push --tags || true
 
       - name: Set outputs
