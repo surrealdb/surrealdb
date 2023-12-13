@@ -21,7 +21,7 @@ pub enum Index {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -30,16 +30,28 @@ pub struct SearchParams {
 	pub doc_lengths_order: u32,
 	pub postings_order: u32,
 	pub terms_order: u32,
+	#[revision(start = 2)]
+	pub doc_ids_cache: u32,
+	#[revision(start = 2)]
+	pub doc_lengths_cache: u32,
+	#[revision(start = 2)]
+	pub postings_cache: u32,
+	#[revision(start = 2)]
+	pub terms_cache: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct MTreeParams {
 	pub dimension: u16,
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
 	pub doc_ids_order: u32,
+	#[revision(start = 2)]
+	pub doc_ids_cache: u32,
+	#[revision(start = 2)]
+	pub mtree_cache: u32,
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -94,13 +106,17 @@ impl Display for Index {
 			Self::Search(p) => {
 				write!(
 					f,
-					"SEARCH ANALYZER {} {} DOC_IDS_ORDER {} DOC_LENGTHS_ORDER {} POSTINGS_ORDER {} TERMS_ORDER {}",
+					"SEARCH ANALYZER {} {} DOC_IDS_ORDER {} DOC_LENGTHS_ORDER {} POSTINGS_ORDER {} TERMS_ORDER {} DOC_IDS_CACHE {} DOC_LENGTHS_CACHE {} POSTINGS_CACHE {} TERMS_CACHE {}",
 					p.az,
 					p.sc,
 					p.doc_ids_order,
 					p.doc_lengths_order,
 					p.postings_order,
-					p.terms_order
+					p.terms_order,
+					p.doc_ids_cache,
+					p.doc_lengths_cache,
+					p.postings_cache,
+					p.terms_cache
 				)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
@@ -110,8 +126,8 @@ impl Display for Index {
 			Self::MTree(p) => {
 				write!(
 					f,
-					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {}",
-					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order
+					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
+					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order, p.doc_ids_cache, p.mtree_cache
 				)
 			}
 		}

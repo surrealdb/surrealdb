@@ -46,8 +46,8 @@ pub enum Error {
 	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
-	#[error("The database encountered unreachable logic")]
-	Unreachable,
+	#[error("The database encountered unreachable logic: {0}")]
+	Unreachable(&'static str),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -619,8 +619,8 @@ pub enum Error {
 	Revision(#[from] RevisionError),
 
 	/// The index has been found to be inconsistent
-	#[error("Index is corrupted")]
-	CorruptedIndex,
+	#[error("Index is corrupted: {0}")]
+	CorruptedIndex(&'static str),
 
 	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
 	#[error("There was no suitable index supporting the expression '{value}'")]
