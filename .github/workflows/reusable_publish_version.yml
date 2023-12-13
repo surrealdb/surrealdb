@@ -505,6 +505,13 @@ jobs:
             artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.tgz
             artifacts/surreal-${{ needs.prepare-vars.outputs.git-ref }}.*/*.exe
 
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-2
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
       - name: Set latest release version
         if: ${{ inputs.create-release && inputs.latest }}
         run: |
@@ -516,13 +523,6 @@ jobs:
         run: |
           echo ${{ needs.prepare-vars.outputs.git-ref }} > ${{ inputs.environment }}.txt
           aws s3 cp --cache-control 'no-store' ${{ inputs.environment }}.txt s3://download.surrealdb.com/${{ inputs.environment }}.txt
-
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: us-east-2
-          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
       - name: Publish binaries
         run: |
