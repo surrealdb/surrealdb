@@ -33,7 +33,10 @@ impl<'a> Document<'a> {
 				let inp = inp.pick(&k);
 				// Check for IMMUTABLE clause
 				if fd.immutable && !self.is_new() && val != old {
-					return Err(Error::FieldImmutable{ field: fd.name.clone(), thing: rid.to_string() })
+					return Err(Error::FieldImmutable {
+						field: fd.name.clone(),
+						thing: rid.to_string(),
+					});
 				}
 				// Get the default value
 				let def = match &fd.default {
@@ -43,7 +46,7 @@ impl<'a> Document<'a> {
 							Value::Function(_) => Some(v),
 							v if v.is_static() => Some(*v),
 							_ => None,
-						}
+						},
 						_ => None,
 					},
 				};

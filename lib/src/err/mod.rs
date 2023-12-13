@@ -530,7 +530,9 @@ pub enum Error {
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
-	#[error("Found changed value for field `{field}`, with record `{thing}`, but field is immutable")]
+	#[error(
+		"Found changed value for field `{field}`, with record `{thing}`, but field is immutable"
+	)]
 	FieldImmutable {
 		thing: String,
 		field: Idiom,
