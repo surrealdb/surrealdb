@@ -84,6 +84,15 @@ unstable crates are part of the public API of SurrealDB.
 
 ## Security Automation
 
+### Dependencies
+
+Dependencies used by SurrealDB are [checked for known vulnerabilities in
+CI](https://github.com/surrealdb/surrealdb/pull/3123) using `cargo audit`. Developers are required to either update,
+replace or acknowledge vulnerable dependencies found during the approval process of every pull request. Additionally,
+SurrealDB makes use of Github's [Dependabot
+alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) to continuously
+monitor its dependencies for security issues.
+
 ### Fuzzing
 
 SurrealDB is [integrated](https://github.com/google/oss-fuzz/tree/master/projects/surrealdb) with Google's
@@ -93,12 +102,3 @@ identify security and performance bugs in SurrealQL. We aim to resolve all [secu
 bugs](https://google.github.io/oss-fuzz/advanced-topics/bug-fixing-guidance#security-issues) before their disclosure
 deadline. Other bugs (e.g. crashes or performance bugs) that may have some availability impact will be prioritized and
 resolved as any other bug regardless of the disclosure deadline.
-
-### Dependencies
-
-Dependencies used by SurrealDB are [checked for known vulnerabilities in
-CI](https://github.com/surrealdb/surrealdb/pull/3123) using `cargo audit`. Developers are required to either update,
-replace or acknowledge vulnerable dependencies found during the approval process of every pull request. Additionally,
-SurrealDB makes use of Github's [Dependabot
-alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) to continuously
-monitor its dependencies for security issues.
