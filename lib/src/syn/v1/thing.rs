@@ -11,23 +11,38 @@ use nom::{
 	character::complete::char,
 	combinator::{cut, map, value},
 	sequence::delimited,
+	Err, Parser,
 };
 
 pub fn thing(i: &str) -> IResult<&str, Thing> {
 	expected("a thing", alt((thing_raw, thing_single, thing_double)))(i)
 }
 
+pub fn revert_cut<I, O, E, F: Parser<I, O, E>>(mut parser: F) -> impl FnMut(I) -> IResult<I, O, E> {
+	move |i| match parser.parse(i) {
+		Ok(x) => Ok(x),
+		Err(Err::Failure(e)) => Err(Err::Error(e)),
+		Err(e) => Err(e),
+	}
+}
+
 fn thing_single(i: &str) -> IResult<&str, Thing> {
 	alt((
 		delimited(tag("r\'"), cut(thing_raw), cut(char('\''))),
-		delimited(char('\''), thing_raw, char('\'')),
+		// we need to revert any possible failure here because a thing can parse a value which can
+		// cut at various points. However even if when the production is not a valid record id
+		// string. It might still be a correct plain string
+		delimited(char('\''), revert_cut(thing_raw), char('\'')),
 	))(i)
 }
 
 fn thing_double(i: &str) -> IResult<&str, Thing> {
 	alt((
 		delimited(tag("r\""), cut(thing_raw), cut(char('\"'))),
-		delimited(char('\"'), thing_raw, char('\"')),
+		// we need to revert any possible failure here because a thing can parse a value which can
+		// cut at various points. However even if when the production is not a valid record id
+		// string. It might still be a correct plain string
+		delimited(char('\"'), revert_cut(thing_raw), char('\"')),
 	))(i)
 }
 
@@ -65,6 +80,7 @@ mod tests {
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
 	use crate::sql::value::Value;
+	use crate::sql::Strand;
 	use crate::syn::test::Parse;
 
 	#[test]
@@ -234,5 +250,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100test"), out);
 		assert_eq!("100test", format!("{}", out));
+	}
+
+	#[test]
+	fn backup_id() {
+		// this is an invalid record id.
+		// Normally the parser fails early when an array is missing its delimiter but in this case
+		// it should backup and try to parse a plain string.
+		let sql = r#""_:["foo"""#;
+		let res = Value::parse(sql);
+		assert_eq!(res, Value::Strand(Strand(r#"_:["#.to_owned())));
 	}
 }
