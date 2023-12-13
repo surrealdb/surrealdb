@@ -29,6 +29,16 @@ on:
         type: boolean
         default: false
         description: "Create a GitHub release"
+      http-compression:
+        required: false
+        type: boolean
+        default: true
+        description: "Enable HTTP compression in binaries"
+      ml:
+        required: false
+        type: boolean
+        default: true
+        description: "Enable ML support in binaries"
 
 defaults:
   run:
@@ -346,7 +356,14 @@ jobs:
               brew install protobuf
 
               # Build
-              cargo build --features storage-tikv,http-compression,ml --release --locked --target x86_64-apple-darwin
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
+              cargo build --features $features --release --locked --target x86_64-apple-darwin
 
               # Package
               cp target/x86_64-apple-darwin/release/surreal surreal
@@ -363,7 +380,14 @@ jobs:
               brew install protobuf
 
               # Build
-              cargo build --features storage-tikv,http-compression,ml --release --locked --target aarch64-apple-darwin
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
+              cargo build --features $features --release --locked --target aarch64-apple-darwin
 
               # Package
               cp target/aarch64-apple-darwin/release/surreal surreal
@@ -377,9 +401,16 @@ jobs:
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
               docker build \
                 --platform linux/amd64 \
-                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression,ml" \
+                --build-arg="CARGO_EXTRA_FEATURES=${features}" \
                 -t binary \
                 -f docker/Dockerfile.binary \
                 .
@@ -397,9 +428,16 @@ jobs:
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
             build-step: |
               # Build
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
               docker build \
                 --platform linux/arm64 \
-                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression,ml" \
+                --build-arg="CARGO_EXTRA_FEATURES=${features}" \
                 -t binary \
                 -f docker/Dockerfile.binary \
                 .
@@ -420,7 +458,11 @@ jobs:
               vcpkg integrate install
 
               # Build
-              cargo build --features storage-tikv,http-compression --release --locked --target x86_64-pc-windows-msvc
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
               # Package
               cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
