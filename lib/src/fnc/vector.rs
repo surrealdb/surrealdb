@@ -128,12 +128,13 @@ impl TryFrom<Value> for Vec<Number> {
 
 	fn try_from(val: Value) -> Result<Self, Self::Error> {
 		if let Value::Array(a) = val {
-			let mut vec = Vec::with_capacity(a.0.len());
-			for v in a.0 {
-				let n: Number = v.try_into()?;
-				vec.push(n);
-			}
-			Ok(vec)
+		    a
+				.into_iter()
+				.map(Value::try_into)
+				.collect::<Result<Vec<Number>, Error>>()
+				.map_err(|_| Error::InvalidVectorValue {
+					current: val.to_string(),
+				});
 		} else {
 			Err(Error::InvalidVectorValue {
 				current: val.to_string(),
