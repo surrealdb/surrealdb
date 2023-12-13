@@ -9,7 +9,7 @@
 
 ## Reporting a Vulnerability
 
-We take the security of SurrealDB code, software, and cloud platform very seriously. If you believe you have found a
+We take the security of SurrealDB code, software, and infrastructure very seriously. If you believe you have found a
 security vulnerability in SurrealDB, we encourage you to let us know right away. We will investigate all legitimate
 reports and do our best to quickly fix the problem.
 
@@ -24,15 +24,15 @@ can be exploited.
 - ✅ Privately disclose the details of any potential vulnerability to SurrealDB.
 - ✅ Ask permission from SurrealDB to run automated security tools against its infrastructure.
 - ✅ Provide enough information to reproduce the vulnerability in your report.
-- ✅ Report vulnerabilities that you discover in SurrealDB code, products and infrastructure.
+- ✅ Report vulnerabilities that you discover in SurrealDB code, software or infrastructure.
 
 ### Do Not
 
 - ❌ Disclose the details of the vulnerability publicly or to third parties. 
 - ❌ Run automated security tools against SurrealDB infrastructure without permission.
 - ❌ Exploit a vulnerability beyond what is strictly necessary to verify its existence.
-- ❌ Report well-known vulnerabilities in [third-party
-  dependencies](#dependencies) or disclosed by [OSS-Fuzz](#fuzzing).
+- ❌ Report well-known vulnerabilities in [third-party dependencies](#dependencies) or disclosed by
+  [OSS-Fuzz](#fuzzing).
 
 ### Our Responsibility 
 
@@ -72,11 +72,11 @@ Regular security updates can be released as part of a minor release (e.g. `1.999
 should not break backward compatibility either and we encourage updating whenever possible. However, due to the youth of
 the Rust ecosystem, there are a few security-sensitive dependencies (e.g. `rustls` or `native_tls`) that are part of the
 public API of SurrealDB but are still in an unstable version, meaning that they can break backward compatibility. We do
-not consider these types (e.g.  the [TLS enumeration](https://docs.rs/surrealdb/1.0.0/surrealdb/opt/enum.Tls.html))
-part of the SurrealDB stable API and as such their backward compatibility may be broken in a minor release. These
-breaking changes should be rare and will always be clearly stated in the changelog. Even if not considered part of the
-stable API, these types of breaking changes will only be included in major and minor releases; never in patch releases
-as stated in the previous paragraph.
+not consider these types (e.g.  the [TLS enumeration](https://docs.rs/surrealdb/1.0.0/surrealdb/opt/enum.Tls.html)) part
+of the SurrealDB stable API and as such their backward compatibility may be broken in a minor release. These breaking
+changes should be rare and will always be clearly stated in the changelog. Even if not considered part of the stable
+API, these types of breaking changes will only be included in major and minor releases; never in patch releases as
+stated in the previous paragraph.
 
 If and when an LTS (Long-Term Support) version of SurrealDB becomes available, we will strive to backport security
 patches to that version as well. This will be possible without breaking any sort of backward compatibility once no
