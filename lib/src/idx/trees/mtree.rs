@@ -144,9 +144,7 @@ impl MTreeIndex {
 				vec.add(n);
 				Ok(())
 			}
-			_ => Err(Error::InvalidVectorValue {
-				current: value.clone().to_raw_string(),
-			}),
+			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
 		}
 	}
 

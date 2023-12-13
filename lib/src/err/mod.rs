@@ -242,10 +242,8 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
-	#[error("The value '{current}' is not a vector.")]
-	InvalidVectorValue {
-		current: String,
-	},
+	#[error("The value cannot be converted to a vector: {0}")]
+	InvalidVectorValue(String),
 
 	/// Invalid regular expression
 	#[error("Invalid regular expression: {0:?}")]

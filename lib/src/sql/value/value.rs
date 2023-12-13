@@ -710,6 +710,16 @@ impl TryFrom<Value> for Number {
 	}
 }
 
+impl TryFrom<&Value> for Number {
+	type Error = Error;
+	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => Ok(x.clone()),
+			_ => Err(Error::TryFrom(value.to_string(), "Number")),
+		}
+	}
+}
+
 impl TryFrom<Value> for Datetime {
 	type Error = Error;
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
