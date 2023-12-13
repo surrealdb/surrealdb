@@ -4,15 +4,29 @@ use crate::cli::abstraction::{
 };
 use crate::err::Error;
 use clap::Args;
-use surrealdb::dbs::Capabilities;
+use futures_util::StreamExt;
 use surrealdb::engine::any::{connect, IntoEndpoint};
-use surrealdb::opt::Config;
+use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
-pub struct ImportCommandArguments {
-	#[arg(help = "Path to the SurrealQL file to import")]
+pub struct ModelArguments {
+	#[arg(help = "The name of the model")]
+	#[arg(env = "SURREAL_NAME", long = "name")]
+	pub(crate) name: String,
+	#[arg(help = "The version of the model")]
+	#[arg(env = "SURREAL_VERSION", long = "version")]
+	pub(crate) version: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ExportCommandArguments {
+	#[arg(help = "Path to the SurrealML file to export. Use dash - to write into stdout.")]
+	#[arg(default_value = "-")]
 	#[arg(index = 1)]
 	file: String,
+
+	#[command(flatten)]
+	model: ModelArguments,
 	#[command(flatten)]
 	conn: DatabaseConnectionArguments,
 	#[command(flatten)]
@@ -22,8 +36,12 @@ pub struct ImportCommandArguments {
 }
 
 pub async fn init(
-	ImportCommandArguments {
+	ExportCommandArguments {
 		file,
+		model: ModelArguments {
+			name,
+			version,
+		},
 		conn: DatabaseConnectionArguments {
 			endpoint,
 		},
@@ -36,12 +54,10 @@ pub async fn init(
 			namespace,
 			database,
 		},
-	}: ImportCommandArguments,
+	}: ExportCommandArguments,
 ) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("info").init();
-	// Default datastore configuration for local engines
-	let config = Config::new().capabilities(Capabilities::all());
+	crate::telemetry::builder().with_log_level("error").init();
 
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
@@ -68,14 +84,34 @@ pub async fn init(
 		client
 	} else {
 		debug!("Connecting to the database engine without authentication");
-		connect((endpoint, config)).await?
+		connect(endpoint).await?
+	};
+
+	// Parse model version
+	let version = match version.parse() {
+		Ok(version) => version,
+		Err(_) => {
+			return Err(Error::Other(format!("`{version}` is not a valid semantic version")));
+		}
 	};
 
 	// Use the specified namespace / database
 	client.use_ns(namespace).use_db(database).await?;
-	// Import the data into the database
-	client.import(file).await?;
-	info!("The SurrealQL file was imported successfully");
+	// Export the data from the database
+	debug!("Exporting data from the database");
+	if file == "-" {
+		// Prepare the backup
+		let mut backup = client.export(()).ml(&name, version).await?;
+		// Get a handle to standard output
+		let mut stdout = io::stdout();
+		// Write the backup to standard output
+		while let Some(bytes) = backup.next().await {
+			stdout.write_all(&bytes?).await?;
+		}
+	} else {
+		client.export(file).ml(&name, version).await?;
+	}
+	info!("The SurrealML file was exported successfully");
 	// Everything OK
 	Ok(())
 }

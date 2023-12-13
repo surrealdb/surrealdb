@@ -10,7 +10,7 @@ use surrealdb::opt::Config;
 
 #[derive(Args, Debug)]
 pub struct ImportCommandArguments {
-	#[arg(help = "Path to the SurrealQL file to import")]
+	#[arg(help = "Path to the SurrealML file to import")]
 	#[arg(index = 1)]
 	file: String,
 	#[command(flatten)]
@@ -74,8 +74,8 @@ pub async fn init(
 	// Use the specified namespace / database
 	client.use_ns(namespace).use_db(database).await?;
 	// Import the data into the database
-	client.import(file).await?;
-	info!("The SurrealQL file was imported successfully");
+	client.import(file).ml().await?;
+	info!("The SurrealML file was imported successfully");
 	// Everything OK
 	Ok(())
 }

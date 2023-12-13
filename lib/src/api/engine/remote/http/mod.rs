@@ -7,6 +7,9 @@ pub(crate) mod wasm;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
@@ -516,7 +519,14 @@ async fn router(
 		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
-			let path = base_url.join(Method::Export.as_str())?;
+			let path = match param.ml_config {
+				#[cfg(feature = "ml")]
+				Some(MlConfig::Export {
+					name,
+					version,
+				}) => base_url.join(&format!("ml/export/{name}/{version}"))?,
+				_ => base_url.join(Method::Export.as_str())?,
+			};
 			let request = client
 				.get(path)
 				.headers(headers.clone())
@@ -527,7 +537,11 @@ async fn router(
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Import => {
-			let path = base_url.join(Method::Import.as_str())?;
+			let path = match param.ml_config {
+				#[cfg(feature = "ml")]
+				Some(MlConfig::Import) => base_url.join("ml/import")?,
+				_ => base_url.join(Method::Import.as_str())?,
+			};
 			let file = param.file.expect("file to import from");
 			let request = client
 				.post(path)

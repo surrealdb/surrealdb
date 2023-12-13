@@ -6,6 +6,7 @@ use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
 use crate::sql::statements::DefineFunctionStatement;
 use crate::sql::statements::DefineIndexStatement;
+use crate::sql::statements::DefineModelStatement;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::statements::DefineParamStatement;
 use crate::sql::statements::DefineScopeStatement;
@@ -22,6 +23,7 @@ pub enum Entry {
 	Db(Arc<DefineDatabaseStatement>),
 	Fc(Arc<DefineFunctionStatement>),
 	Ix(Arc<DefineIndexStatement>),
+	Ml(Arc<DefineModelStatement>),
 	Ns(Arc<DefineNamespaceStatement>),
 	Pa(Arc<DefineParamStatement>),
 	Tb(Arc<DefineTableStatement>),
@@ -36,6 +38,7 @@ pub enum Entry {
 	Fts(Arc<[DefineTableStatement]>),
 	Ixs(Arc<[DefineIndexStatement]>),
 	Lvs(Arc<[LiveStatement]>),
+	Mls(Arc<[DefineModelStatement]>),
 	Nss(Arc<[DefineNamespaceStatement]>),
 	Nts(Arc<[DefineTokenStatement]>),
 	Nus(Arc<[DefineUserStatement]>),

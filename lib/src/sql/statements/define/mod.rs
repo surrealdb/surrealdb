@@ -52,7 +52,7 @@ pub enum DefineStatement {
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
-	MlModel(DefineModelStatement),
+	Model(DefineModelStatement),
 }
 
 impl DefineStatement {
@@ -81,7 +81,7 @@ impl DefineStatement {
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::MlModel(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Model(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -101,7 +101,7 @@ impl Display for DefineStatement {
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
 			Self::Analyzer(v) => Display::fmt(v, f),
-			Self::MlModel(v) => Display::fmt(v, f),
+			Self::Model(v) => Display::fmt(v, f),
 		}
 	}
 }
