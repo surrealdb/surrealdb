@@ -320,6 +320,9 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
 		LET $keywords = 'animals';
+ 		SELECT id FROM blog
+ 			WHERE (title @1@ $keywords AND label = 'test')
+ 			OR (title @1@ $keywords AND label = 'test') EXPLAIN;
  		SELECT id,search::score(1) AS score FROM blog
  			WHERE (title @1@ $keywords AND label = 'test')
  			OR (title @1@ $keywords AND label = 'test');
@@ -330,11 +333,24 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
+	assert_eq!(res.len(), 10);
 	//
 	for _ in 0..7 {
 		let _ = res.remove(0).result?;
 	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'blog'
+					},
+					operation: 'Iterate Table'
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -350,6 +366,64 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_without_complex_query() -> Result<(), Error> {
+	let sql = r"
+		CREATE page:1 SET title = 'jump1', content = 'the quick brown fox jumped over the lazy dog', hostname = 'www1';
+		CREATE page:2 SET title = 'jump2', content = 'the fast fox jumped over the lazy dog', hostname = 'www2';
+		CREATE page:3 SET title = 'watching', content = 'the other animals sat there watching', hostname = 'www1';
+		CREATE page:4 SET title = 'nothing', content = 'the dog sat there and did nothing', hostname = 'www1';
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX blog_title ON page FIELDS title SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		DEFINE INDEX blog_content ON page FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		LET $keywords = 'dog';
+ 		LET $host = 'www1';
+		SELECT id,(search::score(0) * 2 + search::score(1)) AS score FROM page
+ 			WHERE hostname = $host AND (title @0@ $keywords OR content @1@ $keywords)
+ 			ORDER BY score DESC EXPLAIN;
+ 		SELECT id,(search::score(0) * 2 + search::score(1)) AS score FROM page
+ 			WHERE hostname = $host AND (title @0@ $keywords OR content @1@ $keywords)
+ 			ORDER BY score DESC;";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 11);
+	//
+	for _ in 0..9 {
+		let _ = res.remove(0).result?;
+	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+		{
+			detail: {
+				table: 'page'
+			},
+			operation: 'Iterate Table'
+		}
+	]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: page:1,
+				score: -0.7832164764404297f
+			},
+			{
+				id: page:4,
+				score: -0.87105393409729f
+			}
+		]",
+	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
