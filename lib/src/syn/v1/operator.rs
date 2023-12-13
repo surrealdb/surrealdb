@@ -5,12 +5,11 @@ use super::{
 use crate::sql::index::Distance;
 use crate::sql::{Dir, Operator};
 use crate::syn::v1::part::index::minkowski;
-use nom::combinator::map;
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
 	character::complete::{char, u32, u8},
-	combinator::{cut, opt, value},
+	combinator::{cut, map, opt, value},
 };
 
 pub fn assigner(i: &str) -> IResult<&str, Operator> {
