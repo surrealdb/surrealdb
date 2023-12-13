@@ -4,7 +4,7 @@
 
 FROM docker.io/ubuntu:20.04
 
-ARG CARGO_EXTRA_FEATURES="http-compression,storage-tikv"
+ARG CARGO_EXTRA_FEATURES="storage-tikv"
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y curl patch clang gpg build-essential git
