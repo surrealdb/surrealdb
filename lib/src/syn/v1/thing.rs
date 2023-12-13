@@ -80,6 +80,7 @@ mod tests {
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
 	use crate::sql::value::Value;
+	use crate::sql::Strand;
 	use crate::syn::test::Parse;
 
 	#[test]
@@ -249,5 +250,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100test"), out);
 		assert_eq!("100test", format!("{}", out));
+	}
+
+	#[test]
+	fn backup_id() {
+		// this is an invalid record id.
+		// Normally the parser fails early when an array is missing its delimiter but in this case
+		// it should backup and try to parse a plain string.
+		let sql = r#""_:["foo"""#;
+		let res = Value::parse(sql);
+		assert_eq!(res, Value::Strand(Strand(r#"_:["#.to_owned())));
 	}
 }
