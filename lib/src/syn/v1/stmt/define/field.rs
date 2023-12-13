@@ -30,7 +30,7 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 		let (i, what) = ident(i)?;
 		let (i, opts) = many0(field_opts)(i)?;
 		let (i, _) = expected(
-			"one of FLEX(IBLE), TYPE, VALUE, ASSERT, DEFAULT, or COMMENT",
+			"one of FLEX(IBLE), TYPE, IMMUTABLE, VALUE, ASSERT, DEFAULT, or COMMENT",
 			cut(ending::query),
 		)(i)?;
 		Ok((i, (name, what, opts)))
@@ -49,6 +49,9 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 			}
 			DefineFieldOption::Kind(v) => {
 				res.kind = Some(v);
+			}
+			DefineFieldOption::Immutable => {
+				res.immutable = true;
 			}
 			DefineFieldOption::Value(v) => {
 				res.value = Some(v);
@@ -74,6 +77,7 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 enum DefineFieldOption {
 	Flex,
 	Kind(Kind),
+	Immutable,
 	Value(Value),
 	Assert(Value),
 	Default(Value),
@@ -85,6 +89,7 @@ fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
 	alt((
 		field_flex,
 		field_kind,
+		field_immutable,
 		field_value,
 		field_assert,
 		field_default,
@@ -105,6 +110,12 @@ fn field_kind(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(kind)(i)?;
 	Ok((i, DefineFieldOption::Kind(v)))
+}
+
+fn field_immutable(i: &str) -> IResult<&str, DefineFieldOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IMMUTABLE")(i)?;
+	Ok((i, DefineFieldOption::Immutable))
 }
 
 fn field_value(i: &str) -> IResult<&str, DefineFieldOption> {

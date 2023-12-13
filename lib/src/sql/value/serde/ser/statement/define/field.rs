@@ -44,6 +44,7 @@ pub struct SerializeDefineFieldStatement {
 	what: Ident,
 	flex: bool,
 	kind: Option<Kind>,
+	immutable: bool,
 	value: Option<Value>,
 	assert: Option<Value>,
 	default: Option<Value>,
@@ -71,6 +72,9 @@ impl serde::ser::SerializeStruct for SerializeDefineFieldStatement {
 			}
 			"kind" => {
 				self.kind = value.serialize(ser::kind::opt::Serializer.wrap())?;
+			}
+			"immutable" => {
+				self.immutable = value.serialize(ser::primitive::bool::Serializer.wrap())?;
 			}
 			"value" => {
 				self.value = value.serialize(ser::value::opt::Serializer.wrap())?;
@@ -102,6 +106,7 @@ impl serde::ser::SerializeStruct for SerializeDefineFieldStatement {
 			what: self.what,
 			flex: self.flex,
 			kind: self.kind,
+			immutable: self.immutable,
 			value: self.value,
 			assert: self.assert,
 			default: self.default,
