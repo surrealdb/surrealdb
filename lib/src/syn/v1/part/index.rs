@@ -7,6 +7,7 @@ use crate::sql::{
 	index::{Distance, MTreeParams, SearchParams, VectorType},
 	Ident, Index,
 };
+
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
@@ -43,16 +44,32 @@ pub fn doc_ids_order(i: &str) -> IResult<&str, u32> {
 	order("DOC_IDS_ORDER", i)
 }
 
+pub fn doc_ids_cache(i: &str) -> IResult<&str, u32> {
+	order("DOC_IDS_CACHE", i)
+}
+
 pub fn doc_lengths_order(i: &str) -> IResult<&str, u32> {
 	order("DOC_LENGTHS_ORDER", i)
+}
+
+pub fn doc_lengths_cache(i: &str) -> IResult<&str, u32> {
+	order("DOC_LENGTHS_CACHE", i)
 }
 
 pub fn postings_order(i: &str) -> IResult<&str, u32> {
 	order("POSTINGS_ORDER", i)
 }
 
+pub fn postings_cache(i: &str) -> IResult<&str, u32> {
+	order("POSTINGS_CACHE", i)
+}
+
 pub fn terms_order(i: &str) -> IResult<&str, u32> {
 	order("TERMS_ORDER", i)
+}
+
+pub fn terms_cache(i: &str) -> IResult<&str, u32> {
+	order("TERMS_CACHE", i)
 }
 
 pub fn highlights(i: &str) -> IResult<&str, bool> {
@@ -71,6 +88,10 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 		let (i, o2) = opt(doc_lengths_order)(i)?;
 		let (i, o3) = opt(postings_order)(i)?;
 		let (i, o4) = opt(terms_order)(i)?;
+		let (i, c1) = opt(doc_ids_cache)(i)?;
+		let (i, c2) = opt(doc_lengths_cache)(i)?;
+		let (i, c3) = opt(postings_cache)(i)?;
+		let (i, c4) = opt(terms_cache)(i)?;
 		let (i, hl) = highlights(i)?;
 		Ok((
 			i,
@@ -82,6 +103,10 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 				doc_lengths_order: o2.unwrap_or(100),
 				postings_order: o3.unwrap_or(100),
 				terms_order: o4.unwrap_or(100),
+				doc_ids_cache: c1.unwrap_or(100),
+				doc_lengths_cache: c2.unwrap_or(100),
+				postings_cache: c3.unwrap_or(100),
+				terms_cache: c4.unwrap_or(100),
 			}),
 		))
 	})(i)
@@ -134,6 +159,10 @@ pub fn capacity(i: &str) -> IResult<&str, u16> {
 	Ok((i, capacity))
 }
 
+pub fn mtree_cache(i: &str) -> IResult<&str, u32> {
+	order("MTREE_CACHE", i)
+}
+
 pub fn mtree(i: &str) -> IResult<&str, Index> {
 	let (i, _) = tag_no_case("MTREE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -143,6 +172,8 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 		let (i, vector_type) = opt(vector_type)(i)?;
 		let (i, capacity) = opt(capacity)(i)?;
 		let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
+		let (i, doc_ids_cache) = opt(doc_ids_cache)(i)?;
+		let (i, mtree_cache) = opt(mtree_cache)(i)?;
 		Ok((
 			i,
 			Index::MTree(MTreeParams {
@@ -151,6 +182,8 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 				vector_type: vector_type.unwrap_or(VectorType::F64),
 				capacity: capacity.unwrap_or(40),
 				doc_ids_order: doc_ids_order.unwrap_or(100),
+				doc_ids_cache: doc_ids_cache.unwrap_or(100),
+				mtree_cache: mtree_cache.unwrap_or(100),
 			}),
 		))
 	})(i)

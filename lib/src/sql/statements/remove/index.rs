@@ -19,7 +19,7 @@ impl RemoveIndexStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
@@ -27,6 +27,8 @@ impl RemoveIndexStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
+		// Clear the index store cache
+		ctx.get_index_stores().index_removed(opt, &mut run, &self.what, &self.name).await?;
 		// Clear the cache
 		run.clear_cache();
 		// Delete the definition

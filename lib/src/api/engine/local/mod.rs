@@ -28,6 +28,8 @@ pub(crate) mod wasm;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
@@ -44,9 +46,27 @@ use crate::api::Surreal;
 use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::iam::check::check_ns_db;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::iam::Action;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::sql::statements::DefineModelStatement;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::sql::statements::DefineStatement;
 use crate::sql::statements::KillStatement;
 use crate::sql::Array;
 use crate::sql::Query;
@@ -56,6 +76,9 @@ use crate::sql::Strand;
 use crate::sql::Uuid;
 use crate::sql::Value;
 use channel::Sender;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use futures::StreamExt;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -65,6 +88,9 @@ use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use surrealml_core::storage::surml_file::SurMlFile;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -405,17 +431,42 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 async fn export(
 	kvs: &Datastore,
 	sess: &Session,
-	ns: String,
-	db: String,
 	chn: channel::Sender<Vec<u8>>,
+	ml_config: Option<MlConfig>,
 ) -> Result<()> {
-	if let Err(error) = kvs.export(sess, ns, db, chn).await?.await {
-		if let crate::error::Db::Channel(message) = error {
-			// This is not really an error. Just logging it for improved visibility.
-			trace!("{message}");
-			return Ok(());
+	match ml_config {
+		#[cfg(feature = "ml")]
+		Some(MlConfig::Export {
+			name,
+			version,
+		}) => {
+			// Ensure a NS and DB are set
+			let (nsv, dbv) = check_ns_db(sess)?;
+			// Check the permissions level
+			kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			// Start a new readonly transaction
+			let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+			// Attempt to get the model definition
+			let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
+			// Export the file data in to the store
+			let mut data = crate::obs::stream(info.hash.to_owned()).await?;
+			// Process all stream values
+			while let Some(Ok(bytes)) = data.next().await {
+				if chn.send(bytes.to_vec()).await.is_err() {
+					break;
+				}
+			}
 		}
-		return Err(error.into());
+		_ => {
+			if let Err(error) = kvs.export(sess, chn).await?.await {
+				if let crate::error::Db::Channel(message) = error {
+					// This is not really an error. Just logging it for improved visibility.
+					trace!("{message}");
+					return Ok(());
+				}
+				return Err(error.into());
+			}
+		}
 	}
 	Ok(())
 }
@@ -563,8 +614,6 @@ async fn router(
 		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
-			let ns = session.ns.clone().unwrap_or_default();
-			let db = session.db.clone().unwrap_or_default();
 			let (tx, rx) = crate::channel::bounded(1);
 
 			match (param.file, param.bytes_sender) {
@@ -572,7 +621,7 @@ async fn router(
 					let (mut writer, mut reader) = io::duplex(10_240);
 
 					// Write to channel.
-					let export = export(kvs, session, ns, db, tx);
+					let export = export(kvs, session, tx, param.ml_config);
 
 					// Read from channel and write to pipe.
 					let bridge = async move {
@@ -613,7 +662,7 @@ async fn router(
 					let session = session.clone();
 					tokio::spawn(async move {
 						let export = async {
-							if let Err(error) = export(&kvs, &session, ns, db, tx).await {
+							if let Err(error) = export(&kvs, &session, tx, param.ml_config).await {
 								let _ = backup.send(Err(error)).await;
 							}
 						};
@@ -647,15 +696,63 @@ async fn router(
 					.into());
 				}
 			};
-			let mut statements = String::new();
-			if let Err(error) = file.read_to_string(&mut statements).await {
-				return Err(Error::FileRead {
-					path,
-					error,
+			let responses = match param.ml_config {
+				#[cfg(feature = "ml")]
+				Some(MlConfig::Import) => {
+					// Ensure a NS and DB are set
+					let (nsv, dbv) = check_ns_db(session)?;
+					// Check the permissions level
+					kvs.check(session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+					// Create a new buffer
+					let mut buffer = Vec::new();
+					// Load all the uploaded file chunks
+					if let Err(error) = file.read_to_end(&mut buffer).await {
+						return Err(Error::FileRead {
+							path,
+							error,
+						}
+						.into());
+					}
+					// Check that the SurrealML file is valid
+					let file = match SurMlFile::from_bytes(buffer) {
+						Ok(file) => file,
+						Err(error) => {
+							return Err(Error::FileRead {
+								path,
+								error,
+							}
+							.into());
+						}
+					};
+					// Convert the file back in to raw bytes
+					let data = file.to_bytes();
+					// Calculate the hash of the model file
+					let hash = crate::obs::hash(&data);
+					// Insert the file data in to the store
+					crate::obs::put(&hash, data).await?;
+					// Insert the model in to the database
+					let query = DefineStatement::Model(DefineModelStatement {
+						hash,
+						name: file.header.name.to_string().into(),
+						version: file.header.version.to_string(),
+						comment: Some(file.header.description.to_string().into()),
+						..Default::default()
+					})
+					.into();
+					kvs.process(query, session, Some(vars.clone())).await?
 				}
-				.into());
-			}
-			let responses = kvs.execute(&statements, &*session, Some(vars.clone())).await?;
+				_ => {
+					let mut statements = String::new();
+					if let Err(error) = file.read_to_string(&mut statements).await {
+						return Err(Error::FileRead {
+							path,
+							error,
+						}
+						.into());
+					}
+					kvs.execute(&statements, &*session, Some(vars.clone())).await?
+				}
+			};
 			for response in responses {
 				response.result?;
 			}
