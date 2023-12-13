@@ -844,3 +844,59 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn field_definition_immutable() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD birthdate ON person TYPE option<string> IMMUTABLE;
+		CREATE person:test SET birthdate = '2023-12-13T21:27:55.632Z';
+		UPDATE person:test SET birthdate = '2023-12-13T21:27:55.632Z';
+		UPDATE person:test SET birthdate = '2024-12-13T21:27:55.632Z';
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 9);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				birthdate: '2024-12-13T21:27:55.632Z',
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				birthdate: '2024-12-13T21:27:55.632Z',
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Found changed value for field `birthdate`, with record `person:test`, but field is immutable",
+
+		),
+		"{}",
+		tmp.unwrap_err().to_string()
+	);
+	//
+	Ok(())
+}
