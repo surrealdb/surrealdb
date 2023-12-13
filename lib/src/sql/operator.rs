@@ -58,7 +58,7 @@ pub enum Operator {
 	Outside,
 	Intersects,
 	//
-	Knn(u16, Option<Distance>), // <{k}[,{dist}]>
+	Knn(u32, Option<Distance>), // <{k}[,{dist}]>
 	//
 	Rem, // %
 }

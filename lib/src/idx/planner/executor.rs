@@ -29,7 +29,7 @@ use tokio::sync::RwLock;
 
 pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>, Distance);
 pub(super) type KnnExpressions =
-	HashMap<Arc<Expression>, (u16, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
+	HashMap<Arc<Expression>, (u32, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -544,7 +544,7 @@ impl MtEntry {
 		tx: &mut kvs::Transaction,
 		mt: &MTreeIndex,
 		a: Array,
-		k: u16,
+		k: u32,
 	) -> Result<Self, Error> {
 		let res = mt.knn_search(tx, a, k as usize).await?;
 		Ok(Self {
