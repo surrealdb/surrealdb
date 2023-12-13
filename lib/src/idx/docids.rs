@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BStatistics, BTree, BTreeStore};
-use crate::idx::trees::store::{IndexStores, StoreProvider, StoreRights, TreeNodeProvider};
+use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
 use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, TransactionType};
 use revision::revisioned;
@@ -23,7 +23,7 @@ pub(crate) struct DocIds {
 
 impl DocIds {
 	pub(in crate::idx) async fn new(
-		index_stores: &IndexStores,
+		ixs: &IndexStores,
 		tx: &mut Transaction,
 		tt: TransactionType,
 		ikb: IndexKeyBase,
@@ -48,9 +48,7 @@ impl DocIds {
 			state_key,
 			index_key_base: ikb,
 			btree: BTree::new(state.btree),
-			index_stores,
-			tree_node_provider: TreeNodeProvider::DocIds(index_key_base.clone()),
-			store_provider,
+			store,
 			available_ids: state.available_ids,
 			next_doc_id: state.next_doc_id,
 		})
@@ -97,17 +95,6 @@ impl DocIds {
 		tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
 		self.btree.insert(tx, &mut self.store, doc_key, doc_id).await?;
 		Ok(Resolved::New(doc_id))
-	}
-
-	async fn get_store(&self, rights: StoreRights) -> BTreeStore<TrieKeys> {
-		self.index_stores
-			.get_store_btree_trie(
-				self.tree_node_provider.clone(),
-				self.store_provider,
-				rights,
-				20, //TODO Replace by env
-			)
-			.await
 	}
 
 	pub(in crate::idx) async fn remove_doc(
@@ -231,9 +218,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_resolve_doc_id() {
-		for sp in [StoreProvider::Transaction, StoreProvider::Memory] {
-			let ds = Datastore::new("memory").await.unwrap();
-			let ixs = IndexStores::default();
+		let ds = Datastore::new("memory").await.unwrap();
 
 		// Resolve a first doc key
 		{
@@ -319,9 +304,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_remove_doc() {
-		for sp in [StoreProvider::Transaction, StoreProvider::Memory] {
-			let ds = Datastore::new("memory").await.unwrap();
-			let ixs = IndexStores::default();
+		let ds = Datastore::new("memory").await.unwrap();
 
 		// Create two docs
 		{

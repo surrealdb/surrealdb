@@ -7,6 +7,7 @@ use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
+use crate::idx::trees::store::IndexStores;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;

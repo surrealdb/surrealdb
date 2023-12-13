@@ -304,27 +304,3 @@ impl IndexStores {
 			&& self.0.btree_trie_caches.is_empty().await
 	}
 }
-
-// We are using a macro rather than a function because the `tokio::sync::RwLockWriteGuard`
-// is designed to automatically release the lock when they go out of scope.
-#[macro_export]
-macro_rules! mem_store_write_lock {
-	($mem_store:expr) => {
-		match &$mem_store {
-			Some(store) => Some(store.write().await),
-			None => None,
-		}
-	};
-}
-
-// We are using a macro rather than a function because the `tokio::sync::RwLockReadGuard`
-// is designed to automatically release the lock when they go out of scope.
-#[macro_export]
-macro_rules! mem_store_read_lock {
-	($mem_store:expr) => {
-		match &$mem_store {
-			Some(store) => Some(store.read().await),
-			None => None,
-		}
-	};
-}

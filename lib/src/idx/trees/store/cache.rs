@@ -194,14 +194,8 @@ where
 			return Ok(n);
 		}
 		match self.cache.write().await.entry(node_id) {
-			Entry::Occupied(e) => {
-				#[cfg(debug_assertions)]
-				debug!("CACHE CACHED id: {node_id}");
-				Ok(e.get().clone())
-			}
+			Entry::Occupied(e) => Ok(e.get().clone()),
 			Entry::Vacant(e) => {
-				#[cfg(debug_assertions)]
-				debug!("CACHE LOAD id: {node_id}");
 				let n = Arc::new(self.keys.load::<N>(tx, node_id).await?);
 				e.insert(n.clone());
 				Ok(n)

@@ -153,11 +153,11 @@ where
 		&mut self,
 		key: Key,
 		payload: Payload,
-		node: BStoredNode<BK>,
+		node: BTreeNode<BK>,
 	) -> Result<Option<Payload>, Error> {
 		match self {
 			BTreeNode::Internal(keys, children) => {
-				if let BTreeNode::Internal(append_keys, mut append_children) = &node.n {
+				if let BTreeNode::Internal(append_keys, mut append_children) = node {
 					keys.append(append_keys);
 					children.append(&mut append_children);
 					Ok(keys.insert(key, payload))
@@ -260,6 +260,7 @@ where
 				let child_idx = keys.get_child_idx(searched_key);
 				next_node.replace(children[child_idx]);
 			}
+			store.set_node(current, false).await?;
 		}
 		Ok(None)
 	}
@@ -355,7 +356,7 @@ where
 		idx: usize,
 		child_node: BStoredNode<BK>,
 	) -> Result<SplitResult, Error> {
-		let (left_node, right_node, median_key, median_payload) = match &child_node.n {
+		let (left_node, right_node, median_key, median_payload) = match child_node.n {
 			BTreeNode::Internal(keys, children) => self.split_internal_node(keys, children)?,
 			BTreeNode::Leaf(keys) => self.split_leaf_node(keys)?,
 		};
@@ -397,10 +398,9 @@ where
 	fn split_internal_node(
 		&mut self,
 		keys: BK,
-		left_children: &[NodeId],
+		mut left_children: Vec<NodeId>,
 	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
 		let r = keys.split_keys()?;
-		let mut left_children = left_children.to_vec();
 		let right_children = left_children.split_off(r.median_idx + 1);
 		let left_node = BTreeNode::Internal(r.left, left_children);
 		let right_node = BTreeNode::Internal(r.right, right_children);
@@ -450,7 +450,7 @@ where
 							keys.remove(&key_to_delete);
 							if keys.len() == 0 {
 								// The node is empty, we can delete it
-								store.remove_node(node).await?;
+								store.remove_node(node.id, node.key).await?;
 								// Check if this was the root node
 								if Some(node_id) == self.state.root {
 									self.state.set_root(None);
@@ -595,11 +595,11 @@ where
 			left_node.n.check();
 			debug!("CLRS: 2c");
 		}
-		left_node.n.append(key_to_delete.clone(), 0, right_node.clone())?;
+		left_node.n.append(key_to_delete.clone(), 0, right_node.n)?;
 		#[cfg(debug_assertions)]
 		left_node.n.check();
 		store.set_node(left_node, true).await?;
-		store.remove_node(right_node).await?;
+		store.remove_node(right_id, right_node.key).await?;
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
 		Ok((false, key_to_delete, left_id))
@@ -874,14 +874,14 @@ where
 		debug!("descending_key: {}", String::from_utf8_lossy(&descending_key));
 		children.remove(child_idx + 1);
 		let left_id = left_child.id;
-		if left_child.n.append(descending_key, descending_payload, right_child.clone())?.is_some() {
+		if left_child.n.append(descending_key, descending_payload, right_child.n)?.is_some() {
 			#[cfg(debug_assertions)]
 			panic!("Key already present");
 		}
 		#[cfg(debug_assertions)]
 		left_child.n.check();
 		store.set_node(left_child, true).await?;
-		store.remove_node(right_child).await?;
+		store.remove_node(right_child.id, right_child.key).await?;
 		Ok((true, is_main_key, key_to_delete, left_id))
 	}
 
@@ -934,7 +934,7 @@ mod tests {
 	use crate::idx::trees::btree::{
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
-	use crate::idx::trees::store::{InMemoryProvider, NodeId, TreeNode, TreeNodeProvider};
+	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
 	use crate::idx::VersionedSerdeState;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
 	use rand::prelude::SliceRandom;
