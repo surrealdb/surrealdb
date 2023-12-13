@@ -79,6 +79,26 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
+  check-dependencies:
+    name: Check dependencies
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.71.1
+          components: rustfmt
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        run: cargo install --debug --locked cargo-audit
+
+      - name: Check dependencies 
+        run: cargo audit
+
   check-wasm:
     name: Check Wasm
     runs-on: ubuntu-latest
