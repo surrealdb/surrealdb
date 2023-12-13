@@ -142,10 +142,10 @@ impl PermissionKind {
 	}
 }
 
-pub fn permissions(i: &str) -> IResult<&str, Permissions> {
+pub fn permissions(i: &str, default: Permission) -> IResult<&str, Permissions> {
 	let (i, _) = tag_no_case("PERMISSIONS")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	cut(alt((none, full, specific)))(i)
+	cut(alt((none, full, specific(default))))(i)
 }
 
 fn none(i: &str) -> IResult<&str, Permissions> {
@@ -158,49 +158,51 @@ fn full(i: &str) -> IResult<&str, Permissions> {
 	Ok((i, Permissions::full()))
 }
 
-fn specific(i: &str) -> IResult<&str, Permissions> {
-	let (i, perms) = separated_list1(commasorspace, rule)(i)?;
-	Ok((
-		i,
-		Permissions {
-			select: perms
-				.iter()
-				.find_map(|x| {
-					x.iter().find_map(|y| match y {
-						(PermissionKind::Select, ref v) => Some(v.to_owned()),
-						_ => None,
+fn specific(default: Permission) -> impl Fn(&str) -> IResult<&str, Permissions> {
+	move |i: &str| -> IResult<&str, Permissions> {
+		let (i, perms) = separated_list1(commasorspace, rule)(i)?;
+		Ok((
+			i,
+			Permissions {
+				select: perms
+					.iter()
+					.find_map(|x| {
+						x.iter().find_map(|y| match y {
+							(PermissionKind::Select, ref v) => Some(v.to_owned()),
+							_ => None,
+						})
 					})
-				})
-				.unwrap_or_default(),
-			create: perms
-				.iter()
-				.find_map(|x| {
-					x.iter().find_map(|y| match y {
-						(PermissionKind::Create, ref v) => Some(v.to_owned()),
-						_ => None,
+					.unwrap_or(default.to_owned()),
+				create: perms
+					.iter()
+					.find_map(|x| {
+						x.iter().find_map(|y| match y {
+							(PermissionKind::Create, ref v) => Some(v.to_owned()),
+							_ => None,
+						})
 					})
-				})
-				.unwrap_or_default(),
-			update: perms
-				.iter()
-				.find_map(|x| {
-					x.iter().find_map(|y| match y {
-						(PermissionKind::Update, ref v) => Some(v.to_owned()),
-						_ => None,
+					.unwrap_or(default.to_owned()),
+				update: perms
+					.iter()
+					.find_map(|x| {
+						x.iter().find_map(|y| match y {
+							(PermissionKind::Update, ref v) => Some(v.to_owned()),
+							_ => None,
+						})
 					})
-				})
-				.unwrap_or_default(),
-			delete: perms
-				.iter()
-				.find_map(|x| {
-					x.iter().find_map(|y| match y {
-						(PermissionKind::Delete, ref v) => Some(v.to_owned()),
-						_ => None,
+					.unwrap_or(default.to_owned()),
+				delete: perms
+					.iter()
+					.find_map(|x| {
+						x.iter().find_map(|y| match y {
+							(PermissionKind::Delete, ref v) => Some(v.to_owned()),
+							_ => None,
+						})
 					})
-				})
-				.unwrap_or_default(),
-		},
-	))
+					.unwrap_or(default.to_owned()),
+			},
+		))
+	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -285,7 +287,7 @@ mod tests {
 	#[test]
 	fn permissions_none() {
 		let sql = "PERMISSIONS NONE";
-		let res = permissions(sql);
+		let res = permissions(sql, Permission::Full);
 		let out = res.unwrap().1;
 		assert_eq!("PERMISSIONS NONE", format!("{}", out));
 		assert_eq!(out, Permissions::none());
@@ -294,7 +296,7 @@ mod tests {
 	#[test]
 	fn permissions_full() {
 		let sql = "PERMISSIONS FULL";
-		let res = permissions(sql);
+		let res = permissions(sql, Permission::None);
 		let out = res.unwrap().1;
 		assert_eq!("PERMISSIONS FULL", format!("{}", out));
 		assert_eq!(out, Permissions::full());
@@ -304,7 +306,7 @@ mod tests {
 	fn permissions_specific() {
 		let sql =
 			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE";
-		let res = permissions(sql);
+		let res = permissions(sql, Permission::None);
 		let out = res.unwrap().1;
 		assert_eq!(
 			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE",

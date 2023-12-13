@@ -29,7 +29,7 @@ async fn define_global_param() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
-			params: { test: 'DEFINE PARAM $test VALUE 12345' },
+			params: { test: 'DEFINE PARAM $test VALUE 12345 PERMISSIONS FULL' },
 			scopes: {},
 			tables: {},
 			users: {},

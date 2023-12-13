@@ -17,7 +17,7 @@ use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::{kind, Kind};
-use crate::sql::permission::{permissions, Permissions};
+use crate::sql::permission::{permissions, Permission, Permissions};
 use crate::sql::strand::{strand, Strand};
 use crate::sql::value::{value, Value};
 use derive::Store;
@@ -96,15 +96,13 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
-		if !self.permissions.is_full() {
-			let _indent = if is_pretty() {
-				Some(pretty_indent())
-			} else {
-				f.write_char(' ')?;
-				None
-			};
-			write!(f, "{}", self.permissions)?;
-		}
+		let _indent = if is_pretty() {
+			Some(pretty_indent())
+		} else {
+			f.write_char(' ')?;
+			None
+		};
+		write!(f, "{}", self.permissions)?;
 		Ok(())
 	}
 }
@@ -232,6 +230,6 @@ fn field_comment(i: &str) -> IResult<&str, DefineFieldOption> {
 
 fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = permissions(i)?;
+	let (i, v) = permissions(i, Permission::Full)?;
 	Ok((i, DefineFieldOption::Permissions(v)))
 }

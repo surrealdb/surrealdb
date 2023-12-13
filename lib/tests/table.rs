@@ -43,7 +43,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 		"{
 			events: {},
 			fields: {},
-			tables: { person_by_age: 'DEFINE TABLE person_by_age SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average FROM person GROUP BY age' },
+			tables: { person_by_age: 'DEFINE TABLE person_by_age SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average FROM person GROUP BY age PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
 		}",

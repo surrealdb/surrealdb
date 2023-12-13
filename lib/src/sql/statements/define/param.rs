@@ -66,15 +66,13 @@ impl Display for DefineParamStatement {
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
-		if !self.permissions.is_full() {
-			let _indent = if is_pretty() {
-				Some(pretty_indent())
-			} else {
-				f.write_char(' ')?;
-				None
-			};
-			write!(f, "PERMISSIONS {}", self.permissions)?;
-		}
+		let _indent = if is_pretty() {
+			Some(pretty_indent())
+		} else {
+			f.write_char(' ')?;
+			None
+		};
+		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
 	}
 }
