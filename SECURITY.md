@@ -22,15 +22,15 @@ can be exploited.
 ### Do
 
 - ✅ Privately disclose the details of any potential vulnerability to SurrealDB.
-- ✅ Ask permission from SurrealDB to run automated security tools against its infrastructure.
 - ✅ Provide enough information to reproduce the vulnerability in your report.
+- ✅ Ask permission from SurrealDB to run automated security tools against its infrastructure.
 - ✅ Report vulnerabilities that you discover in SurrealDB code, software or infrastructure.
 
 ### Do Not
 
 - ❌ Disclose the details of the vulnerability publicly or to third parties. 
-- ❌ Run automated security tools against SurrealDB infrastructure without permission.
 - ❌ Exploit a vulnerability beyond what is strictly necessary to verify its existence.
+- ❌ Run automated security tools against SurrealDB infrastructure without permission.
 - ❌ Report well-known vulnerabilities in [third-party dependencies](#dependencies) or disclosed by
   [OSS-Fuzz](#fuzzing).
 
@@ -65,8 +65,8 @@ As with any other update, security updates to SurrealDB are released following [
 SemVer)](https://semver.org).
 
 Urgent security patches will be released for the latest SurrealDB minor release (e.g. `1.999.0`) using a patch release
-(e.g. `1.999.1`). We commit not to break any sort of backward compatibility for any reason in patch releases to ensure
-that SurrealDB users have no reservations or delays when applying security patches.
+(e.g. `1.999.1`). We commit not to break API backward compatibility in patch releases to ensure that SurrealDB users
+have no reservations that may cause delays when applying security patches.
 
 Regular security updates can be released as part of a minor release (e.g. `1.999.0` to `1.1000.0`). Minor releases
 should not break backward compatibility either and we encourage updating whenever possible. However, due to the youth of
