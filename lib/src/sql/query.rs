@@ -1,6 +1,6 @@
 use crate::sql::fmt::Pretty;
-use crate::sql::{Statement, Statements, Value};
 use crate::sql::statements::{DefineStatement, RemoveStatement};
+use crate::sql::{Statement, Statements};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
