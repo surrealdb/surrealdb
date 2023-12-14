@@ -47,7 +47,7 @@ async fn post_handler(
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, params.0.parse().into()).await {
+	match db.execute_sql(sql, &session, params.0.parse().into()).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -80,7 +80,7 @@ async fn handle_socket(ws: WebSocket, session: Session) {
 				// Get a database reference
 				let db = DB.get().unwrap();
 				// Execute the received sql query
-				let _ = match db.execute(sql, &session, None).await {
+				let _ = match db.execute_sql(sql, &session, None).await {
 					// Convert the response to JSON
 					Ok(v) => match serde_json::to_string(&v) {
 						// Send the JSON response to the client

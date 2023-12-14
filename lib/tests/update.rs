@@ -19,7 +19,7 @@ async fn update_merge_and_content() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
@@ -103,7 +103,7 @@ async fn update_simple_with_input() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -183,7 +183,7 @@ async fn update_complex_with_input() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -217,7 +217,7 @@ async fn update_with_return_clause() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -321,7 +321,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute_sql(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			if should_succeed {
@@ -346,7 +346,11 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			// Prepare datastore
 			let mut resp = ds
-				.execute("CREATE person:test", &Session::owner().with_ns("NS").with_db("DB"), None)
+				.execute_sql(
+					"CREATE person:test",
+					&Session::owner().with_ns("NS").with_db("DB"),
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -355,7 +359,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
-				.execute(
+				.execute_sql(
 					"CREATE person:test",
 					&Session::owner().with_ns("OTHER_NS").with_db("DB"),
 					None,
@@ -368,7 +372,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
-				.execute(
+				.execute_sql(
 					"CREATE person:test",
 					&Session::owner().with_ns("NS").with_db("OTHER_DB"),
 					None,
@@ -382,7 +386,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			// Run the test
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute_sql(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			// Select always succeeds, but the result may be empty
@@ -393,7 +397,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 				// Verify the update was persisted
 				let mut resp = ds
-					.execute(
+					.execute_sql(
 						"SELECT name FROM person:test",
 						&Session::owner().with_ns("NS").with_db("DB"),
 						None,
@@ -408,7 +412,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 				// Verify the update was not persisted
 				let mut resp = ds
-					.execute(
+					.execute_sql(
 						"SELECT name FROM person:test",
 						&Session::owner().with_ns("NS").with_db("DB"),
 						None,
@@ -443,7 +447,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -461,7 +465,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -474,7 +478,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -487,7 +491,7 @@ async fn check_permissions_auth_enabled() {
 
 		// Verify the update was not persisted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -509,7 +513,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -522,7 +526,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -535,7 +539,7 @@ async fn check_permissions_auth_enabled() {
 
 		// Verify the update was persisted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -573,7 +577,7 @@ async fn check_permissions_auth_disabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -590,7 +594,7 @@ async fn check_permissions_auth_disabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -603,7 +607,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -616,7 +620,7 @@ async fn check_permissions_auth_disabled() {
 
 		// Verify the update was persisted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -638,7 +642,7 @@ async fn check_permissions_auth_disabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -651,7 +655,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -664,7 +668,7 @@ async fn check_permissions_auth_disabled() {
 
 		// Verify the update was persisted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,

@@ -90,7 +90,7 @@ async fn select_all(
 		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
 	};
 	// Execute the query and return the result
-	match db.execute(sql, &session, Some(vars)).await {
+	match db.execute_sql(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -131,7 +131,7 @@ async fn create_all(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars)).await {
+			match db.execute_sql(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -175,7 +175,7 @@ async fn update_all(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars)).await {
+			match db.execute_sql(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -219,7 +219,7 @@ async fn modify_all(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars)).await {
+			match db.execute_sql(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -256,7 +256,7 @@ async fn delete_all(
 		=> params.parse()
 	};
 	// Execute the query and return the result
-	match db.execute(sql, &session, Some(vars)).await {
+	match db.execute_sql(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -303,7 +303,7 @@ async fn select_one(
 		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
 	};
 	// Execute the query and return the result
-	match db.execute(sql, &session, Some(vars)).await {
+	match db.execute_sql(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -350,7 +350,7 @@ async fn create_one(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars)).await {
+			match db.execute_sql(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -400,7 +400,7 @@ async fn update_one(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars)).await {
+			match db.execute_sql(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -450,7 +450,7 @@ async fn modify_one(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(sql, &session, Some(vars)).await {
+			match db.execute_sql(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -491,7 +491,7 @@ async fn delete_one(
 		String::from("id") => rid,
 	};
 	// Execute the query and return the result
-	match db.execute(sql, &session, Some(vars)).await {
+	match db.execute_sql(sql, &session, Some(vars)).await {
 		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),

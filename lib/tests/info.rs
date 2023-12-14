@@ -17,7 +17,7 @@ async fn info_for_root() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner();
 
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 3);
 
 	let out = res.pop().unwrap().output();
@@ -45,7 +45,7 @@ async fn info_for_ns() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns");
 
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 4);
 
 	let out = res.pop().unwrap().output();
@@ -79,7 +79,7 @@ async fn info_for_db() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 8);
 
 	let out = res.pop().unwrap().output();
@@ -105,7 +105,7 @@ async fn info_for_scope() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 3);
 
 	let out = res.pop().unwrap().output();
@@ -133,7 +133,7 @@ async fn info_for_table() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 5);
 
 	let out = res.pop().unwrap().output();
@@ -162,12 +162,12 @@ async fn info_for_user() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
-	let res = dbs.execute(sql, &ses, None).await.unwrap();
+	let res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 3);
 
 	// Info for ROOT user
 	let sql = "INFO FOR USER user ON ROOT";
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex = Regex::new(r"DEFINE USER user ON ROOT PASSHASH .* ROLES VIEWER").unwrap();
@@ -181,7 +181,7 @@ async fn info_for_user() {
 
 	// Info for NS user
 	let sql = "INFO FOR USER user ON NS";
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
@@ -196,7 +196,7 @@ async fn info_for_user() {
 
 	// Info for DB user
 	let sql = "INFO FOR USER user ON DB";
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
@@ -211,7 +211,7 @@ async fn info_for_user() {
 
 	// Info for user on selected level
 	let sql = "INFO FOR USER user";
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+	let mut res = dbs.execute_sql(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =

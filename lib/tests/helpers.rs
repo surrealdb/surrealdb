@@ -28,7 +28,7 @@ pub async fn iam_run_case(
 	// Prepare statement
 	{
 		if !prepare.is_empty() {
-			let resp = ds.execute(prepare, &owner_sess, None).await.unwrap();
+			let resp = ds.execute_sql(prepare, &owner_sess, None).await.unwrap();
 			for r in resp.into_iter() {
 				let tmp = r.output();
 				if tmp.is_err() {
@@ -39,11 +39,11 @@ pub async fn iam_run_case(
 	}
 
 	// Execute statement
-	let mut resp = ds.execute(test, sess, None).await.unwrap();
+	let mut resp = ds.execute_sql(test, sess, None).await.unwrap();
 
 	// Check datastore state first
 	{
-		let resp = ds.execute(check, &owner_sess, None).await.unwrap();
+		let resp = ds.execute_sql(check, &owner_sess, None).await.unwrap();
 		if resp.len() != check_expected_result.len() {
 			return Err(format!(
 				"Check statement failed for test: expected {} results, got {}",

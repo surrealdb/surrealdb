@@ -215,7 +215,7 @@ async fn run_queries(
 > {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
+	dbs.execute_sql(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
 }
 
 fn with_enough_stack(
