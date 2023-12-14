@@ -35,7 +35,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	dbs.tick_at(end_ts).await?;
 	assert_eq!(res.len(), 6);
 	// DEFINE DATABASE
@@ -95,12 +95,12 @@ async fn database_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	dbs.tick_at(end_ts + 3599).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, val);
 	// GC after 1hs
 	dbs.tick_at(end_ts + 3600).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
@@ -140,7 +140,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	dbs.tick_at(end_ts).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
@@ -276,12 +276,12 @@ async fn table_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	dbs.tick_at(end_ts + 3599).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, val);
 	// GC after 1hs
 	dbs.tick_at(end_ts + 3600).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
@@ -297,7 +297,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
-	db.execute(sql, &ses, None).await?.remove(0).result?;
+	db.execute_sql(sql, &ses, None).await?.remove(0).result?;
 	// Save timestamp 1
 	let ts1_dt = "2023-08-01T00:00:00Z";
 	let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
@@ -309,12 +309,12 @@ async fn changefeed_with_ts() -> Result<(), Error> {
         UPDATE user:amos SET name = 'AMOS';
     ";
 	let table = "user";
-	let res = db.execute(sql, &ses, None).await?;
+	let res = db.execute_sql(sql, &ses, None).await?;
 	for res in res {
 		res.result?;
 	}
 	let sql = format!("UPDATE {table} SET name = 'Doe'");
-	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	let users = db.execute_sql(&sql, &ses, None).await?.remove(0).result?;
 	let expected = Value::parse(
 		"[
 		{
@@ -329,12 +329,12 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	);
 	assert_eq!(users, expected);
 	let sql = format!("SELECT * FROM {table}");
-	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	let users = db.execute_sql(&sql, &ses, None).await?.remove(0).result?;
 	assert_eq!(users, expected);
 	let sql = "
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
-	let value: Value = db.execute(sql, &ses, None).await?.remove(0).result?;
+	let value: Value = db.execute_sql(sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};
@@ -474,7 +474,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE user SINCE '{ts1_dt}' LIMIT 10;
     "
 	);
-	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	let value: Value = db.execute_sql(&sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};
@@ -511,7 +511,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	// Show changes using timestamp 3
 	//
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE '{ts3_dt}' LIMIT 10;");
-	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	let value: Value = db.execute_sql(&sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};

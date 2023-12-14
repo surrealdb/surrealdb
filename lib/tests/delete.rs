@@ -17,7 +17,7 @@ async fn delete() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -82,7 +82,11 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds
-				.execute("CREATE person:test", &Session::owner().with_ns("NS").with_db("DB"), None)
+				.execute_sql(
+					"CREATE person:test",
+					&Session::owner().with_ns("NS").with_db("DB"),
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -92,7 +96,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			let mut resp = ds
-				.execute(
+				.execute_sql(
 					"CREATE person:test",
 					&Session::owner().with_ns("OTHER_NS").with_db("DB"),
 					None,
@@ -106,7 +110,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			let mut resp = ds
-				.execute(
+				.execute_sql(
 					"CREATE person:test",
 					&Session::owner().with_ns("NS").with_db("OTHER_DB"),
 					None,
@@ -120,14 +124,14 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			// Run the test
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute_sql(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 			assert!(res.is_ok(), "delete should not fail");
 
 			if should_succeed {
 				// Verify the record has been deleted
 				let mut resp = ds
-					.execute(
+					.execute_sql(
 						"SELECT * FROM person:test",
 						&Session::owner().with_ns("NS").with_db("DB"),
 						None,
@@ -139,7 +143,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			} else {
 				// Verify the record has not been deleted in any DB
 				let mut resp = ds
-					.execute(
+					.execute_sql(
 						"SELECT * FROM person:test",
 						&Session::owner().with_ns("NS").with_db("DB"),
 						None,
@@ -150,7 +154,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
 
 				let mut resp = ds
-					.execute(
+					.execute_sql(
 						"SELECT * FROM person:test",
 						&Session::owner().with_ns("OTHER_NS").with_db("DB"),
 						None,
@@ -161,7 +165,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
 
 				let mut resp = ds
-					.execute(
+					.execute_sql(
 						"SELECT * FROM person:test",
 						&Session::owner().with_ns("NS").with_db("OTHER_DB"),
 						None,
@@ -194,7 +198,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -207,7 +211,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -216,7 +220,7 @@ async fn check_permissions_auth_enabled() {
 
 		// Verify the record has not been deleted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT * FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -236,7 +240,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -249,7 +253,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -258,7 +262,7 @@ async fn check_permissions_auth_enabled() {
 
 		// Verify the record has been deleted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT * FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -293,7 +297,7 @@ async fn check_permissions_auth_disabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -306,7 +310,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -315,7 +319,7 @@ async fn check_permissions_auth_disabled() {
 
 		// Verify the record has been deleted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT * FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -335,7 +339,7 @@ async fn check_permissions_auth_disabled() {
 
 		// When the table exists and grants full permissions
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -348,7 +352,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -357,7 +361,7 @@ async fn check_permissions_auth_disabled() {
 
 		// Verify the record has been deleted
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"SELECT * FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -377,7 +381,8 @@ async fn check_permissions_auth_disabled() {
 async fn delete_filtered_live_notification() -> Result<(), Error> {
 	let dbs = new_ds().await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
-	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
+	let res =
+		&mut dbs.execute_sql("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	// validate create response
 	let tmp = res.remove(0).result?;
@@ -392,8 +397,9 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	assert_eq!(tmp, expected_record);
 
 	// Validate live query response
-	let res =
-		&mut dbs.execute("LIVE SELECT * FROM person WHERE condition = true", &ses, None).await?;
+	let res = &mut dbs
+		.execute_sql("LIVE SELECT * FROM person WHERE condition = true", &ses, None)
+		.await?;
 	assert_eq!(res.len(), 1);
 	let live_id = res.remove(0).result?;
 	let live_id = match live_id {
@@ -402,7 +408,7 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 	};
 
 	// Validate delete response
-	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
+	let res = &mut dbs.execute_sql("DELETE person:test_true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");

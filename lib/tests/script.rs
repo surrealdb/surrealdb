@@ -20,7 +20,7 @@ async fn script_function_error() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -49,7 +49,7 @@ async fn script_function_simple() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -78,7 +78,7 @@ async fn script_function_context() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -112,7 +112,7 @@ async fn script_function_arguments() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -155,7 +155,7 @@ async fn script_function_types() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -185,7 +185,7 @@ async fn script_function_module_os() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result;
@@ -205,7 +205,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// direct query
-	dbs.execute(sql, &ses, None).await?;
+	dbs.execute_sql(sql, &ses, None).await?;
 	let sql = r#"
 		RETURN function(){
 			return await surrealdb.query(`SELECT number FROM test WHERE name = $name`,{
@@ -213,7 +213,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 			})
 		}
 	"#;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -233,7 +233,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 			return await surrealdb.query(query);
 		}
 	"#;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -257,7 +257,7 @@ async fn script_query_from_script() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -272,7 +272,7 @@ async fn script_query_from_script() -> Result<(), Error> {
 	let sql = r#"
 		SELECT * FROM article
 	"#;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -296,7 +296,7 @@ async fn script_value_function_params() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	let tmp = res.remove(1).result?;
 	let val = Value::parse(r#""The daily news""#);
@@ -321,7 +321,7 @@ async fn script_value_function_inline_values() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	res.remove(0).result?;
 	Ok(())

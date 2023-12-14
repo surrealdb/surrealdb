@@ -750,7 +750,7 @@ async fn router(
 						}
 						.into());
 					}
-					kvs.execute(&statements, &*session, Some(vars.clone())).await?
+					kvs.execute_sql(&statements, &*session, Some(vars.clone())).await?
 				}
 			};
 			for response in responses {

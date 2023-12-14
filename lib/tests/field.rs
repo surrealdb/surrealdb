@@ -22,7 +22,7 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
@@ -105,7 +105,7 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -154,7 +154,7 @@ async fn field_definition_empty_nested_objects() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -208,7 +208,7 @@ async fn field_definition_empty_nested_arrays() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -260,7 +260,7 @@ async fn field_definition_empty_nested_flexible() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -318,7 +318,7 @@ async fn field_selection_variable_field_projection() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
@@ -393,7 +393,7 @@ async fn field_selection_variable_fields_projection() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -469,7 +469,7 @@ async fn field_definition_default_value() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result;
@@ -589,7 +589,7 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -690,7 +690,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -792,7 +792,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
@@ -840,7 +840,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		RELATE business:two->contact:two->business:one;
 	";
 	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "one")).into());
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;

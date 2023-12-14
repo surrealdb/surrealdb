@@ -308,7 +308,7 @@ mod tests {
 		// Test the scenario by making sure the custom password doesn't change.
 		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
 		let sess = Session::owner();
-		ds.execute(sql, &sess, None).await.unwrap();
+		ds.execute_sql(sql, &sess, None).await.unwrap();
 		let pass_hash = ds
 			.transaction(Read, Optimistic)
 			.await
@@ -570,7 +570,7 @@ mod tests {
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {
 			info!("Test case {idx}: query={query}, succeeds={succeeds}");
-			let res = ds.execute(&query, &sess, None).await;
+			let res = ds.execute_sql(&query, &sess, None).await;
 
 			if !succeeds && res.is_err() {
 				let res = res.unwrap_err();

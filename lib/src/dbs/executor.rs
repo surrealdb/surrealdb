@@ -444,7 +444,7 @@ mod tests {
 			{
 				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-				let res = ds.execute(statement, session, None).await;
+				let res = ds.execute_sql(statement, session, None).await;
 
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
@@ -464,8 +464,9 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds
+				.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+				.await;
 
 			let err = res.unwrap_err().to_string();
 			assert!(
@@ -479,8 +480,9 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
 
-			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds
+				.execute_sql(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+				.await;
 
 			assert!(
 				res.is_ok(),

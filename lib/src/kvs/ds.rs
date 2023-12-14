@@ -1,5 +1,4 @@
 use super::tx::Transaction;
-use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
@@ -17,6 +16,7 @@ use crate::opt::auth::Root;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::Oracle;
+use crate::{cf, gql};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
@@ -819,13 +819,13 @@ impl Datastore {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
 			return match tx.cancel().await {
-				Ok(_) => {
-					Err(e)
-				}
-				Err(txe) => {
-					Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
-				}
-			};
+                Ok(_) => {
+                    Err(e)
+                }
+                Err(txe) => {
+                    Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+                }
+            };
 		}
 		Ok(())
 	}
@@ -855,13 +855,13 @@ impl Datastore {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
 			return match tx.cancel().await {
-				Ok(_) => {
-					Err(e)
-				}
-				Err(txe) => {
-					Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
-				}
-			};
+                Ok(_) => {
+                    Err(e)
+                }
+                Err(txe) => {
+                    Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
+                }
+            };
 		}
 		Ok(())
 	}
@@ -990,13 +990,13 @@ impl Datastore {
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
-	///     let ast = "USE NS test DB test; SELECT * FROM person;";
-	///     let res = ds.execute(ast, &ses, None).await?;
+	///     let sql = "USE NS test DB test; SELECT * FROM person;";
+	///     let res = ds.execute_sql(sql, &ses, None).await?;
 	///     Ok(())
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
-	pub async fn execute(
+	pub async fn execute_sql(
 		&self,
 		txt: &str,
 		sess: &Session,
@@ -1008,6 +1008,36 @@ impl Datastore {
 		self.process(ast, sess, vars).await
 	}
 
+	/// Parse and execute an GraphQL query
+	///
+	/// ```rust,no_run
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::owner();
+	///     let gql = "USE NS test DB test; SELECT * FROM person;";
+	///     let res = ds.execute_gql(gql, &ses, None).await?;
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(level = "debug", skip_all)]
+	pub async fn execute_gql(
+		&self,
+		txt: &str,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Vec<Response>, Error> {
+		// Parse the GraphQL query text
+		let ast = gql::parse_and_transpile(txt)?;
+		// Transpile QraphQL AST to Surreal AST
+
+		// Process the AST
+		self.process(ast, sess, vars).await
+	}
 	/// Execute a pre-parsed SQL query
 	///
 	/// ```rust,no_run
@@ -1243,7 +1273,7 @@ impl Datastore {
 	#[instrument(level = "debug", skip(self, sess, sql))]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Execute the SQL import
-		self.execute(sql, sess, None).await
+		self.execute_sql(sql, sess, None).await
 	}
 
 	/// Performs a full database export as SQL

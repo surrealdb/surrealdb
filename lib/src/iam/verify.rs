@@ -545,7 +545,7 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
+			ds.execute_sql("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				..Default::default()
@@ -570,9 +570,13 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
-				.await
-				.unwrap();
+			ds.execute_sql(
+				"DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
 
 			let mut sess = Session {
 				..Default::default()
@@ -595,7 +599,7 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
+			ds.execute_sql("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				..Default::default()
@@ -614,7 +618,7 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
+			ds.execute_sql("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: Some("test".to_string()),
@@ -640,9 +644,13 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
-				.await
-				.unwrap();
+			ds.execute_sql(
+				"DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
 
 			let mut sess = Session {
 				ns: Some("test".to_string()),
@@ -666,7 +674,7 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
+			ds.execute_sql("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				..Default::default()
@@ -685,7 +693,7 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
+			ds.execute_sql("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: Some("test".to_string()),
@@ -712,9 +720,13 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
-				.await
-				.unwrap();
+			ds.execute_sql(
+				"DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
 
 			let mut sess = Session {
 				ns: Some("test".to_string()),
@@ -739,7 +751,7 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
+			ds.execute_sql("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				..Default::default()
@@ -766,7 +778,7 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
-		ds.execute(
+		ds.execute_sql(
 			format!("DEFINE TOKEN token ON NS TYPE HS512 VALUE '{secret}'").as_str(),
 			&sess,
 			None,
@@ -872,7 +884,7 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
-		ds.execute(
+		ds.execute_sql(
 			format!("DEFINE TOKEN token ON DB TYPE HS512 VALUE '{secret}'").as_str(),
 			&sess,
 			None,
@@ -1269,13 +1281,13 @@ mod tests {
 			let sess = Session::owner();
 
 			let sql = "DEFINE USER root ON ROOT PASSWORD 'root'";
-			ds.execute(sql, &sess, None).await.unwrap();
+			ds.execute_sql(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
-			ds.execute(sql, &sess, None).await.unwrap();
+			ds.execute_sql(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
-			ds.execute(sql, &sess, None).await.unwrap();
+			ds.execute_sql(sql, &sess, None).await.unwrap();
 		}
 
 		// Accept ROOT user
