@@ -35,11 +35,7 @@ impl<'a> Document<'a> {
 				let def = match &fd.default {
 					Some(v) => Some(v),
 					_ => match &fd.value {
-						Some(v) => match &v {
-							Value::Function(f) if f.args().is_empty() => Some(v),
-							v if v.is_static() => Some(*v),
-							_ => None,
-						},
+						Some(v) if v.is_static() => Some(v),
 						_ => None,
 					},
 				};
