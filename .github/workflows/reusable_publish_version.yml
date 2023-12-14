@@ -274,6 +274,16 @@ jobs:
       - name: Create a temporary branch
         run: git checkout -b crate
 
+      - name: Configure release-plz
+        run: |
+          cat << EOF > /tmp/release-plz.toml
+          [workspace]
+          changelog_update = false
+          git_release_enable = false
+          semver_check = false
+          git_tag_enable = false
+          EOF
+
       - name: Patch beta crate version
         if: ${{ inputs.environment == 'beta' }}
         run: |
@@ -321,7 +331,7 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
+        run: /home/runner/.cargo/bin/release-plz release --config /tmp/release-plz.toml
 
   docker-build:
     name: Build Docker images
