@@ -61,7 +61,7 @@ jobs:
     needs: [checks]
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
-      environment: release
+      environment: stable
       git-ref: ${{ inputs.branch }}
       latest: ${{ inputs.branch == 'releases/beta' || inputs.latest }}
       publish: ${{ inputs.publish }}

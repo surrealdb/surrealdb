@@ -72,7 +72,7 @@ jobs:
           git config --add --bool push.autoSetupRemote true
 
       - name: Patch release version
-        if: ${{ inputs.environment == 'release' }}
+        if: ${{ inputs.environment == 'stable' }}
         run: |
           set -x
 
@@ -140,11 +140,11 @@ jobs:
           git tag -a v${betaVersion} -m "Release ${betaVersion}" || true
 
       - name: Push changes
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
         run: git push
 
       - name: Push tag
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
         run: git push --tags || true
 
       - name: Set outputs
@@ -154,7 +154,7 @@ jobs:
 
           version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
 
-          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "release")  ]]; then
+          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
           else
             echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
@@ -367,7 +367,7 @@ jobs:
               if [[ "${{ inputs.ml}}" == "true" ]]; then
                 features=${features},ml
               fi
-              if [[ "${{ inputs.environment}}" == "beta" || "${{ inputs.environment}}" == "release" ]]; then
+              if [[ "${{ inputs.environment}}" == "beta" || "${{ inputs.environment}}" == "stable" ]]; then
                 export SURREAL_BUILD_METADATA=""
               fi
               cargo build --features $features --release --locked --target x86_64-apple-darwin
@@ -394,7 +394,7 @@ jobs:
               if [[ "${{ inputs.ml}}" == "true" ]]; then
                 features=${features},ml
               fi
-              if [[ "${{ inputs.environment}}" == "beta" || "${{ inputs.environment}}" == "release" ]]; then
+              if [[ "${{ inputs.environment}}" == "beta" || "${{ inputs.environment}}" == "stable" ]]; then
                 export SURREAL_BUILD_METADATA=""
               fi
               cargo build --features $features --release --locked --target aarch64-apple-darwin
@@ -488,7 +488,7 @@ jobs:
               if [[ "${{ inputs.http-compression}}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.environment}}" == "beta" || "${{ inputs.environment}}" == "release" ]]; then
+              if [[ "${{ inputs.environment}}" == "beta" || "${{ inputs.environment}}" == "stable" ]]; then
                 export SURREAL_BUILD_METADATA=""
               fi
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
