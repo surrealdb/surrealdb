@@ -24,9 +24,8 @@ impl Location {
 			.expect("tried to find location of substring in unrelated string");
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		for (line_idx, line) in input.split('\n').enumerate() {
-			// +1 for the '\n'
-			let bytes_so_far = bytes_prior + line.len() + 1;
+		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
+			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
 			if bytes_so_far > offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
@@ -49,9 +48,8 @@ impl Location {
 		let offset = span.offset as usize;
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		for (line_idx, line) in source.split('\n').enumerate() {
-			// +1 for the '\n'
-			let bytes_so_far = bytes_prior + line.len() + 1;
+		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
+			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
 			if bytes_so_far > offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
@@ -73,9 +71,8 @@ impl Location {
 		let offset = span.offset as usize + span.len as usize;
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		for (line_idx, line) in source.split('\n').enumerate() {
-			// +1 for the '\n'
-			let bytes_so_far = bytes_prior + line.len() + 1;
+		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
+			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
 			if bytes_so_far > offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
@@ -99,13 +96,12 @@ impl Location {
 
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		let mut iterator = source.split('\n').enumerate();
+		let mut iterator = LineIterator::new(input).enumerate();
 		let start = loop {
-			let Some((line_idx, line)) = iterator.next() else {
+			let Some((line_idx, (line, seperator_offset))) = iterator.next() else {
 				panic!("tried to find location of span not belonging to string");
 			};
-			// +1 for the '\n'
-			let bytes_so_far = bytes_prior + line.len() + 1;
+			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
 			if bytes_so_far > offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
@@ -133,11 +129,10 @@ impl Location {
 		};
 
 		loop {
-			let Some((line_idx, line)) = iterator.next() else {
+			let Some((line_idx, (line, seperator_offset))) = iterator.next() else {
 				panic!("tried to find location of span not belonging to string");
 			};
-			// +1 for the '\n'
-			let bytes_so_far = bytes_prior + line.len() + 1;
+			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
 			if bytes_so_far > end {
 				let line_offset = end - bytes_prior;
 				let column = line[..line_offset].chars().count();
@@ -147,5 +142,86 @@ impl Location {
 				};
 			}
 		}
+	}
+}
+
+struct LineIterator<'a> {
+	current: &'a str,
+}
+
+impl<'a> LineIterator<'a> {
+	pub fn new(s: &'a str) -> Self {
+		LineIterator {
+			current: s,
+		}
+	}
+}
+
+impl<'a> Iterator for LineIterator<'a> {
+	type Item = (&'a str, Option<u8>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.current.is_empty() {
+			return None;
+		}
+		let bytes = self.current.as_bytes();
+		for i in 0..bytes.len() {
+			match bytes[i] {
+				b'\r' => {
+					if let Some(b'\n') = bytes.get(i + 1) {
+						let res = &self.current[..i];
+						self.current = &self.current[i + 2..];
+						return Some((res, Some(2)));
+					}
+					let res = &self.current[..i];
+					self.current = &self.current[i + 1..];
+					return Some((res, Some(1)));
+				}
+				0xb | 0x85 | 0xC | b'\n' => {
+					// vertical tab VT, next line NEL and form feed FF.
+					let res = &self.current[..i];
+					self.current = &self.current[i + 1..];
+					return Some((res, Some(1)));
+				}
+				0xe2 => {
+					// line separator and paragraph seperator.
+					if bytes.get(i + 1).copied() != Some(0x80) {
+						continue;
+					}
+					let next_byte = bytes.get(i + 2).copied();
+					if next_byte != Some(0xA8) && next_byte != Some(0xA9) {
+						continue;
+					}
+
+					// vertical tab VT, next line NEL and form feed FF.
+					let res = &self.current[..i];
+					self.current = &self.current[i + 3..];
+					return Some((res, Some(3)));
+				}
+				_ => {}
+			}
+		}
+		Some((std::mem::take(&mut self.current), None))
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::LineIterator;
+
+	#[test]
+	fn test_line_iterator() {
+		let lines = "foo\nbar\r\nfoo\rbar\u{000B}foo\u{000C}bar\u{0085}foo\u{2028}bar\u{2029}\n";
+		let mut iterator = LineIterator::new(lines);
+		assert_eq!(iterator.next(), Some(("foo", Some(1))));
+		assert_eq!(iterator.next(), Some(("bar", Some(2))));
+		assert_eq!(iterator.next(), Some(("foo", Some(1))));
+		assert_eq!(iterator.next(), Some(("bar", Some(1))));
+		assert_eq!(iterator.next(), Some(("foo", Some(1))));
+		assert_eq!(iterator.next(), Some(("bar", Some(2))));
+		assert_eq!(iterator.next(), Some(("foo", Some(3))));
+		assert_eq!(iterator.next(), Some(("bar", Some(3))));
+		assert_eq!(iterator.next(), Some(("", Some(1))));
+		assert_eq!(iterator.next(), None);
 	}
 }
