@@ -882,7 +882,7 @@ async fn field_definition_immutable() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				birthdate: '2024-12-13T21:27:55.632Z',
+				birthdate: '2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
@@ -893,7 +893,7 @@ async fn field_definition_immutable() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				birthdate: '2024-12-13T21:27:55.632Z',
+				birthdate: '2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
