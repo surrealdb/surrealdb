@@ -344,7 +344,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
-	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
