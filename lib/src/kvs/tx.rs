@@ -7,7 +7,6 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
-use crate::idx::trees::store::TreeStoreType;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
@@ -76,7 +75,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Transaction),
 }
-
+#[derive(Copy, Clone)]
 pub enum TransactionType {
 	Read,
 	Write,
@@ -87,16 +86,6 @@ impl From<bool> for TransactionType {
 		match value {
 			true => TransactionType::Write,
 			false => TransactionType::Read,
-		}
-	}
-}
-
-impl From<TreeStoreType> for TransactionType {
-	fn from(value: TreeStoreType) -> Self {
-		match value {
-			TreeStoreType::Write => TransactionType::Write,
-			TreeStoreType::Read => TransactionType::Read,
-			TreeStoreType::Traversal => TransactionType::Read,
 		}
 	}
 }

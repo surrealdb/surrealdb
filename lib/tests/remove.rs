@@ -123,6 +123,9 @@ async fn remove_statement_index() -> Result<(), Error> {
 	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
 		assert_empty_prefix!(&mut tx, surrealdb::key::index::all::new("test", "test", "book", ix));
 	}
+
+	// Every index store cache has been removed
+	assert!(dbs.index_store().is_empty().await);
 	Ok(())
 }
 

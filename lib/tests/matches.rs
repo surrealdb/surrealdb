@@ -39,7 +39,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 					}
 			]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -49,7 +49,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -89,7 +89,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 				},
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -99,7 +99,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -143,7 +143,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 					}
 			]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -158,7 +158,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -212,7 +212,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 					}
 			]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -274,7 +274,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -306,7 +306,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -345,11 +345,11 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }

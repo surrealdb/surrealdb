@@ -7,6 +7,7 @@ use crate::dbs::{
 };
 use crate::err::Error;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
@@ -108,6 +109,8 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
+	// The index store cache
+	index_stores: IndexStores,
 }
 
 /// We always want to be circulating the live query information
@@ -363,6 +366,7 @@ impl Datastore {
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
+			index_stores: IndexStores::default(),
 		})
 	}
 
@@ -413,6 +417,10 @@ impl Datastore {
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
 		self
+	}
+
+	pub fn index_store(&self) -> &IndexStores {
+		&self.index_stores
 	}
 
 	/// Is authentication enabled for this Datastore?
@@ -1058,12 +1066,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = Context::default();
-		ctx.add_capabilities(self.capabilities.clone());
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
-		}
+		let mut ctx = Context::from_ds(
+			self.query_timeout,
+			self.capabilities.clone(),
+			self.index_stores.clone(),
+		);
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));

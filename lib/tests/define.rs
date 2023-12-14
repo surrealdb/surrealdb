@@ -1224,11 +1224,12 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			tables: {},
 			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
 			SEARCH ANALYZER simple BM25(1.2,0.75) \
-			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 HIGHLIGHTS' },
+			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
+			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	let tmp = res.remove(0).result?;
 

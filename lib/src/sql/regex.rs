@@ -1,5 +1,6 @@
-use lru::LruCache;
 use once_cell::sync::Lazy;
+use quick_cache::sync::Cache;
+use quick_cache::GuardResult;
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
@@ -9,9 +10,7 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::Mutex;
 use std::{env, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
@@ -28,22 +27,24 @@ impl Regex {
 }
 
 fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
-	static REGEX_CACHE: Lazy<Mutex<LruCache<String, regex::Regex>>> = Lazy::new(|| {
+	static REGEX_CACHE: Lazy<Cache<String, regex::Regex>> = Lazy::new(|| {
 		let cache_size: usize = env::var("SURREAL_REGEX_CACHE_SIZE")
 			.map_or(1000, |v| v.parse().unwrap_or(1000))
 			.max(10); // The minimum cache size is 10
-		Mutex::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap()))
+		Cache::new(cache_size)
 	});
-	let mut cache = match REGEX_CACHE.lock() {
-		Ok(guard) => guard,
-		Err(poisoned) => poisoned.into_inner(),
-	};
-	if let Some(re) = cache.get(str) {
-		return Ok(re.clone());
+	match REGEX_CACHE.get_value_or_guard(str, None) {
+		GuardResult::Value(v) => Ok(v),
+		GuardResult::Guard(g) => {
+			let re = regex::Regex::new(str)?;
+			g.insert(re.clone()).ok();
+			Ok(re)
+		}
+		GuardResult::Timeout => {
+			warn!("Regex cache timeout");
+			regex::Regex::new(str)
+		}
 	}
-	let re = regex::Regex::new(str)?;
-	cache.put(str.to_owned(), re.clone());
-	Ok(re)
 }
 
 impl FromStr for Regex {
