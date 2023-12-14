@@ -43,7 +43,7 @@ impl<'a> Document<'a> {
 					Some(v) => Some(v),
 					_ => match &fd.value {
 						Some(v) => match &v {
-							Value::Function(f) if f.args() == &[] => Some(v),
+							Value::Function(f) if f.args().is_empty() => Some(v),
 							v if v.is_static() => Some(*v),
 							_ => None,
 						},
