@@ -120,6 +120,7 @@ keyword! {
 	PostingsCache => "POSTINGS_CACHE",
 	PostingsOrder => "POSTINGS_ORDER",
 	Punct => "PUNCT",
+	Readonly => "READONLY",
 	Relate => "RELATE",
 	Remove => "REMOVE",
 	Replace => "REPLACE",
