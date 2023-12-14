@@ -470,6 +470,26 @@ impl Parser<'_> {
 						.then(|| self.parse_token_value())
 						.transpose()?
 						.unwrap_or(100);
+					let doc_ids_cache = self
+						.eat(t!("DOC_IDS_CACHE"))
+						.then(|| self.parse_token_value())
+						.transpose()?
+						.unwrap_or(100);
+					let doc_lengths_cache = self
+						.eat(t!("DOC_LENGHTS_CACHE"))
+						.then(|| self.parse_token_value())
+						.transpose()?
+						.unwrap_or(100);
+					let postings_cache = self
+						.eat(t!("POSTINGS_CACHE"))
+						.then(|| self.parse_token_value())
+						.transpose()?
+						.unwrap_or(100);
+					let terms_cache = self
+						.eat(t!("TERMS_CACHE"))
+						.then(|| self.parse_token_value())
+						.transpose()?
+						.unwrap_or(100);
 
 					let hl = self.eat(t!("HIGHLIGHTS"));
 
@@ -481,6 +501,10 @@ impl Parser<'_> {
 						doc_lengths_order,
 						postings_order,
 						terms_order,
+						doc_ids_cache,
+						doc_lengths_cache,
+						postings_cache,
+						terms_cache,
 					});
 				}
 				t!("MTREE") => {
@@ -500,11 +524,25 @@ impl Parser<'_> {
 						.transpose()?
 						.unwrap_or(100);
 
+					let doc_ids_cache = self
+						.eat(t!("DOC_IDS_CACHE"))
+						.then(|| self.parse_token_value())
+						.transpose()?
+						.unwrap_or(100);
+
+					let mtree_cache = self
+						.eat(t!("MTREE_CACHE"))
+						.then(|| self.parse_token_value())
+						.transpose()?
+						.unwrap_or(100);
+
 					res.index = Index::MTree(crate::sql::index::MTreeParams {
 						dimension,
 						distance,
 						capacity,
 						doc_ids_order,
+						doc_ids_cache,
+						mtree_cache,
 						vector_type: VectorType::F64,
 					})
 				}
