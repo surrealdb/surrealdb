@@ -478,6 +478,12 @@ async fn field_definition_default_value() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
 			&tmp,
@@ -856,7 +862,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 async fn field_definition_immutable() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
-		DEFINE FIELD birthdate ON person TYPE option<string> IMMUTABLE;
+		DEFINE FIELD birthdate ON person TYPE datetime IMMUTABLE;
 		CREATE person:test SET birthdate = '2023-12-13T21:27:55.632Z';
 		UPDATE person:test SET birthdate = '2023-12-13T21:27:55.632Z';
 		UPDATE person:test SET birthdate = '2024-12-13T21:27:55.632Z';
