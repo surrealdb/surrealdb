@@ -114,6 +114,8 @@ impl<'a> BytesReader<'a> {
 	#[inline]
 	pub fn backup(&mut self, offset: usize) {
 		assert!(offset <= self.offset());
+		// SAFETY: Since start is a non-null pointer adding an offset to that pointer will also
+		// result in a nonnull pointer.
 		self.current = unsafe { NonNull::new_unchecked(self.start.as_ptr().add(offset)) };
 	}
 

@@ -233,7 +233,7 @@ impl<'a> Lexer<'a> {
 
 	/// Lexes a digit part of date time.
 	///
-	/// This function eats an amount of digits and then checks if the valeu the digits represent
+	/// This function eats an amount of digits and then checks if the value the digits represent
 	/// is within the given range.
 	pub fn lex_datetime_part(
 		&mut self,

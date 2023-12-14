@@ -7,7 +7,7 @@ use crate::syn::v2::{
 };
 
 impl<'a> Lexer<'a> {
-	/// Eats a single line comment and returns the next token.
+	/// Eats a single line comment.
 	pub fn eat_single_line_comment(&mut self) {
 		loop {
 			let Some(byte) = self.reader.next() else {
@@ -46,7 +46,7 @@ impl<'a> Lexer<'a> {
 		self.skip_offset();
 	}
 
-	/// Eats a multi line comment and returns the next token.
+	/// Eats a multi line comment and returns an error if `*/` would be missing.
 	pub fn eat_multi_line_comment(&mut self) -> Result<(), Error> {
 		loop {
 			let Some(byte) = self.reader.next() else {

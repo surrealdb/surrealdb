@@ -268,7 +268,7 @@ impl<'a> Lexer<'a> {
 		self.last_offset = offset;
 	}
 
-	/// Checks if the next byte is the give byte, if it is it consumes the byte and returns true.
+	/// Checks if the next byte is the given byte, if it is it consumes the byte and returns true.
 	/// Otherwise returns false.
 	///
 	/// Also returns false if there is no next character.
