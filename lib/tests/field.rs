@@ -443,13 +443,11 @@ async fn field_selection_variable_fields_projection() -> Result<(), Error> {
 #[tokio::test]
 async fn field_definition_default_value() -> Result<(), Error> {
 	let sql = "
-		DEFINE FUNCTION fn::opt_arg($arg: option<bool>) { $arg ?? true };
-		--
 		DEFINE TABLE product SCHEMAFULL;
 		DEFINE FIELD primary ON product TYPE number VALUE 123.456;
 		DEFINE FIELD secondary ON product TYPE bool DEFAULT true VALUE $value;
 		DEFINE FIELD tertiary ON product TYPE string DEFAULT 'hello' VALUE 'tester';
-		DEFINE FIELD quaternary ON product TYPE bool VALUE fn::opt_arg();
+		DEFINE FIELD quaternary ON product TYPE bool VALUE array::all([1, 2]);
 		--
 		CREATE product:test SET primary = NULL;
 		CREATE product:test SET secondary = 'oops';
@@ -463,10 +461,7 @@ async fn field_definition_default_value() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 13);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
