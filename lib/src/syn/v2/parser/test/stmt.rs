@@ -377,8 +377,17 @@ fn parse_define_field() {
 fn parse_define_index() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2) DOC_IDS_ORDER 1 DOC_LENGTHS_ORDER 2 POSTINGS_ORDER 3 TERMS_ORDER 4 HIGHLIGHTS"#
-	).unwrap();
+		r#"DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
+			DOC_IDS_ORDER 1
+			DOC_LENGTHS_ORDER 2
+			POSTINGS_ORDER 3
+			TERMS_ORDER 4
+			DOC_IDS_CACHE 5
+			DOC_LENGTHS_CACHE 6
+			POSTINGS_CACHE 7
+			HIGHLIGHTS"#
+	)
+	.unwrap();
 
 	assert_eq!(
 		res,
@@ -400,6 +409,9 @@ fn parse_define_index() {
 				doc_lengths_order: 2,
 				postings_order: 3,
 				terms_order: 4
+				doc_ids_cache: 5
+				doc_lengths_cache: 6
+				postings_cache: 7
 			}),
 			comment: None
 		}))
@@ -420,7 +432,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7"#).unwrap();
+		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9"#).unwrap();
 
 	assert_eq!(
 		res,
@@ -433,6 +445,8 @@ fn parse_define_index() {
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
 				doc_ids_order: 7,
+				doc_ids_cache: 8,
+				mtree_cache: 9,
 				vector_type: VectorType::F64,
 			}),
 			comment: None

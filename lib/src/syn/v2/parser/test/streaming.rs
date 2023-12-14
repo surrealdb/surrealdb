@@ -50,9 +50,17 @@ static SOURCE: &str = r#"
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
 	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR DELETE, UPDATE NONE, FOR create WHERE true;
-	DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2) DOC_IDS_ORDER 1 DOC_LENGTHS_ORDER 2 POSTINGS_ORDER 3 TERMS_ORDER 4 HIGHLIGHTS;
+	DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
+			DOC_IDS_ORDER 1
+			DOC_LENGTHS_ORDER 2
+			POSTINGS_ORDER 3
+			TERMS_ORDER 4
+			DOC_IDS_CACHE 5
+			DOC_LENGTHS_CACHE 6
+			POSTINGS_CACHE 7
+			HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
-	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7;
+	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
 	DELETE FROM ONLY |foo:32..64| Where 2 RETURN AFTER TIMEOUT 1s PARALLEL;
 	DELETE FROM ONLY a:b->?[$][?true] WHERE null RETURN NULL TIMEOUT 1h PARALLEL;
@@ -278,6 +286,9 @@ fn statements() -> Vec<Statement> {
 				doc_lengths_order: 2,
 				postings_order: 3,
 				terms_order: 4,
+				doc_ids_cache: 5
+				doc_lengths_cache: 6
+				postings_cache: 7
 			}),
 			comment: None,
 		})),
@@ -297,6 +308,8 @@ fn statements() -> Vec<Statement> {
 				distance: Distance::Minkowski(Number::Int(5)),
 				capacity: 6,
 				doc_ids_order: 7,
+				doc_ids_cache: 8,
+				mtree_cache: 9,
 				vector_type: VectorType::F64,
 			}),
 			comment: None,
