@@ -7,7 +7,6 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
-use crate::key::debug;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::Check;
@@ -622,8 +621,8 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!(
 			"Scan {:?} - {:?}",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
+			crate::key::debug::sprint_key(&rng.start.clone().into()),
+			crate::key::debug::sprint_key(&rng.end.clone().into())
 		);
 		match self {
 			#[cfg(feature = "kv-mem")]

@@ -420,8 +420,8 @@ impl Datastore {
 				}
 			}
 		};
-		if resolve_err.is_err() {
-			err.push(resolve_err.unwrap_err());
+		if let Err(error) = resolve_err {
+			err.push(error);
 		}
 		if !err.is_empty() {
 			error!("Error bootstrapping sweep phase: {:?}", err);
