@@ -51,6 +51,7 @@ jobs:
     outputs:
       git-ref: ${{ steps.outputs.outputs.git-ref }}
       name: ${{ steps.outputs.outputs.name }}
+      build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
