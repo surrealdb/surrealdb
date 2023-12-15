@@ -314,11 +314,12 @@ async fn field_selection_variable_field_projection() -> Result<(), Error> {
 		SELECT type::field($param), type::field('name.last') FROM person;
 		SELECT VALUE { 'firstname': type::field($param), lastname: type::field('name.last') } FROM person;
 		SELECT VALUE [type::field($param), type::field('name.last')] FROM person;
+		SELECT type::field($param) AS first_name FROM person;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -366,6 +367,14 @@ async fn field_selection_variable_field_projection() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			['Tobie', 'Morgan Hitchcock']
+		]",
+	);
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+		{ first_name: 'Tobie' }
 		]",
 	);
 	assert_eq!(tmp, val);
