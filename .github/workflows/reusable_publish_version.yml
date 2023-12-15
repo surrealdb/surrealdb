@@ -29,6 +29,16 @@ on:
         type: boolean
         default: false
         description: "Create a GitHub release"
+      http-compression:
+        required: false
+        type: boolean
+        default: true
+        description: "Enable HTTP compression in binaries"
+      ml:
+        required: false
+        type: boolean
+        default: true
+        description: "Enable ML support in binaries"
 
 defaults:
   run:
@@ -41,6 +51,7 @@ jobs:
     outputs:
       git-ref: ${{ steps.outputs.outputs.git-ref }}
       name: ${{ steps.outputs.outputs.name }}
+      build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -50,7 +61,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.git-ref || github.ref_name }}
+          ref: ${{ inputs.git-ref }}
 
       - name: Install a TOML parser
         run: cargo install --force --locked --version 0.8.1 taplo-cli
@@ -62,7 +73,7 @@ jobs:
           git config --add --bool push.autoSetupRemote true
 
       - name: Patch release version
-        if: ${{ inputs.environment == 'release' }}
+        if: ${{ inputs.environment == 'stable' }}
         run: |
           set -x
 
@@ -130,13 +141,11 @@ jobs:
           git tag -a v${betaVersion} -m "Release ${betaVersion}" || true
 
       - name: Push changes
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
         run: git push
 
       - name: Push tag
-        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'release') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the tag
+        if: ${{ inputs.publish && (inputs.environment == 'beta' || inputs.environment == 'stable') }}
         run: git push --tags || true
 
       - name: Set outputs
@@ -146,10 +155,10 @@ jobs:
 
           version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
 
-          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "release")  ]]; then
+          if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
           else
-            echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
           fi
 
           if [[ "${{ inputs.environment }}" == "nightly" ]]; then
@@ -157,8 +166,10 @@ jobs:
 
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
             rev=$(git rev-parse --short HEAD)
+            echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
           else
             echo "name=v${version}" >> $GITHUB_OUTPUT
+            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
           fi
 
   test:
@@ -239,22 +250,223 @@ jobs:
       - name: Check clippy
         run: cargo make ci-clippy
 
-  crate:
-    name: Publish crate to crates.io
-    if: ${{ inputs.publish }}
-    needs: [test, lint, prepare-vars]
-    environment: ${{ inputs.environment }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+  docker-build:
+    name: Build Docker images
+    needs: [prepare-vars]
+    uses: ./.github/workflows/reusable_docker.yml
+    with:
+      git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
+      tag-prefix: ${{ needs.prepare-vars.outputs.name }}
+      build: true
+      push: false
+    secrets: inherit
 
+  build:
+    name: Build ${{ matrix.arch }} binary
+    needs: [prepare-vars]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MacOS amd64
+          - arch: x86_64-apple-darwin
+            runner: macos-latest-xl
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              brew install protobuf
+
+              # Build
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
+              cargo build --features $features --release --locked --target x86_64-apple-darwin
+
+              # Package
+              cp target/x86_64-apple-darwin/release/surreal surreal
+              chmod +x surreal
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.txt
+
+          # MacOS arm64
+          - arch: aarch64-apple-darwin
+            runner: macos-latest-xl
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              brew install protobuf
+
+              # Build
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
+              cargo build --features $features --release --locked --target aarch64-apple-darwin
+
+              # Package
+              cp target/aarch64-apple-darwin/release/surreal surreal
+              chmod +x surreal
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.txt
+
+          # Linux amd64
+          - arch: x86_64-unknown-linux-gnu
+            runner: ["self-hosted", "amd64", "builder"]
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
+            build-step: |
+              set -x
+
+              # Build
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
+              docker build \
+                --platform linux/amd64 \
+                --build-arg="CARGO_EXTRA_FEATURES=${features}" \
+                --build-arg="SURREAL_BUILD_METADATA=${SURREAL_BUILD_METADATA}" \
+                -t binary \
+                -f docker/Dockerfile.binary \
+                .
+              docker create --name binary binary
+              docker cp binary:/surrealdb/target/release/surreal surreal
+              
+              # Package
+              chmod +x surreal
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.txt
+
+          # Linux arm64
+          - arch: aarch64-unknown-linux-gnu
+            runner: ["self-hosted", "arm64", "builder"]
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
+            build-step: |
+              set -x
+
+              # Build
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
+              docker build \
+                --platform linux/arm64 \
+                --build-arg="CARGO_EXTRA_FEATURES=${features}" \
+                --build-arg="SURREAL_BUILD_METADATA=${SURREAL_BUILD_METADATA}" \
+                -t binary \
+                -f docker/Dockerfile.binary \
+                .
+              docker create --name binary binary
+              docker cp binary:/surrealdb/target/release/surreal surreal
+
+              # Package
+              chmod +x surreal
+              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz surreal
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.txt
+
+          # Windows amd64
+          - arch: x86_64-pc-windows-msvc
+            runner: windows-latest
+            file: surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64
+            build-step: |
+              set -x
+
+              # Prepare deps
+              vcpkg integrate install
+
+              # Build
+              features=storage-tikv
+              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+                features=${features},http-compression
+              fi
+              cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
+
+              # Package
+              cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
+              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
+
+    runs-on: ${{ matrix.runner }}
+    steps:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Checkout docker
+        uses: actions/checkout@v4
+        with:
+          path: _docker
+  
+      # Replace docker files. It allows us to test new Dockerfiles with workflow_dispatch and a custom git ref.
+      # When triggered by a push or a schedule, this git ref will be the same as 'inputs.git-ref'
+      - name: Replace docker files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf docker .dockerignore
+          mv _docker/docker .
+          mv _docker/.dockerignore .
+          rm -rf _docker
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.71.1
+          targets: ${{ matrix.arch }}
+
+      - name: Output package versions
+        run: |
+          set -x
+          set +e
+          go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+
+      - name: Build step
+        env:
+          SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
+        run: ${{ matrix.build-step }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.file }}
+          path: |
+            surreal
+            ${{ matrix.file }}.tgz
+            ${{ matrix.file }}.txt
+            ${{ matrix.file }}.exe
+
+  publish:
+    name: Publish crate and artifacts binaries
+    needs: [prepare-vars, test, lint, build, docker-build]
+    if: ${{ inputs.publish }}
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
 
       - name: Install release-plz
         run: cargo install --force --locked --version 0.3.30 release-plz
@@ -262,6 +474,19 @@ jobs:
       - name: Install a TOML parser
         if: ${{ inputs.environment == 'beta' }}
         run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Create a temporary branch
+        run: git checkout -b crate
+
+      - name: Configure release-plz
+        run: |
+          cat << EOF > /tmp/release-plz.toml
+          [workspace]
+          changelog_update = false
+          git_release_enable = false
+          semver_check = false
+          git_tag_enable = false
+          EOF
 
       - name: Patch beta crate version
         if: ${{ inputs.environment == 'beta' }}
@@ -310,181 +535,7 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          set -x
-
-          # Create a temporary branch
-          git checkout -b crate
-
-          # Publish the crate
-          /home/runner/.cargo/bin/release-plz release --config .config/release-plz.toml
-
-  docker-build:
-    name: Build Docker images
-    needs: [prepare-vars]
-    uses: ./.github/workflows/reusable_docker.yml
-    with:
-      git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
-      tag-prefix: ${{ needs.prepare-vars.outputs.name }}
-      build: true
-      push: false
-    secrets: inherit
-
-  build:
-    name: Build ${{ matrix.arch }} binary
-    needs: [prepare-vars]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # MacOS amd64
-          - arch: x86_64-apple-darwin
-            runner: macos-latest-xl
-            file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
-            build-step: |
-              # Prepare deps
-              brew install protobuf
-
-              # Build
-              cargo build --features storage-tikv,http-compression,ml --release --locked --target x86_64-apple-darwin
-
-              # Package
-              cp target/x86_64-apple-darwin/release/surreal surreal
-              chmod +x surreal
-              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz surreal
-              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.txt
-
-          # MacOS arm64
-          - arch: aarch64-apple-darwin
-            runner: macos-latest-xl
-            file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
-            build-step: |
-              # Prepare deps
-              brew install protobuf
-
-              # Build
-              cargo build --features storage-tikv,http-compression,ml --release --locked --target aarch64-apple-darwin
-
-              # Package
-              cp target/aarch64-apple-darwin/release/surreal surreal
-              chmod +x surreal
-              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz surreal
-              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.txt
-
-          # Linux amd64
-          - arch: x86_64-unknown-linux-gnu
-            runner: ["self-hosted", "amd64", "builder"]
-            file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
-            build-step: |
-              # Build
-              docker build \
-                --platform linux/amd64 \
-                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression,ml" \
-                -t binary \
-                -f docker/Dockerfile.binary \
-                .
-              docker create --name binary binary
-              docker cp binary:/surrealdb/target/release/surreal surreal
-              
-              # Package
-              chmod +x surreal
-              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz surreal
-              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.txt
-
-          # Linux arm64
-          - arch: aarch64-unknown-linux-gnu
-            runner: ["self-hosted", "arm64", "builder"]
-            file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
-            build-step: |
-              # Build
-              docker build \
-                --platform linux/arm64 \
-                --build-arg="CARGO_EXTRA_FEATURES=storage-tikv,http-compression,ml" \
-                -t binary \
-                -f docker/Dockerfile.binary \
-                .
-              docker create --name binary binary
-              docker cp binary:/surrealdb/target/release/surreal surreal
-
-              # Package
-              chmod +x surreal
-              tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz surreal
-              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.txt
-
-          # Windows amd64
-          - arch: x86_64-pc-windows-msvc
-            runner: windows-latest
-            file: surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64
-            build-step: |
-              # Prepare deps
-              vcpkg integrate install
-
-              # Build
-              cargo build --features storage-tikv,http-compression --release --locked --target x86_64-pc-windows-msvc
-
-              # Package
-              cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
-              echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
-
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Checkout docker
-        uses: actions/checkout@v4
-        with:
-          path: _docker
-  
-      # Replace docker files. It allows us to test new Dockerfiles with workflow_dispatch and a custom git ref.
-      # When triggered by a push or a schedule, this git ref will be the same as 'inputs.git-ref'
-      - name: Replace docker files
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          rm -rf docker .dockerignore
-          mv _docker/docker .
-          mv _docker/.dockerignore .
-          rm -rf _docker
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.71.1
-          targets: ${{ matrix.arch }}
-
-      - name: Output package versions
-        run: |
-          set -x
-          set +e
-          go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
-
-      - name: Build step
-        run: ${{ matrix.build-step }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ matrix.file }}
-          path: |
-            surreal
-            ${{ matrix.file }}.tgz
-            ${{ matrix.file }}.txt
-            ${{ matrix.file }}.exe
-
-  publish:
-    name: Publish artifacts binaries
-    needs: [prepare-vars, test, lint, build, docker-build]
-    if: ${{ inputs.publish }}
-    environment: ${{ inputs.environment }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+        run: /home/runner/.cargo/bin/release-plz release --config /tmp/release-plz.toml
 
       - name: Download artifacts
         uses: actions/download-artifact@v3
@@ -497,8 +548,7 @@ jobs:
         with:
           name: "Release ${{ needs.prepare-vars.outputs.git-ref }}"
           tag_name: ${{ needs.prepare-vars.outputs.git-ref }}
-          token: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can push the release
-          prerelease: ${{ inputs.environment == 'beta' }}
+          prerelease: ${{ inputs.environment == 'beta' || inputs.environment == 'nightly' }}
           fail_on_unmatched_files: true
           files: |
             LICENSE
@@ -521,8 +571,8 @@ jobs:
       - name: Set latest beta version
         if: ${{ inputs.publish && inputs.environment == 'beta' }}
         run: |
-          echo ${{ needs.prepare-vars.outputs.git-ref }} > ${{ inputs.environment }}.txt
-          aws s3 cp --cache-control 'no-store' ${{ inputs.environment }}.txt s3://download.surrealdb.com/${{ inputs.environment }}.txt
+          echo ${{ needs.prepare-vars.outputs.git-ref }} > beta.txt
+          aws s3 cp --cache-control 'no-store' beta.txt s3://download.surrealdb.com/beta.txt
 
       - name: Publish binaries
         run: |
