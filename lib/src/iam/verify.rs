@@ -2,17 +2,15 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::sql::Object;
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use base64_lib::Engine;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
 use std::str::{self, FromStr};
 use std::sync::Arc;
-
-use super::base::BASE64;
 
 fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {
@@ -162,7 +160,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Parse the token and catch any errors
-	let value = parse(token)?;
+	let value: Value = match token_data.claims.clone().into() {
+		Value::Object(object) => {
+			let mut object = object.0.clone();
+			object.remove("roles");
+			Value::Object(Object(object))
+		},
+		_ => return Err(Error::InvalidAuth)
+	};
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -421,17 +426,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		// There was an auth error
 		_ => Err(Error::InvalidAuth),
 	}
-}
-
-pub fn parse(value: &str) -> Result<Value, Error> {
-	// Extract the middle part of the token
-	let value = value.splitn(3, '.').skip(1).take(1).next().ok_or(Error::InvalidAuth)?;
-	// Decode the base64 token data content
-	let value = BASE64.decode(value).map_err(|_| Error::InvalidAuth)?;
-	// Convert the decoded data to a string
-	let value = str::from_utf8(&value).map_err(|_| Error::InvalidAuth)?;
-	// Parse the token data into SurrealQL
-	syn::json(value).map_err(|_| Error::InvalidAuth)
 }
 
 pub async fn verify_root_creds(
