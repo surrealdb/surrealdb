@@ -272,6 +272,8 @@ jobs:
             runner: macos-latest-xl
             file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
             build-step: |
+              set -x
+
               # Prepare deps
               brew install protobuf
 
@@ -297,6 +299,8 @@ jobs:
             runner: macos-latest-xl
             file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
             build-step: |
+              set -x
+
               # Prepare deps
               brew install protobuf
 
@@ -322,6 +326,8 @@ jobs:
             runner: ["self-hosted", "amd64", "builder"]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
+              set -x
+
               # Build
               features=storage-tikv
               if [[ "${{ inputs.http-compression}}" == "true" ]]; then
@@ -350,6 +356,8 @@ jobs:
             runner: ["self-hosted", "arm64", "builder"]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64
             build-step: |
+              set -x
+
               # Build
               features=storage-tikv
               if [[ "${{ inputs.http-compression}}" == "true" ]]; then
@@ -378,6 +386,8 @@ jobs:
             runner: windows-latest
             file: surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64
             build-step: |
+              set -x
+
               # Prepare deps
               vcpkg integrate install
 
