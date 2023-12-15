@@ -2,7 +2,6 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::Object;
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -159,13 +158,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	trace!("Attempting token authentication");
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
-	// Parse the token and catch any errors
+	// Parse the token into a SurrealQL value and catch any errors
 	let value: Value = match token_data.claims.clone().into() {
-		Value::Object(object) => {
-			let mut object = object.0.clone();
-			object.remove("roles");
-			Value::Object(Object(object))
-		},
+		Value::Object(object) => Value::Object(object),
 		_ => return Err(Error::InvalidAuth)
 	};
 	// Check if the auth token can be used
