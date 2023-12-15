@@ -195,7 +195,7 @@ impl fmt::Display for Snippet {
 
 #[cfg(test)]
 mod test {
-	use super::{Snippet, Truncation};
+	use super::{RenderedError, Snippet, Truncation};
 	use crate::syn::common::Location;
 
 	#[test]
@@ -258,5 +258,31 @@ mod test {
 			snippet.source.as_str(),
 			"aaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		);
+	}
+
+	#[test]
+	fn render() {
+		let error = RenderedError {
+			text: "some_error".to_string(),
+			snippets: vec![Snippet {
+				source: "hallo error".to_owned(),
+				truncation: Truncation::Both,
+				location: Location {
+					line: 4,
+					column: 10,
+				},
+				offset: 6,
+				length: 5,
+				explain: Some("this is wrong".to_owned()),
+			}],
+		};
+
+		let error_string = format!("{}", error);
+		let expected = r#"some_error
+  |
+4 | ...hallo error...
+  |          ^^^^^ this is wrong
+"#;
+		assert_eq!(error_string, expected)
 	}
 }
