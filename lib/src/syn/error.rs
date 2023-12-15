@@ -149,7 +149,10 @@ impl fmt::Display for Snippet {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		// extra spacing for the line number
 		let spacing = self.location.line.ilog10() as usize + 1;
-		writeln!(f, "{:>spacing$} |", "")?;
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
+		f.write_str(" |\n")?;
 		write!(f, "{:>spacing$} | ", self.location.line)?;
 		match self.truncation {
 			Truncation::None => {
@@ -172,7 +175,13 @@ impl fmt::Display for Snippet {
 			} else {
 				0
 			};
-		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "",)?;
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
+		f.write_str(" | ")?;
+		for _ in 0..error_offset {
+			f.write_str(" ")?;
+		}
 		for _ in 0..self.length {
 			write!(f, "^")?;
 		}

@@ -122,7 +122,7 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 			// There was unparsed SQL remaining
 			Ok((_, _)) => Err(Error::QueryRemaining),
 			// There was an error when parsing the query
-			Err(e) => Err(Error::InvalidQuery(e.render_on(input))),
+			Err(e) => Err(Error::InvalidQuery(dbg!(dbg!(e).render_on(input)))),
 		},
 	}
 }
