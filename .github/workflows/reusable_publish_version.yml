@@ -61,7 +61,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.git-ref || github.ref_name }}
+          ref: ${{ inputs.git-ref }}
 
       - name: Install a TOML parser
         run: cargo install --force --locked --version 0.8.1 taplo-cli
@@ -158,7 +158,7 @@ jobs:
           if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
           else
-            echo "git-ref=${{ inputs.git-ref || github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
           fi
 
           if [[ "${{ inputs.environment }}" == "nightly" ]]; then
