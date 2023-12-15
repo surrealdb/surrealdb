@@ -286,7 +286,6 @@ jobs:
               if [[ "${{ inputs.ml}}" == "true" ]]; then
                 features=${features},ml
               fi
-              export SURREAL_BUILD_METADATA=${{ needs.prepare-vars.outputs.build-metadata }}
               cargo build --features $features --release --locked --target x86_64-apple-darwin
 
               # Package
@@ -313,7 +312,6 @@ jobs:
               if [[ "${{ inputs.ml}}" == "true" ]]; then
                 features=${features},ml
               fi
-              export SURREAL_BUILD_METADATA=${{ needs.prepare-vars.outputs.build-metadata }}
               cargo build --features $features --release --locked --target aarch64-apple-darwin
 
               # Package
@@ -340,7 +338,7 @@ jobs:
               docker build \
                 --platform linux/amd64 \
                 --build-arg="CARGO_EXTRA_FEATURES=${features}" \
-                --build-arg="SURREAL_BUILD_METADATA=${{ needs.prepare-vars.outputs.build-metadata }}" \
+                --build-arg="SURREAL_BUILD_METADATA=${SURREAL_BUILD_METADATA}" \
                 -t binary \
                 -f docker/Dockerfile.binary \
                 .
@@ -370,7 +368,7 @@ jobs:
               docker build \
                 --platform linux/arm64 \
                 --build-arg="CARGO_EXTRA_FEATURES=${features}" \
-                --build-arg="SURREAL_BUILD_METADATA=${{ needs.prepare-vars.outputs.build-metadata }}" \
+                --build-arg="SURREAL_BUILD_METADATA=${SURREAL_BUILD_METADATA}" \
                 -t binary \
                 -f docker/Dockerfile.binary \
                 .
@@ -397,7 +395,6 @@ jobs:
               if [[ "${{ inputs.http-compression}}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              export SURREAL_BUILD_METADATA=${{ needs.prepare-vars.outputs.build-metadata }}
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
               # Package
@@ -440,6 +437,8 @@ jobs:
           go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
       - name: Build step
+        env:
+          SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
