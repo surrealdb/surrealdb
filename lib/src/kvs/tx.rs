@@ -964,7 +964,7 @@ impl Transaction {
 		let end: Key = beg.clone().add(0xff);
 		let min = beg.clone();
 		let max = end.clone();
-		self.delr(min..max, limit).await?;
+		self.delr(min..max, num).await?;
 		Ok(())
 	}
 
@@ -2885,6 +2885,8 @@ impl Transaction {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests {
+	use crate::key::database::all::All;
+	use crate::key::database::tb::Tb;
 	use crate::{
 		kvs::{Datastore, LockType::*, TransactionType::*},
 		sql::{statements::DefineUserStatement, Base},
@@ -3093,5 +3095,46 @@ mod tests {
 		txn.remove_ns_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn test_delp() {
+		let ds = Datastore::new("memory").await.unwrap();
+		// Create entries
+		{
+			let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+			for i in 0..2500 {
+				let t = format!("{i}");
+				let tb = Tb::new("test", "test", &t);
+				txn.set(tb, vec![]).await.unwrap();
+			}
+			txn.commit().await.unwrap();
+		}
+
+		let beg = crate::key::database::tb::prefix("test", "test");
+		let end = crate::key::database::tb::suffix("test", "test");
+		let rng = beg..end;
+
+		// Check we have the table keys
+		{
+			let mut txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.getr(rng.clone(), u32::MAX).await.unwrap();
+			assert_eq!(res.len(), 2500);
+		}
+
+		// Delete using the prefix
+		{
+			let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+			let all = All::new("test", "test");
+			txn.delp(all, u32::MAX).await.unwrap();
+			txn.commit().await.unwrap();
+		}
+
+		// Check we don't have any table key anymore
+		{
+			let mut txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.getr(rng, u32::MAX).await.unwrap();
+			assert_eq!(res.len(), 0);
+		}
 	}
 }
