@@ -14,7 +14,7 @@ RUN mkdir /surrealdb
 WORKDIR /surrealdb
 COPY . /surrealdb/
 
-RUN cargo build  --features http-compression,storage-tikv --release --locked
+RUN cargo build  --features storage-tikv --release --locked
 
 #
 # Development image
