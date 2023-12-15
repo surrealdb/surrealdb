@@ -964,8 +964,7 @@ impl Transaction {
 		let end: Key = beg.clone().add(0xff);
 		let min = beg.clone();
 		let max = end.clone();
-		let num = std::cmp::min(1000, limit);
-		self.delr(min..max, num).await?;
+		self.delr(min..max, limit).await?;
 		Ok(())
 	}
 

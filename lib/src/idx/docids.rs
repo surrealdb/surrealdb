@@ -1,8 +1,8 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
-use crate::idx::trees::btree::{BStatistics, BTree, BTreeStore};
+use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
-use crate::idx::{trees, IndexKeyBase, VersionedSerdeState};
+use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, TransactionType};
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -154,7 +154,7 @@ impl DocIds {
 #[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
 struct State {
-	btree: trees::btree::BState,
+	btree: BState,
 	available_ids: Option<RoaringTreemap>,
 	next_doc_id: DocId,
 }
@@ -164,7 +164,7 @@ impl VersionedSerdeState for State {}
 impl State {
 	fn new(default_btree_order: u32) -> Self {
 		Self {
-			btree: trees::btree::BState::new(default_btree_order),
+			btree: BState::new(default_btree_order),
 			available_ids: None,
 			next_doc_id: 0,
 		}
