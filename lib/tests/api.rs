@@ -2,6 +2,7 @@
 mod api_integration {
 	use chrono::DateTime;
 	use once_cell::sync::Lazy;
+	use semver::Version;
 	use serde::Deserialize;
 	use serde::Serialize;
 	use serde_json::json;

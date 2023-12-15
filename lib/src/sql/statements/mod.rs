@@ -52,14 +52,14 @@ pub use self::update::UpdateStatement;
 
 pub use self::define::{
 	DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-	DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement,
-	DefineScopeStatement, DefineStatement, DefineTableStatement, DefineTokenStatement,
-	DefineUserStatement,
+	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement,
+	DefineParamStatement, DefineScopeStatement, DefineStatement, DefineTableStatement,
+	DefineTokenStatement, DefineUserStatement,
 };
 
 pub use self::remove::{
 	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
-	RemoveScopeStatement, RemoveStatement, RemoveTableStatement, RemoveTokenStatement,
-	RemoveUserStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveScopeStatement, RemoveStatement, RemoveTableStatement,
+	RemoveTokenStatement, RemoveUserStatement,
 };
