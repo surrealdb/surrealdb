@@ -6,7 +6,6 @@ mod import;
 mod isready;
 mod ml;
 mod sql;
-#[cfg(feature = "has-storage")]
 mod start;
 mod upgrade;
 mod validate;
@@ -16,14 +15,12 @@ mod version;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
-#[cfg(feature = "has-storage")]
 pub use config::CF;
 use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
 use sql::SqlCommandArguments;
-#[cfg(feature = "has-storage")]
 use start::StartCommandArguments;
 use std::process::ExitCode;
 use upgrade::UpgradeCommandArguments;
@@ -55,7 +52,6 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
-	#[cfg(feature = "has-storage")]
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
 	#[command(about = "Backup data to or from an existing database")]
@@ -84,7 +80,6 @@ enum Commands {
 pub async fn init() -> ExitCode {
 	let args = Cli::parse();
 	let output = match args.command {
-		#[cfg(feature = "has-storage")]
 		Commands::Start(args) => start::init(args).await,
 		Commands::Backup(args) => backup::init(args).await,
 		Commands::Import(args) => import::init(args).await,

@@ -1,5 +1,4 @@
 use once_cell::sync::Lazy;
-#[cfg(feature = "has-storage")]
 use std::time::Duration;
 
 pub const LOGO: &str = "
@@ -15,22 +14,18 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 ";
 
 /// The publicly visible name of the server
-#[cfg(feature = "has-storage")]
 pub const PKG_NAME: &str = "surrealdb";
 
 /// The publicly visible user-agent of the command-line tool
 pub const SERVER_AGENT: &str = concat!("SurrealDB ", env!("CARGO_PKG_VERSION"));
 
 /// The public endpoint for the administration interface
-#[cfg(feature = "has-storage")]
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 
 /// Specifies the frequency with which ping messages should be sent to the client
-#[cfg(feature = "has-storage")]
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
 /// What is the maximum WebSocket frame size (defaults to 16 MiB)
-#[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
 	option_env!("SURREAL_WEBSOCKET_MAX_FRAME_SIZE")
 		.and_then(|s| s.parse::<usize>().ok())
@@ -38,7 +33,6 @@ pub static WEBSOCKET_MAX_FRAME_SIZE: Lazy<usize> = Lazy::new(|| {
 });
 
 /// What is the maximum WebSocket message size (defaults to 128 MiB)
-#[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
 	option_env!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE")
 		.and_then(|s| s.parse::<usize>().ok())
@@ -46,7 +40,6 @@ pub static WEBSOCKET_MAX_MESSAGE_SIZE: Lazy<usize> = Lazy::new(|| {
 });
 
 /// How many concurrent tasks can be handled on each WebSocket (defaults to 24)
-#[cfg(feature = "has-storage")]
 pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> = Lazy::new(|| {
 	option_env!("SURREAL_WEBSOCKET_MAX_CONCURRENT_REQUESTS")
 		.and_then(|s| s.parse::<usize>().ok())
@@ -54,7 +47,6 @@ pub static WEBSOCKET_MAX_CONCURRENT_REQUESTS: Lazy<usize> = Lazy::new(|| {
 });
 
 /// What is the runtime thread memory stack size (defaults to 10MiB)
-#[cfg(feature = "has-storage")]
 pub static RUNTIME_STACK_SIZE: Lazy<usize> = Lazy::new(|| {
 	// Stack frames are generally larger in debug mode.
 	let default = if cfg!(debug_assertions) {
@@ -68,7 +60,6 @@ pub static RUNTIME_STACK_SIZE: Lazy<usize> = Lazy::new(|| {
 });
 
 /// How many threads which can be started for blocking operations (defaults to 512)
-#[cfg(feature = "has-storage")]
 pub static RUNTIME_MAX_BLOCKING_THREADS: Lazy<usize> = Lazy::new(|| {
 	option_env!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS")
 		.and_then(|s| s.parse::<usize>().ok())
