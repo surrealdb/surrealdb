@@ -1,17 +1,26 @@
 use crate::cnf;
 use crate::rpc::connection::Connection;
 use axum::routing::get;
-use axum::Extension;
-use axum::Router;
+use axum::{
+	extract::ws::{WebSocket, WebSocketUpgrade},
+	response::IntoResponse,
+	Extension, Router,
+};
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
-use axum::{
-	extract::ws::{WebSocket, WebSocketUpgrade},
-	response::IntoResponse,
-};
+const PROTOCOLS: [&str; 4] = [
+	// For internal serialisation
+	"surrealql-binary",
+	// For basic JSON serialisation
+	"json",
+	// For basic CBOR serialisation
+	"cbor",
+	// For basic MessagePack serialisation
+	"messagepack",
+];
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -27,12 +36,12 @@ async fn handler(
 	Extension(req_id): Extension<RequestId>,
 ) -> impl IntoResponse {
 	ws
-		// Set the maximum frame size
+		// Set the potential WebSocket protocols
+		.protocols(PROTOCOLS)
+		// Set the maximum WebSocket frame size
 		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
-		// Set the maximum message size
+		// Set the maximum WebSocket message size
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
-		// Set the potential WebSocket protocol formats
-		.protocols(["surrealql-binary", "json", "cbor", "messagepack"])
 		// Handle the WebSocket upgrade and process messages
 		.on_upgrade(move |socket| handle_socket(socket, sess, req_id))
 }
