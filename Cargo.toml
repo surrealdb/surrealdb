@@ -60,7 +60,7 @@ serde = { version = "1.0.193", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
-surrealdb = { path = "lib", features = ["kv-mem", "protocol-http", "protocol-ws", "rustls"] }
+surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 surrealml-core = { version = "0.0.2", optional = true}
 tempfile = "3.8.1"
 thiserror = "1.0.50"
