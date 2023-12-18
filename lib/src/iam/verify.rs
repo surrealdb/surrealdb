@@ -158,11 +158,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	trace!("Attempting token authentication");
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
-	// Parse the token into a SurrealQL value and catch any errors
-	let value: Value = match token_data.claims.clone().into() {
-		Value::Object(object) => Value::Object(object),
-		_ => return Err(Error::InvalidAuth),
-	};
+	// Convert the token to a SurrealQL object value
+        let value = token_data.claims.clone().into();
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
