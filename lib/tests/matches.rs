@@ -353,3 +353,45 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_matches_without_complex_query() -> Result<(), Error> {
+	let sql = r"
+		CREATE page:1 SET title = 'the quick brown', content = 'fox jumped over the lazy dog', host = 'test';
+		CREATE page:2 SET title = 'the fast fox', content = 'jumped over the lazy dog', host = 'test';
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX page_title ON page FIELDS title SEARCH ANALYZER simple BM25;
+		DEFINE INDEX page_content ON page FIELDS content SEARCH ANALYZER simple BM25;
+		DEFINE INDEX page_host ON page FIELDS host;
+ 		SELECT id, search::score(1) as sc1, search::score(2) as sc2
+    		FROM page WHERE
+    		host = 'test'
+    		AND (title @1@ 'dog' OR content @2@ 'dog') 
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	for _ in 0..6 {
+		let _ = res.remove(0).result?;
+	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: page:1,
+				sc1: 0.9227996468544006,
+				sc2: 0.9227996468544006
+			},
+			{
+				id: page:2,
+				sc1: 0.9227996468544006,
+				sc2: 0.9227996468544006
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
