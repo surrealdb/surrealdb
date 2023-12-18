@@ -632,6 +632,9 @@ dependencies = [
  "pin-project-lite",
  "rustversion",
  "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tower",
@@ -692,7 +695,7 @@ dependencies = [
 name = "axum-example"
 version = "0.1.0"
 dependencies = [
- "axum 0.6.20",
+ "axum 0.7.2",
  "serde",
  "surrealdb",
  "thiserror",
