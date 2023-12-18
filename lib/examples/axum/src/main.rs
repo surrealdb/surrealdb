@@ -3,10 +3,10 @@ mod person;
 
 use axum::routing::{delete, get, post, put};
 use axum::Router;
-use std::net::SocketAddr;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,9 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.route("/people", get(person::list))
 		.with_state(db);
 
-		let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
-		
-		axum::serve(listener, app).await.unwrap();
+	let listener = TcpListener::bind("localhost:8080").await?;
+
+	axum::serve(listener, app).await?;
 
 	Ok(())
 }
