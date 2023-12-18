@@ -1178,8 +1178,9 @@ mod tests {
 		{
 			let ids = vec!["user.name", "user.name1", "user.name10", "user.name100"];
 			for id in ids.iter() {
-				let resource_id = format!("user:⟨{id}⟩"); // Enclose in "⟨brackets⟩".
-										  // Prepare the claims object
+				// Enclose special characters in "⟨brackets⟩"
+				let resource_id = format!("user:⟨{id}⟩");
+				// Prepare the claims object
 				let mut claims = claims.clone();
 				claims.id = Some(resource_id.clone());
 				// Create the token
@@ -1204,8 +1205,9 @@ mod tests {
 		//
 		{
 			let id = "83149446-95f5-4c0d-9f42-136e7b272456";
-			let resource_id = format!("user:⟨{id}⟩"); // Enclose in "⟨brackets⟩".
-										  // Prepare the claims object
+			// Enclose special characters in "⟨brackets⟩"
+			let resource_id = format!("user:⟨{id}⟩");
+			// Prepare the claims object
 			let mut claims = claims.clone();
 			claims.id = Some(resource_id.clone());
 			// Create the token
