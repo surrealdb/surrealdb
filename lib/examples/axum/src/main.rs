@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	db.use_ns("namespace").use_db("database").await?;
 
-	let app = Router::new()
+	let router = Router::new()
 		.route("/person/:id", post(person::create))
 		.route("/person/:id", get(person::read))
 		.route("/person/:id", put(person::update))
@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let listener = TcpListener::bind("localhost:8080").await?;
 
-	axum::serve(listener, app).await?;
+	axum::serve(listener, router).await?;
 
 	Ok(())
 }
