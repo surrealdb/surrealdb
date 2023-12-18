@@ -826,7 +826,7 @@ mod tests {
 		}
 
 		//
-		// Test with invalid token
+		// Test with invalid signature
 		//
 		{
 			// Prepare the claims object
@@ -934,7 +934,7 @@ mod tests {
 		}
 
 		//
-		// Test with invalid token
+		// Test with invalid signature
 		//
 		{
 			// Prepare the claims object
@@ -963,6 +963,265 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_scope() {
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			tk: Some("token".to_string()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			sc: Some("test".to_string()),
+			..Claims::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON SCOPE test TYPE HS512 VALUE '{secret}';").as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		//
+		// Test without roles defined
+		// Roles should be ignored in scope authentication
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with roles defined
+		// Roles should be ignored in scope authentication
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = Some(vec!["editor".to_string(), "owner".to_string()]);
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with invalid signature
+		//
+		{
+			// Prepare the claims object
+			let claims = claims.clone();
+			// Create the token
+			let key = EncodingKey::from_secret("invalid".as_ref());
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+
+		//
+		// Test with valid token invalid sc
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.sc = Some("invalid".to_string());
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+
+		//
+		// Test with invalid id
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.id = Some("##_INVALID_##".to_string());
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+
+		//
+		// Test with generic user identifier
+		//
+		{
+			let resource_id = "user:2k9qnabxuxh8k4d5gfto".to_string();
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.id = Some(resource_id.clone());
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			let user_id = syn::thing(&resource_id).unwrap();
+			assert_eq!(sess.sd, Some(Value::from(user_id)));
+		}
+
+		//
+		// Test with custom user numeric identifiers of varying sizes
+		//
+		{
+			let ids = vec!["1", "2", "100", "10000000"];
+			for id in ids.iter() {
+				let resource_id = format!("user:{id}");
+				// Prepare the claims object
+				let mut claims = claims.clone();
+				claims.id = Some(resource_id.clone());
+				// Create the token
+				let enc = encode(&HEADER, &claims, &key).unwrap();
+				// Signin with the token
+				let mut sess = Session::default();
+				let res = token(&ds, &mut sess, &enc).await;
+
+				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+				assert_eq!(sess.ns, Some("test".to_string()));
+				assert_eq!(sess.db, Some("test".to_string()));
+				assert_eq!(sess.sc, Some("test".to_string()));
+				assert_eq!(sess.au.id(), "token");
+				assert!(sess.au.is_scope());
+				let user_id = syn::thing(&resource_id).unwrap();
+				assert_eq!(sess.sd, Some(Value::from(user_id)));
+			}
+		}
+
+		//
+		// Test with custom user string identifiers of varying lengths
+		//
+		{
+			let ids = vec!["username", "username1", "username10", "username100"];
+			for id in ids.iter() {
+				let resource_id = format!("user:{id}");
+				// Prepare the claims object
+				let mut claims = claims.clone();
+				claims.id = Some(resource_id.clone());
+				// Create the token
+				let enc = encode(&HEADER, &claims, &key).unwrap();
+				// Signin with the token
+				let mut sess = Session::default();
+				let res = token(&ds, &mut sess, &enc).await;
+
+				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+				assert_eq!(sess.ns, Some("test".to_string()));
+				assert_eq!(sess.db, Some("test".to_string()));
+				assert_eq!(sess.sc, Some("test".to_string()));
+				assert_eq!(sess.au.id(), "token");
+				assert!(sess.au.is_scope());
+				let user_id = syn::thing(&resource_id).unwrap();
+				assert_eq!(sess.sd, Some(Value::from(user_id)));
+			}
+		}
+
+		//
+		// Test with custom user string identifiers of varying lengths with special characters
+		//
+		{
+			let ids = vec!["user.name", "user.name1", "user.name10", "user.name100"];
+			for id in ids.iter() {
+				let resource_id = format!("user:⟨{id}⟩"); // Enclose in "⟨brackets⟩".
+										  // Prepare the claims object
+				let mut claims = claims.clone();
+				claims.id = Some(resource_id.clone());
+				// Create the token
+				let enc = encode(&HEADER, &claims, &key).unwrap();
+				// Signin with the token
+				let mut sess = Session::default();
+				let res = token(&ds, &mut sess, &enc).await;
+
+				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+				assert_eq!(sess.ns, Some("test".to_string()));
+				assert_eq!(sess.db, Some("test".to_string()));
+				assert_eq!(sess.sc, Some("test".to_string()));
+				assert_eq!(sess.au.id(), "token");
+				assert!(sess.au.is_scope());
+				let user_id = syn::thing(&resource_id).unwrap();
+				assert_eq!(sess.sd, Some(Value::from(user_id)));
+			}
+		}
+
+		//
+		// Test with custom UUID user identifier
+		//
+		{
+			let id = "83149446-95f5-4c0d-9f42-136e7b272456";
+			let resource_id = format!("user:⟨{id}⟩"); // Enclose in "⟨brackets⟩".
+										  // Prepare the claims object
+			let mut claims = claims.clone();
+			claims.id = Some(resource_id.clone());
+			// Create the token
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			let user_id = syn::thing(&resource_id).unwrap();
+			assert_eq!(sess.sd, Some(Value::from(user_id)));
 		}
 	}
 
