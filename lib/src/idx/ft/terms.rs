@@ -155,13 +155,22 @@ impl State {
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::postings::TermFrequency;
-	use crate::idx::ft::terms::Terms;
-	use crate::idx::IndexKeyBase;
+	use crate::idx::ft::terms::{State, Terms};
+	use crate::idx::{IndexKeyBase, VersionedSerdeState};
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 	use rand::{thread_rng, Rng};
 	use std::collections::HashSet;
 	use test_log::test;
+
+	#[test]
+	fn test_state_serde() {
+		let s = State::new(3);
+		let val = s.try_to_val().unwrap();
+		let s = State::try_from_val(val).unwrap();
+		assert_eq!(s.btree.generation(), 0);
+		assert_eq!(s.next_term_id, 0);
+	}
 
 	fn random_term(key_length: usize) -> String {
 		thread_rng()

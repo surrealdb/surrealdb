@@ -87,6 +87,20 @@ impl Expression {
 		}
 	}
 
+	pub(crate) fn is_static(&self) -> bool {
+		match self {
+			Self::Unary {
+				v,
+				..
+			} => v.is_static(),
+			Self::Binary {
+				l,
+				r,
+				..
+			} => l.is_static() && r.is_static(),
+		}
+	}
+
 	/// Returns the operator
 	pub(crate) fn operator(&self) -> &Operator {
 		match self {

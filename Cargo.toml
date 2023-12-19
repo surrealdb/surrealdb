@@ -2,24 +2,22 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.0.0"
+version = "1.0.1"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 # Public features
 default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
-storage-mem = ["surrealdb/kv-mem", "has-storage"]
-storage-rocksdb = ["surrealdb/kv-rocksdb", "has-storage"]
-storage-speedb = ["surrealdb/kv-speedb", "has-storage"]
-storage-tikv = ["surrealdb/kv-tikv", "has-storage"]
-storage-fdb = ["surrealdb/kv-fdb-7_1", "has-storage"]
+storage-mem = ["surrealdb/kv-mem"]
+storage-rocksdb = ["surrealdb/kv-rocksdb"]
+storage-speedb = ["surrealdb/kv-speedb"]
+storage-tikv = ["surrealdb/kv-tikv"]
+storage-fdb = ["surrealdb/kv-fdb-7_1"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
-# Private features
-has-storage = []
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
