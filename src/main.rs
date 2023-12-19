@@ -13,22 +13,17 @@
 #[macro_use]
 extern crate tracing;
 
-#[cfg(feature = "has-storage")]
 #[macro_use]
 mod mac;
 
 mod cli;
 mod cnf;
-#[cfg(feature = "has-storage")]
 mod dbs;
 mod env;
 mod err;
 mod mem;
-#[cfg(feature = "has-storage")]
 mod net;
-#[cfg(feature = "has-storage")]
 mod node;
-#[cfg(feature = "has-storage")]
 mod rpc;
 mod telemetry;
 

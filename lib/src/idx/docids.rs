@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 
 pub type DocId = u64;
 
-pub(crate) const NO_DOC_ID: u64 = u64::MAX;
-
 pub(crate) struct DocIds {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
