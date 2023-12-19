@@ -43,7 +43,7 @@ impl fmt::Display for Algorithm {
 			Self::Rs256 => "RS256",
 			Self::Rs384 => "RS384",
 			Self::Rs512 => "RS512",
-			Self::Jwks => "JWKS",
+			Self::Jwks => "JWKS", // Not an algorithm.
 		})
 	}
 }
