@@ -16,8 +16,6 @@ pub struct Claims {
 	pub exp: Option<i64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iss: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub kid: Option<String>,
 	#[serde(alias = "ns")]
 	#[serde(alias = "NS")]
 	#[serde(rename = "NS")]
