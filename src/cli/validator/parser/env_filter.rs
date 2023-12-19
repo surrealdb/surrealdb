@@ -17,7 +17,6 @@ impl Clone for CustomEnvFilter {
 pub struct CustomEnvFilterParser;
 
 impl CustomEnvFilterParser {
-	#[cfg(feature = "has-storage")]
 	pub fn new() -> CustomEnvFilterParser {
 		Self
 	}
