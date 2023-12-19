@@ -409,7 +409,7 @@ impl Options {
 
 	/// Get current Node ID
 	pub fn id(&self) -> Result<Uuid, Error> {
-		self.id.ok_or(Error::Unreachable)
+		self.id.ok_or(Error::Unreachable("Options::id"))
 	}
 
 	/// Get currently selected NS

@@ -99,12 +99,11 @@ pub enum Value {
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
-	// Closure(Box<Closure>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
 	Query(Query),
-	MlModel(Box<Model>),
+	Model(Box<Model>),
 	// Add new variants here
 }
 
@@ -257,7 +256,7 @@ impl From<Function> for Value {
 
 impl From<Model> for Value {
 	fn from(v: Model) -> Self {
-		Value::MlModel(Box::new(v))
+		Value::Model(Box::new(v))
 	}
 }
 
@@ -502,6 +501,12 @@ impl From<Id> for Value {
 				Gen::Uuid => Id::uuid().into(),
 			},
 		}
+	}
+}
+
+impl From<Query> for Value {
+	fn from(q: Query) -> Self {
+		Value::Query(q)
 	}
 }
 
@@ -1035,7 +1040,7 @@ impl Value {
 	pub fn can_start_idiom(&self) -> bool {
 		match self {
 			Value::Function(x) => !x.is_script(),
-			Value::MlModel(_)
+			Value::Model(_)
 			| Value::Subquery(_)
 			| Value::Constant(_)
 			| Value::Datetime(_)
@@ -2308,8 +2313,10 @@ impl Value {
 			Value::Duration(_) => true,
 			Value::Datetime(_) => true,
 			Value::Geometry(_) => true,
-			Value::Array(v) => v.iter().all(Value::is_static),
-			Value::Object(v) => v.values().all(Value::is_static),
+			Value::Array(v) => v.is_static(),
+			Value::Object(v) => v.is_static(),
+			Value::Expression(v) => v.is_static(),
+			Value::Function(v) => v.is_static(),
 			Value::Constant(_) => true,
 			_ => false,
 		}
@@ -2526,7 +2533,7 @@ impl fmt::Display for Value {
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
-			Value::MlModel(v) => write!(f, "{v}"),
+			Value::Model(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
 			Value::Geometry(v) => write!(f, "{v}"),
 			Value::Idiom(v) => write!(f, "{v}"),
@@ -2557,7 +2564,7 @@ impl Value {
 			Value::Function(v) => {
 				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
 			}
-			Value::MlModel(m) => m.args.iter().any(Value::writeable),
+			Value::Model(m) => m.args.iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,
@@ -2588,7 +2595,7 @@ impl Value {
 			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::MlModel(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Model(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),

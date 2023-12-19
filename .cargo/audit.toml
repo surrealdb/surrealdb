@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+	# Will be resolved once "surrealdb-jsonwebtoken", a temporary fork
+	# of "jsonwebtoken", is replaced by the upstream version which no
+	# longer uses the affected "rsa" crate.
+	"RUSTSEC-2023-0071"
+]

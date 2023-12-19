@@ -134,6 +134,10 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
+
+#[cfg(feature = "ml")]
+#[doc(hidden)]
+pub mod obs;
 #[doc(hidden)]
 pub mod syn;
 

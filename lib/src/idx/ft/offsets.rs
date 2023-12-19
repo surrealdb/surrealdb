@@ -109,16 +109,16 @@ impl TryFrom<Val> for OffsetRecords {
 		}
 		let decompressed: Vec<u32> = bincode::deserialize(&val)?;
 		let mut iter = decompressed.iter();
-		let s = *iter.next().ok_or(Error::CorruptedIndex)?;
+		let s = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(1)"))?;
 		let mut indexes = Vec::with_capacity(s as usize);
 		for _ in 0..s {
-			let index = *iter.next().ok_or(Error::CorruptedIndex)?;
+			let index = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(2)"))?;
 			indexes.push(index);
 		}
 		let mut res = Vec::with_capacity(s as usize);
 		for index in indexes {
-			let start = *iter.next().ok_or(Error::CorruptedIndex)?;
-			let end = *iter.next().ok_or(Error::CorruptedIndex)?;
+			let start = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(3)"))?;
+			let end = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(4)"))?;
 			res.push(Offset::new(index, start, end));
 		}
 		Ok(OffsetRecords(res))

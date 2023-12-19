@@ -90,6 +90,9 @@ pub struct Stats {
 	pub execution_time: Duration,
 }
 
+/// Machine learning model marker type for import and export types
+pub struct Model;
+
 /// Responses returned with statistics
 #[derive(Debug)]
 pub struct WithStats<T>(T);
@@ -1004,7 +1007,9 @@ where
 		Export {
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
+			ml_config: None,
 			response: PhantomData,
+			export_type: PhantomData,
 		}
 	}
 
@@ -1034,6 +1039,8 @@ where
 		Import {
 			client: Cow::Borrowed(self),
 			file: file.as_ref().to_owned(),
+			ml_config: None,
+			import_type: PhantomData,
 		}
 	}
 }
