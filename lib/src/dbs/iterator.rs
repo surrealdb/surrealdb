@@ -640,7 +640,7 @@ impl Iterator {
 			}
 			// Run statements in parallel
 			true => {
-				// If any iterator requires distinct, we new to create a global distinct instance
+				// If any iterator requires distinct, we need to create a global distinct instance
 				let distinct = AsyncDistinct::new(ctx);
 				// Create a new executor
 				let e = executor::Executor::new();

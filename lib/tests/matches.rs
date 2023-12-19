@@ -365,15 +365,19 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 		DEFINE INDEX page_host ON page FIELDS host;
 		SELECT id, search::score(1) as sc1, search::score(2) as sc2
     		FROM page WHERE (title @1@ 'dog' OR content @2@ 'dog');
+		SELECT id, search::score(1) as sc1, search::score(2) as sc2
+		FROM page WHERE
+		host = 'test'
+		AND (title @1@ 'dog' OR content @2@ 'dog') explain;
  		SELECT id, search::score(1) as sc1, search::score(2) as sc2
     		FROM page WHERE
     		host = 'test'
-    		AND (title @1@ 'dog' OR content @2@ 'dog') 
+    		AND (title @1@ 'dog' OR content @2@ 'dog');
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 9);
 	//
 	for _ in 0..6 {
 		let _ = res.remove(0).result?;
@@ -393,6 +397,46 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 					sc2: -1.6716052293777466f
 				}
 			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'page_host',
+						operator: '=',
+						value: 'test'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'page_title',
+						operator: '@1@',
+						value: 'dog'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'page_content',
+						operator: '@2@',
+						value: 'dog'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			}
+		]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
