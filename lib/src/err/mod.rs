@@ -753,6 +753,18 @@ pub enum Error {
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
 
+	/// Auth requires a token header which is missing
+	#[error("Auth token is missing the '{0}' header")]
+	MissingTokenHeader(String),
+
+	/// Auth requires a token claim which is missing
+	#[error("Auth token is missing the '{0}' claim")]
+	MissingTokenClaim(String),
+
+	/// Auth requires a JWK that cannot be found locally or remotely
+	#[error("No JWK found for identifier '{0}' in cache or location '{1}'")]
+	JwkNotFound(String, String),
+
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),

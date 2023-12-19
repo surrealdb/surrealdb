@@ -18,6 +18,7 @@ pub enum Algorithm {
 	Rs256,
 	Rs384,
 	Rs512,
+	Jwks, // Not an argorithm.
 }
 
 impl Default for Algorithm {
@@ -42,6 +43,7 @@ impl fmt::Display for Algorithm {
 			Self::Rs256 => "RS256",
 			Self::Rs384 => "RS384",
 			Self::Rs512 => "RS512",
+			Self::Jwks => "JWKS",
 		})
 	}
 }

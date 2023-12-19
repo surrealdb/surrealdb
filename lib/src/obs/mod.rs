@@ -52,7 +52,7 @@ static CACHE: Lazy<Arc<dyn ObjectStore>> =
 		}
 	});
 
-/// Gets the file from the local file system object storage.
+/// Streams the file from the local file system object storage.
 pub async fn stream(
 	file: String,
 ) -> Result<BoxStream<'static, Result<Bytes, object_store::Error>>, Error> {
@@ -74,13 +74,13 @@ pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
 	}
 }
 
-/// Gets the file from the local file system object storage.
+/// Puts the file into the local file system object storage.
 pub async fn put(file: &str, data: Vec<u8>) -> Result<(), Error> {
 	let _ = STORE.put(&Path::from(file), Bytes::from(data)).await?;
 	Ok(())
 }
 
-/// Gets the file from the local file system object storage.
+/// Deletes the file from the local file system object storage.
 pub async fn del(file: &str) -> Result<(), Error> {
 	Ok(STORE.delete(&Path::from(file)).await?)
 }
