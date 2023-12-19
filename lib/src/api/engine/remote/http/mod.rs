@@ -15,6 +15,7 @@ use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
 use crate::api::engine::merge_statement;
 use crate::api::engine::patch_statement;
+use crate::api::engine::remote::duration_from_str;
 use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
@@ -50,7 +51,6 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -157,7 +157,7 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-type HttpQueryResponse = (Duration, Status, Value);
+type HttpQueryResponse = (String, Status, Value);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
@@ -198,7 +198,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	let mut map = IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
 	for (index, (execution_time, status, value)) in responses.into_iter().enumerate() {
 		let stats = Stats {
-			execution_time,
+			execution_time: duration_from_str(&execution_time),
 		};
 		match status {
 			Status::Ok => {

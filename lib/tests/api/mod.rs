@@ -391,11 +391,11 @@ async fn query_with_stats() {
 	let mut response = db.query(sql).with_stats().await.unwrap();
 	// First query statement
 	let (stats, result) = response.take(0).unwrap();
-	assert!(stats.execution_time > Duration::ZERO);
+	assert!(stats.execution_time > Some(Duration::ZERO));
 	let _: Value = result.unwrap();
 	// Second query statement
 	let (stats, result) = response.take(1).unwrap();
-	assert!(stats.execution_time > Duration::ZERO);
+	assert!(stats.execution_time > Some(Duration::ZERO));
 	let _: Vec<RecordId> = result.unwrap();
 }
 
