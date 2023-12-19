@@ -2,6 +2,7 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use helpers::with_enough_stack;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Thing;
@@ -679,7 +680,8 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 
 #[tokio::test]
 async fn field_definition_value_reference_with_future() -> Result<(), Error> {
-	let sql = "
+	with_enough_stack(async {
+		let sql = "
 		DEFINE TABLE product;
 		DEFINE FIELD subproducts ON product VALUE <future> { ->contains->product };
 		CREATE product:one, product:two;
@@ -688,20 +690,20 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 		UPDATE product;
 		SELECT * FROM product;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		let dbs = new_ds().await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 7);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				id: product:one,
 				subproducts: [],
@@ -711,24 +713,24 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		);
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				id: contains:test,
 				in: product:one,
 				out: product:two,
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		);
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				id: product:one,
 				subproducts: [
@@ -740,12 +742,12 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		);
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				id: product:one,
 				subproducts: [
@@ -757,12 +759,12 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		);
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				id: product:one,
 				subproducts: [
@@ -774,10 +776,11 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	Ok(())
+		);
+		assert_eq!(tmp, val);
+		//
+		Ok(())
+	})
 }
 
 #[tokio::test]
