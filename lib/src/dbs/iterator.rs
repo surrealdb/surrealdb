@@ -604,8 +604,6 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			// Distinct is passed only for iterators that really requires it
-			let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
 			v.iterate(ctx, opt, txn, stm, self, dis).await?;
 		}
 		// Everything processed ok
