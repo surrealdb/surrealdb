@@ -1,13 +1,14 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::err::Error;
-use crate::api::opt::Range;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::dbs;
+use crate::method::Live;
 use crate::method::OnceLockExt;
 use crate::method::Query;
+use crate::method::Select;
 use crate::opt::from_value;
 use crate::opt::Resource;
 use crate::sql::cond::Cond;
@@ -20,7 +21,6 @@ use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::statement::Statement;
 use crate::sql::statements::live::LiveStatement;
-use crate::sql::Id;
 use crate::sql::Table;
 use crate::sql::Thing;
 use crate::sql::Uuid;
@@ -41,33 +41,10 @@ use std::task::Poll;
 
 const ID: &str = "id";
 
-/// A live query future
-#[derive(Debug)]
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Live<'r, C: Connection, R> {
-	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
-	pub(super) range: Option<Range<Id>>,
-	pub(super) response_type: PhantomData<R>,
-}
-
-impl<C, R> Live<'_, C, R>
-where
-	C: Connection,
-{
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Live<'static, C, R> {
-		Live {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
-}
-
 macro_rules! into_future {
 	() => {
 		fn into_future(self) -> Self::IntoFuture {
-			let Live {
+			let Select {
 				client,
 				resource,
 				range,
@@ -223,7 +200,7 @@ fn cond_from_range(range: crate::sql::Range) -> Option<Cond> {
 	}
 }
 
-impl<'r, Client> IntoFuture for Live<'r, Client, Value>
+impl<'r, Client> IntoFuture for Select<'r, Client, Value, Live>
 where
 	Client: Connection,
 {
@@ -233,7 +210,7 @@ where
 	into_future! {}
 }
 
-impl<'r, Client, R> IntoFuture for Live<'r, Client, Option<R>>
+impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>, Live>
 where
 	Client: Connection,
 	R: DeserializeOwned,
@@ -244,7 +221,7 @@ where
 	into_future! {}
 }
 
-impl<'r, Client, R> IntoFuture for Live<'r, Client, Vec<R>>
+impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>, Live>
 where
 	Client: Connection,
 	R: DeserializeOwned,
