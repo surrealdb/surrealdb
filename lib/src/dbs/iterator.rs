@@ -604,7 +604,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(ctx, opt, txn, stm, self, dis).await?;
+			v.iterate(ctx, opt, txn, stm, self, distinct.as_mut()).await?;
 		}
 		// Everything processed ok
 		Ok(())
