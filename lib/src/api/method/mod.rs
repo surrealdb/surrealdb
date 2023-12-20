@@ -87,7 +87,7 @@ use std::time::Duration;
 #[non_exhaustive]
 pub struct Stats {
 	/// The time taken to execute the query
-	pub execution_time: Duration,
+	pub execution_time: Option<Duration>,
 }
 
 /// Machine learning model marker type for import and export types

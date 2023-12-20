@@ -15,6 +15,7 @@ use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
 use crate::api::engine::merge_statement;
 use crate::api::engine::patch_statement;
+use crate::api::engine::remote::duration_from_str;
 use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
@@ -27,8 +28,8 @@ use crate::api::Surreal;
 use crate::dbs::Status;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
-use crate::headers::DB;
-use crate::headers::NS;
+use crate::headers::DB_LEGACY;
+use crate::headers::NS_LEGACY;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::serde::deserialize;
@@ -50,7 +51,6 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -157,7 +157,7 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-type HttpQueryResponse = (Duration, Status, Value);
+type HttpQueryResponse = (String, Status, Value);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Credentials {
@@ -198,7 +198,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	let mut map = IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
 	for (index, (execution_time, status, value)) in responses.into_iter().enumerate() {
 		let stats = Stats {
-			execution_time,
+			execution_time: duration_from_str(&execution_time),
 		};
 		match status {
 			Status::Ok => {
@@ -364,7 +364,7 @@ async fn router(
 			let ns = match ns {
 				Some(ns) => match HeaderValue::try_from(&ns) {
 					Ok(ns) => {
-						request = request.header(&NS, &ns);
+						request = request.header(&NS_LEGACY, &ns);
 						Some(ns)
 					}
 					Err(_) => {
@@ -376,7 +376,7 @@ async fn router(
 			let db = match db {
 				Some(db) => match HeaderValue::try_from(&db) {
 					Ok(db) => {
-						request = request.header(&DB, &db);
+						request = request.header(&DB_LEGACY, &db);
 						Some(db)
 					}
 					Err(_) => {
@@ -388,10 +388,10 @@ async fn router(
 			request = request.auth(auth).body("RETURN true");
 			take(true, request).await?;
 			if let Some(ns) = ns {
-				headers.insert(&NS, ns);
+				headers.insert(&NS_LEGACY, ns);
 			}
 			if let Some(db) = db {
-				headers.insert(&DB, db);
+				headers.insert(&DB_LEGACY, db);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}
