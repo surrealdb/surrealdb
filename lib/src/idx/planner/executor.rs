@@ -217,9 +217,6 @@ impl QueryExecutor {
 		}
 		set
 	}
-	pub(crate) fn is_distinct(&self, ir: IteratorRef) -> bool {
-		(ir as usize) < self.0.it_entries.len()
-	}
 
 	pub(crate) fn is_table(&self, tb: &str) -> bool {
 		self.0.table.eq(tb)

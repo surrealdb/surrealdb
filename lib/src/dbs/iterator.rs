@@ -631,9 +631,7 @@ impl Iterator {
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					// Distinct is passed only for iterators that really requires it
-					let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
-					v.iterate(ctx, opt, txn, stm, self, dis).await?;
+					v.iterate(ctx, opt, txn, stm, self, distinct.as_mut()).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -655,8 +653,7 @@ impl Iterator {
 					// Process all prepared values
 					for v in vals {
 						// Distinct is passed only for iterators that really requires it
-						let dis = AsyncDistinct::requires_distinct(ctx, distinct.as_ref(), &v);
-						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), dis))
+						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), distinct.clone()))
 							// Ensure we detach the spawned task
 							.detach();
 					}

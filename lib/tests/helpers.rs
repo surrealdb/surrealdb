@@ -165,6 +165,7 @@ pub async fn iam_check_cases(
 	Ok(())
 }
 
+#[allow(dead_code)]
 pub fn with_enough_stack(
 	fut: impl Future<Output = Result<(), Error>> + Send + 'static,
 ) -> Result<(), Error> {
