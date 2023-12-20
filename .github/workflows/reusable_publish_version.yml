@@ -395,6 +395,9 @@ jobs:
               if [[ "${{ inputs.http-compression}}" == "true" ]]; then
                 features=${features},http-compression
               fi
+              if [[ "${{ inputs.ml}}" == "true" ]]; then
+                features=${features},ml
+              fi
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
               # Package
