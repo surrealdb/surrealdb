@@ -1,21 +1,15 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::fnc::crypto::sha256;
-use crate::iam::{token::Claims, Actor, Auth, Level, Role};
+use crate::iam::{jwks, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use chrono::{DateTime, Utc};
-use jsonwebtoken::jwk::{Jwk, JwkSet};
+use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
-use reqwest;
-use serde::{Deserialize, Serialize};
 use std::str::{self, FromStr};
 use std::sync::Arc;
-
-const JWKS_CACHE_EXPIRATION_SECONDS: i64 = 360;
 
 fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {
@@ -73,82 +67,6 @@ fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Er
 		)),
 		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here.
 	}
-}
-
-async fn fetch_jwks_from_cache(url: String) -> Result<JwkSet, Error> {
-	let url_hash = sha256((url,))?;
-	let path = format!("jwks/{}.json", url_hash);
-	let bytes = crate::obs::get(&path).await?;
-	let jwks_cache: JwksCache = match serde_json::from_slice(&bytes) {
-		Ok(jwks_cache) => jwks_cache,
-		Err(_) => return Err(Error::InvalidAuth),
-	};
-	if Utc::now().signed_duration_since(jwks_cache.time).num_seconds()
-		> JWKS_CACHE_EXPIRATION_SECONDS
-	{
-		return Err(Error::InvalidAuth);
-	}
-	Ok(jwks_cache.jwks)
-}
-
-async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
-	let res = reqwest::blocking::get(url)?;
-	if !res.status().is_success() {
-		return Err(Error::InvalidAuth);
-	}
-	let jwks = res.bytes()?;
-	match serde_json::from_slice(&jwks) {
-		Ok(jwks) => Ok(jwks),
-		Err(_) => Err(Error::InvalidAuth),
-	}
-}
-
-#[derive(Serialize, Deserialize)]
-struct JwksCache {
-	jwks: JwkSet,
-	time: DateTime<Utc>,
-}
-
-async fn cache_jwks(jwks: JwkSet, url: String) -> Result<(), Error> {
-	let url_hash = sha256((url,))?;
-	let path = format!("jwks/{}.json", url_hash);
-	let jwks_cache = JwksCache {
-		jwks,
-		time: Utc::now(),
-	};
-	match serde_json::to_vec(&jwks_cache) {
-		Ok(data) => crate::obs::put(&path, data).await,
-		Err(_) => Err(Error::InvalidAuth),
-	}
-}
-
-async fn config_jwks(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
-	// Try to find JWKS in cache
-	let jwks = match fetch_jwks_from_cache(url.clone()).await {
-		Ok(jwks) => jwks,
-		Err(_) => {
-			// Otherwise, fetch JWKS object from URL
-			match fetch_jwks_from_url(url.clone()).await {
-				Ok(jwks) => {
-					// If fetch is successful, cache JWKS object
-					cache_jwks(jwks.clone(), url.clone()).await?;
-					// Return fetched JWKS object
-					jwks
-				}
-				Err(_) => return Err(Error::InvalidAuth),
-			}
-		}
-	};
-	// Attempt to retrieve JWK from JWKS by KID
-	let jwk = match jwks.find(&kid) {
-		Some(jwk) => jwk.to_owned(),
-		_ => return Err(Error::InvalidAuth),
-	};
-	let alg = match jwk.common.algorithm {
-		Some(alg) => alg,
-		_ => return Err(Error::InvalidAuth),
-	};
-	Ok((DecodingKey::from_jwk(&jwk)?, Validation::new(alg)))
 }
 
 static KEY: Lazy<DecodingKey> = Lazy::new(|| DecodingKey::from_secret(&[]));
@@ -281,9 +199,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
 			// If the token is defined as JWKS
 			let cf = if de.kind == Algorithm::Jwks {
-				// The key identifier claim must be present
+				// The key identifier header must be present
 				if let Some(kid) = token_data.header.kid {
-					config_jwks(kid, de.code).await
+					jwks::config(kid, de.code).await
 				} else {
 					Err(Error::MissingTokenHeader("kid".to_string()))
 				}

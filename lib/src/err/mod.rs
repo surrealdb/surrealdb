@@ -761,9 +761,21 @@ pub enum Error {
 	#[error("Auth token is missing the '{0}' claim")]
 	MissingTokenClaim(String),
 
-	/// Auth requires a JWK that cannot be found locally or remotely
-	#[error("No JWK found for identifier '{0}' in cache or location '{1}'")]
+	/// The JWKS object is malformed
+	#[error("The JWKS object is malformed")]
+	JwksMalformed,
+
+	/// Auth requires a JWKS object that cannot be found locally or remotely
+	#[error("No valid JWKS object found in location '{0}'")]
+	JwksNotFound(String),
+
+	/// Auth requires a JWK object that cannot be found locally or remotely
+	#[error("No valid JWK object found for identifier '{0}' in location '{1}'")]
 	JwkNotFound(String, String),
+
+	/// The cryptographic algorithm is unsupported
+	#[error("The cryptographic algorithm is unsupported")]
+	UnsupportedCryptographicAlgorithm,
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
