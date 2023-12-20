@@ -3,7 +3,6 @@ use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use serde::Serialize;
 use serde_json::Value as Json;
-use surrealdb::dbs;
 use surrealdb::sql;
 
 use super::headers::Accept;
@@ -67,9 +66,8 @@ where
 }
 
 /// Convert and simplify the value into JSON
-pub fn simplify(vec: Vec<dbs::Response>) -> Json {
-	let responses: Vec<_> = vec.into_iter().map(dbs::ApiResponse::from).collect();
-	sql::to_value(responses).unwrap().into()
+pub fn simplify<T: Serialize>(v: T) -> Json {
+	sql::to_value(v).unwrap().into()
 }
 
 impl IntoResponse for Output {
