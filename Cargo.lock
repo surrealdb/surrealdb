@@ -5433,9 +5433,9 @@ dependencies = [
 
 [[package]]
 name = "surrealml-core"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aabe3c44a73d6f7a3d069400a4966d2ffcf643fb1d60399b1746787abc9dd12"
+checksum = "6cde4ceed0b05a8f512afe7fa1a260e4a67cfbba439eccb858e189f826fc3fff"
 dependencies = [
  "bytes",
  "futures-core",
