@@ -770,12 +770,12 @@ pub enum Error {
 	JwksNotFound(String),
 
 	/// Auth requires a JWK object that cannot be found locally or remotely
-	#[error("No valid JWK object found for identifier '{0}' in location '{1}'")]
+	#[error("No valid JWK object found with key identifier '{0}' in location '{1}'")]
 	JwkNotFound(String, String),
 
-	/// The cryptographic algorithm is unsupported
-	#[error("The cryptographic algorithm is unsupported")]
-	UnsupportedCryptographicAlgorithm,
+	// The JWK parameter has an invalid value
+	#[error("The JWK parameter '{0}' has an invalid value")]
+	JwkInvalidParameter(String),
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
@@ -872,7 +872,6 @@ impl<T> From<channel::SendError<T>> for Error {
 	}
 }
 
-#[cfg(feature = "http")]
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())

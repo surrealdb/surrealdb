@@ -543,7 +543,7 @@ pub async fn verify_creds_legacy(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{iam::token::HEADER, kvs::Datastore};
+	use crate::{iam::token::Claims, iam::token::HEADER, iam::verify::token, kvs::Datastore};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};

@@ -17,7 +17,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls"]
+default = ["protocol-ws", "rustls", "dep:reqwest"]
 protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["dep:echodb", "tokio/time"]
