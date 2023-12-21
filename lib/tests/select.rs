@@ -1107,12 +1107,12 @@ async fn select_on_future() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(insert_query, &ses, None).await?;
+	dbs.execute_sql(insert_query, &ses, None).await?;
 
 	let select_query_true = "
 		SELECT name FROM person WHERE can_drive
 	";
-	let mut res = dbs.execute(select_query_true, &ses, None).await?;
+	let mut res = dbs.execute_sql(select_query_true, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[{ name: \"Hendrick\" }]");
 	assert_eq!(tmp, val);
@@ -1120,7 +1120,7 @@ async fn select_on_future() -> Result<(), Error> {
 	let select_query_false = "
 		SELECT name FROM person WHERE !can_drive
 	";
-	let mut res = dbs.execute(select_query_false, &ses, None).await?;
+	let mut res = dbs.execute_sql(select_query_false, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[{ name: \"Hana\" }]");
 	assert_eq!(tmp, val);

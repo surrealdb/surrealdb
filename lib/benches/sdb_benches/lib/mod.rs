@@ -34,7 +34,7 @@ pub(super) async fn init(target: &str) {
 		"lib-fdb" => {
 			let ds = Datastore::new("fdb:///etc/foundationdb/fdb.cluster").await.unwrap();
 			// Verify it can connect to the FDB cluster
-			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None)
+			ds.execute_sql("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None)
 				.await
 				.expect("Unable to connect to FDB cluster");
 			let _ = DB.set(Arc::new(ds));

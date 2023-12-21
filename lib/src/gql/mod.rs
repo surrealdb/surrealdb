@@ -3,6 +3,7 @@ use graphql_parser::query;
 use graphql_parser::schema;
 use graphql_parser::schema::Definition;
 use graphql_parser::schema::Field;
+use graphql_parser::schema::InterfaceType;
 use graphql_parser::schema::ObjectType;
 use graphql_parser::schema::SchemaDefinition;
 use graphql_parser::schema::Type;
@@ -12,15 +13,104 @@ use crate::err::Error;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
+use crate::sql;
 use crate::sql::statements::DefineFieldStatement;
+use crate::sql::statements::SelectStatement;
+use crate::sql::Fields;
 use crate::sql::Kind;
 use crate::sql::Query;
+use crate::sql::Statement;
+use crate::sql::Table;
+use crate::sql::Values;
 
 pub fn parse_and_transpile(txt: &str) -> Result<Query, Error> {
-	let _ast: query::Document<&str> =
+	let ast: query::Document<&str> =
 		parse_query::<&str>(txt).map_err(|e| Error::Thrown(e.to_string()))?;
 
-	todo!()
+	// info!("ast: {:#?}", ast);
+
+	info!("surreal ast: {:#?}", crate::syn::parse("SELECT * FROM person")?);
+
+	let mut query: Vec<Statement> = vec![];
+
+	for d in ast.definitions.iter() {
+		match d {
+			query::Definition::Operation(o) => match o {
+				query::OperationDefinition::SelectionSet(s) => {
+					query.extend(transpile_selection_set(s.clone())?)
+				}
+				query::OperationDefinition::Query(_) => todo!(),
+				query::OperationDefinition::Mutation(_) => todo!(),
+				query::OperationDefinition::Subscription(_) => todo!(),
+			},
+			query::Definition::Fragment(_) => todo!(),
+		}
+	}
+
+	info!("query: {:#?}", query);
+
+	Ok(query.into())
+}
+
+macro_rules! id_field {
+	() => {
+		Field {
+			description: None,
+			name: "id".to_string(),
+			arguments: vec![],
+			field_type: Type::NonNullType(Type::NamedType("ID".to_string()).into()),
+			directives: vec![],
+			position: Default::default(),
+		}
+	};
+}
+
+fn custom_field<'a>(name: &str, ty: &str, non_null: bool) -> Field<'a, String> {
+	let field_type = if non_null {
+		Type::NonNullType(Type::NamedType(ty.to_string()).into())
+	} else {
+		Type::NamedType(ty.to_string()).into()
+	};
+	Field {
+		description: None,
+		name: name.to_string(),
+		arguments: vec![],
+		field_type,
+		directives: vec![],
+		position: Default::default(),
+	}
+}
+
+fn transpile_selection_set<'a>(
+	ss: query::SelectionSet<'a, &'a str>,
+) -> Result<Vec<Statement>, Error> {
+	let statements = ss
+		.items
+		.iter()
+		.map(|s| match s {
+			query::Selection::Field(f) => Statement::Select(SelectStatement {
+				expr: Fields::all(),
+				omit: None,
+				only: false,
+				what: Values(vec![sql::Value::Table(Table(f.name.to_string()))]),
+				with: None,
+				cond: None,
+				split: None,
+				group: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: None,
+				timeout: None,
+				parallel: false,
+				explain: None,
+			}),
+			query::Selection::FragmentSpread(_) => todo!(),
+			query::Selection::InlineFragment(_) => todo!(),
+		})
+		.collect::<Vec<_>>();
+	Ok(statements)
 }
 
 // fn convert_type<'a>(_ty: &Kind) -> Result<TypeDefinition<'a, String>, Error> {
@@ -49,7 +139,7 @@ fn convert_kind_to_type<'a>(ty: Kind) -> Result<Type<'a, String>, Error> {
 		Kind::Uuid => Type::NamedType("Uuid".to_string()).into(),
 		Kind::Record(v) => {
 			// println!("{:?}", v);
-			assert!(v.len() == 1);
+			assert!(v.len() == 1, "multiple types in record");
 			Type::NamedType(v.first().unwrap().to_string()).into()
 		}
 		Kind::Geometry(_) => Type::NamedType("Geometry".to_string()).into(),
@@ -96,21 +186,22 @@ pub async fn get_schema<'a>(
 		position: Default::default(),
 	}));
 	let tbs = tx.all_tb(&ns, &db).await?;
-	println!("tbs: {:?}\n", tbs);
+
 	let mut table_defs = vec![];
+
 	for tb in tbs.iter() {
 		let fds = tx.all_tb_fields(&ns, &db, &tb.name).await?;
-		println!("fds(len:{}): {:?}\n", fds.len(), fds);
-		let fds = fds.iter().map(convert_field).collect::<Result<Vec<_>, Error>>()?;
+		// println!("fds(len:{}): {:?}\n", fds.len(), fds);
+		let mut fd_defs = vec![id_field!()];
+		fd_defs.extend(fds.iter().map(convert_field).collect::<Result<Vec<_>, Error>>()?);
 		let ty_def = TypeDefinition::Object(ObjectType {
 			description: None,
 			name: tb.name.to_string(),
-			implements_interfaces: vec![],
+			implements_interfaces: vec!["Record".to_string()],
 			directives: vec![],
-			fields: fds,
+			fields: fd_defs,
 			position: Default::default(),
 		});
-		println!("ty_def: {:?}\n", ty_def);
 		table_defs.push(Definition::TypeDefinition(ty_def));
 	}
 
@@ -141,6 +232,27 @@ pub async fn get_schema<'a>(
 			})
 			.collect(),
 		position: Default::default(),
+	})));
+
+	defs.push(Definition::TypeDefinition(TypeDefinition::Interface(InterfaceType {
+		position: Default::default(),
+		description: Some("All records must have an id".to_string()),
+		name: "Record".to_string(),
+		implements_interfaces: vec![],
+		directives: vec![],
+		fields: vec![id_field!()],
+	})));
+	defs.push(Definition::TypeDefinition(TypeDefinition::Interface(InterfaceType {
+		position: Default::default(),
+		description: Some("All relations must be records and have in and out fields".to_string()),
+		name: "Relation".to_string(),
+		implements_interfaces: vec!["Record".to_string()],
+		directives: vec![],
+		fields: vec![
+			id_field!(),
+			custom_field("in", "Record", true),
+			custom_field("out", "Record", true),
+		],
 	})));
 
 	defs.extend(table_defs);
