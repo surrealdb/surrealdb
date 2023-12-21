@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::index::VectorType;
+use crate::sql::index::{Distance, VectorType};
 use crate::sql::Number;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -107,7 +107,7 @@ impl Vector {
 			Ok(())
 		}
 	}
-	pub(super) fn euclidean_distance(&self, other: &Self) -> Result<f64, Error> {
+	fn euclidean_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::euclidean", self, other)?;
 		match (self, other) {
 			(Vector::F64(a), Vector::F64(b)) => {
@@ -132,7 +132,7 @@ impl Vector {
 		}
 	}
 
-	pub(super) fn manhattan_distance(&self, other: &Self) -> Result<f64, Error> {
+	fn manhattan_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::manhattan", self, other)?;
 		match (self, other) {
 			(Vector::F64(a), Vector::F64(b)) => {
@@ -153,7 +153,7 @@ impl Vector {
 			_ => Err(Error::Unreachable("Vector::manhattan_distance")),
 		}
 	}
-	pub(super) fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
+	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::minkowski", self, other)?;
 		let dist = match (self, other) {
 			(Vector::F64(a), Vector::F64(b)) => a
@@ -184,5 +184,28 @@ impl Vector {
 			_ => return Err(Error::Unreachable("Vector::minkowski_distance")),
 		};
 		Ok(dist.powf(1.0 / order.to_float()))
+	}
+}
+
+impl Distance {
+	pub(super) fn compute(&self, v1: &SharedVector, v2: &SharedVector) -> Result<f64, Error> {
+		if v1.eq(v2) {
+			return Ok(0.0);
+		}
+		let dist = match self {
+			Distance::Euclidean => v1.euclidean_distance(v2)?,
+			Distance::Manhattan => v1.manhattan_distance(v2)?,
+			Distance::Minkowski(order) => v1.minkowski_distance(v2, order)?,
+			_ => return Err(Error::UnsupportedDistance(self.clone())),
+		};
+		if dist.is_finite() {
+			Ok(dist)
+		} else {
+			Err(Error::InvalidVectorDistance {
+				left: v1.clone(),
+				right: v2.clone(),
+				dist,
+			})
+		}
 	}
 }
