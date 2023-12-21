@@ -16,20 +16,20 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 			Duration::seconds(seconds as i64)
 		}
 		Err(_) => {
-			Duration::seconds(43200) // Set default cache expiration of 12 hours.
+			Duration::seconds(43200) // Set default cache expiration of 12 hours
 		}
 	});
 
-static CACHE_MAX_REFRESH_FREQUENCY: Lazy<chrono::Duration> =
-	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_MAX_REFRESH_FREQUENCY") {
+static CACHE_COOLDOWN: Lazy<chrono::Duration> =
+	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN") {
 		Ok(seconds_str) => {
-			let seconds = seconds_str.parse::<u64>().expect(
-				"Expected a valid number of seconds for SURREAL_JWKS_CACHE_MAX_REFRESH_FREQUENCY",
-			);
+			let seconds = seconds_str
+				.parse::<u64>()
+				.expect("Expected a valid number of seconds for SURREAL_JWKS_CACHE_COOLDOWN");
 			Duration::seconds(seconds as i64)
 		}
 		Err(_) => {
-			Duration::seconds(300) // Set default maximum cache refresh frequency of 5 minutes.
+			Duration::seconds(300) // Set default cache refresh cooldown of 5 minutes
 		}
 	});
 
@@ -46,9 +46,7 @@ pub(crate) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 					_ => {
 						trace!("Could not find valid JWK object in cached JWKS object");
 						// Check that the cached JWKS object has not been recently updated
-						if Utc::now().signed_duration_since(jwks_cache.time)
-							< *CACHE_MAX_REFRESH_FREQUENCY
-						{
+						if Utc::now().signed_duration_since(jwks_cache.time) < *CACHE_COOLDOWN {
 							warn!("Refused to refresh cache too soon after last refresh");
 							return Err(Error::InvalidAuth); // Return opaque error
 						}
@@ -98,22 +96,22 @@ pub(crate) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 }
 
 // Attempts to find a relevant JWK object inside a JWKS object fetched from a remote location
-// Caches the fetched JWKS object in the local cache only if the JWK object is found
+// Caches the fetched JWKS object in the local cache even if the JWK object is not found
 async fn find_jwk_and_cache_jwks(url: String, kid: String) -> Result<Jwk, Error> {
-	// Attempt to find JWK in JWKS object from remote location
+	// Attempt to fetch JWKS object from remote location
 	match fetch_jwks_from_url(url.clone()).await {
 		Ok(jwks) => {
 			trace!("Successfully fetched JWKS object from remote location");
+			// If successful, cache the JWKS object by its URL
+			match cache_jwks(jwks.clone(), url.clone()).await {
+				Ok(_) => trace!("Successfully stored JWKS object in local cache"),
+				Err(err) => {
+					warn!("Failed to store JWKS object in local cache: '{}'", err)
+				}
+			};
 			// Attempt to find JWK in JWKS by the key identifier
 			match jwks.find(&kid) {
 				Some(jwk) => {
-					// If successful, cache the JWKS object by its URL
-					match cache_jwks(jwks.clone(), url.clone()).await {
-						Ok(_) => trace!("Successfully stored JWKS object in local cache"),
-						Err(err) => {
-							warn!("Failed to store JWKS object in local cache: '{}'", err)
-						}
-					};
 					// Return the JWK object
 					Ok(jwk.to_owned())
 				}
@@ -190,7 +188,7 @@ mod tests {
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
-	static DEFAULT_JWKS: Lazy<JwkSet> = Lazy::new(||
+	static DEFAULT_JWKS: Lazy<JwkSet> = Lazy::new(|| {
 		JwkSet{
 		keys: vec![Jwk{
 			common: jsonwebtoken::jwk::CommonParameters {
@@ -235,11 +233,12 @@ mod tests {
 			),
 		}
 		],
+	}
 	});
 
 	#[tokio::test]
 	async fn test_golden_path() {
-		let jwks = DEFAULT_JWKS.clone();	
+		let jwks = DEFAULT_JWKS.clone();
 
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
@@ -250,16 +249,41 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		// Get token configuration from remote location.
+		// Get token configuration from remote location
 		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
-		// Drop server to force usage of the local cache.
+		// Drop server to force usage of the local cache
 		drop(mock_server);
 
-		// Get token configuration from local cache.
+		// Get token configuration from local cache
 		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
+	}
+
+	#[tokio::test]
+	async fn test_dos_protection() {
+		let jwks = DEFAULT_JWKS.clone();
+
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path("/jwks.json"))
+			.respond_with(response)
+			.expect(1)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		// Use token with invalid key identifier claim to force cache refresh
+		let res = config("invalid".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
+
+		// Use token with invalid key identifier claim to force cache refresh again before cooldown
+		let res = config("invalid".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
+
+		// The server will panic if it receives more than the expected single request
 	}
 
 	#[tokio::test]
@@ -274,8 +298,11 @@ mod tests {
 
 		let url = mock_server.uri();
 
-		// Get token configuration from remote location respnding with Internal Server Error.
+		// Get token configuration from remote location respnding with Internal Server Error
 		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
-		assert!(res.is_err(), "Unexpected success validating token configuration with unavailable remote location");
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token configuration with unavailable remote location"
+		);
 	}
 }
