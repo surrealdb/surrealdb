@@ -1,6 +1,6 @@
 use crate::err::Error;
 use chrono::{DateTime, Duration, Utc};
-use jsonwebtoken::jwk::{JwkSet, KeyOperations, PublicKeyUse};
+use jsonwebtoken::jwk::{Jwk, JwkSet, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{DecodingKey, Validation};
 use once_cell::sync::Lazy;
 use reqwest::Client;
@@ -20,38 +20,50 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 		}
 	});
 
-pub(crate) async fn config(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
-	// Try to find JWKS object in cache
-	let jwks = match fetch_jwks_from_cache(url.clone()).await {
-		Ok(jwks) => {
-			trace!("Successfully fetched JWKS object from local cache");
-			jwks
+static CACHE_MAX_REFRESH_FREQUENCY: Lazy<chrono::Duration> =
+	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_MAX_REFRESH_FREQUENCY") {
+		Ok(seconds_str) => {
+			let seconds = seconds_str.parse::<u64>().expect(
+				"Expected a valid number of seconds for SURREAL_JWKS_CACHE_MAX_REFRESH_FREQUENCY",
+			);
+			Duration::seconds(seconds as i64)
 		}
-		Err(err) => {
-			trace!("Failed to fetch JWKS object from local cache: '{}'", err);
-			// Otherwise, fetch JWKS object from URL
-			match fetch_jwks_from_url(url.clone()).await {
-				Ok(jwks) => {
-					trace!("Successfully fetched JWKS object from remote location");
-					// If fetch is successful, cache JWKS object
-					match cache_jwks(jwks.clone(), url.clone()).await {
-						Ok(_) => trace!("Successfully stored JWKS object in local cache"),
-						Err(err) => warn!("Failed to store JWKS object in local cache: '{}'", err),
+		Err(_) => {
+			Duration::seconds(300) // Set default maximum cache refresh frequency of 5 minutes.
+		}
+	});
+
+pub(crate) async fn config(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
+	// Attempt to fetch relevant JWK object either from local cache or remote location
+	let jwk = match fetch_jwks_from_cache(url.clone()).await {
+		Ok(jwks_cache) => {
+			trace!("Successfully fetched JWKS object from local cache");
+			// Check that the cached JWKS object has not expired yet
+			if Utc::now().signed_duration_since(jwks_cache.time) < *CACHE_EXPIRATION {
+				// Attempt to find JWK in JWKS object from local cache
+				match jwks_cache.jwks.find(&kid) {
+					Some(jwk) => jwk.to_owned(),
+					_ => {
+						trace!("Could not find valid JWK object in cached JWKS object");
+						// Check that the cached JWKS object has not been recently updated
+						if Utc::now().signed_duration_since(jwks_cache.time)
+							< *CACHE_MAX_REFRESH_FREQUENCY
+						{
+							warn!("Refused to refresh cache too soon after last refresh");
+							return Err(Error::InvalidAuth); // Return opaque error
+						}
+						find_jwk_and_cache_jwks(url, kid).await?
 					}
-					jwks
 				}
-				Err(err) => {
-					warn!("Could not find a valid JWKS object localy or remotely: '{}'", err);
-					return Err(Error::JwksNotFound(url));
-				}
+			} else {
+				trace!("Fetched JWKS object from local cache has expired");
+				find_jwk_and_cache_jwks(url, kid).await?
 			}
 		}
-	};
-	// Attempt to retrieve JWK from JWKS by the key identifier
-	// TODO: This should be attempted before to see if fetching remotely is necessary
-	let jwk = match jwks.find(&kid) {
-		Some(jwk) => jwk.to_owned(),
-		_ => return Err(Error::JwkNotFound(kid, url)),
+		Err(_) => {
+			trace!("Could not fetch JWKS object from local cache");
+			find_jwk_and_cache_jwks(url, kid).await?
+		}
 	};
 	// Check if key is intended to be used for signing
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
@@ -85,21 +97,47 @@ pub(crate) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 	Ok((DecodingKey::from_jwk(&jwk)?, Validation::new(alg)))
 }
 
+// Attempts to find a relevant JWK object inside a JWKS object fetched from a remote location
+// Caches the fetched JWKS object in the local cache only if the JWK object is found
+async fn find_jwk_and_cache_jwks(url: String, kid: String) -> Result<Jwk, Error> {
+	// Attempt to find JWK in JWKS object from remote location
+	match fetch_jwks_from_url(url.clone()).await {
+		Ok(jwks) => {
+			trace!("Successfully fetched JWKS object from remote location");
+			// Attempt to find JWK in JWKS by the key identifier
+			match jwks.find(&kid) {
+				Some(jwk) => {
+					// If successful, cache the JWKS object by its URL
+					match cache_jwks(jwks.clone(), url.clone()).await {
+						Ok(_) => trace!("Successfully stored JWKS object in local cache"),
+						Err(err) => {
+							warn!("Failed to store JWKS object in local cache: '{}'", err)
+						}
+					};
+					// Return the JWK object
+					Ok(jwk.to_owned())
+				}
+				_ => return Err(Error::JwkNotFound(kid, url)),
+			}
+		}
+		Err(err) => {
+			warn!("Failed to fetch JWKS object from remote location: '{}'", err);
+			return Err(Error::JwksNotFound(url));
+		}
+	}
+}
+
 async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 	let client = Client::new();
 	let res = client.get(&url).send().await?;
 	if !res.status().is_success() {
-		debug!(
-			"Fetching JWKS object from remote location returned status code: '{}'",
-			res.status()
-		);
 		return Err(Error::JwksNotFound(res.url().to_string()));
 	}
 	let jwks = res.bytes().await?;
 	match serde_json::from_slice(&jwks) {
 		Ok(jwks) => Ok(jwks),
 		Err(err) => {
-			warn!("Error parsing JWKS object: '{}'", err);
+			warn!("Failed to parse JWKS object: '{}'", err);
 			Err(Error::JwksMalformed)
 		}
 	}
@@ -133,21 +171,17 @@ async fn cache_jwks(jwks: JwkSet, url: String) -> Result<(), Error> {
 	}
 }
 
-async fn fetch_jwks_from_cache(url: String) -> Result<JwkSet, Error> {
+async fn fetch_jwks_from_cache(url: String) -> Result<JwksCache, Error> {
 	let path = cache_path_from_url(url);
 	let bytes = crate::obs::get(&path).await?;
 	let jwks_cache: JwksCache = match serde_json::from_slice(&bytes) {
 		Ok(jwks_cache) => jwks_cache,
 		Err(err) => {
-			warn!("Error parsing JWKS object: '{}'", err);
+			warn!("Failed to parse JWKS object: '{}'", err);
 			return Err(Error::JwksMalformed);
 		}
 	};
-	// Check if the cached JWKS object has expired.
-	if Utc::now().signed_duration_since(jwks_cache.time) > *CACHE_EXPIRATION {
-		return Err(Error::JwksNotFound(path));
-	}
-	Ok(jwks_cache.jwks)
+	Ok(jwks_cache)
 }
 
 #[cfg(test)]
@@ -156,75 +190,76 @@ mod tests {
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
+	static DEFAULT_JWKS: Lazy<JwkSet> = Lazy::new(||
+		JwkSet{
+		keys: vec![Jwk{
+			common: jsonwebtoken::jwk::CommonParameters {
+				public_key_use: Some(jsonwebtoken::jwk::PublicKeyUse::Signature),
+				key_operations: None,
+				algorithm: Some(jsonwebtoken::Algorithm::RS256),
+				key_id: Some("test_1".to_string()),
+				x509_url: None,
+				x509_chain: Some(vec![
+					"MIIDBTCCAe2gAwIBAgIJdeyDfUXHLwX+MA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANp7Er60Z7sOjiyQqpbZIkQBldO/t+YrHT8Mk661kNz8MRGXPpQ26rkO2fRZMeWPpXVcwW0xxLG5oQ2Iwbm1JUuHYbLb6WA/d/et0sOkOoEI6MP0+MVqrGnro+D6XGoz4yP8m2w8C2u2yFxAc+wAt1AIMWNJIYhEX6tqrliGnitDCye2wXKchhe4WctUlHoUNfO/sgazPQ7ItqisUF/fNSRbHLRJyS2mm76FlDELDLnEyVwUaeV/2xie9F44AfOQzVk1asO18BH3v6YjOQ3L41XEfOm2DMPkLOOmtyM7yA7OeF/fvn6zN+SByza6cFW37IOKoJsmvxkzxeDUlWm9MWkCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUOeOmT9I3/MJ/zI/lS74gPQmAQfEwDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQBDue8iM90XJcLORvr6e+h15f5tlvVjZ/cAzv09487QSHJtUd6qwTlunEABS5818TgMEMFDRafQ7CDX3KaAAXFpo2bnyWY9c+Ozp0PWtp8ChunOs94ayaG+viO0AiTrIY28cc26ehNBZ/4gC4/1k0IlXEk8rd1e03hQuhNiy7SQaxS2f1xkJfR4vCeF8HTN5omjKvIMcWRqkkwFZm4gdgkMfi2lNsV8V6+HXyTc3XUIdcwOUcC+Ms/m+vKxnyxw0UGh0RliB1qBc0ADg83hOsXEqZjneHh1ZhqqVF4IkKSJTfK5ofcc14GqvpLjjTR3s2eX6zxdujzwf4gnHdxjVvdJ".to_string(),
+				]),
+				x509_sha1_fingerprint: None,
+				x509_sha256_fingerprint: None,
+			},
+			algorithm: jsonwebtoken::jwk::AlgorithmParameters::RSA(
+				jsonwebtoken::jwk::RSAKeyParameters{
+				key_type: jsonwebtoken::jwk::RSAKeyType::RSA,
+				n: "2nsSvrRnuw6OLJCqltkiRAGV07-35isdPwyTrrWQ3PwxEZc-lDbquQ7Z9Fkx5Y-ldVzBbTHEsbmhDYjBubUlS4dhstvpYD93963Sw6Q6gQjow_T4xWqsaeuj4PpcajPjI_ybbDwLa7bIXEBz7AC3UAgxY0khiERfq2quWIaeK0MLJ7bBcpyGF7hZy1SUehQ187-yBrM9Dsi2qKxQX981JFsctEnJLaabvoWUMQsMucTJXBRp5X_bGJ70XjgB85DNWTVqw7XwEfe_piM5DcvjVcR86bYMw-Qs46a3IzvIDs54X9--frM35IHLNrpwVbfsg4qgmya_GTPF4NSVab0xaQ".to_string(),
+				e: "AQAB".to_string(),
+				}
+			),
+		},
+		Jwk{
+			common: jsonwebtoken::jwk::CommonParameters {
+				public_key_use: Some(jsonwebtoken::jwk::PublicKeyUse::Signature),
+				key_operations: None,
+				algorithm: Some(jsonwebtoken::Algorithm::RS256),
+				key_id: Some("test_2".to_string()),
+				x509_url: None,
+				x509_chain: Some(vec![
+					"MIIDBTCCAe2gAwIBAgIJUzJ062XCgOVQMA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAL7TgjrojPySPO5kPBOiAgiS0guSpYkfb0AtLNVyVeANe5vgjJoBQDe7vAGm68SHft841GQBPp5KWpxDTO+liECVAnbdR9YHwuZWOGuPRVVwNqtVmS8A75YG/mTWGV4tr2h+dLjjV3jvV0hvXRJwVFShlUS9+BqgevFBoF6zxi5AHIx/k1tCg1y2fhSlzYUHxEiFRgx0RhtJfizyv9QHoLSY3RFI4QOAkPtYwN5C1X69nEHPK0Q+W+POkeV7wuMQZWTRRT+xZuYn+JIYQCQviZ52FoJsrTzOEO5jlmrUa9PMEJpn0Aw68OdyLHjQPsip8B2JSegoVP1LTc0tDoqVGqUCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUYp67WM42b2pqF7ES0LsFvAI/Qy8wDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQANOhmYz0jxNJG6pZ0klNtH00E6SoEsM/MNYH+atraTVZNeqPLAZH9514gMcqdu7+rBfQ/pRjpQG1YbkdZGQBaq5cZNlE6hNCT4BSgKddBYsN0WbfTGxstDVdoXLySgGCYpyKO6Hek4ULxwAf1LmMyOYpn4JrECy4mYShsCcfe504qfzUTd7pz1VaZ4minclOhz0dZbgYa+slUepe0C2+w+T3US138x0lPB9C266SLDakb6n/JTum+Czn2xlFBf4K4w6eWuSknvTlRrqTGE8RX3vzOiKTM3hpDdjU7Tu7eNsZpLkDR1e+w33m5NMi9iYgJcyTGsIeeHr0xjrRPD9Dwh".to_string(),
+				]),
+				x509_sha1_fingerprint: None,
+				x509_sha256_fingerprint: None,
+			},
+			algorithm: jsonwebtoken::jwk::AlgorithmParameters::RSA(
+				jsonwebtoken::jwk::RSAKeyParameters{
+				key_type: jsonwebtoken::jwk::RSAKeyType::RSA,
+				n: "vtOCOuiM_JI87mQ8E6ICCJLSC5KliR9vQC0s1XJV4A17m-CMmgFAN7u8AabrxId-3zjUZAE-nkpanENM76WIQJUCdt1H1gfC5lY4a49FVXA2q1WZLwDvlgb-ZNYZXi2vaH50uONXeO9XSG9dEnBUVKGVRL34GqB68UGgXrPGLkAcjH-TW0KDXLZ-FKXNhQfESIVGDHRGG0l-LPK_1AegtJjdEUjhA4CQ-1jA3kLVfr2cQc8rRD5b486R5XvC4xBlZNFFP7Fm5if4khhAJC-JnnYWgmytPM4Q7mOWatRr08wQmmfQDDrw53IseNA-yKnwHYlJ6ChU_UtNzS0OipUapQ".to_string(),
+				e: "AQAB".to_string(),
+				}
+			),
+		}
+		],
+	});
+
 	#[tokio::test]
 	async fn test_golden_path() {
-		let jwks = r#"{"keys":[{"kid":"test","kty":"RSA","use":"sig","alg":"RS256","n":"2nsSvrRnuw6OLJCqltkiRAGV07-35isdPwyTrrWQ3PwxEZc-lDbquQ7Z9Fkx5Y-ldVzBbTHEsbmhDYjBubUlS4dhstvpYD93963Sw6Q6gQjow_T4xWqsaeuj4PpcajPjI_ybbDwLa7bIXEBz7AC3UAgxY0khiERfq2quWIaeK0MLJ7bBcpyGF7hZy1SUehQ187-yBrM9Dsi2qKxQX981JFsctEnJLaabvoWUMQsMucTJXBRp5X_bGJ70XjgB85DNWTVqw7XwEfe_piM5DcvjVcR86bYMw-Qs46a3IzvIDs54X9--frM35IHLNrpwVbfsg4qgmya_GTPF4NSVab0xaQ","e":"AQAB","x5t":"ZffK9pHzOtCslIK_800RhfZZ_ks","x5c":["MIIDBTCCAe2gAwIBAgIJdeyDfUXHLwX+MA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANp7Er60Z7sOjiyQqpbZIkQBldO/t+YrHT8Mk661kNz8MRGXPpQ26rkO2fRZMeWPpXVcwW0xxLG5oQ2Iwbm1JUuHYbLb6WA/d/et0sOkOoEI6MP0+MVqrGnro+D6XGoz4yP8m2w8C2u2yFxAc+wAt1AIMWNJIYhEX6tqrliGnitDCye2wXKchhe4WctUlHoUNfO/sgazPQ7ItqisUF/fNSRbHLRJyS2mm76FlDELDLnEyVwUaeV/2xie9F44AfOQzVk1asO18BH3v6YjOQ3L41XEfOm2DMPkLOOmtyM7yA7OeF/fvn6zN+SByza6cFW37IOKoJsmvxkzxeDUlWm9MWkCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUOeOmT9I3/MJ/zI/lS74gPQmAQfEwDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQBDue8iM90XJcLORvr6e+h15f5tlvVjZ/cAzv09487QSHJtUd6qwTlunEABS5818TgMEMFDRafQ7CDX3KaAAXFpo2bnyWY9c+Ozp0PWtp8ChunOs94ayaG+viO0AiTrIY28cc26ehNBZ/4gC4/1k0IlXEk8rd1e03hQuhNiy7SQaxS2f1xkJfR4vCeF8HTN5omjKvIMcWRqkkwFZm4gdgkMfi2lNsV8V6+HXyTc3XUIdcwOUcC+Ms/m+vKxnyxw0UGh0RliB1qBc0ADg83hOsXEqZjneHh1ZhqqVF4IkKSJTfK5ofcc14GqvpLjjTR3s2eX6zxdujzwf4gnHdxjVvdJ"]}]}"#;
+		let jwks = DEFAULT_JWKS.clone();	
+
 		let mock_server = MockServer::start().await;
-		let response = ResponseTemplate::new(200).set_body_bytes(jwks);
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
 			.and(path("/jwks.json"))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;
-
 		let url = mock_server.uri();
 
-		// Get token configuration from remote URL.
-		assert!(config("test".to_string(), format!("{}/jwks.json", &url)).await.is_ok());
+		// Get token configuration from remote location.
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Drop server to force usage of the local cache.
 		drop(mock_server);
 
 		// Get token configuration from local cache.
-		assert!(config("test".to_string(), format!("{}/jwks.json", &url)).await.is_ok());
-	}
-
-	#[tokio::test]
-	async fn test_encryption_key() {
-		let jwks = r#"{"keys":[{"kid":"test","kty":"RSA","use":"enc","alg":"RS256","n":"2nsSvrRnuw6OLJCqltkiRAGV07-35isdPwyTrrWQ3PwxEZc-lDbquQ7Z9Fkx5Y-ldVzBbTHEsbmhDYjBubUlS4dhstvpYD93963Sw6Q6gQjow_T4xWqsaeuj4PpcajPjI_ybbDwLa7bIXEBz7AC3UAgxY0khiERfq2quWIaeK0MLJ7bBcpyGF7hZy1SUehQ187-yBrM9Dsi2qKxQX981JFsctEnJLaabvoWUMQsMucTJXBRp5X_bGJ70XjgB85DNWTVqw7XwEfe_piM5DcvjVcR86bYMw-Qs46a3IzvIDs54X9--frM35IHLNrpwVbfsg4qgmya_GTPF4NSVab0xaQ","e":"AQAB","x5t":"ZffK9pHzOtCslIK_800RhfZZ_ks","x5c":["MIIDBTCCAe2gAwIBAgIJdeyDfUXHLwX+MA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANp7Er60Z7sOjiyQqpbZIkQBldO/t+YrHT8Mk661kNz8MRGXPpQ26rkO2fRZMeWPpXVcwW0xxLG5oQ2Iwbm1JUuHYbLb6WA/d/et0sOkOoEI6MP0+MVqrGnro+D6XGoz4yP8m2w8C2u2yFxAc+wAt1AIMWNJIYhEX6tqrliGnitDCye2wXKchhe4WctUlHoUNfO/sgazPQ7ItqisUF/fNSRbHLRJyS2mm76FlDELDLnEyVwUaeV/2xie9F44AfOQzVk1asO18BH3v6YjOQ3L41XEfOm2DMPkLOOmtyM7yA7OeF/fvn6zN+SByza6cFW37IOKoJsmvxkzxeDUlWm9MWkCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUOeOmT9I3/MJ/zI/lS74gPQmAQfEwDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQBDue8iM90XJcLORvr6e+h15f5tlvVjZ/cAzv09487QSHJtUd6qwTlunEABS5818TgMEMFDRafQ7CDX3KaAAXFpo2bnyWY9c+Ozp0PWtp8ChunOs94ayaG+viO0AiTrIY28cc26ehNBZ/4gC4/1k0IlXEk8rd1e03hQuhNiy7SQaxS2f1xkJfR4vCeF8HTN5omjKvIMcWRqkkwFZm4gdgkMfi2lNsV8V6+HXyTc3XUIdcwOUcC+Ms/m+vKxnyxw0UGh0RliB1qBc0ADg83hOsXEqZjneHh1ZhqqVF4IkKSJTfK5ofcc14GqvpLjjTR3s2eX6zxdujzwf4gnHdxjVvdJ"]}]}"#;
-		let mock_server = MockServer::start().await;
-		let response = ResponseTemplate::new(200).set_body_bytes(jwks);
-		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
-			.respond_with(response)
-			.mount(&mock_server)
-			.await;
-
-		let url = mock_server.uri();
-
-		assert!(config("test".to_string(), format!("{}/jwks.json", &url)).await.is_err());
-	}
-
-	#[tokio::test]
-	async fn test_invalid_algorithm() {
-		let jwks = r#"{"keys":[{"kid":"test","kty":"RSA","use":"sig","alg":"XX999","n":"2nsSvrRnuw6OLJCqltkiRAGV07-35isdPwyTrrWQ3PwxEZc-lDbquQ7Z9Fkx5Y-ldVzBbTHEsbmhDYjBubUlS4dhstvpYD93963Sw6Q6gQjow_T4xWqsaeuj4PpcajPjI_ybbDwLa7bIXEBz7AC3UAgxY0khiERfq2quWIaeK0MLJ7bBcpyGF7hZy1SUehQ187-yBrM9Dsi2qKxQX981JFsctEnJLaabvoWUMQsMucTJXBRp5X_bGJ70XjgB85DNWTVqw7XwEfe_piM5DcvjVcR86bYMw-Qs46a3IzvIDs54X9--frM35IHLNrpwVbfsg4qgmya_GTPF4NSVab0xaQ","e":"AQAB","x5t":"ZffK9pHzOtCslIK_800RhfZZ_ks","x5c":["MIIDBTCCAe2gAwIBAgIJdeyDfUXHLwX+MA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANp7Er60Z7sOjiyQqpbZIkQBldO/t+YrHT8Mk661kNz8MRGXPpQ26rkO2fRZMeWPpXVcwW0xxLG5oQ2Iwbm1JUuHYbLb6WA/d/et0sOkOoEI6MP0+MVqrGnro+D6XGoz4yP8m2w8C2u2yFxAc+wAt1AIMWNJIYhEX6tqrliGnitDCye2wXKchhe4WctUlHoUNfO/sgazPQ7ItqisUF/fNSRbHLRJyS2mm76FlDELDLnEyVwUaeV/2xie9F44AfOQzVk1asO18BH3v6YjOQ3L41XEfOm2DMPkLOOmtyM7yA7OeF/fvn6zN+SByza6cFW37IOKoJsmvxkzxeDUlWm9MWkCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUOeOmT9I3/MJ/zI/lS74gPQmAQfEwDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQBDue8iM90XJcLORvr6e+h15f5tlvVjZ/cAzv09487QSHJtUd6qwTlunEABS5818TgMEMFDRafQ7CDX3KaAAXFpo2bnyWY9c+Ozp0PWtp8ChunOs94ayaG+viO0AiTrIY28cc26ehNBZ/4gC4/1k0IlXEk8rd1e03hQuhNiy7SQaxS2f1xkJfR4vCeF8HTN5omjKvIMcWRqkkwFZm4gdgkMfi2lNsV8V6+HXyTc3XUIdcwOUcC+Ms/m+vKxnyxw0UGh0RliB1qBc0ADg83hOsXEqZjneHh1ZhqqVF4IkKSJTfK5ofcc14GqvpLjjTR3s2eX6zxdujzwf4gnHdxjVvdJ"]}]}"#;
-		let mock_server = MockServer::start().await;
-		let response = ResponseTemplate::new(200).set_body_bytes(jwks);
-		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
-			.respond_with(response)
-			.mount(&mock_server)
-			.await;
-
-		let url = mock_server.uri();
-
-		assert!(config("test".to_string(), format!("{}/jwks.json", &url)).await.is_err());
-	}
-
-	#[tokio::test]
-	async fn test_invalid_key_type() {
-		let jwks = r#"{"keys":[{"kid":"test","kty":"XXX","use":"sig","alg":"RS256","n":"2nsSvrRnuw6OLJCqltkiRAGV07-35isdPwyTrrWQ3PwxEZc-lDbquQ7Z9Fkx5Y-ldVzBbTHEsbmhDYjBubUlS4dhstvpYD93963Sw6Q6gQjow_T4xWqsaeuj4PpcajPjI_ybbDwLa7bIXEBz7AC3UAgxY0khiERfq2quWIaeK0MLJ7bBcpyGF7hZy1SUehQ187-yBrM9Dsi2qKxQX981JFsctEnJLaabvoWUMQsMucTJXBRp5X_bGJ70XjgB85DNWTVqw7XwEfe_piM5DcvjVcR86bYMw-Qs46a3IzvIDs54X9--frM35IHLNrpwVbfsg4qgmya_GTPF4NSVab0xaQ","e":"AQAB","x5t":"ZffK9pHzOtCslIK_800RhfZZ_ks","x5c":["MIIDBTCCAe2gAwIBAgIJdeyDfUXHLwX+MA0GCSqGSIb3DQEBCwUAMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTAeFw0yMzEwMzExNzI5MDBaFw0zNzA3MDkxNzI5MDBaMCAxHjAcBgNVBAMTFWdlcmF1c2VyLmV1LmF1dGgwLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANp7Er60Z7sOjiyQqpbZIkQBldO/t+YrHT8Mk661kNz8MRGXPpQ26rkO2fRZMeWPpXVcwW0xxLG5oQ2Iwbm1JUuHYbLb6WA/d/et0sOkOoEI6MP0+MVqrGnro+D6XGoz4yP8m2w8C2u2yFxAc+wAt1AIMWNJIYhEX6tqrliGnitDCye2wXKchhe4WctUlHoUNfO/sgazPQ7ItqisUF/fNSRbHLRJyS2mm76FlDELDLnEyVwUaeV/2xie9F44AfOQzVk1asO18BH3v6YjOQ3L41XEfOm2DMPkLOOmtyM7yA7OeF/fvn6zN+SByza6cFW37IOKoJsmvxkzxeDUlWm9MWkCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUOeOmT9I3/MJ/zI/lS74gPQmAQfEwDgYDVR0PAQH/BAQDAgKEMA0GCSqGSIb3DQEBCwUAA4IBAQBDue8iM90XJcLORvr6e+h15f5tlvVjZ/cAzv09487QSHJtUd6qwTlunEABS5818TgMEMFDRafQ7CDX3KaAAXFpo2bnyWY9c+Ozp0PWtp8ChunOs94ayaG+viO0AiTrIY28cc26ehNBZ/4gC4/1k0IlXEk8rd1e03hQuhNiy7SQaxS2f1xkJfR4vCeF8HTN5omjKvIMcWRqkkwFZm4gdgkMfi2lNsV8V6+HXyTc3XUIdcwOUcC+Ms/m+vKxnyxw0UGh0RliB1qBc0ADg83hOsXEqZjneHh1ZhqqVF4IkKSJTfK5ofcc14GqvpLjjTR3s2eX6zxdujzwf4gnHdxjVvdJ"]}]}"#;
-		let mock_server = MockServer::start().await;
-		let response = ResponseTemplate::new(200).set_body_bytes(jwks);
-		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
-			.respond_with(response)
-			.mount(&mock_server)
-			.await;
-
-		let url = mock_server.uri();
-
-		assert!(config("test".to_string(), format!("{}/jwks.json", &url)).await.is_err());
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 	}
 
 	#[tokio::test]
@@ -239,7 +274,8 @@ mod tests {
 
 		let url = mock_server.uri();
 
-		// Get token configuration from remote URL respnding with Internal Server Error.
-		assert!(config("test".to_string(), format!("{}/jwks.json", &url)).await.is_err());
+		// Get token configuration from remote location respnding with Internal Server Error.
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_err(), "Unexpected success validating token configuration with unavailable remote location");
 	}
 }
