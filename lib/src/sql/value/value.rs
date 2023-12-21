@@ -2441,8 +2441,10 @@ impl Value {
 			Value::Duration(_) => true,
 			Value::Datetime(_) => true,
 			Value::Geometry(_) => true,
-			Value::Array(v) => v.iter().all(Value::is_static),
-			Value::Object(v) => v.values().all(Value::is_static),
+			Value::Array(v) => v.is_static(),
+			Value::Object(v) => v.is_static(),
+			Value::Expression(v) => v.is_static(),
+			Value::Function(v) => v.is_static(),
 			Value::Constant(_) => true,
 			_ => false,
 		}

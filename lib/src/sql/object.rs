@@ -222,6 +222,10 @@ impl Object {
 		}
 		Ok(Value::Object(Object(x)))
 	}
+
+	pub(crate) fn is_static(&self) -> bool {
+		self.values().all(Value::is_static)
+	}
 }
 
 impl Display for Object {
