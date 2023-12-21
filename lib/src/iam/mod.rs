@@ -7,7 +7,7 @@ pub mod base;
 pub mod check;
 pub mod clear;
 pub mod entities;
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub mod jwks;
 pub mod policies;
 pub mod signin;

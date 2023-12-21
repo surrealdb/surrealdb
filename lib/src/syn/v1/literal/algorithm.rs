@@ -17,7 +17,7 @@ pub fn algorithm(i: &str) -> IResult<&str, Algorithm> {
 		value(Algorithm::Rs256, tag("RS256")),
 		value(Algorithm::Rs384, tag("RS384")),
 		value(Algorithm::Rs512, tag("RS512")),
-		#[cfg(feature = "http")]
+		#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 		value(Algorithm::Jwks, tag("JWKS")), // Not an algorithm.
 	))(i)
 }
