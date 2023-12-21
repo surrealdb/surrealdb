@@ -490,7 +490,7 @@ mod tests {
 	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
-	use crate::sql::{Statement, Thing, Value};
+	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
 	use futures::lock::Mutex;
 	use std::collections::HashMap;
@@ -814,5 +814,81 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index_bm_25_with_highlighting() {
 		test_ft_index_bm_25(true).await;
+	}
+
+	async fn concurrent_task(ds: Arc<Datastore>, az: DefineAnalyzerStatement) {
+		let btree_order = 5;
+		let doc1: Thing = ("t", "doc1").into();
+		let content1 = Value::from(Array::from(vec!["Enter a search term", "Welcome", "Docusaurus blogging features are powered by the blog plugin.", "Simply add Markdown files (or folders) to the blog directory.", "blog", "Regular blog authors can be added to authors.yml.", "authors.yml", "The blog post date can be extracted from filenames, such as:", "2019-05-30-welcome.md", "2019-05-30-welcome/index.md", "A blog post folder can be convenient to co-locate blog post images:", "The blog supports tags as well!", "And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.", "blog: false", "MDX Blog Post", "Blog posts support Docusaurus Markdown features, such as MDX.", "Use the power of React to create interactive blog posts.", "Long Blog Post", "This is the summary of a very long blog post,", "Use a <!-- truncate --> comment to limit blog post size in the list view.", "<!--", "truncate", "-->", "First Blog Post", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+
+		let start = std::time::Instant::now();
+		while start.elapsed().as_secs() < 3 {
+			remove_insert_task(ds.as_ref(), &az, btree_order, &doc1, &content1).await;
+		}
+	}
+	#[test(tokio::test)]
+	async fn concurrent_test() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			panic!()
+		};
+		concurrent_task(ds.clone(), az.clone()).await;
+		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
+		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
+		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
+	}
+
+	async fn remove_insert_task(
+		ds: &Datastore,
+		az: &DefineAnalyzerStatement,
+		btree_order: u32,
+		rid: &Thing,
+		content: &Value,
+	) {
+		let (ctx, opt, txn, mut fti) =
+			tx_fti(ds, TreeStoreType::Write, &az, btree_order, false).await;
+		fti.remove_document(&txn, &rid).await.unwrap();
+		fti.index_document(&ctx, &opt, &txn, &rid, vec![content.clone()]).await.unwrap();
+		finish(&txn, fti).await;
+	}
+
+	#[test(tokio::test)]
+	async fn remove_insert_sequence() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			panic!()
+		};
+		let doc: Thing = ("t", "doc1").into();
+		let content = Value::from(Array::from(vec!["Enter a search term","Welcome","Docusaurus blogging features are powered by the blog plugin.","Simply add Markdown files (or folders) to the blog directory.","blog","Regular blog authors can be added to authors.yml.","authors.yml","The blog post date can be extracted from filenames, such as:","2019-05-30-welcome.md","2019-05-30-welcome/index.md","A blog post folder can be convenient to co-locate blog post images:","The blog supports tags as well!","And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.","blog: false","MDX Blog Post","Blog posts support Docusaurus Markdown features, such as MDX.","Use the power of React to create interactive blog posts.","Long Blog Post","This is the summary of a very long blog post,","Use a <!-- truncate --> comment to limit blog post size in the list view.","<!--","truncate","-->","First Blog Post","Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+
+		for i in 0..5 {
+			debug!("Attempt {i}");
+			{
+				let (ctx, opt, txn, mut fti) =
+					tx_fti(&ds, TreeStoreType::Write, &az, 5, false).await;
+				fti.index_document(&ctx, &opt, &txn, &doc, vec![content.clone()]).await.unwrap();
+				finish(&txn, fti).await;
+			}
+
+			{
+				let (_, _, txn, fti) = tx_fti(&ds, TreeStoreType::Read, &az, 5, false).await;
+				let s = fti.statistics(&txn).await.unwrap();
+				assert_eq!(s.terms.keys_count, 113);
+			}
+
+			{
+				let (_, _, txn, mut fti) = tx_fti(&ds, TreeStoreType::Write, &az, 5, false).await;
+				fti.remove_document(&txn, &doc).await.unwrap();
+				finish(&txn, fti).await;
+			}
+
+			{
+				let (_, _, txn, fti) = tx_fti(&ds, TreeStoreType::Read, &az, 5, false).await;
+				let s = fti.statistics(&txn).await.unwrap();
+				assert_eq!(s.terms.keys_count, 0);
+			}
+		}
 	}
 }

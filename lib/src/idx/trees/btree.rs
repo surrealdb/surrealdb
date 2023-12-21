@@ -459,26 +459,22 @@ where
 		let mut left_node = store.get_node(tx, left_id).await?;
 		if left_node.n.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
-			if let Some((key_prim, payload_prim)) = left_node.n.keys().get_last_key() {
-				keys.remove(&key_to_delete);
-				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(left_node, true)?;
-				return Ok((false, key_prim, left_id));
-			}
+			let (key_prim, payload_prim) = self.find_highest(tx, store, left_node).await?;
+			keys.remove(&key_to_delete);
+			keys.insert(key_prim.clone(), payload_prim);
+			return Ok((false, key_prim, left_id));
 		}
 
 		let right_idx = left_idx + 1;
 		let right_id = children[right_idx];
 		let right_node = store.get_node(tx, right_id).await?;
 		if right_node.n.keys().len() >= self.state.minimum_degree {
+			store.set_node(left_node, false)?;
 			// CLRS: 2b -> right_node is name `z` in the book
-			if let Some((key_prim, payload_prim)) = right_node.n.keys().get_first_key() {
-				keys.remove(&key_to_delete);
-				keys.insert(key_prim.clone(), payload_prim);
-				store.set_node(left_node, false)?;
-				store.set_node(right_node, true)?;
-				return Ok((false, key_prim, right_id));
-			}
+			let (key_prim, payload_prim) = self.find_lowest(tx, store, right_node).await?;
+			keys.remove(&key_to_delete);
+			keys.insert(key_prim.clone(), payload_prim);
+			return Ok((false, key_prim, right_id));
 		}
 
 		// CLRS: 2c
@@ -490,6 +486,58 @@ where
 		keys.remove(&key_to_delete);
 		children.remove(right_idx);
 		Ok((false, key_to_delete, left_id))
+	}
+
+	async fn find_highest(
+		&mut self,
+		tx: &mut Transaction,
+		store: &mut BTreeNodeStore<BK>,
+		node: StoredNode<BTreeNode<BK>>,
+	) -> Result<(Key, Payload), Error> {
+		let mut next_node = Some(node);
+		while let Some(node) = next_node.take() {
+			match &node.n {
+				BTreeNode::Internal(_, c) => {
+					let id = c[c.len() - 1];
+					store.set_node(node, false)?;
+					let node = store.get_node(tx, id).await?;
+					next_node.replace(node);
+				}
+				BTreeNode::Leaf(k) => {
+					let (key, payload) = k.get_last_key().ok_or(Error::Unreachable)?;
+					store.set_node(node, false)?;
+					return Ok((key, payload));
+				}
+			}
+		}
+		Err(Error::Unreachable)
+	}
+
+	async fn find_lowest(
+		&mut self,
+		tx: &mut Transaction,
+		store: &mut BTreeNodeStore<BK>,
+		node: StoredNode<BTreeNode<BK>>,
+	) -> Result<(Key, Payload), Error> {
+		let mut next_node = Some(node);
+		while let Some(node) = next_node.take() {
+			match &node.n {
+				BTreeNode::Internal(_, c) => {
+					let id = c[0];
+					store.set_node(node, false)?;
+					let node = store.get_node(tx, id).await?;
+					next_node.replace(node);
+				}
+				BTreeNode::Leaf(k) => {
+					let (key, payload) = k.get_first_key().ok_or(Error::Unreachable)?;
+					#[cfg(debug_assertions)]
+					debug!("Find lowest: {} - node: {}", String::from_utf8_lossy(&key), node.id);
+					store.set_node(node, false)?;
+					return Ok((key, payload));
+				}
+			}
+		}
+		Err(Error::Unreachable)
 	}
 
 	async fn deleted_traversal(
@@ -588,6 +636,11 @@ where
 			if let Some(descending_key) = keys.get_key(child_idx) {
 				if let Some(descending_payload) = keys.remove(&descending_key) {
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
+					if let BTreeNode::Internal(_, rc) = &mut right_child_stored_node.n {
+						if let BTreeNode::Internal(_, lc) = &mut child_stored_node.n {
+							lc.push(rc.remove(0))
+						}
+					}
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
 					store.set_node(child_stored_node, true)?;
@@ -616,6 +669,11 @@ where
 			if let Some(descending_key) = keys.get_key(child_idx) {
 				if let Some(descending_payload) = keys.remove(&descending_key) {
 					child_stored_node.n.keys_mut().insert(descending_key, descending_payload);
+					if let BTreeNode::Internal(_, lc) = &mut left_child_stored_node.n {
+						if let BTreeNode::Internal(_, rc) = &mut child_stored_node.n {
+							rc.insert(0, lc.remove(lc.len() - 1));
+						}
+					}
 					keys.insert(ascending_key, ascending_payload);
 					let child_id = child_stored_node.id;
 					store.set_node(child_stored_node, true)?;
@@ -702,9 +760,11 @@ mod tests {
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
-	use std::collections::{HashMap, VecDeque};
+	use std::collections::{BTreeMap, HashMap, VecDeque};
 	use std::fmt::Debug;
+	use std::sync::Arc;
 	use test_log::test;
+	use tokio::sync::Mutex;
 
 	#[test]
 	fn test_btree_state_serde() {
@@ -1297,6 +1357,213 @@ mod tests {
 		test_btree_fill_and_empty(t).await
 	}
 
+	async fn new_operation<BK>(
+		ds: &Datastore,
+		tt: TreeStoreType,
+		cache_size: usize,
+	) -> (Transaction, Arc<Mutex<BTreeNodeStore<BK>>>)
+	where
+		BK: BKeys + Debug,
+	{
+		let tx_type = match tt {
+			TreeStoreType::Write => Write,
+			TreeStoreType::Read => Read,
+			TreeStoreType::Traversal => Read,
+		};
+		let tx = ds.transaction(tx_type, Optimistic).await.unwrap();
+		let s = TreeNodeStore::new(TreeNodeProvider::Debug, tt, cache_size);
+		(tx, s)
+	}
+
+	#[test(tokio::test)]
+	async fn test_delete_adjust() -> Result<(), Error> {
+		let ds = Datastore::new("memory").await?;
+		let mut t = BTree::<FstKeys>::new(BState::new(3));
+
+		let terms = [
+			"aliquam",
+			"delete",
+			"if",
+			"from",
+			"Docusaurus",
+			"amet,",
+			"don't",
+			"And",
+			"interactive",
+			"well!",
+			"supports",
+			"ultricies.",
+			"Fusce",
+			"consequat.",
+			"just",
+			"use",
+			"elementum",
+			"term",
+			"blogging",
+			"to",
+			"want",
+			"added",
+			"Lorem",
+			"ipsum",
+			"blog:",
+			"MDX.",
+			"posts.",
+			"features",
+			"posts",
+			"features,",
+			"truncate",
+			"images:",
+			"Long",
+			"Pellentesque",
+			"authors.yml.",
+			"filenames,",
+			"such",
+			"co-locate",
+			"you",
+			"can",
+			"the",
+			"-->",
+			"comment",
+			"tags",
+			"A",
+			"React",
+			"The",
+			"adipiscing",
+			"consectetur",
+			"very",
+			"this",
+			"and",
+			"sit",
+			"directory,",
+			"Regular",
+			"Markdown",
+			"Simply",
+			"blog",
+			"MDX",
+			"list",
+			"extracted",
+			"summary",
+			"amet",
+			"plugin.",
+			"your",
+			"long",
+			"First",
+			"power",
+			"post,",
+			"convenient",
+			"folders)",
+			"of",
+			"date",
+			"powered",
+			"2019-05-30-welcome.md",
+			"view.",
+			"are",
+			"be",
+			"<!--",
+			"Welcome",
+			"is",
+			"2019-05-30-welcome/index.md",
+			"by",
+			"directory.",
+			"folder",
+			"Use",
+			"search",
+			"authors",
+			"false",
+			"as:",
+			"tempor",
+			"files",
+			"config.",
+			"dignissim",
+			"as",
+			"a",
+			"in",
+			"This",
+			"authors.yml",
+			"create",
+			"dolor",
+			"Enter",
+			"support",
+			"add",
+			"eros",
+			"post",
+			"Post",
+			"size",
+			"(or",
+			"rhoncus",
+			"Blog",
+			"limit",
+			"elit.",
+		];
+		let mut keys = BTreeMap::new();
+		{
+			for term in terms {
+				{
+					let (mut tx, st) = new_operation(&ds, TreeStoreType::Write, 100).await;
+					let mut st = st.lock().await;
+					t.insert(&mut tx, &mut st, term.into(), 0).await?;
+					st.finish(&mut tx).await?;
+					tx.commit().await?;
+				}
+				keys.insert(term.to_string(), 0);
+				{
+					let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+					let (_, tree_keys) = check_btree_properties(&t, &mut tx).await?;
+					assert_eq!(keys, tree_keys);
+					tx.cancel().await?;
+				}
+			}
+		}
+		{
+			for term in terms {
+				debug!("Delete {term}");
+				{
+					let (mut tx, st) = new_operation(&ds, TreeStoreType::Write, 100).await;
+					let mut st = st.lock().await;
+					t.delete(&mut tx, &mut st, term.into()).await?;
+					st.finish(&mut tx).await?;
+					tx.commit().await?;
+				}
+				keys.remove(term);
+				{
+					let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+					let (_, tree_keys) = check_btree_properties(&t, &mut tx).await?;
+					assert_eq!(keys, tree_keys);
+					tx.cancel().await?;
+				}
+			}
+		}
+		{
+			let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(check_btree_properties(&t, &mut tx).await?.0, 0);
+			tx.cancel().await?;
+		}
+		Ok(())
+	}
+
+	async fn check_btree_properties<BK>(
+		t: &BTree<BK>,
+		tx: &mut Transaction,
+	) -> Result<(usize, BTreeMap<String, Payload>), Error>
+	where
+		BK: BKeys + Debug,
+	{
+		let mut unique_keys = BTreeMap::new();
+		let n = t
+			.inspect_nodes(tx, |_, _, _, sn| {
+				let keys = sn.n.keys();
+				for i in 0..keys.len() {
+					let key = keys.get_key(i as usize).unwrap_or_else(|| panic!("No key"));
+					let payload = keys.get(&key).unwrap_or_else(|| panic!("No payload"));
+					if unique_keys.insert(String::from_utf8(key).unwrap(), payload).is_some() {
+						panic!("Non unique");
+					}
+				}
+			})
+			.await?;
+		Ok((n, unique_keys))
+	}
+
 	/////////////
 	// HELPERS //
 	/////////////
@@ -1364,10 +1631,10 @@ mod tests {
 		async fn inspect_nodes<F>(
 			&self,
 			tx: &mut Transaction,
-			inspect_func: F,
+			mut inspect_func: F,
 		) -> Result<usize, Error>
 		where
-			F: Fn(usize, usize, NodeId, BStoredNode<BK>),
+			F: FnMut(usize, usize, NodeId, BStoredNode<BK>),
 		{
 			let mut node_queue = VecDeque::new();
 			if let Some(node_id) = self.state.root {
