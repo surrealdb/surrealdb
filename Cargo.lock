@@ -5258,6 +5258,7 @@ dependencies = [
  "reqwest",
  "rmp-serde",
  "rustyline",
+ "semver",
  "serde",
  "serde_cbor",
  "serde_json",
