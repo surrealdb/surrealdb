@@ -872,6 +872,7 @@ impl<T> From<channel::SendError<T>> for Error {
 	}
 }
 
+#[cfg(feature = "http")]
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())

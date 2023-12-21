@@ -39,7 +39,7 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds
 #[cfg(test)]
 static CACHE_COOLDOWN: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(300));
 
-pub(crate) async fn config(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
+pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
 	// Attempt to fetch relevant JWK object either from local cache or remote location
 	let jwk = match fetch_jwks_from_cache(url.clone()).await {
 		Ok(jwks_cache) => {

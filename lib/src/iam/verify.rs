@@ -1,6 +1,8 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::iam::{jwks, token::Claims, Actor, Auth, Level, Role};
+#[cfg(feature = "http")]
+use crate::iam::jwks;
+use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
@@ -65,7 +67,7 @@ fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Er
 			DecodingKey::from_rsa_pem(code.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
-		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here.
+		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here
 	}
 }
 
@@ -197,6 +199,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
+			#[cfg(feature = "http")]
 			// If the token is defined as JWKS
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
@@ -208,6 +211,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			} else {
 				config(de.kind, de.code)
 			}?;
+			#[cfg(not(feature = "http"))]
+			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -272,6 +277,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database token
 			let de = tx.get_db_token(&ns, &db, &tk).await?;
+			#[cfg(feature = "http")]
 			// If the token is defined as JWKS
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
@@ -283,6 +289,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			} else {
 				config(de.kind, de.code)
 			}?;
+			#[cfg(not(feature = "http"))]
+			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -354,6 +362,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace token
 			let de = tx.get_ns_token(&ns, &tk).await?;
+			#[cfg(feature = "http")]
 			// If the token is defined as JWKS
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
@@ -365,6 +374,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			} else {
 				config(de.kind, de.code)
 			}?;
+			#[cfg(not(feature = "http"))]
+			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
