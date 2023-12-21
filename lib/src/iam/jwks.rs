@@ -7,6 +7,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(1));
 #[cfg(not(test))]
 static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_EXPIRATION") {
@@ -20,6 +22,9 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 			Duration::seconds(43200) // Set default cache expiration of 12 hours
 		}
 	});
+
+#[cfg(test)]
+static CACHE_COOLDOWN: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(300));
 #[cfg(not(test))]
 static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN") {
@@ -34,10 +39,18 @@ static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 		}
 	});
 
-#[cfg(test)]
-static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(1));
-#[cfg(test)]
-static CACHE_COOLDOWN: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(300));
+static REMOTE_TIMEOUT: Lazy<chrono::Duration> =
+	Lazy::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT") {
+		Ok(milliseconds_str) => {
+			let milliseconds = milliseconds_str
+				.parse::<u64>()
+				.expect("Expected a valid number of milliseconds for SURREAL_JWKS_REMOTE_TIMEOUT");
+			Duration::milliseconds(milliseconds as i64)
+		}
+		Err(_) => {
+			Duration::milliseconds(1000) // Set default remote timeout to 1 second
+		}
+	});
 
 pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
 	// Attempt to fetch relevant JWK object either from local cache or remote location
@@ -130,7 +143,7 @@ async fn find_jwk_and_cache_jwks(url: String, kid: String) -> Result<Jwk, Error>
 
 async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 	let client = Client::new();
-	let res = client.get(&url).send().await?;
+	let res = client.get(&url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
 	if !res.status().is_success() {
 		return Err(Error::JwksNotFound(res.url().to_string()));
 	}
@@ -409,6 +422,35 @@ mod tests {
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
 		// The server will panic if it receives more than the single expected request
+	}
+
+	#[tokio::test]
+	async fn test_remote_timeout() {
+		let jwks = DEFAULT_JWKS.clone();
+
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200)
+			.set_body_json(jwks)
+			.set_delay((*REMOTE_TIMEOUT + Duration::seconds(10)).to_std().unwrap());
+		Mock::given(method("GET"))
+			.and(path("/jwks.json"))
+			.respond_with(response)
+			.expect(1)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		let start_time = Utc::now();
+		// Get token configuration from remote location respnding very slowly
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token configuration with unavailable remote location"
+		);
+		assert!(
+			Utc::now() - start_time < *REMOTE_TIMEOUT + Duration::seconds(1),
+			"Remote request was not aborted immediately after timeout"
+		);
 	}
 
 	#[tokio::test]
