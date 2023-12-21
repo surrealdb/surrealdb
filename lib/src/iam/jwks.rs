@@ -86,10 +86,7 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
 	if let Some(PublicKeyUse::Signature) = &jwk.common.public_key_use {
 	} else {
-		warn!(
-			"Invalid value for parameter 'use' in JWK object: '{:?}'",
-			jwk.common.public_key_use
-		);
+		warn!("Invalid value for parameter 'use' in JWK object: '{:?}'", jwk.common.public_key_use);
 		return Err(Error::JwkInvalidParameter("use".to_string()));
 	}
 	// Check if key operations (if specified) include verification
@@ -201,8 +198,15 @@ async fn fetch_jwks_from_cache(url: String) -> Result<JwksCache, Error> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use rand::{distributions::Alphanumeric, Rng};
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	// Use unique path to prevent accidental cache reuse
+	fn random_path() -> String {
+		let mut rng = rand::thread_rng();
+		rng.sample_iter(&Alphanumeric).take(8).map(char::from).collect()
+	}
 
 	static DEFAULT_JWKS: Lazy<JwkSet> = Lazy::new(|| {
 		JwkSet{
@@ -256,24 +260,25 @@ mod tests {
 	async fn test_golden_path() {
 		let jwks = DEFAULT_JWKS.clone();
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;
 		let url = mock_server.uri();
 
 		// Get first token configuration from remote location
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Drop server to force usage of the local cache
 		drop(mock_server);
 
 		// Get second token configuration from local cache
-		let res = config("test_2".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_2".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 	}
 
@@ -281,10 +286,11 @@ mod tests {
 	async fn test_cache_expiration() {
 		let jwks = DEFAULT_JWKS.clone();
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.expect(2)
 			.mount(&mock_server)
@@ -292,14 +298,14 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Wait for cache to expire
 		std::thread::sleep((*CACHE_EXPIRATION + Duration::seconds(1)).to_std().unwrap());
 
 		// Get same token configuration again after cache has expired
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 
 		// The server will panic if it does not receive exactly two expected requests
@@ -309,17 +315,18 @@ mod tests {
 	async fn test_cache_expiration_remote_down() {
 		let jwks = DEFAULT_JWKS.clone();
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Wait for cache to expire
@@ -329,7 +336,7 @@ mod tests {
 		drop(mock_server);
 
 		// Get same token configuration again after cache has expired
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with an expired cache and remote down"
@@ -341,16 +348,17 @@ mod tests {
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.algorithm = None;
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;
 		let url = mock_server.uri();
 
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key using unsupported algorithm"
@@ -362,16 +370,17 @@ mod tests {
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Encryption);
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;
 		let url = mock_server.uri();
 
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key that only supports encryption"
@@ -383,16 +392,17 @@ mod tests {
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.key_operations = Some(vec![jsonwebtoken::jwk::KeyOperations::Encrypt]);
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;
 		let url = mock_server.uri();
 
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key that only supports encryption"
@@ -403,10 +413,11 @@ mod tests {
 	async fn test_dos_protection() {
 		let jwks = DEFAULT_JWKS.clone();
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.expect(1)
 			.mount(&mock_server)
@@ -414,11 +425,11 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Use token with invalid key identifier claim to force cache refresh
-		let res = config("invalid".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("invalid".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
 		// Use token with invalid key identifier claim to force cache refresh again before cooldown
-		let res = config("invalid".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("invalid".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
 		// The server will panic if it receives more than the single expected request
@@ -428,12 +439,13 @@ mod tests {
 	async fn test_remote_timeout() {
 		let jwks = DEFAULT_JWKS.clone();
 
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200)
 			.set_body_json(jwks)
 			.set_delay((*REMOTE_TIMEOUT + Duration::seconds(10)).to_std().unwrap());
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.expect(1)
 			.mount(&mock_server)
@@ -442,7 +454,7 @@ mod tests {
 
 		let start_time = Utc::now();
 		// Get token configuration from remote location respnding very slowly
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token configuration with unavailable remote location"
@@ -455,10 +467,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_remote_down() {
+		let jwks_path = format!("/{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(500);
 		Mock::given(method("GET"))
-			.and(path("/jwks.json"))
+			.and(path(jwks_path))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;
@@ -466,7 +479,7 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location respnding with Internal Server Error
-		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		let res = config("test_1".to_string(), format!("{}/{}", &url, jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token configuration with unavailable remote location"
