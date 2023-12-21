@@ -7,6 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[cfg(not(test))]
 static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_EXPIRATION") {
 		Ok(seconds_str) => {
@@ -19,7 +20,7 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 			Duration::seconds(43200) // Set default cache expiration of 12 hours
 		}
 	});
-
+#[cfg(not(test))]
 static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN") {
 		Ok(seconds_str) => {
@@ -32,6 +33,11 @@ static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 			Duration::seconds(300) // Set default cache refresh cooldown of 5 minutes
 		}
 	});
+
+#[cfg(test)]
+static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(1));
+#[cfg(test)]
+static CACHE_COOLDOWN: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(300));
 
 pub(crate) async fn config(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
 	// Attempt to fetch relevant JWK object either from local cache or remote location
@@ -249,16 +255,138 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		// Get token configuration from remote location
+		// Get first token configuration from remote location
 		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Drop server to force usage of the local cache
 		drop(mock_server);
 
-		// Get token configuration from local cache
+		// Get second token configuration from local cache
+		let res = config("test_2".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
+	}
+
+	#[tokio::test]
+	async fn test_cache_expiration() {
+		let jwks = DEFAULT_JWKS.clone();
+
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path("/jwks.json"))
+			.respond_with(response)
+			.expect(2)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		// Get token configuration from remote location
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
+
+		// Wait for cache to expire
+		std::thread::sleep((*CACHE_EXPIRATION + Duration::seconds(1)).to_std().unwrap());
+
+		// Get same token configuration again after cache has expired
 		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
+
+		// The server will panic if it does not receive exactly two expected requests
+	}
+
+	#[tokio::test]
+	async fn test_cache_expiration_remote_down() {
+		let jwks = DEFAULT_JWKS.clone();
+
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path("/jwks.json"))
+			.respond_with(response)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		// Get token configuration from remote location
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
+
+		// Wait for cache to expire
+		std::thread::sleep((*CACHE_EXPIRATION + Duration::seconds(1)).to_std().unwrap());
+
+		// Drop server to force usage of the local cache
+		drop(mock_server);
+
+		// Get same token configuration again after cache has expired
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token with an expired cache and remote down"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_unsupported_algorithm() {
+		let mut jwks = DEFAULT_JWKS.clone();
+		jwks.keys[0].common.algorithm = None;
+
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path("/jwks.json"))
+			.respond_with(response)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token with key using unsupported algorithm"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_encryption_only_use() {
+		let mut jwks = DEFAULT_JWKS.clone();
+		jwks.keys[0].common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Encryption);
+
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path("/jwks.json"))
+			.respond_with(response)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token with key that only supports encryption"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_encryption_only_ops() {
+		let mut jwks = DEFAULT_JWKS.clone();
+		jwks.keys[0].common.key_operations = Some(vec![jsonwebtoken::jwk::KeyOperations::Encrypt]);
+
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path("/jwks.json"))
+			.respond_with(response)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		let res = config("test_1".to_string(), format!("{}/jwks.json", &url)).await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token with key that only supports encryption"
+		);
 	}
 
 	#[tokio::test]
@@ -283,7 +411,7 @@ mod tests {
 		let res = config("invalid".to_string(), format!("{}/jwks.json", &url)).await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
-		// The server will panic if it receives more than the expected single request
+		// The server will panic if it receives more than the single expected request
 	}
 
 	#[tokio::test]
