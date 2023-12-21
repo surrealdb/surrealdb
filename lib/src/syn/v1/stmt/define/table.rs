@@ -7,7 +7,7 @@ use super::super::super::{
 	IResult,
 };
 use crate::sql::{
-	statements::DefineTableStatement, ChangeFeed, Permission, Permissions, Strand, View,
+	statements::DefineTableStatement, ChangeFeed, Ident, Permission, Permissions, Strand, View,
 };
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
@@ -50,6 +50,9 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			DefineTableOption::Relation(_) => {
+				res.relation = true;
+			}
 		}
 	}
 	// Return the statement
@@ -65,6 +68,28 @@ enum DefineTableOption {
 	Comment(Strand),
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
+	Relation(Relation),
+}
+
+#[derive(Debug, Default)]
+struct Relation {
+	from: Option<Ident>,
+	to: Option<Ident>,
+}
+
+enum RelationDir {
+	From(Ident),
+	To(Ident),
+}
+
+impl Relation {
+	fn merge(&mut self, other: RelationDir) {
+		//TODO: error if both self and other are some
+		match other {
+			RelationDir::From(i) => self.from = Some(i),
+			RelationDir::To(i) => self.to = Some(i),
+		}
+	}
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
@@ -76,6 +101,7 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_schemafull,
 		table_permissions,
 		table_changefeed,
+		table_relation,
 	))(i)
 }
 
@@ -121,6 +147,36 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i, Permission::None)?;
 	Ok((i, DefineTableOption::Permissions(v)))
+}
+
+fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("RELATION")(i)?;
+
+	let (i, dirs) = many0(alt((relation_from, relation_to)))(i)?;
+
+	let mut relation: Relation = Default::default();
+
+	for dir in dirs {
+		relation.merge(dir);
+	}
+
+	Ok((i, DefineTableOption::Relation(relation)))
+}
+
+fn relation_from(i: &str) -> IResult<&str, RelationDir> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("FROM")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, from) = cut(ident)(i)?;
+	Ok((i, RelationDir::From(from)))
+}
+fn relation_to(i: &str) -> IResult<&str, RelationDir> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("TO")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, to) = cut(ident)(i)?;
+	Ok((i, RelationDir::To(to)))
 }
 
 #[cfg(test)]

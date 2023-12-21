@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -25,6 +25,8 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
+	#[revision(start = 2)]
+	pub relation: bool,
 }
 
 impl DefineTableStatement {
