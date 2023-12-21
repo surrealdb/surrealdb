@@ -372,7 +372,7 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
 	//
 	for _ in 0..6 {

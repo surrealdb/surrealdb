@@ -1031,9 +1031,8 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
-		// Parse the GraphQL query text
+		// Parse the GraphQL query text and convert to SurrealQL
 		let ast = gql::parse_and_transpile(txt)?;
-		// Transpile QraphQL AST to Surreal AST
 
 		// Process the AST
 		self.process(ast, sess, vars).await

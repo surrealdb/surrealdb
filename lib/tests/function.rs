@@ -2432,7 +2432,7 @@ async fn function_math_pow() -> Result<(), Error> {
 	let sql = r#"
 		RETURN math::pow(101, 50);
 	"#;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
 	let res = res.remove(0).result;
