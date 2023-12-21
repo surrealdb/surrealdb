@@ -87,7 +87,7 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 	if let Some(PublicKeyUse::Signature) = &jwk.common.public_key_use {
 	} else {
 		warn!(
-			"Invalid value for parameter 'use' in JWKS object: '{:?}'",
+			"Invalid value for parameter 'use' in JWK object: '{:?}'",
 			jwk.common.public_key_use
 		);
 		return Err(Error::JwkInvalidParameter("use".to_string()));
@@ -97,7 +97,7 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 	if let Some(ops) = &jwk.common.key_operations {
 		if !ops.iter().any(|op| *op == KeyOperations::Verify) {
 			warn!(
-				"Invalid value for parameter 'key_ops' in JWKS object: '{:?}'",
+				"Invalid value for parameter 'key_ops' in JWK object: '{:?}'",
 				jwk.common.key_operations
 			);
 			return Err(Error::JwkInvalidParameter("key_ops".to_string()));
@@ -107,7 +107,7 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 	let alg = match jwk.common.algorithm {
 		Some(alg) => alg,
 		_ => {
-			warn!("Invalid value for parameter 'alg' in JWKS object: '{:?}'", jwk.common.algorithm);
+			warn!("Invalid value for parameter 'alg' in JWK object: '{:?}'", jwk.common.algorithm);
 			return Err(Error::JwkInvalidParameter("alg".to_string()));
 		}
 	};
