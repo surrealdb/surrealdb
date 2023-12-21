@@ -133,7 +133,7 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(all(any(feature = "ml", feature = "http"), not(feature = "wasm")))]
+#[cfg(all(any(feature = "ml", feature = "http"), not(target_arch = "wasm32")))]
 #[doc(hidden)]
 pub mod obs;
 #[doc(hidden)]

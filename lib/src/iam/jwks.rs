@@ -117,16 +117,13 @@ async fn find_jwk_and_cache_jwks(url: String, kid: String) -> Result<Jwk, Error>
 			};
 			// Attempt to find JWK in JWKS by the key identifier
 			match jwks.find(&kid) {
-				Some(jwk) => {
-					// Return the JWK object
-					Ok(jwk.to_owned())
-				}
-				_ => return Err(Error::JwkNotFound(kid, url)),
+				Some(jwk) => Ok(jwk.to_owned()),
+				_ => Err(Error::JwkNotFound(kid, url)),
 			}
 		}
 		Err(err) => {
 			warn!("Failed to fetch JWKS object from remote location: '{}'", err);
-			return Err(Error::JwksNotFound(url));
+			Err(Error::JwksNotFound(url))
 		}
 	}
 }
