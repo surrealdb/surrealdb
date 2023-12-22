@@ -1067,6 +1067,10 @@ async fn set_unset() {
 		panic!("record not found");
 	};
 	assert_eq!(name, value);
+	// `token` is a reserved variable
+	db.set("token", value).await.unwrap_err();
+	// make sure we can still run queries after trying to set a protected variable
+	db.query("RETURN true").await.unwrap().check().unwrap();
 	db.unset(key).await.unwrap();
 	let mut response = db.query(sql).await.unwrap();
 	let name: Option<String> = response.take(0).unwrap();

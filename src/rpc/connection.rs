@@ -587,7 +587,9 @@ impl Connection {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the query parameters
-		let var = Some(self.vars.to_owned());
+		let mut new_vars = self.vars.to_owned();
+		new_vars.insert(key.0.clone(), val.clone());
+		let var = Some(new_vars);
 		// Compute the specified parameter
 		match kvs.compute(val, &self.session, var).await? {
 			// Remove the variable if undefined
