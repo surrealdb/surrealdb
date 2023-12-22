@@ -11,7 +11,16 @@ impl PriorityNode {
 	pub(super) fn new(dist: f64, node_id: NodeId) -> Self {
 		Self(dist, node_id)
 	}
+
+	pub(super) fn dist(&self) -> f64 {
+		self.0
+	}
+
+	pub(super) fn node_id(&self) -> NodeId {
+		self.1
+	}
 }
+
 impl PartialEq<Self> for PriorityNode {
 	fn eq(&self, other: &Self) -> bool {
 		self.0 == other.0 && self.1 == other.1
@@ -90,7 +99,7 @@ impl KnnResultBuilder {
 		}
 	}
 
-	fn add(&mut self, dist: f64, docs: &RoaringTreemap) {
+	pub(super) fn add(&mut self, dist: f64, docs: &RoaringTreemap) {
 		let pr = PriorityResult(dist);
 		match self.priority_list.entry(pr) {
 			Entry::Vacant(e) => {
@@ -222,7 +231,7 @@ pub(super) mod tests {
 	}
 
 	impl TestCollection {
-		pub(super) fn new_unique(
+		pub(in crate::idx::trees) fn new_unique(
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
@@ -234,7 +243,7 @@ pub(super) mod tests {
 			TestCollection::Unique(collection)
 		}
 
-		pub(super) fn new_random(
+		pub(in crate::idx::trees) fn new_random(
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
@@ -250,7 +259,7 @@ pub(super) mod tests {
 			TestCollection::NonUnique(collection)
 		}
 
-		pub(super) fn is_unique(&self) -> bool {
+		pub(in crate::idx::trees) fn is_unique(&self) -> bool {
 			matches!(self, TestCollection::Unique(_))
 		}
 	}

@@ -223,11 +223,11 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
 		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, current.1).await?;
+			let node = store.get_node(tx, current.node_id()).await?;
 			#[cfg(debug_assertions)]
 			{
-				debug!("Visit node id: {} - dist: {}", current.1, current.0);
-				if visited_nodes.insert(current.1, node.n.len()).is_some() {
+				debug!("Visit node id: {} - dist: {}", current.node_id(), current.dist());
+				if visited_nodes.insert(current.node_id(), node.n.len()).is_some() {
 					return Err(Error::Unreachable("MTree::knn_search"));
 				}
 			}
@@ -252,7 +252,7 @@ impl MTree {
 						let min_dist = (d - p.radius).max(0.0);
 						if res.check_add(min_dist) {
 							debug!("Queue add - dist: {} - node: {}", min_dist, p.node);
-							queue.push(PriorityNode(min_dist, p.node));
+							queue.push(PriorityNode::new(min_dist, p.node));
 						}
 					}
 				}

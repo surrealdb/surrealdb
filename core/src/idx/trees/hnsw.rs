@@ -5,7 +5,6 @@ use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SharedVector;
 use crate::sql::index::Distance;
 use roaring::RoaringTreemap;
-use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 struct HnswGraph {
@@ -17,7 +16,7 @@ struct HnswGraph {
 struct HnswNode {
 	point: SharedVector, // The data point. T could be a type that represents your data.
 	docs: RoaringTreemap,
-	neighbors: Vec<Vec<usize>>, // Nested Vec, each sub-Vec represents a layer, containing indices of neighbor nodes.
+	neighbors: Vec<Vec<NodeId>>, // Nested Vec, each sub-Vec represents a layer, containing indices of neighbor nodes.
 }
 
 impl HnswGraph {
@@ -58,7 +57,7 @@ impl HnswGraph {
 		// Update the neighbors of the node and its neighbors as well.
 	}
 
-	pub fn search(&self, query_point: &SharedVector, k: usize) -> Result<Vec<usize>, Error> {
+	pub fn search(&self, query_point: &SharedVector, k: usize) -> Result<Vec<NodeId>, Error> {
 		let mut current_layer = self.max_layer;
 		let mut entry_point_index = 0; // Assuming you start with an arbitrary node or a predefined entry point
 
@@ -73,16 +72,17 @@ impl HnswGraph {
 	fn search_layer(
 		&self,
 		query_point: &SharedVector,
-		entry_point_index: usize,
+		entry_point_index: NodeId,
 		layer: usize,
-	) -> Result<usize, Error> {
-		let mut closest_node = entry_point_index;
+	) -> Result<NodeId, Error> {
+		let mut closest_node = entry_point_index as usize;
 		let mut closest_distance =
 			self.distance.compute(query_point, &self.nodes[closest_node].point)?;
 
 		loop {
 			let mut changed = false;
 			for &neighbor_index in &self.nodes[closest_node].neighbors[layer] {
+				let neighbor_index = neighbor_index as usize;
 				let distance =
 					self.distance.compute(query_point, &self.nodes[neighbor_index].point)?;
 				if distance < closest_distance {
@@ -97,40 +97,42 @@ impl HnswGraph {
 			}
 		}
 
-		Ok(closest_node)
+		Ok(closest_node as NodeId)
 	}
 
 	fn find_nearest_neighbors(
 		&self,
 		query_point: &SharedVector,
-		entry_point_index: usize,
+		entry_point_index: NodeId,
 		k: usize,
-	) -> Result<Vec<usize>, Error> {
-		let mut visited = vec![false; self.nodes.len()];
+	) -> Result<Vec<NodeId>, Error> {
+		let mut visited = RoaringTreemap::new();
 		let mut heap = BinaryHeap::new();
 
-		heap.push(PriorityNode(0.0, entry_point_index));
+		heap.push(PriorityNode::new(0.0, entry_point_index));
 
-		while let Some(PriorityNode(_distance, index)) = heap.pop() {
-			if visited[index] {
+		while let Some(pn) = heap.pop() {
+			let node_id = pn.node_id();
+			if visited.contains(node_id) {
 				continue;
 			}
 
-			visited[index] = true;
+			visited.insert(node_id);
 			if heap.len() > k {
 				break;
 			}
 
-			for &neighbor_index in &self.nodes[index].neighbors[0] {
-				if !visited[neighbor_index] {
-					let neighbor_distance =
-						self.distance.compute(query_point, &self.nodes[neighbor_index].point)?;
-					heap.push(PriorityNode(neighbor_distance, neighbor_index));
+			for &neighbor_index in &self.nodes[node_id as usize].neighbors[0] {
+				if !visited.contains(neighbor_index) {
+					let neighbor_distance = self
+						.distance
+						.compute(query_point, &self.nodes[neighbor_index as usize].point)?;
+					heap.push(PriorityNode::new(neighbor_distance, neighbor_index));
 				}
 			}
 		}
 
-		Ok(heap.into_iter().map(|PriorityNode(_, index)| index).collect())
+		Ok(heap.into_iter().map(|pn| pn.node_id()).collect())
 	}
 }
 
@@ -140,9 +142,7 @@ mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::hnsw::HnswGraph;
 	use crate::idx::trees::knn::tests::TestCollection;
-	use crate::idx::trees::mtree::MTree;
 	use crate::idx::trees::vector::SharedVector;
-	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
 	use std::collections::HashMap;
 
@@ -158,37 +158,28 @@ mod tests {
 		Ok(map)
 	}
 
-	fn find_collection(
-		h: &mut HnswGraph,
-		collection: &TestCollection,
-		cache_size: usize,
-	) -> Result<(), Error> {
+	fn find_collection(h: &mut HnswGraph, collection: &TestCollection) -> Result<(), Error> {
 		let max_knn = 20.max(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
 				let res = h.search(obj, knn)?;
 				if collection.is_unique() {
 					assert!(
-						res.docs.contains(doc_id),
+						res.contains(doc_id),
 						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
 						obj,
 						knn,
 						doc_id,
-						res.docs
+						res
 					);
 				}
 				let expected_len = collection.as_ref().len().min(knn);
-				if expected_len != res.docs.len() {
-					debug!("{:?}", res.visited_nodes);
-					crate::idx::trees::mtree::tests::check_tree_properties(&mut tx, &mut st, t)
-						.await?;
-				}
 				assert_eq!(
 					expected_len,
-					res.docs.len(),
+					res.len(),
 					"Wrong knn count - Expected: {} - Got: {} - Collection: {}",
 					expected_len,
-					res.docs.len(),
+					res.len(),
 					collection.as_ref().len(),
 				)
 			}
