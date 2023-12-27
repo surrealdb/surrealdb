@@ -1,11 +1,14 @@
 use crate::err::Error;
+use crate::kvs::Datastore;
+use crate::opt::capabilities::NetTarget;
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::jwk::{Jwk, JwkSet, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{DecodingKey, Validation};
 use once_cell::sync::Lazy;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::str::FromStr;
 
 #[cfg(test)]
 static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(1));
@@ -52,7 +55,11 @@ static REMOTE_TIMEOUT: Lazy<chrono::Duration> =
 		}
 	});
 
-pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Validation), Error> {
+pub(super) async fn config(
+	kvs: &Datastore,
+	kid: String,
+	url: String,
+) -> Result<(DecodingKey, Validation), Error> {
 	// Attempt to fetch relevant JWK object either from local cache or remote location
 	let jwk = match fetch_jwks_from_cache(url.clone()).await {
 		Ok(jwks_cache) => {
@@ -69,17 +76,17 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 							warn!("Refused to refresh cache before cooldown period is over");
 							return Err(Error::InvalidAuth); // Return opaque error
 						}
-						find_jwk_and_cache_jwks(url, kid).await?
+						find_jwk_and_cache_jwks(kvs, url, kid).await?
 					}
 				}
 			} else {
 				trace!("Fetched JWKS object from local cache has expired");
-				find_jwk_and_cache_jwks(url, kid).await?
+				find_jwk_and_cache_jwks(kvs, url, kid).await?
 			}
 		}
 		Err(_) => {
 			trace!("Could not fetch JWKS object from local cache");
-			find_jwk_and_cache_jwks(url, kid).await?
+			find_jwk_and_cache_jwks(kvs, url, kid).await?
 		}
 	};
 	// Check if key is intended to be used for signing
@@ -115,8 +122,11 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 }
 
 // Attempts to find a relevant JWK object inside a JWKS object fetched from a remote location
+// Checks if network access to the remote location is allowed by the datastore capabilities
 // Caches the fetched JWKS object in the local cache even if the JWK object is not found
-async fn find_jwk_and_cache_jwks(url: String, kid: String) -> Result<Jwk, Error> {
+async fn find_jwk_and_cache_jwks(kvs: &Datastore, url: String, kid: String) -> Result<Jwk, Error> {
+	// Check that the datastore capabilities allow connections to the URL host
+	check_capabilities_url(kvs, url.clone())?;
 	// Attempt to fetch JWKS object from remote location
 	match fetch_jwks_from_url(url.clone()).await {
 		Ok(jwks) => {
@@ -141,6 +151,33 @@ async fn find_jwk_and_cache_jwks(url: String, kid: String) -> Result<Jwk, Error>
 	}
 }
 
+fn check_capabilities_url(kvs: &Datastore, url: String) -> Result<(), Error> {
+	let url_parsed = match Url::parse(&url) {
+		Ok(url) => url,
+		Err(_) => {
+			return Err(Error::InvalidUrl(url));
+		}
+	};
+	let host = match url_parsed.host_str() {
+		Some(host) => host,
+		None => {
+			return Err(Error::InvalidUrl(url));
+		}
+	};
+	let net_target = match NetTarget::from_str(host) {
+		Ok(host) => host,
+		Err(_) => {
+			return Err(Error::InvalidUrl(url));
+		}
+	};
+	if !kvs.allows_network_target(&net_target) {
+		warn!("Failed to fetch JWKS, network access to remote location {} is not allowed", url);
+		return Err(Error::NetTargetNotAllowed(url));
+	}
+
+	Ok(())
+}
+
 async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 	let client = Client::new();
 	let res = client.get(&url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
@@ -156,7 +193,6 @@ async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 		}
 	}
 }
-
 #[derive(Serialize, Deserialize)]
 struct JwksCache {
 	jwks: JwkSet,
@@ -201,6 +237,7 @@ async fn fetch_jwks_from_cache(url: String) -> Result<JwksCache, Error> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::opt::capabilities::{Capabilities, NetTarget, Targets};
 	use rand::{distributions::Alphanumeric, Rng};
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -261,6 +298,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_golden_path() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -274,19 +316,45 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get first token configuration from remote location
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Drop server to force usage of the local cache
 		drop(mock_server);
 
 		// Get second token configuration from local cache
-		let res = config("test_2".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_2".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 	}
 
 	#[tokio::test]
+	async fn test_default_capabilities() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::default());
+		let jwks = DEFAULT_JWKS.clone();
+
+		let jwks_path = format!("{}/jwks.json", random_path());
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path(&jwks_path))
+			.respond_with(response)
+			.expect(0)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		// Get token configuration from unallowed remote location
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		assert!(res.is_err(), "Unexpected success validating token from unallowed remote location");
+	}
+
+	#[tokio::test]
 	async fn test_cache_expiration() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -301,14 +369,14 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Wait for cache to expire
 		std::thread::sleep((*CACHE_EXPIRATION + Duration::seconds(1)).to_std().unwrap());
 
 		// Get same token configuration again after cache has expired
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 
 		// The server will panic if it does not receive exactly two expected requests
@@ -316,6 +384,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_cache_cooldown() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -330,11 +403,11 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Use token with invalid key identifier claim to force cache refresh
-		let res = config("invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
 		// Use token with invalid key identifier claim to force cache refresh again before cooldown
-		let res = config("invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
 		// The server will panic if it receives more than the single expected request
@@ -342,6 +415,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_cache_expiration_remote_down() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -356,14 +434,14 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Wait for cache to expire
 		std::thread::sleep((*CACHE_EXPIRATION + Duration::seconds(1)).to_std().unwrap());
 
 		// Get same token configuration again after cache has expired
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with an expired cache and remote down"
@@ -372,6 +450,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_unsupported_algorithm() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.algorithm = None;
 
@@ -385,7 +468,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key using unsupported algorithm"
@@ -394,6 +477,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_no_key_use() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.public_key_use = None;
 
@@ -407,7 +495,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_ok(),
 			"Failed to validate token with key that does not specify use: {:?}",
@@ -417,6 +505,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_key_use_enc() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Encryption);
 
@@ -430,7 +523,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key that only supports encryption"
@@ -439,6 +532,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_key_ops_encrypt_only() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.key_operations = Some(vec![jsonwebtoken::jwk::KeyOperations::Encrypt]);
 
@@ -452,7 +550,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key that only supports encryption"
@@ -461,6 +559,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_remote_down() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(500);
@@ -473,7 +576,7 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location respnding with Internal Server Error
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token configuration with unavailable remote location"
@@ -482,6 +585,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_remote_timeout() {
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -499,7 +607,7 @@ mod tests {
 
 		let start_time = Utc::now();
 		// Get token configuration from remote location respnding very slowly
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token configuration with unavailable remote location"
