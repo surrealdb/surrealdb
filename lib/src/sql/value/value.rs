@@ -730,6 +730,18 @@ impl TryFrom<Value> for Object {
 	}
 }
 
+impl FromIterator<Value> for Value {
+	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
+		Value::Array(Array(iter.into_iter().collect()))
+	}
+}
+
+impl FromIterator<(String, Value)> for Value {
+	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
+		Value::Object(Object(iter.into_iter().collect()))
+	}
+}
+
 impl Value {
 	// -----------------------------------
 	// Initial record value
@@ -1089,7 +1101,18 @@ impl Value {
 	/// Treat a string as a table name
 	pub fn could_be_table(self) -> Value {
 		match self {
-			Value::Strand(v) => Table::from(v.0).into(),
+			Value::Strand(v) => Value::Table(v.0.into()),
+			_ => self,
+		}
+	}
+
+	/// Treat a string as a thing or table name
+	pub fn could_be_thing_or_table(self) -> Value {
+		match self {
+			Value::Strand(v) => match crate::syn::thing(&v) {
+				Ok(v) => Value::Thing(v),
+				Err(_) => Value::Table(v.0.into()),
+			},
 			_ => self,
 		}
 	}

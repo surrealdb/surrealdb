@@ -1401,7 +1401,7 @@ mod ws_integration {
 			"id": "1",
 			"method": "format",
 			"params": [
-				"pack"
+				"msgpack"
 			]
 		}))
 		.unwrap();

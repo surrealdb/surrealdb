@@ -1,24 +1,17 @@
 use crate::err;
+use crate::rpc::failure::Failure;
+use crate::rpc::format::Format;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use serde::Serialize;
 use serde_json::{json, Value as Json};
-use std::borrow::Cow;
 use surrealdb::channel::Sender;
 use surrealdb::dbs;
 use surrealdb::dbs::Notification;
 use surrealdb::sql;
 use surrealdb::sql::Value;
 use tracing::Span;
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum OutputFormat {
-	Json, // JSON
-	Cbor, // CBOR
-	Pack, // MessagePack
-	Full, // Full type serialization
-}
 
 /// The data returned by the database
 // The variants here should be in exactly the same order as `surrealdb::engine::remote::ws::Data`
@@ -67,7 +60,7 @@ pub struct Response {
 impl Response {
 	/// Convert and simplify the value into JSON
 	#[inline]
-	fn simplify(self) -> Json {
+	pub fn simplify(self) -> Json {
 		let mut value = match self.result {
 			Ok(data) => {
 				let value = match data {
@@ -94,9 +87,10 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	pub async fn send(self, out: OutputFormat, chn: &Sender<Message>) {
+	pub async fn send(self, fmt: Format, chn: &Sender<Message>) {
+		// Create a new tracing span
 		let span = Span::current();
-
+		// Log the rpc response call
 		debug!("Process RPC response");
 
 		let is_error = self.result.is_err();
@@ -109,73 +103,12 @@ impl Response {
 			span.record("rpc.error_code", err.code);
 			span.record("rpc.error_message", err.message.as_ref());
 		}
-
-		let (res_size, message) = match out {
-			OutputFormat::Json => {
-				let res = serde_json::to_string(&self.simplify()).unwrap();
-				(res.len(), Message::Text(res))
-			}
-			OutputFormat::Cbor => {
-				let res = serde_cbor::to_vec(&self.simplify()).unwrap();
-				(res.len(), Message::Binary(res))
-			}
-			OutputFormat::Pack => {
-				let res = serde_pack::to_vec(&self.simplify()).unwrap();
-				(res.len(), Message::Binary(res))
-			}
-			OutputFormat::Full => {
-				let res = surrealdb::sql::serde::serialize(&self).unwrap();
-				(res.len(), Message::Binary(res))
-			}
+		// Process the response for the format
+		let (len, msg) = fmt.res(self).unwrap();
+		// Send the message to the write channel
+		if chn.send(msg).await.is_ok() {
+			record_rpc(&TelemetryContext::current(), len, is_error);
 		};
-
-		if chn.send(message).await.is_ok() {
-			record_rpc(&TelemetryContext::current(), res_size, is_error);
-		};
-	}
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct Failure {
-	code: i64,
-	message: Cow<'static, str>,
-}
-
-#[allow(dead_code)]
-impl Failure {
-	pub const PARSE_ERROR: Failure = Failure {
-		code: -32700,
-		message: Cow::Borrowed("Parse error"),
-	};
-
-	pub const INVALID_REQUEST: Failure = Failure {
-		code: -32600,
-		message: Cow::Borrowed("Invalid Request"),
-	};
-
-	pub const METHOD_NOT_FOUND: Failure = Failure {
-		code: -32601,
-		message: Cow::Borrowed("Method not found"),
-	};
-
-	pub const INVALID_PARAMS: Failure = Failure {
-		code: -32602,
-		message: Cow::Borrowed("Invalid params"),
-	};
-
-	pub const INTERNAL_ERROR: Failure = Failure {
-		code: -32603,
-		message: Cow::Borrowed("Internal error"),
-	};
-
-	pub fn custom<S>(message: S) -> Failure
-	where
-		Cow<'static, str>: From<S>,
-	{
-		Failure {
-			code: -32000,
-			message: message.into(),
-		}
 	}
 }
 

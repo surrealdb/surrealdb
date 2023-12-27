@@ -1,5 +1,6 @@
 use crate::cnf;
 use crate::rpc::connection::Connection;
+use crate::rpc::format::PROTOCOLS;
 use axum::routing::get;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
@@ -10,17 +11,6 @@ use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
-
-const PROTOCOLS: [&str; 4] = [
-	// For internal serialisation
-	"surrealql-binary",
-	// For basic JSON serialisation
-	"json",
-	// For basic CBOR serialisation
-	"cbor",
-	// For basic MessagePack serialisation
-	"messagepack",
-];
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where

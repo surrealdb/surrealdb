@@ -4443,6 +4443,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmpv"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e0e0214a4a2b444ecce41a4025792fc31f77c7bb89c46d253953ea8c65701ec"
+dependencies = [
+ "num-traits",
+ "rmp",
+]
+
+[[package]]
 name = "roaring"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5254,6 +5264,7 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rmp-serde",
+ "rmpv",
  "rustyline",
  "serde",
  "serde_cbor",

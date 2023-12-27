@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::Uuid;
 use crate::sql::Value;
 use derive::Store;
 use revision::revisioned;
@@ -34,6 +35,14 @@ impl KillStatement {
 			Value::Uuid(id) => *id,
 			Value::Param(param) => match param.compute(ctx, opt, txn, None).await? {
 				Value::Uuid(id) => id,
+				Value::Strand(id) => match uuid::Uuid::try_parse(&id) {
+					Ok(id) => Uuid(id),
+					_ => {
+						return Err(Error::KillStatement {
+							value: self.id.to_string(),
+						})
+					}
+				},
 				_ => {
 					return Err(Error::KillStatement {
 						value: self.id.to_string(),

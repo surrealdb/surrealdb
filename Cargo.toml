@@ -57,6 +57,7 @@ opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
 rand = "0.8.5"
 reqwest = { version = "0.11.22", default-features = false, features = ["blocking", "gzip"] }
+rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_cbor = "0.11.2"

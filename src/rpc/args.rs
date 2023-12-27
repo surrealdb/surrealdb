@@ -11,7 +11,7 @@ pub trait Take {
 impl Take for Array {
 	/// Convert the array to one argument
 	fn needs_one(self) -> Result<Value, ()> {
-		if self.is_empty() {
+		if self.len() != 1 {
 			return Err(());
 		}
 		let mut x = self.into_iter();
@@ -22,7 +22,7 @@ impl Take for Array {
 	}
 	/// Convert the array to two arguments
 	fn needs_two(self) -> Result<(Value, Value), ()> {
-		if self.len() < 2 {
+		if self.len() != 2 {
 			return Err(());
 		}
 		let mut x = self.into_iter();
@@ -34,7 +34,7 @@ impl Take for Array {
 	}
 	/// Convert the array to two arguments
 	fn needs_one_or_two(self) -> Result<(Value, Value), ()> {
-		if self.is_empty() {
+		if self.is_empty() && self.len() > 2 {
 			return Err(());
 		}
 		let mut x = self.into_iter();
@@ -46,7 +46,7 @@ impl Take for Array {
 	}
 	/// Convert the array to three arguments
 	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), ()> {
-		if self.is_empty() {
+		if self.is_empty() && self.len() > 3 {
 			return Err(());
 		}
 		let mut x = self.into_iter();

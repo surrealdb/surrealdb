@@ -1,11 +1,12 @@
-use super::request::parse_request;
-use super::response::{failure, success, Data, Failure, IntoRpcResponse, OutputFormat};
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
 use crate::cnf::{WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY};
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::args::Take;
+use crate::rpc::failure::Failure;
+use crate::rpc::format::Format;
+use crate::rpc::response::{failure, success, Data, IntoRpcResponse};
 use crate::rpc::{WebSocketRef, CONN_CLOSED_ERR, LIVE_QUERIES, WEBSOCKETS};
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
@@ -13,6 +14,7 @@ use crate::telemetry::traces::rpc::span_for_request;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use http::HeaderValue;
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
@@ -35,7 +37,7 @@ use uuid::Uuid;
 pub struct Connection {
 	ws_id: Uuid,
 	session: Session,
-	format: OutputFormat,
+	format: Format,
 	vars: BTreeMap<String, Value>,
 	limiter: Arc<Semaphore>,
 	canceller: CancellationToken,
@@ -46,8 +48,8 @@ impl Connection {
 	pub fn new(mut session: Session) -> Arc<RwLock<Connection>> {
 		// Create a new RPC variables store
 		let vars = BTreeMap::new();
-		// Set the default output format
-		let format = OutputFormat::Json;
+		// No output format has been set yet
+		let format = Format::None;
 		// Enable real-time mode
 		session.rt = true;
 		// Create and store the RPC connection
@@ -73,6 +75,10 @@ impl Connection {
 
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
+		if let Some(protocol) = ws.protocol().map(HeaderValue::to_str) {
+			// Any specified protocol will always be a valid value
+			rpc.write().await.format = protocol.unwrap().into();
+		}
 		// Split the socket into send and recv
 		let (sender, receiver) = ws.split();
 		// Create an internal channel between the receiver and the sender
@@ -309,27 +315,41 @@ impl Connection {
 	/// Handle individual WebSocket messages
 	async fn handle_message(rpc: Arc<RwLock<Connection>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
-		let mut out_fmt = rpc.read().await.format;
+		let mut fmt = rpc.read().await.format;
 		// Prepare Span and Otel context
 		let span = span_for_request(&rpc.read().await.ws_id);
 		// Acquire concurrent request rate limiter
 		let permit = rpc.read().await.limiter.clone().acquire_owned().await.unwrap();
+		// Calculate the length of the message
+		let len = match msg {
+			Message::Text(ref msg) => {
+				// If no format was specified, default to JSON
+				if fmt.is_none() {
+					fmt = Format::Json;
+					rpc.write().await.format = fmt;
+				}
+				// Retrieve the length of the message
+				msg.len()
+			}
+			Message::Binary(ref msg) => {
+				// If no format was specified, default to Bincode
+				if fmt.is_none() {
+					fmt = Format::Bincode;
+					rpc.write().await.format = fmt;
+				}
+				// Retrieve the length of the message
+				msg.len()
+			}
+			_ => unreachable!(),
+		};
 		// Parse the request
 		async move {
 			let span = Span::current();
 			let req_cx = RequestContext::default();
 			let otel_cx = TelemetryContext::new().with_value(req_cx.clone());
-
-			match parse_request(msg).await {
+			// Parse the RPC request structure
+			match fmt.req(msg) {
 				Ok(req) => {
-					if let Some(fmt) = req.out_fmt {
-						if out_fmt != fmt {
-							// Update the default format
-							rpc.write().await.format = fmt;
-							out_fmt = fmt;
-						}
-					}
-
 					// Now that we know the method, we can update the span and create otel context
 					span.record("rpc.method", &req.method);
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
@@ -338,17 +358,17 @@ impl Connection {
 						req.id.clone().map(Value::as_string).unwrap_or_default(),
 					);
 					let otel_cx = TelemetryContext::current_with_value(
-						req_cx.with_method(&req.method).with_size(req.size),
+						req_cx.with_method(&req.method).with_size(len),
 					);
 					// Process the message
 					let res =
 						Connection::process_message(rpc.clone(), &req.method, req.params).await;
 					// Process the response
-					res.into_response(req.id).send(out_fmt, &chn).with_context(otel_cx).await
+					res.into_response(req.id).send(fmt, &chn).with_context(otel_cx).await
 				}
 				Err(err) => {
 					// Process the response
-					failure(None, err).send(out_fmt, &chn).with_context(otel_cx).await
+					failure(None, err).send(fmt, &chn).with_context(otel_cx).await
 				}
 			}
 		}
@@ -517,9 +537,9 @@ impl Connection {
 
 	async fn format(&mut self, out: Strand) -> Result<Value, Error> {
 		match out.as_str() {
-			"json" | "application/json" => self.format = OutputFormat::Json,
-			"cbor" | "application/cbor" => self.format = OutputFormat::Cbor,
-			"pack" | "application/pack" => self.format = OutputFormat::Pack,
+			"json" => self.format = Format::Json,
+			"cbor" => self.format = Format::Cbor,
+			"msgpack" => self.format = Format::Msgpack,
 			_ => return Err(Error::InvalidType),
 		};
 		Ok(Value::None)
@@ -612,7 +632,7 @@ impl Connection {
 		let sql = "KILL $id";
 		// Specify the query parameters
 		let var = map! {
-			String::from("id") => id, // NOTE: id can be parameter
+			String::from("id") => id,
 			=> &self.vars
 		};
 		// Execute the query on the database
@@ -651,6 +671,11 @@ impl Connection {
 	// ------------------------------
 
 	async fn select(&self, what: Value) -> Result<Value, Error> {
+		// Detect record ids in strings
+		let what = match self.format.check_strings() {
+			true => what.could_be_thing_or_table(),
+			false => what.could_be_table(),
+		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -659,7 +684,7 @@ impl Connection {
 		let sql = "SELECT * FROM $what";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -678,6 +703,11 @@ impl Connection {
 	// ------------------------------
 
 	async fn insert(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Detect record ids in strings
+		let what = match self.format.check_strings() {
+			true => what.could_be_thing_or_table(),
+			false => what.could_be_table(),
+		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -686,7 +716,7 @@ impl Connection {
 		let sql = "INSERT INTO $what $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -706,6 +736,11 @@ impl Connection {
 	// ------------------------------
 
 	async fn create(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Detect record ids in strings
+		let what = match self.format.check_strings() {
+			true => what.could_be_thing_or_table(),
+			false => what.could_be_table(),
+		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -718,7 +753,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -738,6 +773,11 @@ impl Connection {
 	// ------------------------------
 
 	async fn update(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Detect record ids in strings
+		let what = match self.format.check_strings() {
+			true => what.could_be_thing_or_table(),
+			false => what.could_be_table(),
+		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -750,7 +790,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -770,6 +810,11 @@ impl Connection {
 	// ------------------------------
 
 	async fn merge(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Detect record ids in strings
+		let what = match self.format.check_strings() {
+			true => what.could_be_thing_or_table(),
+			false => what.could_be_table(),
+		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -782,7 +827,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -802,6 +847,11 @@ impl Connection {
 	// ------------------------------
 
 	async fn patch(&self, what: Value, data: Value, diff: Value) -> Result<Value, Error> {
+		// Detect record ids in strings
+		let what = match self.format.check_strings() {
+			true => what.could_be_thing_or_table(),
+			false => what.could_be_table(),
+		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -813,7 +863,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -833,6 +883,11 @@ impl Connection {
 	// ------------------------------
 
 	async fn delete(&self, what: Value) -> Result<Value, Error> {
+		// Detect record ids in strings
+		let what = match self.format.check_strings() {
+			true => what.could_be_thing_or_table(),
+			false => what.could_be_table(),
+		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -841,7 +896,7 @@ impl Connection {
 		let sql = "DELETE $what RETURN BEFORE";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.could_be_table(),
+			String::from("what") => what,
 			=> &self.vars
 		});
 		// Execute the query on the database
