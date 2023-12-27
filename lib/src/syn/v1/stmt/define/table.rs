@@ -6,10 +6,16 @@ use super::super::super::{
 	part::{changefeed, permission::permissions, view},
 	IResult,
 };
-use crate::sql::{
-	statements::DefineTableStatement, ChangeFeed, Ident, Permission, Permissions, Strand, View,
+use crate::{
+	sql::{
+		statements::DefineTableStatement, ChangeFeed, Ident, Permission, Permissions, Strand, View,
+	},
+	syn::v1::common::verbar,
 };
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0,
+	multi::separated_list1,
+};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
@@ -73,13 +79,13 @@ enum DefineTableOption {
 
 #[derive(Debug, Default)]
 struct Relation {
-	from: Option<Ident>,
-	to: Option<Ident>,
+	from: Option<Vec<Ident>>,
+	to: Option<Vec<Ident>>,
 }
 
 enum RelationDir {
-	From(Ident),
-	To(Ident),
+	From(Vec<Ident>),
+	To(Vec<Ident>),
 }
 
 impl Relation {
@@ -168,15 +174,17 @@ fn relation_from(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FROM")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, from) = cut(ident)(i)?;
-	Ok((i, RelationDir::From(from)))
+	let (i, idents) = separated_list1(verbar, ident)(i)?;
+	Ok((i, RelationDir::From(idents)))
 }
+
 fn relation_to(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TO")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, to) = cut(ident)(i)?;
-	Ok((i, RelationDir::To(to)))
+	let (i, idents) = separated_list1(verbar, ident)(i)?;
+
+	Ok((i, RelationDir::To(idents)))
 }
 
 #[cfg(test)]
