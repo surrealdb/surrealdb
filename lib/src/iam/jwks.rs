@@ -66,7 +66,7 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 						trace!("Could not find valid JWK object in cached JWKS object");
 						// Check that the cached JWKS object has not been recently updated
 						if Utc::now().signed_duration_since(jwks_cache.time) < *CACHE_COOLDOWN {
-							warn!("Refused to refresh cache too soon after last refresh");
+							warn!("Refused to refresh cache before cooldown period is over");
 							return Err(Error::InvalidAuth); // Return opaque error
 						}
 						find_jwk_and_cache_jwks(url, kid).await?
@@ -84,17 +84,20 @@ pub(super) async fn config(kid: String, url: String) -> Result<(DecodingKey, Val
 	};
 	// Check if key is intended to be used for signing
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
-	if let Some(PublicKeyUse::Signature) = &jwk.common.public_key_use {
-	} else {
-		warn!("Invalid value for parameter 'use' in JWK object: '{:?}'", jwk.common.public_key_use);
-		return Err(Error::JwkInvalidParameter("use".to_string()));
+	match &jwk.common.public_key_use {
+		Some(PublicKeyUse::Signature) => (),
+		Some(key_use) => {
+			warn!("Invalid value for parameter 'use' in JWK object: '{:?}'", key_use);
+			return Err(Error::JwkInvalidParameter("use".to_string()));
+		}
+		None => (),
 	}
 	// Check if key operations (if specified) include verification
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
 	if let Some(ops) = &jwk.common.key_operations {
 		if !ops.iter().any(|op| *op == KeyOperations::Verify) {
 			warn!(
-				"Invalid value for parameter 'key_ops' in JWK object: '{:?}'",
+				"Invalid values for parameter 'key_ops' in JWK object: '{:?}'",
 				jwk.common.key_operations
 			);
 			return Err(Error::JwkInvalidParameter("key_ops".to_string()));
@@ -312,6 +315,32 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn test_cache_cooldown() {
+		let jwks = DEFAULT_JWKS.clone();
+
+		let jwks_path = format!("{}/jwks.json", random_path());
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path(&jwks_path))
+			.respond_with(response)
+			.expect(1)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		// Use token with invalid key identifier claim to force cache refresh
+		let res = config("invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
+
+		// Use token with invalid key identifier claim to force cache refresh again before cooldown
+		let res = config("invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
+
+		// The server will panic if it receives more than the single expected request
+	}
+
+	#[tokio::test]
 	async fn test_cache_expiration_remote_down() {
 		let jwks = DEFAULT_JWKS.clone();
 
@@ -364,7 +393,30 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_encryption_only_use() {
+	async fn test_no_key_use() {
+		let mut jwks = DEFAULT_JWKS.clone();
+		jwks.keys[0].common.public_key_use = None;
+
+		let jwks_path = format!("{}/jwks.json", random_path());
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path(&jwks_path))
+			.respond_with(response)
+			.mount(&mock_server)
+			.await;
+		let url = mock_server.uri();
+
+		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		assert!(
+			res.is_ok(),
+			"Failed to validate token with key that does not specify use: {:?}",
+			res.err()
+		);
+	}
+
+	#[tokio::test]
+	async fn test_key_use_enc() {
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Encryption);
 
@@ -386,7 +438,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_encryption_only_ops() {
+	async fn test_key_ops_encrypt_only() {
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.key_operations = Some(vec![jsonwebtoken::jwk::KeyOperations::Encrypt]);
 
@@ -408,29 +460,24 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_dos_protection() {
-		let jwks = DEFAULT_JWKS.clone();
-
+	async fn test_remote_down() {
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
-		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		let response = ResponseTemplate::new(500);
 		Mock::given(method("GET"))
 			.and(path(&jwks_path))
 			.respond_with(response)
-			.expect(1)
 			.mount(&mock_server)
 			.await;
+
 		let url = mock_server.uri();
 
-		// Use token with invalid key identifier claim to force cache refresh
-		let res = config("invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
-		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
-
-		// Use token with invalid key identifier claim to force cache refresh again before cooldown
-		let res = config("invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
-		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
-
-		// The server will panic if it receives more than the single expected request
+		// Get token configuration from remote location respnding with Internal Server Error
+		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		assert!(
+			res.is_err(),
+			"Unexpected success validating token configuration with unavailable remote location"
+		);
 	}
 
 	#[tokio::test]
@@ -460,27 +507,6 @@ mod tests {
 		assert!(
 			Utc::now() - start_time < *REMOTE_TIMEOUT + Duration::seconds(1),
 			"Remote request was not aborted immediately after timeout"
-		);
-	}
-
-	#[tokio::test]
-	async fn test_remote_down() {
-		let jwks_path = format!("{}/jwks.json", random_path());
-		let mock_server = MockServer::start().await;
-		let response = ResponseTemplate::new(500);
-		Mock::given(method("GET"))
-			.and(path(&jwks_path))
-			.respond_with(response)
-			.mount(&mock_server)
-			.await;
-
-		let url = mock_server.uri();
-
-		// Get token configuration from remote location respnding with Internal Server Error
-		let res = config("test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
-		assert!(
-			res.is_err(),
-			"Unexpected success validating token configuration with unavailable remote location"
 		);
 	}
 }
