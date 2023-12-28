@@ -171,7 +171,7 @@ fn check_capabilities_url(kvs: &Datastore, url: String) -> Result<(), Error> {
 		}
 	};
 	if !kvs.allows_network_target(&net_target) {
-		warn!("Failed to fetch JWKS, network access to remote location {} is not allowed", url);
+		warn!("Failed to fetch JWKS, network access to remote location '{}' is not allowed", url);
 		return Err(Error::NetTargetNotAllowed(url));
 	}
 
@@ -215,7 +215,7 @@ async fn cache_jwks(jwks: JwkSet, url: String) -> Result<(), Error> {
 	match serde_json::to_vec(&jwks_cache) {
 		Ok(data) => crate::obs::put(&path, data).await,
 		Err(err) => {
-			println!("{}", err);
+			warn!("Failed to cache malformed JWKS object: '{}'", err);
 			Err(Error::JwksMalformed)
 		}
 	}
