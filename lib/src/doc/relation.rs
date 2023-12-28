@@ -12,7 +12,14 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		let tb = self.tb(opt, txn).await?;
+		let relation = match stm {
+			Statement::Relate(_) => true,
+			_ => false,
+		};
+		let tb = self.tb_with_rel(opt, txn, relation).await?;
+
+		// panic!("{:?}", tb);
+		// panic!("{:?}", stm);
 		let rid = self.id.as_ref().unwrap();
 		match stm {
 			Statement::Create(_) | Statement::Insert(_) => {

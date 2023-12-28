@@ -23,7 +23,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(table_opts)(i)?;
 	let (i, _) = expected(
-		"DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
+		"RELATION, DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
 		ending::query,
 	)(i)?;
 	// Create the base statement

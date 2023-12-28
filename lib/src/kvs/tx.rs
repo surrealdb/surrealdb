@@ -2319,6 +2319,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
+		relation: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		match self.get_and_cache_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
@@ -2329,6 +2330,7 @@ impl Transaction {
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
+						relation,
 						..Default::default()
 					};
 					self.put(key.key_category(), key, &val).await?;

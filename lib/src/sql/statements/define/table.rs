@@ -103,6 +103,9 @@ impl Display for DefineTableStatement {
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
+		if self.relation {
+			f.write_str(" RELATION")?;
+		}
 		f.write_str(if self.full {
 			" SCHEMAFULL"
 		} else {
