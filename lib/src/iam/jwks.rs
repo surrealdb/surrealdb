@@ -95,7 +95,7 @@ pub(super) async fn config(
 		Some(PublicKeyUse::Signature) => (),
 		Some(key_use) => {
 			warn!("Invalid value for parameter 'use' in JWK object: '{:?}'", key_use);
-			return Err(Error::JwkInvalidParameter("use".to_string()));
+			return Err(Error::InvalidAuth); // Return opaque error
 		}
 		None => (),
 	}
@@ -107,7 +107,7 @@ pub(super) async fn config(
 				"Invalid values for parameter 'key_ops' in JWK object: '{:?}'",
 				jwk.common.key_operations
 			);
-			return Err(Error::JwkInvalidParameter("key_ops".to_string()));
+			return Err(Error::InvalidAuth); // Return opaque error
 		}
 	}
 	// Check if algorithm specified is supported
@@ -115,10 +115,18 @@ pub(super) async fn config(
 		Some(alg) => alg,
 		_ => {
 			warn!("Invalid value for parameter 'alg' in JWK object: '{:?}'", jwk.common.algorithm);
-			return Err(Error::JwkInvalidParameter("alg".to_string()));
+			return Err(Error::InvalidAuth); // Return opaque error
 		}
 	};
-	Ok((DecodingKey::from_jwk(&jwk)?, Validation::new(alg)))
+
+	// Return verification configuration if a decoding key can be retrieved from the JWK object
+	match DecodingKey::from_jwk(&jwk) {
+		Ok(dec) => Ok((dec, Validation::new(alg))),
+		Err(err) => {
+			warn!("Failed to retrieve decoding key from JWK object: '{:?}'", err);
+			Err(Error::InvalidAuth) // Return opaque error
+		}
+	}
 }
 
 // Attempts to find a relevant JWK object inside a JWKS object fetched from a remote location
@@ -126,7 +134,10 @@ pub(super) async fn config(
 // Caches the fetched JWKS object in the local cache even if the JWK object is not found
 async fn find_jwk_and_cache_jwks(kvs: &Datastore, url: String, kid: String) -> Result<Jwk, Error> {
 	// Check that the datastore capabilities allow connections to the URL host
-	check_capabilities_url(kvs, url.clone())?;
+	if let Err(err) = check_capabilities_url(kvs, url.clone()) {
+		warn!("Network access to JWKS location is not allowed: {}", err);
+		return Err(Error::InvalidAuth); // Return opaque error
+	}
 	// Attempt to fetch JWKS object from remote location
 	match fetch_jwks_from_url(url.clone()).await {
 		Ok(jwks) => {
@@ -135,18 +146,18 @@ async fn find_jwk_and_cache_jwks(kvs: &Datastore, url: String, kid: String) -> R
 			match cache_jwks(jwks.clone(), url.clone()).await {
 				Ok(_) => trace!("Successfully stored JWKS object in local cache"),
 				Err(err) => {
-					warn!("Failed to store JWKS object in local cache: '{}'", err)
+					warn!("Failed to store JWKS object in local cache: '{}'", err);
 				}
 			};
 			// Attempt to find JWK in JWKS by the key identifier
 			match jwks.find(&kid) {
 				Some(jwk) => Ok(jwk.to_owned()),
-				_ => Err(Error::JwkNotFound(kid, url)),
+				_ => Err(Error::JwkNotFound(kid)),
 			}
 		}
 		Err(err) => {
 			warn!("Failed to fetch JWKS object from remote location: '{}'", err);
-			Err(Error::JwksNotFound(url))
+			Err(Error::JwksNotFound)
 		}
 	}
 }
@@ -171,7 +182,6 @@ fn check_capabilities_url(kvs: &Datastore, url: String) -> Result<(), Error> {
 		}
 	};
 	if !kvs.allows_network_target(&net_target) {
-		warn!("Failed to fetch JWKS, network access to remote location '{}' is not allowed", url);
 		return Err(Error::NetTargetNotAllowed(url));
 	}
 
@@ -182,13 +192,13 @@ async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 	let client = Client::new();
 	let res = client.get(&url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
 	if !res.status().is_success() {
-		return Err(Error::JwksNotFound(res.url().to_string()));
+		return Err(Error::JwksNotFound);
 	}
 	let jwks = res.bytes().await?;
 	match serde_json::from_slice(&jwks) {
 		Ok(jwks) => Ok(jwks),
 		Err(err) => {
-			warn!("Failed to parse JWKS object: '{}'", err);
+			warn!("Failed to parse malformed JWKS object: '{}'", err);
 			Err(Error::JwksMalformed)
 		}
 	}
@@ -227,7 +237,7 @@ async fn fetch_jwks_from_cache(url: String) -> Result<JwksCache, Error> {
 	let jwks_cache: JwksCache = match serde_json::from_slice(&bytes) {
 		Ok(jwks_cache) => jwks_cache,
 		Err(err) => {
-			warn!("Failed to parse JWKS object: '{}'", err);
+			warn!("Failed to parse malformed JWKS object: '{}'", err);
 			return Err(Error::JwksMalformed);
 		}
 	};

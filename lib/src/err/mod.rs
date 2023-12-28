@@ -765,17 +765,13 @@ pub enum Error {
 	#[error("The JWKS object is malformed")]
 	JwksMalformed,
 
-	/// Auth requires a JWKS object that cannot be found locally or remotely
-	#[error("No valid JWKS object found in location '{0}'")]
-	JwksNotFound(String),
+	/// Auth requires a JWKS object that cannot be found in the defined location
+	#[error("No valid JWKS object found in location")]
+	JwksNotFound,
 
-	/// Auth requires a JWK object that cannot be found locally or remotely
-	#[error("No valid JWK object found with key identifier '{0}' in location '{1}'")]
-	JwkNotFound(String, String),
-
-	// The JWK parameter has an invalid value
-	#[error("The JWK parameter '{0}' has an invalid value")]
-	JwkInvalidParameter(String),
+	/// Auth requires a JWK object that cannot be found in the JWKS object found in the defined location
+	#[error("No valid JWK object found with key identifier '{0}' in JWKS object")]
+	JwkNotFound(String),
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
