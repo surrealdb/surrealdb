@@ -103,7 +103,7 @@ pub(super) async fn config(
 			return Err(Error::InvalidAuth); // Return opaque error
 		}
 	};
-	// Check if key is intended to be used for signing
+	// Check if the key use (if specified) is intended to be used for signing
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
 	match &jwk.common.public_key_use {
 		Some(PublicKeyUse::Signature) => (),
@@ -113,7 +113,7 @@ pub(super) async fn config(
 		}
 		None => (),
 	}
-	// Check if key operations (if specified) include verification
+	// Check if the key operations (if specified) include verification
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
 	if let Some(ops) = &jwk.common.key_operations {
 		if !ops.iter().any(|op| *op == KeyOperations::Verify) {
