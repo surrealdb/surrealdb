@@ -18,8 +18,6 @@ impl<'a> Document<'a> {
 		};
 		let tb = self.tb_with_rel(opt, txn, relation).await?;
 
-		// panic!("{:?}", tb);
-		// panic!("{:?}", stm);
 		let rid = self.id.as_ref().unwrap();
 		match stm {
 			Statement::Create(_) | Statement::Insert(_) => {
