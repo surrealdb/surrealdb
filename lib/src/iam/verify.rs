@@ -1336,7 +1336,7 @@ mod tests {
 		.await
 		.unwrap();
 
-		// Use custom JWK header that includes the key identifier
+		// Use custom JWT header that includes the key identifier
 		let header_with_kid = jsonwebtoken::Header {
 			kid: Some(kid.to_string()),
 			alg: jsonwebtoken::Algorithm::HS512,
