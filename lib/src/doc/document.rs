@@ -109,33 +109,6 @@ impl<'a> Document<'a> {
 		self.initial.doc.is_none()
 	}
 
-	/// Get the table for this document, if it already exists
-	pub async fn opt_tb(
-		&self,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Option<Arc<DefineTableStatement>>, Error> {
-		// Clone transaction
-		let run = txn.clone();
-		// Claim transaction
-		let mut run = run.lock().await;
-		// Get the record id
-		let rid = self.id.as_ref().unwrap();
-		// Get the table definition
-		let tb = run.get_and_cache_tb(opt.ns(), opt.db(), &rid.tb).await;
-		// Return the table or attempt to define it
-		match tb {
-			// The table doesn't exist
-			Err(Error::TbNotFound {
-				value: _,
-			}) => Ok(None),
-			// There was an error
-			Err(err) => Err(err),
-			// The table exists
-			Ok(tb) => Ok(Some(tb)),
-		}
-	}
-
 	/// Get the table for this document, with option to initialise as relation or not if does't exist
 	pub async fn tb_with_rel(
 		&self,
