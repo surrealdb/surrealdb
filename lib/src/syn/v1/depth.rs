@@ -142,7 +142,8 @@ mod tests {
 	#[test]
 	fn parse_ok_recursion_relate() {
 		let depth = 20;
-		let sql = format!("{} {} {}", "(RELATE ".repeat(depth), "a:1", " -> b:1 -> c:1)".repeat(depth));
+		let sql =
+			format!("{} {} {}", "(RELATE ".repeat(depth), "a:1", " -> b:1 -> c:1)".repeat(depth));
 		syn::parse(&sql).unwrap();
 	}
 
@@ -150,7 +151,8 @@ mod tests {
 	fn parse_ko_recursion_relate() {
 		use crate::err::Error;
 		let depth = 2000;
-		let sql = format!("{} {} {}", "(RELATE ".repeat(depth), "a:1", " -> b:1 -> c:1)".repeat(depth));
+		let sql =
+			format!("{} {} {}", "(RELATE ".repeat(depth), "a:1", " -> b:1 -> c:1)".repeat(depth));
 		let err = syn::parse(&sql).unwrap_err();
 		assert!(
 			matches!(err, Error::InvalidQuery(_)),
