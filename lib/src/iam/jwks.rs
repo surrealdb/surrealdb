@@ -70,7 +70,7 @@ pub(super) async fn config(
 				match jwks_cache.jwks.find(&kid) {
 					Some(jwk) => jwk.to_owned(),
 					_ => {
-						trace!("Could not find valid JWK object in cached JWKS object");
+						trace!("Could not find valid JWK object with key identifier '{kid}' in cached JWKS object");
 						// Check that the cached JWKS object has not been recently updated
 						if Utc::now().signed_duration_since(jwks_cache.time) < *CACHE_COOLDOWN {
 							warn!("Refused to refresh cache before cooldown period is over");
@@ -87,6 +87,15 @@ pub(super) async fn config(
 		Err(_) => {
 			trace!("Could not fetch JWKS object from local cache");
 			find_jwk_and_cache_jwks(kvs, url, kid).await?
+		}
+	};
+
+	// Check if algorithm specified is supported
+	let alg = match jwk.common.algorithm {
+		Some(alg) => alg,
+		_ => {
+			warn!("Invalid value for parameter 'alg' in JWK object: '{:?}'", jwk.common.algorithm);
+			return Err(Error::InvalidAuth); // Return opaque error
 		}
 	};
 	// Check if key is intended to be used for signing
@@ -110,14 +119,6 @@ pub(super) async fn config(
 			return Err(Error::InvalidAuth); // Return opaque error
 		}
 	}
-	// Check if algorithm specified is supported
-	let alg = match jwk.common.algorithm {
-		Some(alg) => alg,
-		_ => {
-			warn!("Invalid value for parameter 'alg' in JWK object: '{:?}'", jwk.common.algorithm);
-			return Err(Error::InvalidAuth); // Return opaque error
-		}
-	};
 
 	// Return verification configuration if a decoding key can be retrieved from the JWK object
 	match DecodingKey::from_jwk(&jwk) {
@@ -152,12 +153,15 @@ async fn find_jwk_and_cache_jwks(kvs: &Datastore, url: String, kid: String) -> R
 			// Attempt to find JWK in JWKS by the key identifier
 			match jwks.find(&kid) {
 				Some(jwk) => Ok(jwk.to_owned()),
-				_ => Err(Error::JwkNotFound(kid)),
+				_ => {
+					warn!("Failed to find JWK object with key identifier '{kid}' in remote JWKS object");
+					Err(Error::InvalidAuth) // Return opaque error
+				}
 			}
 		}
 		Err(err) => {
 			warn!("Failed to fetch JWKS object from remote location: '{}'", err);
-			Err(Error::JwksNotFound)
+			Err(Error::InvalidAuth) // Return opaque error
 		}
 	}
 }
@@ -192,17 +196,19 @@ async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 	let client = Client::new();
 	let res = client.get(&url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
 	if !res.status().is_success() {
-		return Err(Error::JwksNotFound);
+		warn!("Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'", res.status());
+		return Err(Error::InvalidAuth); // Return opaque error
 	}
 	let jwks = res.bytes().await?;
 	match serde_json::from_slice(&jwks) {
 		Ok(jwks) => Ok(jwks),
 		Err(err) => {
 			warn!("Failed to parse malformed JWKS object: '{}'", err);
-			Err(Error::JwksMalformed)
+			Err(Error::InvalidAuth) // Return opaque error
 		}
 	}
 }
+
 #[derive(Serialize, Deserialize)]
 struct JwksCache {
 	jwks: JwkSet,
@@ -226,7 +232,7 @@ async fn cache_jwks(jwks: JwkSet, url: String) -> Result<(), Error> {
 		Ok(data) => crate::obs::put(&path, data).await,
 		Err(err) => {
 			warn!("Failed to cache malformed JWKS object: '{}'", err);
-			Err(Error::JwksMalformed)
+			Err(Error::InvalidAuth) // Return opaque error
 		}
 	}
 }
@@ -234,14 +240,13 @@ async fn cache_jwks(jwks: JwkSet, url: String) -> Result<(), Error> {
 async fn fetch_jwks_from_cache(url: String) -> Result<JwksCache, Error> {
 	let path = cache_path_from_url(url);
 	let bytes = crate::obs::get(&path).await?;
-	let jwks_cache: JwksCache = match serde_json::from_slice(&bytes) {
-		Ok(jwks_cache) => jwks_cache,
+	match serde_json::from_slice::<JwksCache>(&bytes) {
+		Ok(jwks_cache) => Ok(jwks_cache),
 		Err(err) => {
 			warn!("Failed to parse malformed JWKS object: '{}'", err);
-			return Err(Error::JwksMalformed);
+			Err(Error::InvalidAuth) // Return opaque error
 		}
-	};
-	Ok(jwks_cache)
+	}
 }
 
 #[cfg(test)]

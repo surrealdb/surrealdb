@@ -761,18 +761,6 @@ pub enum Error {
 	#[error("Auth token is missing the '{0}' claim")]
 	MissingTokenClaim(String),
 
-	/// The JWKS object is malformed
-	#[error("The JWKS object is malformed")]
-	JwksMalformed,
-
-	/// Auth requires a JWKS object that cannot be found in the defined location
-	#[error("No valid JWKS object found in location")]
-	JwksNotFound,
-
-	/// Auth requires a JWK object that cannot be found in the JWKS object found in the defined location
-	#[error("No valid JWK object found with key identifier '{0}' in JWKS object")]
-	JwkNotFound(String),
-
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),
