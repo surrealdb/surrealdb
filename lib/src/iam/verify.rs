@@ -1266,6 +1266,141 @@ mod tests {
 		}
 	}
 
+	#[tokio::test]
+	async fn test_token_scope_jwks() {
+		use crate::opt::capabilities::{Capabilities, NetTarget, Targets};
+		use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+		use jsonwebtoken::jwk::{Jwk, JwkSet};
+		use rand::{distributions::Alphanumeric, Rng};
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		// Use unique path to prevent accidental cache reuse
+		fn random_path() -> String {
+			let rng = rand::thread_rng();
+			rng.sample_iter(&Alphanumeric).take(8).map(char::from).collect()
+		}
+
+		// Key identifier used in both JWT and JWT
+		let kid = "test_kid";
+		// Secret used to both sign and verify with HMAC
+		let secret = "jwt_secret";
+
+		// JWKS object with single JWK object providing the HS512 secret used to verify
+		let jwks = JwkSet {
+			keys: vec![Jwk {
+				common: jsonwebtoken::jwk::CommonParameters {
+					public_key_use: None,
+					key_operations: None,
+					algorithm: Some(jsonwebtoken::Algorithm::HS512),
+					key_id: Some(kid.to_string()),
+					x509_url: None,
+					x509_chain: None,
+					x509_sha1_fingerprint: None,
+					x509_sha256_fingerprint: None,
+				},
+				algorithm: jsonwebtoken::jwk::AlgorithmParameters::OctetKey(
+					jsonwebtoken::jwk::OctetKeyParameters {
+						key_type: jsonwebtoken::jwk::OctetKeyType::Octet,
+						value: STANDARD_NO_PAD.encode(&secret),
+					},
+				),
+			}],
+		};
+
+		let jwks_path = format!("{}/jwks.json", random_path());
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path(&jwks_path))
+			.respond_with(response)
+			.expect(1)
+			.mount(&mock_server)
+			.await;
+		let server_url = mock_server.uri();
+
+		// We allow requests to the local server serving the JWKS object
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
+
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON SCOPE test TYPE JWKS VALUE '{server_url}/{jwks_path}';")
+				.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Use custom JWK header that includes the key identifier
+		let header_with_kid = jsonwebtoken::Header {
+			kid: Some(kid.to_string()),
+			alg: jsonwebtoken::Algorithm::HS512,
+			..jsonwebtoken::Header::default()
+		};
+
+		// Sign the JWT with the same secret specified in the JWK
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			tk: Some("token".to_string()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			sc: Some("test".to_string()),
+			..Claims::default()
+		};
+
+		//
+		// Test without roles defined
+		// Roles should be ignored in scope authentication
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&header_with_kid, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with invalid signature
+		//
+		{
+			// Prepare the claims object
+			let claims = claims.clone();
+			// Create the token
+			let key = EncodingKey::from_secret("invalid".as_ref());
+			let enc = encode(&header_with_kid, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
+		}
+	}
+
 	#[test]
 	fn test_verify_pass() {
 		let salt = SaltString::generate(&mut rand::thread_rng());
