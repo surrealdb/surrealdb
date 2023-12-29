@@ -97,7 +97,7 @@ quick_cache = "0.4.0"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
 regex = "1.10.2"
-reqwest = { version = "0.11.22", default-features = false, features = ["json", "stream", "multipart"], optional = true }
+reqwest = { version = "0.11.22", default-features = false, features = ["json", "stream", "multipart", "blocking"], optional = true }
 revision = "0.5.0"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
