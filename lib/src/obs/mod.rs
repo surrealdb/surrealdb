@@ -3,10 +3,10 @@
 use crate::err::Error;
 use bytes::Bytes;
 use futures::stream::BoxStream;
-#[cfg(target_arch = "wasm32")]
-use object_store::memory::InMemory;
 #[cfg(not(target_arch = "wasm32"))]
 use object_store::local::LocalFileSystem;
+#[cfg(target_arch = "wasm32")]
+use object_store::memory::InMemory;
 use object_store::parse_url;
 use object_store::path::Path;
 use object_store::ObjectStore;
