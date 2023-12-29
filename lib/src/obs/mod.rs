@@ -1,10 +1,10 @@
 //! This module defines the operations for object storage using the [object_store](https://docs.rs/object_store/latest/object_store/)
-//! crate. This will enable the user to store objects using local file storage, or cloud storage such as S3 or GCS.
+//! crate. This will enable the user to store objects using local file storage, memory, or cloud storage such as S3 or GCS.
 use crate::err::Error;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 #[cfg(target_arch = "wasm32")]
-use object_store::local::InMemory;
+use object_store::memory::InMemory;
 #[cfg(not(target_arch = "wasm32"))]
 use object_store::local::LocalFileSystem;
 use object_store::parse_url;
@@ -69,7 +69,7 @@ static CACHE: Lazy<Arc<dyn ObjectStore>> =
 		}
 	});
 
-/// Streams the file from the local file system object storage.
+/// Streams the file from the local system or memory object storage.
 pub async fn stream(
 	file: String,
 ) -> Result<BoxStream<'static, Result<Bytes, object_store::Error>>, Error> {
@@ -79,7 +79,7 @@ pub async fn stream(
 	}
 }
 
-/// Gets the file from the local file system object storage.
+/// Gets the file from the local file system or memory object storage.
 pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
 	match CACHE.get(&Path::from(file)).await {
 		Ok(data) => Ok(data.bytes().await?.to_vec()),
@@ -91,13 +91,13 @@ pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
 	}
 }
 
-/// Puts the file into the local file system object storage.
+/// Puts the file into the local file system or memory object storage.
 pub async fn put(file: &str, data: Vec<u8>) -> Result<(), Error> {
 	let _ = STORE.put(&Path::from(file), Bytes::from(data)).await?;
 	Ok(())
 }
 
-/// Deletes the file from the local file system object storage.
+/// Deletes the file from the local file system or memory object storage.
 pub async fn del(file: &str) -> Result<(), Error> {
 	Ok(STORE.delete(&Path::from(file)).await?)
 }
