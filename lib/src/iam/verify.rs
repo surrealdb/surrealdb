@@ -1,6 +1,6 @@
 use crate::dbs::Session;
 use crate::err::Error;
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+#[cfg(feature = "http")]
 use crate::iam::jwks;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
@@ -199,7 +199,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
-			#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+			#[cfg(feature = "http")]
 			// If the token is defined as JWKS
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
@@ -211,7 +211,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			} else {
 				config(de.kind, de.code)
 			}?;
-			#[cfg(any(not(feature = "http"), target_arch = "wasm32"))]
+			#[cfg(not(feature = "http"))]
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -277,7 +277,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database token
 			let de = tx.get_db_token(&ns, &db, &tk).await?;
-			#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+			#[cfg(feature = "http")]
 			// If the token is defined as JWKS
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
@@ -289,7 +289,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			} else {
 				config(de.kind, de.code)
 			}?;
-			#[cfg(any(not(feature = "http"), target_arch = "wasm32"))]
+			#[cfg(not(feature = "http"))]
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
@@ -362,7 +362,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace token
 			let de = tx.get_ns_token(&ns, &tk).await?;
-			#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+			#[cfg(feature = "http")]
 			// If the token is defined as JWKS
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
@@ -374,7 +374,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			} else {
 				config(de.kind, de.code)
 			}?;
-			#[cfg(any(not(feature = "http"), target_arch = "wasm32"))]
+			#[cfg(not(feature = "http"))]
 			let cf = config(de.kind, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;

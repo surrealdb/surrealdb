@@ -3,6 +3,9 @@
 use crate::err::Error;
 use bytes::Bytes;
 use futures::stream::BoxStream;
+#[cfg(target_arch = "wasm32")]
+use object_store::local::InMemory;
+#[cfg(not(target_arch = "wasm32"))]
 use object_store::local::LocalFileSystem;
 use object_store::parse_url;
 use object_store::path::Path;
@@ -28,8 +31,15 @@ static STORE: Lazy<Arc<dyn ObjectStore>> =
 				fs::create_dir_all(&path)
 					.expect("Unable to create directory structure for SURREAL_OBJECT_STORE");
 			}
-			// As long as the provided path is correct, the following should never panic
-			Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
+			#[cfg(not(target_arch = "wasm32"))]
+			{
+				// As long as the provided path is correct, the following should never panic
+				Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
+			}
+			#[cfg(target_arch = "wasm32")]
+			{
+				Arc::new(InMemory::new())
+			}
 		}
 	});
 
@@ -47,8 +57,15 @@ static CACHE: Lazy<Arc<dyn ObjectStore>> =
 				fs::create_dir_all(&path)
 					.expect("Unable to create directory structure for SURREAL_OBJECT_CACHE");
 			}
-			// As long as the provided path is correct, the following should never panic
-			Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
+			#[cfg(not(target_arch = "wasm32"))]
+			{
+				// As long as the provided path is correct, the following should never panic
+				Arc::new(LocalFileSystem::new_with_prefix(path).unwrap())
+			}
+			#[cfg(target_arch = "wasm32")]
+			{
+				Arc::new(InMemory::new())
+			}
 		}
 	});
 
