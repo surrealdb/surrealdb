@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::syn::v2::token::Span;
-use std::{fmt, marker::PhantomData, ptr::NonNull};
+use std::fmt;
 
 #[derive(Error, Debug)]
 pub enum CharError {
@@ -13,10 +13,8 @@ pub enum CharError {
 
 #[derive(Clone)]
 pub struct BytesReader<'a> {
-	start: NonNull<u8>,
-	end: NonNull<u8>,
-	current: NonNull<u8>,
-	marker: PhantomData<&'a [u8]>,
+	data: &'a [u8],
+	current: usize,
 }
 
 impl fmt::Debug for BytesReader<'_> {
@@ -30,119 +28,56 @@ impl fmt::Debug for BytesReader<'_> {
 
 impl<'a> BytesReader<'a> {
 	pub fn new(slice: &'a [u8]) -> Self {
-		let len = slice.len();
-		let start = slice.as_ptr() as *mut u8;
-		// SAFETY: len is derived from the slice so the end pointer is still inside the range for
-		// providance.
-		let end = unsafe { start.add(len) };
-
-		// Pointers derived from references to non-empty sized slice are never null but
-		// I couldn't find information about slices which are empty. Testing seems to indicate
-		// that they will always have a non-null value but I can't be certain of that.
-		let start = NonNull::new(start).unwrap();
-
-		// SAFETY: Since start was non-null end should also be.
-		let end = unsafe { NonNull::new_unchecked(end) };
-
 		BytesReader {
-			start,
-			end,
-			current: start,
-			marker: PhantomData,
+			data: slice,
+			current: 0,
 		}
 	}
 
 	#[inline]
 	pub fn full(&self) -> &'a [u8] {
-		unsafe {
-			// SAFETY: start and end are created from the same pointer so have the
-			// same providance.
-			// Furthermore implementation ensures that end is always past start.
-			let len = self.end.as_ptr().offset_from(self.start.as_ptr()) as usize;
-			// SAFETY: We are essentially recreating the original slice here, since we keep track
-			// of the lifetime with the marker type this is like returning the original slice we
-			// passed in.
-			std::slice::from_raw_parts::<'a, u8>(self.start.as_ptr(), len)
-		}
+		self.data
 	}
 
 	#[inline]
 	pub fn used(&self) -> &'a [u8] {
-		let len = self.offset();
-		unsafe {
-			// SAFETY: current and end are created from the same pointer so have the
-			// same providance.
-			// Furthermore implementation ensures that end is always past start.
-			// SAFETY: We are essentially recreating the original slice here, since we keep track
-			// of the lifetime with the marker type this is like returning the original slice we
-			// passed in.
-			std::slice::from_raw_parts::<'a, u8>(self.start.as_ptr(), len)
-		}
+		&self.data[..self.current]
 	}
 
 	#[inline]
 	pub fn remaining(&self) -> &'a [u8] {
-		let len = self.len();
-		unsafe {
-			// SAFETY: We are essentially recreating the original slice here, since we keep track
-			// of the lifetime with the marker type this is like returning the original slice we
-			// passed in.
-			std::slice::from_raw_parts::<'a, u8>(self.current.as_ptr(), len)
-		}
+		&self.data[self.current..]
 	}
 
 	#[inline]
 	pub fn len(&self) -> usize {
-		unsafe {
-			// SAFETY: current and end are created from the same pointer so have the
-			// same providance.
-			// Furthermore implementation ensures that end is always past start.
-			self.end.as_ptr().offset_from(self.current.as_ptr()) as usize
-		}
+		self.remaining().len()
 	}
 
 	#[inline]
 	pub fn offset(&self) -> usize {
-		unsafe {
-			// SAFETY: current and start are created from the same pointer so have the
-			// same providance.
-			// Furthermore implementation ensures that end is always past start.
-			self.current.as_ptr().offset_from(self.start.as_ptr()) as usize
-		}
+		self.current
 	}
 
 	#[inline]
 	pub fn backup(&mut self, offset: usize) {
 		assert!(offset <= self.offset());
-		// SAFETY: Since start is a non-null pointer adding an offset to that pointer will also
-		// result in a nonnull pointer.
-		self.current = unsafe { NonNull::new_unchecked(self.start.as_ptr().add(offset)) };
+		self.current = offset;
 	}
 
 	#[inline]
 	pub fn is_empty(&self) -> bool {
-		self.end == self.current
+		self.remaining().is_empty()
 	}
 
 	#[inline]
 	pub fn peek(&self) -> Option<u8> {
-		if self.end == self.current {
-			None
-		} else {
-			// SAFETY: Implementation ensures that current points to an existing byte at this point.
-			unsafe { Some(self.current.as_ptr().read()) }
-		}
+		self.remaining().get(0).copied()
 	}
-
 	#[inline]
 	pub fn span(&self, span: Span) -> &[u8] {
-		assert!(((span.offset + span.len) as usize) <= self.full().len());
-		unsafe {
-			let ptr = self.start.as_ptr().add(span.offset as usize);
-			std::slice::from_raw_parts(ptr, span.len as usize)
-		}
+		&self.data[(span.offset as usize)..(span.offset as usize + span.len as usize)]
 	}
-
 	#[inline]
 	pub fn next_continue_byte(&mut self) -> Result<u8, CharError> {
 		const CONTINUE_BYTE_PREFIX_MASK: u8 = 0b1100_0000;
@@ -205,18 +140,10 @@ impl<'a> Iterator for BytesReader<'a> {
 
 	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
-		if self.end == self.current {
-			return None;
-		}
-		// SAFETY: Implementation ensures that current points to an existing byte at this point.
-		let res = unsafe { self.current.as_ptr().read() };
-		// SAFETY: current was non-null so adding one should keep it non-null.
-		// SAFETY: Implementation ensures that current is between self.start and self.end so
-		// adding one will keep the pointer inside the providance range.
-		self.current = unsafe { NonNull::new_unchecked(self.current.as_ptr().add(1)) };
+		let res = self.peek()?;
+		self.current += 1;
 		Some(res)
 	}
-
 	fn size_hint(&self) -> (usize, Option<usize>) {
 		let len = self.len();
 		(len, Some(len))
