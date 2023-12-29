@@ -78,7 +78,7 @@ pub(super) async fn config(
 						trace!("Could not find valid JWK object with key identifier '{kid}' in cached JWKS object");
 						// Check that the cached JWKS object has not been recently updated
 						if Utc::now().signed_duration_since(jwks_cache.time) < *CACHE_COOLDOWN {
-							warn!("Refused to refresh cache before cooldown period is over");
+							debug!("Refused to refresh cache before cooldown period is over");
 							return Err(Error::InvalidAuth); // Return opaque error
 						}
 						find_jwk_from_url(kvs, url, kid).await?
@@ -152,7 +152,7 @@ async fn find_jwk_from_url(kvs: &Datastore, url: String, kid: String) -> Result<
 			match jwks.find(&kid) {
 				Some(jwk) => Ok(jwk.to_owned()),
 				_ => {
-					warn!("Failed to find JWK object with key identifier '{kid}' in remote JWKS object");
+					debug!("Failed to find JWK object with key identifier '{kid}' in remote JWKS object");
 					Err(Error::InvalidAuth) // Return opaque error
 				}
 			}
