@@ -424,6 +424,7 @@ impl Datastore {
 	}
 
 	/// Does the datastore allow connections to a network target?
+	#[cfg(feature = "http")]
 	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
 		self.capabilities.allows_network_target(net_target)
 	}
