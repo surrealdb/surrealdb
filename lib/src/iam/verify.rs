@@ -172,6 +172,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp {
+		if exp == 0 {
+			return Err(Error::MissingTokenClaim("exp".to_string()));
+		}
 		if exp < Utc::now().timestamp() {
 			trace!("The 'exp' field in the authentication token was invalid");
 			return Err(Error::InvalidAuth);
