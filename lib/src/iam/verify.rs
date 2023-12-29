@@ -172,9 +172,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp {
-		if exp == 0 {
-			return Err(Error::MissingTokenClaim("exp".to_string()));
-		}
 		if exp < Utc::now().timestamp() {
 			trace!("The 'exp' field in the authentication token was invalid");
 			return Err(Error::InvalidAuth);
@@ -1102,35 +1099,6 @@ mod tests {
 			let res = token(&ds, &mut sess, &enc).await;
 
 			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
-		}
-
-		//
-		// Test with no expiration
-		//
-		{
-			// Prepare the claims object
-			let mut claims = claims.clone();
-			claims.exp = None;
-			// Create the token
-			let key = EncodingKey::from_secret("invalid".as_ref());
-			let enc = encode(&HEADER, &claims, &key).unwrap();
-			// Signin with the token
-			let mut sess = Session::default();
-			let res = token(&ds, &mut sess, &enc).await;
-
-			match res {
-				Ok(_) => {
-					panic!("Unexpected success signing in with token without expiration: {:?}", res)
-				}
-				Err(Error::MissingTokenClaim(claim)) => {
-					if claim != "exp" {
-						panic!("Expected specific error for missing 'exp' claim, got missing '{:?}' claim", claim)
-					}
-				}
-				Err(err) => {
-					panic!("Expected specific error for missing 'exp' claim, got: {:?}", err)
-				}
-			}
 		}
 
 		//
