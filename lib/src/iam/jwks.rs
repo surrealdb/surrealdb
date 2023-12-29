@@ -5,7 +5,7 @@ use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::jwk::{Jwk, JwkSet, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{DecodingKey, Validation};
 use once_cell::sync::Lazy;
-use reqwest::{blocking::Client, Url};
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
@@ -200,12 +200,15 @@ fn check_capabilities_url(kvs: &Datastore, url: String) -> Result<(), Error> {
 // Attempts to fetch a JWKS object from a remote location and stores it in the cache if successful
 async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 	let client = Client::new();
-	let res = client.get(&url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send()?;
+	#[cfg(not(target_arch = "wasm32"))]
+	let res = client.get(&url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
+	#[cfg(target_arch = "wasm32")]
+	let res = client.get(&url).send().await?;
 	if !res.status().is_success() {
 		warn!("Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'", res.status());
 		return Err(Error::InvalidAuth); // Return opaque error
 	}
-	let jwks = res.bytes()?;
+	let jwks = res.bytes().await?;
 
 	match serde_json::from_slice::<JwkSet>(&jwks) {
 		Ok(jwks) => {
