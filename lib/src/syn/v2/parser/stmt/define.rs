@@ -476,7 +476,7 @@ impl Parser<'_> {
 						.transpose()?
 						.unwrap_or(100);
 					let doc_lengths_cache = self
-						.eat(t!("DOC_LENGHTS_CACHE"))
+						.eat(t!("DOC_LENGTHS_CACHE"))
 						.then(|| self.parse_token_value())
 						.transpose()?
 						.unwrap_or(100);

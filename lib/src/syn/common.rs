@@ -42,13 +42,10 @@ impl Location {
 	}
 
 	#[cfg(feature = "experimental_parser")]
-	pub fn of_span_start(source: &str, span: Span) -> Self {
-		// Bytes of input before substr.
-
-		let offset = span.offset as usize;
+	pub fn of_offset(source: &str, offset: usize) -> Self {
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
+		for (line_idx, (line, seperator_offset)) in LineIterator::new(source).enumerate() {
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
 			if bytes_so_far > offset {
 				// found line.
@@ -66,26 +63,18 @@ impl Location {
 	}
 
 	#[cfg(feature = "experimental_parser")]
+	pub fn of_span_start(source: &str, span: Span) -> Self {
+		// Bytes of input before substr.
+
+		let offset = span.offset as usize;
+		Self::of_offset(source, offset)
+	}
+
+	#[cfg(feature = "experimental_parser")]
 	pub fn of_span_end(source: &str, span: Span) -> Self {
 		// Bytes of input before substr.
 		let offset = span.offset as usize + span.len as usize;
-		// Bytes of input prior to line being iteratated.
-		let mut bytes_prior = 0;
-		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
-			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
-				// found line.
-				let line_offset = offset - bytes_prior;
-				let column = line[..line_offset].chars().count();
-				// +1 because line and column are 1 index.
-				return Self {
-					line: line_idx + 1,
-					column: column + 1,
-				};
-			}
-			bytes_prior = bytes_so_far;
-		}
-		unreachable!()
+		Self::of_offset(source, offset)
 	}
 
 	#[cfg(feature = "experimental_parser")]
@@ -96,7 +85,7 @@ impl Location {
 
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		let mut iterator = LineIterator::new(input).enumerate();
+		let mut iterator = LineIterator::new(source).enumerate();
 		let start = loop {
 			let Some((line_idx, (line, seperator_offset))) = iterator.next() else {
 				panic!("tried to find location of span not belonging to string");

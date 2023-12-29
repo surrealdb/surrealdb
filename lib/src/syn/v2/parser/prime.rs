@@ -237,7 +237,7 @@ impl Parser<'_> {
 			}
 			t!("ml") => {
 				self.pop_peek();
-				self.parse_model().map(|x| Value::MlModel(Box::new(x)))?
+				self.parse_model().map(|x| Value::Model(Box::new(x)))?
 			}
 			_ => {
 				self.pop_peek();
