@@ -1105,6 +1105,35 @@ mod tests {
 		}
 
 		//
+		// Test with no expiration
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.exp = None;
+			// Create the token
+			let key = EncodingKey::from_secret("invalid".as_ref());
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			match res {
+				Ok(_) => {
+					panic!("Unexpected success signing in with token without expiration: {:?}", res)
+				}
+				Err(Error::MissingTokenClaim(claim)) => {
+					if claim != "exp" {
+						panic!("Expected specific error for missing 'exp' claim, got missing '{:?}' claim", claim)
+					}
+				}
+				Err(err) => {
+					panic!("Expected specific error for missing 'exp' claim, got: {:?}", err)
+				}
+			}
+		}
+
+		//
 		// Test with valid token invalid sc
 		//
 		{
