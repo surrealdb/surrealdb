@@ -140,6 +140,28 @@ mod tests {
 	}
 
 	#[test]
+	fn parse_ok_recursion_relate() {
+		let depth = 20;
+		let sql =
+			format!("{} {} {}", "(RELATE ".repeat(depth), "a:1", " -> b:1 -> c:1)".repeat(depth));
+		syn::parse(&sql).unwrap();
+	}
+
+	#[test]
+	fn parse_ko_recursion_relate() {
+		use crate::err::Error;
+		let depth = 2000;
+		let sql =
+			format!("{} {} {}", "(RELATE ".repeat(depth), "a:1", " -> b:1 -> c:1)".repeat(depth));
+		let err = syn::parse(&sql).unwrap_err();
+		assert!(
+			matches!(err, Error::InvalidQuery(_)),
+			"expected invalid query due to computation depth exceeded, got {:?}",
+			err
+		);
+	}
+
+	#[test]
 	fn parse_ok_recursion_basic_idiom() {
 		let depth = 2;
 		let sql = format!("{}{}", "[a".repeat(depth), "]".repeat(depth));
