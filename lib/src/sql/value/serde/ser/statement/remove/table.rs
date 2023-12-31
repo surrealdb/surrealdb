@@ -62,6 +62,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveTableStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(RemoveTableStatement {
 			name: self.name,
+			if_exists: false,
 		})
 	}
 }
