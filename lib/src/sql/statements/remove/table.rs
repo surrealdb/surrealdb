@@ -54,15 +54,8 @@ impl RemoveTableStatement {
 				Ok(Value::None)
 			}
 			Err(err) => {
-				if let Error::TbNotFound {
-					value: _,
-				} = err
-				{
-					if self.if_exists {
-						Ok(Value::None)
-					} else {
-						Err(err)
-					}
+				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
+					Ok(Value::None)
 				} else {
 					Err(err)
 				}
