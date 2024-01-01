@@ -139,8 +139,8 @@ async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::TbNotFound { .. }),);
 
 	Ok(())
 }
