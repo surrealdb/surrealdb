@@ -6,6 +6,7 @@ pub trait Take {
 	fn needs_two(self) -> Result<(Value, Value), ()>;
 	fn needs_one_or_two(self) -> Result<(Value, Value), ()>;
 	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), ()>;
+	fn needs_three_or_four(self) -> Result<(Value, Value, Value, Value), ()>;
 }
 
 impl Take for Array {
@@ -55,6 +56,20 @@ impl Take for Array {
 			(Some(a), Some(b), None) => Ok((a, b, Value::None)),
 			(Some(a), None, None) => Ok((a, Value::None, Value::None)),
 			(_, _, _) => Ok((Value::None, Value::None, Value::None)),
+		}
+	}
+	/// Convert the array to four arguments
+	fn needs_three_or_four(self) -> Result<(Value, Value, Value, Value), ()> {
+		if self.len() < 3 {
+			return Err(());
+		}
+		let mut x = self.into_iter();
+		match (x.next(), x.next(), x.next(), x.next()) {
+			(Some(a), Some(b), Some(c), Some(d)) => Ok((a, b, c, d)),
+			(Some(a), Some(b), Some(c), None) => Ok((a, b, c, Value::None)),
+			(Some(a), Some(b), None, None) => Ok((a, b, Value::None, Value::None)),
+			(Some(a), None, None, None) => Ok((a, Value::None, Value::None, Value::None)),
+			(_, _, _, _) => Ok((Value::None, Value::None, Value::None, Value::None)),
 		}
 	}
 }

@@ -507,6 +507,13 @@ impl Connection {
 				}
 				_ => Err(Failure::INVALID_PARAMS),
 			},
+			// Create a relation or relations in the database
+			"relate" => match params.needs_three_or_four() {
+				Ok((v, o, d, c)) => {
+					rpc.read().await.relate(v, o, d, c).await.map(Into::into).map_err(Into::into)
+				}
+				_ => Err(Failure::INVALID_PARAMS),
+			},
 			_ => Err(Failure::METHOD_NOT_FOUND),
 		}
 	}
@@ -894,6 +901,42 @@ impl Connection {
 		for response in &res {
 			self.handle_live_query_results(response).await;
 		}
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
+	// Methods for dealing with relations
+	// ------------------------------
+
+	async fn relate(&self, what: Value, ins: Value, outs: Value, content: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Specify the SQL query string
+		// TODO : be able to use type::table or type::thing (table/id as variable)
+		let table_or_record = what.clone().as_raw_string();
+		let sql = if content.is_none_or_null() {
+			format!("RELATE $ins->{0}->$outs RETURN AFTER", table_or_record)
+		} else {
+			format!("RELATE $ins->{0}->$outs CONTENT $content RETURN AFTER", table_or_record)
+		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("what") => what.could_be_table(),
+			String::from("ins") => ins,
+			String::from("outs") => outs,
+			String::from("content") => content,
+			=> &self.vars
+		});
+		// Execute the query on the database
+		let mut res = kvs.execute(&sql, &self.session, var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		// Return the result to the client
 		Ok(res)
 	}
