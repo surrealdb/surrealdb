@@ -100,6 +100,9 @@ tonic = "0.8.3"
 ulid = "1.1.0"
 wiremock = "0.5.22"
 
+[build-dependencies]
+semver = "1.0.20"
+
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
 maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
