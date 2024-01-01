@@ -169,7 +169,7 @@ jobs:
             echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
           else
             echo "name=v${version}" >> $GITHUB_OUTPUT
-            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
+            echo "build-metadata=" >> $GITHUB_OUTPUT
           fi
 
   test:
@@ -280,10 +280,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               cargo build --features $features --release --locked --target x86_64-apple-darwin
@@ -291,6 +291,7 @@ jobs:
               # Package
               cp target/x86_64-apple-darwin/release/surreal surreal
               chmod +x surreal
+              ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.txt
 
@@ -306,10 +307,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               cargo build --features $features --release --locked --target aarch64-apple-darwin
@@ -329,10 +330,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               docker build \
@@ -347,6 +348,7 @@ jobs:
               
               # Package
               chmod +x surreal
+              ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.txt
 
@@ -359,10 +361,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               docker build \
@@ -377,6 +379,7 @@ jobs:
 
               # Package
               chmod +x surreal
+              ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.txt
 
@@ -392,15 +395,16 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
               # Package
+              ./target/x86_64-pc-windows-msvc/release/surreal.exe version
               cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
 
