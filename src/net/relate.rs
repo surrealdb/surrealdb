@@ -63,8 +63,7 @@ async fn create_relation_with_table(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			// TODO : be able to use type::table (table as variable)
-			let sql = format!("RELATE ($data.ins)->{0}->($data.outs) CONTENT $data.content || {{}}", table);
+			let sql = "RELATE ($data.ins)->(type::table($table))->($data.outs) CONTENT $data.content || {{}}";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
@@ -72,7 +71,7 @@ async fn create_relation_with_table(
 				=> params.parse()
 			};
 			// Execute the query and return the result
-			match db.execute(&sql, &session, Some(vars)).await {
+			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
@@ -113,8 +112,7 @@ async fn create_relation_with_id(
 	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
-			// TODO : be able to use type::thing (table and id as variable)
-			let sql = format!("RELATE ($data.in)->{0}:{1}->($data.out) CONTENT $data.content || {{}}", table, rid.to_raw_string());
+			let sql = "RELATE ($data.in)->(type::thing($table, $id))->($data.out) CONTENT $data.content || {{}}";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),

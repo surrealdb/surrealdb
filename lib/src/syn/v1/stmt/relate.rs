@@ -62,7 +62,7 @@ fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
 
 fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table)))(i)?;
+	let (i, kind) = alt((into(thing), into(table), into(param), into(subquery)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("->")(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -72,7 +72,7 @@ fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 
 fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table)))(i)?;
+	let (i, kind) = alt((into(thing), into(table), into(param), into(subquery)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("<-")(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -107,5 +107,21 @@ mod tests {
 		let res = relate(sql);
 		let out = res.unwrap().1;
 		assert_eq!("RELATE $tobie -> like -> $koala", format!("{}", out))
+	}
+
+	#[test]
+	fn relate_statement_table_param() {
+		let sql = "RELATE $tobie->type::table($table)->$koala";
+		let res = relate(sql);
+		let out = res.unwrap().1;
+		assert_eq!("RELATE $tobie -> type::table($table) -> $koala", format!("{}", out))
+	}
+
+	#[test]
+	fn relate_statement_thing_param() {
+		let sql = "RELATE $tobie->type::thing($table, $thing)->$koala";
+		let res = relate(sql);
+		let out = res.unwrap().1;
+		assert_eq!("RELATE $tobie -> type::thing($table, $thing) -> $koala", format!("{}", out))
 	}
 }

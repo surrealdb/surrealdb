@@ -915,12 +915,10 @@ impl Connection {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		// TODO : be able to use type::table or type::thing (table/id as variable)
-		let table_or_record = what.clone().as_raw_string();
 		let sql = if content.is_none_or_null() {
-			format!("RELATE $ins->{0}->$outs RETURN AFTER", table_or_record)
+			"RELATE $ins->$what->$outs RETURN AFTER"
 		} else {
-			format!("RELATE $ins->{0}->$outs CONTENT $content RETURN AFTER", table_or_record)
+			"RELATE $ins->$what->$outs CONTENT $content RETURN AFTER"
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -931,7 +929,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(&sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
