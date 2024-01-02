@@ -17,6 +17,9 @@ use nom::{
 };
 
 pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
+	use super::super::depth;
+	// Limit recursion depth.
+	let _diving = depth::dive(i)?;
 	let (i, _) = tag_no_case("RELATE")(i)?;
 	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;

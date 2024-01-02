@@ -632,6 +632,9 @@ dependencies = [
  "pin-project-lite",
  "rustversion",
  "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tower",
@@ -692,7 +695,7 @@ dependencies = [
 name = "axum-example"
 version = "0.1.0"
 dependencies = [
- "axum 0.6.20",
+ "axum 0.7.2",
  "serde",
  "surrealdb",
  "thiserror",
@@ -5232,7 +5235,7 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surreal"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5266,6 +5269,7 @@ dependencies = [
  "rmp-serde",
  "rmpv",
  "rustyline",
+ "semver",
  "serde",
  "serde_cbor",
  "serde_json",
@@ -5294,7 +5298,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "addr",
  "any_ascii",
@@ -5441,9 +5445,9 @@ dependencies = [
 
 [[package]]
 name = "surrealml-core"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aabe3c44a73d6f7a3d069400a4966d2ffcf643fb1d60399b1746787abc9dd12"
+checksum = "6cde4ceed0b05a8f512afe7fa1a260e4a67cfbba439eccb858e189f826fc3fff"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6713,18 +6717,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.7.26"
+version = "0.7.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e97e415490559a91254a2979b4829267a57d2fcd741a98eee8b722fb57289aa0"
+checksum = "1c4061bedbb353041c12f413700357bec76df2c7e2ca8e4df8bac24c6bf68e3d"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.7.26"
+version = "0.7.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd7e48ccf166952882ca8bd778a43502c64f33bf94c12ebe2a7f08e5a0f6689f"
+checksum = "b3c129550b3e6de3fd0ba67ba5c81818f9805e58b8d7fee80a3a59d2c9fc601a"
 dependencies = [
  "proc-macro2",
  "quote",
