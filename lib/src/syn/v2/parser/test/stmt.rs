@@ -408,10 +408,10 @@ fn parse_define_index() {
 				doc_ids_order: 1,
 				doc_lengths_order: 2,
 				postings_order: 3,
-				terms_order: 4
-				doc_ids_cache: 5
-				doc_lengths_cache: 6
-				postings_cache: 7
+				terms_order: 4,
+				doc_ids_cache: 5,
+				doc_lengths_cache: 6,
+				postings_cache: 7,
 			}),
 			comment: None
 		}))

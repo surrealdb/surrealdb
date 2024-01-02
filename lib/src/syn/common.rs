@@ -26,7 +26,7 @@ impl Location {
 		let mut bytes_prior = 0;
 		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
+			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
@@ -48,9 +48,9 @@ impl Location {
 		let offset = span.offset as usize;
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
+		for (line_idx, (line, seperator_offset)) in LineIterator::new(source).enumerate() {
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
+			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
@@ -71,9 +71,9 @@ impl Location {
 		let offset = span.offset as usize + span.len as usize;
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
+		for (line_idx, (line, seperator_offset)) in LineIterator::new(source).enumerate() {
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
+			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
@@ -102,7 +102,7 @@ impl Location {
 				panic!("tried to find location of span not belonging to string");
 			};
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
+			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
@@ -133,7 +133,7 @@ impl Location {
 				panic!("tried to find location of span not belonging to string");
 			};
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > end {
+			if bytes_so_far >= end {
 				let line_offset = end - bytes_prior;
 				let column = line[..line_offset].chars().count();
 				return start..Self {
