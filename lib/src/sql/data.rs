@@ -31,6 +31,33 @@ impl Default for Data {
 }
 
 impl Data {
+	pub(crate) fn field_names(&self) -> Vec<Idiom> {
+		match self {
+			Data::SetExpression(v) => v.iter().map(|(i, _, _)| i.clone()).collect(),
+			Data::UnsetExpression(v) => v.clone(),
+			Data::ValuesExpression(v) => {
+				// v.first().unwrap().iter().map(|(i, _)| i.clone()).collect()
+				v.iter().map(|v| v.iter().map(|(i, _)| i.clone())).flatten().collect()
+			}
+			Data::UpdateExpression(v) => v.iter().map(|(i, _, _)| i.clone()).collect(),
+			Data::SingleExpression(v) => names_from_value(v),
+			Data::EmptyExpression => vec![],
+			Data::PatchExpression(v) => names_from_value(v),
+			Data::MergeExpression(v) => names_from_value(v),
+			Data::ReplaceExpression(v) => names_from_value(v),
+			Data::ContentExpression(v) => names_from_value(v),
+		}
+	}
+}
+
+fn names_from_value(value: &Value) -> Vec<Idiom> {
+	match value {
+		Value::Object(o) => o.keys().map(|k| Idiom::from(k.clone())).collect(),
+		_ => vec![],
+	}
+}
+
+impl Data {
 	/// Fetch the 'id' field if one has been specified
 	pub(crate) async fn rid(
 		&self,

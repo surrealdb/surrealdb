@@ -529,6 +529,13 @@ pub enum Error {
 		check: String,
 	},
 
+	/// The specified field on a SCHEMAFUL table was not defined
+	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	UndefinedField {
+		table: String,
+		field: Idiom,
+	},
+
 	/// Found a record id for the record but we are creating a specific record
 	#[error("Found {value} for the id field, but a specific record has been specified")]
 	IdMismatch {
