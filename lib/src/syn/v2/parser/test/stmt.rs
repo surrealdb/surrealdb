@@ -385,6 +385,7 @@ fn parse_define_index() {
 			DOC_IDS_CACHE 5
 			DOC_LENGTHS_CACHE 6
 			POSTINGS_CACHE 7
+			TERMS_CACHE 8
 			HIGHLIGHTS"#
 	)
 	.unwrap();
@@ -412,6 +413,7 @@ fn parse_define_index() {
 				doc_ids_cache: 5,
 				doc_lengths_cache: 6,
 				postings_cache: 7,
+				terms_cache: 8,
 			}),
 			comment: None
 		}))

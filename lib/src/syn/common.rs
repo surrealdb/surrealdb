@@ -96,7 +96,7 @@ impl Location {
 
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		let mut iterator = LineIterator::new(input).enumerate();
+		let mut iterator = LineIterator::new(source).enumerate();
 		let start = loop {
 			let Some((line_idx, (line, seperator_offset))) = iterator.next() else {
 				panic!("tried to find location of span not belonging to string");
@@ -107,7 +107,7 @@ impl Location {
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
 				// +1 because line and column are 1 index.
-				if bytes_so_far > end {
+				if bytes_so_far >= end {
 					// end is on the same line, finish immediatly.
 					let line_offset = end - bytes_prior;
 					let end_column = line[..line_offset].chars().count();
