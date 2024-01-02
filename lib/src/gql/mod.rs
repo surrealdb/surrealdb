@@ -177,7 +177,10 @@ pub async fn get_schema<'a>(
 	db: String,
 ) -> Result<schema::Document<'a, String>, Error> {
 	let mut tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+
 	let mut defs: Vec<Definition<String>> = Vec::new();
+
+	// All graphql schemas start with a schema definition
 	defs.push(Definition::SchemaDefinition(SchemaDefinition {
 		directives: vec![],
 		query: Some("Query".to_string()),
@@ -185,6 +188,7 @@ pub async fn get_schema<'a>(
 		subscription: None,
 		position: Default::default(),
 	}));
+
 	let tbs = tx.all_tb(&ns, &db).await?;
 
 	let mut table_defs = vec![];
@@ -197,7 +201,11 @@ pub async fn get_schema<'a>(
 		let ty_def = TypeDefinition::Object(ObjectType {
 			description: None,
 			name: tb.name.to_string(),
-			implements_interfaces: vec!["Record".to_string()],
+			implements_interfaces: vec![if tb.relation {
+				"Relation".to_string()
+			} else {
+				"Record".to_string()
+			}],
 			directives: vec![],
 			fields: fd_defs,
 			position: Default::default(),

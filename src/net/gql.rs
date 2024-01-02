@@ -31,7 +31,7 @@ async fn schema_handler() -> String {
 	let schema =
 		gql::get_schema(DB.get().unwrap(), "test".to_string(), "test".to_string()).await.unwrap();
 
-	format!("{}", schema)
+	schema.to_string()
 }
 
 #[derive(Deserialize)]
