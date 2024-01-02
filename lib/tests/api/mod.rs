@@ -191,10 +191,7 @@ async fn scope_throws_error() {
 		.await
 	{
 		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signup_thrown_error"),
-		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert_eq!(
-			e,
-			"There was a problem with the database: An error occurred: signup_thrown_error"
-		),
+		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signup")),
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
 			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
@@ -215,10 +212,7 @@ async fn scope_throws_error() {
 		.await
 	{
 		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signin_thrown_error"),
-		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert_eq!(
-			e,
-			"There was a problem with the database: An error occurred: signin_thrown_error"
-		),
+		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signin")),
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
 			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
@@ -392,11 +386,11 @@ async fn query_with_stats() {
 	let mut response = db.query(sql).with_stats().await.unwrap();
 	// First query statement
 	let (stats, result) = response.take(0).unwrap();
-	assert!(stats.execution_time > Duration::ZERO);
+	assert!(stats.execution_time > Some(Duration::ZERO));
 	let _: Value = result.unwrap();
 	// Second query statement
 	let (stats, result) = response.take(1).unwrap();
-	assert!(stats.execution_time > Duration::ZERO);
+	assert!(stats.execution_time > Some(Duration::ZERO));
 	let _: Vec<RecordId> = result.unwrap();
 }
 

@@ -89,6 +89,14 @@ impl Function {
 		matches!(self, Self::Script(_, _))
 	}
 
+	/// Check if this function has static arguments
+	pub fn is_static(&self) -> bool {
+		match self {
+			Self::Normal(_, a) => a.iter().all(Value::is_static),
+			_ => false,
+		}
+	}
+
 	/// Check if this function is a rolling function
 	pub fn is_rolling(&self) -> bool {
 		match self {

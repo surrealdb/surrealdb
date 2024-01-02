@@ -31,6 +31,7 @@ impl Response {
 	pub fn speed(&self) -> String {
 		format!("{:?}", self.time)
 	}
+
 	/// Retrieve the response as a normal result
 	pub fn output(self) -> Result<Value, Error> {
 		self.result
@@ -39,7 +40,7 @@ impl Response {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-pub enum Status {
+pub(crate) enum Status {
 	Ok,
 	Err,
 }
@@ -50,7 +51,7 @@ impl Serialize for Response {
 		S: serde::Serializer,
 	{
 		let mut val = serializer.serialize_struct(TOKEN, 3)?;
-		val.serialize_field("time", &self.time)?;
+		val.serialize_field("time", self.speed().as_str())?;
 		match &self.result {
 			Ok(v) => {
 				val.serialize_field("status", &Status::Ok)?;
@@ -62,28 +63,5 @@ impl Serialize for Response {
 			}
 		}
 		val.end()
-	}
-}
-
-// User facing response sent to WS and HTTP connections directly
-#[derive(Serialize)]
-pub struct ApiResponse {
-	time: String,
-	status: Status,
-	result: Value,
-}
-
-impl From<Response> for ApiResponse {
-	fn from(r: Response) -> Self {
-		let time = r.speed();
-		let (status, result) = match r.result {
-			Ok(value) => (Status::Ok, value),
-			Err(error) => (Status::Err, error.to_string().into()),
-		};
-		Self {
-			time,
-			status,
-			result,
-		}
 	}
 }

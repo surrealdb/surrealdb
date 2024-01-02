@@ -1,7 +1,10 @@
 use crate::dbs::node::Timestamp;
 use crate::sql;
 use sql::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 // Traits cannot have async and we need sized structs for Clone + Send + Sync
 #[allow(dead_code)]
@@ -101,5 +104,16 @@ impl SystemClock {
 impl Default for SystemClock {
 	fn default() -> Self {
 		Self::new()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::kvs::clock::SystemClock;
+
+	#[test]
+	fn get_clock_now() {
+		let clock = SystemClock::new();
+		let _ = clock.now();
 	}
 }
