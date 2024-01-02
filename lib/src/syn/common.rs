@@ -177,11 +177,20 @@ impl<'a> Iterator for LineIterator<'a> {
 					self.current = &self.current[i + 1..];
 					return Some((res, Some(1)));
 				}
-				0xb | 0x85 | 0xC | b'\n' => {
-					// vertical tab VT, next line NEL and form feed FF.
+				0xb | 0xC | b'\n' => {
+					// vertical tab VT and form feed FF.
 					let res = &self.current[..i];
 					self.current = &self.current[i + 1..];
 					return Some((res, Some(1)));
+				}
+				0xc2 => {
+					// next line NEL
+					if bytes.get(i + 1).copied() != Some(0x85) {
+						continue;
+					}
+					let res = &self.current[..i];
+					self.current = &self.current[i + 2..];
+					return Some((res, Some(2)));
 				}
 				0xe2 => {
 					// line separator and paragraph seperator.
