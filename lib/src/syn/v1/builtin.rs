@@ -394,6 +394,22 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 				uuid => { fn },
 			}
 		},
+		semver => {
+			compare => { fn },
+			major => { fn },
+			minor => { fn },
+			patch => { fn },
+			increment => {
+				major => { fn },
+				minor => { fn },
+				patch => { fn },
+			},
+			set => {
+				major => { fn },
+				minor => { fn },
+				patch => { fn },
+			}
+		},
 		time => {
 			ceil => { fn },
 			day => { fn },

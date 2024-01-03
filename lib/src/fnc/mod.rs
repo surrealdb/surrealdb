@@ -24,6 +24,7 @@ pub mod parse;
 pub mod rand;
 pub mod script;
 pub mod search;
+pub mod semver;
 pub mod session;
 pub mod sleep;
 pub mod string;
@@ -266,6 +267,17 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
 		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
+		//
+		"semver::compare" => semver::compare,
+		"semver::major" => semver::major,
+		"semver::minor" => semver::minor,
+		"semver::patch" => semver::patch,
+		"semver::increment::major" => semver::increment::major,
+		"semver::increment::minor" => semver::increment::minor,
+		"semver::increment::patch" => semver::increment::patch,
+		"semver::set::major" => semver::set::major,
+		"semver::set::minor" => semver::set::minor,
+		"semver::set::patch" => semver::set::patch,
 		//
 		"time::ceil" => time::ceil,
 		"time::day" => time::day,

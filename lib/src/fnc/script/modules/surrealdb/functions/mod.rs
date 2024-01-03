@@ -20,6 +20,7 @@ mod object;
 mod parse;
 mod rand;
 mod search;
+mod semver;
 mod session;
 mod string;
 mod time;
