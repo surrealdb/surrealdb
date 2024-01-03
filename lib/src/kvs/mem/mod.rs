@@ -1,14 +1,14 @@
 #![cfg(feature = "kv-mem")]
 
 use crate::err::Error;
-use crate::kvs::Check;
 use crate::kvs::KeyStack;
 use crate::kvs::Val;
+use crate::kvs::{Check, KeyHeap};
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 
 pub struct Datastore {
-	db: echodb::Db<KeyStack, Val>,
+	db: echodb::Db<KeyHeap, Val>,
 }
 
 pub struct Transaction {
@@ -19,7 +19,7 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: echodb::Tx<KeyStack, Val>,
+	inner: echodb::Tx<KeyHeap, Val>,
 }
 
 impl Drop for Transaction {
@@ -119,23 +119,23 @@ impl Transaction {
 		Ok(())
 	}
 	/// Check if a key exists
-	pub(crate) fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	pub(crate) fn exi<K, const S: usize>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyStack<S>>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.inner.exi(key.into())?;
+		let res = self.inner.exi(key.into().into())?;
 		// Return result
 		Ok(res)
 	}
 	/// Fetch a key from the database
-	pub(crate) fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	pub(crate) fn get<K, const S: usize>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -154,7 +154,7 @@ impl Transaction {
 	#[allow(unused)]
 	pub(crate) fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -162,7 +162,7 @@ impl Transaction {
 		}
 		// Write the timestamp to the "last-write-timestamp" key
 		// to ensure that no other transactions can commit with older timestamps.
-		let k: KeyStack = key.into();
+		let k: KeyHeap = key.into();
 		let prev = self.inner.get(k.clone())?;
 		let ver = match prev {
 			Some(prev) => {
@@ -185,14 +185,14 @@ impl Transaction {
 		Ok(verbytes)
 	}
 	/// Obtain a new key that is suffixed with the change timestamp
-	pub(crate) async fn get_versionstamped_key<K>(
+	pub(crate) async fn get_versionstamped_key<K, const S: usize>(
 		&mut self,
 		ts_key: K,
 		prefix: K,
 		suffix: K,
 	) -> Result<Vec<u8>, Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyStack<S>>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -203,14 +203,12 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 
-		let ts_key: KeyStack = ts_key.into();
-		let prefix: KeyStack = prefix.into();
-		let suffix: KeyStack = suffix.into();
+		let ts_key: KeyStack<S> = ts_key.into();
+		let prefix: KeyStack<S> = prefix.into();
+		let suffix: KeyStack<S> = suffix.into();
 
 		let ts = self.get_timestamp(ts_key.clone())?;
-		let mut k: Vec<u8> = prefix.clone();
-		k.append(&mut ts.to_vec());
-		k.append(&mut suffix.clone());
+		let k = prefix + ts_key.into() + suffix;
 
 		trace!("get_versionstamped_key; {ts_key:?} {prefix:?} {ts:?} {suffix:?} {k:?}",);
 
@@ -220,7 +218,7 @@ impl Transaction {
 	/// Insert or update a key in the database
 	pub(crate) fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -239,7 +237,7 @@ impl Transaction {
 	/// Insert a key if it doesn't exist in the database
 	pub(crate) fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -256,9 +254,14 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	pub(crate) fn putc<K, V, const S: usize>(
+		&mut self,
+		key: K,
+		val: V,
+		chk: Option<V>,
+	) -> Result<(), Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -277,7 +280,7 @@ impl Transaction {
 	/// Delete a key
 	pub(crate) fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -295,7 +298,7 @@ impl Transaction {
 	/// Delete a key
 	pub(crate) fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
@@ -312,22 +315,22 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
-	pub(crate) fn scan<K>(
+	pub(crate) fn scan<K, const S: usize>(
 		&mut self,
 		rng: Range<K>,
 		limit: u32,
-	) -> Result<Vec<(KeyStack, Val)>, Error>
+	) -> Result<Vec<(KeyHeap, Val)>, Error>
 	where
-		K: Into<KeyStack>,
+		K: Into<KeyHeap>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
 		}
 		// Convert the range to bytes
-		let rng: Range<KeyStack> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+		let rng: Range<KeyHeap> = Range {
+			start: rng.into().start.into(),
+			end: rng.into().end.into(),
 		};
 		// Scan the keys
 		let res = self.inner.scan(rng, limit)?;
