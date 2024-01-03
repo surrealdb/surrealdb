@@ -505,13 +505,6 @@ impl Connection {
 				Ok(v) => rpc.read().await.delete(v).await.map(Into::into).map_err(Into::into),
 				_ => Err(Failure::INVALID_PARAMS),
 			},
-			// Specify the output format for text requests
-			"format" => match params.needs_one() {
-				Ok(Value::Strand(v)) => {
-					rpc.write().await.format(v).await.map(Into::into).map_err(Into::into)
-				}
-				_ => Err(Failure::INVALID_PARAMS),
-			},
 			// Get the current server version
 			"version" => match params.len() {
 				0 => Ok(format!("{PKG_NAME}-{}", *PKG_VERSION).into()),
@@ -534,16 +527,6 @@ impl Connection {
 	// ------------------------------
 	// Methods for authentication
 	// ------------------------------
-
-	async fn format(&mut self, out: Strand) -> Result<Value, Error> {
-		match out.as_str() {
-			"json" => self.format = Format::Json,
-			"cbor" => self.format = Format::Cbor,
-			"msgpack" => self.format = Format::Msgpack,
-			_ => return Err(Error::InvalidType),
-		};
-		Ok(Value::None)
-	}
 
 	async fn yuse(&mut self, ns: Value, db: Value) -> Result<Value, Error> {
 		if let Value::Strand(ns) = ns {
