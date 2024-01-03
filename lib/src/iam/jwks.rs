@@ -72,7 +72,7 @@ pub(super) async fn config(
 			// Check that the cached JWKS object has not expired yet
 			if Utc::now().signed_duration_since(jwks_cache.time) < *CACHE_EXPIRATION {
 				// Attempt to find JWK in JWKS object from local cache
-				match jwks_cache.jwks.find(&kid) {
+				match jwks_cache.jwks.find(kid) {
 					Some(jwk) => jwk.to_owned(),
 					_ => {
 						trace!("Could not find valid JWK object with key identifier '{kid}' in cached JWKS object");
@@ -149,7 +149,7 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk,
 		Ok(jwks) => {
 			trace!("Successfully fetched JWKS object from remote location");
 			// Attempt to find JWK in JWKS by the key identifier
-			match jwks.find(&kid) {
+			match jwks.find(kid) {
 				Some(jwk) => Ok(jwk.to_owned()),
 				_ => {
 					debug!("Failed to find JWK object with key identifier '{kid}' in remote JWKS object");
