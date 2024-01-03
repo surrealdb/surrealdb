@@ -5264,7 +5264,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb",
- "surrealml-core",
+ "surrealml-core 0.0.3",
  "temp-env",
  "tempfile",
  "test-log",
@@ -5356,7 +5356,7 @@ dependencies = [
  "surrealdb-derive",
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
- "surrealml-core",
+ "surrealml-core 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5430,6 +5430,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic 0.9.2",
+]
+
+[[package]]
+name = "surrealml-core"
+version = "0.0.3"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "ndarray",
+ "once_cell",
+ "ort",
+ "regex",
 ]
 
 [[package]]

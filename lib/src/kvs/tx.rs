@@ -720,40 +720,38 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
+		let range = page.range.clone();
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => {
-				let range = page.range.clone();
-				v.scan(range, batch_limit)
-			}
+			} => v.scan(range, batch_limit),
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.scan(&page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.scan(&page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
 				..
-			} => v.scan(&page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.scan(&page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.scan(&page.range, batch_limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[allow(unreachable_patterns)]
 			_ => Err(Error::MissingStorageEngine),
 		};
