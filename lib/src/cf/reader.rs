@@ -41,7 +41,7 @@ pub async fn read(
 	let limit = limit.unwrap_or(100);
 
 	let scan = tx
-		.scan(
+		.scan_paged(
 			ScanPage {
 				range: beg..end,
 				limit: Limit::Limited(limit),

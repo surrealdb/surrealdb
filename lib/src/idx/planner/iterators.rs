@@ -67,7 +67,7 @@ impl IndexEqualThingIterator {
 		let res = txn
 			.lock()
 			.await
-			.scan(
+			.scan_paged(
 				ScanPage {
 					range: min..max,
 					limit: Limit::Limited(limit),
@@ -190,7 +190,7 @@ impl IndexRangeThingIterator {
 		let res = txn
 			.lock()
 			.await
-			.scan(
+			.scan_paged(
 				ScanPage {
 					range: min..max,
 					limit: Limit::Limited(limit),
@@ -337,7 +337,7 @@ impl UniqueRangeThingIterator {
 		limit += 1;
 		let mut tx = txn.lock().await;
 		let res = tx
-			.scan(
+			.scan_paged(
 				ScanPage {
 					range: min..max,
 					limit: Limit::Limited(limit),

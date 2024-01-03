@@ -270,7 +270,7 @@ impl<'a> Processor<'a> {
 				break;
 			}
 			// Get the next batch of key-value entries
-			let res = txn.clone().lock().await.scan(page, PROCESSOR_BATCH_SIZE).await?;
+			let res = txn.clone().lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
 			next_page = res.next_page;
 			let res = res.values;
 			// If no results then break
@@ -341,7 +341,7 @@ impl<'a> Processor<'a> {
 			if ctx.is_done() {
 				break;
 			}
-			let res = txn.clone().lock().await.scan(page, PROCESSOR_BATCH_SIZE).await?;
+			let res = txn.clone().lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
 			next_page = res.next_page;
 			// Get the next batch of key-value entries
 			let res = res.values;
@@ -462,7 +462,7 @@ impl<'a> Processor<'a> {
 					break;
 				}
 				// Get the next batch key-value entries
-				let res = txn.lock().await.scan(page, PROCESSOR_BATCH_SIZE).await?;
+				let res = txn.lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
 				next_page = res.next_page;
 				let res = res.values;
 				// If there are key-value entries then fetch them
@@ -476,7 +476,7 @@ impl<'a> Processor<'a> {
 						break;
 					}
 					// Parse the data from the store
-					let gra: graph::Graph = (&k).into();
+					let gra: graph::Graph = graph::Graph::decode(&k)?;
 					// Fetch the data from the store
 					let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
 					let val = txn.lock().await.get(key).await?;

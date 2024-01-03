@@ -664,7 +664,53 @@ impl Transaction {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[allow(unused_variables)]
-	pub async fn scan<K>(
+	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key> + Debug,
+	{
+		#[cfg(debug_assertions)]
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Transaction {
+				inner: Inner::Mem(v),
+				..
+			} => v.scan(rng, limit),
+			#[cfg(feature = "kv-rocksdb")]
+			Transaction {
+				inner: Inner::RocksDB(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-indxdb")]
+			Transaction {
+				inner: Inner::IndxDB(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		}
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	#[allow(unused_variables)]
+	pub async fn scan_paged<K>(
 		&mut self,
 		page: ScanPage<K>,
 		batch_limit: u32,
@@ -848,7 +894,7 @@ impl Transaction {
 		// Start processing
 		while let Some(page) = next_page {
 			// Get records batch
-			let res = self.scan(page, 1000).await?;
+			let res = self.scan_paged(page, 1000).await?;
 			next_page = res.next_page;
 			let res = res.values;
 			// Exit when settled
@@ -904,7 +950,7 @@ impl Transaction {
 		});
 		while let Some(page) = next_page {
 			// Get records batch
-			let res = self.scan(page, limit).await?;
+			let res = self.scan_paged(page, limit).await?;
 			next_page = res.next_page;
 			let res = res.values;
 			// Exit when settled
@@ -937,7 +983,7 @@ impl Transaction {
 			limit: Limit::Limited(limit),
 		});
 		while let Some(page) = next_page {
-			let res = self.scan(page, 1000).await?;
+			let res = self.scan_paged(page, 1000).await?;
 			next_page = res.next_page;
 			// Get records batch
 			let res = res.values;
@@ -1077,7 +1123,7 @@ impl Transaction {
 		// Start processing
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
-			let res = self.scan(page, batch_size).await?;
+			let res = self.scan_paged(page, batch_size).await?;
 			next_page = res.next_page;
 			for (k, _) in res.values.into_iter() {
 				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
@@ -1095,7 +1141,7 @@ impl Transaction {
 		// Start processing
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
-			let res = self.scan(page, batch_size).await?;
+			let res = self.scan_paged(page, batch_size).await?;
 			next_page = res.next_page;
 			for (_, v) in res.values.into_iter() {
 				out.push(v.into());
@@ -1133,7 +1179,7 @@ impl Transaction {
 		let mut out: Vec<LqValue> = vec![];
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
-			let res = self.scan(page, batch_size).await?;
+			let res = self.scan_paged(page, batch_size).await?;
 			next_page = res.next_page;
 			for (key, value) in res.values.into_iter() {
 				let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
@@ -1162,7 +1208,7 @@ impl Transaction {
 		let mut out: Vec<LqValue> = vec![];
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
-			let res = self.scan(page, batch_size).await?;
+			let res = self.scan_paged(page, batch_size).await?;
 			next_page = res.next_page;
 			for (key, value) in res.values.into_iter() {
 				let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
@@ -2392,7 +2438,7 @@ impl Transaction {
 					let end = crate::key::thing::suffix(ns, db, &tb.name);
 					let mut nxt: Option<ScanPage<Vec<u8>>> = Some(ScanPage::from(beg..end));
 					while nxt.is_some() {
-						let res = self.scan(nxt.unwrap(), 1000).await?;
+						let res = self.scan_paged(nxt.unwrap(), 1000).await?;
 						nxt = res.next_page;
 						let res = res.values;
 						if res.is_empty() {
