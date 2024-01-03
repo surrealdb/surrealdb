@@ -26,6 +26,7 @@ async fn table_definitions_can_be_scanned() {
 		changefeed: None,
 		comment: None,
 		relation: false,
+		..Default::default()
 	};
 	tx.set(&key, &value).await.unwrap();
 
@@ -65,6 +66,7 @@ async fn table_definitions_can_be_deleted() {
 		changefeed: None,
 		comment: None,
 		relation: false,
+		..Default::default()
 	};
 	tx.set(&key, &value).await.unwrap();
 

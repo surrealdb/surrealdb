@@ -106,6 +106,8 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			changefeed: self.changefeed,
 			comment: self.comment,
 			relation: self.relation,
+			in_field: None,
+			out_field: None,
 		})
 	}
 }

@@ -8,7 +8,7 @@ use super::super::super::{
 };
 use crate::{
 	sql::{
-		statements::DefineTableStatement, ChangeFeed, Ident, Permission, Permissions, Strand, View,
+		statements::DefineTableStatement, ChangeFeed, Kind, Permission, Permissions, Strand, View,
 	},
 	syn::v1::common::verbar,
 };
@@ -56,8 +56,10 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
-			DefineTableOption::Relation(_) => {
+			DefineTableOption::Relation(r) => {
 				res.relation = true;
+				res.in_field = r.from;
+				res.out_field = r.to;
 			}
 		}
 	}
@@ -79,13 +81,13 @@ enum DefineTableOption {
 
 #[derive(Debug, Default)]
 struct Relation {
-	from: Option<Vec<Ident>>,
-	to: Option<Vec<Ident>>,
+	from: Option<Kind>,
+	to: Option<Kind>,
 }
 
 enum RelationDir {
-	From(Vec<Ident>),
-	To(Vec<Ident>),
+	From(Kind),
+	To(Kind),
 }
 
 impl Relation {
@@ -175,7 +177,7 @@ fn relation_from(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = tag_no_case("FROM")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, idents) = separated_list1(verbar, ident)(i)?;
-	Ok((i, RelationDir::From(idents)))
+	Ok((i, RelationDir::From(Kind::Record(idents.into_iter().map(Into::into).collect()))))
 }
 
 fn relation_to(i: &str) -> IResult<&str, RelationDir> {
@@ -184,7 +186,7 @@ fn relation_to(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, idents) = separated_list1(verbar, ident)(i)?;
 
-	Ok((i, RelationDir::To(idents)))
+	Ok((i, RelationDir::To(Kind::Record(idents.into_iter().map(Into::into).collect()))))
 }
 
 #[cfg(test)]

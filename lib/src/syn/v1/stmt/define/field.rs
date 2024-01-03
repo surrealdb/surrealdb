@@ -35,6 +35,7 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 		)(i)?;
 		Ok((i, (name, what, opts)))
 	})(i)?;
+	error!("field: name={:?}, what={:?}", name, what);
 	// Create the base statement
 	let mut res = DefineFieldStatement {
 		name,

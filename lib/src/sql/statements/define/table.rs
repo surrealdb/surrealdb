@@ -9,10 +9,13 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
+use crate::sql::{Idiom, Kind, Part};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
+
+use super::DefineFieldStatement;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
@@ -27,6 +30,12 @@ pub struct DefineTableStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub relation: bool,
+	#[revision(start = 2)]
+	#[serde(skip)]
+	pub in_field: Option<Kind>,
+	#[revision(start = 2)]
+	#[serde(skip)]
+	pub out_field: Option<Kind>,
 }
 
 impl DefineTableStatement {
@@ -56,6 +65,40 @@ impl DefineTableStatement {
 			run.set(key, self).await?;
 			self.to_owned()
 		};
+		if self.relation {
+			let in_kind = self.in_field.clone().unwrap_or(Kind::Record(vec![]));
+			let out_kind = self.out_field.clone().unwrap_or(Kind::Record(vec![]));
+
+			let in_key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.name, "in");
+			let out_key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.name, "out");
+
+			// TODO: fix permissions so they don't defalut to full
+			run.set(
+				in_key,
+				DefineFieldStatement {
+					name: Idiom(vec![Part::from("in")]),
+					what: self.name.clone(),
+					kind: Some(in_kind),
+					..Default::default()
+				},
+			)
+			.await?;
+			run.set(
+				out_key,
+				DefineFieldStatement {
+					name: Idiom(vec![Part::from("out")]),
+					what: self.name.clone(),
+					kind: Some(out_kind),
+					..Default::default()
+				},
+			)
+			.await?;
+		}
+
+		// TODO: define id field here
+
+		let tb_key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.name);
+		run.clr(tb_key).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
@@ -92,6 +135,7 @@ impl DefineTableStatement {
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
 		}
+
 		// Ok all good
 		Ok(Value::None)
 	}
