@@ -62,11 +62,11 @@ static REMOTE_TIMEOUT: Lazy<chrono::Duration> =
 // Source: https://datatracker.ietf.org/doc/html/rfc7517
 pub(super) async fn config(
 	kvs: &Datastore,
-	kid: String,
-	url: String,
+	kid: &str,
+	url: &str,
 ) -> Result<(DecodingKey, Validation), Error> {
 	// Attempt to fetch relevant JWK object either from local cache or remote location
-	let jwk = match fetch_jwks_from_cache(url.clone()).await {
+	let jwk = match fetch_jwks_from_cache(url).await {
 		Ok(jwks_cache) => {
 			trace!("Successfully fetched JWKS object from local cache");
 			// Check that the cached JWKS object has not expired yet
@@ -137,15 +137,15 @@ pub(super) async fn config(
 
 // Checks if network access to a remote location is allowed by the datastore capabilities
 // Attempts to find a relevant JWK object inside a JWKS object fetched from the remote location
-async fn find_jwk_from_url(kvs: &Datastore, url: String, kid: String) -> Result<Jwk, Error> {
+async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk, Error> {
 	// Check that the datastore capabilities allow connections to the URL host
-	if let Err(err) = check_capabilities_url(kvs, url.clone()) {
+	if let Err(err) = check_capabilities_url(kvs, url) {
 		warn!("Network access to JWKS location is not allowed: {}", err);
 		return Err(Error::InvalidAuth); // Return opaque error
 	}
 
 	// Attempt to fetch JWKS object from remote location
-	match fetch_jwks_from_url(url.clone()).await {
+	match fetch_jwks_from_url(url).await {
 		Ok(jwks) => {
 			trace!("Successfully fetched JWKS object from remote location");
 			// Attempt to find JWK in JWKS by the key identifier
@@ -165,11 +165,11 @@ async fn find_jwk_from_url(kvs: &Datastore, url: String, kid: String) -> Result<
 }
 
 // Returns an error if network access to the address from a given URL string is not allowed
-fn check_capabilities_url(kvs: &Datastore, url: String) -> Result<(), Error> {
-	let url_parsed = match Url::parse(&url) {
+fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<(), Error> {
+	let url_parsed = match Url::parse(url) {
 		Ok(url) => url,
 		Err(_) => {
-			return Err(Error::InvalidUrl(url));
+			return Err(Error::InvalidUrl(url.to_string()));
 		}
 	};
 	let addr = match url_parsed.host_str() {
@@ -181,29 +181,29 @@ fn check_capabilities_url(kvs: &Datastore, url: String) -> Result<(), Error> {
 			}
 		}
 		None => {
-			return Err(Error::InvalidUrl(url));
+			return Err(Error::InvalidUrl(url.to_string()));
 		}
 	};
 	let target = match NetTarget::from_str(&addr) {
 		Ok(host) => host,
 		Err(_) => {
-			return Err(Error::InvalidUrl(url));
+			return Err(Error::InvalidUrl(url.to_string()));
 		}
 	};
 	if !kvs.allows_network_target(&target) {
-		return Err(Error::NetTargetNotAllowed(url));
+		return Err(Error::InvalidUrl(url.to_string()));
 	}
 
 	Ok(())
 }
 
 // Attempts to fetch a JWKS object from a remote location and stores it in the cache if successful
-async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
+async fn fetch_jwks_from_url(url: &str) -> Result<JwkSet, Error> {
 	let client = Client::new();
 	#[cfg(not(target_arch = "wasm32"))]
-	let res = client.get(&url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
+	let res = client.get(url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
 	#[cfg(target_arch = "wasm32")]
-	let res = client.get(&url).send().await?;
+	let res = client.get(url).send().await?;
 	if !res.status().is_success() {
 		warn!("Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'", res.status());
 		return Err(Error::InvalidAuth); // Return opaque error
@@ -213,7 +213,7 @@ async fn fetch_jwks_from_url(url: String) -> Result<JwkSet, Error> {
 	match serde_json::from_slice::<JwkSet>(&jwks) {
 		Ok(jwks) => {
 			// If successful, cache the JWKS object by its URL
-			match store_jwks_in_cache(jwks.clone(), url.clone()).await {
+			match store_jwks_in_cache(jwks.clone(), url).await {
 				Ok(_) => trace!("Successfully stored JWKS object in local cache"),
 				Err(err) => {
 					warn!("Failed to store JWKS object in local cache: '{}'", err);
@@ -236,7 +236,7 @@ struct JwksCache {
 }
 
 // Attempts to fetch a JWKS object from the local cache
-async fn fetch_jwks_from_cache(url: String) -> Result<JwksCache, Error> {
+async fn fetch_jwks_from_cache(url: &str) -> Result<JwksCache, Error> {
 	let path = cache_path_from_url(url);
 	let bytes = crate::obs::get(&path).await?;
 
@@ -250,7 +250,7 @@ async fn fetch_jwks_from_cache(url: String) -> Result<JwksCache, Error> {
 }
 
 // Attempts to store a JWKS object in the local cache
-async fn store_jwks_in_cache(jwks: JwkSet, url: String) -> Result<(), Error> {
+async fn store_jwks_in_cache(jwks: JwkSet, url: &str) -> Result<(), Error> {
 	let jwks_cache = JwksCache {
 		jwks,
 		time: Utc::now(),
@@ -267,9 +267,9 @@ async fn store_jwks_in_cache(jwks: JwkSet, url: String) -> Result<(), Error> {
 }
 
 // Generates a unique cache path for a given URL string
-fn cache_path_from_url(url: String) -> String {
+fn cache_path_from_url(url: &str) -> String {
 	let mut hasher = Sha256::new();
-	hasher.update(url.as_bytes());
+	hasher.update(url);
 	let result = hasher.finalize();
 
 	format!("jwks/{:x}.json", result)
@@ -357,14 +357,14 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get first token configuration from remote location
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Drop server to force usage of the local cache
 		drop(mock_server);
 
 		// Get second token configuration from local cache
-		let res = config(&ds, "test_2".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_2", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 	}
 
@@ -385,7 +385,7 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from unallowed remote location
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token from unallowed remote location");
 	}
 
@@ -410,7 +410,7 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from unallowed remote location
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token from unallowed remote location");
 	}
 
@@ -435,14 +435,14 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Wait for cache to expire
 		std::thread::sleep((*CACHE_EXPIRATION + Duration::seconds(1)).to_std().unwrap());
 
 		// Get same token configuration again after cache has expired
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the second time: {:?}", res.err());
 
 		// The server will panic if it does not receive exactly two expected requests
@@ -469,11 +469,11 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Use token with invalid key identifier claim to force cache refresh
-		let res = config(&ds, "invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "invalid", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
 		// Use token with invalid key identifier claim to force cache refresh again before cooldown
-		let res = config(&ds, "invalid".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "invalid", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_err(), "Unexpected success validating token with invalid key identifier");
 
 		// The server will panic if it receives more than the single expected request
@@ -500,14 +500,14 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(res.is_ok(), "Failed to validate token the first time: {:?}", res.err());
 
 		// Wait for cache to expire
 		std::thread::sleep((*CACHE_EXPIRATION + Duration::seconds(1)).to_std().unwrap());
 
 		// Get same token configuration again after cache has expired
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with an expired cache and remote down"
@@ -534,7 +534,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key using unsupported algorithm"
@@ -561,7 +561,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_ok(),
 			"Failed to validate token with key that does not specify use: {:?}",
@@ -589,7 +589,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key that only supports encryption"
@@ -616,7 +616,7 @@ mod tests {
 			.await;
 		let url = mock_server.uri();
 
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token with key that only supports encryption"
@@ -642,7 +642,7 @@ mod tests {
 		let url = mock_server.uri();
 
 		// Get token configuration from remote location responding with Internal Server Error
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token configuration with unavailable remote location"
@@ -673,7 +673,7 @@ mod tests {
 
 		let start_time = Utc::now();
 		// Get token configuration from remote location responding very slowly
-		let res = config(&ds, "test_1".to_string(), format!("{}/{}", &url, &jwks_path)).await;
+		let res = config(&ds, "test_1", &format!("{}/{}", &url, &jwks_path)).await;
 		assert!(
 			res.is_err(),
 			"Unexpected success validating token configuration with unavailable remote location"

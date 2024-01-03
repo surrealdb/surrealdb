@@ -204,7 +204,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
 				if let Some(kid) = token_data.header.kid {
-					jwks::config(kvs, kid, de.code).await
+					jwks::config(kvs, &kid, &de.code).await
 				} else {
 					Err(Error::MissingTokenHeader("kid".to_string()))
 				}
@@ -282,7 +282,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
 				if let Some(kid) = token_data.header.kid {
-					jwks::config(kvs, kid, de.code).await
+					jwks::config(kvs, &kid, &de.code).await
 				} else {
 					Err(Error::MissingTokenHeader("kid".to_string()))
 				}
@@ -367,7 +367,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let cf = if de.kind == Algorithm::Jwks {
 				// The key identifier header must be present
 				if let Some(kid) = token_data.header.kid {
-					jwks::config(kvs, kid, de.code).await
+					jwks::config(kvs, &kid, &de.code).await
 				} else {
 					Err(Error::MissingTokenHeader("kid".to_string()))
 				}
