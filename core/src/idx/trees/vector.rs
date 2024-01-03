@@ -185,6 +185,13 @@ impl Vector {
 		};
 		Ok(dist.powf(1.0 / order.to_float()))
 	}
+
+	pub(super) fn as_f32(&self) -> &[f32] {
+		match self {
+			Vector::F32(v) => v.as_slice(),
+			_ => unreachable!(),
+		}
+	}
 }
 
 impl Distance {
