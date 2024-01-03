@@ -716,7 +716,7 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
@@ -767,7 +767,12 @@ impl Transaction {
 			} else {
 				let (mut rng, limit) = (page.range, page.limit);
 				rng.start = match tup_vec.last() {
-					Some((k, _)) => K::from(k.clone().add(0)),
+					Some((k, _)) => {
+						let key = vec![];
+						key[..].copy_from_slice(k.as_ref());
+						let key = key.add(0);
+						key
+					}
 					None => rng.start,
 				};
 				ScanResult {
