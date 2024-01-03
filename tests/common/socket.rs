@@ -43,20 +43,9 @@ impl Socket {
 	pub async fn close(&mut self) -> Result<(), Box<dyn Error>> {
 		Ok(self.stream.close(None).await?)
 	}
-	/// Connect to a WebSocket server without any specific format
-	pub async fn connect(addr: &str) -> Result<Self, Box<dyn Error>> {
-		let url = format!("ws://{}/rpc", addr);
-		let (stream, _) = connect_async(url).await?;
-		Ok(Self {
-			stream,
-		})
-	}
 
 	/// Connect to a WebSocket server using a specific format
-	pub async fn connect_with_format(
-		addr: &str,
-		format: Option<Format>,
-	) -> Result<Self, Box<dyn Error>> {
+	pub async fn connect(addr: &str, format: Option<Format>) -> Result<Self, Box<dyn Error>> {
 		let url = format!("ws://{}/rpc", addr);
 		let mut req = url.into_client_request().unwrap();
 		if let Some(v) = format.map(|v| v.to_string()) {

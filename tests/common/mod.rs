@@ -1,12 +1,11 @@
+#![allow(unused_imports)]
 #![allow(dead_code)]
 
-pub mod communication;
 pub mod error;
 pub mod format;
 pub mod server;
 pub mod socket;
 
-pub use communication::*;
 pub use format::*;
 pub use server::*;
 pub use socket::*;

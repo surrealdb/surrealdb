@@ -737,7 +737,7 @@ mod cli_integration {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
 
 		// Create a long-lived WS connection so the server don't shutdown gracefully
-		let mut socket = Socket::connect(&addr).await.expect("Failed to connect to server");
+		let mut socket = Socket::connect(&addr, None).await.expect("Failed to connect to server");
 		let json = serde_json::json!({
 			"id": "1",
 			"method": "query",
