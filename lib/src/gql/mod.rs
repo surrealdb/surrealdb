@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use graphql_parser::parse_query;
 use graphql_parser::query;
 use graphql_parser::schema;
@@ -8,6 +10,7 @@ use graphql_parser::schema::ObjectType;
 use graphql_parser::schema::SchemaDefinition;
 use graphql_parser::schema::Type;
 use graphql_parser::schema::TypeDefinition;
+use graphql_parser::schema::UnionType;
 
 use crate::err::Error;
 use crate::kvs::Datastore;
@@ -116,7 +119,10 @@ fn transpile_selection_set<'a>(
 // fn convert_type<'a>(_ty: &Kind) -> Result<TypeDefinition<'a, String>, Error> {
 // 	todo!()
 // }
-fn convert_kind_to_type<'a>(ty: Kind) -> Result<Type<'a, String>, Error> {
+fn convert_kind_to_type<'a>(
+	ty: Kind,
+	def_acc: &mut BTreeMap<String, Definition<String>>,
+) -> Result<Type<'a, String>, Error> {
 	let (optional, match_ty) = match ty {
 		Kind::Option(op_ty) => (true, *op_ty),
 		_ => (false, ty),
@@ -125,28 +131,46 @@ fn convert_kind_to_type<'a>(ty: Kind) -> Result<Type<'a, String>, Error> {
 	let out_ty: Type<'_, String> = match match_ty {
 		Kind::Any => Type::NamedType("Any".to_string()).into(),
 		Kind::Null => Type::NamedType("Null".to_string()).into(),
-		Kind::Bool => Type::NamedType("Bool".to_string()).into(),
+		Kind::Bool => Type::NamedType("Boolean".to_string()).into(), // builtin
 		Kind::Bytes => Type::NamedType("Bytes".to_string()).into(),
 		Kind::Datetime => Type::NamedType("Datetime".to_string()).into(),
 		Kind::Decimal => Type::NamedType("Decimal".to_string()).into(),
 		Kind::Duration => Type::NamedType("Duration".to_string()).into(),
-		Kind::Float => Type::NamedType("Float".to_string()).into(),
-		Kind::Int => Type::NamedType("Int".to_owned()).into(),
+		Kind::Float => Type::NamedType("Float".to_string()).into(), // builtin
+		Kind::Int => Type::NamedType("Int".to_owned()).into(),      // builtin
 		Kind::Number => Type::NamedType("Number".to_string()).into(),
 		Kind::Object => panic!("Object types are not currently supported for graphql"),
 		Kind::Point => Type::NamedType("Point".to_string()).into(),
-		Kind::String => Type::NamedType("String".to_string()).into(),
+		Kind::String => Type::NamedType("String".to_string()).into(), // builtin
 		Kind::Uuid => Type::NamedType("Uuid".to_string()).into(),
 		Kind::Record(v) => {
-			// println!("{:?}", v);
-			assert!(v.len() == 1, "multiple types in record");
-			Type::NamedType(v.first().unwrap().to_string()).into()
+			match v.len() {
+				0 => panic!("record shouldn't have no elements"),
+				1 => Type::NamedType(v.first().unwrap().to_string()).into(), // table names will be defined
+				_ => {
+					let name =
+						v.iter().map(ToString::to_string).collect::<Vec<String>>().join("_or_");
+
+					let def = Definition::TypeDefinition(TypeDefinition::Union(UnionType {
+						description: Some(format!(
+							"A union of the following tables: {}",
+							v.iter().map(ToString::to_string).collect::<Vec<String>>().join(", ")
+						)),
+						name: name.clone(),
+						directives: vec![],
+						position: Default::default(),
+						types: v.iter().map(ToString::to_string).collect(),
+					}));
+					def_acc.insert(name.clone(), def);
+					Type::NamedType(name).into()
+				}
+			}
 		}
 		Kind::Geometry(_) => Type::NamedType("Geometry".to_string()).into(),
-		Kind::Option(_) => convert_kind_to_type(match_ty)?,
+		Kind::Option(_) => convert_kind_to_type(match_ty, def_acc)?,
 		Kind::Either(_) => panic!("Union types are not currently supported for graphql"),
 		Kind::Set(_, _) => Type::NamedType("Set".to_string()).into(),
-		Kind::Array(t, _) => Type::ListType(Box::new(convert_kind_to_type(*t)?)).into(),
+		Kind::Array(t, _) => Type::ListType(Box::new(convert_kind_to_type(*t, def_acc)?)).into(),
 	};
 	let final_ty = if optional {
 		out_ty
@@ -157,9 +181,12 @@ fn convert_kind_to_type<'a>(ty: Kind) -> Result<Type<'a, String>, Error> {
 	Ok(final_ty)
 }
 
-fn convert_field<'a>(fd: &DefineFieldStatement) -> Result<schema::Field<'a, String>, Error> {
+fn convert_field<'a>(
+	fd: &DefineFieldStatement,
+	def_acc: &mut BTreeMap<String, Definition<String>>,
+) -> Result<schema::Field<'a, String>, Error> {
 	let kind = fd.kind.clone().unwrap_or(Kind::Any);
-	let ty = convert_kind_to_type(kind)?;
+	let ty = convert_kind_to_type(kind, def_acc)?;
 
 	Ok(schema::Field {
 		description: None,
@@ -193,11 +220,18 @@ pub async fn get_schema<'a>(
 
 	let mut table_defs = vec![];
 
+	// TODO: check that two types aren't defined with the same name from different sources
+	let mut def_acc = BTreeMap::new();
+
 	for tb in tbs.iter() {
 		let fds = tx.all_tb_fields(&ns, &db, &tb.name).await?;
 		// println!("fds(len:{}): {:?}\n", fds.len(), fds);
 		let mut fd_defs = vec![id_field!()];
-		fd_defs.extend(fds.iter().map(convert_field).collect::<Result<Vec<_>, Error>>()?);
+		fd_defs.extend(
+			fds.iter()
+				.map(|f| convert_field(f, &mut def_acc))
+				.collect::<Result<Vec<_>, Error>>()?,
+		);
 		let ty_def = TypeDefinition::Object(ObjectType {
 			description: None,
 			name: tb.name.to_string(),
@@ -264,6 +298,7 @@ pub async fn get_schema<'a>(
 	})));
 
 	defs.extend(table_defs);
+	defs.extend(def_acc.into_values());
 
 	Ok(schema::Document {
 		definitions: defs,
