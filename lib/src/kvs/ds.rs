@@ -14,6 +14,7 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::clock::SystemClock;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
+#[cfg(feature = "http")]
 use crate::opt::capabilities::NetTarget;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
