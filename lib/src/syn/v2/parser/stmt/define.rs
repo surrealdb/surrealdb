@@ -40,8 +40,8 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
-		let name = self.parse_token_value()?;
-		let comment = self.eat(t!("COMMENT")).then(|| self.parse_token_value()).transpose()?;
+		let name = self.next_token_value()?;
+		let comment = self.eat(t!("COMMENT")).then(|| self.next_token_value()).transpose()?;
 		Ok(DefineNamespaceStatement {
 			id: None,
 			name,
@@ -50,7 +50,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_database(&mut self) -> ParseResult<DefineDatabaseStatement> {
-		let name = self.parse_token_value()?;
+		let name = self.next_token_value()?;
 		let mut res = DefineDatabaseStatement {
 			id: None,
 			name,
@@ -61,7 +61,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
@@ -76,15 +76,15 @@ impl Parser<'_> {
 
 	pub fn parse_define_function(&mut self) -> ParseResult<DefineFunctionStatement> {
 		let name = self.parse_custom_function_name()?;
-		let token = expected!(self, "(").span;
+		let token = expected!(self,t!("(")).span;
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!(")")) {
 				break;
 			}
 
-			let param = self.parse_token_value::<Param>()?.0;
-			expected!(self, ":");
+			let param = self.next_token_value::<Param>()?.0;
+			expected!(self,t!(":"));
 			let kind = self.parse_inner_kind()?;
 
 			args.push((param, kind));
@@ -95,7 +95,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let next = expected!(self, "{").span;
+		let next = expected!(self,t!("{")).span;
 		let block = self.parse_block(next)?;
 
 		let mut res = DefineFunctionStatement {
@@ -109,7 +109,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -123,8 +123,8 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_user(&mut self) -> ParseResult<DefineUserStatement> {
-		let name = self.parse_token_value()?;
-		expected!(self, "ON");
+		let name = self.next_token_value()?;
+		expected!(self,t!("ON"));
 		let base = self.parse_base(false)?;
 
 		let mut res = DefineUserStatement::from_parsed_values(
@@ -137,21 +137,21 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				t!("PASSWORD") => {
 					self.pop_peek();
-					res.set_password(&self.parse_token_value::<Strand>()?.0);
+					res.set_password(&self.next_token_value::<Strand>()?.0);
 				}
 				t!("PASSHASH") => {
 					self.pop_peek();
-					res.set_passhash(self.parse_token_value::<Strand>()?.0);
+					res.set_passhash(self.next_token_value::<Strand>()?.0);
 				}
 				t!("ROLES") => {
 					self.pop_peek();
-					res.roles = vec![self.parse_token_value()?];
+					res.roles = vec![self.next_token_value()?];
 					while self.eat(t!(",")) {
-						res.roles.push(self.parse_token_value()?);
+						res.roles.push(self.next_token_value()?);
 					}
 				}
 				_ => break,
@@ -162,8 +162,8 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_token(&mut self) -> ParseResult<DefineTokenStatement> {
-		let name = self.parse_token_value()?;
-		expected!(self, "ON");
+		let name = self.next_token_value()?;
+		expected!(self,t!("ON"));
 		let base = self.parse_base(true)?;
 
 		let mut res = DefineTokenStatement {
@@ -176,11 +176,11 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.code = self.parse_token_value::<Strand>()?.0;
+					res.code = self.next_token_value::<Strand>()?.0;
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -199,7 +199,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_scope(&mut self) -> ParseResult<DefineScopeStatement> {
-		let name = self.parse_token_value()?;
+		let name = self.next_token_value()?;
 		let mut res = DefineScopeStatement {
 			name,
 			code: DefineScopeStatement::random_code(),
@@ -210,11 +210,11 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				t!("SESSION") => {
 					self.pop_peek();
-					res.session = Some(self.parse_token_value()?);
+					res.session = Some(self.next_token_value()?);
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
@@ -232,7 +232,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_param(&mut self) -> ParseResult<DefineParamStatement> {
-		let name = self.parse_token_value::<Param>()?.0;
+		let name = self.next_token_value::<Param>()?.0;
 
 		let mut res = DefineParamStatement {
 			name,
@@ -247,7 +247,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -260,7 +260,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_table(&mut self) -> ParseResult<DefineTableStatement> {
-		let name = self.parse_token_value()?;
+		let name = self.next_token_value()?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
@@ -271,7 +271,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				t!("DROP") => {
 					self.pop_peek();
@@ -315,10 +315,10 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_event(&mut self) -> ParseResult<DefineEventStatement> {
-		let name = self.parse_token_value()?;
-		expected!(self, "ON");
+		let name = self.next_token_value()?;
+		expected!(self,t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.parse_token_value()?;
+		let what = self.next_token_value()?;
 
 		let mut res = DefineEventStatement {
 			name,
@@ -341,7 +341,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				_ => break,
 			}
@@ -351,9 +351,9 @@ impl Parser<'_> {
 
 	pub fn parse_define_field(&mut self) -> ParseResult<DefineFieldStatement> {
 		let name = self.parse_local_idiom()?;
-		expected!(self, "ON");
+		expected!(self,t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.parse_token_value()?;
+		let what = self.next_token_value()?;
 
 		let mut res = DefineFieldStatement {
 			name,
@@ -390,7 +390,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				_ => break,
 			}
@@ -400,10 +400,10 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_index(&mut self) -> ParseResult<DefineIndexStatement> {
-		let name = self.parse_token_value()?;
-		expected!(self, "ON");
+		let name = self.next_token_value()?;
+		expected!(self,t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.parse_token_value()?;
+		let what = self.next_token_value()?;
 
 		let mut res = DefineIndexStatement {
 			name,
@@ -428,15 +428,15 @@ impl Parser<'_> {
 				t!("SEARCH") => {
 					self.pop_peek();
 					let analyzer =
-						self.eat(t!("ANALYZER")).then(|| self.parse_token_value()).transpose()?;
+						self.eat(t!("ANALYZER")).then(|| self.next_token_value()).transpose()?;
 					let scoring = match self.next().kind {
 						t!("VS") => Scoring::Vs,
 						t!("BM25") => {
 							if self.eat(t!("(")) {
 								let open = self.last_span();
-								let k1 = self.parse_token_value()?;
-								expected!(self, ",");
-								let b = self.parse_token_value()?;
+								let k1 = self.next_token_value()?;
+								expected!(self,t!(","));
+								let b = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open)?;
 								Scoring::Bm {
 									k1,
@@ -452,42 +452,42 @@ impl Parser<'_> {
 					// TODO: Propose change in how order syntax works.
 					let doc_ids_order = self
 						.eat(t!("DOC_IDS_ORDER"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 					let doc_lengths_order = self
 						.eat(t!("DOC_LENGTHS_ORDER"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 					let postings_order = self
 						.eat(t!("POSTINGS_ORDER"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 					let terms_order = self
 						.eat(t!("TERMS_ORDER"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 					let doc_ids_cache = self
 						.eat(t!("DOC_IDS_CACHE"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 					let doc_lengths_cache = self
 						.eat(t!("DOC_LENGTHS_CACHE"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 					let postings_cache = self
 						.eat(t!("POSTINGS_CACHE"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 					let terms_cache = self
 						.eat(t!("TERMS_CACHE"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 
@@ -509,30 +509,30 @@ impl Parser<'_> {
 				}
 				t!("MTREE") => {
 					self.pop_peek();
-					expected!(self, "DIMENSION");
-					let dimension = self.parse_token_value()?;
+					expected!(self,t!("DIMENSION"));
+					let dimension = self.next_token_value()?;
 					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
 					let capacity = self
 						.eat(t!("CAPACITY"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(40);
 
 					let doc_ids_order = self
 						.eat(t!("DOC_IDS_ORDER"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 
 					let doc_ids_cache = self
 						.eat(t!("DOC_IDS_CACHE"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 
 					let mtree_cache = self
 						.eat(t!("MTREE_CACHE"))
-						.then(|| self.parse_token_value())
+						.then(|| self.next_token_value())
 						.transpose()?
 						.unwrap_or(100);
 
@@ -548,7 +548,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				_ => break,
 			}
@@ -558,7 +558,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_analyzer(&mut self) -> ParseResult<DefineAnalyzerStatement> {
-		let name = self.parse_token_value()?;
+		let name = self.next_token_value()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
 			function: None,
@@ -583,24 +583,24 @@ impl Parser<'_> {
 								filters.push(Filter::Uppercase);
 							}
 							t!("EDGENGRAM") => {
-								let open_span = expected!(self, "(").span;
-								let a = self.parse_token_value()?;
-								expected!(self, ",");
-								let b = self.parse_token_value()?;
+								let open_span = expected!(self,t!("(")).span;
+								let a = self.next_token_value()?;
+								expected!(self,t!(","));
+								let b = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::EdgeNgram(a, b));
 							}
 							t!("NGRAM") => {
-								let open_span = expected!(self, "(").span;
-								let a = self.parse_token_value()?;
-								expected!(self, ",");
-								let b = self.parse_token_value()?;
+								let open_span = expected!(self,t!("(")).span;
+								let a = self.next_token_value()?;
+								expected!(self,t!(","));
+								let b = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Ngram(a, b));
 							}
 							t!("SNOWBALL") => {
-								let open_span = expected!(self, "(").span;
-								let language = self.parse_token_value()?;
+								let open_span = expected!(self,t!("(")).span;
+								let language = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Snowball(language))
 							}
@@ -633,11 +633,11 @@ impl Parser<'_> {
 				}
 				t!("FUNCTION") => {
 					self.pop_peek();
-					expected!(self, "fn");
-					expected!(self, "::");
-					let mut ident = self.parse_token_value::<Ident>()?;
+					expected!(self,t!("fn"));
+					expected!(self,t!("::"));
+					let mut ident = self.next_token_value::<Ident>()?;
 					while self.eat(t!("::")) {
-						let value = self.parse_token_value::<Ident>()?;
+						let value = self.next_token_value::<Ident>()?;
 						ident.0.push_str("::");
 						ident.0.push_str(&value);
 					}
@@ -645,7 +645,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.parse_token_value()?);
+					res.comment = Some(self.next_token_value()?);
 				}
 				_ => break,
 			}

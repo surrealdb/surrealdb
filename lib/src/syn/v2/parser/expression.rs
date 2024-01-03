@@ -212,8 +212,8 @@ impl Parser<'_> {
 			t!("@") => {
 				let reference = (!self.eat(t!("@")))
 					.then(|| {
-						let number = self.parse_token_value()?;
-						expected!(self, "@");
+						let number = self.next_token_value()?;
+						expected!(self,t!("@"));
 						Ok(number)
 					})
 					.transpose()?;
@@ -248,13 +248,13 @@ impl Parser<'_> {
 			t!("OUTSIDE") => Operator::Outside,
 			t!("INTERSECTS") => Operator::Intersects,
 			t!("NOT") => {
-				expected!(self, "IN");
+				expected!(self,t!("IN"));
 				Operator::NotInside
 			}
 			t!("IN") => Operator::Inside,
 			t!("KNN") => {
-				let start = expected!(self, "<").span;
-				let amount = self.parse_token_value()?;
+				let start = expected!(self,t!("<")).span;
+				let amount = self.next_token_value()?;
 				self.expect_closing_delimiter(t!(">"), start)?;
 				Operator::Knn(amount)
 			}

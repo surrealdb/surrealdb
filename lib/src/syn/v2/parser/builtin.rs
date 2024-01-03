@@ -401,7 +401,7 @@ impl Parser<'_> {
 	pub fn parse_builtin(&mut self, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
-			self.parse_token_value::<Ident>()?;
+			self.next_token_value::<Ident>()?;
 			last_span = self.last_span();
 		}
 
@@ -455,7 +455,7 @@ impl Parser<'_> {
 
 	/// Parse a call to a builtin function.
 	pub fn parse_builtin_function(&mut self, name: String) -> ParseResult<Function> {
-		let start = expected!(self, "(").span;
+		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!(")")) {

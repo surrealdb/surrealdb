@@ -34,10 +34,10 @@ macro_rules! unexpected {
 
 /// A macro for indicating that the parser encountered an token which it didn't expect.
 macro_rules! expected {
-	($parser:expr, $kind:tt) => {{
+	($parser:expr, $($kind:tt)*) => {{
 		let token = $parser.next();
 		match token.kind {
-			t!($kind) => token,
+			$($kind)* => token,
 			$crate::syn::v2::parser::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
 				return Err($crate::syn::v2::parser::ParseError::new(
@@ -46,7 +46,7 @@ macro_rules! expected {
 				));
 			}
 			x => {
-				let expected = $kind;
+				let expected = $($kind)*.as_str();
 				let kind = if let $crate::syn::v2::token::TokenKind::Eof = x {
 					$crate::syn::v2::parser::ParseErrorKind::UnexpectedEof {
 						expected,

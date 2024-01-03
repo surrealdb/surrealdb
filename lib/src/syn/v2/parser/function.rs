@@ -10,13 +10,13 @@ use super::{ParseResult, Parser};
 
 impl Parser<'_> {
 	pub fn parse_custom_function(&mut self) -> ParseResult<Function> {
-		expected!(self, "::");
-		let mut name = self.parse_token_value::<Ident>()?.0;
+		expected!(self,t!("::"));
+		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.parse_token_value::<Ident>()?.0)
+			name.push_str(&self.next_token_value::<Ident>()?.0)
 		}
-		let start = expected!(self, "(").span;
+		let start = expected!(self,t!("(")).span;
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!(")")) {
@@ -35,13 +35,13 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_model(&mut self) -> ParseResult<Model> {
-		expected!(self, "::");
-		let mut name = self.parse_token_value::<Ident>()?.0;
+		expected!(self,t!("::"));
+		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.parse_token_value::<Ident>()?.0)
+			name.push_str(&self.next_token_value::<Ident>()?.0)
 		}
-		let start = expected!(self, "<").span;
+		let start = expected!(self,t!("<")).span;
 
 		let token = self.lexer.lex_only_integer();
 		let major = match token.kind {
@@ -49,7 +49,7 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "a integer"),
 		};
 
-		expected!(self, ".");
+		expected!(self,t!("."));
 
 		let token = self.lexer.lex_only_integer();
 		let minor = match token.kind {
@@ -57,7 +57,7 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "a integer"),
 		};
 
-		expected!(self, ".");
+		expected!(self,t!("."));
 
 		let token = self.lexer.lex_only_integer();
 		let patch = match token.kind {
@@ -67,7 +67,7 @@ impl Parser<'_> {
 
 		self.expect_closing_delimiter(t!(">"), start)?;
 
-		let start = expected!(self, "(").span;
+		let start = expected!(self,t!("(")).span;
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!(")")) {

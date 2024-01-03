@@ -36,7 +36,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_thing_or_range(&mut self, ident: String) -> ParseResult<Value> {
-		expected!(self, ":");
+		expected!(self,t!(":"));
 
 		self.peek();
 		self.no_whitespace()?;
@@ -104,9 +104,9 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_range(&mut self) -> ParseResult<Range> {
-		let tb = self.parse_token_value::<Ident>()?.0;
+		let tb = self.next_token_value::<Ident>()?.0;
 
-		expected!(self, ":");
+		expected!(self,t!(":"));
 
 		self.peek();
 		self.no_whitespace()?;
@@ -132,7 +132,7 @@ impl Parser<'_> {
 		self.peek();
 		self.no_whitespace()?;
 
-		expected!(self, "..");
+		expected!(self,t!(".."));
 
 		self.peek();
 		self.no_whitespace()?;
@@ -161,12 +161,12 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
-		let ident = self.parse_token_value::<Ident>()?.0;
+		let ident = self.next_token_value::<Ident>()?.0;
 		self.parse_thing_from_ident(ident)
 	}
 
 	pub fn parse_thing_from_ident(&mut self, ident: String) -> ParseResult<Thing> {
-		expected!(self, ":");
+		expected!(self,t!(":"));
 
 		self.peek();
 		self.no_whitespace()?;
@@ -201,18 +201,18 @@ impl Parser<'_> {
 			}
 			t!("ULID") => {
 				// TODO: error message about how to use `ulid` as an identifier.
-				expected!(self, "(");
-				expected!(self, ")");
+				expected!(self,t!("("));
+				expected!(self,t!(")"));
 				Ok(Id::Generate(Gen::Ulid))
 			}
 			t!("UUID") => {
-				expected!(self, "(");
-				expected!(self, ")");
+				expected!(self,t!("("));
+				expected!(self,t!(")"));
 				Ok(Id::Generate(Gen::Uuid))
 			}
 			t!("RAND") => {
-				expected!(self, "(");
-				expected!(self, ")");
+				expected!(self,t!("("));
+				expected!(self,t!(")"));
 				Ok(Id::Generate(Gen::Rand))
 			}
 			_ => {

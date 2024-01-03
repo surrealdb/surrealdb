@@ -21,13 +21,13 @@ impl Parser<'_> {
 	pub fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
 		let res = match self.next().kind {
 			t!("NAMESPACE") => {
-				let name = self.parse_token_value()?;
+				let name = self.next_token_value()?;
 				RemoveStatement::Namespace(RemoveNamespaceStatement {
 					name,
 				})
 			}
 			t!("DATABASE") => {
-				let name = self.parse_token_value()?;
+				let name = self.next_token_value()?;
 				RemoveStatement::Database(RemoveDatabaseStatement {
 					name,
 				})
@@ -43,8 +43,8 @@ impl Parser<'_> {
 				})
 			}
 			t!("TOKEN") => {
-				let name = self.parse_token_value()?;
-				expected!(self, "ON");
+				let name = self.next_token_value()?;
+				expected!(self,t!("ON"));
 				let base = self.parse_base(true)?;
 				RemoveStatement::Token(crate::sql::statements::RemoveTokenStatement {
 					name,
@@ -52,28 +52,28 @@ impl Parser<'_> {
 				})
 			}
 			t!("SCOPE") => {
-				let name = self.parse_token_value()?;
+				let name = self.next_token_value()?;
 				RemoveStatement::Scope(RemoveScopeStatement {
 					name,
 				})
 			}
 			t!("PARAM") => {
-				let name = self.parse_token_value::<Param>()?;
+				let name = self.next_token_value::<Param>()?;
 				RemoveStatement::Param(RemoveParamStatement {
 					name: name.0,
 				})
 			}
 			t!("TABLE") => {
-				let name = self.parse_token_value()?;
+				let name = self.next_token_value()?;
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
 				})
 			}
 			t!("EVENT") => {
-				let name = self.parse_token_value()?;
-				expected!(self, "ON");
+				let name = self.next_token_value()?;
+				expected!(self,t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = self.parse_token_value()?;
+				let table = self.next_token_value()?;
 				RemoveStatement::Event(RemoveEventStatement {
 					name,
 					what: table,
@@ -81,33 +81,33 @@ impl Parser<'_> {
 			}
 			t!("FIELD") => {
 				let idiom = self.parse_local_idiom()?;
-				expected!(self, "ON");
+				expected!(self,t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = self.parse_token_value()?;
+				let table = self.next_token_value()?;
 				RemoveStatement::Field(RemoveFieldStatement {
 					name: idiom,
 					what: table,
 				})
 			}
 			t!("INDEX") => {
-				let name = self.parse_token_value()?;
-				expected!(self, "ON");
+				let name = self.next_token_value()?;
+				expected!(self,t!("ON"));
 				self.eat(t!("TABLE"));
-				let what = self.parse_token_value()?;
+				let what = self.next_token_value()?;
 				RemoveStatement::Index(RemoveIndexStatement {
 					name,
 					what,
 				})
 			}
 			t!("ANALYZER") => {
-				let name = self.parse_token_value()?;
+				let name = self.next_token_value()?;
 				RemoveStatement::Analyzer(RemoveAnalyzerStatement {
 					name,
 				})
 			}
 			t!("USER") => {
-				let name = self.parse_token_value()?;
-				expected!(self, "ON");
+				let name = self.next_token_value()?;
+				expected!(self,t!("ON"));
 				let base = self.parse_base(false)?;
 				RemoveStatement::User(RemoveUserStatement {
 					name,

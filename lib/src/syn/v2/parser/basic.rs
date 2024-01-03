@@ -274,7 +274,7 @@ impl TokenValue for Regex {
 
 impl Parser<'_> {
 	/// Parse a token value from the next token in the parser.
-	pub fn parse_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
+	pub fn next_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
 		let next = self.peek();
 		let res = V::from_token(self, next);
 		if res.is_ok() {

@@ -41,9 +41,9 @@ impl Parser<'_> {
 		};
 		let kind = self.parse_thing_or_table()?;
 		if is_o {
-			expected!(self, "->")
+			expected!(self,t!("->"))
 		} else {
-			expected!(self, "<-")
+			expected!(self,t!("<-"))
 		};
 		let second = self.parse_relate_value()?;
 		if is_o {
@@ -59,7 +59,7 @@ impl Parser<'_> {
 				let start = self.pop_peek().span;
 				self.parse_array(start).map(Value::Array)
 			}
-			t!("$param") => self.parse_token_value().map(Value::Param),
+			t!("$param") => self.next_token_value().map(Value::Param),
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -86,7 +86,7 @@ impl Parser<'_> {
 		if self.peek_token_at(1).kind == t!(":") {
 			self.parse_thing().map(Value::Thing)
 		} else {
-			self.parse_token_value().map(Value::Table)
+			self.next_token_value().map(Value::Table)
 		}
 	}
 }

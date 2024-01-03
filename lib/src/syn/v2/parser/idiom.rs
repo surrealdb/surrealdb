@@ -194,7 +194,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Graph(self.parse_graph(Dir::In)?)
 			}
-			_ => Part::Field(self.parse_token_value()?),
+			_ => Part::Field(self.next_token_value()?),
 		};
 		let start = vec![start];
 		self.parse_remaining_idiom(start)
@@ -206,7 +206,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::All
 			}
-			_ => Part::Field(self.parse_token_value()?),
+			_ => Part::Field(self.next_token_value()?),
 		};
 		Ok(res)
 	}
@@ -221,13 +221,13 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Last
 			}
-			t!("123") => Part::Index(self.parse_token_value()?),
+			t!("123") => Part::Index(self.next_token_value()?),
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
 				Part::Where(self.parse_value_field()?)
 			}
-			t!("$param") => Part::Value(Value::Param(self.parse_token_value()?)),
-			TokenKind::Strand => Part::Value(Value::Strand(self.parse_token_value()?)),
+			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
+			TokenKind::Strand => Part::Value(Value::Strand(self.next_token_value()?)),
 			_ => {
 				let idiom = self.parse_basic_idiom()?;
 				Part::Value(Value::Idiom(idiom))
@@ -246,7 +246,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
-		let start = self.parse_token_value::<Ident>()?;
+		let start = self.next_token_value::<Ident>()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -283,7 +283,7 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_local_idiom(&mut self) -> ParseResult<Idiom> {
-		let start = self.parse_token_value()?;
+		let start = self.next_token_value()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -300,7 +300,7 @@ impl Parser<'_> {
 							Part::All
 						}
 						t!("123") => {
-							let number = self.parse_token_value()?;
+							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						x => unexpected!(self, x, "$, * or a number"),
@@ -388,10 +388,10 @@ impl Parser<'_> {
 					x if x.can_be_identifier() => {
 						// The following function should always succeed here,
 						// returning an error here would be a bug, so unwrap.
-						let table = self.parse_token_value().unwrap();
+						let table = self.next_token_value().unwrap();
 						let mut tables = Tables(vec![table]);
 						while self.eat(t!(",")) {
-							tables.0.push(self.parse_token_value()?);
+							tables.0.push(self.next_token_value()?);
 						}
 						tables
 					}
@@ -415,7 +415,7 @@ impl Parser<'_> {
 			x if x.can_be_identifier() => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let table = self.parse_token_value().unwrap();
+				let table = self.next_token_value().unwrap();
 				Ok(Graph {
 					dir,
 					expr: Fields::all(),

@@ -21,7 +21,7 @@ use crate::{
 	sql,
 	syn::v2::{
 		lexer::{Error as LexError, Lexer},
-		parser::mac::unexpected,
+		parser::mac::expected,
 		token::{t, Span, Token, TokenKind},
 	},
 };
@@ -211,8 +211,13 @@ impl<'a> Parser<'a> {
 	///
 	/// This is the primary entry point of the parser.
 	pub fn parse_query(&mut self) -> ParseResult<sql::Query> {
+		// eat possible empty statements.
+		while self.eat(t!(";")) {}
+
 		let mut statements = vec![self.parse_stmt()?];
+
 		while self.eat(t!(";")) {
+			// eat possible empty statements.
 			while self.eat(t!(";")) {}
 
 			if let TokenKind::Eof = self.peek().kind {
@@ -221,10 +226,8 @@ impl<'a> Parser<'a> {
 
 			statements.push(self.parse_stmt()?);
 		}
-		let token = self.peek();
-		if TokenKind::Eof != token.kind {
-			unexpected!(self, token.kind, ";");
-		};
+
+		expected!(self, TokenKind::Eof);
 		Ok(sql::Query(sql::Statements(statements)))
 	}
 
