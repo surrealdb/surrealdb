@@ -1,25 +1,5 @@
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].
-pub struct Key<const S: usize> {
-	/// The key
-	pub key: [u8; S],
-	/// Since the key size must be known at compile time, we need to track the size in case it is
-	/// smaller
-	pub size: usize,
-}
-
-impl<const S: usize> From<&[u8]> for Key<S> {
-	fn from(value: &[u8]) -> Self {
-		if value.len() > S {
-			panic!("Key too long");
-		}
-		let mut key = [0u8; S];
-		key[..value.len()].copy_from_slice(value);
-		Self {
-			key,
-			size: value.len(),
-		}
-	}
-}
+pub type Key = Vec<u8>;
 
 /// The value part of a key-value pair. An alias for [`Vec<u8>`].
 pub type Val = Vec<u8>;

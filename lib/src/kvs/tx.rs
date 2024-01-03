@@ -670,44 +670,46 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + From<Vec<u8>> + Debug,
+		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
-		let range = &page.range;
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.scan(range, batch_limit),
+			} => {
+				let range = page.range.clone();
+				v.scan(range, batch_limit)
+			}
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.scan(range, batch_limit).await,
+			} => v.scan(&page.range, batch_limit).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.scan(range, batch_limit).await,
+			} => v.scan(&page.range, batch_limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
 				..
-			} => v.scan(range, batch_limit).await,
+			} => v.scan(&page.range, batch_limit).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.scan(range, batch_limit).await,
+			} => v.scan(&page.range, batch_limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.scan(range, batch_limit).await,
+			} => v.scan(&page.range, batch_limit).await,
 			#[allow(unreachable_patterns)]
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::MissingStorageEngine),
 		};
 		// Construct next page
 		res.map(|tup_vec: Vec<(Key, Val)>| {
