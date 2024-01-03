@@ -3,6 +3,9 @@ use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use rmpv::Value as Data;
+use surrealdb::sql::Datetime;
+use surrealdb::sql::Thing;
+use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
 pub fn req(msg: Message) -> Result<Request, Failure> {
@@ -61,7 +64,37 @@ impl TryFrom<Pack> for Value {
 					Ok((k?, v?))
 				})
 				.collect::<Result<Value, Failure>>(),
-			_ => Ok(Value::Null),
+			Data::Ext(t, v) => {
+				match t {
+					// A literal uuid
+					1 => match std::str::from_utf8(&v) {
+						Ok(v) => match Uuid::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err(Failure::custom("Expected a valid UUID value")),
+						},
+						_ => Err(Failure::custom("Expected a valid string data type")),
+					},
+					// A literal datetime
+					2 => match std::str::from_utf8(&v) {
+						Ok(v) => match Datetime::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err(Failure::custom("Expected a valid Datetime value")),
+						},
+						_ => Err(Failure::custom("Expected a valid string data type")),
+					},
+					// A literal uuid
+					3 => match std::str::from_utf8(&v) {
+						Ok(v) => match Thing::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err(Failure::custom("Expected a valid RecordID value")),
+						},
+						_ => Err(Failure::custom("Expected a valid string data type")),
+					},
+					// An unknown tag
+					_ => Err(Failure::custom("Encountered an unknown MessagePack tag")),
+				}
+			}
+			_ => Err(Failure::custom("Encountered an unknown MessagePack data type")),
 		}
 	}
 }

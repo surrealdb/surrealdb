@@ -3,6 +3,9 @@ use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use serde_cbor::Value as Data;
+use surrealdb::sql::Datetime;
+use surrealdb::sql::Thing;
+use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
 pub fn req(msg: Message) -> Result<Request, Failure> {
@@ -50,7 +53,37 @@ impl TryFrom<Cbor> for Value {
 					Ok((k?, v?))
 				})
 				.collect::<Result<Value, Failure>>(),
-			_ => Ok(Value::Null),
+			Data::Tag(t, v) => {
+				match t {
+					// A literal uuid
+					7877325_1 => match *v {
+						Data::Text(v) => match Uuid::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err(Failure::custom("Expected a valid UUID value")),
+						},
+						_ => Err(Failure::custom("Expected a CBOR text data type")),
+					},
+					// A literal datetime
+					7877325_2 => match *v {
+						Data::Text(v) => match Datetime::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err(Failure::custom("Expected a valid Datetime value")),
+						},
+						_ => Err(Failure::custom("Expected a CBOR text data type")),
+					},
+					// A literal uuid
+					7877325_3 => match *v {
+						Data::Text(v) => match Thing::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err(Failure::custom("Expected a valid RecordID value")),
+						},
+						_ => Err(Failure::custom("Expected a CBOR text data type")),
+					},
+					// An unknown tag
+					_ => Err(Failure::custom("Encountered an unknown CBOR tag")),
+				}
+			}
+			_ => Err(Failure::custom("Encountered an unknown CBOR data type")),
 		}
 	}
 }
