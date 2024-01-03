@@ -56,7 +56,7 @@ impl TryFrom<Cbor> for Value {
 			Data::Tag(t, v) => {
 				match t {
 					// A literal uuid
-					7877325_1 => match *v {
+					78_773_251 => match *v {
 						Data::Text(v) => match Uuid::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err(Failure::custom("Expected a valid UUID value")),
@@ -64,7 +64,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err(Failure::custom("Expected a CBOR text data type")),
 					},
 					// A literal datetime
-					7877325_2 => match *v {
+					78_773_252 => match *v {
 						Data::Text(v) => match Datetime::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err(Failure::custom("Expected a valid Datetime value")),
@@ -72,7 +72,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err(Failure::custom("Expected a CBOR text data type")),
 					},
 					// A literal uuid
-					7877325_3 => match *v {
+					78_773_253 => match *v {
 						Data::Text(v) => match Thing::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err(Failure::custom("Expected a valid RecordID value")),
