@@ -25,8 +25,6 @@ impl KeyRequirements for Hb {
 	}
 }
 
-const SIZE: usize = 4 + 8 + 1 + 16;
-
 impl Hb {
 	pub fn new(hb: Timestamp, nd: Uuid) -> Self {
 		Self {
@@ -40,13 +38,13 @@ impl Hb {
 		}
 	}
 
-	pub fn prefix() -> KeyStack<SIZE> {
+	pub fn prefix() -> KeyStack {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'h', b'b', 0x00]);
-		KeyStack::<SIZE>::from(&k)
+		KeyStack::from(&k)
 	}
 
-	pub fn suffix(ts: &Timestamp) -> KeyStack<SIZE> {
+	pub fn suffix(ts: &Timestamp) -> KeyStack {
 		// Add one to timestamp so we get a complete range inclusive of provided timestamp
 		// Also convert type
 		let tskey: KeyTimestamp = KeyTimestamp {
@@ -55,7 +53,7 @@ impl Hb {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'h', b'b']);
 		k.extend_from_slice(tskey.encode().unwrap().as_ref());
-		KeyStack::<SIZE>::from(&k)
+		KeyStack::from(&k)
 	}
 }
 

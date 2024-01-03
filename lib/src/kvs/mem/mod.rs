@@ -121,7 +121,7 @@ impl Transaction {
 	/// Check if a key exists
 	pub(crate) fn exi<K, const S: usize>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<KeyStack<S>>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -192,7 +192,7 @@ impl Transaction {
 		suffix: K,
 	) -> Result<Vec<u8>, Error>
 	where
-		K: Into<KeyStack<S>>,
+		K: Into<KeyStack>,
 	{
 		// Check to see if transaction is closed
 		if self.done {
@@ -203,9 +203,9 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 
-		let ts_key: KeyStack<S> = ts_key.into();
-		let prefix: KeyStack<S> = prefix.into();
-		let suffix: KeyStack<S> = suffix.into();
+		let ts_key: KeyStack = ts_key.into();
+		let prefix: KeyStack = prefix.into();
+		let suffix: KeyStack = suffix.into();
 
 		let ts = self.get_timestamp(ts_key.clone())?;
 		let k = prefix + ts_key.into() + suffix;

@@ -6,8 +6,6 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const SIZE: usize = 4 + 16;
-
 // Represents cluster information.
 // In the future, this could also include broadcast addresses and other information.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
@@ -37,16 +35,16 @@ impl Nd {
 		}
 	}
 
-	pub fn prefix() -> KeyStack<SIZE> {
+	pub fn prefix() -> KeyStack {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'n', b'd', 0x00]);
-		KeyStack::<SIZE>::from(&k) // TODO
+		KeyStack::from(&k) // TODO
 	}
 
-	pub fn suffix() -> KeyStack<SIZE> {
+	pub fn suffix() -> KeyStack {
 		let mut k = crate::key::root::all::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'n', b'd', 0xff]);
-		KeyStack::<SIZE>::from(&k) // TODO
+		KeyStack::from(&k) // TODO
 	}
 }
 

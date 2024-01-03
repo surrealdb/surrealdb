@@ -2,11 +2,11 @@ mod error;
 mod person;
 
 use axum::routing::{delete, get, post, put};
-use axum::{Router, Server};
-use std::net::SocketAddr;
+use axum::Router;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	db.use_ns("namespace").use_db("database").await?;
 
-	let app = Router::new()
+	let router = Router::new()
 		.route("/person/:id", post(person::create))
 		.route("/person/:id", get(person::read))
 		.route("/person/:id", put(person::update))
@@ -28,9 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.route("/people", get(person::list))
 		.with_state(db);
 
-	let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+	let listener = TcpListener::bind("localhost:8080").await?;
 
-	Server::bind(&addr).serve(app.into_make_service()).await?;
+	axum::serve(listener, router).await?;
 
 	Ok(())
 }

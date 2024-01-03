@@ -3,7 +3,7 @@
 {
   inherit target;
 
-  features = with util.features; [ default ];
+  features = with util.features; [ storage-mem storage-rocksdb scripting http ];
 
   buildSpec = with pkgs; {
     strictDeps = true;

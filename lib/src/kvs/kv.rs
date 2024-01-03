@@ -1,75 +1,48 @@
 use std::fmt::Display;
+use std::rc::Rc;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].
 pub type KeyHeap = Vec<u8>;
 
-/// The key part of a key-value pair. Stack allocated.
+/// The key part of a key-value pair. A mutable reference to heap allocated data.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
-pub struct KeyStack<const S: usize> {
+pub struct KeyStack<'data> {
 	/// The key
-	pub key: [u8; S],
-	/// Since the key size must be known at compile time, we need to track the size in case it is
-	/// smaller
-	pub size: usize,
+	pub key: &'data [u8],
 }
 
-impl<const S: usize> From<&[u8]> for KeyStack<S> {
+impl From<&[u8]> for KeyStack {
 	fn from(value: &[u8]) -> Self {
-		if value.len() > S {
-			panic!("Key too long");
-		}
-		let mut key = [0u8; S];
-		key[..value.len()].copy_from_slice(value);
+		let backed = Rc::new(vec![0u8; value.len()]);
+		backed[..value.len()].copy_from_slice(value);
 		Self {
-			key,
-			size: value.len(),
+			key: &mut backed[..],
 		}
 	}
 }
 
-impl<const F: usize, const T: usize> From<KeyStack<F>> for KeyStack<T> {
-	fn from(value: KeyStack<F>) -> Self {
-		if value.size > T {
-			panic!("Key too long");
-		}
-		let mut key = [0u8; T];
-		key[..value.size].copy_from_slice(&value.key[..value.size]);
-		Self {
-			key,
-			size: value.size,
-		}
-	}
-}
-
-impl<const S: usize> Into<KeyHeap> for KeyStack<S> {
+impl Into<KeyHeap> for KeyStack {
 	fn into(self) -> KeyHeap {
-		// Fixed size vec
-		let mut result = vec![0; S];
-		result[..self.size].copy_from_slice(&self.key[..self.size]);
-		result
+		self.key.to_vec()
 	}
 }
 
-impl<const S: usize> Display for KeyStack<S> {
+impl Display for KeyStack {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		for &byte in &self.key[..self.size] {
+		for &byte in &self.key {
 			write!(f, "{}", byte as char)?;
 		}
 		Ok(())
 	}
 }
 
-impl<const S: usize> Add<&KeyStack<S>> for &KeyStack<S> {
-	fn add(self, v: &KeyStack<S>) -> Self {
-		if self.size + v.size > S {
-			panic!("Key too long");
-		}
-		let mut key = [0u8; S];
-		key[..self.size].copy_from_slice(&self.key[..self.size]);
-		key[self.size..self.size + v.size].copy_from_slice(&v.key[..v.size]);
+impl Add<&KeyStack> for &KeyStack {
+	fn add(self, v: &KeyStack) -> Self {
+		let key = Rc::new(vec![0u8; self.key.len() + v.key.len()]);
+		key[..self.key.len()].copy_from_slice(&self.key[..self.key.len()]);
+		key[self.key.len()..].copy_from_slice(&v.key[..v.key.len()]);
 		Self {
 			key,
-			size: self.size + v.size,
 		}
 	}
 }
@@ -103,7 +76,7 @@ pub(super) trait Convert<T> {
 	fn convert(self) -> T;
 }
 
-impl<T> Convert<Vec<T>> for Vec<(KeyStack<128>, Val)>
+impl<T> Convert<Vec<T>> for Vec<(KeyStack, Val)>
 where
 	T: From<Val>,
 {

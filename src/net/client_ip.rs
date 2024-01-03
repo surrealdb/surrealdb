@@ -27,9 +27,11 @@ pub enum ClientIp {
 	CfConnectingIp,
 	/// Fly.io client IP
 	#[clap(name = "Fly-Client-IP")]
+	#[allow(clippy::enum_variant_names)]
 	FlyClientIp,
 	/// Akamai, Cloudflare true client IP
 	#[clap(name = "True-Client-IP")]
+	#[allow(clippy::enum_variant_names)]
 	TrueClientIP,
 	/// Nginx real IP
 	#[clap(name = "X-Real-IP")]

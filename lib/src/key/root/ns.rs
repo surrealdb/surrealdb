@@ -5,8 +5,6 @@ use crate::kvs::KeyStack;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
-const SIZE: usize = 64;
-
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Ns<'a> {
 	__: u8,
@@ -20,16 +18,16 @@ pub fn new(ns: &str) -> Ns<'_> {
 	Ns::new(ns)
 }
 
-pub fn prefix() -> KeyStack<SIZE> {
+pub fn prefix() -> KeyStack {
 	let mut k = super::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b's', 0x00]);
-	KeyStack::<SIZE>::from(k)
+	KeyStack::from(k)
 }
 
-pub fn suffix() -> KeyStack<SIZE> {
+pub fn suffix() -> KeyStack {
 	let mut k = super::all::new().encode().unwrap();
 	k.extend_from_slice(&[b'!', b'n', b's', 0xff]);
-	KeyStack::<SIZE>::from(k)
+	KeyStack::from(k)
 }
 
 impl KeyRequirements for Ns<'_> {

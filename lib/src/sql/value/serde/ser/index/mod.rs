@@ -89,10 +89,14 @@ mod tests {
 				k1: Default::default(),
 				b: Default::default(),
 			},
-			doc_ids_order: Default::default(),
-			doc_lengths_order: Default::default(),
-			postings_order: Default::default(),
-			terms_order: Default::default(),
+			doc_ids_order: 1,
+			doc_lengths_order: 2,
+			postings_order: 3,
+			terms_order: 4,
+			doc_ids_cache: 5,
+			doc_lengths_cache: 6,
+			postings_cache: 7,
+			terms_cache: 8,
 		});
 		let serialized = idx.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(idx, serialized);

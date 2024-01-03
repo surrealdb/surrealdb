@@ -20,10 +20,10 @@ use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::store::TreeStoreType;
+use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs;
-use crate::kvs::KeyStack;
+use crate::kvs::{KeyStack, TransactionType};
 use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
@@ -97,24 +97,25 @@ impl VersionedSerdeState for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
+		ixs: &IndexStores,
 		opt: &Options,
 		txn: &Transaction,
 		az: &str,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
-		store_type: TreeStoreType,
+		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let mut tx = txn.lock().await;
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
-		Self::with_analyzer(&mut tx, az, index_key_base, p, store_type).await
+		Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, tt).await
 	}
-
 	async fn with_analyzer(
+		ixs: &IndexStores,
 		run: &mut kvs::Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
-		store_type: TreeStoreType,
+		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let state_key: KeyStack = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = run.get(state_key.clone()).await? {
@@ -123,16 +124,26 @@ impl FtIndex {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(run, index_key_base.clone(), p.doc_ids_order, store_type).await?,
+			DocIds::new(ixs, run, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache)
+				.await?,
 		));
 		let doc_lengths = Arc::new(RwLock::new(
-			DocLengths::new(run, index_key_base.clone(), p.doc_lengths_order, store_type).await?,
+			DocLengths::new(
+				ixs,
+				run,
+				index_key_base.clone(),
+				p.doc_lengths_order,
+				tt,
+				p.doc_lengths_cache,
+			)
+			.await?,
 		));
 		let postings = Arc::new(RwLock::new(
-			Postings::new(run, index_key_base.clone(), p.postings_order, store_type).await?,
+			Postings::new(ixs, run, index_key_base.clone(), p.postings_order, tt, p.postings_cache)
+				.await?,
 		));
 		let terms = Arc::new(RwLock::new(
-			Terms::new(run, index_key_base.clone(), p.terms_order, store_type).await?,
+			Terms::new(ixs, run, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
 		));
 		let termdocs = TermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
@@ -244,7 +255,7 @@ impl FtIndex {
 		let mut tx = txn.lock().await;
 		let mut dl = self.doc_lengths.write().await;
 		if resolved.was_existing() {
-			if let Some(old_doc_length) = dl.get_doc_length(&mut tx, doc_id).await? {
+			if let Some(old_doc_length) = dl.get_doc_length_mut(&mut tx, doc_id).await? {
 				self.state.total_docs_lengths -= old_doc_length as u128;
 			}
 		}
@@ -442,7 +453,7 @@ impl FtIndex {
 		})
 	}
 
-	pub(crate) async fn finish(self, tx: &Transaction) -> Result<(), Error> {
+	pub(crate) async fn finish(&self, tx: &Transaction) -> Result<(), Error> {
 		let mut run = tx.lock().await;
 		self.doc_ids.write().await.finish(&mut run).await?;
 		self.doc_lengths.write().await.finish(&mut run).await?;
@@ -484,13 +495,12 @@ mod tests {
 	use crate::dbs::{Options, Transaction};
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::trees::store::TreeStoreType;
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*};
+	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
 	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
-	use crate::sql::{Statement, Thing, Value};
+	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
 	use futures::lock::Mutex;
 	use std::collections::HashMap;
@@ -537,16 +547,17 @@ mod tests {
 
 	pub(super) async fn tx_fti<'a>(
 		ds: &Datastore,
-		store_type: TreeStoreType,
+		tt: TransactionType,
 		az: &DefineAnalyzerStatement,
 		order: u32,
 		hl: bool,
 	) -> (Context<'a>, Options, Transaction, FtIndex) {
-		let write = matches!(store_type, TreeStoreType::Write);
-		let tx = ds.transaction(write.into(), Optimistic).await.unwrap();
+		let ctx = Context::default();
+		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let txn = Arc::new(Mutex::new(tx));
 		let mut tx = txn.lock().await;
 		let fti = FtIndex::with_analyzer(
+			ctx.get_index_stores(),
 			&mut tx,
 			az.clone(),
 			IndexKeyBase::default(),
@@ -558,13 +569,17 @@ mod tests {
 				terms_order: order,
 				sc: Scoring::bm25(),
 				hl,
+				doc_ids_cache: 100,
+				doc_lengths_cache: 100,
+				postings_cache: 100,
+				terms_cache: 100,
 			},
-			TreeStoreType::Write,
+			tt,
 		)
 		.await
 		.unwrap();
 		drop(tx);
-		(Context::default(), Options::default(), txn, fti)
+		(ctx, Options::default(), txn, fti)
 	}
 
 	pub(super) async fn finish(txn: &Transaction, fti: FtIndex) {
@@ -589,7 +604,7 @@ mod tests {
 		{
 			// Add one document
 			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.index_document(&ctx, &opt, &txn, &doc1, vec![Value::from("hello the world")])
 				.await
 				.unwrap();
@@ -599,7 +614,7 @@ mod tests {
 		{
 			// Add two documents
 			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.index_document(&ctx, &opt, &txn, &doc2, vec![Value::from("a yellow hello")])
 				.await
 				.unwrap();
@@ -611,7 +626,7 @@ mod tests {
 
 		{
 			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TreeStoreType::Read, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
 			// Check the statistics
 			let statistics = fti.statistics(&txn).await.unwrap();
 			assert_eq!(statistics.terms.keys_count, 7);
@@ -643,14 +658,14 @@ mod tests {
 		{
 			// Reindex one document
 			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.index_document(&ctx, &opt, &txn, &doc3, vec![Value::from("nobar foo")])
 				.await
 				.unwrap();
 			finish(&txn, fti).await;
 
 			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TreeStoreType::Read, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
 
 			// We can still find 'foo'
 			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "foo").await;
@@ -668,7 +683,7 @@ mod tests {
 		{
 			// Remove documents
 			let (_, _, txn, mut fti) =
-				tx_fti(&ds, TreeStoreType::Write, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
 			fti.remove_document(&txn, &doc1).await.unwrap();
 			fti.remove_document(&txn, &doc2).await.unwrap();
 			fti.remove_document(&txn, &doc3).await.unwrap();
@@ -677,7 +692,7 @@ mod tests {
 
 		{
 			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TreeStoreType::Read, &az, btree_order, false).await;
+				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
 			let (hits, _) = search(&ctx, &opt, &txn, &fti, "hello").await;
 			assert!(hits.is_none());
 			let (hits, _) = search(&ctx, &opt, &txn, &fti, "foo").await;
@@ -705,7 +720,7 @@ mod tests {
 			let btree_order = 5;
 			{
 				let (ctx, opt, txn, mut fti) =
-					tx_fti(&ds, TreeStoreType::Write, &az, btree_order, hl).await;
+					tx_fti(&ds, TransactionType::Write, &az, btree_order, hl).await;
 				fti.index_document(
 					&ctx,
 					&opt,
@@ -747,7 +762,7 @@ mod tests {
 
 			{
 				let (ctx, opt, txn, fti) =
-					tx_fti(&ds, TreeStoreType::Read, &az, btree_order, hl).await;
+					tx_fti(&ds, TransactionType::Read, &az, btree_order, hl).await;
 
 				let statistics = fti.statistics(&txn).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 17);
@@ -814,5 +829,81 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index_bm_25_with_highlighting() {
 		test_ft_index_bm_25(true).await;
+	}
+
+	async fn concurrent_task(ds: Arc<Datastore>, az: DefineAnalyzerStatement) {
+		let btree_order = 5;
+		let doc1: Thing = ("t", "doc1").into();
+		let content1 = Value::from(Array::from(vec!["Enter a search term", "Welcome", "Docusaurus blogging features are powered by the blog plugin.", "Simply add Markdown files (or folders) to the blog directory.", "blog", "Regular blog authors can be added to authors.yml.", "authors.yml", "The blog post date can be extracted from filenames, such as:", "2019-05-30-welcome.md", "2019-05-30-welcome/index.md", "A blog post folder can be convenient to co-locate blog post images:", "The blog supports tags as well!", "And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.", "blog: false", "MDX Blog Post", "Blog posts support Docusaurus Markdown features, such as MDX.", "Use the power of React to create interactive blog posts.", "Long Blog Post", "This is the summary of a very long blog post,", "Use a <!-- truncate --> comment to limit blog post size in the list view.", "<!--", "truncate", "-->", "First Blog Post", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+
+		let start = std::time::Instant::now();
+		while start.elapsed().as_secs() < 3 {
+			remove_insert_task(ds.as_ref(), &az, btree_order, &doc1, &content1).await;
+		}
+	}
+	#[test(tokio::test)]
+	async fn concurrent_test() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			panic!()
+		};
+		concurrent_task(ds.clone(), az.clone()).await;
+		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
+		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
+		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
+	}
+
+	async fn remove_insert_task(
+		ds: &Datastore,
+		az: &DefineAnalyzerStatement,
+		btree_order: u32,
+		rid: &Thing,
+		content: &Value,
+	) {
+		let (ctx, opt, txn, mut fti) =
+			tx_fti(ds, TransactionType::Write, &az, btree_order, false).await;
+		fti.remove_document(&txn, &rid).await.unwrap();
+		fti.index_document(&ctx, &opt, &txn, &rid, vec![content.clone()]).await.unwrap();
+		finish(&txn, fti).await;
+	}
+
+	#[test(tokio::test)]
+	async fn remove_insert_sequence() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			panic!()
+		};
+		let doc: Thing = ("t", "doc1").into();
+		let content = Value::from(Array::from(vec!["Enter a search term","Welcome","Docusaurus blogging features are powered by the blog plugin.","Simply add Markdown files (or folders) to the blog directory.","blog","Regular blog authors can be added to authors.yml.","authors.yml","The blog post date can be extracted from filenames, such as:","2019-05-30-welcome.md","2019-05-30-welcome/index.md","A blog post folder can be convenient to co-locate blog post images:","The blog supports tags as well!","And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.","blog: false","MDX Blog Post","Blog posts support Docusaurus Markdown features, such as MDX.","Use the power of React to create interactive blog posts.","Long Blog Post","This is the summary of a very long blog post,","Use a <!-- truncate --> comment to limit blog post size in the list view.","<!--","truncate","-->","First Blog Post","Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+
+		for i in 0..5 {
+			debug!("Attempt {i}");
+			{
+				let (ctx, opt, txn, mut fti) =
+					tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
+				fti.index_document(&ctx, &opt, &txn, &doc, vec![content.clone()]).await.unwrap();
+				finish(&txn, fti).await;
+			}
+
+			{
+				let (_, _, txn, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
+				let s = fti.statistics(&txn).await.unwrap();
+				assert_eq!(s.terms.keys_count, 113);
+			}
+
+			{
+				let (_, _, txn, mut fti) = tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
+				fti.remove_document(&txn, &doc).await.unwrap();
+				finish(&txn, fti).await;
+			}
+
+			{
+				let (_, _, txn, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
+				let s = fti.statistics(&txn).await.unwrap();
+				assert_eq!(s.terms.keys_count, 0);
+			}
+		}
 	}
 }

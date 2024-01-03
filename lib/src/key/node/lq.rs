@@ -6,8 +6,6 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const SIZE: usize = 128;
-
 /// The Lq key is used to quickly discover which live queries belong to which nodes
 /// This is used in networking for clustered environments such as discovering if an event is remote or local
 /// as well as garbage collection after dead nodes
@@ -34,18 +32,18 @@ pub fn new<'a>(nd: Uuid, lq: Uuid, ns: &'a str, db: &'a str) -> Lq<'a> {
 	Lq::new(nd, lq, ns, db)
 }
 
-pub fn prefix_nd(nd: &Uuid) -> KeyStack<SIZE> {
+pub fn prefix_nd(nd: &Uuid) -> KeyStack {
 	let mut k = [b'/', b'$'].to_vec();
 	k.extend_from_slice(nd.as_bytes());
 	k.extend_from_slice(&[0x00]);
-	KeyStack::<SIZE>::from(&k)
+	KeyStack::from(&k)
 }
 
-pub fn suffix_nd(nd: &Uuid) -> KeyStack<SIZE> {
+pub fn suffix_nd(nd: &Uuid) -> KeyStack {
 	let mut k = [b'/', b'$'].to_vec();
 	k.extend_from_slice(nd.as_bytes());
 	k.extend_from_slice(&[0xff]);
-	KeyStack::<SIZE>::from(&k)
+	KeyStack::from(&k)
 }
 
 impl KeyRequirements for Lq<'_> {

@@ -668,31 +668,31 @@ mod http_integration {
 				-- --------------------------------
 				-- OPTION
 				-- ------------------------------
-	
+
 				OPTION IMPORT;
-	
+
 				-- ------------------------------
 				-- TABLE: foo
 				-- ------------------------------
-	
+
 				DEFINE TABLE foo SCHEMALESS PERMISSIONS NONE;
-	
+
 				-- ------------------------------
 				-- TRANSACTION
 				-- ------------------------------
-	
+
 				BEGIN TRANSACTION;
-	
+
 				-- ------------------------------
 				-- TABLE DATA: foo
 				-- ------------------------------
-	
+
 				UPDATE foo:bvklxkhtxumyrfzqoc5i CONTENT { id: foo:bvklxkhtxumyrfzqoc5i };
-	
+
 				-- ------------------------------
 				-- TRANSACTION
 				-- ------------------------------
-	
+
 				COMMIT TRANSACTION;
 			"#;
 			let res = client.post(url).basic_auth(USER, Some(PASS)).body(data).send().await?;
@@ -1341,8 +1341,12 @@ mod http_integration {
 
 		// Check that the content is gzip encoded
 		{
-			let res =
-				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
+			let res = client
+				.post(url)
+				.basic_auth(USER, Some(PASS))
+				.body("CREATE |foo:100|")
+				.send()
+				.await?;
 			assert_eq!(res.status(), 200);
 			assert_eq!(res.headers()["content-encoding"], "gzip");
 		}

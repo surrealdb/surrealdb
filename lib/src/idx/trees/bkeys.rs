@@ -5,11 +5,11 @@ use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::ser;
 use std::collections::VecDeque;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::io;
 use std::io::Cursor;
 
-pub trait BKeys: Default + Display + Sized {
+pub trait BKeys: Default + Debug + Display + Sized {
 	fn with_key_val(key: KeyStack, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> u32;
 	fn is_empty(&self) -> bool;
@@ -22,7 +22,7 @@ pub trait BKeys: Default + Display + Sized {
 		&self,
 		prefix_key: &KeyStack,
 	) -> Result<VecDeque<(KeyStack, Payload)>, Error>;
-	fn insert(&mut self, key: KeyStack, payload: Payload);
+	fn insert(&mut self, key: KeyStack, payload: Payload) -> Option<Payload>;
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &KeyStack) -> Option<Payload>;
 	fn split_keys(self) -> Result<SplitKeys<Self>, Error>;
@@ -49,12 +49,12 @@ where
 	pub(in crate::idx) median_payload: Payload,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FstKeys {
 	i: Inner,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Inner {
 	Map(Map<Vec<u8>>),
 	Trie(TrieKeys),
@@ -110,14 +110,15 @@ impl BKeys for FstKeys {
 		&self,
 		_prefix_key: &KeyStack,
 	) -> Result<VecDeque<(KeyStack, Payload)>, Error> {
-		Err(Error::Unreachable)
+		Err(Error::Unreachable("BKeys/FSTKeys::collect_with_prefix"))
 	}
 
-	fn insert(&mut self, key: KeyStack, payload: Payload) {
+	fn insert(&mut self, key: KeyStack, payload: Payload) -> Option<Payload> {
 		self.edit();
 		if let Inner::Trie(t) = &mut self.i {
-			t.insert(key, payload);
+			return t.insert(key, payload);
 		}
+		unreachable!()
 	}
 
 	fn append(&mut self, keys: Self) {
@@ -165,7 +166,7 @@ impl BKeys for FstKeys {
 				median_payload: s.median_payload,
 			})
 		} else {
-			Err(Error::Unreachable)
+			Err(Error::Unreachable("BKeys/FSTKeys::split_keys"))
 		}
 	}
 
@@ -311,12 +312,12 @@ impl Display for FstKeys {
 				}
 				Ok(())
 			}
-			Inner::Trie(t) => t.fmt(f),
+			Inner::Trie(t) => write!(f, "{}", t),
 		}
 	}
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TrieKeys {
 	keys: Trie<KeyStack, Payload>,
 }
@@ -381,8 +382,8 @@ impl BKeys for TrieKeys {
 		Ok(r)
 	}
 
-	fn insert(&mut self, key: KeyStack, payload: Payload) {
-		self.keys.insert(key, payload);
+	fn insert(&mut self, key: KeyStack, payload: Payload) -> Option<Payload> {
+		self.keys.insert(key, payload)
 	}
 
 	fn append(&mut self, keys: Self) {
@@ -409,7 +410,7 @@ impl BKeys for TrieKeys {
 		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
 			(k.clone(), *v)
 		} else {
-			return Err(Error::Unreachable);
+			return Err(Error::Unreachable("BKeys/TrieKeys::split_keys"));
 		};
 		let mut right = Trie::default();
 		for (key, val) in s {

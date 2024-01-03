@@ -38,8 +38,7 @@ pub const PROCESSOR_BATCH_SIZE: u32 = 50;
 
 /// Forward all signup/signin query errors to a client trying authenticate to a scope. Do not use in production.
 pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> = Lazy::new(|| {
-	let default = false;
-	std::env::var("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS")
-		.map(|v| v.parse::<bool>().unwrap_or(default))
-		.unwrap_or(default)
+	option_env!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS")
+		.and_then(|s| s.parse::<bool>().ok())
+		.unwrap_or(false)
 });
