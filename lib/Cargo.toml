@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.0.1"
+version = "1.0.2"
 rust-version = "1.70.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -113,7 +113,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
-surrealml-core = { version = "0.0.2", optional = true }
+surrealml-core = { version = "0.0.3", optional = true }
 thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tokio-util = { version = "0.7.10", optional = true, features = ["compat"] }

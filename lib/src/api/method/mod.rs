@@ -46,7 +46,6 @@ pub use export::Export;
 pub use health::Health;
 pub use import::Import;
 pub use invalidate::Invalidate;
-pub use live::Live;
 pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
@@ -87,11 +86,14 @@ use std::time::Duration;
 #[non_exhaustive]
 pub struct Stats {
 	/// The time taken to execute the query
-	pub execution_time: Duration,
+	pub execution_time: Option<Duration>,
 }
 
 /// Machine learning model marker type for import and export types
 pub struct Model;
+
+/// Live query marker type
+pub struct Live;
 
 /// Responses returned with statistics
 #[derive(Debug)]
@@ -684,6 +686,7 @@ where
 			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
+			query_type: PhantomData,
 		}
 	}
 

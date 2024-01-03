@@ -494,7 +494,7 @@ mod ws_integration {
 			"Unexpected error received: {:#?}",
 			msgs
 		);
-		let msg = msgs.get(0).unwrap();
+		let msg = msgs.first().unwrap();
 		assert!(msg["status"].is_null(), "unexpected status: {:?}", msg);
 
 		// Create some data for notification
@@ -571,7 +571,7 @@ mod ws_integration {
 			"Unexpected error received: {:#?}",
 			msgs
 		);
-		let msg = msgs.get(0).unwrap();
+		let msg = msgs.first().unwrap();
 		assert!(msg["status"].is_null(), "unexpected status: {:?}", msg);
 
 		// Create some data for notification
