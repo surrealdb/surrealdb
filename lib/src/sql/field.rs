@@ -204,8 +204,13 @@ impl Fields {
 										}
 										v => v.to_owned(),
 									};
-									// This value is always a string, so we can convert it
-									let name = syn::idiom(&name.to_raw_string())?;
+									// find the name for the field, either from the argument or the
+									// alias.
+									let name = if let Some(x) = alias.as_ref().map(Cow::Borrowed) {
+										x
+									} else {
+										Cow::Owned(syn::idiom(&name.to_raw_string())?)
+									};
 									// Add the projected field to the output document
 									out.set(ctx, opt, txn, name.as_ref(), expr).await?
 								}

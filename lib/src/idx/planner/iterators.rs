@@ -1,6 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::docids::{DocId, DocIds, NO_DOC_ID};
+use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
@@ -27,7 +27,7 @@ impl ThingIterator {
 		&mut self,
 		tx: &Transaction,
 		size: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		match self {
 			ThingIterator::IndexEqual(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueEqual(i) => i.next_batch(tx).await,
@@ -61,7 +61,7 @@ impl IndexEqualThingIterator {
 		beg: &mut Vec<u8>,
 		end: &[u8],
 		limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		let min = beg.clone();
 		let max = end.to_owned();
 		let res = txn
@@ -81,7 +81,7 @@ impl IndexEqualThingIterator {
 			key.push(0x00);
 			*beg = key;
 		}
-		let res = res.iter().map(|(_, val)| (val.into(), NO_DOC_ID)).collect();
+		let res = res.iter().map(|(_, val)| (val.into(), None)).collect();
 		Ok(res)
 	}
 
@@ -89,7 +89,7 @@ impl IndexEqualThingIterator {
 		&mut self,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		Self::next_scan(txn, &mut self.beg, &self.end, limit).await
 	}
 }
@@ -184,7 +184,7 @@ impl IndexRangeThingIterator {
 		&mut self,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
 		let res = txn
@@ -206,7 +206,7 @@ impl IndexRangeThingIterator {
 		let mut r = Vec::with_capacity(res.len());
 		for (k, v) in res {
 			if self.r.matches(&k) {
-				r.push((v.into(), NO_DOC_ID));
+				r.push((v.into(), None));
 			}
 		}
 		Ok(r)
@@ -241,7 +241,7 @@ impl IndexUnionThingIterator {
 		&mut self,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		while let Some(r) = &mut self.current {
 			let res = IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit).await?;
 			if !res.is_empty() {
@@ -266,10 +266,13 @@ impl UniqueEqualThingIterator {
 		}
 	}
 
-	async fn next_batch(&mut self, txn: &Transaction) -> Result<Vec<(Thing, DocId)>, Error> {
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = txn.lock().await.get(key).await? {
-				return Ok(vec![(val.into(), NO_DOC_ID)]);
+				return Ok(vec![(val.into(), None)]);
 			}
 		}
 		Ok(vec![])
@@ -325,7 +328,7 @@ impl UniqueRangeThingIterator {
 		&mut self,
 		txn: &Transaction,
 		mut limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		if self.done {
 			return Ok(vec![]);
 		}
@@ -351,13 +354,13 @@ impl UniqueRangeThingIterator {
 				return Ok(r);
 			}
 			if self.r.matches(&k) {
-				r.push((v.into(), NO_DOC_ID));
+				r.push((v.into(), None));
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
 			if let Some(v) = tx.get(end).await? {
-				r.push((v.into(), NO_DOC_ID));
+				r.push((v.into(), None));
 			}
 		}
 		self.done = true;
@@ -381,13 +384,13 @@ impl MatchesThingIterator {
 		&mut self,
 		txn: &Transaction,
 		mut limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		let mut res = vec![];
 		if let Some(hits) = &mut self.hits {
 			let mut run = txn.lock().await;
 			while limit > 0 {
-				if let Some(hit) = hits.next(&mut run).await? {
-					res.push(hit);
+				if let Some((thg, doc_id)) = hits.next(&mut run).await? {
+					res.push((thg, Some(doc_id)));
 				} else {
 					break;
 				}
@@ -414,7 +417,7 @@ impl DocIdsIterator {
 		&mut self,
 		txn: &Transaction,
 		mut limit: u32,
-	) -> Result<Vec<(Thing, DocId)>, Error> {
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		let mut res = vec![];
 		let mut tx = txn.lock().await;
 		while limit > 0 {
@@ -422,7 +425,7 @@ impl DocIdsIterator {
 				if let Some(doc_key) =
 					self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await?
 				{
-					res.push((doc_key.into(), doc_id));
+					res.push((doc_key.into(), Some(doc_id)));
 					limit -= 1;
 				}
 			} else {

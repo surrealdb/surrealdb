@@ -6,8 +6,8 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
+use crate::kvs::TransactionType;
 use crate::sql::ident::Ident;
 use crate::sql::index::Index;
 use crate::sql::value::Value;
@@ -28,7 +28,7 @@ impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
@@ -48,14 +48,28 @@ impl AnalyzeStatement {
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let ft =
-							FtIndex::new(opt, txn, p.az.as_str(), ikb, p, TreeStoreType::Traversal)
-								.await?;
+						let ft = FtIndex::new(
+							ctx.get_index_stores(),
+							opt,
+							txn,
+							p.az.as_str(),
+							ikb,
+							p,
+							TransactionType::Read,
+						)
+						.await?;
 						ft.statistics(txn).await?.into()
 					}
 					Index::MTree(p) => {
 						let mut tx = txn.lock().await;
-						let mt = MTreeIndex::new(&mut tx, ikb, p, TreeStoreType::Traversal).await?;
+						let mt = MTreeIndex::new(
+							ctx.get_index_stores(),
+							&mut tx,
+							ikb,
+							p,
+							TransactionType::Read,
+						)
+						.await?;
 						mt.statistics(&mut tx).await?.into()
 					}
 					_ => {

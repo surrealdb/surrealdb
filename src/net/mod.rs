@@ -17,9 +17,18 @@ mod sync;
 mod tracer;
 mod version;
 
+#[cfg(feature = "ml")]
+mod ml;
+
+use crate::cli::CF;
+use crate::cnf;
+use crate::err::Error;
+use crate::net::signals::graceful_shutdown;
+use crate::telemetry::metrics::HttpMetricsLayer;
 use axum::response::Redirect;
 use axum::routing::get;
 use axum::{middleware, Router};
+use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use http::header;
 use std::net::SocketAddr;
@@ -30,22 +39,17 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
-#[cfg(feature = "http-compression")]
-use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
-use tower_http::sensitive_headers::{
-	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
-};
+use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
+use tower_http::sensitive_headers::SetSensitiveResponseHeadersLayer;
 use tower_http::trace::TraceLayer;
 use tower_http::ServiceBuilderExt;
 
-use crate::cli::CF;
-use crate::cnf;
-use crate::err::Error;
-use crate::net::signals::graceful_shutdown;
-use crate::telemetry::metrics::HttpMetricsLayer;
-use axum_server::tls_rustls::RustlsConfig;
+#[cfg(feature = "http-compression")]
+use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
+#[cfg(feature = "http-compression")]
+use tower_http::compression::CompressionLayer;
 
 const LOG: &str = "surrealdb::net";
 
@@ -80,7 +84,16 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.propagate_x_request_id();
 
 	#[cfg(feature = "http-compression")]
-	let service = service.layer(CompressionLayer::new());
+	let service = service.layer(
+		CompressionLayer::new().compress_when(
+			// Don't compress below 512 bytes
+			SizeAbove::new(512)
+				// Don't compress gRPC
+				.and(NotForContentType::GRPC)
+				// Don't compress images
+				.and(NotForContentType::IMAGES),
+		),
+	);
 
 	#[cfg(feature = "http-compression")]
 	let allow_header = [
@@ -150,8 +163,12 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router())
-		.layer(service);
+		.merge(key::router());
+
+	#[cfg(feature = "ml")]
+	let axum_app = axum_app.merge(ml::router());
+
+	let axum_app = axum_app.layer(service);
 
 	// Setup the graceful shutdown
 	let handle = Handle::new();

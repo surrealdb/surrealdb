@@ -6,7 +6,8 @@ use crate::dbs::{
 	Variables,
 };
 use crate::err::Error;
-use crate::iam::{Action, Auth, Error as IamError, ResourceKind, Role};
+use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
@@ -108,6 +109,8 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
+	// The index store cache
+	index_stores: IndexStores,
 }
 
 /// We always want to be circulating the live query information
@@ -351,6 +354,7 @@ impl Datastore {
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
+			index_stores: IndexStores::default(),
 		})
 	}
 
@@ -401,6 +405,10 @@ impl Datastore {
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
 		self
+	}
+
+	pub fn index_store(&self) -> &IndexStores {
+		&self.index_stores
 	}
 
 	/// Is authentication enabled for this Datastore?
@@ -1046,12 +1054,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = Context::default();
-		ctx.add_capabilities(self.capabilities.clone());
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
-		}
+		let mut ctx = Context::from_ds(
+			self.query_timeout,
+			self.capabilities.clone(),
+			self.index_stores.clone(),
+		);
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
@@ -1232,9 +1239,11 @@ impl Datastore {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
-	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<Arc<RwLock<Sender<Notification>>>> {
-		self.notification_channel.as_ref().map(|v| Arc::new(RwLock::new(v.0.clone())))
+	/// Performs a database import from SQL
+	#[instrument(level = "debug", skip(self, sess, sql))]
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+		// Execute the SQL import
+		self.execute(sql, sess, None).await
 	}
 
 	/// Performs a full database export as SQL
@@ -1242,15 +1251,10 @@ impl Datastore {
 	pub async fn export(
 		&self,
 		sess: &Session,
-		ns: String,
-		db: String,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
-		// Skip auth for Anonymous users if auth is disabled
-		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
-		if !skip_auth {
-			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
-		}
+		// Retrieve the provided NS and DB
+		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let mut txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
@@ -1262,18 +1266,15 @@ impl Datastore {
 		})
 	}
 
-	/// Performs a database import from SQL
-	#[instrument(level = "debug", skip(self, sess, sql))]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+	/// Checks the required permissions level for this session
+	#[instrument(level = "debug", skip(self, sess))]
+	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<(), Error> {
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
-			sess.au.is_allowed(
-				Action::Edit,
-				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
-			)?;
+			sess.au.is_allowed(action, &resource)?;
 		}
-		// Execute the SQL import
-		self.execute(sql, sess, None).await
+		// All ok
+		Ok(())
 	}
 }

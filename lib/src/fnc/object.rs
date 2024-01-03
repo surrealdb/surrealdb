@@ -21,7 +21,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value, Error> {
 	for v in array.iter() {
 		match v {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
-				let key = match entry.get(0) {
+				let key = match entry.first() {
 					Some(v) => match v {
 						Value::Strand(v) => v.to_owned().to_raw(),
 						v => v.to_string(),

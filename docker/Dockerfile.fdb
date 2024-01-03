@@ -15,7 +15,7 @@ COPY . /surrealdb/
 RUN  curl -L https://github.com/apple/foundationdb/releases/download/7.1.42/libfdb_c.x86_64.so -o libfdb_c.so && \
     echo "9501a7910fe2d47b805c48c467fddaf485ccf4b1195863e3c5fb0c86648084f1  libfdb_c.so" | sha256sum -c -s - || exit 1 && \
     mv libfdb_c.so /usr/lib/ && \
-    cargo build --features http-compression,storage-tikv,storage-fdb --release --locked
+    cargo build --features storage-tikv,storage-fdb --release --locked
 
 #
 # Development image

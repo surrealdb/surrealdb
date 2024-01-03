@@ -10,7 +10,7 @@ use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
 pub struct ExportCommandArguments {
-	#[arg(help = "Path to the sql file to export. Use dash - to write into stdout.")]
+	#[arg(help = "Path to the SurrealQL file to export. Use dash - to write into stdout.")]
 	#[arg(default_value = "-")]
 	#[arg(index = 1)]
 	file: String,
@@ -87,7 +87,7 @@ pub async fn init(
 	} else {
 		client.export(file).await?;
 	}
-	info!("The SQL file was exported successfully");
+	info!("The SurrealQL file was exported successfully");
 	// Everything OK
 	Ok(())
 }
