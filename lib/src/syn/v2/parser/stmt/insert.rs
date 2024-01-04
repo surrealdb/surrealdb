@@ -9,7 +9,7 @@ use crate::{
 impl Parser<'_> {
 	pub(crate) fn parse_insert_stmt(&mut self) -> ParseResult<InsertStatement> {
 		let ignore = self.eat(t!("IGNORE"));
-		expected!(self,t!("INTO"));
+		expected!(self, t!("INTO"));
 		let next = self.next();
 		// TODO: Explain that more complicated expressions are not allowed here.
 		let into = match next.kind {
@@ -28,9 +28,9 @@ impl Parser<'_> {
 				let start = self.pop_peek().span;
 				let fields = self.parse_idiom_list()?;
 				self.expect_closing_delimiter(t!(")"), start)?;
-				expected!(self,t!("VALUES"));
+				expected!(self, t!("VALUES"));
 
-				let start = expected!(self,t!("(")).span;
+				let start = expected!(self, t!("(")).span;
 				let mut values = vec![self.parse_value()?];
 				while self.eat(t!(",")) {
 					values.push(self.parse_value()?);
@@ -39,7 +39,7 @@ impl Parser<'_> {
 
 				let mut values = vec![values];
 				while self.eat(t!(",")) {
-					let start = expected!(self,t!("(")).span;
+					let start = expected!(self, t!("(")).span;
 					let mut inner_values = vec![self.parse_value()?];
 					while self.eat(t!(",")) {
 						inner_values.push(self.parse_value()?);
@@ -77,9 +77,9 @@ impl Parser<'_> {
 	}
 
 	fn parse_insert_update(&mut self) -> ParseResult<Data> {
-		expected!(self,t!("DUPLICATE"));
-		expected!(self,t!("KEY"));
-		expected!(self,t!("UPDATE"));
+		expected!(self, t!("DUPLICATE"));
+		expected!(self, t!("KEY"));
+		expected!(self, t!("UPDATE"));
 		let l = self.parse_plain_idiom()?;
 		let o = self.parse_assigner()?;
 		let r = self.parse_value()?;

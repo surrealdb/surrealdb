@@ -1,4 +1,5 @@
 //! Unicode related utilities.
+
 /// Character constants
 pub mod chars {
 	// Character tabulation
@@ -16,6 +17,8 @@ pub mod chars {
 	pub const BS: char = '\u{0008}';
 	/// Paragraph separator
 	pub const PS: char = '\u{2029}';
+	/// Next line
+	pub const NEL: char = '\u{0085}';
 
 	/// Line terminators for javascript source code.
 	pub const JS_LINE_TERIMATORS: [char; 4] = [LF, CR, LS, PS];

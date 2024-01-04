@@ -44,14 +44,14 @@ impl Parser<'_> {
 				t!("ELSE") => {
 					if self.eat(t!("IF")) {
 						let condition = self.parse_value_field()?;
-						expected!(self,t!("THEN"));
+						expected!(self, t!("THEN"));
 						let body = self.parse_value_field()?;
 						self.eat(t!(";"));
 						res.exprs.push((condition, body));
 					} else {
 						let value = self.parse_value_field()?;
 						self.eat(t!(";"));
-						expected!(self,t!("END"));
+						expected!(self, t!("END"));
 						res.close = Some(value);
 						return Ok(());
 					}
@@ -68,11 +68,11 @@ impl Parser<'_> {
 					self.pop_peek();
 					if self.eat(t!("IF")) {
 						let condition = self.parse_value_field()?;
-						let span = expected!(self,t!("{")).span;
+						let span = expected!(self, t!("{")).span;
 						let body = self.parse_block(span)?;
 						res.exprs.push((condition, body.into()));
 					} else {
-						let span = expected!(self,t!("{")).span;
+						let span = expected!(self, t!("{")).span;
 						let value = self.parse_block(span)?;
 						res.close = Some(value.into());
 						return Ok(());

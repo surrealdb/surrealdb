@@ -44,7 +44,7 @@ impl Parser<'_> {
 			}
 			t!("TOKEN") => {
 				let name = self.next_token_value()?;
-				expected!(self,t!("ON"));
+				expected!(self, t!("ON"));
 				let base = self.parse_base(true)?;
 				RemoveStatement::Token(crate::sql::statements::RemoveTokenStatement {
 					name,
@@ -71,7 +71,7 @@ impl Parser<'_> {
 			}
 			t!("EVENT") => {
 				let name = self.next_token_value()?;
-				expected!(self,t!("ON"));
+				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let table = self.next_token_value()?;
 				RemoveStatement::Event(RemoveEventStatement {
@@ -81,7 +81,7 @@ impl Parser<'_> {
 			}
 			t!("FIELD") => {
 				let idiom = self.parse_local_idiom()?;
-				expected!(self,t!("ON"));
+				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let table = self.next_token_value()?;
 				RemoveStatement::Field(RemoveFieldStatement {
@@ -91,7 +91,7 @@ impl Parser<'_> {
 			}
 			t!("INDEX") => {
 				let name = self.next_token_value()?;
-				expected!(self,t!("ON"));
+				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let what = self.next_token_value()?;
 				RemoveStatement::Index(RemoveIndexStatement {
@@ -107,7 +107,7 @@ impl Parser<'_> {
 			}
 			t!("USER") => {
 				let name = self.next_token_value()?;
-				expected!(self,t!("ON"));
+				expected!(self, t!("ON"));
 				let base = self.parse_base(false)?;
 				RemoveStatement::User(RemoveUserStatement {
 					name,

@@ -19,7 +19,7 @@ impl Parser<'_> {
 
 		let omit = self.eat(t!("OMIT")).then(|| self.parse_idiom_list()).transpose()?.map(Idioms);
 
-		expected!(self,t!("FROM"));
+		expected!(self, t!("FROM"));
 
 		let only = self.eat(t!("ONLY"));
 
@@ -76,7 +76,7 @@ impl Parser<'_> {
 		let with = match self.next().kind {
 			t!("NOINDEX") => With::NoIndex,
 			t!("NO") => {
-				expected!(self,t!("INDEX"));
+				expected!(self, t!("INDEX"));
 				With::NoIndex
 			}
 			t!("INDEX") => {
@@ -115,7 +115,7 @@ impl Parser<'_> {
 		let orders = match self.peek_kind() {
 			t!("RAND") => {
 				self.pop_peek();
-				let start = expected!(self,t!("(")).span;
+				let start = expected!(self, t!("(")).span;
 				self.expect_closing_delimiter(t!(")"), start)?;
 				vec![Order {
 					order: Default::default(),

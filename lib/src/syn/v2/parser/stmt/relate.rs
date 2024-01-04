@@ -41,9 +41,9 @@ impl Parser<'_> {
 		};
 		let kind = self.parse_thing_or_table()?;
 		if is_o {
-			expected!(self,t!("->"))
+			expected!(self, t!("->"))
 		} else {
-			expected!(self,t!("<-"))
+			expected!(self, t!("<-"))
 		};
 		let second = self.parse_relate_value()?;
 		if is_o {

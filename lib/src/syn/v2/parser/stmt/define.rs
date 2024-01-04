@@ -76,7 +76,7 @@ impl Parser<'_> {
 
 	pub fn parse_define_function(&mut self) -> ParseResult<DefineFunctionStatement> {
 		let name = self.parse_custom_function_name()?;
-		let token = expected!(self,t!("(")).span;
+		let token = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!(")")) {
@@ -84,7 +84,7 @@ impl Parser<'_> {
 			}
 
 			let param = self.next_token_value::<Param>()?.0;
-			expected!(self,t!(":"));
+			expected!(self, t!(":"));
 			let kind = self.parse_inner_kind()?;
 
 			args.push((param, kind));
@@ -95,7 +95,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let next = expected!(self,t!("{")).span;
+		let next = expected!(self, t!("{")).span;
 		let block = self.parse_block(next)?;
 
 		let mut res = DefineFunctionStatement {
@@ -124,7 +124,7 @@ impl Parser<'_> {
 
 	pub fn parse_define_user(&mut self) -> ParseResult<DefineUserStatement> {
 		let name = self.next_token_value()?;
-		expected!(self,t!("ON"));
+		expected!(self, t!("ON"));
 		let base = self.parse_base(false)?;
 
 		let mut res = DefineUserStatement::from_parsed_values(
@@ -163,7 +163,7 @@ impl Parser<'_> {
 
 	pub fn parse_define_token(&mut self) -> ParseResult<DefineTokenStatement> {
 		let name = self.next_token_value()?;
-		expected!(self,t!("ON"));
+		expected!(self, t!("ON"));
 		let base = self.parse_base(true)?;
 
 		let mut res = DefineTokenStatement {
@@ -316,7 +316,7 @@ impl Parser<'_> {
 
 	pub fn parse_define_event(&mut self) -> ParseResult<DefineEventStatement> {
 		let name = self.next_token_value()?;
-		expected!(self,t!("ON"));
+		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
 
@@ -351,7 +351,7 @@ impl Parser<'_> {
 
 	pub fn parse_define_field(&mut self) -> ParseResult<DefineFieldStatement> {
 		let name = self.parse_local_idiom()?;
-		expected!(self,t!("ON"));
+		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
 
@@ -401,7 +401,7 @@ impl Parser<'_> {
 
 	pub fn parse_define_index(&mut self) -> ParseResult<DefineIndexStatement> {
 		let name = self.next_token_value()?;
-		expected!(self,t!("ON"));
+		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.next_token_value()?;
 
@@ -435,7 +435,7 @@ impl Parser<'_> {
 							if self.eat(t!("(")) {
 								let open = self.last_span();
 								let k1 = self.next_token_value()?;
-								expected!(self,t!(","));
+								expected!(self, t!(","));
 								let b = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open)?;
 								Scoring::Bm {
@@ -509,7 +509,7 @@ impl Parser<'_> {
 				}
 				t!("MTREE") => {
 					self.pop_peek();
-					expected!(self,t!("DIMENSION"));
+					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
 					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
 					let capacity = self
@@ -583,23 +583,23 @@ impl Parser<'_> {
 								filters.push(Filter::Uppercase);
 							}
 							t!("EDGENGRAM") => {
-								let open_span = expected!(self,t!("(")).span;
+								let open_span = expected!(self, t!("(")).span;
 								let a = self.next_token_value()?;
-								expected!(self,t!(","));
+								expected!(self, t!(","));
 								let b = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::EdgeNgram(a, b));
 							}
 							t!("NGRAM") => {
-								let open_span = expected!(self,t!("(")).span;
+								let open_span = expected!(self, t!("(")).span;
 								let a = self.next_token_value()?;
-								expected!(self,t!(","));
+								expected!(self, t!(","));
 								let b = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Ngram(a, b));
 							}
 							t!("SNOWBALL") => {
-								let open_span = expected!(self,t!("(")).span;
+								let open_span = expected!(self, t!("(")).span;
 								let language = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
 								filters.push(Filter::Snowball(language))
@@ -633,8 +633,8 @@ impl Parser<'_> {
 				}
 				t!("FUNCTION") => {
 					self.pop_peek();
-					expected!(self,t!("fn"));
-					expected!(self,t!("::"));
+					expected!(self, t!("fn"));
+					expected!(self, t!("::"));
 					let mut ident = self.next_token_value::<Ident>()?;
 					while self.eat(t!("::")) {
 						let value = self.next_token_value::<Ident>()?;
