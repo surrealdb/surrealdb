@@ -19,6 +19,7 @@ impl Parser<'_> {
 		Ok(kind)
 	}
 
+	/// Parse an inner kind, a kind without enclosing `<` `>`.
 	pub fn parse_inner_kind(&mut self) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
@@ -27,7 +28,8 @@ impl Parser<'_> {
 			}
 			t!("OPTION") => {
 				self.pop_peek();
-				let delim = expected!(self,t!("<")).span;
+
+				let delim = expected!(self, t!("<")).span;
 				let mut first = self.parse_concrete_kind()?;
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
@@ -54,6 +56,7 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parse a single kind which is not any, option, or either.
 	fn parse_concrete_kind(&mut self) -> ParseResult<Kind> {
 		match self.next().kind {
 			t!("BOOL") => Ok(Kind::Bool),
@@ -104,6 +107,7 @@ impl Parser<'_> {
 						self.expect_closing_delimiter(t!(">"), delim)?;
 						kind
 					}
+					// Legacy gemoetry kind syntax with parens instead of `<` `>`.
 					t!("(") => {
 						let delim = self.pop_peek().span;
 						let mut kind = vec![self.parse_geometry_kind()?];

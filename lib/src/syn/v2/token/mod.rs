@@ -115,9 +115,9 @@ pub enum Operator {
 	Dec,
 	/// `+?=`
 	Ext,
-	/// `??`
-	Tco,
 	/// `?:`
+	Tco,
+	/// `??`
 	Nco,
 }
 
@@ -158,8 +158,8 @@ impl Operator {
 			Operator::Inc => "'+='",
 			Operator::Dec => "'-='",
 			Operator::Ext => "'+?='",
-			Operator::Tco => "'??'",
-			Operator::Nco => "'?:'",
+			Operator::Tco => "'?:'",
+			Operator::Nco => "'??'",
 		}
 	}
 }
