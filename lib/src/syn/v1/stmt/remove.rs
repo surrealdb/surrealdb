@@ -178,8 +178,11 @@ pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
-	let (i, if_exists) =
-		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	Ok((
 		i,
 		RemoveTableStatement {
@@ -260,5 +263,12 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE TABLE test IF EXISTS", format!("{}", out))
+	}
+
+	#[test]
+	fn remove_table_if() {
+		let sql = "REMOVE TABLE test IF";
+		let res = remove(sql);
+		assert!(res.is_err());
 	}
 }
