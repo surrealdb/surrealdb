@@ -1370,7 +1370,10 @@ mod tests {
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
 		// There should be one record per node
-		assert_eq!(10, tx.scan(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len());
+		assert_eq!(
+			10,
+			tx.scan_paged(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len()
+		);
 
 		let nodes_count = t
 			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| match count {
@@ -1510,7 +1513,10 @@ mod tests {
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
 		// There should be one record per node
-		assert_eq!(7, tx.scan(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len());
+		assert_eq!(
+			7,
+			tx.scan_paged(ScanPage::from(vec![]..vec![0xf]), 100).await.unwrap().values.len()
+		);
 
 		let nodes_count = t
 			.inspect_nodes(&mut tx, &mut st, |count, depth, node_id, node| match count {
@@ -1635,7 +1641,7 @@ mod tests {
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
 		// There should not be any record in the database
-		assert_eq!(0, tx.scan(ScanPage::from(vec![]..vec![0xf]), 100).await?.values.len());
+		assert_eq!(0, tx.scan_paged(ScanPage::from(vec![]..vec![0xf]), 100).await?.values.len());
 		tx.cancel().await?;
 		Ok(())
 	}
