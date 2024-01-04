@@ -52,6 +52,9 @@ impl DefineFieldStatement {
 		let new_tb = match (self.name.to_string().as_str(), tb.relation.clone(), self.kind.clone())
 		{
 			("in", Some((in_k, out_k)), Some(dk)) => {
+				if !matches!(dk, Kind::Record(_)) {
+					return Err(Error::Thrown("in field on a relation must be a record".into()));
+				};
 				if in_k.as_ref() != Some(&dk) {
 					Some(DefineTableStatement {
 						relation: Some((Some(dk), out_k)),
@@ -62,6 +65,9 @@ impl DefineFieldStatement {
 				}
 			}
 			("out", Some((in_k, out_k)), Some(dk)) => {
+				if !matches!(dk, Kind::Record(_)) {
+					return Err(Error::Thrown("out field on a relation must be a record".into()));
+				};
 				if out_k.as_ref() != Some(&dk) {
 					Some(DefineTableStatement {
 						relation: Some((in_k, Some(dk))),
