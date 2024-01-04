@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
+	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
