@@ -765,9 +765,11 @@ async fn router(
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			let mut new_vars = vars.clone();
-			new_vars.insert(key.clone(), value.clone());
-			match kvs.compute(value, &*session, Some(new_vars)).await? {
+			let var = Some(map! {
+				key.clone() => Value::None,
+				=> &vars
+			});
+			match kvs.compute(value, &*session, var).await? {
 				Value::None => vars.remove(&key),
 				v => vars.insert(key, v),
 			};
