@@ -146,7 +146,7 @@ impl Parser<'_> {
 		// HACK: The way we handle numbers in the parser has one downside: We can't parse i64::MIN
 		// directly.
 		// The tokens [`-`, `1232`] are parsed independently where - is parsed as a unary operator then 1232
-		// as a positive i64 integer. This results in a proble when 9223372036854775808 is the
+		// as a positive i64 integer. This results in a problem when 9223372036854775808 is the
 		// positive integer. This is larger then i64::MAX so the parser fallsback to parsing a
 		// floating point number. However -9223372036854775808 does fit in a i64 but the parser is,
 		// when parsing the number, unaware that the number will be negative.
@@ -213,7 +213,7 @@ impl Parser<'_> {
 				let reference = (!self.eat(t!("@")))
 					.then(|| {
 						let number = self.next_token_value()?;
-						expected!(self,t!("@"));
+						expected!(self, t!("@"));
 						Ok(number)
 					})
 					.transpose()?;
@@ -248,12 +248,12 @@ impl Parser<'_> {
 			t!("OUTSIDE") => Operator::Outside,
 			t!("INTERSECTS") => Operator::Intersects,
 			t!("NOT") => {
-				expected!(self,t!("IN"));
+				expected!(self, t!("IN"));
 				Operator::NotInside
 			}
 			t!("IN") => Operator::Inside,
 			t!("KNN") => {
-				let start = expected!(self,t!("<")).span;
+				let start = expected!(self, t!("<")).span;
 				let amount = self.next_token_value()?;
 				self.expect_closing_delimiter(t!(">"), start)?;
 				Operator::Knn(amount)

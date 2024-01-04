@@ -155,6 +155,7 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parse the kind of gemoetry
 	fn parse_geometry_kind(&mut self) -> ParseResult<String> {
 		match self.next().kind {
 			TokenKind::Keyword(

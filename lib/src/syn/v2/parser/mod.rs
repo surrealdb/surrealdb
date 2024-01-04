@@ -46,6 +46,7 @@ pub mod test;
 
 pub use error::{IntErrorKind, ParseError, ParseErrorKind};
 
+/// The result returned by most parser function.
 pub type ParseResult<T> = Result<T, ParseError>;
 
 /// A result of trying to parse a possibly partial query.
@@ -193,6 +194,8 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Ensure that there was no whitespace parser between the last token and the current one.
+	///
+	/// This is used in places where whitespace is prohibited like inside a record id.
 	fn no_whitespace(&mut self) -> ParseResult<()> {
 		if let Some(span) = self.lexer.whitespace_span() {
 			Err(ParseError::new(ParseErrorKind::NoWhitespace, span))

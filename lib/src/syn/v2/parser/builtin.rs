@@ -13,14 +13,14 @@ const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;
 const MAX_FUNCTION_NAME_LEN: usize = 33;
 const LEVENSTHEIN_ARRAY_SIZE: usize = 1 + MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEIN_CUT_OFF as usize;
 
-// simple function calculating levenshtein distance with a cut-off.
-//
-// levenshtein distance seems fast enough for searching possible functions to suggest as the list
-// isn't that long and the function names aren't that long. Additionally this function also uses a
-// cut off for quick rejection of strings which won't lower the minimum searched distance.
-//
-// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE. LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
-// maximum cut_off + 1 for the additional value required during calculation
+/// simple function calculating levenshtein distance with a cut-off.
+///
+/// levenshtein distance seems fast enough for searching possible functions to suggest as the list
+/// isn't that long and the function names aren't that long. Additionally this function also uses a
+/// cut off for quick rejection of strings which won't lower the minimum searched distance.
+///
+/// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE. LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
+/// maximum cut_off + 1 for the additional value required during calculation
 fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	debug_assert!(LEVENSTHEIN_ARRAY_SIZE < u8::MAX as usize);
 	let mut distance_array = [[0u8; LEVENSTHEIN_ARRAY_SIZE]; 2];
@@ -409,8 +409,7 @@ impl Parser<'_> {
 		let slice = self.lexer.reader.span(span);
 
 		// parser implementations guarentess that the slice is a valid utf8 string.
-		debug_assert!(std::str::from_utf8(slice).is_ok());
-		let str = unsafe { std::str::from_utf8_unchecked(slice) };
+		let str = std::str::from_utf8(slice).unwrap();
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),
@@ -482,6 +481,10 @@ mod test {
 		let max = PATHS.keys().map(|x| x.len()).max().unwrap();
 		// These two need to be the same but the constant needs to manually be updated if PATHS
 		// ever changes so that these two values are not the same.
-		assert_eq!(MAX_FUNCTION_NAME_LEN, max);
+		assert_eq!(
+			MAX_FUNCTION_NAME_LEN, max,
+			"the constant MAX_FUNCTION_NAME_LEN should be {} but is {}, please update the constant",
+			max, MAX_FUNCTION_NAME_LEN
+		);
 	}
 }

@@ -65,6 +65,7 @@ impl Parser<'_> {
 		Ok(Some(res))
 	}
 
+	/// Parses a statement output if the next token is `return`.
 	pub fn try_parse_output(&mut self) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
@@ -95,6 +96,7 @@ impl Parser<'_> {
 		Ok(Some(res))
 	}
 
+	/// Parses a statement timeout if the next token is `TIMEOUT`.
 	pub fn try_parse_timeout(&mut self) -> ParseResult<Option<Timeout>> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(None);
@@ -284,9 +286,9 @@ impl Parser<'_> {
 	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
 	/// parens. Expects the next keyword to be `SELECT`.
 	pub fn parse_view(&mut self) -> ParseResult<View> {
-		expected!(self,t!("SELECT"));
+		expected!(self, t!("SELECT"));
 		let fields = self.parse_fields()?;
-		expected!(self,t!("FROM"));
+		expected!(self, t!("FROM"));
 		let mut from = vec![self.next_token_value()?];
 		while self.eat(t!(",")) {
 			from.push(self.next_token_value()?);
@@ -325,13 +327,12 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
-		expected!(self,t!("fn"));
-		expected!(self,t!("::"));
+		expected!(self, t!("fn"));
+		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?;
 		while self.eat(t!("::")) {
 			let part = self.next_token_value::<Ident>()?;
-			name.0.push(':');
-			name.0.push(':');
+			name.0.push_str("::");
 			name.0.push_str(part.0.as_str());
 		}
 		Ok(name)

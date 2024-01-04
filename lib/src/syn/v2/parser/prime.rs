@@ -56,9 +56,9 @@ impl Parser<'_> {
 			}
 			t!("<") => {
 				self.pop_peek();
-				expected!(self,t!("FUTURE"));
-				expected!(self,t!(">"));
-				let start = expected!(self,t!("{")).span;
+				expected!(self, t!("FUTURE"));
+				expected!(self, t!(">"));
+				let start = expected!(self, t!("{")).span;
 				let block = self.parse_block(start)?;
 				Ok(Value::Future(Box::new(crate::sql::Future(block))))
 			}
@@ -130,9 +130,9 @@ impl Parser<'_> {
 			t!("<") => {
 				self.pop_peek();
 				// Casting should already have been parsed.
-				expected!(self,t!("FUTURE"));
+				expected!(self, t!("FUTURE"));
 				self.expect_closing_delimiter(t!(">"), token.span)?;
-				let next = expected!(self,t!("{")).span;
+				let next = expected!(self, t!("{")).span;
 				let block = self.parse_block(next)?;
 				return Ok(Value::Future(Box::new(crate::sql::Future(block))));
 			}
@@ -300,9 +300,13 @@ impl Parser<'_> {
 		Ok(Array(values))
 	}
 
+	/// Parse a mock `|foo:1..3|`
+	///
+	/// # Parser State
+	/// Expects the starting `|` already be eaten and its span passed as an argument.
 	pub fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
 		let name = self.next_token_value::<Ident>()?.0;
-		expected!(self,t!(":"));
+		expected!(self, t!(":"));
 		let from = self.next_token_value()?;
 		let to = self.eat(t!("..")).then(|| self.next_token_value()).transpose()?;
 		self.expect_closing_delimiter(t!("|"), start)?;
@@ -457,6 +461,8 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
+	/// matches.
 	pub fn parse_legacy_strand(&mut self) -> ParseResult<Value> {
 		let text = self.lexer.string.take().unwrap();
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing() {
@@ -472,7 +478,7 @@ impl Parser<'_> {
 	}
 
 	fn parse_script(&mut self) -> ParseResult<Function> {
-		let start = expected!(self,t!("(")).span;
+		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!(")")) {
@@ -486,7 +492,7 @@ impl Parser<'_> {
 				break;
 			}
 		}
-		expected!(self,t!("{"));
+		expected!(self, t!("{"));
 		let body = self
 			.lexer
 			.lex_js_function_body()
