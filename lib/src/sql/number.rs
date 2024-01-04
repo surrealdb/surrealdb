@@ -1,4 +1,4 @@
-use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
+use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub};
 use crate::err::Error;
 use crate::sql::strand::Strand;
 use revision::revisioned;
@@ -9,7 +9,7 @@ use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
-use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+use std::ops::{self, Add, Div, Mul, Neg, Sub};
 use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
@@ -499,7 +499,6 @@ impl_simple_try_op!(TryAdd, try_add, add, checked_add);
 impl_simple_try_op!(TrySub, try_sub, sub, checked_sub);
 impl_simple_try_op!(TryMul, try_mul, mul, checked_mul);
 impl_simple_try_op!(TryDiv, try_div, div, checked_div);
-impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
 
 impl TryPow for Number {
 	type Output = Self;

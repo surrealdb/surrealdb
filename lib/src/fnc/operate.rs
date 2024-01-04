@@ -3,7 +3,13 @@ use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub, Value};
+use crate::sql::value::TryAdd;
+use crate::sql::value::TryDiv;
+use crate::sql::value::TryMul;
+use crate::sql::value::TryNeg;
+use crate::sql::value::TryPow;
+use crate::sql::value::TrySub;
+use crate::sql::value::Value;
 use crate::sql::{Expression, Thing};
 
 pub fn neg(a: Value) -> Result<Value, Error> {
@@ -56,10 +62,6 @@ pub fn mul(a: Value, b: Value) -> Result<Value, Error> {
 
 pub fn div(a: Value, b: Value) -> Result<Value, Error> {
 	a.try_div(b)
-}
-
-pub fn rem(a: Value, b: Value) -> Result<Value, Error> {
-	a.try_rem(b)
 }
 
 pub fn pow(a: Value, b: Value) -> Result<Value, Error> {
