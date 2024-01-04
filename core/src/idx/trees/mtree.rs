@@ -14,7 +14,7 @@ use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::knn::{KnnResult, KnnResultBuilder, PriorityNode};
+use crate::idx::trees::knn::{Docs, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{
 	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
@@ -240,7 +240,7 @@ impl MTree {
 						if res.check_add(d) {
 							#[cfg(debug_assertions)]
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
-							res.add(d, &p.docs);
+							res.add(d, &Docs::Bits(p.docs.clone()));
 						}
 					}
 				}

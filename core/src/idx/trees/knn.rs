@@ -75,10 +75,177 @@ impl Ord for PriorityResult {
 	}
 }
 
+#[derive(Debug, Clone)]
+pub(super) enum Docs {
+	One(DocId),
+	Vec2([DocId; 2]),
+	Vec3([DocId; 3]),
+	Vec4([DocId; 4]),
+	Bits(RoaringTreemap),
+}
+
+impl Docs {
+	fn len(&self) -> u64 {
+		match self {
+			Docs::One(_) => 1,
+			Docs::Vec2(_) => 2,
+			Docs::Vec3(_) => 3,
+			Docs::Vec4(_) => 4,
+			Docs::Bits(b) => b.len(),
+		}
+	}
+
+	fn append_to(&self, to: &mut RoaringTreemap) {
+		match &self {
+			Docs::One(d) => {
+				to.insert(*d);
+			}
+			Docs::Vec2(a) => {
+				for d in a {
+					to.insert(*d);
+				}
+			}
+			Docs::Vec3(a) => {
+				for d in a {
+					to.insert(*d);
+				}
+			}
+			Docs::Vec4(a) => {
+				for d in a {
+					to.insert(*d);
+				}
+			}
+			Docs::Bits(b) => {
+				for d in b {
+					to.insert(d);
+				}
+			}
+		}
+	}
+
+	fn remove_to(&self, to: &mut RoaringTreemap) {
+		match &self {
+			Docs::One(d) => {
+				to.remove(*d);
+			}
+			Docs::Vec2(a) => {
+				for &d in a {
+					to.remove(d);
+				}
+			}
+			Docs::Vec3(a) => {
+				for &d in a {
+					to.remove(d);
+				}
+			}
+			Docs::Vec4(a) => {
+				for &d in a {
+					to.remove(d);
+				}
+			}
+			Docs::Bits(b) => {
+				for d in b {
+					to.remove(d);
+				}
+			}
+		}
+	}
+
+	fn append_iter_ref<'a, I>(&mut self, docs: I) -> Option<Self>
+	where
+		I: Iterator<Item = &'a DocId>,
+	{
+		let mut new_doc: Option<Self> = None;
+		for &doc in docs {
+			if let Some(mut nd) = new_doc {
+				new_doc = nd.insert(doc);
+			} else {
+				new_doc = self.insert(doc);
+			}
+		}
+		new_doc
+	}
+
+	fn append_iter<I>(&mut self, docs: I) -> Option<Self>
+	where
+		I: Iterator<Item = DocId>,
+	{
+		let mut new_doc: Option<Self> = None;
+		for doc in docs {
+			if let Some(mut nd) = new_doc {
+				new_doc = nd.insert(doc);
+			} else {
+				new_doc = self.insert(doc);
+			}
+		}
+		new_doc
+	}
+	fn append_from(&mut self, from: &Docs) -> Option<Self> {
+		match from {
+			Docs::One(d) => self.insert(*d),
+			Docs::Vec2(a) => self.append_iter_ref(a.iter()),
+			Docs::Vec3(a) => self.append_iter_ref(a.iter()),
+			Docs::Vec4(a) => self.append_iter_ref(a.iter()),
+			Docs::Bits(a) => self.append_iter(a.iter()),
+		}
+	}
+
+	fn iter<I>(&self) -> I
+	where
+		I: Iterator<Item = DocId>,
+	{
+		match &self {
+			Docs::One(d) => OneDocIterator(Some(*d)),
+			Docs::Vec2(a) => SliceDocIterator(a.iter()),
+			Docs::Vec3(a) => SliceDocIterator(a.iter()),
+			Docs::Vec4(a) => SliceDocIterator(a.iter()),
+			Docs::Bits(a) => a.iter(),
+		}
+	}
+
+	pub(super) fn insert(&mut self, d: DocId) -> Option<Self> {
+		match self {
+			Docs::One(o) => Some(Docs::Vec2([*o, d])),
+			Docs::Vec2(a) => Some(Docs::Vec3([a[0], a[1], d])),
+			Docs::Vec3(a) => Some(Docs::Vec4([a[0], a[1], a[2], d])),
+			Docs::Vec4(a) => Some(Docs::Bits(RoaringTreemap::from([a[0], a[1], a[2], a[3], d]))),
+			Docs::Bits(b) => {
+				b.insert(d);
+				None
+			}
+		}
+	}
+}
+
+struct OneDocIterator(Option<DocId>);
+
+impl Iterator for OneDocIterator {
+	type Item = DocId;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.take()
+	}
+}
+
+struct SliceDocIterator<'a, I>(I)
+where
+	I: Iterator<Item = &'a DocId>;
+
+impl<'a, I> Iterator for SliceDocIterator<'a, I>
+where
+	I: Iterator<Item = &'a DocId>,
+{
+	type Item = DocId;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.next().map(|d| *d)
+	}
+}
+
 pub(super) struct KnnResultBuilder {
 	knn: u64,
 	docs: RoaringTreemap,
-	priority_list: BTreeMap<PriorityResult, RoaringTreemap>,
+	priority_list: BTreeMap<PriorityResult, Docs>,
 }
 
 impl KnnResultBuilder {
@@ -99,27 +266,18 @@ impl KnnResultBuilder {
 		}
 	}
 
-	pub(super) fn add(&mut self, dist: f64, docs: &RoaringTreemap) {
+	pub(super) fn add(&mut self, dist: f64, docs: &Docs) {
 		let pr = PriorityResult(dist);
+		docs.append_to(&mut self.docs);
 		match self.priority_list.entry(pr) {
 			Entry::Vacant(e) => {
-				for doc in docs {
-					self.docs.insert(doc);
-				}
 				e.insert(docs.clone());
 			}
 			Entry::Occupied(mut e) => {
 				let d = e.get_mut();
-				for doc in docs {
-					d.insert(doc);
-					self.docs.insert(doc);
-				}
+				d.append_from(docs);
 			}
 		}
-
-		#[cfg(debug_assertions)]
-		debug!("KnnResult add - dist: {} - docs: {:?} - total: {}", dist, docs, self.docs.len());
-		debug!("{:?}", self.priority_list);
 
 		// Do possible eviction
 		let docs_len = self.docs.len();
@@ -127,7 +285,7 @@ impl KnnResultBuilder {
 			if let Some((_, d)) = self.priority_list.last_key_value() {
 				if docs_len - d.len() >= self.knn {
 					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
-						self.docs -= evicted_docs;
+						evicted_docs.remove_to(&mut self.docs);
 					}
 				}
 			}
@@ -145,12 +303,12 @@ impl KnnResultBuilder {
 		for (_, docs) in self.priority_list {
 			let dl = docs.len();
 			if dl > left {
-				for doc_id in docs.iter().take(left as usize) {
+				for doc_id in docs.take(left as usize) {
 					sorted_docs.push_back(doc_id);
 				}
 				break;
 			}
-			for doc_id in docs {
+			for doc_id in docs.iter() {
 				sorted_docs.push_back(doc_id);
 			}
 			left -= dl;

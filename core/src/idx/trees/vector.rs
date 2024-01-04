@@ -21,7 +21,7 @@ pub enum Vector {
 /// So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-pub(crate) type SharedVector = Arc<Vector>;
+pub type SharedVector = Arc<Vector>;
 
 impl PartialEq for Vector {
 	fn eq(&self, other: &Self) -> bool {
@@ -107,7 +107,7 @@ impl Vector {
 			Ok(())
 		}
 	}
-	fn euclidean_distance(&self, other: &Self) -> Result<f64, Error> {
+	pub(crate) fn euclidean_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::euclidean", self, other)?;
 		match (self, other) {
 			(Vector::F64(a), Vector::F64(b)) => {
@@ -132,7 +132,7 @@ impl Vector {
 		}
 	}
 
-	fn manhattan_distance(&self, other: &Self) -> Result<f64, Error> {
+	pub(crate) fn manhattan_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::manhattan", self, other)?;
 		match (self, other) {
 			(Vector::F64(a), Vector::F64(b)) => {
@@ -153,7 +153,7 @@ impl Vector {
 			_ => Err(Error::Unreachable("Vector::manhattan_distance")),
 		}
 	}
-	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
+	pub(crate) fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::minkowski", self, other)?;
 		let dist = match (self, other) {
 			(Vector::F64(a), Vector::F64(b)) => a
@@ -184,13 +184,6 @@ impl Vector {
 			_ => return Err(Error::Unreachable("Vector::minkowski_distance")),
 		};
 		Ok(dist.powf(1.0 / order.to_float()))
-	}
-
-	pub(super) fn as_f32(&self) -> &[f32] {
-		match self {
-			Vector::F32(v) => v.as_slice(),
-			_ => unreachable!(),
-		}
 	}
 }
 
