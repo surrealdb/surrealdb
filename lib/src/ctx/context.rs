@@ -149,9 +149,12 @@ impl<'a> Context<'a> {
 	/// to be able to handle overflow cases transparently. This may be done
 	/// for v2.0.0, as it would change the public API.
 	pub fn add_timeout(&mut self, timeout: Duration) {
+		#[cfg(not(target_arch = "wasm32"))]
 		if let Some(deadline) = Instant::now().checked_add(timeout) {
 			self.add_deadline(deadline)
 		}
+		#[cfg(target_arch = "wasm32")]
+		self.add_deadline(Instant::now() + timeout)
 	}
 
 	/// Add the LIVE query notification channel to the context, so that we
