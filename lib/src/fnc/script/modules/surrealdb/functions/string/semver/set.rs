@@ -5,7 +5,7 @@ pub struct Package;
 
 impl_module_def!(
 	Package,
-	"semver::set",
+	"string::semver::set",
 	"major" => run,
 	"minor" => run,
 	"patch" => run
