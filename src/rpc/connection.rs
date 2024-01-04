@@ -75,9 +75,12 @@ impl Connection {
 
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
+		// Check if there is a WebSocket protocol specified
 		if let Some(protocol) = ws.protocol().map(HeaderValue::to_str) {
+			// Process the value here, before the next await call
+			let format: Format = protocol.unwrap().into();
 			// Any specified protocol will always be a valid value
-			rpc.write().await.format = protocol.unwrap().into();
+			rpc.write().await.format = format;
 		}
 		// Split the socket into send and recv
 		let (sender, receiver) = ws.split();
