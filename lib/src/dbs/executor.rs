@@ -489,4 +489,22 @@ mod tests {
 			)
 		}
 	}
+
+	#[tokio::test]
+	async fn check_execute_timeout() {
+		// With small timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 2s";
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
+		}
+		// With very large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 9460800000000000000s";
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
+		}
+	}
 }

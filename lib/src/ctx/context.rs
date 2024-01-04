@@ -143,9 +143,15 @@ impl<'a> Context<'a> {
 	}
 
 	/// Add a timeout to the context. If the current timeout is sooner than
-	/// the provided timeout, this method does nothing.
+	/// the provided timeout, this method does nothing. If the result of the
+	/// addition causes an overflow, this method does nothing.
+	/// NOTE(gguillemas): This should probably return an option or a result
+	/// to be able to handle overflow cases transparently. This may be done
+	/// for v2.0.0, as it would change the public API.
 	pub fn add_timeout(&mut self, timeout: Duration) {
-		self.add_deadline(Instant::now() + timeout)
+		if let Some(deadline) = Instant::now().checked_add(timeout) {
+			self.add_deadline(deadline)
+		}
 	}
 
 	/// Add the LIVE query notification channel to the context, so that we
