@@ -7,6 +7,7 @@ use graphql_parser::schema::Definition;
 use graphql_parser::schema::Field;
 use graphql_parser::schema::InterfaceType;
 use graphql_parser::schema::ObjectType;
+use graphql_parser::schema::ScalarType;
 use graphql_parser::schema::SchemaDefinition;
 use graphql_parser::schema::Type;
 use graphql_parser::schema::TypeDefinition;
@@ -93,21 +94,8 @@ fn transpile_selection_set<'a>(
 		.map(|s| match s {
 			query::Selection::Field(f) => Statement::Select(SelectStatement {
 				expr: Fields::all(),
-				omit: None,
-				only: false,
 				what: Values(vec![sql::Value::Table(Table(f.name.to_string()))]),
-				with: None,
-				cond: None,
-				split: None,
-				group: None,
-				order: None,
-				limit: None,
-				start: None,
-				fetch: None,
-				version: None,
-				timeout: None,
-				parallel: false,
-				explain: None,
+				..Default::default()
 			}),
 			query::Selection::FragmentSpread(_) => todo!(),
 			query::Selection::InlineFragment(_) => todo!(),
@@ -119,6 +107,36 @@ fn transpile_selection_set<'a>(
 // fn convert_type<'a>(_ty: &Kind) -> Result<TypeDefinition<'a, String>, Error> {
 // 	todo!()
 // }
+
+macro_rules! scalar_def {
+	($name:literal, $desc:literal) => {
+		Definition::TypeDefinition(TypeDefinition::Scalar(ScalarType {
+			name: $name.to_string(),
+			description: Some($desc.to_string()),
+			directives: vec![],
+			position: Default::default(),
+		}))
+	};
+
+	($name:literal) => {
+		Definition::TypeDefinition(TypeDefinition::Scalar(ScalarType {
+			name: $name.to_string(),
+			description: None,
+			directives: vec![],
+			position: Default::default(),
+		}))
+	};
+}
+
+macro_rules! scalar_insert {
+	($acc:ident, $name:literal, $desc:literal) => {
+		$acc.insert($name.to_string(), scalar_def!($name, $desc));
+	};
+	($acc:ident, $name:literal) => {
+		$acc.insert($name.to_string(), scalar_def!($name));
+	};
+}
+
 fn convert_kind_to_type<'a>(
 	ty: Kind,
 	def_acc: &mut BTreeMap<String, Definition<String>>,
@@ -129,23 +147,57 @@ fn convert_kind_to_type<'a>(
 	};
 
 	let out_ty: Type<'_, String> = match match_ty {
-		Kind::Any => Type::NamedType("Any".to_string()).into(),
-		Kind::Null => Type::NamedType("Null".to_string()).into(),
+		Kind::Any => {
+			scalar_insert!(def_acc, "Any", "An untyped value");
+			Type::NamedType("Any".to_string()).into()
+		}
+		Kind::Null => {
+			scalar_insert!(def_acc, "Null");
+			Type::NamedType("Null".to_string()).into()
+		}
 		Kind::Bool => Type::NamedType("Boolean".to_string()).into(), // builtin
-		Kind::Bytes => Type::NamedType("Bytes".to_string()).into(),
-		Kind::Datetime => Type::NamedType("Datetime".to_string()).into(),
-		Kind::Decimal => Type::NamedType("Decimal".to_string()).into(),
-		Kind::Duration => Type::NamedType("Duration".to_string()).into(),
+		Kind::Bytes => {
+			scalar_insert!(def_acc, "Bytes");
+			Type::NamedType("Bytes".to_string()).into()
+		}
+		Kind::Datetime => {
+			scalar_insert!(def_acc, "Datetime", "An ISO-8601 datetime");
+			Type::NamedType("Datetime".to_string()).into()
+		}
+		Kind::Decimal => {
+			scalar_insert!(def_acc, "Decimal", "An arbitrary precision decimal number");
+			Type::NamedType("Decimal".to_string()).into()
+		}
+		Kind::Duration => {
+			scalar_insert!(def_acc, "Duration", "An ISO-8601 duration");
+			Type::NamedType("Duration".to_string()).into()
+		}
 		Kind::Float => Type::NamedType("Float".to_string()).into(), // builtin
 		Kind::Int => Type::NamedType("Int".to_owned()).into(),      // builtin
-		Kind::Number => Type::NamedType("Number".to_string()).into(),
-		Kind::Object => panic!("Object types are not currently supported for graphql"),
-		Kind::Point => Type::NamedType("Point".to_string()).into(),
+		Kind::Number => {
+			scalar_insert!(
+				def_acc,
+				"Number",
+				"A generic number which can be an Int, Float, or Decimal"
+			);
+			Type::NamedType("Number".to_string()).into()
+		}
+		Kind::Object => {
+			scalar_insert!(def_acc, "Object", "A dynamic key-value object");
+			Type::NamedType("Object".to_string()).into()
+		}
+		Kind::Point => {
+			scalar_insert!(def_acc, "Point", "A GeoJSON point");
+			Type::NamedType("Point".to_string()).into()
+		}
 		Kind::String => Type::NamedType("String".to_string()).into(), // builtin
-		Kind::Uuid => Type::NamedType("Uuid".to_string()).into(),
+		Kind::Uuid => {
+			scalar_insert!(def_acc, "Uuid", "A Universally Unique Identifier");
+			Type::NamedType("Uuid".to_string()).into()
+		}
 		Kind::Record(v) => {
 			match v.len() {
-				0 => panic!("record shouldn't have no elements"),
+				0 => Type::NamedType("Record".to_string()).into(),
 				1 => Type::NamedType(v.first().unwrap().to_string()).into(), // table names will be defined
 				_ => {
 					let name =
@@ -168,7 +220,27 @@ fn convert_kind_to_type<'a>(
 		}
 		Kind::Geometry(_) => Type::NamedType("Geometry".to_string()).into(),
 		Kind::Option(_) => convert_kind_to_type(match_ty, def_acc)?,
-		Kind::Either(_) => panic!("Union types are not currently supported for graphql"),
+		Kind::Either(v) => match v.len() {
+			0 | 1 => {
+				return Err(Error::Thrown("Either must have at least two options".to_string()));
+			}
+			_ => {
+				let name = v.iter().map(ToString::to_string).collect::<Vec<String>>().join("_or_");
+
+				let def = Definition::TypeDefinition(TypeDefinition::Union(UnionType {
+					description: Some(format!(
+						"A union of the following types: {}",
+						v.iter().map(ToString::to_string).collect::<Vec<String>>().join(", ")
+					)),
+					name: name.clone(),
+					directives: vec![],
+					position: Default::default(),
+					types: v.iter().map(ToString::to_string).collect(),
+				}));
+				def_acc.insert(name.clone(), def);
+				Type::NamedType(name).into()
+			}
+		},
 		Kind::Set(_, _) => Type::NamedType("Set".to_string()).into(),
 		Kind::Array(t, _) => Type::ListType(Box::new(convert_kind_to_type(*t, def_acc)?)).into(),
 	};
@@ -235,7 +307,7 @@ pub async fn get_schema<'a>(
 		let ty_def = TypeDefinition::Object(ObjectType {
 			description: None,
 			name: tb.name.to_string(),
-			implements_interfaces: vec![if tb.relation {
+			implements_interfaces: vec![if tb.is_relation() {
 				"Relation".to_string()
 			} else {
 				"Record".to_string()
