@@ -9,7 +9,7 @@ pub trait Spread {
 impl Spread for Vec<Number> {
 	fn spread(self) -> Number {
 		// Get the initial number
-		let init = self.get(0);
+		let init = self.first();
 		// Get the minimum and the maximum
 		let min_max = self.iter().fold((init, init), |(mut min, mut max), val| {
 			min = std::cmp::min(min, Some(val));
