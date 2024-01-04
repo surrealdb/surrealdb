@@ -124,14 +124,8 @@ async fn delete_live_query_batch(
 						ret.push((lq, Some(e)));
 						continue;
 					}
-					// Delete the notifications
-					// TODO hypothetical impl
-					if let Err(e) = Ok(()) {
-						println!("Failed deleting notifications: {:?}", e);
-						error!("Failed deleting notifications: {:?}", e);
-						// TODO wrap error with context that this step failed; requires self-ref error
-						ret.push((lq, Some(e)));
-					}
+					// We do not delete the notifications - they should not be written in the first
+					// place, since that was not merged.
 				}
 				// TODO where can the above transaction hard fail? Every op needs rollback?
 				if let Err(e) = tx.commit().await {
