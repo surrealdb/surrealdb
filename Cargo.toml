@@ -19,8 +19,6 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
 experimental_parser = ["surrealdb/experimental_parser"]
-# Private features
-has-storage = []
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
