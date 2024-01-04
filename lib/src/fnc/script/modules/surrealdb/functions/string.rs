@@ -3,8 +3,8 @@ use crate::fnc::script::modules::impl_module_def;
 
 mod distance;
 mod is;
-mod similarity;
 mod semver;
+mod similarity;
 
 pub struct Package;
 
