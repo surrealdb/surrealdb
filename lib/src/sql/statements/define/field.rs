@@ -3,6 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::{
 	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,
 };
@@ -45,8 +46,40 @@ impl DefineFieldStatement {
 		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+
+		let new_tb = match (self.name.to_string().as_str(), tb.relation.clone(), self.kind.clone())
+		{
+			("in", Some((in_k, out_k)), Some(dk)) => {
+				if in_k.as_ref() != Some(&dk) {
+					Some(DefineTableStatement {
+						relation: Some((Some(dk), out_k)),
+						..tb
+					})
+				} else {
+					None
+				}
+			}
+			("out", Some((in_k, out_k)), Some(dk)) => {
+				if out_k.as_ref() != Some(&dk) {
+					Some(DefineTableStatement {
+						relation: Some((in_k, Some(dk))),
+						..tb
+					})
+				} else {
+					None
+				}
+			}
+			_ => None,
+		};
+		if let Some(tb) = new_tb {
+			let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.what);
+			run.set(key, &tb).await?;
+			let key = crate::key::table::ft::prefix(opt.ns(), opt.db(), &self.what);
+			run.clr(key).await?;
+		}
+
 		// Clear the cache
 		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;

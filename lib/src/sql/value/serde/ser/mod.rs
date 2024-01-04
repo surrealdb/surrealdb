@@ -40,6 +40,7 @@ mod permission;
 mod permissions;
 mod primitive;
 mod range;
+mod relation;
 mod scoring;
 mod split;
 mod start;

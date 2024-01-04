@@ -57,9 +57,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 				res.permissions = v;
 			}
 			DefineTableOption::Relation(r) => {
-				res.relation = true;
-				res.in_field = r.from;
-				res.out_field = r.to;
+				res.relation = Some((r.from, r.to));
 			}
 		}
 	}

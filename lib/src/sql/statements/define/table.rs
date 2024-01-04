@@ -29,13 +29,7 @@ pub struct DefineTableStatement {
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
-	pub relation: bool,
-	#[revision(start = 2)]
-	#[serde(skip)]
-	pub in_field: Option<Kind>,
-	#[revision(start = 2)]
-	#[serde(skip)]
-	pub out_field: Option<Kind>,
+	pub relation: Option<(Option<Kind>, Option<Kind>)>,
 }
 
 impl DefineTableStatement {
@@ -65,9 +59,9 @@ impl DefineTableStatement {
 			run.set(key, self).await?;
 			self.to_owned()
 		};
-		if self.relation {
-			let in_kind = self.in_field.clone().unwrap_or(Kind::Record(vec![]));
-			let out_kind = self.out_field.clone().unwrap_or(Kind::Record(vec![]));
+		if let Some((in_field, out_field)) = &self.relation {
+			let in_kind = in_field.clone().unwrap_or(Kind::Record(vec![]));
+			let out_kind = out_field.clone().unwrap_or(Kind::Record(vec![]));
 
 			let in_key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.name, "in");
 			let out_key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.name, "out");
@@ -141,14 +135,33 @@ impl DefineTableStatement {
 	}
 }
 
+impl DefineTableStatement {
+	pub fn is_relation(&self) -> bool {
+		self.relation.is_some()
+	}
+}
+
+fn get_tables_from_kind(kind: &Kind) -> String {
+	let Kind::Record(tables) = kind else {
+		panic!()
+	};
+	tables.into_iter().map(ToString::to_string).collect::<Vec<_>>().join(" | ")
+}
+
 impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE {}", self.name)?;
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
-		if self.relation {
+		if let Some((in_field, out_field)) = &self.relation {
 			f.write_str(" RELATION")?;
+			if let Some(kind) = in_field {
+				write!(f, " FROM {}", get_tables_from_kind(kind))?;
+			}
+			if let Some(kind) = out_field {
+				write!(f, " TO {}", get_tables_from_kind(kind))?;
+			}
 		}
 		f.write_str(if self.full {
 			" SCHEMAFULL"

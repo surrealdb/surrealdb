@@ -3,6 +3,7 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Ident;
+use crate::sql::Kind;
 use crate::sql::Permissions;
 use crate::sql::Strand;
 use crate::sql::View;
@@ -47,7 +48,7 @@ pub struct SerializeDefineTableStatement {
 	permissions: Permissions,
 	changefeed: Option<ChangeFeed>,
 	comment: Option<Strand>,
-	relation: bool,
+	relation: Option<(Option<Kind>, Option<Kind>)>,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
@@ -84,7 +85,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
 			"relation" => {
-				self.relation = value.serialize(ser::primitive::bool::Serializer.wrap())?;
+				self.relation = value.serialize(ser::relation::opt::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!(
@@ -106,8 +107,6 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			changefeed: self.changefeed,
 			comment: self.comment,
 			relation: self.relation,
-			in_field: None,
-			out_field: None,
 		})
 	}
 }

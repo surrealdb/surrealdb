@@ -14,6 +14,7 @@ use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use crate::sql::Kind;
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -114,7 +115,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-		relation: bool,
+		relation: Option<(Option<Kind>, Option<Kind>)>,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Clone transaction
 		let run = txn.clone();
@@ -150,7 +151,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		self.tb_with_rel(opt, txn, false).await
+		self.tb_with_rel(opt, txn, None).await
 	}
 	/// Get the foreign tables for this document
 	pub async fn ft(
