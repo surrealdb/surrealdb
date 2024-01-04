@@ -5,7 +5,8 @@ use super::Val;
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
-use crate::err::Error;
+use crate::dbs::KvsNotification;
+use crate::err::{Error, InternalCause, LiveQueryCause, UnreachableCause};
 use crate::idg::u32::U32;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
@@ -48,7 +49,36 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-pub(crate) const NO_LIMIT: u32 = 0;
+#[derive(Copy, Clone, Debug)]
+pub enum Limit {
+	Unlimited,
+	Limited(u32),
+}
+
+pub struct ScanPage<K>
+where
+	K: Into<Key> + Debug + Clone,
+{
+	pub range: Range<K>,
+	pub limit: Limit,
+}
+
+impl From<Range<Vec<u8>>> for ScanPage<Vec<u8>> {
+	fn from(value: Range<Vec<u8>>) -> Self {
+		ScanPage {
+			range: value,
+			limit: Limit::Unlimited,
+		}
+	}
+}
+
+pub struct ScanResult<K>
+where
+	K: Into<Key> + Debug + Clone,
+{
+	pub next_page: Option<ScanPage<K>>,
+	pub values: Vec<(Key, Val)>,
+}
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -275,6 +305,7 @@ impl Transaction {
 	}
 
 	/// Delete a key from the datastore.
+	/// Does not error if it does not exist.
 	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
@@ -595,8 +626,6 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -637,9 +666,13 @@ impl Transaction {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[allow(unused_variables)]
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(
+		&mut self,
+		page: ScanPage<K>,
+		batch_limit: u32,
+	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + From<Vec<u8>> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", rng.start, rng.end);
@@ -648,35 +681,57 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.scan(rng, limit),
+			} => v.scan(range, batch_limit),
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.scan(rng, limit).await,
+			} => v.scan(range, batch_limit).await,
 			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+			_ => Err(Error::UnreachableCause(UnreachableCause::CatchAll)),
+		};
+		// Construct next page
+		res.map(|tup_vec| {
+			if tup_vec.len() < batch_limit as usize {
+				ScanResult {
+					next_page: None,
+					values: tup_vec,
+				}
+			} else {
+				let mut rng = page.range.clone();
+				rng.start = match tup_vec.last() {
+					Some((k, _)) => K::from(k.clone().add(0)),
+					None => rng.start,
+				};
+				ScanResult {
+					next_page: Some(ScanPage {
+						range: rng,
+						limit: page.limit,
+					}),
+					values: tup_vec,
+				}
+			}
+		})
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -686,8 +741,6 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -784,43 +837,25 @@ impl Transaction {
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
 		// Start processing
-		while num > 0 {
+		while let Some(page) = next_page {
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
+			let res = self.scan(page, 1000).await?;
+			next_page = res.next_page;
+			let res = res.values;
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
 			}
 			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, v) in res.into_iter() {
 				// Delete
 				out.push((k, v));
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(out)
@@ -830,7 +865,7 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
@@ -859,42 +894,24 @@ impl Transaction {
 	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		// Start processing
-		while num > 0 {
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
+		while let Some(page) = next_page {
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
+			let res = self.scan(page, limit).await?;
+			next_page = res.next_page;
+			let res = res.values;
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
 			}
 			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, _) in res.into_iter() {
 				// Delete
 				self.del(k).await?;
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(())
@@ -910,43 +927,25 @@ impl Transaction {
 		trace!("Getp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
 		// Start processing
-		while num > 0 {
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
+		while let Some(page) = next_page {
+			let res = self.scan(page, 1000).await?;
+			next_page = res.next_page;
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
+			let res = res.values;
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
-			}
+			};
 			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, v) in res.into_iter() {
 				// Delete
 				out.push((k, v));
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(out)
@@ -1067,108 +1066,38 @@ impl Transaction {
 	pub async fn scan_hb(
 		&mut self,
 		time_to: &Timestamp,
-		limit: u32,
+		batch_size: u32,
 	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
 		let beg = crate::key::root::hb::Hb::prefix();
 		let end = crate::key::root::hb::Hb::suffix(time_to);
-		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (k, _) in res.values.into_iter() {
 				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
-				// Count
-				if limit > 0 {
-					num -= 1;
-				}
 			}
 		}
-		trace!("scan_hb: {:?}", out);
 		Ok(out)
 	}
 
 	/// scan_nd will scan all the cluster membership registers
 	/// setting limit to 0 will result in scanning all entries
-	pub async fn scan_nd(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+	pub async fn scan_nd(&mut self, batch_size: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
-		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		while (limit == NO_LIMIT) || (num > 0) {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
-				out.push((&v).into());
-				// Count
-				if limit > 0 {
-					num -= 1;
-				}
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (_, v) in res.values.into_iter() {
+				out.push(v.into());
 			}
 		}
-		trace!("scan_nd: {:?}", out);
 		Ok(out)
 	}
 
@@ -1191,62 +1120,28 @@ impl Transaction {
 		self.del(key).await
 	}
 
-	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
+	pub async fn scan_ndlq<'a>(
+		&mut self,
+		node: &Uuid,
+		batch_size: u32,
+	) -> Result<Vec<LqValue>, Error> {
 		let beg = crate::key::node::lq::prefix_nd(node);
 		let end = crate::key::node::lq::suffix_nd(node);
-		trace!(
-			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&beg),
-			crate::key::debug::sprint_key(&end),
-		);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<LqValue> = vec![];
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (key, value)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(key.clone());
-				}
-				let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (key, value) in res.values.into_iter() {
+				let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
 				let tb: String = String::from_utf8(value).unwrap();
-				trace!("scan_lq Found tb: {:?}", tb);
 				out.push(LqValue {
-					nd: lq.nd.into(),
-					ns: lq.ns.to_string(),
-					db: lq.db.to_string(),
+					nd: lv.nd.into(),
+					ns: lv.ns.to_string(),
+					db: lv.db.to_string(),
 					tb,
-					lq: lq.lq.into(),
+					lq: lv.lq.into(),
 				});
-				// Count
-				if limit != NO_LIMIT {
-					num -= 1;
-				}
 			}
 		}
 		Ok(out)
@@ -1257,49 +1152,16 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		limit: u32,
+		batch_size: u32,
 	) -> Result<Vec<LqValue>, Error> {
 		let beg = crate::key::table::lq::prefix(ns, db, tb);
 		let end = crate::key::table::lq::suffix(ns, db, tb);
-		trace!(
-			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&beg),
-			crate::key::debug::sprint_key(&end),
-		);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<LqValue> = vec![];
-		while limit == NO_LIMIT || num > 0 {
-			let batch_size = match num {
-				0 => 1000,
-				_ => std::cmp::min(1000, num),
-			};
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					self.scan(min..max, batch_size).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (key, value)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(key.clone());
-				}
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan(page, batch_size).await?;
+			next_page = res.next_page;
+			for (key, value) in res.values.into_iter() {
 				let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
 				let val: LiveStatement = value.into();
 				out.push(LqValue {
@@ -1309,10 +1171,6 @@ impl Transaction {
 					tb: lv.tb.to_string(),
 					lq: val.id,
 				});
-				// Count
-				if limit != NO_LIMIT {
-					num -= 1;
-				}
 			}
 		}
 		Ok(out)
@@ -1329,6 +1187,7 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}
@@ -1768,7 +1627,8 @@ impl Transaction {
 			let lq_key = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			trace!("Value is {:?}", &value);
 			let lq_value = String::from_utf8(value).map_err(|e| {
-				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
+				error!("Error decoding live query value: {:?}", e);
+				Error::InternalLiveQueryError(LiveQueryCause::FailedToDecodeNodeLiveQueryValue)
 			})?;
 			let lqv = LqValue {
 				nd: (*nd).into(),
@@ -2528,55 +2388,35 @@ impl Transaction {
 					// Fetch records
 					let beg = crate::key::thing::prefix(ns, db, &tb.name);
 					let end = crate::key::thing::suffix(ns, db, &tb.name);
-					let mut nxt: Option<Vec<u8>> = None;
-					loop {
-						let res = match nxt {
-							None => {
-								let min = beg.clone();
-								let max = end.clone();
-								self.scan(min..max, 1000).await?
-							}
-							Some(ref mut beg) => {
-								beg.push(0x00);
-								let min = beg.clone();
-								let max = end.clone();
-								self.scan(min..max, 1000).await?
-							}
-						};
-						if !res.is_empty() {
-							// Get total results
-							let n = res.len();
-							// Exit when settled
-							if n == 0 {
-								break;
-							}
-							// Loop over results
-							for (i, (k, v)) in res.into_iter().enumerate() {
-								// Ready the next
-								if n == i + 1 {
-									nxt = Some(k.clone());
-								}
-								// Parse the key and the value
-								let k: crate::key::thing::Thing = (&k).into();
-								let v: Value = (&v).into();
-								let t = Thing::from((k.tb, k.id));
-								// Check if this is a graph edge
-								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
-									// This is a graph edge record
-									(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
-										let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
-										chn.send(bytes!(sql)).await?;
-									}
-									// This is a normal record
-									_ => {
-										let sql = format!("UPDATE {t} CONTENT {v};");
-										chn.send(bytes!(sql)).await?;
-									}
-								}
-							}
-							continue;
+					let mut nxt: Option<ScanPage<Vec<u8>>> = Some(ScanPage::from(beg..end));
+					while nxt.is_some() {
+						let res = self.scan(nxt.unwrap(), 1000).await?;
+						nxt = res.next_page;
+						let res = res.values;
+						if res.is_empty() {
+							break;
 						}
-						break;
+						// Loop over results
+						for (k, v) in res.into_iter() {
+							// Parse the key and the value
+							let k: crate::key::thing::Thing = (&k).into();
+							let v: Value = (&v).into();
+							let t = Thing::from((k.tb, k.id));
+							// Check if this is a graph edge
+							match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+								// This is a graph edge record
+								(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
+									let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
+									chn.send(bytes!(sql)).await?;
+								}
+								// This is a normal record
+								_ => {
+									let sql = format!("UPDATE {t} CONTENT {v};");
+									chn.send(bytes!(sql)).await?;
+								}
+							}
+						}
+						continue;
 					}
 					chn.send(bytes!("")).await?;
 				}
@@ -2805,9 +2645,7 @@ impl Transaction {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal(
-					"ts is less than or equal to the latest ts".to_string(),
-				));
+				return Err(Error::InternalCause(InternalCause::TimestampSkew));
 			}
 		}
 		self.set(ts_key, vs).await?;
@@ -2832,7 +2670,7 @@ impl Transaction {
 				sl.copy_from_slice(v);
 				return Ok(Some(sl));
 			} else {
-				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
+				return Err(Error::InternalCause(InternalCause::InvalidVersionstamp));
 			}
 		}
 		Ok(None)

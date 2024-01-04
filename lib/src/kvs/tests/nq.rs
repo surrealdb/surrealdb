@@ -1,28 +1,25 @@
 #[tokio::test]
 #[serial]
 async fn archive_lv_for_node_archives() {
-	let node_id = Uuid::parse_str("9ab2d498-757f-48cc-8c07-a7d337997445").unwrap();
+	let node_id = Uuid::from_str("9ab2d498-757f-48cc-8c07-a7d337997445").unwrap();
 	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
 	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_database";
 	let table = "test_table";
-	tx.set_nd(node_id).await.unwrap();
+	tx.set_nd(*node_id).await.unwrap();
 
-	let lv_id = crate::sql::uuid::Uuid::from(Uuid::from_bytes([
-		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-		0x1F,
-	]));
+	let lv_id = Uuid::from_str("1108f946-6930-4d29-a339-4d1f9d088cc0").unwrap();
 
-	let key = crate::key::node::lq::new(node_id, lv_id.0, namespace, database);
+	let key = crate::key::node::lq::new(*node_id, lv_id.0, namespace, database);
 	tx.putc(key, table, None).await.unwrap();
 
 	let mut stm = LiveStatement::from_source_parts(Fields::all(), Table(table.into()), None, None);
 	stm.id = lv_id;
 	tx.putc_tblq(namespace, database, table, stm, None).await.unwrap();
 
-	let this_node_id = crate::sql::uuid::Uuid::from(Uuid::from_bytes([
+	let this_node_id = crate::sql::uuid::Uuid::from(uuid::Uuid::from_bytes([
 		0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E,
 		0x2F,
 	]));
@@ -31,11 +28,7 @@ async fn archive_lv_for_node_archives() {
 	tx.commit().await.unwrap();
 
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let results = test
-		.db
-		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id), this_node_id)
-		.await
-		.unwrap();
+	let results = test.db.archive_lv_for_node(&mut tx, &node_id, this_node_id).await.unwrap();
 	assert_eq!(results.len(), 1);
 	tx.commit().await.unwrap();
 	let (lq, opt_err) = &results[0];
@@ -47,7 +40,7 @@ async fn archive_lv_for_node_archives() {
 			panic!("Unexpected error: {:?}", err);
 		}
 	}
-	assert_eq!(lq.nd, sql::uuid::Uuid(node_id));
+	assert_eq!(lq.nd, node_id);
 	assert_eq!(lq.ns, namespace);
 	assert_eq!(lq.db, database);
 	assert_eq!(lq.tb, table);

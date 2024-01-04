@@ -23,6 +23,7 @@ mod speedb;
 mod tikv;
 mod tx;
 
+mod bootstrap;
 mod clock;
 #[cfg(test)]
 mod tests;

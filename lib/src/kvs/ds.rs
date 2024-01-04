@@ -1,18 +1,20 @@
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
+use crate::dbs::KvsNotification;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
 	Variables,
 };
-use crate::err::Error;
+use crate::err::{BootstrapCause, Error, InternalCause, TaskVariant};
+use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
+use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
@@ -22,19 +24,37 @@ use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
-// If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
+/// Bootstrap dead node garbage collection has a limit in size in case of catastrophe
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
-const LQ_CHANNEL_SIZE: usize = 100;
+
+/// This is the channel size for live query notifications from the engine
+const TX_LQ_CHANNEL_SIZE: usize = 100;
+
+/// This is the general batch size for database operations and channel sizes in bootstrap
+pub(crate) const BOOTSTRAP_BATCH_SIZE: usize = 1000;
+
+/// When processing batches from channels in bootstrap, this is the latency
+/// to decide if a batch is big enough
+pub(crate) const BOOTSTRAP_BATCH_LATENCY: Duration = Duration::from_millis(100);
+
+/// The number of transaction retries before a bootstrap transaction is aborted completely
+pub(crate) const BOOTSTRAP_TX_RETRIES: u32 = 3;
+
+/// The duration between retries lower bound, for scatter
+pub(crate) const BOOTSTRAP_TX_RETRY_LOW_MILLIS: u64 = 0;
+
+/// The duration between retries higher bound, for scatter
+pub(crate) const BOOTSTRAP_TX_RETRY_HIGH_MILLIS: u64 = 10;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -84,11 +104,12 @@ impl Ord for LqType {
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct Datastore {
 	// The inner datastore type
-	inner: Inner,
+	inner: Arc<Inner>,
 	// The unique id of this datastore, used in notifications
-	id: Uuid,
+	pub(crate) id: Uuid,
 	// Whether this datastore runs in strict mode by default
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
@@ -106,7 +127,8 @@ pub struct Datastore {
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	notification_channel:
+		OnceLock<(channel::Sender<KvsNotification>, channel::Receiver<KvsNotification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 	// The index store cache
@@ -136,7 +158,7 @@ pub(super) enum Inner {
 impl fmt::Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		#![allow(unused_variables)]
-		match &self.inner {
+		match self.inner.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
@@ -334,8 +356,6 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				// use clock_override and default_clock to remove warning when no kv is enabled.
-				let _ = (clock_override, default_clock);
 				info!("Unable to load the specified datastore {}", path);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
@@ -343,14 +363,14 @@ impl Datastore {
 		// Set the properties on the datastore
 		inner.map(|inner| Self {
 			id: Uuid::new_v4(),
-			inner,
+			inner: Arc::new(inner),
 			strict: false,
 			auth_enabled: false,
 			// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
 			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			notification_channel: None,
+			notification_channel: OnceLock::new(),
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
@@ -371,8 +391,8 @@ impl Datastore {
 	}
 
 	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(channel::bounded(LQ_CHANNEL_SIZE));
+	pub fn with_notifications(self) -> Self {
+		self.notification_channel.set(channel::bounded(TX_LQ_CHANNEL_SIZE)).unwrap();
 		self
 	}
 
@@ -490,7 +510,7 @@ impl Datastore {
 
 		trace!("Bootstrapping {}", self.id);
 		let mut tx = self.transaction(Write, Optimistic).await?;
-		let archived = match self.register_remove_and_archive(&mut tx, &self.id).await {
+		let dead_nodes = match self.register_and_remove_dead_nodes(&mut tx, &self.id).await {
 			Ok(archived) => {
 				tx.commit().await?;
 				archived
@@ -501,62 +521,131 @@ impl Datastore {
 				return Err(e);
 			}
 		};
-		// Filtered includes all lqs that should be used in subsequent step
-		// Currently that is all of them, no matter the error encountered
-		let mut filtered: Vec<LqValue> = vec![];
-		// err is used to aggregate all errors across all stages
-		let mut err = vec![];
-		for res in archived {
-			match res {
-				(lq, Some(e)) => {
-					filtered.push(lq);
-					err.push(e);
-				}
-				(lq, None) => {
-					filtered.push(lq);
+
+		// The transaction request pair is used for receiving requests for new transactions
+		// it contains one-shot senders so that the transaction can be sent and forgotten
+		let (tx_req_send, mut tx_req_recv): (
+			mpsc::Sender<oneshot::Sender<Transaction>>,
+			mpsc::Receiver<oneshot::Sender<Transaction>>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+
+		// In several new transactions, scan all removed node live queries
+		let (scan_send, scan_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let scan_task = tokio::spawn(bootstrap::scan_node_live_queries(
+			tx_req_send.clone(),
+			dead_nodes,
+			scan_send,
+			BOOTSTRAP_BATCH_SIZE as u32,
+		));
+
+		// In several new transactions, archive removed node live queries
+		let (archive_send, archive_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let archive_task = tokio::spawn(bootstrap::archive_live_queries(
+			tx_req_send.clone(),
+			self.id,
+			scan_recv,
+			archive_send,
+			BOOTSTRAP_BATCH_SIZE,
+			&BOOTSTRAP_BATCH_LATENCY,
+		));
+
+		// In several new transactions, delete archived node live queries
+		let (delete_send, mut delete_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let delete_task = tokio::spawn(bootstrap::delete_live_queries(
+			tx_req_send.clone(),
+			archive_recv,
+			delete_send,
+			BOOTSTRAP_BATCH_SIZE,
+		));
+
+		// We then need to collect and log the errors
+		// It's also important to consume from the channel otherwise things will block
+		let delete_handler_task = tokio::spawn(async move {
+			while let Some(res) = delete_recv.recv().await {
+				let (_lq, e) = res;
+				if let Some(e) = e {
+					error!("Error deleting lq during bootstrap: {:?}", e);
 				}
 			}
-		}
+		});
 
-		let mut tx = self.transaction(Write, Optimistic).await?;
-		let val = self.remove_archived(&mut tx, filtered).await;
-		let resolve_err = match val {
-			Ok(_) => tx.commit().await,
-			Err(e) => {
-				error!("Error bootstrapping sweep phase: {:?}", e);
-				match tx.cancel().await {
-					Ok(_) => Err(e),
-					Err(e) => {
-						// We have a nested error
-						Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?} and error cancelling transaction: {:?}", e, e)))
+		// Handle transaction requests
+		// This loop will continue to run until all channels have been closed above
+		trace!("Handling bootstrap transaction requests");
+		loop {
+			match tx_req_recv.recv().await {
+				None => {
+					// closed
+					break;
+				}
+				Some(sender) => {
+					let tx = self.transaction(Write, Optimistic).await?;
+					if let Err(mut tx) = sender.send(tx) {
+						// The receiver has been dropped, so we need to cancel the transaction
+						tx.cancel().await?;
 					}
 				}
 			}
-		};
-		if let Err(e) = resolve_err {
-			err.push(e);
 		}
-		if !err.is_empty() {
-			error!("Error bootstrapping sweep phase: {:?}", err);
-			return Err(Error::Tx(format!("Error bootstrapping sweep phase: {:?}", err)));
+		trace!("Finished handling requests");
+
+		// Now run everything together and return any errors that arent captured per record
+		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
+			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
+
+		// Throw errors from join tasks
+		let scan_err = join_scan_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapScan, e))
+		})?;
+		let arch_err = join_arch_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapArchive, e))
+		})?;
+		let del_err = join_del_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapDelete, e))
+		})?;
+		join_log_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapStageLog, e))
+		})?;
+
+		// Handle all the possible hard errors from tasks
+		if let Some(err) = scan_err
+			.map_err(|e| Error::Internal(format!("an error occurred in the scan task: {:?}", e)))
+			.err()
+			.or(arch_err
+				.map_err(|e| {
+					Error::Internal(format!("an error occurred in the archive task: {:?}", e))
+				})
+				.err())
+			.or(del_err
+				.map_err(|e| Error::Internal(format!("an error occurred in the del task: {:?}", e)))
+				.err())
+		{
+			return Err(err);
 		}
 		Ok(())
 	}
 
 	// Node registration + "mark" stage of mark-and-sweep gc
-	pub async fn register_remove_and_archive(
+	pub async fn register_and_remove_dead_nodes(
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
+	) -> Result<Vec<Uuid>, Error> {
 		trace!("Registering node {}", node_id);
 		let timestamp = tx.clock().await;
 		self.register_membership(tx, node_id, timestamp).await?;
 		// Determine the timeout for when a cluster node is expired
 		let ts_expired = (&timestamp - &sql::duration::Duration::from_secs(5))?;
-		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
-		trace!("Archiving dead nodes: {:?}", dead);
-		self.archive_dead_lqs(tx, &dead, node_id).await
+		self.remove_dead_nodes(tx, &ts_expired).await
 	}
 
 	// Adds entries to the KV store indicating membership information
@@ -590,63 +679,9 @@ impl Datastore {
 		Ok(nodes)
 	}
 
-	/// Accepts cluster IDs
-	/// Archives related live queries
-	/// Returns live query keys that can be used for deletes
-	///
-	/// The reason we archive first is to stop other nodes from picking it up for further updates
-	/// This means it will be easier to wipe the range in a subsequent transaction
-	pub async fn archive_dead_lqs(
-		&self,
-		tx: &mut Transaction,
-		nodes: &[Uuid],
-		this_node_id: &Uuid,
-	) -> Result<Vec<BootstrapOperationResult>, Error> {
-		let mut archived = vec![];
-		for nd in nodes.iter() {
-			trace!("Archiving node {}", &nd);
-			// Scan on node prefix for LQ space
-			let node_lqs = tx.scan_ndlq(nd, NO_LIMIT).await?;
-			trace!("Found {} LQ entries for {:?}", node_lqs.len(), nd);
-			for lq in node_lqs {
-				trace!("Archiving query {:?}", &lq);
-				let node_archived_lqs =
-					match self.archive_lv_for_node(tx, &lq.nd, *this_node_id).await {
-						Ok(lq) => lq,
-						Err(e) => {
-							error!("Error archiving lqs during bootstrap phase: {:?}", e);
-							vec![]
-						}
-					};
-				// We need to add lv nodes not found so that they can be deleted in second stage
-				for lq_value in node_archived_lqs {
-					archived.push(lq_value);
-				}
-			}
-		}
-		Ok(archived)
-	}
-
-	pub async fn remove_archived(
-		&self,
-		tx: &mut Transaction,
-		archived: Vec<LqValue>,
-	) -> Result<(), Error> {
-		trace!("Gone into removing archived: {:?}", archived.len());
-		for lq in archived {
-			// Delete the cluster key, used for finding LQ associated with a node
-			let key = crate::key::node::lq::new(lq.nd.0, lq.lq.0, &lq.ns, &lq.db);
-			tx.del(key).await?;
-			// Delete the table key, used for finding LQ associated with a table
-			let key = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, lq.lq.0);
-			tx.del(key).await?;
-		}
-		Ok(())
-	}
-
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cluster = tx.scan_nd(NO_LIMIT).await?;
+		let cluster = tx.scan_nd(100_000).await?;
 		trace!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
@@ -657,7 +692,7 @@ impl Datastore {
 			// We remove one, because the scan range adds one
 			value: u64::MAX - 1,
 		};
-		let hbs = tx.scan_hb(&end_of_time, NO_LIMIT).await?;
+		let hbs = tx.scan_hb(&end_of_time, 100_000).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			match unreachable_nodes.remove(&hb.nd.to_string()) {
@@ -681,9 +716,13 @@ impl Datastore {
 		// Scan node live queries for every node
 		let mut nd_lq_set: BTreeSet<LqType> = BTreeSet::new();
 		for cl in &cluster {
-			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
-                Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
-            })?, NO_LIMIT).await?;
+			let node_id = uuid::Uuid::parse_str(&cl.name).map_err(|e| {
+				Error::Unimplemented(format!(
+					"cluster id was not uuid when parsing to aggregate cluster live queries: {:?}",
+					e
+				))
+			})?;
+			let nds = tx.scan_ndlq(&node_id, 100_000).await?;
 			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
@@ -692,7 +731,7 @@ impl Datastore {
 		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NO_LIMIT).await?;
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, 100_000).await?;
 			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
@@ -724,7 +763,7 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, NO_LIMIT).await?;
+		let lqs = tx.scan_ndlq(&self.id, 100_000).await?;
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {
@@ -785,7 +824,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
 		// Delete the heartbeat and everything nested
-		tx.delr_hb(dead.clone(), NO_LIMIT).await?;
+		tx.delr_hb(dead.clone(), 100_000).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
 		}
@@ -796,7 +835,8 @@ impl Datastore {
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
-			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
+			error!("Clock may have gone backwards: {:?}", e.duration());
+			Error::InternalCause(InternalCause::ClockMayHaveGoneBackwards)
 		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;
@@ -920,21 +960,21 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(
 		&self,
-		write: TransactionType,
+		tx_type: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
-		let write = match write {
-			TransactionType::Read => false,
-			TransactionType::Write => true,
+		let write = match tx_type {
+			Read => false,
+			Write => true,
 		};
 
 		let lock = match lock {
-			LockType::Pessimistic => true,
-			LockType::Optimistic => false,
+			Pessimistic => true,
+			Optimistic => false,
 		};
 
-		let inner = match &self.inner {
+		let inner = match &*self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -1043,14 +1083,7 @@ impl Datastore {
 			.into());
 		}
 		// Create a new query options
-		let opt = Options::default()
-			.with_id(self.id.0)
-			.with_ns(sess.ns())
-			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
-			.with_auth_enabled(self.auth_enabled);
+		let opt = Options::new_from_sess(sess, &self.id, self.strict, self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -1060,7 +1093,7 @@ impl Datastore {
 			self.index_stores.clone(),
 		);
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
+		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1124,7 +1157,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
+		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1193,7 +1226,7 @@ impl Datastore {
 			ctx.add_timeout(timeout);
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
+		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1227,7 +1260,7 @@ impl Datastore {
 	///     let ds = Datastore::new("memory").await?.with_notifications();
 	///     let ses = Session::owner();
 	/// 	if let Some(channel) = ds.notifications() {
-	///     	while let Ok(v) = channel.recv().await {
+	///     	while let Ok(v) = channel.clone().recv().await {
 	///     	    println!("Received notification: {v}");
 	///     	}
 	/// 	}
@@ -1235,8 +1268,8 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
-		self.notification_channel.as_ref().map(|v| v.1.clone())
+	pub fn notifications(&self) -> Option<channel::Receiver<KvsNotification>> {
+		self.notification_channel.get().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
@@ -1251,7 +1284,7 @@ impl Datastore {
 	pub async fn export(
 		&self,
 		sess: &Session,
-		chn: Sender<Vec<u8>>,
+		chn: channel::Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
