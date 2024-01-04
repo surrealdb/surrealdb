@@ -16,14 +16,13 @@ pub enum Vector {
 	I64(Vec<i64>),
 	I32(Vec<i32>),
 	I16(Vec<i16>),
-	I8(Vec<i8>),
 }
 
 /// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
 /// So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-pub(super) type SharedVector = Arc<Vector>;
+pub(crate) type SharedVector = Arc<Vector>;
 
 impl Hash for Vector {
 	fn hash<H: Hasher>(&self, state: &mut H) {
@@ -59,12 +58,6 @@ impl Hash for Vector {
 					state.write_i16(*item);
 				}
 			}
-			I8(v) => {
-				5.hash(state);
-				for item in v {
-					state.write_i8(*item);
-				}
-			}
 		}
 	}
 }
@@ -78,7 +71,6 @@ impl PartialEq for Vector {
 			(I64(v), I64(v_o)) => v == v_o,
 			(I32(v), I32(v_o)) => v == v_o,
 			(I16(v), I16(v_o)) => v == v_o,
-			(I8(v), I8(v_o)) => v == v_o,
 			_ => false,
 		}
 	}
@@ -101,7 +93,6 @@ impl Ord for Vector {
 			(I64(v), I64(v_o)) => v.cmp(v_o),
 			(I32(v), I32(v_o)) => v.cmp(v_o),
 			(I16(v), I16(v_o)) => v.cmp(v_o),
-			(I8(v), I8(v_o)) => v.cmp(v_o),
 			(F64(_), _) => Ordering::Less,
 			(_, F64(_)) => Ordering::Greater,
 			(F32(_), _) => Ordering::Less,
@@ -110,8 +101,6 @@ impl Ord for Vector {
 			(_, I64(_)) => Ordering::Greater,
 			(I32(_), _) => Ordering::Less,
 			(_, I32(_)) => Ordering::Greater,
-			(I16(_), _) => Ordering::Less,
-			(_, I16(_)) => Ordering::Greater,
 		}
 	}
 }
@@ -124,7 +113,6 @@ impl Vector {
 			VectorType::I64 => Self::I64(Vec::with_capacity(l)),
 			VectorType::I32 => Self::I32(Vec::with_capacity(l)),
 			VectorType::I16 => Self::I16(Vec::with_capacity(l)),
-			VectorType::I8 => Self::I8(Vec::with_capacity(l)),
 		}
 	}
 
@@ -135,18 +123,16 @@ impl Vector {
 			Vector::I64(v) => v.push(n.to_int()),
 			Vector::I32(v) => v.push(n.to_int() as i32),
 			Vector::I16(v) => v.push(n.to_int() as i16),
-			Vector::I8(v) => v.push(n.to_int() as i8),
 		};
 	}
 
-	fn len(&self) -> usize {
+	pub(super) fn len(&self) -> usize {
 		match self {
 			Vector::F64(v) => v.len(),
 			Vector::F32(v) => v.len(),
 			Vector::I64(v) => v.len(),
 			Vector::I32(v) => v.len(),
 			Vector::I16(v) => v.len(),
-			Vector::I8(v) => v.len(),
 		}
 	}
 
@@ -166,9 +152,12 @@ impl Vector {
 			(Vector::F64(a), Vector::F64(b)) => {
 				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt())
 			}
-			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).powi(2)).sum::<f32>().sqrt() as f64)
-			}
+			(Vector::F32(a), Vector::F32(b)) => Ok(a
+				.iter()
+				.zip(b.iter())
+				.map(|(a, b)| (*a as f64 - *b as f64).powi(2))
+				.sum::<f64>()
+				.sqrt()),
 			(Vector::I64(a), Vector::I64(b)) => {
 				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i64>() as f64).sqrt())
 			}
@@ -178,76 +167,7 @@ impl Vector {
 			(Vector::I16(a), Vector::I16(b)) => {
 				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i16>() as f64).sqrt())
 			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i8>() as f64).sqrt())
-			}
-			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
-		}
-	}
-
-	fn magnitude_squared(&self) -> f64 {
-		match self {
-			Vector::F64(v) => v.iter().map(|a| a.powi(2)).sum::<f64>(),
-			Vector::F32(v) => v.iter().map(|a| a.powi(2)).sum::<f32>() as f64,
-			Vector::I64(v) => v.iter().map(|a| a.pow(2)).sum::<i64>() as f64,
-			Vector::I32(v) => v.iter().map(|a| a.pow(2)).sum::<i32>() as f64,
-			Vector::I16(v) => v.iter().map(|a| a.pow(2)).sum::<i16>() as f64,
-			Vector::I8(v) => v.iter().map(|a| a.pow(2)).sum::<i8>() as f64,
-		}
-	}
-
-	fn dot(a: &Self, b: &Self) -> Result<f64, Error> {
-		match (a, b) {
-			(Vector::F64(a), Vector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum())
-			}
-			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<f32>() as f64)
-			}
-			(Vector::I64(a), Vector::I64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i64>() as f64)
-			}
-			(Vector::I32(a), Vector::I32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i32>() as f64)
-			}
-			(Vector::I16(a), Vector::I16(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i16>() as f64)
-			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| a * b).sum::<i8>() as f64)
-			}
-			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
-		}
-	}
-
-	pub(super) fn cosine_similarity(&self, other: &Self) -> Result<f64, Error> {
-		Self::check_same_dimension("vector::similarity::cosine", self, other)?;
-		let d = Self::dot(self, other)?;
-		Ok(d / (self.magnitude_squared() * other.magnitude_squared()))
-	}
-
-	pub(super) fn hamming_distance(&self, other: &Self) -> Result<f64, Error> {
-		Self::check_same_dimension("vector::distance::hamming", self, other)?;
-		match (self, other) {
-			(Vector::F64(a), Vector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I64(a), Vector::I64(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I32(a), Vector::I32(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I16(a), Vector::I16(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
+			_ => Err(Error::Unreachable("Vector::euclidean_distance")),
 		}
 	}
 
@@ -258,7 +178,7 @@ impl Vector {
 				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum())
 			}
 			(Vector::F32(a), Vector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<f32>() as f64)
+				Ok(a.iter().zip(b.iter()).map(|(a, b)| (*a as f64 - *b as f64).abs()).sum::<f64>())
 			}
 			(Vector::I64(a), Vector::I64(b)) => {
 				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i64>() as f64)
@@ -268,9 +188,6 @@ impl Vector {
 			}
 			(Vector::I16(a), Vector::I16(b)) => {
 				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i16>() as f64)
-			}
-			(Vector::I8(a), Vector::I8(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i8>() as f64)
 			}
 			_ => Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		}
@@ -303,11 +220,6 @@ impl Vector {
 				.zip(b.iter())
 				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
 				.sum::<i16>() as f64,
-			(Vector::I8(a), Vector::I8(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i8>() as f64,
 			_ => return Err(Error::UnreachableCause(UnreachableCause::AllLogicalEnumsEvaluated)),
 		};
 		Ok(dist.powf(1.0 / order.to_float()))

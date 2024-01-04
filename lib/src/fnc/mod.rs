@@ -18,6 +18,7 @@ pub mod http;
 pub mod math;
 pub mod meta;
 pub mod not;
+pub mod object;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -192,6 +193,12 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		//
 		"not" => not::not,
 		//
+		"object::entries" => object::entries,
+		"object::from_entries" => object::from_entries,
+		"object::keys" => object::keys,
+		"object::len" => object::len,
+		"object::values" => object::values,
+		//
 		"parse::email::host" => parse::email::host,
 		"parse::email::user" => parse::email::user,
 		"parse::url::domain" => parse::url::domain,
@@ -230,6 +237,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::join" => string::join,
 		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,
+		"string::matches" => string::matches,
 		"string::repeat" => string::repeat,
 		"string::replace" => string::replace,
 		"string::reverse" => string::reverse,
@@ -309,6 +317,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::is::geometry" => r#type::is::geometry,
 		"type::is::int" => r#type::is::int,
 		"type::is::line" => r#type::is::line,
+		"type::is::none" => r#type::is::none,
 		"type::is::null" => r#type::is::null,
 		"type::is::multiline" => r#type::is::multiline,
 		"type::is::multipoint" => r#type::is::multipoint,
@@ -388,6 +397,7 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
+		"search::analyze" => search::analyze((ctx, txn, opt)).await,
 		"search::score" => search::score((ctx, txn, doc)).await,
 		"search::highlight" => search::highlight((ctx,txn, doc)).await,
 		"search::offsets" => search::offsets((ctx, txn, doc)).await,
@@ -404,8 +414,8 @@ mod tests {
 	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
 
-	#[test]
-	fn implementations_are_present() {
+	#[tokio::test]
+	async fn implementations_are_present() {
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
 		let mut problems = Vec::new();
 
@@ -422,13 +432,13 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let builtin_name = crate::sql::builtin::builtin_name(name);
+			let builtin_name = crate::syn::test::builtin_name(name);
 			if builtin_name.is_err() {
 				problems.push(format!("couldn't parse {name} function"));
 			}
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
-			futures::executor::block_on(async {
+			{
 				use crate::sql::Value;
 
 				let name = name.replace("::", ".");
@@ -446,7 +456,7 @@ mod tests {
 				} else if tmp != Value::from("function") {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
-			});
+			}
 		}
 
 		if !problems.is_empty() {

@@ -5,7 +5,7 @@ use crate::dbs::Statement;
 use crate::dbs::{KvsAction, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
-use crate::err::Error;
+use crate::err::{Error, InternalCause};
 use crate::sql::paths::META;
 use crate::sql::permission::Permission;
 use crate::sql::{Uuid, Value};
@@ -25,143 +25,85 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Check if we can send notifications
-		if let Some(chn) = &opt.sender.get() {
-			// Loop through all index statements
-			for lv in self.lv(opt, txn).await?.iter() {
-				// Create a new statement
-				let lq = Statement::from(lv);
-				// Get the event action
-				let met = if stm.is_delete() {
-					Value::from("DELETE")
-				} else if self.is_new() {
-					Value::from("CREATE")
-				} else {
-					Value::from("UPDATE")
-				};
-				// Check if this is a delete statement
-				let doc = match stm.is_delete() {
-					true => &self.initial,
-					false => &self.current,
-				};
-				// Ensure that a session exists on the LIVE query
-				let sess = match lv.session.as_ref() {
-					Some(v) => v,
-					None => {
-						warn!("Lives picked up a live query but it had no session");
-						continue;
-					}
-				};
-				// Ensure that auth info exists on the LIVE query
-				let auth = match lv.auth.clone() {
-					Some(v) => v,
-					None => continue,
-				};
-				// We need to create a new context which we will
-				// use for processing this LIVE query statement.
-				// This ensures that we are using the session
-				// of the user who created the LIVE query.
-				let mut lqctx = Context::background().with_live_value(sess.clone());
-				// We need to create a new options which we will
-				// use for processing this LIVE query statement.
-				// This ensures that we are using the auth data
-				// of the user who created the LIVE query.
-				let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
-				// Add $before, $after, $value, and $event params
-				// to this LIVE query so that user can use these
-				// within field projections and WHERE clauses.
-				lqctx.add_value("event", met);
-				lqctx.add_value("value", self.current.doc.deref());
-				lqctx.add_value("after", self.current.doc.deref());
-				lqctx.add_value("before", self.initial.doc.deref());
-				// First of all, let's check to see if the WHERE
-				// clause of the LIVE query is matched by this
-				// document. If it is then we can continue.
-				match self.lq_check(&lqctx, &lqopt, txn, &lq, doc).await {
-					Err(Error::Ignore) => continue,
-					Err(e) => return Err(e),
-					Ok(_) => (),
-				}
-				// Secondly, let's check to see if any PERMISSIONS
-				// clause for this table allows this document to
-				// be viewed by the user who created this LIVE
-				// query. If it does, then we can continue.
-				match self.lq_allow(&lqctx, &lqopt, txn, &lq, doc).await {
-					Err(Error::Ignore) => continue,
-					Err(e) => return Err(e),
-					Ok(_) => (),
-				}
-				// Finally, let's check what type of statement
-				// caused this LIVE query to run, and send the
-				// relevant notification based on the statement.
-				let mut tx = txn.lock().await;
-				let ts = tx.clock().await;
-				let ns = opt.ns().to_string();
-				let db = opt.db().to_string();
-				let tb = self.id.unwrap().tb.to_string();
-				let not_id = Uuid::new_v4();
-				if stm.is_delete() {
-					// Send previous notifications
-					let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
-					match previous_nots {
-						Ok(nots) => {
-							for not in &nots {
-								// Consume the notification entry
-								let key = crate::key::table::nt::Nt::new(
-									opt.ns(),
-									opt.db(),
-									&tb,
-									not.live_id,
-									not.timestamp,
-									not.notification_id,
-								);
-								let key_enc = key.encode()?;
-								tx.del(key_enc).await?;
-								// Send the notification to the channel
-								if let Err(e) = chn.send(not.clone()).await {
-									error!("Error sending scanned notification: {}", e);
-								}
-							}
-						}
-						Err(err) => {
-							error!("Error scanning notifications: {}", err);
-						}
-					}
-					// Send a DELETE notification
-					let notification = KvsNotification {
-						live_id: lv.id,
-						node_id: lv.node,
-						notification_id: not_id,
-						action: KvsAction::Delete,
-						result: {
-							// Ensure futures are run
-							let lqopt: &Options = &lqopt.new_with_futures(true);
-							// Output the full document before any changes were applied
-							let mut value = doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
-							// Remove metadata fields on output
-							value.del(&lqctx, lqopt, txn, &*META).await?;
-							// Output result
-							value
-						},
-						timestamp: ts,
-					};
-					if opt.id()? == lv.node.0 {
-						chn.send(notification).await?;
+		if let mut guard = opt.sender.write().map_err(|_| {
+			Error::InternalCause(InternalCause::UnableToAcquireLock("options sender during lives"))
+		})? {
+			if let Some(chn) = guard.as_mut() {
+				// Loop through all index statements
+				for lv in self.lv(opt, txn).await?.iter() {
+					// Create a new statement
+					let lq = Statement::from(lv);
+					// Get the event action
+					let met = if stm.is_delete() {
+						Value::from("DELETE")
+					} else if self.is_new() {
+						Value::from("CREATE")
 					} else {
-						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
-						tx.putc_tbnt(key, notification, None).await?;
-					}
-				} else if self.is_new() {
-					// Send a CREATE notification
-					let plucked = self.pluck(_ctx, opt, txn, &lq).await?;
-					let notification = KvsNotification {
-						live_id: lv.id,
-						node_id: lv.node,
-						notification_id: not_id,
-						action: KvsAction::Create,
-						result: plucked,
-						timestamp: ts,
+						Value::from("UPDATE")
 					};
-					if opt.id()? == lv.node.0 {
+					// Check if this is a delete statement
+					let doc = match stm.is_delete() {
+						true => &self.initial,
+						false => &self.current,
+					};
+					// Ensure that a session exists on the LIVE query
+					let sess = match lv.session.as_ref() {
+						Some(v) => v,
+						None => {
+							warn!("Lives picked up a live query but it had no session");
+							continue;
+						}
+					};
+					// Ensure that auth info exists on the LIVE query
+					let auth = match lv.auth.clone() {
+						Some(v) => v,
+						None => continue,
+					};
+					// We need to create a new context which we will
+					// use for processing this LIVE query statement.
+					// This ensures that we are using the session
+					// of the user who created the LIVE query.
+					let mut lqctx = Context::background().with_live_value(sess.clone());
+					// We need to create a new options which we will
+					// use for processing this LIVE query statement.
+					// This ensures that we are using the auth data
+					// of the user who created the LIVE query.
+					let lqopt = opt.new_with_perms(true).with_auth(Arc::from(auth));
+					// Add $before, $after, $value, and $event params
+					// to this LIVE query so that user can use these
+					// within field projections and WHERE clauses.
+					lqctx.add_value("event", met);
+					lqctx.add_value("value", self.current.doc.deref());
+					lqctx.add_value("after", self.current.doc.deref());
+					lqctx.add_value("before", self.initial.doc.deref());
+					// First of all, let's check to see if the WHERE
+					// clause of the LIVE query is matched by this
+					// document. If it is then we can continue.
+					match self.lq_check(&lqctx, &lqopt, txn, &lq, doc).await {
+						Err(Error::Ignore) => continue,
+						Err(e) => return Err(e),
+						Ok(_) => (),
+					}
+					// Secondly, let's check to see if any PERMISSIONS
+					// clause for this table allows this document to
+					// be viewed by the user who created this LIVE
+					// query. If it does, then we can continue.
+					match self.lq_allow(&lqctx, &lqopt, txn, &lq, doc).await {
+						Err(Error::Ignore) => continue,
+						Err(e) => return Err(e),
+						Ok(_) => (),
+					}
+					// Finally, let's check what type of statement
+					// caused this LIVE query to run, and send the
+					// relevant notification based on the statement.
+					let mut tx = txn.lock().await;
+					let ts = tx.clock().await;
+					let ns = opt.ns().to_string();
+					let db = opt.db().to_string();
+					let tb = self.id.unwrap().tb.to_string();
+					let not_id = Uuid::new_v4();
+					if stm.is_delete() {
+						// Send previous notifications
 						let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
 						match previous_nots {
 							Ok(nots) => {
@@ -187,54 +129,139 @@ impl<'a> Document<'a> {
 								error!("Error scanning notifications: {}", err);
 							}
 						}
-						chn.send(notification).await?;
-					} else {
-						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
-						tx.putc_tbnt(key, notification, None).await?;
-					}
-				} else {
-					// Send a UPDATE notification
-					let notification = KvsNotification {
-						live_id: lv.id,
-						node_id: lv.node,
-						notification_id: not_id,
-						action: KvsAction::Update,
-						result: self.pluck(_ctx, opt, txn, &lq).await?,
-						timestamp: ts,
-					};
-					if opt.id()? == lv.node.0 {
-						let previous_nots =
-							tx.scan_tbnt(opt.ns(), opt.db(), &tb, lv.id, 1000).await;
-						match previous_nots {
-							Ok(nots) => {
-								for not in nots {
-									// Delete the consumed notification
-									let key = crate::key::table::nt::Nt::new(
-										&ns,
-										&db,
-										&tb,
-										not.live_id,
-										not.timestamp,
-										not.notification_id,
-									);
-									let key_enc = key.encode()?;
-									tx.del(key_enc).await?;
-									// Send the consumed notification
-									if let Err(e) = chn.send(not).await {
-										error!("Error sending scanned notification: {}", e);
+						// Send a DELETE notification
+						let notification = KvsNotification {
+							live_id: lv.id,
+							node_id: lv.node,
+							notification_id: not_id,
+							action: KvsAction::Delete,
+							result: {
+								// Ensure futures are run
+								let lqopt: &Options = &lqopt.new_with_futures(true);
+								// Output the full document before any changes were applied
+								let mut value =
+									doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
+								// Remove metadata fields on output
+								value.del(&lqctx, lqopt, txn, &*META).await?;
+								// Output result
+								value
+							},
+							timestamp: ts,
+						};
+						if opt.id()? == lv.node.0 {
+							chn.send(KvsNotification {
+								live_id: lv.id,
+								node_id: lv.node,
+								action: KvsAction::Delete,
+								result: {
+									// Ensure futures are run
+									let lqopt: &Options = &lqopt.new_with_futures(true);
+									// Output the full document before any changes were applied
+									let mut value =
+										doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
+									// Remove metadata fields on output
+									value.del(&lqctx, lqopt, txn, &*META).await?;
+									// Output result
+									value
+								},
+								notification_id: not_id,
+								timestamp: ts,
+							})
+							.await?;
+						} else {
+							let key =
+								crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
+							tx.putc_tbnt(key, notification, None).await?;
+						}
+					} else if self.is_new() {
+						// Send a CREATE notification
+						let plucked = self.pluck(_ctx, opt, txn, &lq).await?;
+						let notification = KvsNotification {
+							live_id: lv.id,
+							node_id: lv.node,
+							notification_id: not_id,
+							action: KvsAction::Create,
+							result: plucked,
+							timestamp: ts,
+						};
+						if opt.id()? == lv.node.0 {
+							let previous_nots = tx.scan_tbnt(&ns, &db, &tb, lv.id, 1000).await;
+							match previous_nots {
+								Ok(nots) => {
+									for not in &nots {
+										// TODO consume
+										// Consume the notification entry
+										let key = crate::key::table::nt::Nt::new(
+											opt.ns(),
+											opt.db(),
+											&tb,
+											not.live_id,
+											not.timestamp,
+											not.notification_id,
+										);
+										let key_enc = key.encode()?;
+										tx.del(key_enc).await?;
+										// Send the notification to the channel
+										if let Err(e) = chn.send(not.clone()).await {
+											error!("Error sending scanned notification: {}", e);
+										}
 									}
 								}
+								Err(err) => {
+									error!("Error scanning notifications: {}", err);
+								}
 							}
-							Err(err) => {
-								error!("Error scanning notifications: {}", err);
-							}
+							chn.send(notification).await?;
+						} else {
+							let key =
+								crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
+							tx.putc_tbnt(key, notification, None).await?;
 						}
-						chn.send(notification).await?;
 					} else {
-						let key = crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
-						tx.putc_tbnt(key, notification, None).await?;
-					}
-				};
+						// Send a UPDATE notification
+						let notification = KvsNotification {
+							live_id: lv.id,
+							node_id: lv.node,
+							notification_id: not_id,
+							action: KvsAction::Update,
+							result: self.pluck(_ctx, opt, txn, &lq).await?,
+							timestamp: ts,
+						};
+						if opt.id()? == lv.node.0 {
+							let previous_nots =
+								tx.scan_tbnt(opt.ns(), opt.db(), &tb, lv.id, 1000).await;
+							match previous_nots {
+								Ok(nots) => {
+									for not in nots {
+										// Delete the consumed notification
+										let key = crate::key::table::nt::Nt::new(
+											&ns,
+											&db,
+											&tb,
+											not.live_id,
+											not.timestamp,
+											not.notification_id,
+										);
+										let key_enc = key.encode()?;
+										tx.del(key_enc).await?;
+										// Send the consumed notification
+										if let Err(e) = chn.send(not).await {
+											error!("Error sending scanned notification: {}", e);
+										}
+									}
+								}
+								Err(err) => {
+									error!("Error scanning notifications: {}", err);
+								}
+							}
+							chn.send(notification).await?;
+						} else {
+							let key =
+								crate::key::table::nt::Nt::new(&ns, &db, &tb, lv.id, ts, not_id);
+							tx.putc_tbnt(key, notification, None).await?;
+						}
+					};
+				}
 			}
 		}
 		// Carry on
@@ -252,7 +279,8 @@ impl<'a> Document<'a> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			// Check if the expression is truthy
-			if !cond.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
+
+			if !cond.compute(ctx, &opt.new_with_futures(true), txn, Some(doc)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}

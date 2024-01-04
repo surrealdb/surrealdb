@@ -4,7 +4,7 @@ use surrealdb::sql::{serde::deserialize, Array, Value};
 use once_cell::sync::Lazy;
 use surrealdb::sql::Part;
 
-use super::res::{Failure, OutputFormat};
+use super::response::{Failure, OutputFormat};
 
 pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 pub static METHOD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("method")]);

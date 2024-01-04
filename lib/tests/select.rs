@@ -1008,3 +1008,98 @@ async fn check_permissions_auth_disabled() {
 		);
 	}
 }
+
+#[tokio::test]
+async fn select_only() -> Result<(), Error> {
+	let sql: &str = "
+		SELECT * FROM ONLY 1;
+		SELECT * FROM ONLY NONE;
+		SELECT * FROM ONLY [];
+		SELECT * FROM ONLY [1];
+		SELECT * FROM ONLY [1, 2];
+		SELECT * FROM ONLY [] LIMIT 1;
+		SELECT * FROM ONLY [1] LIMIT 1;
+		SELECT * FROM ONLY [1, 2] LIMIT 1;
+		SELECT * FROM ONLY 1, 2;
+		SELECT * FROM ONLY 1, 2 LIMIT 1;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 10);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("NONE");
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("NONE");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
+		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("1");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_on_future() -> Result<(), Error> {
+	let insert_query = "
+		CREATE person SET name = \"Hana\", age = 10, can_drive = <future>{ age > 17 };
+		CREATE person SET name = \"Hendrick\", age = 18, can_drive = <future>{ age > 17 };
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(insert_query, &ses, None).await?;
+
+	let select_query_true = "
+		SELECT name FROM person WHERE can_drive
+	";
+	let mut res = dbs.execute(select_query_true, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ name: \"Hendrick\" }]");
+	assert_eq!(tmp, val);
+
+	let select_query_false = "
+		SELECT name FROM person WHERE !can_drive
+	";
+	let mut res = dbs.execute(select_query_false, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ name: \"Hana\" }]");
+	assert_eq!(tmp, val);
+
+	Ok(())
+}

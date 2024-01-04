@@ -879,15 +879,14 @@ async fn select_unique_single_range_operator_more_or_equal() -> Result<(), Error
 async fn select_with_idiom_param_value() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let sql = format!(
-		"
+	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m', company='SurrealDB';
 		CREATE person:jaime SET name = 'Jaime', genre='m', company='SurrealDB';
 		DEFINE INDEX name ON TABLE person COLUMNS name UNIQUE;
 		LET $name = 'Tobie';
 		LET $nameObj = {{name:'Tobie'}};
 		SELECT name FROM person WHERE name = $nameObj.name EXPLAIN;"
-	);
+		.to_owned();
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	skip_ok(&mut res, 5)?;
@@ -955,7 +954,7 @@ async fn test_contains(
 	index_explain: &str,
 	result: &str,
 ) -> Result<(), Error> {
-	let mut res = execute_test(&dbs, sql, 5).await?;
+	let mut res = execute_test(dbs, sql, 5).await?;
 
 	{
 		let tmp = res.remove(0).result?;

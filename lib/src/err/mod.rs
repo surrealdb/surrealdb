@@ -1,15 +1,18 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
+use crate::idx::trees::vector::SharedVector;
 use crate::key::error::KeyCategory;
-use crate::sql::error::RenderedError as RenderedParserError;
 use crate::sql::idiom::Idiom;
+use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
+use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use std::io::Error as IoError;
@@ -44,9 +47,9 @@ pub enum Error {
 	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
-	#[error("The database encountered unreachable logic")]
+	#[error("The database encountered unreachable logic: {0}")]
 	#[deprecated(note = "Use UnreachableCause instead")]
-	Unreachable,
+	Unreachable(&'static str),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -194,6 +197,12 @@ pub enum Error {
 		message: String,
 	},
 
+	/// There was an error with the provided machine learning model
+	#[error("Problem with machine learning computation. {message}")]
+	InvalidModel {
+		message: String,
+	},
+
 	/// There was a problem running the specified function
 	#[error("There was a problem running the {name}() function. {message}")]
 	InvalidFunction {
@@ -220,6 +229,14 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
+	#[error("Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
+	InvalidVectorDistance {
+		left: SharedVector,
+		right: SharedVector,
+		dist: f64,
+	},
+
+	/// The size of the vector is incorrect
 	#[error("The vector element ({current}) is not a number.")]
 	InvalidVectorType {
 		current: String,
@@ -231,6 +248,10 @@ pub enum Error {
 	InvalidVectorValue {
 		current: String,
 	},
+
+	/// Invalid regular expression
+	#[error("Invalid regular expression: {0:?}")]
+	InvalidRegex(String),
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
@@ -304,6 +325,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested model does not exist
+	#[error("The model 'ml::{value}' does not exist")]
+	MlNotFound {
+		value: String,
+	},
+
 	/// The requested scope does not exist
 	#[error("The scope '{value}' does not exist")]
 	ScNotFound {
@@ -363,6 +390,9 @@ pub enum Error {
 	IxNotFound {
 		value: String,
 	},
+
+	#[error("Unsupported distance: {0}")]
+	UnsupportedDistance(Distance),
 
 	/// The requested root user does not exist
 	#[error("The root user '{value}' does not exist")]
@@ -591,11 +621,11 @@ pub enum Error {
 	Revision(#[from] RevisionError),
 
 	/// The index has been found to be inconsistent
-	#[error("Index is corrupted")]
-	CorruptedIndex,
+	#[error("Index is corrupted: {0}")]
+	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the match @@ operator on a given expression
-	#[error("There was no suitable full-text index supporting the expression '{value}'")]
+	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
+	#[error("There was no suitable index supporting the expression '{value}'")]
 	NoIndexFoundForMatch {
 		value: String,
 	},
@@ -619,6 +649,14 @@ pub enum Error {
 	/// Represents an underlying error while reading UTF8 characters
 	#[error("Utf8 error: {0}")]
 	Utf8Error(#[from] FromUtf8Error),
+
+	/// Represents an underlying error with the Object Store
+	#[error("Object Store error: {0}")]
+	ObsError(#[from] ObjectStoreError),
+
+	/// There was an error with model computation
+	#[error("There was an error with model computation: {0}")]
+	ModelComputation(String),
 
 	/// The feature has not yet being implemented
 	#[error("Feature not yet implemented: {feature}")]
@@ -863,6 +901,8 @@ pub enum InternalCause {
 	ClockMayHaveGoneBackwards,
 	#[error("versionstamp is not 10 bytes")]
 	InvalidVersionstamp,
+	#[error("unable to acquire lock: {0}")]
+	UnableToAcquireLock(&'static str),
 }
 
 impl From<Error> for String {
@@ -880,6 +920,12 @@ impl From<Base64Error> for Error {
 impl From<JWTError> for Error {
 	fn from(_: JWTError) -> Error {
 		Error::InvalidAuth
+	}
+}
+
+impl From<regex::Error> for Error {
+	fn from(error: regex::Error) -> Self {
+		Error::InvalidRegex(error.to_string())
 	}
 }
 

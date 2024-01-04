@@ -8,7 +8,6 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::KvsNotification;
 use crate::err::{Error, InternalCause, LiveQueryCause, UnreachableCause};
 use crate::idg::u32::U32;
-use crate::idx::trees::store::TreeStoreType;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
@@ -34,6 +33,7 @@ use sql::statements::DefineEventStatement;
 use sql::statements::DefineFieldStatement;
 use sql::statements::DefineFunctionStatement;
 use sql::statements::DefineIndexStatement;
+use sql::statements::DefineModelStatement;
 use sql::statements::DefineNamespaceStatement;
 use sql::statements::DefineParamStatement;
 use sql::statements::DefineScopeStatement;
@@ -105,7 +105,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Transaction),
 }
-
+#[derive(Copy, Clone)]
 pub enum TransactionType {
 	Read,
 	Write,
@@ -116,16 +116,6 @@ impl From<bool> for TransactionType {
 		match value {
 			true => TransactionType::Write,
 			false => TransactionType::Read,
-		}
-	}
-}
-
-impl From<TreeStoreType> for TransactionType {
-	fn from(value: TreeStoreType) -> Self {
-		match value {
-			TreeStoreType::Write => TransactionType::Write,
-			TreeStoreType::Read => TransactionType::Read,
-			TreeStoreType::Traversal => TransactionType::Read,
 		}
 	}
 }
@@ -319,10 +309,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Into<Vec<u8>> + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
+		trace!("Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -573,7 +563,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -682,10 +672,11 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
+		K: Into<Key> + From<Vec<u8>> + Debug,
 	{
-		let range = page.range.clone();
-		let res = match self {
+		#[cfg(debug_assertions)]
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
+		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
@@ -840,7 +831,7 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
@@ -972,8 +963,7 @@ impl Transaction {
 		let end: Key = beg.clone().add(0xff);
 		let min = beg.clone();
 		let max = end.clone();
-		let num = std::cmp::min(1000, limit);
-		self.delr(min..max, num).await?;
+		self.delr(min..max, limit).await?;
 		Ok(())
 	}
 
@@ -1464,6 +1454,29 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve all model definitions for a specific database.
+	pub async fn all_db_models(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineModelStatement]>, Error> {
+		let key = crate::key::database::ml::prefix(ns, db);
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Mls(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::database::ml::prefix(ns, db);
+			let end = crate::key::database::ml::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Mls(Arc::clone(&val)));
+			val
+		})
+	}
+
 	/// Retrieve all scope definitions for a specific database.
 	pub async fn all_sc(
 		&mut self,
@@ -1744,6 +1757,21 @@ impl Transaction {
 			value: user.to_owned(),
 			ns: ns.to_owned(),
 			db: db.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific model definition from a database.
+	pub async fn get_db_model(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ml: &str,
+		vn: &str,
+	) -> Result<DefineModelStatement, Error> {
+		let key = crate::key::database::ml::new(ns, db, ml, vn);
+		let val = self.get(key).await?.ok_or(Error::MlNotFound {
+			value: format!("{ml}<{vn}>"),
 		})?;
 		Ok(val.into())
 	}
@@ -2082,6 +2110,31 @@ impl Transaction {
 			})?;
 			let val: Arc<DefineParamStatement> = Arc::new(val.into());
 			self.cache.set(key, Entry::Pa(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve a specific model definition.
+	pub async fn get_and_cache_db_model(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ml: &str,
+		vn: &str,
+	) -> Result<Arc<DefineModelStatement>, Error> {
+		let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ml(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::MlNotFound {
+				value: format!("{ml}<{vn}>"),
+			})?;
+			let val: Arc<DefineModelStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Ml(Arc::clone(&val)));
 			val
 		})
 	}
@@ -2719,6 +2772,8 @@ impl Transaction {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests {
+	use crate::key::database::all::All;
+	use crate::key::database::tb::Tb;
 	use crate::{
 		kvs::{Datastore, LockType::*, TransactionType::*},
 		sql::{statements::DefineUserStatement, Base},
@@ -2927,5 +2982,46 @@ mod tests {
 		txn.remove_ns_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn test_delp() {
+		let ds = Datastore::new("memory").await.unwrap();
+		// Create entries
+		{
+			let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+			for i in 0..2500 {
+				let t = format!("{i}");
+				let tb = Tb::new("test", "test", &t);
+				txn.set(tb, vec![]).await.unwrap();
+			}
+			txn.commit().await.unwrap();
+		}
+
+		let beg = crate::key::database::tb::prefix("test", "test");
+		let end = crate::key::database::tb::suffix("test", "test");
+		let rng = beg..end;
+
+		// Check we have the table keys
+		{
+			let mut txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.getr(rng.clone(), u32::MAX).await.unwrap();
+			assert_eq!(res.len(), 2500);
+		}
+
+		// Delete using the prefix
+		{
+			let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+			let all = All::new("test", "test");
+			txn.delp(all, u32::MAX).await.unwrap();
+			txn.commit().await.unwrap();
+		}
+
+		// Check we don't have any table key anymore
+		{
+			let mut txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.getr(rng, u32::MAX).await.unwrap();
+			assert_eq!(res.len(), 0);
+		}
 	}
 }

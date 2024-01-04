@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
@@ -6,21 +7,19 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator, KnnThingIterator,
+	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::trees::store::TreeStoreType;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
-use crate::kvs::Key;
+use crate::kvs::{Key, TransactionType};
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Object, Table, Thing, Value};
-use roaring::RoaringTreemap;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -59,12 +58,12 @@ impl IteratorEntry {
 }
 impl QueryExecutor {
 	pub(super) async fn new(
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		table: &Table,
 		im: IndexesMap,
 	) -> Result<Self, Error> {
-		let mut run = txn.lock().await;
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
 		let mut ft_map = HashMap::default();
@@ -81,15 +80,22 @@ impl QueryExecutor {
 						let mut ft_entry = None;
 						if let Some(ft) = ft_map.get(&ix_ref) {
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(&mut run, ft, io).await?;
+								ft_entry = FtEntry::new(ctx, opt, txn, ft, io).await?;
 							}
 						} else {
 							let ikb = IndexKeyBase::new(opt, idx_def);
-							let az = run.get_db_analyzer(opt.ns(), opt.db(), p.az.as_str()).await?;
-							let ft =
-								FtIndex::new(&mut run, az, ikb, p, TreeStoreType::Read).await?;
+							let ft = FtIndex::new(
+								ctx.get_index_stores(),
+								opt,
+								txn,
+								p.az.as_str(),
+								ikb,
+								p,
+								TransactionType::Read,
+							)
+							.await?;
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(&mut run, &ft, io).await?;
+								ft_entry = FtEntry::new(ctx, opt, txn, &ft, io).await?;
 							}
 							ft_map.insert(ix_ref, ft);
 						}
@@ -106,13 +112,20 @@ impl QueryExecutor {
 					}
 					Index::MTree(p) => {
 						if let IndexOperator::Knn(a, k) = io.op() {
+							let mut tx = txn.lock().await;
 							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
-								MtEntry::new(&mut run, mt, a.clone(), *k).await?
+								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
 							} else {
 								let ikb = IndexKeyBase::new(opt, idx_def);
-								let mt =
-									MTreeIndex::new(&mut run, ikb, p, TreeStoreType::Read).await?;
-								let entry = MtEntry::new(&mut run, &mt, a.clone(), *k).await?;
+								let mt = MTreeIndex::new(
+									ctx.get_index_stores(),
+									&mut tx,
+									ikb,
+									p,
+									TransactionType::Read,
+								)
+								.await?;
+								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
 								mt_map.insert(ix_ref, mt);
 								entry
 							};
@@ -294,7 +307,7 @@ impl QueryExecutor {
 	fn new_mtree_index_knn_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(it_ref as usize) {
 			if let Some(mte) = self.mt_entries.get(exp.as_ref()) {
-				let it = KnnThingIterator::new(mte.doc_ids.clone(), mte.res.clone());
+				let it = DocIdsIterator::new(mte.doc_ids.clone(), mte.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
 		}
@@ -438,13 +451,16 @@ struct Inner {
 
 impl FtEntry {
 	async fn new(
-		tx: &mut kvs::Transaction,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
-			let terms = ft.extract_terms(tx, qs.to_owned()).await?;
-			let terms_docs = Arc::new(ft.get_terms_docs(tx, &terms).await?);
+			let terms = ft.extract_terms(ctx, opt, txn, qs.to_owned()).await?;
+			let mut tx = txn.lock().await;
+			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),
@@ -461,7 +477,7 @@ impl FtEntry {
 #[derive(Clone)]
 pub(super) struct MtEntry {
 	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<RoaringTreemap>,
+	res: VecDeque<DocId>,
 }
 
 impl MtEntry {

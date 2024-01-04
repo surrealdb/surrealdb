@@ -13,6 +13,7 @@ use http_body::Body as HttpBody;
 use serde::Deserialize;
 use std::str;
 use surrealdb::dbs::Session;
+use surrealdb::iam::check::check_ns_db;
 use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -68,12 +69,14 @@ where
 
 async fn select_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Specify the request statement
 	let sql = match query.fields {
 		None => "SELECT * FROM type::table($table) LIMIT $limit START $start",
@@ -88,7 +91,7 @@ async fn select_all(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(ref res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -105,13 +108,15 @@ async fn select_all(
 
 async fn create_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
@@ -127,7 +132,7 @@ async fn create_all(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -147,13 +152,15 @@ async fn create_all(
 
 async fn update_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
@@ -169,7 +176,7 @@ async fn update_all(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -189,13 +196,15 @@ async fn update_all(
 
 async fn modify_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
@@ -211,7 +220,7 @@ async fn modify_all(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -231,12 +240,14 @@ async fn modify_all(
 
 async fn delete_all(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path(table): Path<String>,
 	Query(params): Query<Params>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Specify the request statement
 	let sql = "DELETE type::table($table) RETURN BEFORE";
 	// Specify the request variables
@@ -246,7 +257,7 @@ async fn delete_all(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -267,12 +278,14 @@ async fn delete_all(
 
 async fn select_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 	Query(query): Query<QueryOptions>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Specify the request statement
 	let sql = match query.fields {
 		None => "SELECT * FROM type::thing($table, $id)",
@@ -291,7 +304,7 @@ async fn select_one(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -308,13 +321,15 @@ async fn select_one(
 
 async fn create_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
 	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
@@ -336,7 +351,7 @@ async fn create_one(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -356,13 +371,15 @@ async fn create_one(
 
 async fn update_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
 	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
@@ -384,7 +401,7 @@ async fn update_one(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -404,13 +421,15 @@ async fn update_one(
 
 async fn modify_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Query(params): Query<Params>,
 	Path((table, id)): Path<(String, String)>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
@@ -432,7 +451,7 @@ async fn modify_one(
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars)).await {
-				Ok(res) => match maybe_output.as_deref() {
+				Ok(res) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 					Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
@@ -452,11 +471,13 @@ async fn modify_one(
 
 async fn delete_one(
 	Extension(session): Extension<Session>,
-	maybe_output: Option<TypedHeader<Accept>>,
+	accept: Option<TypedHeader<Accept>>,
 	Path((table, id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
+	// Ensure a NS and DB are set
+	let _ = check_ns_db(&session)?;
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
@@ -471,7 +492,7 @@ async fn delete_one(
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars)).await {
-		Ok(res) => match maybe_output.as_deref() {
+		Ok(res) => match accept.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),

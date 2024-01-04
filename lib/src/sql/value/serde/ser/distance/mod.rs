@@ -31,7 +31,6 @@ impl ser::Serializer for Serializer {
 		match variant {
 			"Euclidean" => Ok(Distance::Euclidean),
 			"Manhattan" => Ok(Distance::Manhattan),
-			"Cosine" => Ok(Distance::Cosine),
 			"Hamming" => Ok(Distance::Hamming),
 			variant => Err(Error::custom(format!("unexpected unit variant `{name}::{variant}`"))),
 		}
@@ -82,13 +81,6 @@ mod tests {
 	#[test]
 	fn distance_hamming() {
 		let dist = Distance::Hamming;
-		let serialized = dist.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(dist, serialized);
-	}
-
-	#[test]
-	fn distance_cosine() {
-		let dist = Distance::Cosine;
 		let serialized = dist.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dist, serialized);
 	}

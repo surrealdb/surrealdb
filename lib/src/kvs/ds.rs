@@ -10,23 +10,29 @@ use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
+use crate::dbs::{
+	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
+	Variables,
+};
+use crate::err::Error;
 use crate::err::{BootstrapCause, Error, InternalCause, TaskVariant};
 use crate::iam::ResourceKind;
+use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::iam::{Action, Auth, Error as IamError, Role};
+use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
-#[allow(unused_imports)] // TODO fix
+#[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
-use crate::sql;
-use crate::sql::statements::DefineUserStatement;
-use crate::sql::Base;
-use crate::sql::Value;
-use crate::sql::{Query, Uuid};
+use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::syn;
 use crate::vs::Oracle;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use futures::Future;
+use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -120,6 +126,9 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
+	// Whether authentication level is enabled on this datastore.
+	// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
+	auth_level_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -134,6 +143,8 @@ pub struct Datastore {
 		OnceLock<(channel::Sender<KvsNotification>, channel::Receiver<KvsNotification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
+	// The index store cache
+	index_stores: IndexStores,
 }
 
 /// We always want to be circulating the live query information
@@ -234,6 +245,9 @@ impl Datastore {
 		path: &str,
 		#[allow(unused_variables)] clock_override: Option<Arc<RwLock<SizedClock>>>,
 	) -> Result<Datastore, Error> {
+		#[allow(unused_variables)]
+		let default_clock: Arc<RwLock<SizedClock>> =
+			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
 			"memory" => {
@@ -364,12 +378,15 @@ impl Datastore {
 			inner: Arc::new(inner),
 			strict: false,
 			auth_enabled: false,
+			// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
+			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: OnceLock::new(),
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
+			index_stores: IndexStores::default(),
 		})
 	}
 
@@ -409,15 +426,32 @@ impl Datastore {
 		self
 	}
 
+	/// Set whether authentication levels are enabled for this Datastore
+	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
+	pub fn with_auth_level_enabled(mut self, enabled: bool) -> Self {
+		self.auth_level_enabled = enabled;
+		self
+	}
+
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
 		self
 	}
 
+	pub fn index_store(&self) -> &IndexStores {
+		&self.index_stores
+	}
+
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
+	}
+
+	/// Is authentication level enabled for this Datastore?
+	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
+	pub fn is_auth_level_enabled(&self) -> bool {
+		self.auth_level_enabled
 	}
 
 	/// Setup the initial credentials
@@ -1021,7 +1055,7 @@ impl Datastore {
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
 		// Parse the SQL query text
-		let ast = sql::parse(txt)?;
+		let ast = syn::parse(txt)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -1065,12 +1099,11 @@ impl Datastore {
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
-		let mut ctx = Context::default();
-		ctx.add_capabilities(self.capabilities.clone());
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
-		}
+		let mut ctx = Context::from_ds(
+			self.query_timeout,
+			self.capabilities.clone(),
+			self.index_stores.clone(),
+		);
 		// Setup the notification channel
 		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
@@ -1251,9 +1284,11 @@ impl Datastore {
 		self.notification_channel.get().map(|v| v.1.clone())
 	}
 
-	#[allow(dead_code)]
-	pub(crate) fn live_sender(&self) -> Option<channel::Sender<KvsNotification>> {
-		self.notification_channel.get().map(|v| v.0.clone())
+	/// Performs a database import from SQL
+	#[instrument(level = "debug", skip(self, sess, sql))]
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+		// Execute the SQL import
+		self.execute(sql, sess, None).await
 	}
 
 	/// Performs a full database export as SQL
@@ -1261,15 +1296,10 @@ impl Datastore {
 	pub async fn export(
 		&self,
 		sess: &Session,
-		ns: String,
-		db: String,
 		chn: channel::Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
-		// Skip auth for Anonymous users if auth is disabled
-		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
-		if !skip_auth {
-			sess.au.is_allowed(Action::View, &ResourceKind::Any.on_db(&ns, &db))?;
-		}
+		// Retrieve the provided NS and DB
+		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let mut txn = self.transaction(Read, Optimistic).await?;
 		// Return an async export job
@@ -1281,18 +1311,15 @@ impl Datastore {
 		})
 	}
 
-	/// Performs a database import from SQL
-	#[instrument(level = "debug", skip(self, sess, sql))]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+	/// Checks the required permissions level for this session
+	#[instrument(level = "debug", skip(self, sess))]
+	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<(), Error> {
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
-			sess.au.is_allowed(
-				Action::Edit,
-				&ResourceKind::Any.on_level(sess.au.level().to_owned()),
-			)?;
+			sess.au.is_allowed(action, &resource)?;
 		}
-		// Execute the SQL import
-		self.execute(sql, sess, None).await
+		// All ok
+		Ok(())
 	}
 }

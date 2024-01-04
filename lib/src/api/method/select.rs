@@ -1,6 +1,6 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
-use crate::api::conn::Router;
+use crate::api::method::OnceLockExt;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
@@ -8,7 +8,9 @@ use crate::api::Result;
 use crate::method::Live;
 use crate::sql::Id;
 use crate::sql::Value;
+use crate::Surreal;
 use serde::de::DeserializeOwned;
+use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -17,18 +19,32 @@ use std::pin::Pin;
 /// A select future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Select<'r, C: Connection, R> {
-	pub(super) router: Result<&'r Router<C>>,
+pub struct Select<'r, C: Connection, R, T = ()> {
+	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
+	pub(super) query_type: PhantomData<T>,
+}
+
+impl<C, R, T> Select<'_, C, R, T>
+where
+	C: Connection,
+{
+	/// Converts to an owned type which can easily be moved to a different thread
+	pub fn into_owned(self) -> Select<'static, C, R, T> {
+		Select {
+			client: Cow::Owned(self.client.into_owned()),
+			..self
+		}
+	}
 }
 
 macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Select {
-				router,
+				client,
 				resource,
 				range,
 				..
@@ -39,7 +55,7 @@ macro_rules! into_future {
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(Method::Select);
-				conn.$method(router?, Param::new(vec![param])).await
+				conn.$method(client.router.extract()?, Param::new(vec![param])).await
 			})
 		}
 	};
@@ -151,12 +167,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn live(self) -> Live<'r, C, R> {
-		Live {
-			router: self.router,
+	pub fn live(self) -> Select<'r, C, R, Live> {
+		Select {
+			client: self.client,
 			resource: self.resource,
 			range: self.range,
 			response_type: self.response_type,
+			query_type: PhantomData,
 		}
 	}
 }

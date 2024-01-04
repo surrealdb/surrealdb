@@ -1,14 +1,7 @@
-use crate::api::err::Error;
-use crate::api::opt::from_value;
-use crate::api::Response as QueryResponse;
-use crate::api::Result;
-use crate::sql;
-use crate::sql::statements::*;
-use crate::sql::Array;
-use crate::sql::Object;
-use crate::sql::Statement;
-use crate::sql::Statements;
-use crate::sql::Value;
+use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
+use crate::method::Stats;
+use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
+use crate::syn;
 use serde::de::DeserializeOwned;
 use std::mem;
 
@@ -160,19 +153,19 @@ impl IntoQuery for OptionStatement {
 
 impl IntoQuery for &str {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		sql::parse(self)?.into_query()
+		syn::parse(self)?.into_query()
 	}
 }
 
 impl IntoQuery for &String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		sql::parse(self)?.into_query()
+		syn::parse(self)?.into_query()
 	}
 }
 
 impl IntoQuery for String {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		sql::parse(&self)?.into_query()
+		syn::parse(&self)?.into_query()
 	}
 }
 
@@ -183,14 +176,23 @@ where
 {
 	/// Extracts and deserializes a query result from a query response
 	fn query_result(self, response: &mut QueryResponse) -> Result<Response>;
+
+	/// Extracts the statistics from a query response
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&0).map(|x| x.0)
+	}
 }
 
 impl QueryResult<Value> for usize {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
 		match map.remove(&self) {
-			Some(result) => Ok(result?),
+			Some((_, result)) => Ok(result?),
 			None => Ok(Value::None),
 		}
+	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(self).map(|x| x.0)
 	}
 }
 
@@ -200,7 +202,7 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
 		let value = match map.get_mut(&self) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -229,13 +231,17 @@ where
 		map.remove(&self);
 		result
 	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(self).map(|x| x.0)
+	}
 }
 
 impl QueryResult<Value> for (usize, &str) {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
 		let (index, key) = self;
 		let response = match map.get_mut(&index) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -255,6 +261,10 @@ impl QueryResult<Value> for (usize, &str) {
 
 		Ok(response)
 	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&self.0).map(|x| x.0)
+	}
 }
 
 impl<T> QueryResult<Option<T>> for (usize, &str)
@@ -264,7 +274,7 @@ where
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
 		let value = match map.get_mut(&index) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -307,6 +317,10 @@ where
 			_ => Ok(None),
 		}
 	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&self.0).map(|x| x.0)
+	}
 }
 
 impl<T> QueryResult<Vec<T>> for usize
@@ -315,7 +329,7 @@ where
 {
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match map.remove(&self) {
-			Some(result) => match result? {
+			Some((_, result)) => match result? {
 				Value::Array(Array(vec)) => vec,
 				vec => vec![vec],
 			},
@@ -324,6 +338,10 @@ where
 			}
 		};
 		from_value(vec.into()).map_err(Into::into)
+	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(self).map(|x| x.0)
 	}
 }
 
@@ -334,7 +352,7 @@ where
 	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
 		let mut response = match map.get_mut(&index) {
-			Some(result) => match result {
+			Some((_, result)) => match result {
 				Ok(val) => match val {
 					Value::Array(Array(vec)) => mem::take(vec),
 					val => {
@@ -361,6 +379,10 @@ where
 			}
 		}
 		from_value(vec.into()).map_err(Into::into)
+	}
+
+	fn stats(&self, QueryResponse(map): &QueryResponse) -> Option<Stats> {
+		map.get(&self.0).map(|x| x.0)
 	}
 }
 

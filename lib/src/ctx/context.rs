@@ -6,6 +6,7 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, KvsNotification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
+use crate::idx::trees::store::IndexStores;
 use crate::sql::paths::SC;
 use crate::sql::paths::SD;
 use crate::sql::paths::TK;
@@ -51,6 +52,8 @@ pub struct Context<'a> {
 	notifications: Option<Sender<KvsNotification>>,
 	// An optional query planner
 	query_planner: Option<&'a QueryPlanner<'a>>,
+	// The index store
+	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 }
@@ -73,9 +76,29 @@ impl<'a> Debug for Context<'a> {
 }
 
 impl<'a> Context<'a> {
+	pub(crate) fn from_ds(
+		time_out: Option<Duration>,
+		capabilities: Capabilities,
+		index_stores: IndexStores,
+	) -> Context<'a> {
+		let mut ctx = Self {
+			values: HashMap::default(),
+			parent: None,
+			deadline: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: None,
+			query_planner: None,
+			capabilities: Arc::new(capabilities),
+			index_stores,
+		};
+		if let Some(timeout) = time_out {
+			ctx.add_timeout(timeout);
+		}
+		ctx
+	}
 	/// Create an empty background context.
 	pub fn background() -> Self {
-		Context {
+		Self {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
@@ -83,6 +106,7 @@ impl<'a> Context<'a> {
 			notifications: None,
 			query_planner: None,
 			capabilities: Arc::new(Capabilities::default()),
+			index_stores: IndexStores::default(),
 		}
 	}
 
@@ -96,6 +120,7 @@ impl<'a> Context<'a> {
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
 			capabilities: parent.capabilities.clone(),
+			index_stores: parent.index_stores.clone(),
 		}
 	}
 
@@ -162,6 +187,11 @@ impl<'a> Context<'a> {
 
 	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
 		self.query_planner
+	}
+
+	/// Get the index_store for this context/ds
+	pub(crate) fn get_index_stores(&self) -> &IndexStores {
+		&self.index_stores
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

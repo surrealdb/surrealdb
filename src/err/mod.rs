@@ -1,7 +1,10 @@
+use crate::cli::abstraction::auth::Error as SurrealAuthError;
+use axum::extract::rejection::TypedHeaderRejection;
 use axum::response::{IntoResponse, Response};
+use axum::Error as AxumError;
 use axum::Json;
 use base64::DecodeError as Base64Error;
-use http::StatusCode;
+use http::{HeaderName, StatusCode};
 use reqwest::Error as ReqwestError;
 use serde::Serialize;
 use serde_cbor::error::Error as CborError;
@@ -34,6 +37,9 @@ pub enum Error {
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
 
+	#[error("There was a problem parsing the header {0}: {1}")]
+	InvalidHeader(HeaderName, TypedHeaderRejection),
+
 	#[error("The operation is unsupported")]
 	OperationUnsupported,
 
@@ -42,6 +48,9 @@ pub enum Error {
 
 	#[error("Couldn't open the specified file: {0}")]
 	Io(#[from] IoError),
+
+	#[error("There was an error with the network: {0}")]
+	Axum(#[from] AxumError),
 
 	#[error("There was an error serializing to JSON: {0}")]
 	Json(#[from] JsonError),
@@ -55,8 +64,15 @@ pub enum Error {
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] ReqwestError),
 
+	#[error("There was an error with auth: {0}")]
+	Auth(#[from] SurrealAuthError),
+
 	#[error("There was an error with the node agent")]
 	NodeAgent,
+
+	/// Statement has been deprecated
+	#[error("{0}")]
+	Other(String),
 }
 
 impl From<Error> for String {

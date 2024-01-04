@@ -3,14 +3,8 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::base::Base;
-use crate::sql::comment::shouldbespace;
-use crate::sql::error::IResult;
-use crate::sql::ident::{ident, Ident};
-use crate::sql::value::Value;
+use crate::sql::{Base, Ident, Value};
 use derive::Store;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::cut;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -25,7 +19,7 @@ impl RemoveTableStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
@@ -33,6 +27,8 @@ impl RemoveTableStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Claim transaction
 		let mut run = txn.lock().await;
+		// Remove the index stores
+		ctx.get_index_stores().table_removed(opt, &mut run, &self.name).await?;
 		// Clear the cache
 		run.clear_cache();
 		// Get the defined table
@@ -61,16 +57,4 @@ impl Display for RemoveTableStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE TABLE {}", self.name)
 	}
-}
-
-pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
-	let (i, _) = tag_no_case("TABLE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = cut(ident)(i)?;
-	Ok((
-		i,
-		RemoveTableStatement {
-			name,
-		},
-	))
 }

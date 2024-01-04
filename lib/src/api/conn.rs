@@ -6,6 +6,7 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::KvsNotification;
+use crate::dbs::Notification;
 use crate::opt::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -113,6 +114,16 @@ pub enum DbResponse {
 	Other(Value),
 }
 
+#[derive(Debug)]
+#[allow(dead_code)] // used by ML model import and export functions
+pub(crate) enum MlConfig {
+	Import,
+	Export {
+		name: String,
+		version: String,
+	},
+}
+
 /// Holds the parameters given to the caller
 #[derive(Debug, Default)]
 #[allow(dead_code)] // used by the embedded and remote connections
@@ -121,7 +132,8 @@ pub struct Param {
 	pub(crate) other: Vec<Value>,
 	pub(crate) file: Option<PathBuf>,
 	pub(crate) bytes_sender: Option<channel::Sender<Result<Vec<u8>>>>,
-	pub(crate) notification_sender: Option<channel::Sender<KvsNotification>>,
+	pub(crate) notification_sender: Option<channel::Sender<Notification>>,
+	pub(crate) ml_config: Option<MlConfig>,
 }
 
 impl Param {
@@ -153,7 +165,7 @@ impl Param {
 		}
 	}
 
-	pub(crate) fn notification_sender(send: channel::Sender<KvsNotification>) -> Self {
+	pub(crate) fn notification_sender(send: channel::Sender<Notification>) -> Self {
 		Self {
 			notification_sender: Some(send),
 			..Default::default()

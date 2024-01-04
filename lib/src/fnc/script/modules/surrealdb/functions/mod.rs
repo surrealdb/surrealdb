@@ -16,6 +16,7 @@ mod geo;
 mod http;
 mod math;
 mod meta;
+mod object;
 mod parse;
 mod rand;
 mod search;
@@ -40,6 +41,7 @@ impl_module_def!(
 	"http" => (http::Package),
 	"math" => (math::Package),
 	"meta" => (meta::Package),
+	"object" => (object::Package),
 	"not" => run,
 	"parse" => (parse::Package),
 	"rand" => (rand::Package),

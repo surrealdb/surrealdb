@@ -135,8 +135,17 @@ pub mod key;
 #[doc(hidden)]
 pub mod kvs;
 
+#[cfg(feature = "ml")]
+#[doc(hidden)]
+pub mod obs;
+#[doc(hidden)]
+pub mod syn;
+
 #[doc(inline)]
 pub use api::engine;
+#[cfg(feature = "protocol-http")]
+#[doc(hidden)]
+pub use api::headers;
 #[doc(inline)]
 pub use api::method;
 #[doc(inline)]
@@ -155,7 +164,8 @@ pub use api::Surreal;
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use channel::bounded as new;
+	pub use channel::bounded;
+	pub use channel::unbounded;
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }

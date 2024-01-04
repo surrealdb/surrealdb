@@ -1,20 +1,9 @@
 use crate::ctx::Context;
-use crate::dbs::Iterator;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Transaction;
+use crate::dbs::{Iterator, Options, Statement, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::comment::shouldbespace;
-use crate::sql::cond::{cond, Cond};
-use crate::sql::error::IResult;
-use crate::sql::output::{output, Output};
-use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::value::{whats, Value, Values};
+use crate::sql::{Cond, Output, Timeout, Value, Values};
 use derive::Store;
-use nom::bytes::complete::tag_no_case;
-use nom::combinator::opt;
-use nom::sequence::preceded;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -99,42 +88,5 @@ impl fmt::Display for DeleteStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
-	}
-}
-
-pub fn delete(i: &str) -> IResult<&str, DeleteStatement> {
-	let (i, _) = tag_no_case("DELETE")(i)?;
-	let (i, _) = opt(preceded(shouldbespace, tag_no_case("FROM")))(i)?;
-	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, what) = whats(i)?;
-	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
-	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	Ok((
-		i,
-		DeleteStatement {
-			only: only.is_some(),
-			what,
-			cond,
-			output,
-			timeout,
-			parallel: parallel.is_some(),
-		},
-	))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn delete_statement() {
-		let sql = "DELETE test";
-		let res = delete(sql);
-		let out = res.unwrap().1;
-		assert_eq!("DELETE test", format!("{}", out))
 	}
 }

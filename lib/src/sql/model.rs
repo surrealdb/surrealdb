@@ -1,29 +1,28 @@
-use async_recursion::async_recursion;
+use crate::ctx::Context;
+use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::value::Value;
 use derive::Store;
-use nom::{
-	bytes::complete::{tag, take_while1},
-	character::complete::i64,
-	combinator::{cut, recognize},
-	multi::separated_list1,
-};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{
-	ctx::Context,
-	dbs::{Options, Transaction},
-	doc::CursorDoc,
-	err::Error,
-	sql::{error::IResult, value::Value},
-};
+#[cfg(feature = "ml")]
+use crate::iam::Action;
+#[cfg(feature = "ml")]
+use crate::sql::Permission;
+#[cfg(feature = "ml")]
+use futures::future::try_join_all;
+#[cfg(feature = "ml")]
+use std::collections::HashMap;
+#[cfg(feature = "ml")]
+use surrealml_core::execution::compute::ModelComputation;
+#[cfg(feature = "ml")]
+use surrealml_core::storage::surml_file::SurMlFile;
 
-use super::{
-	common::{closechevron, closeparentheses, commas, openchevron, openparentheses, val_char},
-	error::{expect_tag_no_case, expected},
-	util::{delimited_list1, expect_delimited},
-	value::value,
-};
+#[cfg(feature = "ml")]
+const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
@@ -47,102 +46,165 @@ impl fmt::Display for Model {
 }
 
 impl Model {
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	#[cfg(feature = "ml")]
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&CursorDoc<'_>>,
+	) -> Result<Value, Error> {
+		// Ensure futures are run
+		let opt = &opt.new_with_futures(true);
+		// Get the full name of this model
+		let name = format!("ml::{}", self.name);
+		// Check this function is allowed
+		ctx.check_allowed_function(name.as_str())?;
+		// Get the model definition
+		let val = {
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Get the function definition
+			run.get_and_cache_db_model(opt.ns(), opt.db(), &self.name, &self.version).await?
+		};
+		// Calculate the model path
+		let path = format!(
+			"ml/{}/{}/{}-{}-{}.surml",
+			opt.ns(),
+			opt.db(),
+			self.name,
+			self.version,
+			val.hash
+		);
+		// Check permissions
+		if opt.check_perms(Action::View) {
+			match &val.permissions {
+				Permission::Full => (),
+				Permission::None => {
+					return Err(Error::FunctionPermissions {
+						name: self.name.to_owned(),
+					})
+				}
+				Permission::Specific(e) => {
+					// Disable permissions
+					let opt = &opt.new_with_perms(false);
+					// Process the PERMISSION clause
+					if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+						return Err(Error::FunctionPermissions {
+							name: self.name.to_owned(),
+						});
+					}
+				}
+			}
+		}
+		// Compute the function arguments
+		let mut args =
+			try_join_all(self.args.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+		// Check the minimum argument length
+		if args.len() != 1 {
+			return Err(Error::InvalidArguments {
+				name: format!("ml::{}<{}>", self.name, self.version),
+				message: ARGUMENTS.into(),
+			});
+		}
+		// Take the first and only specified argument
+		match args.swap_remove(0) {
+			// Perform bufferered compute
+			Value::Object(v) => {
+				// Compute the model function arguments
+				let mut args = v
+					.into_iter()
+					.map(|(k, v)| Ok((k, Value::try_into(v)?)))
+					.collect::<Result<HashMap<String, f32>, Error>>()
+					.map_err(|_| Error::InvalidArguments {
+						name: format!("ml::{}<{}>", self.name, self.version),
+						message: ARGUMENTS.into(),
+					})?;
+				// Get the model file as bytes
+				let bytes = crate::obs::get(&path).await?;
+				// Run the compute in a blocking task
+				let outcome = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.buffered_compute(&mut args).map_err(Error::ModelComputation)
+				})
+				.await
+				.unwrap()?;
+				// Convert the output to a value
+				Ok(outcome[0].into())
+			}
+			// Perform raw compute
+			Value::Number(v) => {
+				// Compute the model function arguments
+				let args: f32 = v.try_into().map_err(|_| Error::InvalidArguments {
+					name: format!("ml::{}<{}>", self.name, self.version),
+					message: ARGUMENTS.into(),
+				})?;
+				// Get the model file as bytes
+				let bytes = crate::obs::get(&path).await?;
+				// Convert the argument to a tensor
+				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
+				// Run the compute in a blocking task
+				let outcome = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+				})
+				.await
+				.unwrap()?;
+				// Convert the output to a value
+				Ok(outcome[0].into())
+			}
+			// Perform raw compute
+			Value::Array(v) => {
+				// Compute the model function arguments
+				let args = v
+					.into_iter()
+					.map(Value::try_into)
+					.collect::<Result<Vec<f32>, Error>>()
+					.map_err(|_| Error::InvalidArguments {
+						name: format!("ml::{}<{}>", self.name, self.version),
+						message: ARGUMENTS.into(),
+					})?;
+				// Get the model file as bytes
+				let bytes = crate::obs::get(&path).await?;
+				// Convert the argument to a tensor
+				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
+				// Run the compute in a blocking task
+				let outcome = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+				})
+				.await
+				.unwrap()?;
+				// Convert the output to a value
+				Ok(outcome[0].into())
+			}
+			//
+			_ => Err(Error::InvalidArguments {
+				name: format!("ml::{}<{}>", self.name, self.version),
+				message: ARGUMENTS.into(),
+			}),
+		}
+	}
+
+	#[cfg(not(feature = "ml"))]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
-		_doc: Option<&'async_recursion CursorDoc<'_>>,
+		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Unimplemented("ML model evaluation not yet implemented".to_string()))
-	}
-}
-
-pub fn model(i: &str) -> IResult<&str, Model> {
-	let (i, _) = tag("ml::")(i)?;
-
-	cut(|i| {
-		let (i, name) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
-
-		let (i, version) =
-			expected("a version", expect_delimited(openchevron, version, closechevron))(i)?;
-
-		let (i, args) = expected(
-			"model arguments",
-			delimited_list1(openparentheses, commas, value, closeparentheses),
-		)(i)?;
-
-		Ok((
-			i,
-			Model {
-				name: name.to_owned(),
-				version,
-				args,
-			},
-		))
-	})(i)
-}
-
-pub fn version(i: &str) -> IResult<&str, String> {
-	use std::fmt::Write;
-
-	let (i, major) = expected("a version number", i64)(i)?;
-	let (i, _) = expect_tag_no_case(".")(i)?;
-	let (i, minor) = expected("a version number", i64)(i)?;
-	let (i, _) = expect_tag_no_case(".")(i)?;
-	let (i, patch) = expected("a version number", i64)(i)?;
-
-	let mut res = String::new();
-	// Writing into a string can never error.
-	write!(&mut res, "{major}.{minor}.{patch}").unwrap();
-	Ok((i, res))
-}
-
-#[cfg(test)]
-mod test {
-	use super::*;
-	use crate::sql::query;
-
-	#[test]
-	fn ml_model_example() {
-		let sql = r#"ml::insurance::prediction<1.0.0>({
-				age: 18,
-				disposable_income: "yes",
-				purchased_before: true
-			})
-		"#;
-		let res = model(sql);
-		let out = res.unwrap().1.to_string();
-		assert_eq!("ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",out);
-	}
-
-	#[test]
-	fn ml_model_example_in_select() {
-		let sql = r"
-			SELECT
-			name,
-			age,
-			ml::insurance::prediction<1.0.0>({
-				age: age,
-				disposable_income: math::round(income),
-				purchased_before: array::len(->purchased->property) > 0,
-			}) AS likely_to_buy FROM person:tobie;
-		";
-		let res = query::query(sql);
-		let out = res.unwrap().1.to_string();
-		assert_eq!(
-			"SELECT name, age, ml::insurance::prediction<1.0.0>({ age: age, disposable_income: math::round(income), purchased_before: array::len(->purchased->property) > 0 }) AS likely_to_buy FROM person:tobie;",
-			out,
-		);
-	}
-
-	#[test]
-	fn ml_model_with_mutiple_arguments() {
-		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,);";
-		let res = query::query(sql);
-		let out = res.unwrap().1.to_string();
-		assert_eq!("ml::insurance::prediction<1.0.0>(1,2,3,4);", out,);
+		Err(Error::InvalidModel {
+			message: String::from("Machine learning computation is not enabled."),
+		})
 	}
 }

@@ -32,7 +32,6 @@ impl ser::Serializer for Serializer {
 			"I64" => Ok(VectorType::I64),
 			"I32" => Ok(VectorType::I32),
 			"I16" => Ok(VectorType::I16),
-			"I8" => Ok(VectorType::I8),
 			variant => Err(Error::custom(format!("unexpected unit variant `{name}::{variant}`"))),
 		}
 	}
@@ -74,12 +73,6 @@ mod tests {
 	#[test]
 	fn vector_type_i16() {
 		let vt = VectorType::I16;
-		let serialized = vt.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(vt, serialized);
-	}
-	#[test]
-	fn vector_type_i8() {
-		let vt = VectorType::I8;
 		let serialized = vt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(vt, serialized);
 	}

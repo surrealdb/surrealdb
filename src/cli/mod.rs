@@ -4,8 +4,8 @@ mod config;
 mod export;
 mod import;
 mod isready;
+mod ml;
 mod sql;
-#[cfg(feature = "has-storage")]
 mod start;
 mod upgrade;
 mod validate;
@@ -15,13 +15,12 @@ mod version;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
-#[cfg(feature = "has-storage")]
 pub use config::CF;
 use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
+use ml::MlCommand;
 use sql::SqlCommandArguments;
-#[cfg(feature = "has-storage")]
 use start::StartCommandArguments;
 use std::process::ExitCode;
 use upgrade::UpgradeCommandArguments;
@@ -53,7 +52,6 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
-	#[cfg(feature = "has-storage")]
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
 	#[command(about = "Backup data to or from an existing database")]
@@ -68,6 +66,8 @@ enum Commands {
 	Upgrade(UpgradeCommandArguments),
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
+	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
+	Ml(MlCommand),
 	#[command(
 		about = "Check if the SurrealDB server is ready to accept connections",
 		visible_alias = "isready"
@@ -80,7 +80,6 @@ enum Commands {
 pub async fn init() -> ExitCode {
 	let args = Cli::parse();
 	let output = match args.command {
-		#[cfg(feature = "has-storage")]
 		Commands::Start(args) => start::init(args).await,
 		Commands::Backup(args) => backup::init(args).await,
 		Commands::Import(args) => import::init(args).await,
@@ -88,6 +87,7 @@ pub async fn init() -> ExitCode {
 		Commands::Version(args) => version::init(args).await,
 		Commands::Upgrade(args) => upgrade::init(args).await,
 		Commands::Sql(args) => sql::init(args).await,
+		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 	};

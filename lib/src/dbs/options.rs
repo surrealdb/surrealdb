@@ -6,7 +6,7 @@ use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::Base;
 use crate::{cnf, sql};
 use channel::Sender;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
@@ -51,8 +51,8 @@ pub struct Options {
 	pub projections: bool,
 	/// The channel over which we send notifications
 	/// Must be set alongside live, and preferably populated via datastore notifications channel
-	/// TODO create ticket to sort this
-	pub sender: OnceLock<Sender<KvsNotification>>,
+	/// TODO create ticket to (1) make OnceLock and mut borrows, (2) better initialisation
+	pub sender: RwLock<Option<Sender<KvsNotification>>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
 }
@@ -82,7 +82,7 @@ impl Options {
 			futures: false,
 			projections: false,
 			auth_enabled: true,
-			sender: OnceLock::new(),
+			sender: RwLock::new(None),
 			auth: Arc::new(Auth::default()),
 			capabilities: Arc::new(Capabilities::default()),
 		}
@@ -384,14 +384,13 @@ impl Options {
 
 	/// Create a new Options object for a subquery
 	pub fn new_with_sender(&self, sender: Sender<KvsNotification>) -> Self {
-		let once_lock = OnceLock::new();
-		once_lock.set(sender).unwrap();
+		let locked = RwLock::new(Some(sender));
 		Self {
 			auth: self.auth.clone(),
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
-			sender: once_lock,
+			sender: locked,
 			live: true,
 			..*self
 		}

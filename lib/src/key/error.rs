@@ -44,6 +44,8 @@ pub enum KeyCategory {
 	DatabaseFunction,
 	/// crate::key::database::lg             /*{ns}*{db}!lg{lg}
 	DatabaseLog,
+	/// crate::key::database::ml             /*{ns}*{db}!ml{ml}{vn}
+	DatabaseModel,
 	/// crate::key::database::pa             /*{ns}*{db}!pa{pa}
 	DatabaseParameter,
 	/// crate::key::database::sc             /*{ns}*{db}!sc{sc}
@@ -138,6 +140,7 @@ impl Display for KeyCategory {
 			KeyCategory::DatabaseAnalyzer => "DatabaseAnalyzer",
 			KeyCategory::DatabaseFunction => "DatabaseFunction",
 			KeyCategory::DatabaseLog => "DatabaseLog",
+			KeyCategory::DatabaseModel => "DatabaseModel",
 			KeyCategory::DatabaseParameter => "DatabaseParameter",
 			KeyCategory::DatabaseScope => "DatabaseScope",
 			KeyCategory::DatabaseTable => "DatabaseTable",

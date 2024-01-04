@@ -86,9 +86,8 @@ async fn define_statement_function() -> Result<(), Error> {
 		"{
 			analyzers: {},
 			tokens: {},
-			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; }' },
-			params: {},
-			scopes: {},
+			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; } PERMISSIONS FULL' },
+			models: {},
 			params: {},
 			scopes: {},
 			tables: {},
@@ -120,9 +119,10 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
+			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -151,9 +151,10 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMALESS' },
+			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -186,9 +187,10 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -217,9 +219,10 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL' },
+			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -256,11 +259,12 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL',
-				view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL',
+				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
+				view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -272,7 +276,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			events: {},
 			fields: {},
-			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL' },
+			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
 		}",
@@ -288,10 +292,11 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL',
+				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -509,7 +514,7 @@ async fn define_statement_field() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			events: {},
-			fields: { test: 'DEFINE FIELD test ON user' },
+			fields: { test: 'DEFINE FIELD test ON user PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -542,7 +547,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			events: {},
-			fields: { test: 'DEFINE FIELD test ON user TYPE string' },
+			fields: { test: 'DEFINE FIELD test ON user TYPE string PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -575,7 +580,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 	let val = Value::parse(
 		r#"{
 			events: {},
-			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
+			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR' PERMISSIONS FULL" },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -608,7 +613,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			events: {},
-			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
+			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/ PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -641,7 +646,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 	let val = Value::parse(
 		r#"{
 			events: {},
-			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
+			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/ PERMISSIONS FULL" },
 			tables: {},
 			indexes: {},
 			lives: {},
@@ -1146,39 +1151,45 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 
 #[tokio::test]
 async fn define_statement_analyzer() -> Result<(), Error> {
-	let sql = "
+	let sql = r#"
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
+        DEFINE FUNCTION fn::stripHtml($html: string) {
+            RETURN string::replace($html, /<[^>]*>/, "");
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
 		INFO FOR DB;
-	";
+	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	for _ in 0..4 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
+		r#"{
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
 			tokens: {},
-			functions: {},
+			functions: {
+				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); } PERMISSIONS FULL"
+			},
+			models: {},
 			params: {},
 			scopes: {},
 			tables: {},
 			users: {},
-		}",
+		}"#,
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -1213,11 +1224,12 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			tables: {},
 			indexes: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title \
 			SEARCH ANALYZER simple BM25(1.2,0.75) \
-			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 HIGHLIGHTS' },
+			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
+			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	let tmp = res.remove(0).result?;
 
@@ -1491,8 +1503,8 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; }\" }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1533,8 +1545,8 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1617,8 +1629,8 @@ async fn permissions_checks_define_token_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: { token: \"DEFINE TOKEN token ON DATABASE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: { token: \"DEFINE TOKEN token ON DATABASE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1743,8 +1755,8 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1785,8 +1797,8 @@ async fn permissions_checks_define_scope() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: { account: 'DEFINE SCOPE account SESSION 1h' }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: { account: 'DEFINE SCOPE account SESSION 1h' }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1827,8 +1839,8 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo'\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1866,8 +1878,8 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS' }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
+		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1950,7 +1962,7 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB' }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
@@ -2022,4 +2034,50 @@ async fn permissions_checks_define_index() {
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
+}
+
+#[tokio::test]
+async fn define_statement_table_permissions() -> Result<(), Error> {
+	// Permissions for tables, unlike other resources, are restrictive (NONE) by default.
+	// This test ensures that behaviour
+	let sql = "
+		DEFINE TABLE default;
+		DEFINE TABLE select_full PERMISSIONS FOR select FULL;
+		DEFINE TABLE full PERMISSIONS FULL;
+		INFO FOR DB;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {},
+			functions: {},
+			models: {},
+			params: {},
+			scopes: {},
+			tables: {
+					default: 'DEFINE TABLE default SCHEMALESS PERMISSIONS NONE',
+					full: 'DEFINE TABLE full SCHEMALESS PERMISSIONS FULL',
+					select_full: 'DEFINE TABLE select_full SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
+			},
+			tokens: {},
+			users: {}
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
 }

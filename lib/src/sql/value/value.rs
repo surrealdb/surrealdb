@@ -5,54 +5,19 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
-use crate::sql::array::Uniq;
-use crate::sql::array::{array, Array};
-use crate::sql::block::{block, Block};
-use crate::sql::builtin::builtin_name;
-use crate::sql::bytes::Bytes;
-use crate::sql::cast::{cast, Cast};
-use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
-use crate::sql::constant::Constant;
-use crate::sql::datetime::{datetime, Datetime};
-use crate::sql::duration::{duration, Duration};
-use crate::sql::edges::{edges, Edges};
-use crate::sql::ending::keyword;
-use crate::sql::error::IResult;
-use crate::sql::expression::{unary, Expression};
-use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{builtin_function, defined_function, Function};
-use crate::sql::future::{future, Future};
-use crate::sql::geometry::{geometry, Geometry};
-use crate::sql::id::{Gen, Id};
-use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
-use crate::sql::kind::Kind;
-use crate::sql::mock::{mock, Mock};
-use crate::sql::model::{model, Model};
-use crate::sql::number::{number, Number};
-use crate::sql::object::{key, object, Object};
-use crate::sql::operation::Operation;
-use crate::sql::param::{param, Param};
-use crate::sql::part::Part;
-use crate::sql::range::{range, Range};
-use crate::sql::regex::{regex, Regex};
-use crate::sql::strand::{strand, Strand};
-use crate::sql::subquery::{subquery, Subquery};
-use crate::sql::table::{table, Table};
-use crate::sql::thing::{thing, Thing};
-use crate::sql::uuid::{uuid as unique, Uuid};
-use crate::sql::{builtin, operator, Query};
+use crate::sql::{
+	array::Uniq,
+	fmt::{Fmt, Pretty},
+	id::{Gen, Id},
+	model::Model,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
+	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
+	Strand, Subquery, Table, Thing, Uuid,
+};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
 use geo::Point;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::character::complete::char;
-use nom::combinator::{self, cut, into, opt};
-use nom::multi::separated_list0;
-use nom::multi::separated_list1;
-use nom::sequence::terminated;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -89,21 +54,6 @@ impl Display for Values {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
-}
-
-pub fn values(i: &str) -> IResult<&str, Values> {
-	let (i, v) = separated_list1(commas, value)(i)?;
-	Ok((i, Values(v)))
-}
-
-pub fn selects(i: &str) -> IResult<&str, Values> {
-	let (i, v) = separated_list1(commas, select)(i)?;
-	Ok((i, Values(v)))
-}
-
-pub fn whats(i: &str) -> IResult<&str, Values> {
-	let (i, v) = separated_list1(commas, what)(i)?;
-	Ok((i, Values(v)))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -149,12 +99,11 @@ pub enum Value {
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
-	// Closure(Box<Closure>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
 	Query(Query),
-	MlModel(Box<Model>),
+	Model(Box<Model>),
 	// Add new variants here
 }
 
@@ -307,7 +256,7 @@ impl From<Function> for Value {
 
 impl From<Model> for Value {
 	fn from(v: Model) -> Self {
-		Value::MlModel(Box::new(v))
+		Value::Model(Box::new(v))
 	}
 }
 
@@ -552,6 +501,12 @@ impl From<Id> for Value {
 				Gen::Uuid => Id::uuid().into(),
 			},
 		}
+	}
+}
+
+impl From<Query> for Value {
+	fn from(q: Query) -> Self {
+		Value::Query(q)
 	}
 }
 
@@ -1085,7 +1040,7 @@ impl Value {
 	pub fn can_start_idiom(&self) -> bool {
 		match self {
 			Value::Function(x) => !x.is_script(),
-			Value::MlModel(_)
+			Value::Model(_)
 			| Value::Subquery(_)
 			| Value::Constant(_)
 			| Value::Datetime(_)
@@ -1440,6 +1395,21 @@ impl Value {
 			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "number".into(),
+			}),
+		}
+	}
+
+	/// Try to coerce this value to a `Regex`
+	pub(crate) fn coerce_to_regex(self) -> Result<Regex, Error> {
+		match self {
+			// Allow any Regex value
+			Value::Regex(v) => Ok(v),
+			// Allow any string value
+			Value::Strand(v) => Ok(v.as_str().parse()?),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "regex".into(),
 			}),
 		}
 	}
@@ -1898,6 +1868,9 @@ impl Value {
 			// Allow any decimal number
 			Value::Number(v) if v.is_decimal() => Ok(v),
 			// Attempt to convert an int number
+			// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
+			// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
+			#[allow(warnings)]
 			Value::Number(Number::Int(ref v)) => match Decimal::try_from(*v) {
 				// The Int can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
@@ -2343,8 +2316,10 @@ impl Value {
 			Value::Duration(_) => true,
 			Value::Datetime(_) => true,
 			Value::Geometry(_) => true,
-			Value::Array(v) => v.iter().all(Value::is_static),
-			Value::Object(v) => v.values().all(Value::is_static),
+			Value::Array(v) => v.is_static(),
+			Value::Object(v) => v.is_static(),
+			Value::Expression(v) => v.is_static(),
+			Value::Function(v) => v.is_static(),
 			Value::Constant(_) => true,
 			_ => false,
 		}
@@ -2561,7 +2536,7 @@ impl fmt::Display for Value {
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
-			Value::MlModel(v) => write!(f, "{v}"),
+			Value::Model(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
 			Value::Geometry(v) => write!(f, "{v}"),
 			Value::Idiom(v) => write!(f, "{v}"),
@@ -2592,7 +2567,7 @@ impl Value {
 			Value::Function(v) => {
 				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
 			}
-			Value::MlModel(m) => m.args.iter().any(Value::writeable),
+			Value::Model(m) => m.args.iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,
@@ -2623,7 +2598,7 @@ impl Value {
 			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::MlModel(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Model(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
@@ -2758,215 +2733,12 @@ impl TryNeg for Value {
 	}
 }
 
-/// Parse any `Value` including expressions
-pub fn value(i: &str) -> IResult<&str, Value> {
-	let (i, start) = single(i)?;
-	if let (i, Some(o)) = opt(operator::binary)(i)? {
-		let _diving = crate::sql::parser::depth::dive(i)?;
-		let (i, r) = cut(value)(i)?;
-		let expr = match r {
-			Value::Expression(r) => r.augment(start, o),
-			_ => Expression::new(start, o, r),
-		};
-		let v = Value::from(expr);
-		Ok((i, v))
-	} else {
-		Ok((i, start))
-	}
-}
-
-/// Parse any `Value` excluding binary expressions
-pub fn single(i: &str) -> IResult<&str, Value> {
-	// Dive in `single` (as opposed to `value`) since it is directly
-	// called by `Cast`
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, v) = alt((
-		alt((
-			terminated(
-				alt((
-					combinator::value(Value::None, tag_no_case("NONE")),
-					combinator::value(Value::Null, tag_no_case("NULL")),
-					combinator::value(Value::Bool(true), tag_no_case("true")),
-					combinator::value(Value::Bool(false), tag_no_case("false")),
-				)),
-				keyword,
-			),
-			into(idiom::multi_without_start),
-		)),
-		alt((
-			into(future),
-			into(cast),
-			path_like,
-			into(geometry),
-			into(subquery),
-			into(datetime),
-			into(duration),
-			into(unique),
-			into(number),
-			into(unary),
-			into(object),
-			into(array),
-		)),
-		alt((
-			into(block),
-			into(param),
-			into(regex),
-			into(mock),
-			into(edges),
-			into(range),
-			into(thing),
-			into(strand),
-			into(idiom::path),
-		)),
-	))(i)?;
-	reparse_idiom_start(v, i)
-}
-
-pub fn select_start(i: &str) -> IResult<&str, Value> {
-	let (i, v) = alt((
-		alt((
-			into(unary),
-			combinator::value(Value::None, tag_no_case("NONE")),
-			combinator::value(Value::Null, tag_no_case("NULL")),
-			combinator::value(Value::Bool(true), tag_no_case("true")),
-			combinator::value(Value::Bool(false), tag_no_case("false")),
-			into(idiom::multi_without_start),
-		)),
-		alt((
-			into(future),
-			into(cast),
-			path_like,
-			into(geometry),
-			into(subquery),
-			into(datetime),
-			into(duration),
-			into(unique),
-			into(number),
-			into(object),
-			into(array),
-			into(block),
-			into(param),
-			into(regex),
-			into(mock),
-			into(edges),
-			into(range),
-			into(thing),
-			into(table),
-			into(strand),
-		)),
-	))(i)?;
-	reparse_idiom_start(v, i)
-}
-
-/// A path like production: Constants, predefined functions, user defined functions and ml models.
-pub fn path_like(i: &str) -> IResult<&str, Value> {
-	alt((into(defined_function), into(model), |i| {
-		let (i, v) = builtin_name(i)?;
-		match v {
-			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),
-			builtin::BuiltinName::Function(name) => {
-				builtin_function(name, i).map(|(i, v)| (i, v.into()))
-			}
-		}
-	}))(i)
-}
-
-pub fn select(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, start) = select_start(i)?;
-	if let (i, Some(op)) = opt(operator::binary)(i)? {
-		// In a binary expression single ident's arent tables but paths.
-		let start = match start {
-			Value::Table(Table(x)) => Value::Idiom(Idiom::from(x)),
-			x => x,
-		};
-		let (i, r) = cut(value)(i)?;
-		let expr = match r {
-			Value::Expression(r) => r.augment(start, op),
-			_ => Expression::new(start, op, r),
-		};
-		let v = Value::from(expr);
-		Ok((i, v))
-	} else {
-		Ok((i, start))
-	}
-}
-
-/// Used in CREATE, UPDATE, and DELETE clauses
-pub fn what(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, v) = alt((
-		into(idiom::multi_without_start),
-		path_like,
-		into(subquery),
-		into(datetime),
-		into(duration),
-		into(future),
-		into(block),
-		into(param),
-		into(mock),
-		into(edges),
-		into(range),
-		into(thing),
-		into(table),
-	))(i)?;
-	reparse_idiom_start(v, i)
-}
-
-/// Used to parse any simple JSON-like value
-pub fn json(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	// Use a specific parser for JSON objects
-	fn object(i: &str) -> IResult<&str, Object> {
-		let (i, _) = char('{')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, v) = separated_list0(commas, |i| {
-			let (i, k) = key(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = char(':')(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, v) = json(i)?;
-			Ok((i, (String::from(k), v)))
-		})(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = opt(char(','))(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('}')(i)?;
-		Ok((i, Object(v.into_iter().collect())))
-	}
-	// Use a specific parser for JSON arrays
-	fn array(i: &str) -> IResult<&str, Array> {
-		let (i, _) = char('[')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, v) = separated_list0(commas, json)(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = opt(char(','))(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(']')(i)?;
-		Ok((i, Array(v)))
-	}
-	// Parse any simple JSON-like value
-	alt((
-		combinator::value(Value::Null, tag_no_case("null".as_bytes())),
-		combinator::value(Value::Bool(true), tag_no_case("true".as_bytes())),
-		combinator::value(Value::Bool(false), tag_no_case("false".as_bytes())),
-		into(datetime),
-		into(geometry),
-		into(unique),
-		into(number),
-		into(object),
-		into(array),
-		into(thing),
-		into(strand),
-	))(i)
-}
-
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::sql::test::Parse;
 	use crate::sql::uuid::Uuid;
+	use crate::syn::test::Parse;
 
 	#[test]
 	fn check_none() {

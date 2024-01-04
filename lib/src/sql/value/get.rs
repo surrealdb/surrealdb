@@ -1,3 +1,4 @@
+use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -26,6 +27,10 @@ impl Value {
 		doc: Option<&'async_recursion CursorDoc<'_>>,
 		path: &[Part],
 	) -> Result<Self, Error> {
+		// Limit recursion depth.
+		if path.len() > (*MAX_COMPUTATION_DEPTH).into() {
+			return Err(Error::ComputationDepthExceeded);
+		}
 		match path.first() {
 			// Get the current value at the path
 			Some(p) => match self {
@@ -244,8 +249,8 @@ mod tests {
 	use crate::dbs::test::mock;
 	use crate::sql::id::Id;
 	use crate::sql::idiom::Idiom;
-	use crate::sql::test::Parse;
 	use crate::sql::thing::Thing;
+	use crate::syn::test::Parse;
 
 	#[tokio::test]
 	async fn get_none() {
@@ -263,6 +268,34 @@ mod tests {
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(123));
+	}
+
+	#[tokio::test]
+	async fn get_basic_deep_ok() {
+		let (ctx, opt, txn) = mock().await;
+		let depth = 20;
+		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
+		let val = Value::parse(&format!(
+			"{} {{ other: null, something: 123 {} }}",
+			"{ test: ".repeat(depth),
+			"}".repeat(depth)
+		));
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		assert_eq!(res, Value::from(123));
+	}
+
+	#[tokio::test]
+	async fn get_basic_deep_ko() {
+		let (ctx, opt, txn) = mock().await;
+		let depth = 2000;
+		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
+		let val = Value::parse("{}"); // A deep enough object cannot be parsed.
+		let err = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap_err();
+		assert!(
+			matches!(err, Error::ComputationDepthExceeded),
+			"expected computation depth exceeded, got {:?}",
+			err
+		);
 	}
 
 	#[tokio::test]

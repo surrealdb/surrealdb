@@ -2,6 +2,7 @@
 mod api_integration {
 	use chrono::DateTime;
 	use once_cell::sync::Lazy;
+	use semver::Version;
 	use serde::Deserialize;
 	use serde::Serialize;
 	use serde_json::json;
@@ -30,6 +31,7 @@ mod api_integration {
 	use surrealdb::Error;
 	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
+	use tokio::sync::SemaphorePermit;
 	use tracing_subscriber::filter::EnvFilter;
 	use tracing_subscriber::fmt;
 	use tracing_subscriber::layer::SubscriberExt;
@@ -74,9 +76,7 @@ mod api_integration {
 		use surrealdb::engine::remote::ws::Client;
 		use surrealdb::engine::remote::ws::Ws;
 
-		static PERMITS: Semaphore = Semaphore::const_new(1);
-
-		async fn new_db() -> Surreal<Client> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Client>) {
 			let permit = PERMITS.acquire().await.unwrap();
 			let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
@@ -85,8 +85,7 @@ mod api_integration {
 			})
 			.await
 			.unwrap();
-			drop(permit);
-			db
+			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
@@ -106,9 +105,7 @@ mod api_integration {
 		use surrealdb::engine::remote::http::Client;
 		use surrealdb::engine::remote::http::Http;
 
-		static PERMITS: Semaphore = Semaphore::const_new(1);
-
-		async fn new_db() -> Surreal<Client> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Client>) {
 			let permit = PERMITS.acquire().await.unwrap();
 			let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
@@ -117,8 +114,7 @@ mod api_integration {
 			})
 			.await
 			.unwrap();
-			drop(permit);
-			db
+			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
@@ -140,7 +136,8 @@ mod api_integration {
 		use surrealdb::engine::local::Mem;
 		use surrealdb::iam;
 
-		async fn new_db() -> Surreal<Db> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+			let permit = PERMITS.acquire().await.unwrap();
 			let root = Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
@@ -151,7 +148,7 @@ mod api_integration {
 				.capabilities(Capabilities::all());
 			let db = Surreal::new::<Mem>(config).await.unwrap();
 			db.signin(root).await.unwrap();
-			db
+			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
@@ -233,7 +230,8 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::File;
 
-		async fn new_db() -> Surreal<Db> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+			let permit = PERMITS.acquire().await.unwrap();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
 				username: ROOT_USER,
@@ -245,7 +243,7 @@ mod api_integration {
 				.capabilities(Capabilities::all());
 			let db = Surreal::new::<File>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
-			db
+			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
@@ -267,7 +265,8 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::RocksDb;
 
-		async fn new_db() -> Surreal<Db> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+			let permit = PERMITS.acquire().await.unwrap();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
 				username: ROOT_USER,
@@ -279,7 +278,7 @@ mod api_integration {
 				.capabilities(Capabilities::all());
 			let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
-			db
+			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
@@ -301,7 +300,8 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::SpeeDb;
 
-		async fn new_db() -> Surreal<Db> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+			let permit = PERMITS.acquire().await.unwrap();
 			let path = format!("/tmp/{}.db", Ulid::new());
 			let root = Root {
 				username: ROOT_USER,
@@ -313,7 +313,7 @@ mod api_integration {
 				.capabilities(Capabilities::all());
 			let db = Surreal::new::<SpeeDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
-			db
+			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
@@ -335,9 +335,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::TiKv;
 
-		static PERMITS: Semaphore = Semaphore::const_new(1);
-
-		async fn new_db() -> Surreal<Db> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
 			let root = Root {
 				username: ROOT_USER,
@@ -349,8 +347,7 @@ mod api_integration {
 				.capabilities(Capabilities::all());
 			let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 			db.signin(root).await.unwrap();
-			drop(permit);
-			db
+			(permit, db)
 		}
 
 		#[test_log::test(tokio::test)]
@@ -371,9 +368,7 @@ mod api_integration {
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::FDb;
 
-		static PERMITS: Semaphore = Semaphore::const_new(1);
-
-		async fn new_db() -> Surreal<Db> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
 			let root = Root {
 				username: ROOT_USER,
@@ -389,8 +384,7 @@ mod api_integration {
 				.unwrap();
 			let db = Surreal::new::<FDb>((path, config)).await.unwrap();
 			db.signin(root).await.unwrap();
-			drop(permit);
-			db
+			(permit, db)
 		}
 
 		include!("api/mod.rs");
@@ -403,9 +397,7 @@ mod api_integration {
 		use super::*;
 		use surrealdb::engine::any::Any;
 
-		static PERMITS: Semaphore = Semaphore::const_new(1);
-
-		async fn new_db() -> Surreal<Any> {
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Any>) {
 			let permit = PERMITS.acquire().await.unwrap();
 			let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 			db.signin(Root {
@@ -414,8 +406,7 @@ mod api_integration {
 			})
 			.await
 			.unwrap();
-			drop(permit);
-			db
+			(permit, db)
 		}
 
 		include!("api/mod.rs");
