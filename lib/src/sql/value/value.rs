@@ -2684,23 +2684,6 @@ impl TryDiv for Value {
 
 // ------------------------------
 
-pub(crate) trait TryRem<Rhs = Self> {
-	type Output;
-	fn try_rem(self, v: Self) -> Result<Self::Output, Error>;
-}
-
-impl TryRem for Value {
-	type Output = Self;
-	fn try_rem(self, other: Self) -> Result<Self, Error> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
-			(v, w) => return Err(Error::TryRem(v.to_raw_string(), w.to_raw_string())),
-		})
-	}
-}
-
-// ------------------------------
-
 pub(crate) trait TryPow<Rhs = Self> {
 	type Output;
 	fn try_pow(self, v: Self) -> Result<Self::Output, Error>;
