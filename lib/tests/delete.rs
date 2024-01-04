@@ -1,11 +1,14 @@
 mod parse;
+
 use parse::Parse;
+use std::str::FromStr;
 
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::{Action, Notification, Session};
+use surrealdb::dbs::{KvsAction, KvsNotification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
+use surrealdb::sql;
 use surrealdb::sql::Value;
 
 #[tokio::test]
@@ -375,7 +378,8 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<(), Error> {
-	let dbs = new_ds().await?.with_notifications();
+	let node_id = sql::Uuid::from_str("9eec1d17-4aca-407b-acb8-3dae8eb1765f").unwrap();
+	let dbs = new_ds().await?.with_notifications().with_node_id(node_id);
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -410,18 +414,25 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 
 	// Validate notification
 	let notifications = dbs.notifications().expect("expected notifications");
-	let notification = notifications.recv().await.unwrap();
+	let mut notification = notifications.recv().await.unwrap();
+	assert_ne!(notification.timestamp, Default::default());
+	notification.timestamp = Default::default();
+	assert_ne!(notification.notification_id, Default::default());
+	notification.notification_id = Default::default();
 	assert_eq!(
 		notification,
-		Notification {
-			id: live_id,
-			action: Action::Delete,
+		KvsNotification {
+			live_id,
+			node_id,
+			notification_id: Default::default(),
+			action: KvsAction::Delete,
 			result: Value::parse(
 				"{
 					id: person:test_true,
 					condition: true,
 				}"
 			),
+			timestamp: Default::default()
 		}
 	);
 	Ok(())

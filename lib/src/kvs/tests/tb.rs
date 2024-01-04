@@ -31,7 +31,7 @@ async fn table_definitions_can_be_scanned() {
 
 	// Validate with scan
 	match tx
-		.scan(
+		.scan_paged(
 			ScanPage::from(tb::prefix(namespace, database)..tb::suffix(namespace, database)),
 			1000,
 		)

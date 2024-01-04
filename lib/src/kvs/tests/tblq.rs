@@ -1,7 +1,7 @@
 #[tokio::test]
 #[serial]
 async fn write_scan_tblq() {
-	let node_id = uuid::uuid!("0bee25e0-34d7-448c-abc0-48cdf3db3a53");
+	let node_id = Uuid::from_str("0bee25e0-34d7-448c-abc0-48cdf3db3a53").unwrap();
 	let live_ids = [
 		uuid::Uuid::nil(),
 		uuid::uuid!("b5aab54e-d1ef-4a14-b537-9206dcde2209"),
@@ -41,7 +41,7 @@ async fn write_scan_tblq() {
 		assert_eq!(
 			res_many_batches,
 			vec![LqValue {
-				nd: sql::Uuid::from(node_id),
+				nd: node_id,
 				ns: ns.to_string(),
 				db: db.to_string(),
 				tb: tb.to_string(),

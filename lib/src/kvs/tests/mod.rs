@@ -58,7 +58,6 @@ mod mem {
 	include!("helper.rs");
 	include!("lq.rs");
 	include!("nq.rs");
-	include!("nt.rs");
 	include!("raw.rs");
 	include!("snapshot.rs");
 	include!("tb.rs");

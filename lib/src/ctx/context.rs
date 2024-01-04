@@ -3,7 +3,7 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::FuncTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, KvsNotification, Notification};
+use crate::dbs::{Capabilities, KvsNotification};
 use crate::err::Error;
 use crate::idx::planner::QueryPlanner;
 use crate::idx::trees::store::IndexStores;

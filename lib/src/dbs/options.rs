@@ -1,6 +1,6 @@
 use super::capabilities::Capabilities;
 use crate::cnf;
-use crate::dbs::{KvsNotification, Notification};
+use crate::dbs::KvsNotification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::Base;
@@ -414,14 +414,20 @@ impl Options {
 
 	/// Get currently selected NS
 	pub fn ns(&self) -> &str {
-		self.ns.as_ref().map(AsRef::as_ref).unwrap()
-		// self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
+		self.ns
+			.as_ref()
+			.map(AsRef::as_ref)
+			.ok_or(Error::Unreachable("ns check in options"))
+			.unwrap()
 	}
 
 	/// Get currently selected DB
 	pub fn db(&self) -> &str {
-		self.db.as_ref().map(AsRef::as_ref).unwrap()
-		// self.db.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
+		self.db
+			.as_ref()
+			.map(AsRef::as_ref)
+			.ok_or(Error::Unreachable("db check in options"))
+			.unwrap()
 	}
 
 	/// Check whether this request supports realtime queries

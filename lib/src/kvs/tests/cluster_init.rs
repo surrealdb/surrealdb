@@ -98,14 +98,12 @@ async fn expired_nodes_get_live_queries_archived() {
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
 	let ctx = ses.context(context::Context::background());
-	let sender = test.db.live_sender().unwrap();
 	let opt = Options::new()
 		.with_ns(ses.ns())
 		.with_db(ses.db())
 		.with_auth(Arc::new(Default::default()))
 		.with_live(true)
 		.with_id(*old_node);
-	let opt = Options::new_with_sender(&opt, sender);
 	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
 	let res = lq.compute(&ctx, &opt, &tx, None).await.unwrap();
 	match res {

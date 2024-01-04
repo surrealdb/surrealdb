@@ -197,7 +197,7 @@ mod test {
 
 	#[tokio::test]
 	async fn test_empty_channel() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Arc::new(Datastore::new("memory").await.unwrap().with_notifications());
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
 
@@ -230,7 +230,7 @@ mod test {
 
 	#[tokio::test]
 	async fn test_invalid_message() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Arc::new(Datastore::new("memory").await.unwrap().with_notifications());
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
 
@@ -285,7 +285,7 @@ mod test {
 
 	#[tokio::test]
 	async fn test_handles_batches_correctly() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Arc::new(Datastore::new("memory").await.unwrap().with_notifications());
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
 
@@ -299,13 +299,27 @@ mod test {
 		) = mpsc::channel(10);
 
 		let self_node_id = Uuid::from_str("ac35aa6f-ab10-48a5-a3d9-d4439e1c91bc").unwrap();
-		let namespace = "sample-namespace";
-		let database = "sample-db";
+		let namespace = "sampleNamespace";
+		let database = "sampleDb";
 		let table = "sampleTable";
 		let sess = Session::owner().with_rt(true).with_ns(namespace).with_db(database);
 		let delete_task =
 			tokio::spawn(delete_live_queries(tx_req, input_lq_recv, output_lq_send, 10));
 
+		let query = format!("USE NS {namespace} DB {database};");
+		if let Some(e) = ds
+			.execute(&query, &sess, None)
+			.await
+			.unwrap()
+			.iter()
+			.filter_map(|resp| match &resp.result {
+				Ok(_) => None,
+				Err(e) => Some(e),
+			})
+			.next()
+		{
+			panic!("Failed to use namespace and database: {:?}", e);
+		}
 		let query = format!("LIVE SELECT * FROM {table}");
 		let mut lq = ds.execute(&query, &sess, None).await.unwrap();
 		assert_eq!(lq.len(), 1);

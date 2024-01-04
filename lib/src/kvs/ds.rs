@@ -3,11 +3,9 @@ use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::KvsNotification;
 use crate::dbs::{
-	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Variables,
+	node::Timestamp, Attach, Capabilities, Executor, Options, Response, Session, Variables,
 };
 use crate::err::{BootstrapCause, Error, InternalCause, TaskVariant};
-use crate::iam::ResourceKind;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
@@ -19,7 +17,6 @@ use crate::opt::auth::Root;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::Oracle;
-use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1085,7 +1082,10 @@ impl Datastore {
 		// Create a new query options
 		let opt = Options::new()
 			.with_id(self.id.0)
+			.with_ns(sess.ns())
+			.with_db(sess.db())
 			.with_strict(self.strict)
+			.with_live(sess.live())
 			.with_auth_enabled(self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);

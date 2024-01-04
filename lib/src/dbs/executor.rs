@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::response::Response;
+use crate::dbs::KvsNotification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::dbs::Transaction;
-use crate::dbs::{KvsNotification, Notification};
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
