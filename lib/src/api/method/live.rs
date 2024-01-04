@@ -34,10 +34,15 @@ use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use std::mem;
 use std::ops::Bound;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 const ID: &str = "id";
 
@@ -242,30 +247,6 @@ pub struct Stream<'r, C: Connection, R> {
 	response_type: PhantomData<R>,
 }
 
-impl<Client, R> Stream<'_, Client, R>
-where
-	Client: Connection,
-{
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Stream<'static, Client, R> {
-		Stream {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
-
-	/// Close the live query stream
-	///
-	/// This kills the live query process responsible for this stream.
-	/// If the stream is dropped without calling this method, the process
-	/// will be killed next time it tries to send a notification to the stream.
-	pub async fn close(self) -> Result<()> {
-		let router = self.client.router.extract()?;
-		let mut conn = Client::new(Method::Kill);
-		conn.execute_unit(router, Param::new(vec![self.id])).await
-	}
-}
-
 macro_rules! poll_next {
 	($action:ident, $result:ident => $body:expr) => {
 		fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -322,4 +303,30 @@ where
 	type Item = Result<Notification<R>>;
 
 	poll_next_and_convert! {}
+}
+
+impl<Client, R> Drop for Stream<'_, Client, R>
+where
+	Client: Connection,
+{
+	/// Close the live query stream
+	///
+	/// This kills the live query process responsible for this stream.
+	fn drop(&mut self) {
+		if !self.id.is_none() {
+			let id = mem::take(&mut self.id);
+			let client = self.client.clone().into_owned();
+			spawn(async move {
+				if let Ok(router) = client.router.extract() {
+					let mut conn = Client::new(Method::Kill);
+					match conn.execute_unit(router, Param::new(vec![id.clone()])).await {
+						Ok(()) => trace!("Live query {id} dropped successfully"),
+						Err(error) => warn!("Failed to drop live query {id}; {error}"),
+					}
+				}
+			});
+		} else {
+			trace!("Ignoring drop call on an already dropped live::Stream");
+		}
+	}
 }
