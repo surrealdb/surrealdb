@@ -19,6 +19,7 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
+use crate::sql::Kind;
 use crate::sql::Strand;
 use crate::sql::Value;
 use crate::vs::Oracle;
@@ -2319,7 +2320,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
-		relation: bool,
+		relation: Option<(Option<Kind>, Option<Kind>)>,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		match self.get_and_cache_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {

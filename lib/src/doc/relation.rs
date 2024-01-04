@@ -13,12 +13,23 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		let relation = matches!(stm, Statement::Relate(_));
-		let tb = self.tb_with_rel(opt, txn, relation).await?;
+		// TODO: extract from and to from RelateStatement
+		let tb = self
+			.tb_with_rel(
+				opt,
+				txn,
+				if relation {
+					Some(Default::default())
+				} else {
+					None
+				},
+			)
+			.await?;
 
 		let rid = self.id.as_ref().unwrap();
 		match stm {
 			Statement::Create(_) | Statement::Insert(_) => {
-				if tb.relation {
+				if tb.is_relation() {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: false,
@@ -26,7 +37,7 @@ impl<'a> Document<'a> {
 				}
 			}
 			Statement::Relate(_) => {
-				if !tb.relation {
+				if !tb.is_relation() {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: true,
