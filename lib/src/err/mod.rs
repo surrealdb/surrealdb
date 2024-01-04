@@ -791,6 +791,9 @@ pub enum Error {
 	/// arent bootstrap (definitely) or heartbeat (maybe)
 	#[error("Bootstrap failure: {0}")]
 	BootstrapError(BootstrapCause),
+	/// The db is running without an avilable storage engine
+	#[error("The db is running without an avilable storage engine")]
+	MissingStorageEngine,
 }
 
 #[derive(Error, Debug)]

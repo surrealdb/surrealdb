@@ -14,7 +14,7 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
+use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::opt::auth::Root;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
@@ -1083,7 +1083,10 @@ impl Datastore {
 			.into());
 		}
 		// Create a new query options
-		let opt = Options::new_from_sess(sess, &self.id, self.strict, self.auth_enabled);
+		let opt = Options::new()
+			.with_id(self.id.0)
+			.with_strict(self.strict)
+			.with_auth_enabled(self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context

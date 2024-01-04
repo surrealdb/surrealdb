@@ -1,8 +1,8 @@
 use crate::ctx::Context;
-use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::{Action, Transaction};
+use crate::dbs::{KvsAction, KvsNotification, Notification};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
@@ -11,7 +11,7 @@ use crate::sql::paths::SC;
 use crate::sql::paths::SD;
 use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
-use crate::sql::Value;
+use crate::sql::{Uuid, Value};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -94,15 +94,19 @@ impl<'a> Document<'a> {
 					Err(e) => return Err(e),
 					Ok(_) => (),
 				}
+				// Get the timestamp
+				let timestamp = txn.lock().await.clock().await;
 				// Finally, let's check what type of statement
 				// caused this LIVE query to run, and send the
 				// relevant notification based on the statement.
 				if stm.is_delete() {
 					// Send a DELETE notification
 					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id,
-							action: Action::Delete,
+						chn.send(KvsNotification {
+							live_id: lv.id,
+							node_id: lv.node,
+							notification_id: Uuid::new_v4(),
+							action: KvsAction::Delete,
 							result: {
 								// Ensure futures are run
 								let lqopt: &Options = &lqopt.new_with_futures(true);
@@ -114,6 +118,7 @@ impl<'a> Document<'a> {
 								// Output result
 								value
 							},
+							timestamp,
 						})
 						.await?;
 					} else {
@@ -122,10 +127,13 @@ impl<'a> Document<'a> {
 				} else if self.is_new() {
 					// Send a CREATE notification
 					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id,
-							action: Action::Create,
+						chn.send(KvsNotification {
+							live_id: lv.id,
+							node_id: lv.node,
+							notification_id: Uuid::new_v4(),
+							action: KvsAction::Create,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
+							timestamp,
 						})
 						.await?;
 					} else {
@@ -134,10 +142,13 @@ impl<'a> Document<'a> {
 				} else {
 					// Send a UPDATE notification
 					if opt.id()? == lv.node.0 {
-						chn.send(Notification {
-							id: lv.id,
-							action: Action::Update,
+						chn.send(KvsNotification {
+							live_id: lv.id,
+							node_id: lv.node,
+							notification_id: Uuid::new_v4(),
+							action: KvsAction::Update,
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
+							timestamp,
 						})
 						.await?;
 					} else {

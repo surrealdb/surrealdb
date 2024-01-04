@@ -18,9 +18,9 @@ use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
-use surrealdb::dbs::QueryType;
 use surrealdb::dbs::Response;
 use surrealdb::dbs::Session;
+use surrealdb::dbs::{Notification, QueryType};
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
@@ -286,13 +286,13 @@ impl Connection {
 					_ = canceller.cancelled() => break,
 					//
 					msg = channel.recv() => {
-						if let Ok(notification) = msg {
+						if let Ok(notification) = &msg {
 							// Find which WebSocket the notification belongs to
-							if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
+							if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.live_id) {
 								// Check to see if the WebSocket exists
 								if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(ws_id) {
 									// Serialize the message to send
-									let message = success(None, notification);
+									let message = success::<Notification>(None, Notification::from(notification));
 									// Get the current output format
 									let format = rpc.read().await.format;
 									// Send the notification to the client

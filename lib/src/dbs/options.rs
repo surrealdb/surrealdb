@@ -1,6 +1,6 @@
 use super::capabilities::Capabilities;
 use crate::cnf;
-use crate::dbs::Notification;
+use crate::dbs::{KvsNotification, Notification};
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
 use crate::sql::Base;
@@ -49,7 +49,7 @@ pub struct Options {
 	/// Should we process variable field projections?
 	pub projections: bool,
 	/// The channel over which we send notifications
-	pub sender: Option<Sender<Notification>>,
+	pub sender: Option<Sender<KvsNotification>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
 }
@@ -363,7 +363,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
+	pub fn new_with_sender(&self, sender: Sender<KvsNotification>) -> Self {
 		Self {
 			auth: self.auth.clone(),
 			capabilities: self.capabilities.clone(),

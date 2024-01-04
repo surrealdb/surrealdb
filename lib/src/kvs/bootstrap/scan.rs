@@ -33,7 +33,7 @@ pub(crate) async fn scan_node_live_queries(
 					limit: Unlimited,
 				});
 				while let Some(page) = next_page {
-					match tx.scan(page, batch_size).await {
+					match tx.scan_paged(page, batch_size).await {
 						Ok(scan_result) => {
 							next_page = scan_result.next_page;
 							for (key, value) in scan_result.values {
