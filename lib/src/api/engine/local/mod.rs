@@ -767,7 +767,7 @@ async fn router(
 			};
 			let var = Some(map! {
 				key.clone() => Value::None,
-				=> &vars
+				=> vars
 			});
 			match kvs.compute(value, &*session, var).await? {
 				Value::None => vars.remove(&key),
