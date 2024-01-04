@@ -1,18 +1,5 @@
 use std::collections::BTreeMap;
 
-use graphql_parser::parse_query;
-use graphql_parser::query;
-use graphql_parser::schema;
-use graphql_parser::schema::Definition;
-use graphql_parser::schema::Field;
-use graphql_parser::schema::InterfaceType;
-use graphql_parser::schema::ObjectType;
-use graphql_parser::schema::ScalarType;
-use graphql_parser::schema::SchemaDefinition;
-use graphql_parser::schema::Type;
-use graphql_parser::schema::TypeDefinition;
-use graphql_parser::schema::UnionType;
-
 use crate::err::Error;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
@@ -22,18 +9,33 @@ use crate::sql::statements::DefineFieldStatement;
 use crate::sql::statements::SelectStatement;
 use crate::sql::Fields;
 use crate::sql::Kind;
+use crate::sql::Limit;
 use crate::sql::Query;
+use crate::sql::Start;
 use crate::sql::Statement;
 use crate::sql::Table;
 use crate::sql::Values;
+use graphql_parser::parse_query;
+use graphql_parser::query;
+use graphql_parser::schema;
+use graphql_parser::schema::Definition;
+use graphql_parser::schema::Field;
+use graphql_parser::schema::InputObjectType;
+use graphql_parser::schema::InterfaceType;
+use graphql_parser::schema::ObjectType;
+use graphql_parser::schema::ScalarType;
+use graphql_parser::schema::SchemaDefinition;
+use graphql_parser::schema::Type;
+use graphql_parser::schema::TypeDefinition;
+use graphql_parser::schema::UnionType;
 
 pub fn parse_and_transpile(txt: &str) -> Result<Query, Error> {
 	let ast: query::Document<&str> =
 		parse_query::<&str>(txt).map_err(|e| Error::Thrown(e.to_string()))?;
 
-	// info!("ast: {:#?}", ast);
+	info!("graphql ast: {:#?}", ast);
 
-	info!("surreal ast: {:#?}", crate::syn::parse("SELECT * FROM person")?);
+	// info!("surreal ast: {:#?}", crate::syn::parse("SELECT * FROM person")?);
 
 	let mut query: Vec<Statement> = vec![];
 
@@ -69,19 +71,86 @@ macro_rules! id_field {
 	};
 }
 
-fn custom_field<'a>(name: &str, ty: &str, non_null: bool) -> Field<'a, String> {
+macro_rules! field {
+	($name:literal, $ty:literal, null, $description:literal) => {
+		custom_field($name, $ty, false, Some($description.to_string()))
+	};
+	($name:literal, $ty:literal, non_null, $description:literal) => {
+		custom_field($name, $ty, true, Some($description.to_string()))
+	};
+	($name:literal, $ty:literal, null) => {
+		custom_field($name, $ty, false, None)
+	};
+	($name:literal, $ty:literal, non_null) => {
+		custom_field($name, $ty, true, None)
+	};
+	($name:literal, $ty:literal, $non_null:literal) => {
+		custom_field($name, $ty, $non_null, None)
+	};
+	($name:literal, $ty:literal, $non_null:literal, $description:literal) => {
+		custom_field($name, $ty, $non_null, Some($description.to_string()))
+	};
+}
+
+fn custom_field<'a>(
+	name: &str,
+	ty: &str,
+	non_null: bool,
+	description: Option<String>,
+) -> Field<'a, String> {
 	let field_type = if non_null {
 		Type::NonNullType(Type::NamedType(ty.to_string()).into())
 	} else {
 		Type::NamedType(ty.to_string()).into()
 	};
 	Field {
-		description: None,
+		description,
 		name: name.to_string(),
 		arguments: vec![],
 		field_type,
 		directives: vec![],
 		position: Default::default(),
+	}
+}
+macro_rules! input_val {
+	($name:literal, $ty:literal, null, $description:literal) => {
+		custom_input_value($name, $ty, false, Some($description.to_string()))
+	};
+	($name:literal, $ty:literal, non_null, $description:literal) => {
+		custom_input_value($name, $ty, true, Some($description.to_string()))
+	};
+	($name:literal, $ty:literal, null) => {
+		custom_input_value($name, $ty, false, None)
+	};
+	($name:literal, $ty:literal, non_null) => {
+		custom_input_value($name, $ty, true, None)
+	};
+	($name:literal, $ty:literal, $non_null:literal) => {
+		custom_input_value($name, $ty, $non_null, None)
+	};
+	($name:literal, $ty:literal, $non_null:literal, $description:literal) => {
+		custom_input_value($name, $ty, $non_null, Some($description.to_string()))
+	};
+}
+
+fn custom_input_value<'a>(
+	name: &str,
+	ty: &str,
+	non_null: bool,
+	description: Option<String>,
+) -> schema::InputValue<'a, String> {
+	let field_type = if non_null {
+		Type::NonNullType(Type::NamedType(ty.to_string()).into())
+	} else {
+		Type::NamedType(ty.to_string()).into()
+	};
+	schema::InputValue {
+		description,
+		name: name.to_string(),
+		default_value: None,
+		directives: vec![],
+		position: Default::default(),
+		value_type: field_type,
 	}
 }
 
@@ -92,11 +161,59 @@ fn transpile_selection_set<'a>(
 		.items
 		.iter()
 		.map(|s| match s {
-			query::Selection::Field(f) => Statement::Select(SelectStatement {
-				expr: Fields::all(),
-				what: Values(vec![sql::Value::Table(Table(f.name.to_string()))]),
-				..Default::default()
-			}),
+			query::Selection::Field(f) => {
+				let args: BTreeMap<&str, schema::Value<&str>> =
+					f.arguments.iter().cloned().collect();
+				// let (limit, start) = args.get("pagination").map_or((None, None), |v| {
+				// 	let schema::Value::Object(o) = v else {
+				// 		panic!("must be object, should be caught be validation")
+				// 	};
+				// 	let limit = o
+				// 		.get("limit")
+				// 		.map(|v| {
+				// 			let schema::Value::Int(i) = v else {
+				// 				panic!("must be int, should be caught be validation")
+				// 			};
+				// 			i.as_i64()
+				// 		})
+				// 		.flatten();
+				// 	let start = o
+				// 		.get("start")
+				// 		.map(|v| {
+				// 			let schema::Value::Int(i) = v else {
+				// 				panic!("must be int, should be caught be validation")
+				// 			};
+				// 			i.as_i64()
+				// 		})
+				// 		.flatten();
+				// 	(limit, start)
+				// });
+				let limit = args
+					.get("limit")
+					.map(|v| {
+						let schema::Value::Int(i) = v else {
+							panic!("must be int, should be caught be validation")
+						};
+						i.as_i64()
+					})
+					.flatten();
+				let start = args
+					.get("start")
+					.map(|v| {
+						let schema::Value::Int(i) = v else {
+							panic!("must be int, should be caught be validation")
+						};
+						i.as_i64()
+					})
+					.flatten();
+				Statement::Select(SelectStatement {
+					expr: Fields::all(),
+					what: Values(vec![sql::Value::Table(Table(f.name.to_string()))]),
+					limit: limit.map(|l| Limit(l.into())),
+					start: start.map(|s| Start(s.into())),
+					..Default::default()
+				})
+			}
 			query::Selection::FragmentSpread(_) => todo!(),
 			query::Selection::InlineFragment(_) => todo!(),
 		})
@@ -260,6 +377,8 @@ fn convert_field<'a>(
 	let kind = fd.kind.clone().unwrap_or(Kind::Any);
 	let ty = convert_kind_to_type(kind, def_acc)?;
 
+	//TODO: check if field name has multiple parts, should .* be represented? create custom types to represent nested structure
+
 	Ok(schema::Field {
 		description: None,
 		name: fd.name.to_string(),
@@ -295,6 +414,22 @@ pub async fn get_schema<'a>(
 	// TODO: check that two types aren't defined with the same name from different sources
 	let mut def_acc = BTreeMap::new();
 
+	// let mut filter_defs = vec![];
+	// filter_defs.push(Definition::TypeDefinition(TypeDefinition::InputObject(InputObjectType {
+	// 	position: Default::default(),
+	// 	description: None,
+	// 	name: "IDFilter".to_string(),
+	// 	directives: vec![],
+	// 	fields: vec![Field {
+	// 		position: Default::default(),
+	// 		description: "=".to_string(),
+	// 		name: "eq".to_string(),
+	// 		arguments: todo!(),
+	// 		field_type: Type::NamedType("String".to_string()).into(),
+	// 		directives: todo!(),
+	// 	}],
+	// })));
+
 	for tb in tbs.iter() {
 		let fds = tx.all_tb_fields(&ns, &db, &tb.name).await?;
 		// println!("fds(len:{}): {:?}\n", fds.len(), fds);
@@ -305,7 +440,7 @@ pub async fn get_schema<'a>(
 				.collect::<Result<Vec<_>, Error>>()?,
 		);
 		let ty_def = TypeDefinition::Object(ObjectType {
-			description: None,
+			description: tb.comment.clone().map(|s| s.to_string()),
 			name: tb.name.to_string(),
 			implements_interfaces: vec![if tb.is_relation() {
 				"Relation".to_string()
@@ -337,9 +472,15 @@ pub async fn get_schema<'a>(
 					position: Default::default(),
 					description: None,
 					name: tb.name.to_string(),
-					arguments: vec![],
+					arguments: vec![
+						input_val!("limit", "Int", null),
+						input_val!("start", "Int", null),
+					],
 					field_type: Type::NonNullType(
-						Type::ListType(Type::NamedType(tb.name.to_string()).into()).into(),
+						Type::ListType(
+							Type::NonNullType(Type::NamedType(tb.name.to_string()).into()).into(),
+						)
+						.into(),
 					),
 					directives: vec![],
 				}
@@ -364,13 +505,21 @@ pub async fn get_schema<'a>(
 		directives: vec![],
 		fields: vec![
 			id_field!(),
-			custom_field("in", "Record", true),
-			custom_field("out", "Record", true),
+			field!("in", "Record", non_null),
+			field!("out", "Record", non_null),
 		],
 	})));
 
 	defs.extend(table_defs);
 	defs.extend(def_acc.into_values());
+
+	// defs.push(Definition::TypeDefinition(TypeDefinition::InputObject(InputObjectType {
+	// 	position: Default::default(),
+	// 	description: None,
+	// 	name: "Pagination".to_string(),
+	// 	directives: vec![],
+	// 	fields: vec![input_val!("limit", "Int", null), input_val!("start", "Int", null)],
+	// })));
 
 	Ok(schema::Document {
 		definitions: defs,
