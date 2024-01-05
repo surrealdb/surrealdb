@@ -118,9 +118,16 @@ impl<'a> Context<'a> {
 	}
 
 	/// Add a timeout to the context. If the current timeout is sooner than
-	/// the provided timeout, this method does nothing.
-	pub fn add_timeout(&mut self, timeout: Duration) {
-		self.add_deadline(Instant::now() + timeout)
+	/// the provided timeout, this method does nothing. If the result of the
+	/// addition causes an overflow, this method returns an error.
+	pub fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+		match Instant::now().checked_add(timeout) {
+			Some(deadline) => {
+				self.add_deadline(deadline);
+				Ok(())
+			}
+			None => Err(Error::InvalidTimeout(timeout.as_secs())),
+		}
 	}
 
 	/// Add the LIVE query notification channel to the context, so that we
