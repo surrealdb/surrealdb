@@ -1,15 +1,13 @@
 use super::super::super::{
 	comment::shouldbespace,
 	ending,
-	error::{expect_tag_no_case, expected},
+	error::{expect_tag_no_case, expected, ParseError::Expected},
 	literal::{algorithm, ident, strand, strand::strand_raw},
 	part::base_or_scope,
 	IResult,
 };
-#[cfg(not(feature = "jwks"))]
-use crate::err::Error;
 use crate::sql::{statements::DefineTokenStatement, Algorithm, Strand};
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0, Err};
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
@@ -36,7 +34,10 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 			DefineTokenOption::Type(v) => {
 				#[cfg(not(feature = "jwks"))]
 				if matches!(v, Algorithm::Jwks) {
-					return Error::JwksDisabled;
+					return Err(Err::Error(Expected{
+						tried: i,
+						expected: "the 'jwks' feature to be enabled",
+					}));
 				}
 				res.kind = v;
 			}
