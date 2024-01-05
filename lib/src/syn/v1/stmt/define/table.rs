@@ -8,7 +8,8 @@ use super::super::super::{
 };
 use crate::{
 	sql::{
-		statements::DefineTableStatement, ChangeFeed, Kind, Permission, Permissions, Strand, View,
+		statements::DefineTableStatement, ChangeFeed, Kind, Permission, Permissions, Relation,
+		Strand, TableType, View,
 	},
 	syn::v1::common::verbar,
 };
@@ -30,6 +31,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let mut res = DefineTableStatement {
 		name,
 		permissions: Permissions::none(),
+		table_type: TableType::Normal,
 		..Default::default()
 	};
 	// Assign any defined options
@@ -57,7 +59,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 				res.permissions = v;
 			}
 			DefineTableOption::Relation(r) => {
-				res.relation = Some((r.from, r.to));
+				res.table_type = TableType::Relation(r);
 			}
 		}
 	}
@@ -75,12 +77,6 @@ enum DefineTableOption {
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
 	Relation(Relation),
-}
-
-#[derive(Debug, Default)]
-struct Relation {
-	from: Option<Kind>,
-	to: Option<Kind>,
 }
 
 enum RelationDir {

@@ -7,6 +7,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::{
 	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,
 };
+use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -49,36 +50,46 @@ impl DefineFieldStatement {
 		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
 
-		let new_tb = match (self.name.to_string().as_str(), tb.relation.clone(), self.kind.clone())
-		{
-			("in", Some((in_k, out_k)), Some(dk)) => {
-				if !matches!(dk, Kind::Record(_)) {
-					return Err(Error::Thrown("in field on a relation must be a record".into()));
-				};
-				if in_k.as_ref() != Some(&dk) {
-					Some(DefineTableStatement {
-						relation: Some((Some(dk), out_k)),
-						..tb
-					})
-				} else {
-					None
+		let new_tb =
+			match (self.name.to_string().as_str(), tb.table_type.clone(), self.kind.clone()) {
+				("in", TableType::Relation(rel), Some(dk)) => {
+					if !matches!(dk, Kind::Record(_)) {
+						return Err(Error::Thrown(
+							"in field on a relation must be a record".into(),
+						));
+					};
+					if rel.from.as_ref() != Some(&dk) {
+						Some(DefineTableStatement {
+							table_type: TableType::Relation(Relation {
+								from: Some(dk),
+								..rel
+							}),
+							..tb
+						})
+					} else {
+						None
+					}
 				}
-			}
-			("out", Some((in_k, out_k)), Some(dk)) => {
-				if !matches!(dk, Kind::Record(_)) {
-					return Err(Error::Thrown("out field on a relation must be a record".into()));
-				};
-				if out_k.as_ref() != Some(&dk) {
-					Some(DefineTableStatement {
-						relation: Some((in_k, Some(dk))),
-						..tb
-					})
-				} else {
-					None
+				("out", TableType::Relation(rel), Some(dk)) => {
+					if !matches!(dk, Kind::Record(_)) {
+						return Err(Error::Thrown(
+							"out field on a relation must be a record".into(),
+						));
+					};
+					if rel.to.as_ref() != Some(&dk) {
+						Some(DefineTableStatement {
+							table_type: TableType::Relation(Relation {
+								to: Some(dk),
+								..rel
+							}),
+							..tb
+						})
+					} else {
+						None
+					}
 				}
-			}
-			_ => None,
-		};
+				_ => None,
+			};
 		if let Some(tb) = new_tb {
 			let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.what);
 			run.set(key, &tb).await?;

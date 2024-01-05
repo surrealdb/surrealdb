@@ -9,7 +9,7 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
-use crate::sql::{Idiom, Kind, Part};
+use crate::sql::{Idiom, Kind, Part, Relation, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -28,8 +28,10 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
+	// #[revision(start = 2)]
+	// pub relation: Option<(Option<Kind>, Option<Kind>)>,
 	#[revision(start = 2)]
-	pub relation: Option<(Option<Kind>, Option<Kind>)>,
+	pub table_type: TableType,
 }
 
 impl DefineTableStatement {
@@ -59,7 +61,11 @@ impl DefineTableStatement {
 			run.set(key, self).await?;
 			self.to_owned()
 		};
-		if let Some((in_field, out_field)) = &self.relation {
+		if let TableType::Relation(Relation {
+			from: in_field,
+			to: out_field,
+		}) = &self.table_type
+		{
 			let in_kind = in_field.clone().unwrap_or(Kind::Record(vec![]));
 			let out_kind = out_field.clone().unwrap_or(Kind::Record(vec![]));
 
@@ -137,7 +143,10 @@ impl DefineTableStatement {
 
 impl DefineTableStatement {
 	pub fn is_relation(&self) -> bool {
-		self.relation.is_some()
+		match self.table_type {
+			TableType::Relation(_) => true,
+			_ => false,
+		}
 	}
 }
 
@@ -154,13 +163,13 @@ impl Display for DefineTableStatement {
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
-		if let Some((in_field, out_field)) = &self.relation {
+		if let TableType::Relation(rel) = &self.table_type {
 			f.write_str(" RELATION")?;
-			if let Some(kind) = in_field {
-				write!(f, " FROM {}", get_tables_from_kind(kind))?;
+			if let Some(kind) = &rel.from {
+				write!(f, " FROM {}", get_tables_from_kind(&kind))?;
 			}
-			if let Some(kind) = out_field {
-				write!(f, " TO {}", get_tables_from_kind(kind))?;
+			if let Some(kind) = &rel.to {
+				write!(f, " TO {}", get_tables_from_kind(&kind))?;
 			}
 		}
 		f.write_str(if self.full {
