@@ -148,7 +148,7 @@ pub enum Error {
 	HttpDisabled,
 
 	/// it is not possible to set a variable with the specified name
-	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
 		name: String,
 	},
