@@ -45,10 +45,6 @@ impl Format {
 	pub fn is_none(&self) -> bool {
 		matches!(self, Format::None)
 	}
-	/// Check if strings in this format might be Record IDs
-	pub fn check_strings(&self) -> bool {
-		matches!(self, Format::Cbor | Format::Msgpack)
-	}
 	/// Process a request using the specified format
 	pub fn req(&self, msg: Message) -> Result<Request, Failure> {
 		match self {

@@ -657,11 +657,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn select(&self, what: Value) -> Result<Value, Error> {
-		// Detect record ids in strings
-		let what = match self.format.check_strings() {
-			true => what.could_be_thing_or_table(),
-			false => what.could_be_table(),
-		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -670,7 +665,7 @@ impl Connection {
 		let sql = "SELECT * FROM $what";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what,
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -689,11 +684,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn insert(&self, what: Value, data: Value) -> Result<Value, Error> {
-		// Detect record ids in strings
-		let what = match self.format.check_strings() {
-			true => what.could_be_thing_or_table(),
-			false => what.could_be_table(),
-		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -702,7 +692,7 @@ impl Connection {
 		let sql = "INSERT INTO $what $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what,
+			String::from("what") => what.could_be_table(),
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -722,11 +712,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn create(&self, what: Value, data: Value) -> Result<Value, Error> {
-		// Detect record ids in strings
-		let what = match self.format.check_strings() {
-			true => what.could_be_thing_or_table(),
-			false => what.could_be_table(),
-		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -739,7 +724,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what,
+			String::from("what") => what.could_be_table(),
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -759,11 +744,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn update(&self, what: Value, data: Value) -> Result<Value, Error> {
-		// Detect record ids in strings
-		let what = match self.format.check_strings() {
-			true => what.could_be_thing_or_table(),
-			false => what.could_be_table(),
-		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -776,7 +756,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what,
+			String::from("what") => what.could_be_table(),
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -796,11 +776,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn merge(&self, what: Value, data: Value) -> Result<Value, Error> {
-		// Detect record ids in strings
-		let what = match self.format.check_strings() {
-			true => what.could_be_thing_or_table(),
-			false => what.could_be_table(),
-		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -813,7 +788,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what,
+			String::from("what") => what.could_be_table(),
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -833,11 +808,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn patch(&self, what: Value, data: Value, diff: Value) -> Result<Value, Error> {
-		// Detect record ids in strings
-		let what = match self.format.check_strings() {
-			true => what.could_be_thing_or_table(),
-			false => what.could_be_table(),
-		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -849,7 +819,7 @@ impl Connection {
 		};
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what,
+			String::from("what") => what.could_be_table(),
 			String::from("data") => data,
 			=> &self.vars
 		});
@@ -869,11 +839,6 @@ impl Connection {
 	// ------------------------------
 
 	async fn delete(&self, what: Value) -> Result<Value, Error> {
-		// Detect record ids in strings
-		let what = match self.format.check_strings() {
-			true => what.could_be_thing_or_table(),
-			false => what.could_be_table(),
-		};
 		// Return a single result?
 		let one = what.is_thing();
 		// Get a database reference
@@ -882,7 +847,7 @@ impl Connection {
 		let sql = "DELETE $what RETURN BEFORE";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what,
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database

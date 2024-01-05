@@ -1106,17 +1106,6 @@ impl Value {
 		}
 	}
 
-	/// Treat a string as a thing or table name
-	pub fn could_be_thing_or_table(self) -> Value {
-		match self {
-			Value::Strand(v) => match crate::syn::thing(&v) {
-				Ok(v) => Value::Thing(v),
-				Err(_) => Value::Table(v.0.into()),
-			},
-			_ => self,
-		}
-	}
-
 	// -----------------------------------
 	// Simple output of value type
 	// -----------------------------------
