@@ -761,10 +761,6 @@ pub enum Error {
 	#[error("Auth token is missing the '{0}' claim")]
 	MissingTokenClaim(String),
 
-	/// Token verification with JWKS objects is not enabled
-	#[error("Token verification with JWKS objects is not enabled")]
-	JwksDisabled,
-
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),

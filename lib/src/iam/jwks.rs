@@ -129,7 +129,7 @@ pub(super) async fn config(
 	match DecodingKey::from_jwk(&jwk) {
 		Ok(dec) => Ok((dec, Validation::new(alg))),
 		Err(err) => {
-			warn!("Failed to retrieve decoding key from JWK object: '{:?}'", err);
+			warn!("Failed to retrieve decoding key from JWK object: '{}'", err);
 			Err(Error::InvalidAuth) // Return opaque error
 		}
 	}
@@ -140,7 +140,7 @@ pub(super) async fn config(
 async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk, Error> {
 	// Check that the datastore capabilities allow connections to the URL host
 	if let Err(err) = check_capabilities_url(kvs, url) {
-		warn!("Network access to JWKS location is not allowed: {}", err);
+		warn!("Network access to JWKS location is not allowed: '{}'", err);
 		return Err(Error::InvalidAuth); // Return opaque error
 	}
 

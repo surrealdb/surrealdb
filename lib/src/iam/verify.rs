@@ -199,20 +199,24 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
-			#[cfg(feature = "jwks")]
 			// If the token is defined as JWKS
-			let cf = if de.kind == Algorithm::Jwks {
-				// The key identifier header must be present
-				if let Some(kid) = token_data.header.kid {
-					jwks::config(kvs, &kid, &de.code).await
+			let cf =
+				if de.kind == Algorithm::Jwks {
+					#[cfg(not(feature = "jwks"))]
+					{
+						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
+						return Err(Error::InvalidAuth);
+					}
+					#[cfg(feature = "jwks")]
+					// The key identifier header must be present
+					if let Some(kid) = token_data.header.kid {
+						jwks::config(kvs, &kid, &de.code).await
+					} else {
+						Err(Error::MissingTokenHeader("kid".to_string()))
+					}
 				} else {
-					Err(Error::MissingTokenHeader("kid".to_string()))
-				}
-			} else {
-				config(de.kind, de.code)
-			}?;
-			#[cfg(not(feature = "jwks"))]
-			let cf = config(de.kind, de.code)?;
+					config(de.kind, de.code)
+				}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -277,20 +281,24 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database token
 			let de = tx.get_db_token(&ns, &db, &tk).await?;
-			#[cfg(feature = "jwks")]
 			// If the token is defined as JWKS
-			let cf = if de.kind == Algorithm::Jwks {
-				// The key identifier header must be present
-				if let Some(kid) = token_data.header.kid {
-					jwks::config(kvs, &kid, &de.code).await
+			let cf =
+				if de.kind == Algorithm::Jwks {
+					#[cfg(not(feature = "jwks"))]
+					{
+						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
+						return Err(Error::InvalidAuth);
+					}
+					#[cfg(feature = "jwks")]
+					// The key identifier header must be present
+					if let Some(kid) = token_data.header.kid {
+						jwks::config(kvs, &kid, &de.code).await
+					} else {
+						Err(Error::MissingTokenHeader("kid".to_string()))
+					}
 				} else {
-					Err(Error::MissingTokenHeader("kid".to_string()))
-				}
-			} else {
-				config(de.kind, de.code)
-			}?;
-			#[cfg(not(feature = "jwks"))]
-			let cf = config(de.kind, de.code)?;
+					config(de.kind, de.code)
+				}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -362,20 +370,24 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace token
 			let de = tx.get_ns_token(&ns, &tk).await?;
-			#[cfg(feature = "jwks")]
 			// If the token is defined as JWKS
-			let cf = if de.kind == Algorithm::Jwks {
-				// The key identifier header must be present
-				if let Some(kid) = token_data.header.kid {
-					jwks::config(kvs, &kid, &de.code).await
+			let cf =
+				if de.kind == Algorithm::Jwks {
+					#[cfg(not(feature = "jwks"))]
+					{
+						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
+						return Err(Error::InvalidAuth);
+					}
+					#[cfg(feature = "jwks")]
+					// The key identifier header must be present
+					if let Some(kid) = token_data.header.kid {
+						jwks::config(kvs, &kid, &de.code).await
+					} else {
+						Err(Error::MissingTokenHeader("kid".to_string()))
+					}
 				} else {
-					Err(Error::MissingTokenHeader("kid".to_string()))
-				}
-			} else {
-				config(de.kind, de.code)
-			}?;
-			#[cfg(not(feature = "jwks"))]
-			let cf = config(de.kind, de.code)?;
+					config(de.kind, de.code)
+				}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
