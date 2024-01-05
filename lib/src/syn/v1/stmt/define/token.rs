@@ -6,6 +6,8 @@ use super::super::super::{
 	part::base_or_scope,
 	IResult,
 };
+#[cfg(not(feature = "jwks"))]
+use crate::err::Error;
 use crate::sql::{statements::DefineTokenStatement, Algorithm, Strand};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
