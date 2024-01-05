@@ -3,9 +3,9 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Ident;
-use crate::sql::Kind;
 use crate::sql::Permissions;
 use crate::sql::Strand;
+use crate::sql::TableType;
 use crate::sql::View;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -48,7 +48,8 @@ pub struct SerializeDefineTableStatement {
 	permissions: Permissions,
 	changefeed: Option<ChangeFeed>,
 	comment: Option<Strand>,
-	relation: Option<(Option<Kind>, Option<Kind>)>,
+	// relation: Option<(Option<Kind>, Option<Kind>)>,
+	table_type: TableType,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
@@ -84,8 +85,8 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
-			"relation" => {
-				self.relation = value.serialize(ser::relation::opt::Serializer.wrap())?;
+			"table_type" => {
+				self.table_type = value.serialize(ser::table_type::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!(
@@ -106,7 +107,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			permissions: self.permissions,
 			changefeed: self.changefeed,
 			comment: self.comment,
-			relation: self.relation,
+			table_type: self.table_type,
 		})
 	}
 }

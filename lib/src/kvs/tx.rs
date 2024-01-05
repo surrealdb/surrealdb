@@ -19,8 +19,8 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
-use crate::sql::Kind;
 use crate::sql::Strand;
+use crate::sql::TableType;
 use crate::sql::Value;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
@@ -2320,7 +2320,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
-		relation: Option<(Option<Kind>, Option<Kind>)>,
+		table_type: TableType,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		match self.get_and_cache_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
@@ -2331,7 +2331,7 @@ impl Transaction {
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
-						relation,
+						table_type,
 						..Default::default()
 					};
 					self.put(key.key_category(), key, &val).await?;

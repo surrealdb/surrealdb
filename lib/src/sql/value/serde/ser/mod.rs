@@ -49,6 +49,7 @@ mod strand;
 mod string;
 mod subquery;
 mod table;
+mod table_type;
 mod thing;
 mod timeout;
 mod tokenizer;

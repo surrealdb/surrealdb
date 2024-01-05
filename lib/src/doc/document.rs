@@ -14,7 +14,7 @@ use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
-use crate::sql::Kind;
+use crate::sql::TableType;
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -115,7 +115,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-		relation: Option<(Option<Kind>, Option<Kind>)>,
+		table_type: TableType,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Clone transaction
 		let run = txn.clone();
@@ -136,7 +136,7 @@ impl<'a> Document<'a> {
 				// We can create the table automatically
 				run.add_and_cache_ns(opt.ns(), opt.strict).await?;
 				run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict, relation).await
+				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict, table_type).await
 			}
 			// There was an error
 			Err(err) => Err(err),
@@ -151,7 +151,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		self.tb_with_rel(opt, txn, None).await
+		self.tb_with_rel(opt, txn, TableType::Normal).await
 	}
 	/// Get the foreign tables for this document
 	pub async fn ft(
