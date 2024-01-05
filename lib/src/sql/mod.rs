@@ -29,7 +29,7 @@ pub(crate) mod group;
 pub(crate) mod id;
 pub(crate) mod ident;
 pub(crate) mod idiom;
-pub mod index;
+pub(crate) mod index;
 pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
