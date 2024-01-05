@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y curl patch clang gpg build-essential gi
 
 # Install rust
 COPY docker/files/rustup-init.sh /tmp/rustup-init.sh
-RUN /tmp/rustup-init.sh -y
+RUN /tmp/rustup-init.sh -y --default-toolchain 1.74.1
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN mkdir /surrealdb
