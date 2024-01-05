@@ -333,7 +333,7 @@ impl<'a> Executor<'a> {
 									// There is a timeout clause
 									Some(timeout) => {
 										// Set statement timeout
-										ctx.add_timeout(timeout);
+										ctx.add_timeout(timeout)?;
 										// Process the statement
 										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
 										// Catch statement timeout
@@ -499,12 +499,23 @@ mod tests {
 			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
 			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
 		}
+		// With large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 31540000s"; // 1 year
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
+		}
 		// With very large timeout
 		{
 			let ds = Datastore::new("memory").await.unwrap();
-			let stmt = "UPDATE test TIMEOUT 9460800000000000000s";
+			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
 			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
-			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
+			assert!(
+				res.is_err(),
+				"Unexpected success executing statement with very large timeout: {:?}",
+				res
+			);
 		}
 	}
 }
