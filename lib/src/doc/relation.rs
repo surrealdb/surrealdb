@@ -24,7 +24,7 @@ impl<'a> Document<'a> {
 		let rid = self.id.as_ref().unwrap();
 		match stm {
 			Statement::Create(_) | Statement::Insert(_) => {
-				if tb.is_relation() {
+				if !tb.allows_normal() {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: false,
@@ -32,7 +32,7 @@ impl<'a> Document<'a> {
 				}
 			}
 			Statement::Relate(_) => {
-				if !tb.is_relation() {
+				if !tb.allows_relation() {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: true,

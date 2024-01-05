@@ -116,6 +116,20 @@ impl DefineTableStatement {
 			_ => false,
 		}
 	}
+	pub fn allows_relation(&self) -> bool {
+		match self.table_type {
+			TableType::Relation(_) => true,
+			TableType::Any => true,
+			_ => false,
+		}
+	}
+	pub fn allows_normal(&self) -> bool {
+		match self.table_type {
+			TableType::Normal => true,
+			TableType::Any => true,
+			_ => false,
+		}
+	}
 }
 
 fn get_tables_from_kind(kind: &Kind) -> String {
