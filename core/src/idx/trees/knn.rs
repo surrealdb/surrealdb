@@ -190,16 +190,13 @@ impl Docs {
 		}
 	}
 
-	fn iter<I>(&self) -> I
-	where
-		I: Iterator<Item = DocId>,
-	{
+	fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
 		match &self {
-			Docs::One(d) => OneDocIterator(Some(*d)),
-			Docs::Vec2(a) => SliceDocIterator(a.iter()),
-			Docs::Vec3(a) => SliceDocIterator(a.iter()),
-			Docs::Vec4(a) => SliceDocIterator(a.iter()),
-			Docs::Bits(a) => a.iter(),
+			Docs::One(d) => Box::new(OneDocIterator(Some(*d))),
+			Docs::Vec2(a) => Box::new(SliceDocIterator(a.iter())),
+			Docs::Vec3(a) => Box::new(SliceDocIterator(a.iter())),
+			Docs::Vec4(a) => Box::new(SliceDocIterator(a.iter())),
+			Docs::Bits(a) => Box::new(a.iter()),
 		}
 	}
 
@@ -238,7 +235,7 @@ where
 	type Item = DocId;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.0.next().map(|d| *d)
+		self.0.next().cloned()
 	}
 }
 
@@ -303,7 +300,7 @@ impl KnnResultBuilder {
 		for (_, docs) in self.priority_list {
 			let dl = docs.len();
 			if dl > left {
-				for doc_id in docs.take(left as usize) {
+				for doc_id in docs.iter().take(left as usize) {
 					sorted_docs.push_back(doc_id);
 				}
 				break;
