@@ -205,7 +205,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					#[cfg(not(feature = "jwks"))]
 					{
 						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-						return Err(Error::InvalidAuth);
+						Err(Error::InvalidAuth)
 					}
 					#[cfg(feature = "jwks")]
 					// The key identifier header must be present
@@ -287,7 +287,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					#[cfg(not(feature = "jwks"))]
 					{
 						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-						return Err(Error::InvalidAuth);
+						Err(Error::InvalidAuth)
 					}
 					#[cfg(feature = "jwks")]
 					// The key identifier header must be present
@@ -376,7 +376,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					#[cfg(not(feature = "jwks"))]
 					{
 						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-						return Err(Error::InvalidAuth);
+						Err(Error::InvalidAuth)
 					}
 					#[cfg(feature = "jwks")]
 					// The key identifier header must be present
