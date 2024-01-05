@@ -1157,15 +1157,14 @@ async fn define_statement_analyzer() -> Result<(), Error> {
         DEFINE FUNCTION fn::stripHtml($html: string) {
             RETURN string::replace($html, /<[^>]*>/, "");
         };
-        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
 		INFO FOR DB;
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 4);
 	//
-	for _ in 0..4 {
+	for _ in 0..3 {
 		let tmp = res.remove(0).result;
 		assert!(tmp.is_ok());
 	}
@@ -1175,8 +1174,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 		r#"{
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
-				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
-				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
+				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)'
 			},
 			tokens: {},
 			functions: {

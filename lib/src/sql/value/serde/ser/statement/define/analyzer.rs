@@ -81,7 +81,6 @@ impl serde::ser::SerializeStruct for SerializeDefineAnalyzerStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(DefineAnalyzerStatement {
 			name: self.name,
-			function: self.function.map(|s| Ident(s.0)),
 			tokenizers: self.tokenizers,
 			filters: self.filters,
 			comment: self.comment,
