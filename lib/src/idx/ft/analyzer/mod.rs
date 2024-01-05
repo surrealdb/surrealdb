@@ -9,7 +9,6 @@ use crate::idx::ft::terms::{TermId, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
-use crate::syn::path_like;
 use async_recursion::async_recursion;
 use filter::Filter;
 use std::collections::hash_map::Entry;
@@ -19,7 +18,6 @@ mod filter;
 mod tokenizer;
 
 pub(crate) struct Analyzer {
-	function: Option<String>,
 	tokenizers: Option<Vec<SqlTokenizer>>,
 	filters: Option<Vec<Filter>>,
 }
@@ -27,7 +25,6 @@ pub(crate) struct Analyzer {
 impl From<DefineAnalyzerStatement> for Analyzer {
 	fn from(az: DefineAnalyzerStatement) -> Self {
 		Self {
-			function: az.function.map(|i| i.0),
 			tokenizers: az.tokenizers,
 			filters: Filter::from(az.filters),
 		}
@@ -189,33 +186,11 @@ impl Analyzer {
 
 	async fn generate_tokens(
 		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		mut input: String,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_txn: &Transaction,
+		input: String,
 	) -> Result<Tokens, Error> {
-		if let Some(function_name) = &self.function {
-			let fns = format!("fn::{function_name}(\"{input}\")");
-			match path_like(&fns) {
-				Ok(func_value) => {
-					let val = func_value.compute(ctx, opt, txn, None).await?;
-					if let Value::Strand(val) = val {
-						input = val.0;
-					} else {
-						return Err(Error::InvalidFunction {
-							name: function_name.to_string(),
-							message: "The function should return a string.".to_string(),
-						});
-					}
-				}
-				Err(e) => {
-					return Err(Error::InvalidFunction {
-						name: function_name.to_string(),
-						message: e.to_string(),
-					})
-				}
-			}
-		}
 		if let Some(t) = &self.tokenizers {
 			if !input.is_empty() {
 				let t = Tokenizer::tokenize(t, input);
