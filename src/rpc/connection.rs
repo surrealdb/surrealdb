@@ -14,7 +14,6 @@ use crate::telemetry::traces::rpc::span_for_request;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use http::HeaderValue;
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
@@ -35,7 +34,7 @@ use tracing::Span;
 use uuid::Uuid;
 
 pub struct Connection {
-	ws_id: Uuid,
+	id: Uuid,
 	session: Session,
 	format: Format,
 	vars: BTreeMap<String, Value>,
@@ -45,62 +44,41 @@ pub struct Connection {
 
 impl Connection {
 	/// Instantiate a new RPC
-	pub fn new(mut session: Session) -> Arc<RwLock<Connection>> {
-		// Create a new RPC variables store
-		let vars = BTreeMap::new();
-		// No output format has been set yet
-		let format = Format::None;
+	pub fn new(id: Uuid, mut session: Session, format: Format) -> Arc<RwLock<Connection>> {
 		// Enable real-time mode
 		session.rt = true;
 		// Create and store the RPC connection
 		Arc::new(RwLock::new(Connection {
-			ws_id: Uuid::new_v4(),
+			id,
 			session,
 			format,
-			vars,
+			vars: BTreeMap::new(),
 			limiter: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
 			canceller: CancellationToken::new(),
 		}))
 	}
 
-	/// Update the WebSocket ID. If the ID already exists, do not update it.
-	pub async fn update_ws_id(&mut self, ws_id: Uuid) -> Result<(), Box<dyn std::error::Error>> {
-		if WEBSOCKETS.read().await.contains_key(&ws_id) {
-			trace!("WebSocket ID '{}' is in use by another connection. Do not update it.", &ws_id);
-			return Err("websocket ID is in use".into());
-		}
-		self.ws_id = ws_id;
-		Ok(())
-	}
-
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
-		// Check if there is a WebSocket protocol specified
-		if let Some(protocol) = ws.protocol().map(HeaderValue::to_str) {
-			// Process the value here, before the next await call
-			let format: Format = protocol.unwrap().into();
-			// Any specified protocol will always be a valid value
-			rpc.write().await.format = format;
-		}
 		// Split the socket into send and recv
 		let (sender, receiver) = ws.split();
 		// Create an internal channel between the receiver and the sender
 		let (internal_sender, internal_receiver) =
 			channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS);
 
-		let ws_id = rpc.read().await.ws_id;
+		let id = rpc.read().await.id;
 
-		trace!("WebSocket {} connected", ws_id);
+		trace!("WebSocket {} connected", id);
 
 		if let Err(err) = telemetry::metrics::ws::on_connect() {
 			error!("Error running metrics::ws::on_connect hook: {}", err);
 		}
 
 		// Add this WebSocket to the list
-		WEBSOCKETS.write().await.insert(
-			ws_id,
-			WebSocketRef(internal_sender.clone(), rpc.read().await.canceller.clone()),
-		);
+		WEBSOCKETS
+			.write()
+			.await
+			.insert(id, WebSocketRef(internal_sender.clone(), rpc.read().await.canceller.clone()));
 
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
@@ -118,15 +96,15 @@ impl Connection {
 
 		internal_sender.close();
 
-		trace!("WebSocket {} disconnected", ws_id);
+		trace!("WebSocket {} disconnected", id);
 
 		// Remove this WebSocket from the list
-		WEBSOCKETS.write().await.remove(&ws_id);
+		WEBSOCKETS.write().await.remove(&id);
 
 		// Remove all live queries
 		let mut gc = Vec::new();
 		LIVE_QUERIES.write().await.retain(|key, value| {
-			if value == &ws_id {
+			if value == &id {
 				trace!("Removing live query: {}", key);
 				gc.push(*key);
 				return false;
@@ -297,9 +275,9 @@ impl Connection {
 					msg = channel.recv() => {
 						if let Ok(notification) = msg {
 							// Find which WebSocket the notification belongs to
-							if let Some(ws_id) = LIVE_QUERIES.read().await.get(&notification.id) {
+							if let Some(id) = LIVE_QUERIES.read().await.get(&notification.id) {
 								// Check to see if the WebSocket exists
-								if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(ws_id) {
+								if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(id) {
 									// Serialize the message to send
 									let message = success(None, notification);
 									// Get the current output format
@@ -320,7 +298,7 @@ impl Connection {
 		// Get the current output format
 		let mut fmt = rpc.read().await.format;
 		// Prepare Span and Otel context
-		let span = span_for_request(&rpc.read().await.ws_id);
+		let span = span_for_request(&rpc.read().await.id);
 		// Acquire concurrent request rate limiter
 		let permit = rpc.read().await.limiter.clone().acquire_owned().await.unwrap();
 		// Calculate the length of the message
@@ -913,15 +891,14 @@ impl Connection {
 			QueryType::Live => {
 				if let Ok(Value::Uuid(lqid)) = &res.result {
 					// Match on Uuid type
-					LIVE_QUERIES.write().await.insert(lqid.0, self.ws_id);
-					trace!("Registered live query {} on websocket {}", lqid, self.ws_id);
+					LIVE_QUERIES.write().await.insert(lqid.0, self.id);
+					trace!("Registered live query {} on websocket {}", lqid, self.id);
 				}
 			}
 			QueryType::Kill => {
 				if let Ok(Value::Uuid(lqid)) = &res.result {
-					let ws_id = LIVE_QUERIES.write().await.remove(&lqid.0);
-					if let Some(ws_id) = ws_id {
-						trace!("Unregistered live query {} on websocket {}", lqid, ws_id);
+					if let Some(id) = LIVE_QUERIES.write().await.remove(&lqid.0) {
+						trace!("Unregistered live query {} on websocket {}", lqid, id);
 					}
 				}
 			}
