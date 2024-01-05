@@ -32,6 +32,10 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	for opt in opts {
 		match opt {
 			DefineTokenOption::Type(v) => {
+				#[cfg(not(feature = "jwks"))]
+				if matches!(v, Algorithm::Jwks) {
+					return Error::JwksDisabled;
+				}
 				res.kind = v;
 			}
 			DefineTokenOption::Value(v) => {
