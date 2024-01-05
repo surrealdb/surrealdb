@@ -332,14 +332,18 @@ impl<'a> Executor<'a> {
 								let res = match stm.timeout() {
 									// There is a timeout clause
 									Some(timeout) => {
-										// Set statement timeout
-										ctx.add_timeout(timeout)?;
-										// Process the statement
-										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-										// Catch statement timeout
-										match ctx.is_timedout() {
-											true => Err(Error::QueryTimedout),
-											false => res,
+										// Set statement timeout or propagate the error
+										if let Err(err) = ctx.add_timeout(timeout) {
+											Err(err)
+										} else {
+											// Process the statement
+											let res =
+												stm.compute(&ctx, &opt, &self.txn(), None).await;
+											// Catch statement timeout
+											match ctx.is_timedout() {
+												true => Err(Error::QueryTimedout),
+												false => res,
+											}
 										}
 									}
 									// There is no timeout clause
