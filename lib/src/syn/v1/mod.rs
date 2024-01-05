@@ -99,6 +99,7 @@ pub fn range(input: &str) -> Result<Range, Error> {
 	parse_impl(input, literal::range)
 }
 
+/// Parses a SurrealQL [`Thing`]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, thing::thing)
 }
