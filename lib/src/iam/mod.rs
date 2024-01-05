@@ -7,7 +7,7 @@ pub mod base;
 pub mod check;
 pub mod clear;
 pub mod entities;
-#[cfg(feature = "http")]
+#[cfg(feature = "jwks")]
 pub mod jwks;
 pub mod policies;
 pub mod signin;

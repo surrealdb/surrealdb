@@ -856,7 +856,7 @@ impl<T> From<channel::SendError<T>> for Error {
 	}
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "jwks"))]
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())

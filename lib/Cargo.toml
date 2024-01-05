@@ -38,6 +38,7 @@ http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
 ml = ["surrealml-core", "ndarray"]
+jwks = ["dep:reqwest"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
 
@@ -47,7 +48,7 @@ features = [
     "protocol-ws", "protocol-http",
     "kv-mem", "kv-indxdb", "kv-rocksdb",
     "rustls", "native-tls",
-    "http", "scripting"
+    "http", "scripting", "jwks"
 ]
 targets = []
 
