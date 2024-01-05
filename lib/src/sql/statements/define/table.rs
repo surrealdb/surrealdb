@@ -9,13 +9,11 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
-use crate::sql::{Idiom, Kind, Part, Relation, TableType};
+use crate::sql::{Kind, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-
-use super::DefineFieldStatement;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
@@ -61,38 +59,8 @@ impl DefineTableStatement {
 			run.set(key, self).await?;
 			self.to_owned()
 		};
-		if let TableType::Relation(Relation {
-			from: in_field,
-			to: out_field,
-		}) = &self.table_type
-		{
-			let in_kind = in_field.clone().unwrap_or(Kind::Record(vec![]));
-			let out_kind = out_field.clone().unwrap_or(Kind::Record(vec![]));
-
-			let in_key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.name, "in");
-			let out_key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.name, "out");
-
-			// TODO: fix permissions so they don't defalut to full
-			run.set(
-				in_key,
-				DefineFieldStatement {
-					name: Idiom(vec![Part::from("in")]),
-					what: self.name.clone(),
-					kind: Some(in_kind),
-					..Default::default()
-				},
-			)
-			.await?;
-			run.set(
-				out_key,
-				DefineFieldStatement {
-					name: Idiom(vec![Part::from("out")]),
-					what: self.name.clone(),
-					kind: Some(out_kind),
-					..Default::default()
-				},
-			)
-			.await?;
+		if let TableType::Relation(rel) = &self.table_type {
+			run.define_in_out_fd_from_relation(opt.ns(), opt.db(), &self.name, rel).await?
 		}
 
 		// TODO: define id field here

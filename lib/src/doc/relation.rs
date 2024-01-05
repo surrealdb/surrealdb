@@ -3,8 +3,7 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::statements::RelateStatement;
-use crate::sql::{Kind, Relation, TableType};
+use crate::sql::TableType;
 
 impl<'a> Document<'a> {
 	pub async fn relation(
@@ -14,16 +13,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		let table_type = if let Statement::Relate(RelateStatement {
-			from,
-			with,
-			..
-		}) = stm
-		{
-			TableType::Relation(Relation {
-				from: from.clone().record().map(|r| Kind::Record(vec![r.tb.into()])),
-				to: with.clone().record().map(|r| Kind::Record(vec![r.tb.into()])),
-			})
+		let table_type = if let Statement::Relate(_) = stm {
+			TableType::Relation(Default::default())
 		} else {
 			TableType::Normal
 		};
