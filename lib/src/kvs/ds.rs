@@ -26,6 +26,7 @@ use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::time::{sleep, timeout};
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
@@ -543,6 +544,7 @@ impl Datastore {
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		trace!("Spawned archive task");
 		let archive_task = tokio::spawn(bootstrap::archive_live_queries(
 			tx_req_send.clone(),
 			self.id,
@@ -557,6 +559,7 @@ impl Datastore {
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		trace!("Spawned delete live query task");
 		let delete_task = tokio::spawn(bootstrap::delete_live_queries(
 			tx_req_send.clone(),
 			archive_recv,
@@ -566,6 +569,7 @@ impl Datastore {
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
+		trace!("Spawned delete handler task");
 		let delete_handler_task = tokio::spawn(async move {
 			while let Some(res) = delete_recv.recv().await {
 				let (_lq, e) = res;
@@ -579,23 +583,38 @@ impl Datastore {
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
 		loop {
-			match tx_req_recv.recv().await {
-				None => {
-					// closed
-					break;
-				}
-				Some(sender) => {
-					let tx = self.transaction(Write, Optimistic).await?;
-					if let Err(mut tx) = sender.send(tx) {
-						// The receiver has been dropped, so we need to cancel the transaction
-						tx.cancel().await?;
+			if let Err(res) =
+				timeout(Duration::from_millis(BOOTSTRAP_BATCH_LATENCY.as_millis() as u64), async {
+					match tx_req_recv.recv().await {
+						None => {
+							// closed
+							trace!("Transaction request channel closed, forcing timeout");
+							sleep(
+								Duration::from_millis(BOOTSTRAP_BATCH_LATENCY.as_millis() as u64),
+							)
+							.await;
+						}
+						Some(sender) => {
+							trace!("Received a transaction request");
+							let tx = self.transaction(Write, Optimistic).await.unwrap();
+							if let Err(mut tx) = sender.send(tx) {
+								// The receiver has been dropped, so we need to cancel the transaction
+								trace!("Unable to send a transaction as response to task because the receiver is closed");
+								tx.cancel().await.unwrap();
+							}
+						}
 					}
-				}
+				})
+				.await
+			{
+				trace!("Timed out waiting for transaction requests. Breaking tx request loop");
+				break;
 			}
 		}
 		trace!("Finished handling requests");
 
 		// Now run everything together and return any errors that arent captured per record
+		trace!("Joining bootstrap tasks");
 		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
 			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
 
