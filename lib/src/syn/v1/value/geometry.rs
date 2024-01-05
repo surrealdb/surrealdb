@@ -391,4 +391,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]]] }", format!("{}", out));
 	}
+
+	#[test]
+	fn invalid_polygon() {
+		// a polygon must have atleast a single item.
+		let sql = r#"{
+			coordinates: []
+			type: 'Polygon',
+		}"#;
+		let res = geometry(sql);
+		res.unwrap_err();
+	}
 }
