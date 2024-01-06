@@ -281,7 +281,7 @@ fn process(
 				format!(
 					"-- Query {:?} (execution time: {:?})\n{v:#}",
 					i + 1,
-					stats[i].execution_time
+					stats[i].execution_time.unwrap_or_default()
 				)
 			})
 			.collect::<Vec<String>>()
