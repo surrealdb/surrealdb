@@ -11,6 +11,7 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct IfelseStatement {
 	pub exprs: Vec<(Value, Value)>,
 	pub close: Option<Value>,

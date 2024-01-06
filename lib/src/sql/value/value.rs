@@ -33,6 +33,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -58,6 +59,7 @@ impl Display for Values {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Value {
 	// These value types are simple values which

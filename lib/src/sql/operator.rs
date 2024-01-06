@@ -7,6 +7,7 @@ use std::fmt::Write;
 /// Binary operators.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Operator {
 	//
 	Neg, // -

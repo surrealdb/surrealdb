@@ -8,6 +8,7 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct Tables(pub Vec<Table>);
 
@@ -32,6 +33,7 @@ impl Display for Tables {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Table")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct Table(#[serde(with = "no_nul_bytes")] pub String);
 

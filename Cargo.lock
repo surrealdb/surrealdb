@@ -361,6 +361,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d5a26814d8dcb93b0e5a0ff3c6d80a8843bafb21b39e8e18a6f05471870e110"
+dependencies = [
+ "derive_arbitrary",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1583,6 +1592,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_arbitrary"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67e77553c4162a157adbf834ebae5b415acbecbeafc7a74b0e886657506a7611"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.39",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2174,6 +2194,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "567495020b114f1ce9bed679b29975aa0bfae06ac22beacd5cfde5dabe7b05d6"
 dependencies = [
  "approx",
+ "arbitrary",
  "num-traits",
  "rstar",
  "serde",
@@ -4242,6 +4263,9 @@ name = "regex-syntax"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
+dependencies = [
+ "arbitrary",
+]
 
 [[package]]
 name = "relative-path"
@@ -4569,6 +4593,7 @@ version = "1.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06676aec5ccb8fc1da723cc8c0f9a46549f21ebb8753d3915c6c41db1e7f1dc4"
 dependencies = [
+ "arbitrary",
  "arrayvec",
  "borsh",
  "bytes",
@@ -5291,6 +5316,7 @@ version = "1.0.2"
 dependencies = [
  "addr",
  "any_ascii",
+ "arbitrary",
  "argon2",
  "async-channel",
  "async-executor",
@@ -5313,6 +5339,7 @@ dependencies = [
  "futures-concurrency",
  "fuzzy-matcher",
  "geo 0.27.0",
+ "geo-types",
  "hex",
  "indexmap 2.1.0",
  "indxdb",
@@ -5335,6 +5362,7 @@ dependencies = [
  "radix_trie",
  "rand 0.8.5",
  "regex",
+ "regex-syntax 0.8.2",
  "reqwest",
  "revision",
  "roaring",
@@ -6238,6 +6266,7 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e395fcf16a7a3d8127ec99782007af141946b4795001f876d54fb0d55978560"
 dependencies = [
+ "arbitrary",
  "atomic",
  "getrandom 0.2.11",
  "serde",
