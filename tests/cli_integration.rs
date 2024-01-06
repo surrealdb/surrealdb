@@ -93,11 +93,11 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db2} --pretty --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args).input("SELECT * FROM thing;\n").output(),
-				Ok("-- Query 1\n[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output = common::run(&args).input("SELECT * FROM thing;\n").output().unwrap();
+			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
+			assert!(line1.starts_with("-- Query 1"));
+			assert!(line1.contains("execution time"));
+			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
 		}
 
 		info!("* Unfinished backup CLI");
