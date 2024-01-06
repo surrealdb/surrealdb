@@ -281,11 +281,9 @@ fn process(
 			.iter()
 			.enumerate()
 			.map(|(i, v)| {
-				format!(
-					"-- Query {:?} (execution time: {:?})\n{v:#}",
-					i + 1,
-					stats[i].execution_time.unwrap_or_default()
-				)
+				let query_num = i + 1;
+				let execution_time = stats[i].execution_time.unwrap_or_default();
+				format!("-- Query {query_num} (execution time: {execution_time:?})\n{v:#}",)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
@@ -304,11 +302,9 @@ fn process(
 
 				v.clone().into_json().serialize(&mut serializer).unwrap();
 				let v = String::from_utf8(buf).unwrap();
-				format!(
-					"-- Query {:?} (execution time: {:?}\n{v:#}",
-					i + 1,
-					stats[i].execution_time
-				)
+				let query_num = i + 1;
+				let execution_time = stats[i].execution_time.unwrap_or_default();
+				format!("-- Query {query_num} (execution time: {execution_time:?}\n{v:#}",)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
