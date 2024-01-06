@@ -96,6 +96,7 @@ mod cli_integration {
 			let output = common::run(&args).input("SELECT * FROM thing;\n").output().unwrap();
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
 			assert!(line1.starts_with("-- Query 1"));
+			assert!(line1.contains("execution time"));
 			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
 		}
 
