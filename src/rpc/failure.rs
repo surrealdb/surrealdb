@@ -1,10 +1,28 @@
+use crate::err::Error;
 use serde::Serialize;
 use std::borrow::Cow;
+use surrealdb::sql::Value;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: Cow<'static, str>,
+}
+
+impl From<Error> for Failure {
+	fn from(err: Error) -> Self {
+		Failure::custom(err.to_string())
+	}
+}
+
+impl From<Failure> for Value {
+	fn from(err: Failure) -> Self {
+		map! {
+			String::from("code") => Value::from(err.code),
+			String::from("message") => Value::from(err.message.to_string()),
+		}
+		.into()
+	}
 }
 
 #[allow(dead_code)]

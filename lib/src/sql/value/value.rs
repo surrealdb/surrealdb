@@ -458,6 +458,12 @@ impl From<Vec<bool>> for Value {
 	}
 }
 
+impl From<HashMap<&str, Value>> for Value {
+	fn from(v: HashMap<&str, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
 impl From<HashMap<String, Value>> for Value {
 	fn from(v: HashMap<String, Value>) -> Self {
 		Value::Object(Object::from(v))
@@ -466,6 +472,12 @@ impl From<HashMap<String, Value>> for Value {
 
 impl From<BTreeMap<String, Value>> for Value {
 	fn from(v: BTreeMap<String, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<BTreeMap<&str, Value>> for Value {
+	fn from(v: BTreeMap<&str, Value>) -> Self {
 		Value::Object(Object::from(v))
 	}
 }

@@ -1,11 +1,10 @@
-use crate::err;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::Format;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use serde::Serialize;
-use serde_json::{json, Value as Json};
+use serde_json::Value as Json;
 use surrealdb::channel::Sender;
 use surrealdb::dbs;
 use surrealdb::dbs::Notification;
@@ -39,15 +38,25 @@ impl From<String> for Data {
 	}
 }
 
+impl From<Notification> for Data {
+	fn from(n: Notification) -> Self {
+		Data::Live(n)
+	}
+}
+
 impl From<Vec<dbs::Response>> for Data {
 	fn from(v: Vec<dbs::Response>) -> Self {
 		Data::Query(v)
 	}
 }
 
-impl From<Notification> for Data {
-	fn from(n: Notification) -> Self {
-		Data::Live(n)
+impl From<Data> for Value {
+	fn from(val: Data) -> Self {
+		match val {
+			Data::Query(v) => sql::to_value(v).unwrap(),
+			Data::Live(v) => sql::to_value(v).unwrap(),
+			Data::Other(v) => v,
+		}
 	}
 }
 
@@ -60,26 +69,24 @@ pub struct Response {
 impl Response {
 	/// Convert and simplify the value into JSON
 	#[inline]
-	pub fn simplify(self) -> Json {
+	pub fn as_json(self) -> Json {
+		Json::from(self.as_value())
+	}
+
+	#[inline]
+	pub fn as_value(self) -> Value {
 		let mut value = match self.result {
-			Ok(data) => {
-				let value = match data {
-					Data::Query(vec) => sql::to_value(vec).unwrap(),
-					Data::Live(notification) => sql::to_value(notification).unwrap(),
-					Data::Other(value) => value,
-				};
-				json!({
-					"result": Json::from(value),
-				})
-			}
-			Err(failure) => json!({
-				"error": failure,
-			}),
+			Ok(val) => map! {
+				"result" => Value::from(val),
+			},
+			Err(err) => map! {
+				"error" => Value::from(err),
+			},
 		};
 		if let Some(id) = self.id {
-			value["id"] = id.into();
+			value.insert("id", id);
 		}
-		value
+		value.into()
 	}
 
 	/// Send the response to the WebSocket channel
@@ -121,12 +128,6 @@ pub fn failure(id: Option<Value>, err: Failure) -> Response {
 	Response {
 		id,
 		result: Err(err),
-	}
-}
-
-impl From<err::Error> for Failure {
-	fn from(err: err::Error) -> Self {
-		Failure::custom(err.to_string())
 	}
 }
 

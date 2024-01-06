@@ -22,8 +22,10 @@ pub fn req(msg: Message) -> Result<Request, Failure> {
 }
 
 pub fn res(res: Response) -> Result<(usize, Message), Failure> {
-	// Serialize the response with simplified type information
-	let res = serde_pack::to_vec(&res.simplify()).unwrap();
+	// Convert the response into a value
+	let val = res.as_value();
+	// Serialize the value into MsgPack binary data
+	let res = serde_pack::to_vec(&val).unwrap();
 	// Return the message length, and message as binary
 	Ok((res.len(), Message::Binary(res)))
 }
