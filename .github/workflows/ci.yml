@@ -1,5 +1,7 @@
 name: Continuous integration
 
+run-name: "CI run '${{ github.head_ref || github.ref_name }}'"
+
 on:
   workflow_dispatch:
   push:
@@ -13,6 +15,16 @@ defaults:
     shell: bash
 
 jobs:
+  # TODO: Do not run it on CI because it's very slow right now.
+  # Build the Docker image but don't push it.
+  # docker:
+  #   uses: ./.github/workflows/reusable_docker.yml
+  #   with:
+  #     git-ref: ${{ github.ref }}
+  #     tag-prefix: ${{ github.head_ref || github.ref_name }}
+  #     build: true
+  #     push: false
+  #   secrets: inherit
 
   format:
     name: Check format
@@ -26,7 +38,7 @@ jobs:
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -50,7 +62,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -67,6 +79,26 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
+  check-dependencies:
+    name: Check dependencies
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.71.1
+          components: rustfmt
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        run: cargo install --debug --locked cargo-audit
+
+      - name: Check dependencies 
+        run: cargo audit
+
   check-wasm:
     name: Check Wasm
     runs-on: ubuntu-latest
@@ -79,7 +111,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -104,7 +136,7 @@ jobs:
           components: clippy
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -132,7 +164,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -170,7 +202,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -186,6 +218,34 @@ jobs:
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
+  
+  ml-support:
+    name: ML integration tests
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.71.1
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Run ML integration tests
+        run: cargo make ci-ml-integration
 
   ws-server:
     name: WebSocket integration tests
@@ -198,7 +258,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -226,7 +286,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -277,7 +337,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -314,7 +374,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -351,7 +411,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -388,7 +448,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -412,7 +472,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -436,7 +496,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -460,7 +520,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -484,7 +544,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -528,7 +588,7 @@ jobs:
           toolchain: 1.71.1
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2

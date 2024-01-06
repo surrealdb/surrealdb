@@ -29,7 +29,8 @@ async fn define_global_param() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
-			params: { test: 'DEFINE PARAM $test VALUE 12345' },
+			models: {},
+			params: { test: 'DEFINE PARAM $test VALUE 12345 PERMISSIONS FULL' },
 			scopes: {},
 			tables: {},
 			users: {},
@@ -80,7 +81,7 @@ async fn define_protected_param() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Found 'auth' but it is not possible to set a variable with this name"#
+		Some(e) if e.to_string() == "'auth' is a protected variable and cannot be set"
 	));
 	//
 	Ok(())

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 pub mod auth;
 pub mod base;
+pub mod check;
 pub mod clear;
 pub mod entities;
 pub mod policies;

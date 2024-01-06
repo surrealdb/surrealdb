@@ -101,6 +101,9 @@ pub fn local(i: &str) -> IResult<&str, Idiom> {
 ///
 /// Doesnt allow flatten, computed values or where selectors.
 pub fn basic(i: &str) -> IResult<&str, Idiom> {
+	use super::depth;
+	// Limit recursion depth.
+	let _diving = depth::dive(i)?;
 	expected("a basic idiom", |i| {
 		let (i, p) = first(i).explain("graphs are not allowed in a basic idioms.", dir)?;
 		let (i, mut v) = many0(basic_part)(i)?;
@@ -273,7 +276,7 @@ pub fn bracketed_value(i: &str) -> IResult<&str, Part> {
 #[cfg(test)]
 mod tests {
 
-	use crate::sql::{Dir, Expression, Number, Param, Table, Thing};
+	use crate::sql::{Dir, Expression, Id, Number, Param, Strand, Table, Thing};
 	use crate::syn::test::Parse;
 
 	use super::*;
@@ -577,5 +580,56 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("[WHERE test = true]", format!("{}", out));
 		assert_eq!(out, Part::Where(Value::from(Expression::parse("test = true"))));
+	}
+
+	#[test]
+	fn idiom_thing_number() {
+		let sql = "test:1.foo";
+		let res = idiom(sql);
+		let out = res.unwrap().1;
+		assert_eq!(
+			out,
+			Idiom(vec![
+				Part::Start(Value::Thing(Thing {
+					tb: "test".to_owned(),
+					id: Id::Number(1),
+				})),
+				Part::from("foo"),
+			])
+		);
+	}
+
+	#[test]
+	fn idiom_thing_index() {
+		let sql = "test:1['foo']";
+		let res = idiom(sql);
+		let out = res.unwrap().1;
+		assert_eq!(
+			out,
+			Idiom(vec![
+				Part::Start(Value::Thing(Thing {
+					tb: "test".to_owned(),
+					id: Id::Number(1),
+				})),
+				Part::Value(Value::Strand(Strand("foo".to_owned()))),
+			])
+		);
+	}
+
+	#[test]
+	fn idiom_thing_all() {
+		let sql = "test:1.*";
+		let res = idiom(sql);
+		let out = res.unwrap().1;
+		assert_eq!(
+			out,
+			Idiom(vec![
+				Part::Start(Value::Thing(Thing {
+					tb: "test".to_owned(),
+					id: Id::Number(1),
+				})),
+				Part::All
+			])
+		);
 	}
 }

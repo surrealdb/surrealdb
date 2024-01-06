@@ -15,7 +15,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,has-storage", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -38,6 +38,12 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem", "--workspace", "--test", "ws_integration", "--", "ws_integration", "--nocapture"]
+
+[tasks.ci-ml-integration]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+env = { RUST_LOG={ value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
 
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
@@ -143,54 +149,64 @@ run_task = { name = ["start-tikv", "ci-api-integration-tikv-tests", "stop-tikv"]
 category = "CI - SERVICES"
 dependencies = ["build-surrealdb"]
 script = """
-   #!/bin/bash -ex
+    #!/bin/bash -ex
 
-   target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
-   echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
+    echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
 
-   set +e
-   echo "Waiting for surreal to be ready..."
-   tries=0
-   while [[ $tries < 5 ]]; do
-           target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
-           tries=$((tries + 1))
-   done
+    set +e
+    echo "Waiting for surreal to be ready..."
+    tries=0
+    while [[ $tries < 5 ]]; do
+            target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
+            tries=$((tries + 1))
+    done
 
-   echo "ERROR: Surreal is unhealthy!"
-   exit 1
+    echo "ERROR: Surreal is unhealthy!"
+    exit 1
 """
 
 [tasks.stop-surrealdb]
 category = "CI - SERVICES"
 script = """
-        kill $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
-        sleep 5
-        kill -9 $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
+    kill $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
+    sleep 5
+    kill -9 $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
 """
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
 script = """
-   #!/bin/bash -ex
+    #!/bin/bash -ex
 
-   ${HOME}/.tiup/bin/tiup install pd tikv playground
+    ${HOME}/.tiup/bin/tiup install pd tikv playground
 
-   ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor &>/tmp/tiup.log &
+    playground_attempts=0
+    while [[ $playground_attempts < 5 ]]; do
+        nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor > /tmp/tiup.log &
 
-   echo $! > /tmp/tiup.pid
+        echo $! > /tmp/tiup.pid
 
-   set +e
-   echo "Waiting for tiup playground to be ready..."
-   tries=0
-   while [[ $tries < 10 ]]; do
-           ${HOME}/.tiup/bin/tiup playground display >/dev/null && echo "Ready!" && exit 0 || sleep 5
-           tries=$((tries + 1))
-   done
-   set -e
+        set +e
+        echo "Waiting for tiup playground to be ready..."
+        tries=0
+        while [[ $tries < 10 ]]; do
+                ${HOME}/.tiup/bin/tiup playground display >/dev/null && echo "Ready!" && exit 0 || sleep 5
+                tries=$((tries + 1))
+        done
+        set -e
 
-   echo "ERROR: TiUP Playground is unhealthy!"
-   exit 1
+        echo "ERROR: TiUP Playground is unhealthy! Try again..."
+        kill $(cat /tmp/tiup.pid) || true
+
+        playground_attempts=$((playground_attempts + 1))
+    done
+
+    echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
+    cat /tmp/tiup.log
+
+    exit 1
 """
 
 [tasks.stop-tikv]

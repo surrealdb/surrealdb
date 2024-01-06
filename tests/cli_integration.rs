@@ -386,7 +386,7 @@ mod cli_integration {
 				.expect("success");
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
-				"auth level datbase should not be able to access root info: {output}",
+				"auth level database should not be able to access root info: {output}",
 			);
 		}
 
@@ -401,7 +401,7 @@ mod cli_integration {
 				.expect("success");
 			assert!(
 				output.contains("IAM error: Not enough permissions to perform this action"),
-				"auth level datbase should not be able to access namespace info: {output}",
+				"auth level database should not be able to access namespace info: {output}",
 			);
 		}
 
@@ -416,7 +416,7 @@ mod cli_integration {
 				.expect("success");
 			assert!(
 				output.contains("tables: {"),
-				"auth level datbase should be able to access database info: {output}"
+				"auth level database should be able to access database info: {output}"
 			);
 		}
 
@@ -448,6 +448,72 @@ mod cli_integration {
 					.unwrap_err()
 					.contains("Database is needed for authentication but it was not provided"),
 				"auth level database requires providing a namespace and database: {:?}",
+				output
+			);
+		}
+	}
+
+	#[test(tokio::test)]
+	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
+	async fn without_auth_level() {
+		// Commands with credentials for different auth levels
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
+
+		info!("* Create users with identical credentials at ROOT, NS and DB levels");
+		{
+			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} {creds}");
+			let _ = common::run(&args)
+				.input(format!("DEFINE USER {USER}_root ON ROOT PASSWORD '{PASS}' ROLES OWNER;
+                                                DEFINE USER {USER}_ns ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
+                                                DEFINE USER {USER}_db ON DATABASE PASSWORD '{PASS}' ROLES OWNER;\n").as_str())
+				.output()
+				.expect("success");
+		}
+
+		info!("* Pass root level credentials and access root info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --user {USER}_root --pass {PASS}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("namespaces: {"),
+				"auth level root should be able to access root info: {output}"
+			);
+		}
+
+		info!("* Pass namespace level credentials and access namespace info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --user {USER}_ns --pass {PASS}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.output();
+			assert!(
+				output.clone().unwrap_err().contains("401 Unauthorized"),
+				"namespace level credentials should not work with CLI authentication: {:?}",
+				output
+			);
+		}
+
+		info!("* Pass database level credentials and access database info");
+		{
+			let args = format!(
+				"sql --conn http://{addr} --db {db} --ns {ns} --user {USER}_db --pass {PASS}"
+			);
+			let output = common::run(&args)
+				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.output();
+			assert!(
+				output.clone().unwrap_err().contains("401 Unauthorized"),
+				"database level credentials should not work with CLI authentication: {:?}",
 				output
 			);
 		}

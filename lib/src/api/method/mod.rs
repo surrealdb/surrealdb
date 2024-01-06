@@ -46,7 +46,6 @@ pub use export::Export;
 pub use health::Health;
 pub use import::Import;
 pub use invalidate::Invalidate;
-pub use live::Live;
 pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
@@ -75,6 +74,7 @@ use crate::opt::IntoExportDestination;
 use crate::sql::to_value;
 use crate::sql::Value;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
@@ -86,8 +86,14 @@ use std::time::Duration;
 #[non_exhaustive]
 pub struct Stats {
 	/// The time taken to execute the query
-	pub execution_time: Duration,
+	pub execution_time: Option<Duration>,
 }
+
+/// Machine learning model marker type for import and export types
+pub struct Model;
+
+/// Live query marker type
+pub struct Live;
 
 /// Responses returned with statistics
 #[derive(Debug)]
@@ -274,7 +280,7 @@ where
 	/// ```
 	pub fn use_ns(&self, ns: impl Into<String>) -> UseNs<C> {
 		UseNs {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			ns: ns.into(),
 		}
 	}
@@ -293,7 +299,7 @@ where
 	/// ```
 	pub fn use_db(&self, db: impl Into<String>) -> UseDb<C> {
 		UseDb {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			ns: Value::None,
 			db: db.into(),
 		}
@@ -333,7 +339,7 @@ where
 	/// ```
 	pub fn set(&self, key: impl Into<String>, value: impl Serialize) -> Set<C> {
 		Set {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			key: key.into(),
 			value: to_value(value).map_err(Into::into),
 		}
@@ -373,7 +379,7 @@ where
 	/// ```
 	pub fn unset(&self, key: impl Into<String>) -> Unset<C> {
 		Unset {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			key: key.into(),
 		}
 	}
@@ -432,7 +438,7 @@ where
 	/// ```
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			credentials: to_value(credentials).map_err(Into::into),
 			response_type: PhantomData,
 		}
@@ -551,7 +557,7 @@ where
 	/// ```
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			credentials: to_value(credentials).map_err(Into::into),
 			response_type: PhantomData,
 		}
@@ -571,7 +577,7 @@ where
 	/// ```
 	pub fn invalidate(&self) -> Invalidate<C> {
 		Invalidate {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 		}
 	}
 
@@ -590,7 +596,7 @@ where
 	/// ```
 	pub fn authenticate(&self, token: impl Into<Jwt>) -> Authenticate<C> {
 		Authenticate {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			token: token.into(),
 		}
 	}
@@ -629,7 +635,7 @@ where
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
 		Query {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			query: vec![query.into_query()],
 			bindings: Ok(Default::default()),
 		}
@@ -676,10 +682,11 @@ where
 	/// ```
 	pub fn select<R>(&self, resource: impl opt::IntoResource<R>) -> Select<C, R> {
 		Select {
-			client: self,
+			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
+			query_type: PhantomData,
 		}
 	}
 
@@ -731,7 +738,7 @@ where
 	/// ```
 	pub fn create<R>(&self, resource: impl opt::IntoResource<R>) -> Create<C, R> {
 		Create {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
@@ -889,7 +896,7 @@ where
 	/// ```
 	pub fn update<R>(&self, resource: impl opt::IntoResource<R>) -> Update<C, R> {
 		Update {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
@@ -922,7 +929,7 @@ where
 	/// ```
 	pub fn delete<R>(&self, resource: impl opt::IntoResource<R>) -> Delete<C, R> {
 		Delete {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
@@ -943,7 +950,7 @@ where
 	/// ```
 	pub fn version(&self) -> Version<C> {
 		Version {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 		}
 	}
 
@@ -961,7 +968,7 @@ where
 	/// ```
 	pub fn health(&self) -> Health<C> {
 		Health {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 		}
 	}
 
@@ -1001,9 +1008,11 @@ where
 	/// ```
 	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<C, R> {
 		Export {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
+			ml_config: None,
 			response: PhantomData,
+			export_type: PhantomData,
 		}
 	}
 
@@ -1031,8 +1040,10 @@ where
 		P: AsRef<Path>,
 	{
 		Import {
-			router: self.router.extract(),
+			client: Cow::Borrowed(self),
 			file: file.as_ref().to_owned(),
+			ml_config: None,
+			import_type: PhantomData,
 		}
 	}
 }

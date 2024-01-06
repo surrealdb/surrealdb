@@ -19,7 +19,7 @@ async fn archive_lv_for_node_archives() {
 	tx.putc(key, table, None).await.unwrap();
 
 	let mut stm = LiveStatement::from_source_parts(Fields::all(), Table(table.into()), None, None);
-	stm.id = lv_id.clone();
+	stm.id = lv_id;
 	tx.putc_tblq(namespace, database, table, stm, None).await.unwrap();
 
 	let this_node_id = crate::sql::uuid::Uuid::from(Uuid::from_bytes([
@@ -33,7 +33,7 @@ async fn archive_lv_for_node_archives() {
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 	let results = test
 		.db
-		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id), this_node_id.clone())
+		.archive_lv_for_node(&mut tx, &sql::uuid::Uuid(node_id), this_node_id)
 		.await
 		.unwrap();
 	assert_eq!(results.len(), 1);

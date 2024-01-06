@@ -34,7 +34,7 @@ pub mod view;
 pub mod with;
 
 pub use data::data;
-pub use field::{field, fields};
+pub use field::fields;
 pub use split::split;
 pub use start::start;
 pub use timeout::timeout;

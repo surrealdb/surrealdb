@@ -167,7 +167,7 @@ impl Vector {
 			(Vector::I16(a), Vector::I16(b)) => {
 				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i16>() as f64).sqrt())
 			}
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::Unreachable("Vector::euclidean_distance")),
 		}
 	}
 
@@ -189,7 +189,7 @@ impl Vector {
 			(Vector::I16(a), Vector::I16(b)) => {
 				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i16>() as f64)
 			}
-			_ => Err(Error::Unreachable),
+			_ => Err(Error::Unreachable("Vector::manhattan_distance")),
 		}
 	}
 	pub(super) fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
@@ -220,7 +220,7 @@ impl Vector {
 				.zip(b.iter())
 				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
 				.sum::<i16>() as f64,
-			_ => return Err(Error::Unreachable),
+			_ => return Err(Error::Unreachable("Vector::minkowski_distance")),
 		};
 		Ok(dist.powf(1.0 / order.to_float()))
 	}

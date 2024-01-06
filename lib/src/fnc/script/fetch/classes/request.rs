@@ -364,8 +364,6 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 	}
 }
 
-pub use request::Request as RequestClass;
-
 pub use super::*;
 
 use bytes::Bytes;

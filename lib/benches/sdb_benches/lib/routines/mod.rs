@@ -32,8 +32,6 @@ pub(super) fn bench_routine<R>(
 {
 	// Run the runtime and return the duration, accounting for the number of operations on each run
 	b.iter_custom(|iters| {
-		let num_ops = num_ops.clone();
-
 		// Total time spent running the actual benchmark run for all iterations
 		let mut total = std::time::Duration::from_secs(0);
 		let session = Session::owner().with_ns("test").with_db("test");

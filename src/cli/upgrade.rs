@@ -9,16 +9,18 @@ use std::path::Path;
 use std::process::Command;
 use surrealdb::env::{arch, os};
 
-const LATEST_STABLE_VERSION: &str = "https://version.surrealdb.com/";
 const ROOT: &str = "https://download.surrealdb.com";
 
 #[derive(Args, Debug)]
 pub struct UpgradeCommandArguments {
 	/// Install the latest nightly version
-	#[arg(long, conflicts_with = "version")]
+	#[arg(long, conflicts_with = "beta", conflicts_with = "version")]
 	nightly: bool,
+	/// Install the latest beta version
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "version")]
+	beta: bool,
 	/// Install a specific version
-	#[arg(long, conflicts_with = "nightly")]
+	#[arg(long, conflicts_with = "nightly", conflicts_with = "beta")]
 	version: Option<String>,
 	/// Don't actually replace the executable
 	#[arg(long)]
@@ -28,21 +30,27 @@ pub struct UpgradeCommandArguments {
 impl UpgradeCommandArguments {
 	/// Get the version string to download based on the user preference
 	async fn version(&self) -> Result<Cow<'_, str>, Error> {
-		Ok(if self.nightly {
-			Cow::Borrowed("nightly")
+		if self.nightly {
+			Ok(Cow::Borrowed("nightly"))
+		} else if self.beta {
+			fetch("beta").await
 		} else if let Some(version) = self.version.as_ref() {
-			Cow::Borrowed(version)
+			Ok(Cow::Borrowed(version))
 		} else {
-			let response = reqwest::get(LATEST_STABLE_VERSION).await?;
-			if !response.status().is_success() {
-				return Err(Error::Io(IoError::new(
-					ErrorKind::Other,
-					format!("received status {} when fetching version", response.status()),
-				)));
-			}
-			Cow::Owned(response.text().await?.trim().to_owned())
-		})
+			fetch("latest").await
+		}
 	}
+}
+
+async fn fetch(version: &str) -> Result<Cow<'_, str>, Error> {
+	let response = reqwest::get(format!("{ROOT}/{version}.txt")).await?;
+	if !response.status().is_success() {
+		return Err(Error::Io(IoError::new(
+			ErrorKind::Other,
+			format!("received status {} when fetching version", response.status()),
+		)));
+	}
+	Ok(Cow::Owned(response.text().await?.trim().to_owned()))
 }
 
 pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {

@@ -12,6 +12,7 @@ use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
+use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use std::io::Error as IoError;
@@ -45,8 +46,8 @@ pub enum Error {
 	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
-	#[error("The database encountered unreachable logic")]
-	Unreachable,
+	#[error("The database encountered unreachable logic: {0}")]
+	Unreachable(&'static str),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -147,7 +148,7 @@ pub enum Error {
 	HttpDisabled,
 
 	/// it is not possible to set a variable with the specified name
-	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
 		name: String,
 	},
@@ -191,6 +192,12 @@ pub enum Error {
 	/// There was an error with the provided JavaScript code
 	#[error("Problem with embedded script function. {message}")]
 	InvalidScript {
+		message: String,
+	},
+
+	/// There was an error with the provided machine learning model
+	#[error("Problem with machine learning computation. {message}")]
+	InvalidModel {
 		message: String,
 	},
 
@@ -243,6 +250,10 @@ pub enum Error {
 	/// Invalid regular expression
 	#[error("Invalid regular expression: {0:?}")]
 	InvalidRegex(String),
+
+	/// Invalid timeout
+	#[error("Invalid timeout: {0:?} seconds")]
+	InvalidTimeout(u64),
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
@@ -313,6 +324,12 @@ pub enum Error {
 	/// The requested function does not exist
 	#[error("The function 'fn::{value}' does not exist")]
 	FcNotFound {
+		value: String,
+	},
+
+	/// The requested model does not exist
+	#[error("The model 'ml::{value}' does not exist")]
+	MlNotFound {
 		value: String,
 	},
 
@@ -606,8 +623,8 @@ pub enum Error {
 	Revision(#[from] RevisionError),
 
 	/// The index has been found to be inconsistent
-	#[error("Index is corrupted")]
-	CorruptedIndex,
+	#[error("Index is corrupted: {0}")]
+	CorruptedIndex(&'static str),
 
 	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
 	#[error("There was no suitable index supporting the expression '{value}'")]
@@ -634,6 +651,14 @@ pub enum Error {
 	/// Represents an underlying error while reading UTF8 characters
 	#[error("Utf8 error: {0}")]
 	Utf8Error(#[from] FromUtf8Error),
+
+	/// Represents an underlying error with the Object Store
+	#[error("Object Store error: {0}")]
+	ObsError(#[from] ObjectStoreError),
+
+	/// There was an error with model computation
+	#[error("There was an error with model computation: {0}")]
+	ModelComputation(String),
 
 	/// The feature has not yet being implemented
 	#[error("Feature not yet implemented: {feature}")]

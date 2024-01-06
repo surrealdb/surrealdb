@@ -488,3 +488,32 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should be able to insert a new record if the table exists and grants full permissions");
 	}
 }
+
+#[tokio::test]
+async fn insert_statement_unique_index() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX name ON TABLE company COLUMNS name UNIQUE;
+		INSERT INTO company { name: 'SurrealDB' };
+		INSERT INTO company { name: 'SurrealDB' };
+		SELECT count() FROM company GROUP ALL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[ { count: 1 } ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

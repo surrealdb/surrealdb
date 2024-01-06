@@ -112,7 +112,7 @@ fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
 	let (i, roles) = separated_list1(commas, |i| {
 		let (i, v) = cut(ident)(i)?;
 		// Verify the role is valid
-		Role::try_from(v.as_str()).map_err(|_| Err::Failure(ParseError::Role(i, v.to_string())))?;
+		v.as_str().parse::<Role>().map_err(|_| Err::Failure(ParseError::Role(i, v.to_string())))?;
 
 		Ok((i, v))
 	})(i)?;
