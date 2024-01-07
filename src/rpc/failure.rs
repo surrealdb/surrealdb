@@ -9,6 +9,12 @@ pub struct Failure {
 	pub(crate) message: Cow<'static, str>,
 }
 
+impl From<&str> for Failure {
+	fn from(err: &str) -> Self {
+		Failure::custom(err.to_string())
+	}
+}
+
 impl From<Error> for Failure {
 	fn from(err: Error) -> Self {
 		Failure::custom(err.to_string())

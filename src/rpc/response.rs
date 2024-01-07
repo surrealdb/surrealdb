@@ -69,12 +69,12 @@ pub struct Response {
 impl Response {
 	/// Convert and simplify the value into JSON
 	#[inline]
-	pub fn as_json(self) -> Json {
-		Json::from(self.as_value())
+	pub fn into_json(self) -> Json {
+		Json::from(self.into_value())
 	}
 
 	#[inline]
-	pub fn as_value(self) -> Value {
+	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
 			Ok(val) => map! {
 				"result" => Value::from(val),
