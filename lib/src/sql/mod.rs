@@ -29,7 +29,6 @@ pub(crate) mod group;
 pub(crate) mod id;
 pub(crate) mod ident;
 pub(crate) mod idiom;
-pub(crate) mod index;
 pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
@@ -64,6 +63,9 @@ pub(crate) mod value;
 pub(crate) mod version;
 pub(crate) mod view;
 pub(crate) mod with;
+
+#[doc(hidden)]
+pub mod index;
 
 pub mod serde;
 pub mod statements;
