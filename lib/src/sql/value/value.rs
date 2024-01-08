@@ -852,6 +852,11 @@ impl Value {
 		matches!(self, Value::Mock(_))
 	}
 
+	/// Check if this Value is a Param
+	pub fn is_param(&self) -> bool {
+		matches!(self, Value::Param(_))
+	}
+
 	/// Check if this Value is a Range
 	pub fn is_range(&self) -> bool {
 		matches!(self, Value::Range(_))
@@ -974,11 +979,6 @@ impl Value {
 			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
 			_ => false,
 		}
-	}
-
-	/// Check if this Value is a Param
-	pub fn is_param(&self) -> bool {
-		matches!(self, Value::Param(_))
 	}
 
 	/// Check if this Value is a Geometry of a specific type
