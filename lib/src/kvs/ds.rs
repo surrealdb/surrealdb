@@ -1058,7 +1058,7 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
-		);
+		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
@@ -1121,7 +1121,7 @@ impl Datastore {
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
+			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
@@ -1190,7 +1190,7 @@ impl Datastore {
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
+			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
