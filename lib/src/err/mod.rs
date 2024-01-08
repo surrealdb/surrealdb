@@ -48,7 +48,6 @@ pub enum Error {
 
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
-	// #[deprecated(note = "Use UnreachableCause instead")]
 	Unreachable(&'static str),
 
 	/// Statement has been deprecated
@@ -150,7 +149,7 @@ pub enum Error {
 	HttpDisabled,
 
 	/// it is not possible to set a variable with the specified name
-	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
 		name: String,
 	},
@@ -252,6 +251,10 @@ pub enum Error {
 	/// Invalid regular expression
 	#[error("Invalid regular expression: {0:?}")]
 	InvalidRegex(String),
+
+	/// Invalid timeout
+	#[error("Invalid timeout: {0:?} seconds")]
+	InvalidTimeout(u64),
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
@@ -678,8 +681,7 @@ pub enum Error {
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors
 	#[error("Internal database error: {0}")]
-	// #[deprecated(note = "Use InternalCause instead")]
-	Internal(String),
+	Internal(&'static str),
 
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
@@ -760,30 +762,9 @@ pub enum Error {
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),
 
-	/// The database encountered unreachable logic
-	#[error("The database encountered unreachable logic: {0}")]
-	UnreachableCause(UnreachableCause),
-
-	/// Internal server error
-	/// This should be used extremely sporadically, since we lose the type of error as a consequence
-	/// There will be times when it is useful, such as with unusual type conversion errors
-	/// If you are able to categorically classify the error (ex its part of a collection of errors
-	/// in a part of the code) then you should create a new enum - also with cause.
-	#[error("Internal database error: {0}")]
-	InternalCause(InternalCause),
-
-	/// Internal server error related to context
-	/// A classification of internal error, related directly to context
-	#[error("Internal database error due to context: {0}")]
-	InternalContextError(ContextCause),
-
-	/// Internal server error related to live query state
-	#[error("Internal live query error: {0}")]
-	InternalLiveQueryError(LiveQueryCause),
-
-	/// When a transaction rollback fails, the error will be captured here
-	#[error("Transaction rollback failed: {0}")]
-	TxRollbackFailed(String),
+	/// The db is running without an avilable storage engine
+	#[error("The db is running without an avilable storage engine")]
+	MissingStorageEngine,
 
 	/// Error that can happen at any point during bootstrap
 	/// TODO change this to heartbeat? cleanup? cluster lifecycle?
@@ -791,9 +772,6 @@ pub enum Error {
 	/// arent bootstrap (definitely) or heartbeat (maybe)
 	#[error("Bootstrap failure: {0}")]
 	BootstrapError(BootstrapCause),
-	/// The db is running without an avilable storage engine
-	#[error("The db is running without an avilable storage engine")]
-	MissingStorageEngine,
 }
 
 #[derive(Error, Debug)]
@@ -835,77 +813,9 @@ pub enum ChannelVariant {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum UnreachableCause {
-	#[error("The node id should always be set in the options")]
-	NodeIdAlwaysSet,
-
-	#[error("unreachable index while getting vector in mtree internal node")]
-	UnreachableNodeIndex,
-
-	#[error("leaf while retrieving internal in mtree")]
-	UnexpectedLeaf,
-
-	#[error("The root node was different that what was expected")]
-	UnexpectedIndexRootNode,
-
-	#[error("This will always be a write type")]
-	TreeNodeAlwaysWrite,
-
-	#[error("This key will never exist in the tree")]
-	TreeNeverHasNode,
-
-	#[error("The tree out set will never be empty")]
-	TreeOutSetNeverEmpty,
-
-	#[error("The iterable should have a next item")]
-	ShouldHaveNextItem,
-
-	#[error("The struct should have an inner set")]
-	ShouldHaveInner,
-
-	#[error("All logical enums evaluated")]
-	AllLogicalEnumsEvaluated,
-
-	#[error("The value operated on will always be set")]
-	AlwaysSet,
-
-	#[error("All logical enums evaluated")]
-	CatchAll,
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum LiveQueryCause {
-	#[error("The timestamps in the key and the value do not match")]
-	TimestampMismatch,
-	#[error("The live query ID in the key and the value do not match")]
-	LiveQueryIDMismatch,
-	#[error("The notification ID in the key and the value do not match")]
-	NotificationIDMismatch,
-	#[error("Failed to decode a value while reading LQ")]
-	FailedToDecodeNodeLiveQueryValue,
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
 pub enum ContextCause {
 	#[error("Expected the context to include 'session'")]
 	MissingSession,
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum InternalCause {
-	#[error("no versionstamp associated to this timestamp exists yet")]
-	NoVersionstamp,
-	#[error("ts is less than or equal to the latest ts")]
-	TimestampSkew,
-	#[error("Clock may have gone backwards")]
-	ClockMayHaveGoneBackwards,
-	#[error("versionstamp is not 10 bytes")]
-	InvalidVersionstamp,
-	#[error("unable to acquire lock: {0}")]
-	UnableToAcquireLock(&'static str),
 }
 
 impl From<Error> for String {

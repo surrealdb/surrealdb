@@ -5,7 +5,7 @@ use crate::dbs::KvsNotification;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Options, Response, Session, Variables,
 };
-use crate::err::{BootstrapCause, Error, InternalCause, TaskVariant};
+use crate::err::{BootstrapCause, Error, TaskVariant};
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
@@ -53,6 +53,9 @@ pub(crate) const BOOTSTRAP_TX_RETRY_LOW_MILLIS: u64 = 0;
 
 /// The duration between retries higher bound, for scatter
 pub(crate) const BOOTSTRAP_TX_RETRY_HIGH_MILLIS: u64 = 10;
+
+// The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
+const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -583,7 +586,7 @@ impl Datastore {
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
 		loop {
-			if let Err(res) =
+			if let Err(_elapsed) =
 				timeout(Duration::from_millis(BOOTSTRAP_BATCH_LATENCY.as_millis() as u64), async {
 					match tx_req_recv.recv().await {
 						None => {
@@ -634,15 +637,22 @@ impl Datastore {
 
 		// Handle all the possible hard errors from tasks
 		if let Some(err) = scan_err
-			.map_err(|e| Error::Internal(format!("an error occurred in the scan task: {:?}", e)))
+			.map_err(|e| {
+				error!("an error occurred in the scan task: {:?}", e);
+				Error::Internal("an error occurred in the scan task")
+			})
 			.err()
 			.or(arch_err
 				.map_err(|e| {
-					Error::Internal(format!("an error occurred in the archive task: {:?}", e))
+					error!("an error occurred in the archive task: {:?}", e);
+					Error::Internal("an error occurred in the archive task")
 				})
 				.err())
 			.or(del_err
-				.map_err(|e| Error::Internal(format!("an error occurred in the del task: {:?}", e)))
+				.map_err(|e| {
+					error!("an error occurred in the del task: {:?}", e);
+					Error::Internal("an error occurred in the del task")
+				})
 				.err())
 		{
 			return Err(err);
@@ -697,7 +707,7 @@ impl Datastore {
 
 	pub async fn clear_unreachable_state(&self, tx: &mut Transaction) -> Result<(), Error> {
 		// Scan nodes
-		let cluster = tx.scan_nd(100_000).await?;
+		let cluster = tx.scan_nd(NON_PAGED_BATCH_SIZE).await?;
 		trace!("Found {} nodes", cluster.len());
 		let mut unreachable_nodes = BTreeMap::new();
 		for cl in &cluster {
@@ -708,7 +718,7 @@ impl Datastore {
 			// We remove one, because the scan range adds one
 			value: u64::MAX - 1,
 		};
-		let hbs = tx.scan_hb(&end_of_time, 100_000).await?;
+		let hbs = tx.scan_hb(&end_of_time, NON_PAGED_BATCH_SIZE).await?;
 		trace!("Found {} heartbeats", hbs.len());
 		for hb in hbs {
 			match unreachable_nodes.remove(&hb.nd.to_string()) {
@@ -747,7 +757,7 @@ impl Datastore {
 		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
-			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, 100_000).await?;
+			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NON_PAGED_BATCH_SIZE).await?;
 			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
@@ -779,7 +789,7 @@ impl Datastore {
 
 		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
 		// We may improve this in future by tracking in web layer
-		let lqs = tx.scan_ndlq(&self.id, 100_000).await?;
+		let lqs = tx.scan_ndlq(&self.id, NON_PAGED_BATCH_SIZE).await?;
 		let mut hits = vec![];
 		for lq_value in lqs {
 			if live_queries.contains(&lq_value.lq) {
@@ -840,7 +850,7 @@ impl Datastore {
 	) -> Result<Vec<Hb>, Error> {
 		let dead = tx.scan_hb(ts, HEARTBEAT_BATCH_SIZE).await?;
 		// Delete the heartbeat and everything nested
-		tx.delr_hb(dead.clone(), 100_000).await?;
+		tx.delr_hb(dead.clone(), NON_PAGED_BATCH_SIZE).await?;
 		for dead_node in dead.clone() {
 			tx.del_nd(dead_node.nd).await?;
 		}
@@ -852,7 +862,7 @@ impl Datastore {
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
 			error!("Clock may have gone backwards: {:?}", e.duration());
-			Error::InternalCause(InternalCause::ClockMayHaveGoneBackwards)
+			Error::Internal("Clock may have gone backwards")
 		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;
@@ -1113,7 +1123,7 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
-		);
+		)?;
 		// Setup the notification channel
 		if let Some(channel) = self.notification_channel.get() {
 			ctx.add_notifications(Some(&channel.0));
@@ -1176,7 +1186,7 @@ impl Datastore {
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
+			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
 		if let Some(channel) = self.notification_channel.get() {
@@ -1245,7 +1255,7 @@ impl Datastore {
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout);
+			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
 		if let Some(channel) = self.notification_channel.get() {

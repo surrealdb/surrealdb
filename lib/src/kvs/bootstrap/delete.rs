@@ -87,8 +87,8 @@ async fn delete_live_query_batch(
 			msg.push((lq, e));
 		}
 		// Fast-return
-		if msg.len() <= 0 {
-			trace!("Delete fast return because msg.len() <= 0");
+		if msg.is_empty() {
+			trace!("Delete fast return because msg is empty");
 			break;
 		}
 		println!("Requesting tx");
@@ -109,7 +109,7 @@ async fn delete_live_query_batch(
 					// TODO check if e has error and send and skip
 					// Delete the node live query
 					println!("Deleting live query: {:?}", lq);
-					if let Err(e) = tx.del_ndlq(*(&lq).nd, *(&lq).lq, &lq.ns, &lq.db).await {
+					if let Err(e) = tx.del_ndlq(*lq.nd, *lq.lq, &lq.ns, &lq.db).await {
 						println!("Failed deleting node live query: {:?}", e);
 						error!("Failed deleting node live query: {:?}", e);
 						// TODO wrap error with context that this step failed; requires self-ref error
@@ -117,7 +117,7 @@ async fn delete_live_query_batch(
 						continue;
 					}
 					// Delete the table live query
-					if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *(&lq).lq).await {
+					if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *lq.lq).await {
 						println!("Failed deleting table live query: {:?}", e);
 						error!("Failed deleting table live query: {:?}", e);
 						// TODO wrap error with context that this step failed; requires self-ref error

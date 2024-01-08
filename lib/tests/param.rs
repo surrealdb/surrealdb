@@ -81,7 +81,7 @@ async fn define_protected_param() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Found 'auth' but it is not possible to set a variable with this name"#
+		Some(e) if e.to_string() == "'auth' is a protected variable and cannot be set"
 	));
 	//
 	Ok(())

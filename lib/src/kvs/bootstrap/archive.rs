@@ -99,8 +99,8 @@ async fn archive_live_query_batch(
 			msg.push((lq, e));
 		}
 		// Fast-return
-		if msg.len() <= 0 {
-			trace!("archive fast return because msg.len() <= 0");
+		if msg.is_empty() {
+			trace!("archive fast return because msg is empty");
 			break;
 		}
 		trace!("Receiving a tx response in archive");
@@ -128,7 +128,7 @@ async fn archive_live_query_batch(
 					}
 					let lv = lv_res.unwrap();
 					// If the lq is already archived, we can remove it from bootstrap
-					if !lv.archived.is_some() {
+					if lv.archived.is_none() {
 						// Mark as archived by us (this node) and write back
 						let archived_lvs = lv.clone().archive(node_id);
 						match tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await {

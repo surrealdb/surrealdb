@@ -332,14 +332,18 @@ impl<'a> Executor<'a> {
 								let res = match stm.timeout() {
 									// There is a timeout clause
 									Some(timeout) => {
-										// Set statement timeout
-										ctx.add_timeout(timeout);
-										// Process the statement
-										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-										// Catch statement timeout
-										match ctx.is_timedout() {
-											true => Err(Error::QueryTimedout),
-											false => res,
+										// Set statement timeout or propagate the error
+										if let Err(err) = ctx.add_timeout(timeout) {
+											Err(err)
+										} else {
+											// Process the statement
+											let res =
+												stm.compute(&ctx, &opt, &self.txn(), None).await;
+											// Catch statement timeout
+											match ctx.is_timedout() {
+												true => Err(Error::QueryTimedout),
+												false => res,
+											}
 										}
 									}
 									// There is no timeout clause
@@ -487,6 +491,37 @@ mod tests {
 				"anonymous user should be able to set options when auth is disabled: {:?}",
 				res
 			)
+		}
+	}
+
+	#[tokio::test]
+	async fn check_execute_timeout() {
+		// With small timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 2s";
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
+		}
+		// With large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 31540000s"; // 1 year
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
+		}
+		// With very large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
+			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
+			assert!(
+				err.contains("Invalid timeout"),
+				"Expected to find invalid timeout error: {:?}",
+				err
+			);
 		}
 	}
 }

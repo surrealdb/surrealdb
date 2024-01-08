@@ -5,7 +5,7 @@ use super::Val;
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
-use crate::err::{Error, InternalCause, LiveQueryCause};
+use crate::err::Error;
 use crate::idg::u32::U32;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
@@ -1673,8 +1673,8 @@ impl Transaction {
 			let lq_key = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			trace!("Value is {:?}", &value);
 			let lq_value = String::from_utf8(value).map_err(|e| {
-				error!("Error decoding live query value: {:?}", e);
-				Error::InternalLiveQueryError(LiveQueryCause::FailedToDecodeNodeLiveQueryValue)
+				error!("Failed to decode a value while reading LQ: {}", e);
+				Error::Internal("Failed to decode a value while reading LQ")
 			})?;
 			let lqv = LqValue {
 				nd: (*nd).into(),
@@ -2691,7 +2691,7 @@ impl Transaction {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::InternalCause(InternalCause::TimestampSkew));
+				return Err(Error::Internal("ts is less than or equal to the latest ts"));
 			}
 		}
 		self.set(ts_key, vs).await?;
@@ -2716,7 +2716,7 @@ impl Transaction {
 				sl.copy_from_slice(v);
 				return Ok(Some(sl));
 			} else {
-				return Err(Error::InternalCause(InternalCause::InvalidVersionstamp));
+				return Err(Error::Internal("versionstamp is not 10 bytes"));
 			}
 		}
 		Ok(None)

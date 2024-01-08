@@ -72,7 +72,7 @@ impl<'a> Context<'a> {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
-	) -> Context<'a> {
+	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -84,9 +84,9 @@ impl<'a> Context<'a> {
 			index_stores,
 		};
 		if let Some(timeout) = time_out {
-			ctx.add_timeout(timeout);
+			ctx.add_timeout(timeout)?;
 		}
-		ctx
+		Ok(ctx)
 	}
 	/// Create an empty background context.
 	pub fn background() -> Self {
@@ -143,9 +143,16 @@ impl<'a> Context<'a> {
 	}
 
 	/// Add a timeout to the context. If the current timeout is sooner than
-	/// the provided timeout, this method does nothing.
-	pub fn add_timeout(&mut self, timeout: Duration) {
-		self.add_deadline(Instant::now() + timeout)
+	/// the provided timeout, this method does nothing. If the result of the
+	/// addition causes an overflow, this method returns an error.
+	pub fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+		match Instant::now().checked_add(timeout) {
+			Some(deadline) => {
+				self.add_deadline(deadline);
+				Ok(())
+			}
+			None => Err(Error::InvalidTimeout(timeout.as_secs())),
+		}
 	}
 
 	/// Add the LIVE query notification channel to the context, so that we

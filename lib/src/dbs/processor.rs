@@ -7,6 +7,7 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Tr
 use crate::err::Error;
 use crate::idx::planner::executor::IteratorRef;
 use crate::key::{graph, thing};
+use crate::kvs::ScanPage;
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
@@ -261,60 +262,43 @@ impl<'a> Processor<'a> {
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns(), opt.db(), &v);
 		let end = thing::suffix(opt.ns(), opt.db(), &v);
-		// Prepare the next holder key
-		let mut nxt: Option<Vec<u8>> = None;
 		// Loop until no more keys
-		loop {
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
 			// Check if the context is finished
 			if ctx.is_done() {
 				break;
 			}
 			// Get the next batch of key-value entries
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
-				}
-			};
-			// If there are key-value entries then fetch them
-			if !res.is_empty() {
-				// Get total results
-				let n = res.len();
-				// Loop over results
-				for (i, (k, v)) in res.into_iter().enumerate() {
-					// Check the context
-					if ctx.is_done() {
-						break;
-					}
-					// Ready the next
-					if n == i + 1 {
-						nxt = Some(k.clone());
-					}
-					// Parse the data from the store
-					let key: thing::Thing = (&k).into();
-					let val: Value = (&v).into();
-					let rid = Thing::from((key.tb, key.id));
-					// Create a new operable value
-					let val = Operable::Value(val);
-					// Process the record
-					let pro = Processed {
-						ir: None,
-						rid: Some(rid),
-						doc_id: None,
-						val,
-					};
-					self.process(ctx, opt, txn, stm, pro).await?;
-				}
-				continue;
+			let res = txn.clone().lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
+			next_page = res.next_page;
+			let res = res.values;
+			// If no results then break
+			if res.is_empty() {
+				break;
 			}
-			break;
+			// Loop over results
+			for (k, v) in res.into_iter() {
+				// Check the context
+				if ctx.is_done() {
+					break;
+				}
+				// Parse the data from the store
+				let key: thing::Thing = (&k).into();
+				let val: Value = (&v).into();
+				let rid = Thing::from((key.tb, key.id));
+				// Create a new operable value
+				let val = Operable::Value(val);
+				// Process the record
+				let pro = Processed {
+					ir: None,
+					rid: Some(rid),
+					doc_id: None,
+					val,
+				};
+				self.process(ctx, opt, txn, stm, pro).await?;
+			}
+			continue;
 		}
 		// Everything ok
 		Ok(())
@@ -350,60 +334,43 @@ impl<'a> Processor<'a> {
 				key
 			}
 		};
-		// Prepare the next holder key
-		let mut nxt: Option<Vec<u8>> = None;
 		// Loop until no more keys
-		loop {
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
 			// Check if the context is finished
 			if ctx.is_done() {
 				break;
 			}
+			let res = txn.clone().lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
+			next_page = res.next_page;
 			// Get the next batch of key-value entries
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					txn.clone().lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
-				}
-			};
+			let res = res.values;
 			// If there are key-value entries then fetch them
-			if !res.is_empty() {
-				// Get total results
-				let n = res.len();
-				// Loop over results
-				for (i, (k, v)) in res.into_iter().enumerate() {
-					// Check the context
-					if ctx.is_done() {
-						break;
-					}
-					// Ready the next
-					if n == i + 1 {
-						nxt = Some(k.clone());
-					}
-					// Parse the data from the store
-					let key: thing::Thing = (&k).into();
-					let val: Value = (&v).into();
-					let rid = Thing::from((key.tb, key.id));
-					// Create a new operable value
-					let val = Operable::Value(val);
-					// Process the record
-					let pro = Processed {
-						ir: None,
-						rid: Some(rid),
-						doc_id: None,
-						val,
-					};
-					self.process(ctx, opt, txn, stm, pro).await?;
-				}
-				continue;
+			if res.is_empty() {
+				break;
 			}
-			break;
+			// Loop over results
+			for (k, v) in res.into_iter() {
+				// Check the context
+				if ctx.is_done() {
+					break;
+				}
+				// Parse the data from the store
+				let key: thing::Thing = (&k).into();
+				let val: Value = (&v).into();
+				let rid = Thing::from((key.tb, key.id));
+				// Create a new operable value
+				let val = Operable::Value(val);
+				// Process the record
+				let pro = Processed {
+					ir: None,
+					rid: Some(rid),
+					doc_id: None,
+					val,
+				};
+				self.process(ctx, opt, txn, stm, pro).await?;
+			}
+			continue;
 		}
 		// Everything ok
 		Ok(())
@@ -487,69 +454,48 @@ impl<'a> Processor<'a> {
 		};
 		//
 		for (beg, end) in keys.iter() {
-			// Prepare the next holder key
-			let mut nxt: Option<Vec<u8>> = None;
 			// Loop until no more keys
-			loop {
+			let mut next_page = Some(ScanPage::from(beg.clone()..end.clone()));
+			while let Some(page) = next_page {
 				// Check if the context is finished
 				if ctx.is_done() {
 					break;
 				}
 				// Get the next batch key-value entries
-				let res = match nxt {
-					None => {
-						let min = beg.clone();
-						let max = end.clone();
-						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
-					}
-					Some(ref mut beg) => {
-						beg.push(0x00);
-						let min = beg.clone();
-						let max = end.clone();
-						txn.lock().await.scan(min..max, PROCESSOR_BATCH_SIZE).await?
-					}
-				};
+				let res = txn.lock().await.scan_paged(page, PROCESSOR_BATCH_SIZE).await?;
+				next_page = res.next_page;
+				let res = res.values;
 				// If there are key-value entries then fetch them
-				if !res.is_empty() {
-					// Get total results
-					let n = res.len();
-					// Exit when settled
-					if n == 0 {
+				if res.is_empty() {
+					break;
+				}
+				// Loop over results
+				for (k, _) in res.into_iter() {
+					// Check the context
+					if ctx.is_done() {
 						break;
 					}
-					// Loop over results
-					for (i, (k, _)) in res.into_iter().enumerate() {
-						// Check the context
-						if ctx.is_done() {
-							break;
-						}
-						// Ready the next
-						if n == i + 1 {
-							nxt = Some(k.clone());
-						}
-						// Parse the data from the store
-						let gra: graph::Graph = (&k).into();
-						// Fetch the data from the store
-						let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
-						let val = txn.lock().await.get(key).await?;
-						let rid = Thing::from((gra.ft, gra.fk));
-						// Parse the data from the store
-						let val = Operable::Value(match val {
-							Some(v) => Value::from(v),
-							None => Value::None,
-						});
-						// Process the record
-						let pro = Processed {
-							ir: None,
-							rid: Some(rid),
-							doc_id: None,
-							val,
-						};
-						self.process(ctx, opt, txn, stm, pro).await?;
-					}
-					continue;
+					// Parse the data from the store
+					let gra: graph::Graph = graph::Graph::decode(&k)?;
+					// Fetch the data from the store
+					let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
+					let val = txn.lock().await.get(key).await?;
+					let rid = Thing::from((gra.ft, gra.fk));
+					// Parse the data from the store
+					let val = Operable::Value(match val {
+						Some(v) => Value::from(v),
+						None => Value::None,
+					});
+					// Process the record
+					let pro = Processed {
+						ir: None,
+						rid: Some(rid),
+						doc_id: None,
+						val,
+					};
+					self.process(ctx, opt, txn, stm, pro).await?;
 				}
-				break;
+				continue;
 			}
 		}
 		// Everything ok
