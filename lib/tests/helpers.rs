@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use surrealdb::dbs::capabilities::Capabilities;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::iam::{Auth, Level, Role};
-use surrealdb::kvs::Datastore;
+use surrealdb_sql::dbs::capabilities::Capabilities;
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::err::Error;
+use surrealdb_sql::iam::{Auth, Level, Role};
+use surrealdb_sql::kvs::Datastore;
 
 pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()))

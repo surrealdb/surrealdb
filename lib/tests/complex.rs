@@ -6,9 +6,9 @@ mod helpers;
 use helpers::new_ds;
 use std::future::Future;
 use std::thread::Builder;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::err::Error;
+use surrealdb_sql::Value;
 
 #[test]
 fn self_referential_field() -> Result<(), Error> {

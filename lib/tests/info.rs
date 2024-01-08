@@ -4,8 +4,8 @@ use helpers::*;
 use std::collections::HashMap;
 
 use regex::Regex;
-use surrealdb::dbs::Session;
-use surrealdb::iam::Role;
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::iam::Role;
 
 #[tokio::test]
 async fn info_for_root() {

@@ -1,7 +1,7 @@
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::err::Error;
 
 #[tokio::test]
 async fn throw_basic() -> Result<(), Error> {

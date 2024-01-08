@@ -13,8 +13,6 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
 use crate::engine::IntervalStream;
-use crate::iam::Level;
-use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use flume::Receiver;
 use flume::Sender;
@@ -33,6 +31,8 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Duration;
+use surrealdb_sql::iam::Level;
+use surrealdb_sql::kvs::Datastore;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
 
@@ -120,8 +120,8 @@ pub(crate) fn router(
 				}
 				// If a root user is specified, setup the initial datastore credentials
 				if let Some(root) = configured_root {
-					if let Err(error) = kvs.setup_initial_creds(root).await {
-						let _ = conn_tx.into_send_async(Err(error.into())).await;
+					if let Err(error) = super::setup_initial_creds(&kvs, root).await {
+						let _ = conn_tx.into_send_async(Err(error)).await;
 						return;
 					}
 				}

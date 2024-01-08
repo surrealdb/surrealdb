@@ -20,12 +20,10 @@ use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
-use crate::api::opt::from_value;
 use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Status;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB_LEGACY;
@@ -51,6 +49,8 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+use surrealdb_sql::dbs::Status;
+use surrealdb_sql::from_value;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]

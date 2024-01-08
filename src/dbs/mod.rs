@@ -4,6 +4,7 @@ use clap::Args;
 use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
+use surrealdb::engine::local::setup_initial_creds;
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::auth::Root;
 
@@ -258,10 +259,13 @@ pub async fn init(
 	dbs.bootstrap().await?;
 
 	if let Some(user) = opt.user.as_ref() {
-		dbs.setup_initial_creds(Root {
-			username: user,
-			password: opt.pass.as_ref().unwrap(),
-		})
+		setup_initial_creds(
+			&dbs,
+			Root {
+				username: user,
+				password: opt.pass.as_ref().unwrap(),
+			},
+		)
 		.await?;
 	}
 
@@ -277,6 +281,7 @@ mod tests {
 	use std::str::FromStr;
 
 	use surrealdb::dbs::Session;
+	use surrealdb::engine::local::setup_initial_creds;
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::{Datastore, LockType::*, TransactionType::*};
 	use test_log::test;
@@ -297,7 +302,7 @@ mod tests {
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			0
 		);
-		ds.setup_initial_creds(creds).await.unwrap();
+		setup_initial_creds(&ds, creds).await.unwrap();
 		assert_eq!(
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			1
@@ -318,7 +323,7 @@ mod tests {
 			.unwrap()
 			.hash;
 
-		ds.setup_initial_creds(creds).await.unwrap();
+		setup_initial_creds(&ds, creds).await.unwrap();
 		assert_eq!(
 			pass_hash,
 			ds.transaction(Read, Optimistic)

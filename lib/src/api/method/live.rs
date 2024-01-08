@@ -9,22 +9,7 @@ use crate::method::Live;
 use crate::method::OnceLockExt;
 use crate::method::Query;
 use crate::method::Select;
-use crate::opt::from_value;
 use crate::opt::Resource;
-use crate::sql::cond::Cond;
-use crate::sql::expression::Expression;
-use crate::sql::field::Field;
-use crate::sql::field::Fields;
-use crate::sql::ident::Ident;
-use crate::sql::idiom::Idiom;
-use crate::sql::operator::Operator;
-use crate::sql::part::Part;
-use crate::sql::statement::Statement;
-use crate::sql::statements::live::LiveStatement;
-use crate::sql::Table;
-use crate::sql::Thing;
-use crate::sql::Uuid;
-use crate::sql::Value;
 use crate::Notification;
 use crate::Surreal;
 use channel::Receiver;
@@ -39,6 +24,21 @@ use std::ops::Bound;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use surrealdb_sql::cond::Cond;
+use surrealdb_sql::expression::Expression;
+use surrealdb_sql::field::Field;
+use surrealdb_sql::field::Fields;
+use surrealdb_sql::from_value;
+use surrealdb_sql::ident::Ident;
+use surrealdb_sql::idiom::Idiom;
+use surrealdb_sql::operator::Operator;
+use surrealdb_sql::part::Part;
+use surrealdb_sql::statement::Statement;
+use surrealdb_sql::statements::live::LiveStatement;
+use surrealdb_sql::Table;
+use surrealdb_sql::Thing;
+use surrealdb_sql::Uuid;
+use surrealdb_sql::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
 #[cfg(target_arch = "wasm32")]
@@ -111,7 +111,7 @@ macro_rules! into_future {
 	};
 }
 
-fn cond_from_range(range: crate::sql::Range) -> Option<Cond> {
+fn cond_from_range(range: surrealdb_sql::Range) -> Option<Cond> {
 	match (range.beg, range.end) {
 		(Bound::Unbounded, Bound::Unbounded) => None,
 		(Bound::Unbounded, Bound::Excluded(id)) => {

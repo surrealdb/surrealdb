@@ -1,0 +1,11 @@
+use crate::err::Error;
+use crate::thing::Thing;
+use crate::value::Value;
+
+pub fn id((arg,): (Thing,)) -> Result<Value, Error> {
+	Ok(arg.id.into())
+}
+
+pub fn tb((arg,): (Thing,)) -> Result<Value, Error> {
+	Ok(arg.tb.into())
+}

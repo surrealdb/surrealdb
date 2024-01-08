@@ -2,9 +2,9 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::err::Error;
+use surrealdb_sql::Value;
 
 #[tokio::test]
 async fn clear_transaction_cache_table() -> Result<(), Error> {

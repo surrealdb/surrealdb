@@ -12,7 +12,6 @@ mod api_integration {
 	use std::sync::Arc;
 	use std::sync::Mutex;
 	use std::time::Duration;
-	use surrealdb::dbs::capabilities::Capabilities;
 	use surrealdb::error::Api as ApiError;
 	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Database;
@@ -30,6 +29,7 @@ mod api_integration {
 	use surrealdb::sql::Value;
 	use surrealdb::Error;
 	use surrealdb::Surreal;
+	use surrealdb_sql::dbs::capabilities::Capabilities;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use tracing_subscriber::filter::EnvFilter;
@@ -134,7 +134,7 @@ mod api_integration {
 		use surrealdb::engine::any;
 		use surrealdb::engine::local::Db;
 		use surrealdb::engine::local::Mem;
-		use surrealdb::iam;
+		use surrealdb_sql::iam;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();

@@ -6,11 +6,11 @@ use helpers::*;
 
 use std::collections::HashMap;
 
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::iam::Role;
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::err::Error;
+use surrealdb_sql::iam::Role;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<(), Error> {

@@ -1,9 +1,11 @@
-use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
+use crate::api::{err::Error, Response as QueryResponse, Result};
 use crate::method::Stats;
-use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
-use crate::syn;
 use serde::de::DeserializeOwned;
 use std::mem;
+use surrealdb_sql::from_value;
+use surrealdb_sql::syn;
+use surrealdb_sql::Query;
+use surrealdb_sql::{self, statements::*, Array, Object, Statement, Statements, Value};
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
@@ -11,9 +13,9 @@ pub trait IntoQuery {
 	fn into_query(self) -> Result<Vec<Statement>>;
 }
 
-impl IntoQuery for sql::Query {
+impl IntoQuery for Query {
 	fn into_query(self) -> Result<Vec<Statement>> {
-		let sql::Query(Statements(statements)) = self;
+		let Query(Statements(statements)) = self;
 		Ok(statements)
 	}
 }

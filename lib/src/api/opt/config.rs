@@ -1,5 +1,6 @@
-use crate::{dbs::Capabilities, iam::Level};
+use crate::dbs::Capabilities;
 use std::time::Duration;
+use surrealdb_sql::iam::Level;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
 #[derive(Debug, Clone, Default)]

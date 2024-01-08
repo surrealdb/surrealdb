@@ -9,12 +9,12 @@ mod parse;
 
 use helpers::new_ds;
 use serial_test::serial;
-use surrealdb::err::Error;
-use surrealdb::kvs::LockType::Optimistic;
-use surrealdb::kvs::Transaction;
-use surrealdb::kvs::TransactionType::Write;
-use surrealdb::sql::statements::LiveStatement;
 use surrealdb::sql::Uuid;
+use surrealdb_sql::err::Error;
+use surrealdb_sql::kvs::LockType::Optimistic;
+use surrealdb_sql::kvs::Transaction;
+use surrealdb_sql::kvs::TransactionType::Write;
+use surrealdb_sql::statements::LiveStatement;
 
 #[tokio::test]
 #[serial]

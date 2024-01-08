@@ -2,11 +2,11 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::iam::Role;
 use surrealdb::sql::Part;
 use surrealdb::sql::Value;
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::err::Error;
+use surrealdb_sql::iam::Role;
 
 #[tokio::test]
 async fn insert_statement_object_single() -> Result<(), Error> {

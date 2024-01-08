@@ -55,11 +55,8 @@ use crate::iam::Action;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
+use crate::opt::auth::Root;
 use crate::opt::IntoEndpoint;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
@@ -79,6 +76,8 @@ use channel::Sender;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
+use iam::Auth;
+use iam::Role;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -88,6 +87,14 @@ use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb_sql::ctx::Context;
+use surrealdb_sql::dbs::Options;
+use surrealdb_sql::iam;
+use surrealdb_sql::kvs::Datastore;
+use surrealdb_sql::kvs::{LockType, TransactionType};
+use surrealdb_sql::map;
+use surrealdb_sql::statements::DefineUserStatement;
+use surrealdb_sql::Base;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
 use surrealml_core::storage::surml_file::SurMlFile;
@@ -502,6 +509,55 @@ async fn kill_live_query(
 	take(true, response).await
 }
 
+/// Setup the initial credentials
+/// Trigger the `unreachable definition` compilation error, probably due to this issue:
+/// https://github.com/rust-lang/rust/issues/111370
+#[allow(unreachable_code, unused_variables)]
+#[doc(hidden)]
+pub async fn setup_initial_creds(kvs: &Datastore, creds: Root<'_>) -> Result<()> {
+	// Start a new writeable transaction
+	let txn = kvs
+		.transaction(TransactionType::Write, LockType::Optimistic)
+		.await?
+		.rollback_with_panic()
+		.enclose();
+	// Fetch the root users from the storage
+	let users = txn.lock().await.all_root_users().await;
+	// Process credentials, depending on existing users
+	match users {
+		Ok(v) if v.is_empty() => {
+			// Display information in the logs
+			info!("Credentials were provided, and no root users were found. The root user '{}' will be created", creds.username);
+			// Create and save a new root users
+			let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
+			let ctx = Context::default();
+			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+			let _ = stm.compute(&ctx, &opt, &txn, None).await?;
+			// We added a new user, so commit the transaction
+			txn.lock().await.commit().await?;
+			// Everything ok
+			Ok(())
+		}
+		Ok(_) => {
+			// Display warnings in the logs
+			warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", creds.username);
+			warn!(
+				"Consider removing the --user and --pass arguments from the server start command"
+			);
+			// We didn't write anything, so just rollback
+			txn.lock().await.cancel().await?;
+			// Everything ok
+			Ok(())
+		}
+		Err(e) => {
+			// There was an unexpected error, so rollback
+			txn.lock().await.cancel().await?;
+			// Return any error
+			Err(e.into())
+		}
+	}
+}
+
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Arc<Datastore>,
@@ -533,7 +589,7 @@ async fn router(
 				[Value::Object(credentials)] => mem::take(credentials),
 				_ => unreachable!(),
 			};
-			let response = crate::iam::signup::signup(kvs, session, credentials).await?;
+			let response = iam::signup::signup(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Method::Signin => {
@@ -541,7 +597,7 @@ async fn router(
 				[Value::Object(credentials)] => mem::take(credentials),
 				_ => unreachable!(),
 			};
-			let response = crate::iam::signin::signin(kvs, session, credentials).await?;
+			let response = iam::signin::signin(kvs, session, credentials).await?;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Method::Authenticate => {
@@ -549,11 +605,11 @@ async fn router(
 				[Value::Strand(Strand(token))] => mem::take(token),
 				_ => unreachable!(),
 			};
-			crate::iam::verify::token(kvs, session, &token).await?;
+			iam::verify::token(kvs, session, &token).await?;
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Invalidate => {
-			crate::iam::clear::clear(session)?;
+			iam::clear::clear(session)?;
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Create => {
@@ -759,7 +815,7 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Health => Ok(DbResponse::Other(Value::None)),
-		Method::Version => Ok(DbResponse::Other(crate::env::VERSION.into())),
+		Method::Version => Ok(DbResponse::Other(surrealdb_sql::env::VERSION.into())),
 		Method::Set => {
 			let (key, value) = match &mut params[..2] {
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),

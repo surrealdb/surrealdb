@@ -7,6 +7,7 @@ use crate::sql::Value;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
+use surrealdb_sql::FromValueError;
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database
@@ -213,6 +214,15 @@ impl From<flume::RecvError> for crate::Error {
 impl From<url::ParseError> for crate::Error {
 	fn from(error: url::ParseError) -> Self {
 		Self::Api(Error::InternalError(error.to_string()))
+	}
+}
+
+impl From<FromValueError> for crate::Error {
+	fn from(error: FromValueError) -> Self {
+		Self::Api(Error::FromValue {
+			value: error.value,
+			error: error.error,
+		})
 	}
 }
 

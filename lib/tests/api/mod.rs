@@ -189,7 +189,7 @@ async fn scope_throws_error() {
 		})
 		.await
 	{
-		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signup_thrown_error"),
+		Err(Error::Db(surrealdb::error::Db::Thrown(e))) => assert_eq!(e, "signup_thrown_error"),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signup")),
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
@@ -210,7 +210,7 @@ async fn scope_throws_error() {
 		})
 		.await
 	{
-		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signin_thrown_error"),
+		Err(Error::Db(surrealdb::error::Db::Thrown(e))) => assert_eq!(e, "signin_thrown_error"),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signin")),
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
@@ -251,7 +251,7 @@ async fn scope_invalid_query() {
 		})
 		.await
 	{
-		Err(Error::Db(surrealdb::err::Error::SignupQueryFailed)) => (),
+		Err(Error::Db(surrealdb::error::Db::SignupQueryFailed)) => (),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
 			assert_eq!(e, "There was a problem with the database: The signup query failed")
 		}
@@ -274,7 +274,7 @@ async fn scope_invalid_query() {
 		})
 		.await
 	{
-		Err(Error::Db(surrealdb::err::Error::SigninQueryFailed)) => (),
+		Err(Error::Db(surrealdb::error::Db::SigninQueryFailed)) => (),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
 			assert_eq!(e, "There was a problem with the database: The signin query failed")
 		}

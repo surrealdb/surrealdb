@@ -1,7 +1,8 @@
 use crate::api::{err::Error, Result};
-use crate::sql::{self, Array, Edges, Id, Object, Table, Thing, Value};
-use crate::syn;
+use sql::syn;
+use sql::{Array, Edges, Id, Object, Table, Thing, Value};
 use std::ops::{self, Bound};
+use surrealdb_sql as sql;
 
 /// A database resource
 #[derive(Debug)]

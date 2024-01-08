@@ -103,43 +103,7 @@
 #[macro_use]
 extern crate tracing;
 
-#[macro_use]
-mod mac;
-
 mod api;
-mod cf;
-mod ctx;
-mod doc;
-mod exe;
-mod fnc;
-mod vs;
-
-pub mod sql;
-
-#[doc(hidden)]
-pub mod cnf;
-#[doc(hidden)]
-pub mod dbs;
-#[doc(hidden)]
-pub mod env;
-#[doc(hidden)]
-pub mod err;
-#[doc(hidden)]
-pub mod iam;
-#[doc(hidden)]
-pub mod idg;
-#[doc(hidden)]
-pub mod idx;
-#[doc(hidden)]
-pub mod key;
-#[doc(hidden)]
-pub mod kvs;
-
-#[cfg(feature = "ml")]
-#[doc(hidden)]
-pub mod obs;
-#[doc(hidden)]
-pub mod syn;
 
 #[doc(inline)]
 pub use api::engine;
@@ -160,6 +124,14 @@ pub use api::Response;
 pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
+#[doc(inline)]
+pub use surrealdb_sql as sql;
+
+#[cfg(feature = "ml")]
+#[doc(hidden)]
+pub use surrealdb_sql::obs;
+#[doc(hidden)]
+pub use surrealdb_sql::{cnf, dbs, env, err, iam, idg, idx, key, kvs, syn};
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
@@ -173,7 +145,7 @@ pub mod channel {
 /// Different error types for embedded and remote databases
 pub mod error {
 	pub use crate::api::err::Error as Api;
-	pub use crate::err::Error as Db;
+	pub use surrealdb_sql::err::Error as Db;
 }
 
 /// The action performed on a record

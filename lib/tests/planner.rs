@@ -3,10 +3,10 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::{Response, Session};
-use surrealdb::err::Error;
-use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
+use surrealdb_sql::dbs::{Response, Session};
+use surrealdb_sql::err::Error;
+use surrealdb_sql::kvs::Datastore;
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index() -> Result<(), Error> {

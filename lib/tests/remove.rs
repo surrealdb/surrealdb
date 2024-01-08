@@ -9,11 +9,11 @@ mod util;
 
 use std::collections::HashMap;
 
-use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::iam::Role;
-use surrealdb::kvs::{LockType::*, TransactionType::*};
 use surrealdb::sql::Value;
+use surrealdb_sql::dbs::Session;
+use surrealdb_sql::err::Error;
+use surrealdb_sql::iam::Role;
+use surrealdb_sql::kvs::{LockType::*, TransactionType::*};
 
 #[tokio::test]
 async fn remove_statement_table() -> Result<(), Error> {
@@ -121,7 +121,10 @@ async fn remove_statement_index() -> Result<(), Error> {
 
 	let mut tx = dbs.transaction(Read, Optimistic).await?;
 	for ix in ["uniq_isbn", "idx_author", "ft_title"] {
-		assert_empty_prefix!(&mut tx, surrealdb::key::index::all::new("test", "test", "book", ix));
+		assert_empty_prefix!(
+			&mut tx,
+			surrealdb_sql::key::index::all::new("test", "test", "book", ix)
+		);
 	}
 	Ok(())
 }
