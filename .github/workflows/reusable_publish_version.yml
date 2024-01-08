@@ -56,7 +56,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: 1.74.1
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -473,7 +473,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: 1.74.1
 
       - name: Install release-plz
         run: cargo install --force --locked --version 0.3.30 release-plz

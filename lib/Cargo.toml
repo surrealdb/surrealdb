@@ -79,7 +79,7 @@ hex = { version = "0.4.3", optional = false }
 indexmap = { version = "2.1.0", features = ["serde"] }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "=0.4.0-beta.4", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
+js = { version = "0.4.0", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 lexicmp = "0.1.0"
 md-5 = "0.10.6"
@@ -118,7 +118,7 @@ thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tokio-util = { version = "0.7.10", optional = true, features = ["compat"] }
 tracing = "0.1.40"
-trice = "0.3.1"
+trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
 url = "2.5.0"
 
