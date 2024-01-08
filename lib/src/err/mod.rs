@@ -761,8 +761,8 @@ pub enum Error {
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),
 
-	/// The db is running without an avilable storage engine
-	#[error("The db is running without an avilable storage engine")]
+	/// The db is running without an available storage engine
+	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
 }
 
