@@ -1,7 +1,8 @@
 use ciborium::Value as Data;
+use std::collections::BTreeMap;
 use surrealdb::sql::Datetime;
 use surrealdb::sql::Duration;
-// use surrealdb::sql::Id;
+use surrealdb::sql::Id;
 use surrealdb::sql::Number;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
@@ -80,7 +81,37 @@ impl TryFrom<Cbor> for Value {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid RecordID value"),
 						},
-						_ => Err("Expected a CBOR text data type"),
+						Data::Array(mut v) if v.len() == 2 => match (v.remove(0), v.remove(0)) {
+							(Data::Text(tb), Data::Text(id)) => {
+								Ok(Value::from(Thing::from((tb, id))))
+							}
+							(Data::Text(tb), Data::Integer(id)) => {
+								Ok(Value::from(Thing::from((tb, Id::from(i128::from(id) as i64)))))
+							}
+							(Data::Text(tb), Data::Array(id)) => Ok(Value::from(Thing::from((
+								tb,
+								Id::from(
+									id.into_iter()
+										.map(|v| Value::try_from(Cbor(v)))
+										.collect::<Result<Vec<Value>, &str>>()?,
+								),
+							)))),
+							(Data::Text(tb), Data::Map(id)) => Ok(Value::from(Thing::from((
+								tb,
+								Id::from(
+									id.into_iter()
+										.map(|(k, v)| {
+											let k =
+												Value::try_from(Cbor(k)).map(|k| k.as_raw_string());
+											let v = Value::try_from(Cbor(v));
+											Ok((k?, v?))
+										})
+										.collect::<Result<BTreeMap<String, Value>, &str>>()?,
+								),
+							)))),
+							_ => Err("Expected a CBOR array with 2 elements, a text data type, and a valid ID type"),
+						},
+						_ => Err("Expected a CBOR text data type, or a CBOR array with 2 elements"),
 					},
 					// An unknown tag
 					_ => Err("Encountered an unknown CBOR tag"),
@@ -131,20 +162,19 @@ impl TryFrom<Value> for Cbor {
 					.collect::<Result<Vec<(Data, Data)>, &str>>()?,
 			))),
 			Value::Bytes(v) => Ok(Cbor(Data::Bytes(v.into_inner()))),
-			Value::Thing(v) => Ok(Cbor(Data::Tag(TAG_RECORDID, Box::new(Data::Text(v.to_raw()))))),
-			// Value::Thing(v) => Ok(Cbor(Data::Tag(
-			// 	TAG_RECORDID,
-			// 	Box::new(Data::Array(vec![
-			// 		Data::Text(v.tb),
-			// 		match v.id {
-			// 			Id::Number(v) => Data::Integer(v.into()),
-			// 			Id::String(v) => Data::Text(v),
-			// 			Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
-			// 			Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
-			// 			Id::Generate(_) => unreachable!(),
-			// 		},
-			// 	])),
-			// ))),
+			Value::Thing(v) => Ok(Cbor(Data::Tag(
+				TAG_RECORDID,
+				Box::new(Data::Array(vec![
+					Data::Text(v.tb),
+					match v.id {
+						Id::Number(v) => Data::Integer(v.into()),
+						Id::String(v) => Data::Text(v),
+						Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
+						Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
+						Id::Generate(_) => unreachable!(),
+					},
+				])),
+			))),
 			// We shouldn't reach here
 			_ => Ok(Cbor(Data::Null)),
 		}
