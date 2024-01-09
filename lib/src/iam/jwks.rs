@@ -16,9 +16,9 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds
 static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_EXPIRATION_SECONDS") {
 		Ok(seconds_str) => {
-			let seconds = seconds_str
-				.parse::<u64>()
-				.expect("Expected a valid number of seconds for SURREAL_JWKS_CACHE_EXPIRATION_SECONDS");
+			let seconds = seconds_str.parse::<u64>().expect(
+				"Expected a valid number of seconds for SURREAL_JWKS_CACHE_EXPIRATION_SECONDS",
+			);
 			Duration::seconds(seconds as i64)
 		}
 		Err(_) => {
@@ -32,9 +32,9 @@ static CACHE_COOLDOWN: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(3
 static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN_SECONDS") {
 		Ok(seconds_str) => {
-			let seconds = seconds_str
-				.parse::<u64>()
-				.expect("Expected a valid number of seconds for SURREAL_JWKS_CACHE_COOLDOWN_SECONDS");
+			let seconds = seconds_str.parse::<u64>().expect(
+				"Expected a valid number of seconds for SURREAL_JWKS_CACHE_COOLDOWN_SECONDS",
+			);
 			Duration::seconds(seconds as i64)
 		}
 		Err(_) => {
