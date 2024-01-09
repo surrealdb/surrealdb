@@ -10,6 +10,7 @@ use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpres
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum ResourceKind {
 	#[default]
@@ -78,6 +79,7 @@ impl ResourceKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct Resource(String, ResourceKind, Level);
 

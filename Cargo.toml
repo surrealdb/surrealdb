@@ -41,6 +41,7 @@ axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
+ciborium = "0.2.1"
 clap = { version = "4.4.11", features = ["env", "derive", "wrap_help", "unicode"] }
 futures = "0.3.29"
 futures-util = "0.3.29"
@@ -56,9 +57,9 @@ opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
 rand = "0.8.5"
 reqwest = { version = "0.11.22", default-features = false, features = ["blocking", "gzip"] }
+rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }
-serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }

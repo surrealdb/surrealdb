@@ -16,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Constant")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,

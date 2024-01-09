@@ -33,6 +33,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -58,6 +59,7 @@ impl Display for Values {
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Value {
 	// These value types are simple values which
@@ -458,6 +460,12 @@ impl From<Vec<bool>> for Value {
 	}
 }
 
+impl From<HashMap<&str, Value>> for Value {
+	fn from(v: HashMap<&str, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
 impl From<HashMap<String, Value>> for Value {
 	fn from(v: HashMap<String, Value>) -> Self {
 		Value::Object(Object::from(v))
@@ -466,6 +474,12 @@ impl From<HashMap<String, Value>> for Value {
 
 impl From<BTreeMap<String, Value>> for Value {
 	fn from(v: BTreeMap<String, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<BTreeMap<&str, Value>> for Value {
+	fn from(v: BTreeMap<&str, Value>) -> Self {
 		Value::Object(Object::from(v))
 	}
 }
@@ -730,6 +744,18 @@ impl TryFrom<Value> for Object {
 	}
 }
 
+impl FromIterator<Value> for Value {
+	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
+		Value::Array(Array(iter.into_iter().collect()))
+	}
+}
+
+impl FromIterator<(String, Value)> for Value {
+	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
+		Value::Object(Object(iter.into_iter().collect()))
+	}
+}
+
 impl Value {
 	// -----------------------------------
 	// Initial record value
@@ -826,6 +852,11 @@ impl Value {
 	/// Check if this Value is a Mock
 	pub fn is_mock(&self) -> bool {
 		matches!(self, Value::Mock(_))
+	}
+
+	/// Check if this Value is a Param
+	pub fn is_param(&self) -> bool {
+		matches!(self, Value::Param(_))
 	}
 
 	/// Check if this Value is a Range
@@ -950,11 +981,6 @@ impl Value {
 			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
 			_ => false,
 		}
-	}
-
-	/// Check if this Value is a Param
-	pub fn is_param(&self) -> bool {
-		matches!(self, Value::Param(_))
 	}
 
 	/// Check if this Value is a Geometry of a specific type
@@ -1089,7 +1115,7 @@ impl Value {
 	/// Treat a string as a table name
 	pub fn could_be_table(self) -> Value {
 		match self {
-			Value::Strand(v) => Table::from(v.0).into(),
+			Value::Strand(v) => Value::Table(v.0.into()),
 			_ => self,
 		}
 	}

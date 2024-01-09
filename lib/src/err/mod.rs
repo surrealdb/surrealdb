@@ -251,6 +251,10 @@ pub enum Error {
 	#[error("Invalid regular expression: {0:?}")]
 	InvalidRegex(String),
 
+	/// Invalid timeout
+	#[error("Invalid timeout: {0:?} seconds")]
+	InvalidTimeout(u64),
+
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
 	QueryTimedout,
