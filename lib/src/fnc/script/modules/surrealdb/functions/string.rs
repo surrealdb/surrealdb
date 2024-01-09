@@ -3,7 +3,9 @@ use crate::fnc::script::modules::impl_module_def;
 
 mod distance;
 mod is;
+mod semver;
 mod similarity;
+
 pub struct Package;
 
 impl_module_def!(
@@ -28,5 +30,6 @@ impl_module_def!(
 	"startsWith" => run,
 	"trim" => run,
 	"uppercase" => run,
-	"words" => run
+	"words" => run,
+	"semver" => (semver::Package)
 );

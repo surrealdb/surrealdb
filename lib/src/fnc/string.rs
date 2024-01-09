@@ -260,6 +260,119 @@ pub mod similarity {
 	}
 }
 
+pub mod semver {
+
+	use crate::err::Error;
+	use crate::sql::Value;
+	use semver::Version;
+
+	fn parse_version(ver: &str, func: &str, msg: &str) -> Result<Version, Error> {
+		Version::parse(ver).map_err(|_| Error::InvalidArguments {
+			name: String::from(func),
+			message: String::from(msg),
+		})
+	}
+
+	pub fn compare((left, right): (String, String)) -> Result<Value, Error> {
+		let left = parse_version(
+			&left,
+			"string::semver::compare",
+			"Invalid semantic version string for left argument",
+		)?;
+		let right = parse_version(
+			&right,
+			"string::semver::compare",
+			"Invalid semantic version string for right argument",
+		)?;
+
+		Ok((left.cmp(&right) as i32).into())
+	}
+
+	pub fn major((version,): (String,)) -> Result<Value, Error> {
+		parse_version(&version, "string::semver::major", "Invalid semantic version")
+			.map(|v| v.major.into())
+	}
+
+	pub fn minor((version,): (String,)) -> Result<Value, Error> {
+		parse_version(&version, "string::semver::minor", "Invalid semantic version")
+			.map(|v| v.minor.into())
+	}
+
+	pub fn patch((version,): (String,)) -> Result<Value, Error> {
+		parse_version(&version, "string::semver::patch", "Invalid semantic version")
+			.map(|v| v.patch.into())
+	}
+
+	pub mod inc {
+		use crate::err::Error;
+		use crate::fnc::string::semver::parse_version;
+		use crate::sql::Value;
+
+		pub fn major((version,): (String,)) -> Result<Value, Error> {
+			parse_version(&version, "string::semver::inc::major", "Invalid semantic version").map(
+				|mut version| {
+					version.major += 1;
+					version.minor = 0;
+					version.patch = 0;
+					version.to_string().into()
+				},
+			)
+		}
+
+		pub fn minor((version,): (String,)) -> Result<Value, Error> {
+			parse_version(&version, "string::semver::inc::minor", "Invalid semantic version").map(
+				|mut version| {
+					version.minor += 1;
+					version.patch = 0;
+					version.to_string().into()
+				},
+			)
+		}
+
+		pub fn patch((version,): (String,)) -> Result<Value, Error> {
+			parse_version(&version, "string::semver::inc::patch", "Invalid semantic version").map(
+				|mut version| {
+					version.patch += 1;
+					version.to_string().into()
+				},
+			)
+		}
+	}
+
+	pub mod set {
+		use crate::err::Error;
+		use crate::fnc::string::semver::parse_version;
+		use crate::sql::Value;
+
+		pub fn major((version, value): (String, u64)) -> Result<Value, Error> {
+			parse_version(&version, "string::semver::set::major", "Invalid semantic version").map(
+				|mut version| {
+					version.major = value;
+					version.to_string().into()
+				},
+			)
+		}
+
+		pub fn minor((version, value): (String, u64)) -> Result<Value, Error> {
+			parse_version(&version, "string::semver::set::minor", "Invalid semantic version").map(
+				|mut version| {
+					version.minor = value;
+					version.to_string().into()
+				},
+			)
+		}
+
+		pub fn patch((version, value): (String, u64)) -> Result<Value, Error> {
+			parse_version(&version, "string::semver::set::patch", "Invalid semantic version").map(
+				|mut version| {
+					version.patch = value;
+					version.to_string().into()
+				},
+			)
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
@@ -441,5 +554,53 @@ mod tests {
 		let input = (String::from("foo-bar").into(),);
 		let value = super::is::uuid(input).unwrap();
 		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn semver_compare() {
+		let value = super::semver::compare((String::from("1.2.3"), String::from("1.0.0"))).unwrap();
+		assert_eq!(value, Value::from(1));
+
+		let value = super::semver::compare((String::from("1.2.3"), String::from("1.2.3"))).unwrap();
+		assert_eq!(value, Value::from(0));
+
+		let value = super::semver::compare((String::from("1.0.0"), String::from("1.2.3"))).unwrap();
+		assert_eq!(value, Value::from(-1));
+	}
+
+	#[test]
+	fn semver_extract() {
+		let value = super::semver::major((String::from("1.2.3"),)).unwrap();
+		assert_eq!(value, Value::from(1));
+
+		let value = super::semver::minor((String::from("1.2.3"),)).unwrap();
+		assert_eq!(value, Value::from(2));
+
+		let value = super::semver::patch((String::from("1.2.3"),)).unwrap();
+		assert_eq!(value, Value::from(3));
+	}
+
+	#[test]
+	fn semver_increment() {
+		let value = super::semver::inc::major((String::from("1.2.3"),)).unwrap();
+		assert_eq!(value, Value::from("2.0.0"));
+
+		let value = super::semver::inc::minor((String::from("1.2.3"),)).unwrap();
+		assert_eq!(value, Value::from("1.3.0"));
+
+		let value = super::semver::inc::patch((String::from("1.2.3"),)).unwrap();
+		assert_eq!(value, Value::from("1.2.4"));
+	}
+
+	#[test]
+	fn semver_set() {
+		let value = super::semver::set::major((String::from("1.2.3"), 9)).unwrap();
+		assert_eq!(value, Value::from("9.2.3"));
+
+		let value = super::semver::set::minor((String::from("1.2.3"), 9)).unwrap();
+		assert_eq!(value, Value::from("1.9.3"));
+
+		let value = super::semver::set::patch((String::from("1.2.3"), 9)).unwrap();
+		assert_eq!(value, Value::from("1.2.9"));
 	}
 }

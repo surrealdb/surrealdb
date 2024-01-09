@@ -37,18 +37,6 @@ impl FromStr for Role {
 	}
 }
 
-impl std::convert::From<&str> for Role {
-	fn from(s: &str) -> Self {
-		Self::from_str(s).unwrap()
-	}
-}
-
-impl std::convert::From<String> for Role {
-	fn from(s: String) -> Self {
-		Self::from_str(&s).unwrap()
-	}
-}
-
 impl std::convert::From<&Ident> for Role {
 	fn from(id: &Ident) -> Self {
 		Role::from_str(id).unwrap()
