@@ -8,12 +8,36 @@ use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, DecodingKey, Header, Validation};
 use once_cell::sync::Lazy;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 
-fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
+async fn config(
+	kvs: &Datastore,
+	de_kind: Algorithm,
+	de_code: String,
+	token_header: Header,
+) -> Result<(DecodingKey, Validation), Error> {
+	if de_kind == Algorithm::Jwks {
+		#[cfg(not(feature = "jwks"))]
+		{
+			warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
+			Err(Error::InvalidAuth)
+		}
+		#[cfg(feature = "jwks")]
+		// The key identifier header must be present
+		if let Some(kid) = token_header.kid {
+			jwks::config(kvs, &kid, &de_code).await
+		} else {
+			Err(Error::MissingTokenHeader("kid".to_string()))
+		}
+	} else {
+		config_alg(de_kind, de_code)
+	}
+}
+
+fn config_alg(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {
 		Algorithm::Hs256 => Ok((
 			DecodingKey::from_secret(code.as_ref()),
@@ -199,24 +223,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
-			// If the token is defined as JWKS
-			let cf =
-				if de.kind == Algorithm::Jwks {
-					#[cfg(not(feature = "jwks"))]
-					{
-						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-						Err(Error::InvalidAuth)
-					}
-					#[cfg(feature = "jwks")]
-					// The key identifier header must be present
-					if let Some(kid) = token_data.header.kid {
-						jwks::config(kvs, &kid, &de.code).await
-					} else {
-						Err(Error::MissingTokenHeader("kid".to_string()))
-					}
-				} else {
-					config(de.kind, de.code)
-				}?;
+			// Obtain the configuration with which to verify the token
+			let cf = config(&kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -250,7 +258,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let id = syn::thing(&id)?;
 			// Get the scope
 			let de = tx.get_sc(&ns, &db, &sc).await?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -281,24 +289,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database token
 			let de = tx.get_db_token(&ns, &db, &tk).await?;
-			// If the token is defined as JWKS
-			let cf =
-				if de.kind == Algorithm::Jwks {
-					#[cfg(not(feature = "jwks"))]
-					{
-						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-						Err(Error::InvalidAuth)
-					}
-					#[cfg(feature = "jwks")]
-					// The key identifier header must be present
-					if let Some(kid) = token_data.header.kid {
-						jwks::config(kvs, &kid, &de.code).await
-					} else {
-						Err(Error::MissingTokenHeader("kid".to_string()))
-					}
-				} else {
-					config(de.kind, de.code)
-				}?;
+			// Obtain the configuration with which to verify the token
+			let cf = config(&kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -342,7 +334,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -370,24 +362,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace token
 			let de = tx.get_ns_token(&ns, &tk).await?;
-			// If the token is defined as JWKS
-			let cf =
-				if de.kind == Algorithm::Jwks {
-					#[cfg(not(feature = "jwks"))]
-					{
-						warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-						Err(Error::InvalidAuth)
-					}
-					#[cfg(feature = "jwks")]
-					// The key identifier header must be present
-					if let Some(kid) = token_data.header.kid {
-						jwks::config(kvs, &kid, &de.code).await
-					} else {
-						Err(Error::MissingTokenHeader("kid".to_string()))
-					}
-				} else {
-					config(de.kind, de.code)
-				}?;
+			// Obtain the configuration with which to verify the token
+			let cf = config(&kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -426,7 +402,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -455,7 +431,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
