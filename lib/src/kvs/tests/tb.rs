@@ -25,7 +25,7 @@ async fn table_definitions_can_be_scanned() {
 		permissions: Default::default(),
 		changefeed: None,
 		comment: None,
-		relation: None,
+		table_type: Default::default(),
 	};
 	tx.set(&key, &value).await.unwrap();
 
@@ -64,8 +64,7 @@ async fn table_definitions_can_be_deleted() {
 		permissions: Default::default(),
 		changefeed: None,
 		comment: None,
-		relation: None,
-		..Default::default()
+		table_type: Default::default(),
 	};
 	tx.set(&key, &value).await.unwrap();
 
