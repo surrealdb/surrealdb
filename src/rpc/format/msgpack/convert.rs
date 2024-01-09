@@ -139,7 +139,7 @@ impl TryFrom<Value> for Pack {
 			Value::Bytes(v) => Ok(Pack(Data::Binary(v.into_inner()))),
 			Value::Thing(v) => Ok(Pack(Data::Ext(TAG_RECORDID, v.to_raw().as_bytes().to_vec()))),
 			// We shouldn't reach here
-			_ => Ok(Pack(Data::Nil)),
+			_ => unreachable!(),
 		}
 	}
 }
