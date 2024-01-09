@@ -3,6 +3,8 @@ mod common;
 
 mod cli_integration {
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
+	use common::Format;
+	use common::Socket;
 	use std::fs;
 	use std::fs::File;
 	use std::time;
@@ -735,15 +737,13 @@ mod cli_integration {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
 
 		// Create a long-lived WS connection so the server don't shutdown gracefully
-		let mut socket = common::connect_ws(&addr).await.expect("Failed to connect to server");
+		let mut socket = Socket::connect(&addr, None).await.expect("Failed to connect to server");
 		let json = serde_json::json!({
 			"id": "1",
 			"method": "query",
 			"params": ["SLEEP 30s;"],
 		});
-		common::ws_send_msg(&mut socket, serde_json::to_string(&json).unwrap())
-			.await
-			.expect("Failed to send WS message");
+		socket.send_message(Format::Json, json).await.expect("Failed to send WS message");
 
 		// Make sure the SLEEP query is being executed
 		tokio::select! {
