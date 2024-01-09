@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities;
 use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::Response;
@@ -205,7 +206,7 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let res = client.query(query).await;
+				let res = client.query(query).with_stats().await;
 				match process(pretty, json, res) {
 					Ok(v) => {
 						println!("{v}\n");
@@ -248,45 +249,65 @@ pub async fn init(
 	Ok(())
 }
 
-fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
+fn process(
+	pretty: bool,
+	json: bool,
+	res: surrealdb::Result<WithStats<Response>>,
+) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let mut output = Vec::<Value>::with_capacity(num_statements);
+	let mut vec = Vec::<(Stats, Value)>::with_capacity(num_statements);
 	for index in 0..num_statements {
-		let result = response.take(index).unwrap_or_else(|e| e.to_string().into());
-		output.push(result);
+		let (stats, result) = response
+			.take(index)
+			.ok_or_else(|| {
+				format!("Expected some result for a query with index {index}, but found none")
+			})
+			.map_err(Error::Other)?;
+		let output = result.unwrap_or_else(|e| e.to_string().into());
+		vec.push((stats, output));
 	}
 
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => Value::from(output).to_string(),
+		(false, false) => {
+			Value::from(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>()).to_string()
+		}
 		// Yes prettify the SurrealQL response
-		(false, true) => output
-			.iter()
+		(false, true) => vec
+			.into_iter()
 			.enumerate()
-			.map(|(i, v)| format!("-- Query {:?}\n{v:#}", i + 1))
+			.map(|(index, (stats, value))| {
+				let query_num = index + 1;
+				let execution_time = stats.execution_time.unwrap_or_default();
+				format!("-- Query {query_num} (execution time: {execution_time:?})\n{value:#}",)
+			})
 			.collect::<Vec<String>>()
 			.join("\n"),
 		// Don't pretty print the JSON response
-		(true, false) => serde_json::to_string(&Value::from(output).into_json()).unwrap(),
+		(true, false) => {
+			let value = Value::from(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>());
+			serde_json::to_string(&value.into_json()).unwrap()
+		}
 		// Yes prettify the JSON response
-		(true, true) => output
-			.iter()
+		(true, true) => vec
+			.into_iter()
 			.enumerate()
-			.map(|(i, v)| {
+			.map(|(index, (stats, value))| {
 				let mut buf = Vec::new();
 				let mut serializer = serde_json::Serializer::with_formatter(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-
-				v.clone().into_json().serialize(&mut serializer).unwrap();
-				let v = String::from_utf8(buf).unwrap();
-				format!("-- Query {:?}\n{v:#}", i + 1)
+				value.into_json().serialize(&mut serializer).unwrap();
+				let output = String::from_utf8(buf).unwrap();
+				let query_num = index + 1;
+				let execution_time = stats.execution_time.unwrap_or_default();
+				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),

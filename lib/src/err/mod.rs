@@ -148,7 +148,7 @@ pub enum Error {
 	HttpDisabled,
 
 	/// it is not possible to set a variable with the specified name
-	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
 		name: String,
 	},
@@ -250,6 +250,10 @@ pub enum Error {
 	/// Invalid regular expression
 	#[error("Invalid regular expression: {0:?}")]
 	InvalidRegex(String),
+
+	/// Invalid timeout
+	#[error("Invalid timeout: {0:?} seconds")]
+	InvalidTimeout(u64),
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
