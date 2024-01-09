@@ -224,7 +224,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
 			// Obtain the configuration with which to verify the token
-			let cf = config(&kvs, de.kind, de.code, token_data.header).await?;
+			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -290,7 +290,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the database token
 			let de = tx.get_db_token(&ns, &db, &tk).await?;
 			// Obtain the configuration with which to verify the token
-			let cf = config(&kvs, de.kind, de.code, token_data.header).await?;
+			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -363,7 +363,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the namespace token
 			let de = tx.get_ns_token(&ns, &tk).await?;
 			// Obtain the configuration with which to verify the token
-			let cf = config(&kvs, de.kind, de.code, token_data.header).await?;
+			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
