@@ -30,7 +30,7 @@ args = ["test", "--workspace", "--no-fail-fast"]
 [tasks.cargo-check]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["check", "--workspace"]
+args = ["check", "--workspace", "--features", "${DEV_FEATURES}"]
 
 [tasks.cargo-fmt]
 category = "LOCAL USAGE"

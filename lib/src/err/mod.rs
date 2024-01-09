@@ -766,6 +766,10 @@ pub enum Error {
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),
+
+	/// The db is running without an available storage engine
+	#[error("The db is running without an available storage engine")]
+	MissingStorageEngine,
 }
 
 impl From<Error> for String {
