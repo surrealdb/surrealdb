@@ -36,13 +36,14 @@ impl Parser<'_> {
 		let mut res = Vec::new();
 		loop {
 			match self.peek_kind() {
+				// consume any possible empty statements.
 				t!(";") => continue,
 				t!("eof") => break,
 				_ => {
 					let stmt = self.parse_stmt()?;
 					res.push(stmt);
 					if !self.eat(t!(";")) {
-						expected!(self, "eof");
+						expected!(self, t!("eof"));
 						break;
 					}
 				}
@@ -231,8 +232,8 @@ impl Parser<'_> {
 			}
 			_ => {
 				// TODO: Provide information about keywords.
-				// TODO: Look at 'let' less let statement.
-				self.parse_value_field().map(Entry::Value)
+				let v = self.parse_value_field()?;
+				Ok(Self::refine_entry_value(v))
 			}
 		}
 	}
@@ -258,17 +259,41 @@ impl Parser<'_> {
 		}
 	}
 
+	fn refine_entry_value(value: Value) -> Entry {
+		match value {
+			Value::Expression(x) => {
+				if let Expression::Binary {
+					l: Value::Param(x),
+					o: Operator::Equal,
+					r,
+				} = *x
+				{
+					return Entry::Set(crate::sql::statements::SetStatement {
+						name: x.0 .0,
+						what: r,
+					});
+				}
+				Entry::Value(Value::Expression(x))
+			}
+			_ => Entry::Value(value),
+		}
+	}
+
 	/// Parsers a analyze statement.
 	fn parse_analyze(&mut self) -> ParseResult<AnalyzeStatement> {
-		expected!(self, "INDEX");
+		expected!(self, t!("INDEX"));
 
-		let index = self.parse_token_value()?;
-		expected!(self, "ON");
-		let table = self.parse_token_value()?;
+		let index = self.next_token_value()?;
+		expected!(self, t!("ON"));
+		let table = self.next_token_value()?;
 
 		Ok(AnalyzeStatement::Idx(table, index))
 	}
 
+	/// Parsers a begin statement.
+	///
+	/// # Parser State
+	/// Expects `BEGIN` to already be consumed.
 	fn parse_begin(&mut self) -> ParseResult<BeginStatement> {
 		if let t!("TRANSACTION") = self.peek().kind {
 			self.next();
@@ -276,6 +301,10 @@ impl Parser<'_> {
 		Ok(BeginStatement)
 	}
 
+	/// Parsers a cancel statement.
+	///
+	/// # Parser State
+	/// Expects `CANCEL` to already be consumed.
 	fn parse_cancel(&mut self) -> ParseResult<CancelStatement> {
 		if let t!("TRANSACTION") = self.peek().kind {
 			self.next();
@@ -283,6 +312,10 @@ impl Parser<'_> {
 		Ok(CancelStatement)
 	}
 
+	/// Parsers a commit statement.
+	///
+	/// # Parser State
+	/// Expects `COMMIT` to already be consumed.
 	fn parse_commit(&mut self) -> ParseResult<CommitStatement> {
 		if let t!("TRANSACTION") = self.peek().kind {
 			self.next();
@@ -290,19 +323,23 @@ impl Parser<'_> {
 		Ok(CommitStatement)
 	}
 
+	/// Parsers a USE statement.
+	///
+	/// # Parser State
+	/// Expects `USE` to already be consumed.
 	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
 		let (ns, db) = if self.eat(t!("NAMESPACE")) {
-			let ns = self.parse_token_value::<Ident>()?.0;
+			let ns = self.next_token_value::<Ident>()?.0;
 			let db = self
 				.eat(t!("DATABASE"))
-				.then(|| self.parse_token_value::<Ident>())
+				.then(|| self.next_token_value::<Ident>())
 				.transpose()?
 				.map(|x| x.0);
 			(Some(ns), db)
 		} else {
-			expected!(self, "DATABASE");
+			expected!(self, t!("DATABASE"));
 
-			let db = self.parse_token_value::<Ident>()?.0;
+			let db = self.next_token_value::<Ident>()?.0;
 			(None, Some(db))
 		};
 
@@ -312,12 +349,16 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parsers a FOR statement.
+	///
+	/// # Parser State
+	/// Expects `FOR` to already be consumed.
 	pub fn parse_for_stmt(&mut self) -> ParseResult<ForeachStatement> {
-		let param = self.parse_token_value()?;
-		expected!(self, "IN");
+		let param = self.next_token_value()?;
+		expected!(self, t!("IN"));
 		let range = self.parse_value()?;
 
-		let span = expected!(self, "{").span;
+		let span = expected!(self, t!("{")).span;
 		let block = self.parse_block(span)?;
 		Ok(ForeachStatement {
 			param,
@@ -326,22 +367,26 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parsers a INFO statement.
+	///
+	/// # Parser State
+	/// Expects `INFO` to already be consumed.
 	pub(crate) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
-		expected!(self, "FOR");
+		expected!(self, t!("FOR"));
 		let stmt = match self.next().kind {
 			t!("ROOT") => InfoStatement::Root,
 			t!("NAMESPACE") => InfoStatement::Ns,
 			t!("DATABASE") => InfoStatement::Db,
 			t!("SCOPE") => {
-				let ident = self.parse_token_value()?;
+				let ident = self.next_token_value()?;
 				InfoStatement::Sc(ident)
 			}
 			t!("TABLE") => {
-				let ident = self.parse_token_value()?;
+				let ident = self.next_token_value()?;
 				InfoStatement::Tb(ident)
 			}
 			t!("USER") => {
-				let ident = self.parse_token_value()?;
+				let ident = self.next_token_value()?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
 				InfoStatement::User(ident, base)
 			}
@@ -350,9 +395,13 @@ impl Parser<'_> {
 		Ok(stmt)
 	}
 
+	/// Parsers a KILL statement.
+	///
+	/// # Parser State
+	/// Expects `KILL` to already be consumed.
 	pub(crate) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
-		let id = match self.peek().kind {
-			TokenKind::Uuid => self.parse_token_value().map(Value::Uuid)?,
+		let id = match self.peek_kind() {
+			TokenKind::Uuid => self.next_token_value().map(Value::Uuid)?,
 			t!("$param") => {
 				let token = self.pop_peek();
 				let param = self.token_value(token)?;
@@ -365,19 +414,24 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parsers a LIVE statement.
+	///
+	/// # Parser State
+	/// Expects `LIVE` to already be consumed.
 	pub(crate) fn parse_live_stmt(&mut self) -> ParseResult<LiveStatement> {
-		expected!(self, "SELECT");
-		let expr = match self.peek().kind {
+		expected!(self, t!("SELECT"));
+
+		let expr = match self.peek_kind() {
 			t!("DIFF") => {
 				self.pop_peek();
 				Fields::default()
 			}
 			_ => self.parse_fields()?,
 		};
-		expected!(self, "FROM");
+		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
-			t!("$param") => Value::Param(self.parse_token_value()?),
-			_ => Value::Table(self.parse_token_value()?),
+			t!("$param") => Value::Param(self.next_token_value()?),
+			_ => Value::Table(self.next_token_value()?),
 		};
 		let cond = self.try_parse_condition()?;
 		let fetch = self.try_parse_fetch()?;
@@ -385,8 +439,12 @@ impl Parser<'_> {
 		Ok(LiveStatement::from_source_parts(expr, what, cond, fetch))
 	}
 
+	/// Parsers a OPTION statement.
+	///
+	/// # Parser State
+	/// Expects `OPTION` to already be consumed.
 	pub(crate) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
-		let name = self.parse_token_value()?;
+		let name = self.next_token_value()?;
 		let what = if self.eat(t!("=")) {
 			match self.next().kind {
 				t!("true") => true,
@@ -402,6 +460,10 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parsers a RETURN statement.
+	///
+	/// # Parser State
+	/// Expects `RETURN` to already be consumed.
 	pub(crate) fn parse_return_stmt(&mut self) -> ParseResult<OutputStatement> {
 		let what = self.parse_value_field()?;
 		let fetch = self.try_parse_fetch()?;
@@ -411,9 +473,18 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parsers a LET statement.
+	///
+	/// SurrealQL has support for `LET` less let statements.
+	/// These are not parsed here but after a statement is fully parsed.
+	/// A expression statement which matches a let-less let statement is then refined into a let
+	/// statement.
+	///
+	/// # Parser State
+	/// Expects `LET` to already be consumed.
 	pub(crate) fn parse_let_stmt(&mut self) -> ParseResult<SetStatement> {
-		let name = self.parse_token_value::<Param>()?.0 .0;
-		expected!(self, "=");
+		let name = self.next_token_value::<Param>()?.0 .0;
+		expected!(self, t!("="));
 		let what = self.parse_value()?;
 		Ok(SetStatement {
 			name,
@@ -421,18 +492,25 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parsers a SHOW statement
+	///
+	/// # Parser State
+	/// Expects `SHOW` to already be consumed.
 	pub(crate) fn parse_show_stmt(&mut self) -> ParseResult<ShowStatement> {
-		expected!(self, "CHANGES");
-		expected!(self, "FOR");
+		expected!(self, t!("CHANGES"));
+		expected!(self, t!("FOR"));
+
 		let table = match self.next().kind {
 			t!("TABLE") => {
-				let table = self.parse_token_value()?;
+				let table = self.next_token_value()?;
 				Some(table)
 			}
 			t!("DATABASE") => None,
 			x => unexpected!(self, x, "`TABLE` or `DATABASE`"),
 		};
-		expected!(self, "SINCE");
+
+		expected!(self, t!("SINCE"));
+
 		let next = self.next();
 		let since = match next.kind {
 			TokenKind::Number(_) => ShowSince::Versionstamp(self.token_value(next)?),
@@ -440,7 +518,7 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "a version stamp or a date-time"),
 		};
 
-		let limit = self.eat(t!("LIMIT")).then(|| self.parse_token_value()).transpose()?;
+		let limit = self.eat(t!("LIMIT")).then(|| self.next_token_value()).transpose()?;
 
 		Ok(ShowStatement {
 			table,
@@ -449,15 +527,23 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parsers a SLEEP statement
+	///
+	/// # Parser State
+	/// Expects `SLEEP` to already be consumed.
 	pub(crate) fn parse_sleep_stmt(&mut self) -> ParseResult<SleepStatement> {
-		let duration = self.parse_token_value()?;
+		let duration = self.next_token_value()?;
 		Ok(SleepStatement {
 			duration,
 		})
 	}
 
+	/// Parsers a THROW statement
+	///
+	/// # Parser State
+	/// Expects `THROW` to already be consumed.
 	pub(crate) fn parse_throw_stmt(&mut self) -> ParseResult<ThrowStatement> {
-		let error = self.parse_value()?;
+		let error = self.parse_value_field()?;
 		Ok(ThrowStatement {
 			error,
 		})

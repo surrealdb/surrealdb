@@ -26,7 +26,7 @@ impl Location {
 		let mut bytes_prior = 0;
 		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
+			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
@@ -47,7 +47,7 @@ impl Location {
 		let mut bytes_prior = 0;
 		for (line_idx, (line, seperator_offset)) in LineIterator::new(source).enumerate() {
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
+			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
@@ -91,12 +91,12 @@ impl Location {
 				panic!("tried to find location of span not belonging to string");
 			};
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > offset {
+			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = line[..line_offset].chars().count();
 				// +1 because line and column are 1 index.
-				if bytes_so_far > end {
+				if bytes_so_far >= end {
 					// end is on the same line, finish immediatly.
 					let line_offset = end - bytes_prior;
 					let end_column = line[..line_offset].chars().count();
@@ -122,7 +122,7 @@ impl Location {
 				panic!("tried to find location of span not belonging to string");
 			};
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far > end {
+			if bytes_so_far >= end {
 				let line_offset = end - bytes_prior;
 				let column = line[..line_offset].chars().count();
 				return start..Self {
@@ -166,11 +166,20 @@ impl<'a> Iterator for LineIterator<'a> {
 					self.current = &self.current[i + 1..];
 					return Some((res, Some(1)));
 				}
-				0xb | 0x85 | 0xC | b'\n' => {
-					// vertical tab VT, next line NEL and form feed FF.
+				0xb | 0xC | b'\n' => {
+					// vertical tab VT and form feed FF.
 					let res = &self.current[..i];
 					self.current = &self.current[i + 1..];
 					return Some((res, Some(1)));
+				}
+				0xc2 => {
+					// next line NEL
+					if bytes.get(i + 1).copied() != Some(0x85) {
+						continue;
+					}
+					let res = &self.current[..i];
+					self.current = &self.current[i + 2..];
+					return Some((res, Some(2)));
 				}
 				0xe2 => {
 					// line separator and paragraph seperator.

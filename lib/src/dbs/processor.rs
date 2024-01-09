@@ -602,7 +602,7 @@ impl<'a> Processor<'a> {
 							let pro = Processed {
 								ir: Some(ir),
 								rid: Some(rid),
-								doc_id: Some(doc_id),
+								doc_id,
 								val,
 							};
 							self.process(ctx, opt, txn, stm, pro).await?;

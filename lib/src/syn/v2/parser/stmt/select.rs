@@ -19,7 +19,7 @@ impl Parser<'_> {
 
 		let omit = self.eat(t!("OMIT")).then(|| self.parse_idiom_list()).transpose()?.map(Idioms);
 
-		expected!(self, "FROM");
+		expected!(self, t!("FROM"));
 
 		let only = self.eat(t!("ONLY"));
 
@@ -76,13 +76,13 @@ impl Parser<'_> {
 		let with = match self.next().kind {
 			t!("NOINDEX") => With::NoIndex,
 			t!("NO") => {
-				expected!(self, "INDEX");
+				expected!(self, t!("INDEX"));
 				With::NoIndex
 			}
 			t!("INDEX") => {
-				let mut index = vec![self.parse_token_value::<Ident>()?.0];
+				let mut index = vec![self.next_token_value::<Ident>()?.0];
 				while self.eat(t!(",")) {
-					index.push(self.parse_token_value::<Ident>()?.0);
+					index.push(self.next_token_value::<Ident>()?.0);
 				}
 				With::Index(index)
 			}
@@ -115,7 +115,7 @@ impl Parser<'_> {
 		let orders = match self.peek_kind() {
 			t!("RAND") => {
 				self.pop_peek();
-				let start = expected!(self, "(").span;
+				let start = expected!(self, t!("(")).span;
 				self.expect_closing_delimiter(t!(")"), start)?;
 				vec![Order {
 					order: Default::default(),
@@ -183,7 +183,7 @@ impl Parser<'_> {
 		if !self.eat(t!("VERSION")) {
 			return Ok(None);
 		}
-		let time = self.parse_token_value()?;
+		let time = self.next_token_value()?;
 		Ok(Some(Version(time)))
 	}
 }

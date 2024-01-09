@@ -38,7 +38,7 @@ impl Parser<'_> {
 	fn parse_object_or_geometry(&mut self, start: Span) -> ParseResult<Value> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
-		expected!(self, ":");
+		expected!(self, t!(":"));
 		// the order of fields of a geometry does not matter so check if it is any of geometry like keys
 		// "type" : could be the type of the object.
 		// "collections": could be a geometry collection.
@@ -110,7 +110,7 @@ impl Parser<'_> {
 								.map(Value::Object);
 						}
 						let coord_key = self.parse_object_key()?;
-						expected!(self, ":");
+						expected!(self, t!(":"));
 						if coord_key != "geometries" {
 							// invalid field key, not a Geometry
 							return self
@@ -210,7 +210,7 @@ impl Parser<'_> {
 				}
 
 				let type_key = self.parse_object_key()?;
-				expected!(self, ":");
+				expected!(self, t!(":"));
 				if type_key != "type" {
 					// not the right field, return object.
 					return self
@@ -312,7 +312,7 @@ impl Parser<'_> {
 					return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
 				}
 				let type_key = self.parse_object_key()?;
-				expected!(self, ":");
+				expected!(self, t!(":"));
 				if type_key != "type" {
 					return self
 						.parse_object_from_key(type_key, BTreeMap::from([(key, value)]), start)
@@ -387,7 +387,7 @@ impl Parser<'_> {
 			return Ok(Value::Object(Object(BTreeMap::from([(key, Value::Strand(strand))]))));
 		}
 		let coord_key = self.parse_object_key()?;
-		expected!(self, ":");
+		expected!(self, t!(":"));
 		if coord_key != "coordinates" {
 			// next field was not correct, fallback to parsing plain object.
 			return self
@@ -580,7 +580,7 @@ impl Parser<'_> {
 	/// 1 }`
 	fn parse_object_entry(&mut self) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
-		expected!(self, ":");
+		expected!(self, t!(":"));
 		let value = self.parse_value_field()?;
 		Ok((text, value))
 	}

@@ -6,6 +6,10 @@ use crate::{
 use super::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser};
 
 impl Parser<'_> {
+	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM baz`.
+	///
+	/// # Parser State
+	/// Expects the next tokens to be of a field set.
 	pub fn parse_fields(&mut self) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
 			let expr = self.parse_value_field()?;
@@ -48,7 +52,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	/// Parses the remaining idiom parts after the start.
+	/// Parses the remaining idiom parts after the start: Any part like `...`, `.foo` and `->foo`
+	///
+	/// This function differes from [`Parser::parse_remaining_value_idiom`] in how it handles graph
+	/// parsing. Graphs inside a plain idioms will remain a normal graph production.
 	pub(crate) fn parse_remaining_idiom(&mut self, start: Vec<Part>) -> ParseResult<Idiom> {
 		let mut res = start;
 		loop {
@@ -93,7 +100,12 @@ impl Parser<'_> {
 		Ok(Idiom(res))
 	}
 
-	/// Parses the remaining idiom parts after the start.
+	/// Parses the remaining idiom parts after the start: Any part like `...`, `.foo` and `->foo`
+	///
+	///
+	/// This function differes from [`Parser::parse_remaining_value_idiom`] in how it handles graph
+	/// parsing. When parsing a idiom like production which can be a value, the initial start value
+	/// might need to be changed to a Edge depending on what is parsed next.
 	pub(crate) fn parse_remaining_value_idiom(&mut self, start: Vec<Part>) -> ParseResult<Value> {
 		let mut res = start;
 		loop {
@@ -144,6 +156,8 @@ impl Parser<'_> {
 		Ok(Value::Idiom(Idiom(res)))
 	}
 
+	/// Parse a graph idiom and possibly rewrite the starting value to be an edge whenever the
+	/// parsed production matches `Thing -> Ident`.
 	fn parse_graph_idiom(&mut self, res: &mut Vec<Part>, dir: Dir) -> ParseResult<Option<Value>> {
 		let graph = self.parse_graph(dir)?;
 		// the production `Thing Graph` is reparsed as an edge if the graph does not contain an
@@ -194,23 +208,24 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Graph(self.parse_graph(Dir::In)?)
 			}
-			_ => Part::Field(self.parse_token_value()?),
+			_ => Part::Field(self.next_token_value()?),
 		};
 		let start = vec![start];
 		self.parse_remaining_idiom(start)
 	}
 
+	/// Parse the part after the `.` in a idiom
 	pub fn parse_dot_part(&mut self) -> ParseResult<Part> {
 		let res = match self.peek_kind() {
 			t!("*") => {
 				self.pop_peek();
 				Part::All
 			}
-			_ => Part::Field(self.parse_token_value()?),
+			_ => Part::Field(self.next_token_value()?),
 		};
 		Ok(res)
 	}
-
+	/// Parse the part after the `[` in a idiom
 	pub fn parse_bracket_part(&mut self, start: Span) -> ParseResult<Part> {
 		let res = match self.peek_kind() {
 			t!("*") => {
@@ -221,13 +236,13 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Last
 			}
-			t!("123") => Part::Index(self.parse_token_value()?),
+			t!("123") => Part::Index(self.next_token_value()?),
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
 				Part::Where(self.parse_value_field()?)
 			}
-			t!("$param") => Part::Value(Value::Param(self.parse_token_value()?)),
-			TokenKind::Strand => Part::Value(Value::Strand(self.parse_token_value()?)),
+			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
+			TokenKind::Strand => Part::Value(Value::Strand(self.next_token_value()?)),
 			_ => {
 				let idiom = self.parse_basic_idiom()?;
 				Part::Value(Value::Idiom(idiom))
@@ -237,6 +252,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	/// Parse a list of basic idioms seperated by a ','
 	pub fn parse_basic_idiom_list(&mut self) -> ParseResult<Vec<Idiom>> {
 		let mut res = vec![self.parse_basic_idiom()?];
 		while self.eat(t!(",")) {
@@ -245,8 +261,12 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	/// Parse a basic idiom.
+	///
+	/// Basic idioms differ from normal idioms in that they are more restrictive.
+	/// Flatten, graphs, conditions and indexing by param is not allowed.
 	pub fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
-		let start = self.parse_token_value::<Ident>()?;
+		let start = self.next_token_value::<Ident>()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -282,8 +302,13 @@ impl Parser<'_> {
 		Ok(Idiom(parts))
 	}
 
+	/// Parse a local idiom.
+	///
+	/// Basic idioms differ from local idioms in that they are more restrictive.
+	/// Only field, all and number indexing is allowed. Flatten is also allowed but only at the
+	/// end.
 	pub fn parse_local_idiom(&mut self) -> ParseResult<Idiom> {
-		let start = self.parse_token_value()?;
+		let start = self.next_token_value()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
@@ -300,7 +325,7 @@ impl Parser<'_> {
 							Part::All
 						}
 						t!("123") => {
-							let number = self.parse_token_value()?;
+							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						x => unexpected!(self, x, "$, * or a number"),
@@ -388,10 +413,10 @@ impl Parser<'_> {
 					x if x.can_be_identifier() => {
 						// The following function should always succeed here,
 						// returning an error here would be a bug, so unwrap.
-						let table = self.parse_token_value().unwrap();
+						let table = self.next_token_value().unwrap();
 						let mut tables = Tables(vec![table]);
 						while self.eat(t!(",")) {
-							tables.0.push(self.parse_token_value()?);
+							tables.0.push(self.next_token_value()?);
 						}
 						tables
 					}
@@ -415,7 +440,7 @@ impl Parser<'_> {
 			x if x.can_be_identifier() => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let table = self.parse_token_value().unwrap();
+				let table = self.next_token_value().unwrap();
 				Ok(Graph {
 					dir,
 					expr: Fields::all(),

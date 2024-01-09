@@ -1869,6 +1869,9 @@ impl Value {
 			// Allow any decimal number
 			Value::Number(v) if v.is_decimal() => Ok(v),
 			// Attempt to convert an int number
+			// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
+			// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
+			#[allow(warnings)]
 			Value::Number(Number::Int(ref v)) => match Decimal::try_from(*v) {
 				// The Int can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
@@ -2314,8 +2317,10 @@ impl Value {
 			Value::Duration(_) => true,
 			Value::Datetime(_) => true,
 			Value::Geometry(_) => true,
-			Value::Array(v) => v.iter().all(Value::is_static),
-			Value::Object(v) => v.values().all(Value::is_static),
+			Value::Array(v) => v.is_static(),
+			Value::Object(v) => v.is_static(),
+			Value::Expression(v) => v.is_static(),
+			Value::Function(v) => v.is_static(),
 			Value::Constant(_) => true,
 			_ => false,
 		}

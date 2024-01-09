@@ -15,7 +15,6 @@ impl<'a> Lexer<'a> {
 			};
 			match byte {
 				byte::CR => {
-					self.reader.peek();
 					self.eat(byte::LF);
 					break;
 				}
@@ -35,7 +34,7 @@ impl<'a> Lexer<'a> {
 					};
 
 					match char {
-						chars::LS | chars::PS => break,
+						chars::LS | chars::PS | chars::NEL => break,
 						_ => {}
 					}
 				}

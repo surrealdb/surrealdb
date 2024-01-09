@@ -65,6 +65,7 @@ impl Parser<'_> {
 		Ok(Some(res))
 	}
 
+	/// Parses a statement output if the next token is `return`.
 	pub fn try_parse_output(&mut self) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
@@ -95,11 +96,12 @@ impl Parser<'_> {
 		Ok(Some(res))
 	}
 
+	/// Parses a statement timeout if the next token is `TIMEOUT`.
 	pub fn try_parse_timeout(&mut self) -> ParseResult<Option<Timeout>> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(None);
 		}
-		let duration = self.parse_token_value()?;
+		let duration = self.next_token_value()?;
 		Ok(Some(Timeout(duration)))
 	}
 
@@ -254,7 +256,7 @@ impl Parser<'_> {
 				if !scope_allowed {
 					unexpected!(self, t!("SCOPE"), "a scope is not allowed here");
 				}
-				let name = self.parse_token_value()?;
+				let name = self.next_token_value()?;
 				Ok(Base::Sc(name))
 			}
 			x => {
@@ -272,7 +274,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
-		let expiry = self.parse_token_value::<Duration>()?.0;
+		let expiry = self.next_token_value::<Duration>()?.0;
 		Ok(ChangeFeed {
 			expiry,
 		})
@@ -284,12 +286,12 @@ impl Parser<'_> {
 	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
 	/// parens. Expects the next keyword to be `SELECT`.
 	pub fn parse_view(&mut self) -> ParseResult<View> {
-		expected!(self, "SELECT");
+		expected!(self, t!("SELECT"));
 		let fields = self.parse_fields()?;
-		expected!(self, "FROM");
-		let mut from = vec![self.parse_token_value()?];
+		expected!(self, t!("FROM"));
+		let mut from = vec![self.next_token_value()?];
 		while self.eat(t!(",")) {
-			from.push(self.parse_token_value()?);
+			from.push(self.next_token_value()?);
 		}
 
 		let cond = self.try_parse_condition()?;
@@ -314,7 +316,7 @@ impl Parser<'_> {
 				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Hamming => Distance::Hamming,
 				DistanceKind::Minkowski => {
-					let distance = self.parse_token_value()?;
+					let distance = self.next_token_value()?;
 					Distance::Minkowski(distance)
 				}
 			},
@@ -325,13 +327,12 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
-		expected!(self, "fn");
-		expected!(self, "::");
-		let mut name = self.parse_token_value::<Ident>()?;
+		expected!(self, t!("fn"));
+		expected!(self, t!("::"));
+		let mut name = self.next_token_value::<Ident>()?;
 		while self.eat(t!("::")) {
-			let part = self.parse_token_value::<Ident>()?;
-			name.0.push(':');
-			name.0.push(':');
+			let part = self.next_token_value::<Ident>()?;
+			name.0.push_str("::");
 			name.0.push_str(part.0.as_str());
 		}
 		Ok(name)

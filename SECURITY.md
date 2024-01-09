@@ -16,7 +16,7 @@ reports and do our best to quickly fix the problem.
 Please report any issues or vulnerabilities via [Github Security
 Advisories](https://github.com/surrealdb/surrealdb/security/advisories) instead of posting a public issue in GitHub.
 You can also send security communications to [security@surrealdb.com](mailto:security@surrealdb.com). Please include the
-version identifier obtained by running `surrealdb version` on the command line and details on how the vulnerability
+version identifier obtained by running `surreal version` on the command line and details on how the vulnerability
 can be exploited.
 
 ### Do

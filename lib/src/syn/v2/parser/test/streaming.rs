@@ -58,6 +58,7 @@ static SOURCE: &str = r#"
 			DOC_IDS_CACHE 5
 			DOC_LENGTHS_CACHE 6
 			POSTINGS_CACHE 7
+			TERMS_CACHE 8
 			HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
 	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9;
@@ -286,9 +287,10 @@ fn statements() -> Vec<Statement> {
 				doc_lengths_order: 2,
 				postings_order: 3,
 				terms_order: 4,
-				doc_ids_cache: 5
-				doc_lengths_cache: 6
-				postings_cache: 7
+				doc_ids_cache: 5,
+				doc_lengths_cache: 6,
+				postings_cache: 7,
+				terms_cache: 8,
 			}),
 			comment: None,
 		})),

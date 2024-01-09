@@ -149,7 +149,10 @@ impl fmt::Display for Snippet {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		// extra spacing for the line number
 		let spacing = self.location.line.ilog10() as usize + 1;
-		writeln!(f, "{:>spacing$} |", "")?;
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
+		f.write_str(" |\n")?;
 		write!(f, "{:>spacing$} | ", self.location.line)?;
 		match self.truncation {
 			Truncation::None => {
@@ -172,7 +175,13 @@ impl fmt::Display for Snippet {
 			} else {
 				0
 			};
-		write!(f, "{:>spacing$} |{:>error_offset$} ", "", "",)?;
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
+		f.write_str(" | ")?;
+		for _ in 0..error_offset {
+			f.write_str(" ")?;
+		}
 		for _ in 0..self.length {
 			write!(f, "^")?;
 		}
@@ -186,7 +195,7 @@ impl fmt::Display for Snippet {
 
 #[cfg(test)]
 mod test {
-	use super::{Snippet, Truncation};
+	use super::{RenderedError, Snippet, Truncation};
 	use crate::syn::common::Location;
 
 	#[test]
@@ -249,5 +258,31 @@ mod test {
 			snippet.source.as_str(),
 			"aaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		);
+	}
+
+	#[test]
+	fn render() {
+		let error = RenderedError {
+			text: "some_error".to_string(),
+			snippets: vec![Snippet {
+				source: "hallo error".to_owned(),
+				truncation: Truncation::Both,
+				location: Location {
+					line: 4,
+					column: 10,
+				},
+				offset: 6,
+				length: 5,
+				explain: Some("this is wrong".to_owned()),
+			}],
+		};
+
+		let error_string = format!("{}", error);
+		let expected = r#"some_error
+  |
+4 | ...hallo error...
+  |          ^^^^^ this is wrong
+"#;
+		assert_eq!(error_string, expected)
 	}
 }

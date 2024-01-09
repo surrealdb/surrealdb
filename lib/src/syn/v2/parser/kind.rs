@@ -19,6 +19,7 @@ impl Parser<'_> {
 		Ok(kind)
 	}
 
+	/// Parse an inner kind, a kind without enclosing `<` `>`.
 	pub fn parse_inner_kind(&mut self) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
@@ -27,7 +28,8 @@ impl Parser<'_> {
 			}
 			t!("OPTION") => {
 				self.pop_peek();
-				let delim = expected!(self, "<").span;
+
+				let delim = expected!(self, t!("<")).span;
 				let mut first = self.parse_concrete_kind()?;
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
@@ -54,6 +56,7 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parse a single kind which is not any, option, or either.
 	fn parse_concrete_kind(&mut self) -> ParseResult<Kind> {
 		match self.next().kind {
 			t!("BOOL") => Ok(Kind::Bool),
@@ -73,18 +76,18 @@ impl Parser<'_> {
 				let tables = match self.peek_kind() {
 					t!("<") => {
 						let next = self.next();
-						let mut tables = vec![self.parse_token_value()?];
+						let mut tables = vec![self.next_token_value()?];
 						while self.eat(t!("|")) {
-							tables.push(self.parse_token_value()?);
+							tables.push(self.next_token_value()?);
 						}
 						self.expect_closing_delimiter(t!(">"), next.span)?;
 						tables
 					}
 					t!("(") => {
 						let next = self.next();
-						let mut tables = vec![self.parse_token_value()?];
+						let mut tables = vec![self.next_token_value()?];
 						while self.eat(t!(",")) {
-							tables.push(self.parse_token_value()?);
+							tables.push(self.next_token_value()?);
 						}
 						self.expect_closing_delimiter(t!(")"), next.span)?;
 						tables
@@ -104,6 +107,7 @@ impl Parser<'_> {
 						self.expect_closing_delimiter(t!(">"), delim)?;
 						kind
 					}
+					// Legacy gemoetry kind syntax with parens instead of `<` `>`.
 					t!("(") => {
 						let delim = self.pop_peek().span;
 						let mut kind = vec![self.parse_geometry_kind()?];
@@ -129,7 +133,7 @@ impl Parser<'_> {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
 					let kind = self.parse_inner_kind()?;
-					let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
+					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Array(Box::new(kind), size))
 				} else {
@@ -140,7 +144,7 @@ impl Parser<'_> {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
 					let kind = self.parse_inner_kind()?;
-					let size = self.eat(t!(",")).then(|| self.parse_token_value()).transpose()?;
+					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Set(Box::new(kind), size))
 				} else {
@@ -151,6 +155,7 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parse the kind of gemoetry
 	fn parse_geometry_kind(&mut self) -> ParseResult<String> {
 		match self.next().kind {
 			TokenKind::Keyword(

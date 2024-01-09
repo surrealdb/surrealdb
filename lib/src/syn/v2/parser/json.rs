@@ -44,7 +44,7 @@ impl Parser<'_> {
 				return Ok(Object(obj));
 			}
 			let key = self.parse_object_key()?;
-			expected!(self, ":");
+			expected!(self, t!(":"));
 			let value = self.parse_json()?;
 			obj.insert(key, value);
 
