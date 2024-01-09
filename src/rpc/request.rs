@@ -1,10 +1,7 @@
-use axum::extract::ws::Message;
-use surrealdb::sql::{serde::deserialize, Array, Value};
-
+use crate::rpc::failure::Failure;
 use once_cell::sync::Lazy;
 use surrealdb::sql::Part;
-
-use super::response::{Failure, OutputFormat};
+use surrealdb::sql::{Array, Value};
 
 pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 pub static METHOD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("method")]);
@@ -14,8 +11,6 @@ pub struct Request {
 	pub id: Option<Value>,
 	pub method: String,
 	pub params: Array,
-	pub size: usize,
-	pub out_fmt: Option<OutputFormat>,
 }
 
 impl TryFrom<Value> for Request {
