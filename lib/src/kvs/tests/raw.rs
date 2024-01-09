@@ -1,5 +1,4 @@
 use crate::key::error::KeyCategory::Unknown;
-use crate::kvs::Limit;
 
 #[tokio::test]
 #[serial]
@@ -259,16 +258,9 @@ async fn scan_paged() {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx
-		.scan_paged(
-			ScanPage {
-				range: "test1".."test9",
-				limit: Limit::Unlimited,
-			},
-			u32::MAX,
-		)
-		.await
-		.unwrap();
+	let val =
+		tx.scan_paged(ScanPage::from("test1".into().."test9".into()), u32::MAX).await.unwrap();
+	let val = val.values;
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test1");
 	assert_eq!(val[0].1, b"1");
@@ -283,16 +275,9 @@ async fn scan_paged() {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx
-		.scan_paged(
-			ScanPage {
-				range: "test2".."test4",
-				limit: Limit::Unlimited,
-			},
-			u32::MAX,
-		)
-		.await
-		.unwrap();
+	let val =
+		tx.scan_paged(ScanPage::from("test2".into().."test4".into()), u32::MAX).await.unwrap();
+	let val = val.values;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");
 	assert_eq!(val[0].1, b"2");
@@ -301,16 +286,8 @@ async fn scan_paged() {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx
-		.scan_paged(
-			ScanPage {
-				range: "test1".."test9",
-				limit: Limit::Unlimited,
-			},
-			u32::MAX,
-		)
-		.await
-		.unwrap();
+	let val = tx.scan_paged(ScanPage::from("test1".into().."test9".into()), 2).await.unwrap();
+	let val = val.values;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test1");
 	assert_eq!(val[0].1, b"1");
