@@ -19,6 +19,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -45,6 +46,7 @@ impl Display for Idioms {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {

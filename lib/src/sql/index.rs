@@ -7,6 +7,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Index {
 	/// (Basic) non unique
@@ -21,6 +22,7 @@ pub enum Index {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
 pub struct SearchParams {
 	pub az: Ident,
@@ -41,6 +43,7 @@ pub struct SearchParams {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
 pub struct MTreeParams {
 	pub dimension: u16,
@@ -55,6 +58,7 @@ pub struct MTreeParams {
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Distance {
 	#[default]
@@ -76,6 +80,7 @@ impl Display for Distance {
 }
 
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum VectorType {
 	#[default]

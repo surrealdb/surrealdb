@@ -46,6 +46,7 @@ impl Iterator for IntoIter {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Mock")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),
