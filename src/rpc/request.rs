@@ -1,6 +1,4 @@
 use crate::rpc::failure::Failure;
-use crate::rpc::format::cbor::Cbor;
-use crate::rpc::format::msgpack::Pack;
 use once_cell::sync::Lazy;
 use surrealdb::sql::Part;
 use surrealdb::sql::{Array, Value};
@@ -13,20 +11,6 @@ pub struct Request {
 	pub id: Option<Value>,
 	pub method: String,
 	pub params: Array,
-}
-
-impl TryFrom<Cbor> for Request {
-	type Error = Failure;
-	fn try_from(val: Cbor) -> Result<Self, Failure> {
-		<Cbor as TryInto<Value>>::try_into(val).map_err(|_| Failure::INVALID_REQUEST)?.try_into()
-	}
-}
-
-impl TryFrom<Pack> for Request {
-	type Error = Failure;
-	fn try_from(val: Pack) -> Result<Self, Failure> {
-		<Pack as TryInto<Value>>::try_into(val).map_err(|_| Failure::INVALID_REQUEST)?.try_into()
-	}
 }
 
 impl TryFrom<Value> for Request {
