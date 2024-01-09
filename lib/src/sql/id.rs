@@ -7,6 +7,7 @@ use crate::sql::{escape::escape_rid, Array, Number, Object, Strand, Thing, Uuid,
 use nanoid::nanoid;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use ulid::Ulid;
 
@@ -103,6 +104,12 @@ impl From<Vec<String>> for Id {
 impl From<Vec<Value>> for Id {
 	fn from(v: Vec<Value>) -> Self {
 		Id::Array(v.into())
+	}
+}
+
+impl From<BTreeMap<String, Value>> for Id {
+	fn from(v: BTreeMap<String, Value>) -> Self {
+		Id::Object(v.into())
 	}
 }
 
