@@ -4446,6 +4446,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmpv"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e0e0214a4a2b444ecce41a4025792fc31f77c7bb89c46d253953ea8c65701ec"
+dependencies = [
+ "num-traits",
+ "rmp",
+]
+
+[[package]]
 name = "roaring"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4814,16 +4824,6 @@ version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab33ec92f677585af6d88c65593ae2375adde54efdbf16d597f2cbc7a6d368ff"
 dependencies = [
- "serde",
-]
-
-[[package]]
-name = "serde_cbor"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
-dependencies = [
- "half",
  "serde",
 ]
 
@@ -5235,6 +5235,7 @@ dependencies = [
  "axum-server",
  "base64 0.21.5",
  "bytes",
+ "ciborium",
  "clap",
  "env_logger",
  "futures",
@@ -5257,10 +5258,10 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rmp-serde",
+ "rmpv",
  "rustyline",
  "semver",
  "serde",
- "serde_cbor",
  "serde_json",
  "serial_test",
  "surrealdb",
