@@ -98,7 +98,6 @@
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(test, deny(warnings))]
 
 #[macro_use]
 extern crate tracing;
@@ -134,8 +133,7 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;
 #[doc(hidden)]

@@ -755,6 +755,14 @@ pub enum Error {
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
 
+	/// Auth requires a token header which is missing
+	#[error("Auth token is missing the '{0}' header")]
+	MissingTokenHeader(String),
+
+	/// Auth requires a token claim which is missing
+	#[error("Auth token is missing the '{0}' claim")]
+	MissingTokenClaim(String),
+
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),
@@ -850,7 +858,7 @@ impl<T> From<channel::SendError<T>> for Error {
 	}
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "jwks"))]
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())

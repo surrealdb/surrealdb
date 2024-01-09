@@ -14,6 +14,8 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::clock::SystemClock;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*, NO_LIMIT};
 use crate::opt::auth::Root;
+#[cfg(feature = "jwks")]
+use crate::opt::capabilities::NetTarget;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::Oracle;
@@ -420,6 +422,12 @@ impl Datastore {
 	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
 	pub fn is_auth_level_enabled(&self) -> bool {
 		self.auth_level_enabled
+	}
+
+	/// Does the datastore allow connections to a network target?
+	#[cfg(feature = "jwks")]
+	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
+		self.capabilities.allows_network_target(net_target)
 	}
 
 	/// Setup the initial credentials
