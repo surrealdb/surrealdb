@@ -1258,8 +1258,8 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-
-			let _: serde_cbor::Value = serde_cbor::from_slice(&res.bytes().await?).unwrap();
+			let res = res.bytes().await?.to_vec();
+			let _: ciborium::Value = ciborium::from_reader(res.as_slice()).unwrap();
 		}
 
 		// Creating a record with Accept PACK encoding is allowed
@@ -1272,8 +1272,8 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-
-			let _: serde_cbor::Value = serde_pack::from_slice(&res.bytes().await?).unwrap();
+			let res = res.bytes().await?.to_vec();
+			let _: rmpv::Value = rmpv::decode::read_value(&mut res.as_slice()).unwrap();
 		}
 
 		// Creating a record with Accept Surrealdb encoding is allowed
