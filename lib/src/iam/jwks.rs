@@ -14,11 +14,11 @@ use std::str::FromStr;
 static CACHE_EXPIRATION: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(1));
 #[cfg(not(test))]
 static CACHE_EXPIRATION: Lazy<chrono::Duration> =
-	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_EXPIRATION") {
+	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_EXPIRATION_SECONDS") {
 		Ok(seconds_str) => {
 			let seconds = seconds_str
 				.parse::<u64>()
-				.expect("Expected a valid number of seconds for SURREAL_JWKS_CACHE_EXPIRATION");
+				.expect("Expected a valid number of seconds for SURREAL_JWKS_CACHE_EXPIRATION_SECONDS");
 			Duration::seconds(seconds as i64)
 		}
 		Err(_) => {
@@ -30,11 +30,11 @@ static CACHE_EXPIRATION: Lazy<chrono::Duration> =
 static CACHE_COOLDOWN: Lazy<chrono::Duration> = Lazy::new(|| Duration::seconds(300));
 #[cfg(not(test))]
 static CACHE_COOLDOWN: Lazy<chrono::Duration> =
-	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN") {
+	Lazy::new(|| match std::env::var("SURREAL_JWKS_CACHE_COOLDOWN_SECONDS") {
 		Ok(seconds_str) => {
 			let seconds = seconds_str
 				.parse::<u64>()
-				.expect("Expected a valid number of seconds for SURREAL_JWKS_CACHE_COOLDOWN");
+				.expect("Expected a valid number of seconds for SURREAL_JWKS_CACHE_COOLDOWN_SECONDS");
 			Duration::seconds(seconds as i64)
 		}
 		Err(_) => {
@@ -43,11 +43,11 @@ static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 	});
 
 static REMOTE_TIMEOUT: Lazy<chrono::Duration> =
-	Lazy::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT") {
+	Lazy::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
 		Ok(milliseconds_str) => {
 			let milliseconds = milliseconds_str
 				.parse::<u64>()
-				.expect("Expected a valid number of milliseconds for SURREAL_JWKS_REMOTE_TIMEOUT");
+				.expect("Expected a valid number of milliseconds for SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS");
 			Duration::milliseconds(milliseconds as i64)
 		}
 		Err(_) => {
