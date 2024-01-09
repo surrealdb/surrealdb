@@ -223,11 +223,11 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
 		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, current.node_id()).await?;
+			let node = store.get_node(tx, current.id()).await?;
 			#[cfg(debug_assertions)]
 			{
-				debug!("Visit node id: {} - dist: {}", current.node_id(), current.dist());
-				if visited_nodes.insert(current.node_id(), node.n.len()).is_some() {
+				debug!("Visit node id: {} - dist: {}", current.id(), current.dist());
+				if visited_nodes.insert(current.id(), node.n.len()).is_some() {
 					return Err(Error::Unreachable("MTree::knn_search"));
 				}
 			}
