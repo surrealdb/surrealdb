@@ -139,10 +139,10 @@ impl Display for DefineTableStatement {
 		if let TableType::Relation(rel) = &self.table_type {
 			f.write_str(" RELATION")?;
 			if let Some(kind) = &rel.from {
-				write!(f, " FROM {}", get_tables_from_kind(kind))?;
+				write!(f, " IN {}", get_tables_from_kind(kind))?;
 			}
 			if let Some(kind) = &rel.to {
-				write!(f, " TO {}", get_tables_from_kind(kind))?;
+				write!(f, " OUT {}", get_tables_from_kind(kind))?;
 			}
 		}
 		f.write_str(if self.full {
