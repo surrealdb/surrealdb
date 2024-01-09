@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
 use crate::{
 	sql::{Block, Geometry, Object, Strand, Value},

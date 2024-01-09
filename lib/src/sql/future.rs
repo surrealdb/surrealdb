@@ -13,6 +13,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Future")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Future(pub Block);
 
 impl From<Value> for Future {
