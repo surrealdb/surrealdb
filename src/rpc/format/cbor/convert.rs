@@ -176,7 +176,7 @@ impl TryFrom<Value> for Cbor {
 				])),
 			))),
 			// We shouldn't reach here
-			_ => Ok(Cbor(Data::Null)),
+			_ => unreachable!(),
 		}
 	}
 }
