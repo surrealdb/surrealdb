@@ -6,6 +6,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
@@ -23,7 +24,11 @@ impl Iterable {
 		ite: &mut Iterator,
 		dis: Option<&mut SyncDistinct>,
 	) -> Result<(), Error> {
-		Processor::Iterator(dis, ite).process_iterable(ctx, opt, txn, stm, self).await
+		if self.iteration_stage_check(ctx) {
+			Processor::Iterator(dis, ite).process_iterable(ctx, opt, txn, stm, self).await
+		} else {
+			Ok(())
+		}
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
@@ -36,7 +41,27 @@ impl Iterable {
 		chn: Sender<Processed>,
 		dis: Option<AsyncDistinct>,
 	) -> Result<(), Error> {
-		Processor::Channel(dis, chn).process_iterable(ctx, opt, txn, stm, self).await
+		if self.iteration_stage_check(ctx) {
+			Processor::Channel(dis, chn).process_iterable(ctx, opt, txn, stm, self).await
+		} else {
+			Ok(())
+		}
+	}
+
+	fn iteration_stage_check(&self, ctx: &Context<'_>) -> bool {
+		match self {
+			Iterable::Table(tb) | Iterable::Index(tb, _) => {
+				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
+					if let Some(qp) = ctx.get_query_planner() {
+						if let Some(exe) = qp.get_query_executor(tb) {
+							return exe.has_knn();
+						}
+					}
+				}
+			}
+			_ => {}
+		}
+		true
 	}
 }
 
@@ -94,10 +119,32 @@ impl<'a> Processor<'a> {
 				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v).await?,
 				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v).await?,
 				Iterable::Defer(v) => self.process_defer(ctx, opt, txn, stm, v).await?,
-				Iterable::Table(v) => self.process_table(ctx, opt, txn, stm, v).await?,
+				Iterable::Table(v) => {
+					if let Some(qp) = ctx.get_query_planner() {
+						if let Some(exe) = qp.get_query_executor(&v.0) {
+							// We set the query executor matching the current table in the Context
+							// Avoiding search in the hashmap of the query planner for each doc
+							let mut ctx = Context::new(ctx);
+							ctx.set_query_executor(exe.clone());
+							return self.process_table(&ctx, opt, txn, stm, v).await;
+						}
+					}
+					self.process_table(ctx, opt, txn, stm, v).await?
+				}
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
-				Iterable::Index(t, ir) => self.process_index(ctx, opt, txn, stm, t, ir).await?,
+				Iterable::Index(t, ir) => {
+					if let Some(qp) = ctx.get_query_planner() {
+						if let Some(exe) = qp.get_query_executor(&t.0) {
+							// We set the query executor matching the current table in the Context
+							// Avoiding search in the hashmap of the query planner for each doc
+							let mut ctx = Context::new(ctx);
+							ctx.set_query_executor(exe.clone());
+							return self.process_index(&ctx, opt, txn, stm, t, ir).await;
+						}
+					}
+					self.process_index(ctx, opt, txn, stm, t, ir).await?
+				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
 				}
@@ -568,52 +615,50 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
-		if let Some(pla) = ctx.get_query_planner() {
-			if let Some(exe) = pla.get_query_executor(&table.0) {
-				if let Some(mut iterator) = exe.new_iterator(opt, ir).await? {
-					let mut things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
-					while !things.is_empty() {
-						// Check if the context is finished
+		if let Some(exe) = ctx.get_query_executor() {
+			if let Some(mut iterator) = exe.new_iterator(opt, ir).await? {
+				let mut things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
+				while !things.is_empty() {
+					// Check if the context is finished
+					if ctx.is_done() {
+						break;
+					}
+
+					for (thing, doc_id) in things {
+						// Check the context
 						if ctx.is_done() {
 							break;
 						}
 
-						for (thing, doc_id) in things {
-							// Check the context
-							if ctx.is_done() {
-								break;
-							}
-
-							// If the record is from another table we can skip
-							if !thing.tb.eq(table.as_str()) {
-								continue;
-							}
-
-							// Fetch the data from the store
-							let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
-							let val = txn.lock().await.get(key.clone()).await?;
-							let rid = Thing::from((key.tb, key.id));
-							// Parse the data from the store
-							let val = Operable::Value(match val {
-								Some(v) => Value::from(v),
-								None => Value::None,
-							});
-							// Process the document record
-							let pro = Processed {
-								ir: Some(ir),
-								rid: Some(rid),
-								doc_id,
-								val,
-							};
-							self.process(ctx, opt, txn, stm, pro).await?;
+						// If the record is from another table we can skip
+						if !thing.tb.eq(table.as_str()) {
+							continue;
 						}
 
-						// Collect the next batch of ids
-						things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
+						// Fetch the data from the store
+						let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
+						let val = txn.lock().await.get(key.clone()).await?;
+						let rid = Thing::from((key.tb, key.id));
+						// Parse the data from the store
+						let val = Operable::Value(match val {
+							Some(v) => Value::from(v),
+							None => Value::None,
+						});
+						// Process the document record
+						let pro = Processed {
+							ir: Some(ir),
+							rid: Some(rid),
+							doc_id,
+							val,
+						};
+						self.process(ctx, opt, txn, stm, pro).await?;
 					}
-					// Everything ok
-					return Ok(());
+
+					// Collect the next batch of ids
+					things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
 				}
+				// Everything ok
+				return Ok(());
 			}
 		}
 		Err(Error::QueryNotExecutedDetail {
