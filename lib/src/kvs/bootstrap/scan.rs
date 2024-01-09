@@ -63,6 +63,7 @@ pub(crate) async fn scan_node_live_queries(
 			tx.commit().await
 		}
 		Err(_recv_error) => {
+			println!("Failed receiving tx in scan node live queries");
 			// TODO wrap
 			Err(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)))
 		}

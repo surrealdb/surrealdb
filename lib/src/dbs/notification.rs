@@ -6,7 +6,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::dbs::node::Timestamp;
-use crate::sql::{Uuid, Value};
+use crate::sql::{Object, Uuid, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "UPPERCASE")]
@@ -15,6 +15,16 @@ pub enum KvsAction {
 	Create,
 	Update,
 	Delete,
+}
+
+impl Display for KvsAction {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match *self {
+			KvsAction::Create => write!(f, "CREATE"),
+			KvsAction::Update => write!(f, "UPDATE"),
+			KvsAction::Delete => write!(f, "DELETE"),
+		}
+	}
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Store, Hash)]
@@ -33,6 +43,21 @@ pub struct KvsNotification {
 	pub result: Value,
 	// The system-clock timestamp used for non-deterministic ordering
 	pub timestamp: Timestamp,
+}
+
+impl Display for KvsNotification {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let obj: Object = map! {
+			"live_id".to_string() => self.live_id.to_string().into(),
+			"node_id".to_string() => self.node_id.to_string().into(),
+			"notification_id".to_string() => self.notification_id.to_string().into(),
+			"action".to_string() => self.action.to_string().into(),
+			"result".to_string() => self.result.clone(),
+			"timestamp".to_string() => self.timestamp.to_string().into(),
+		}
+		.into();
+		write!(f, "{}", obj)
+	}
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -59,6 +84,17 @@ pub struct Notification {
 	pub id: Uuid,
 	pub action: Action,
 	pub result: Value,
+}
+impl Display for Notification {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let obj: Object = map! {
+			"id".to_string() => self.id.to_string().into(),
+			"action".to_string() => self.action.to_string().into(),
+			"result".to_string() => self.result.clone(),
+		}
+		.into();
+		write!(f, "{}", obj)
+	}
 }
 
 impl From<&KvsNotification> for Notification {

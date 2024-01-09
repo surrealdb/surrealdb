@@ -27,6 +27,7 @@ pub(crate) async fn archive_live_queries(
 	loop {
 		match tokio::time::timeout(*batch_latency, scan_recv.recv()).await {
 			Ok(Some(bor)) => {
+				println!("In archive, got an operation result");
 				if bor.1.is_some() {
 					// send any errors further on, because we don't need to process them
 					// unless we can handle them. Currently we can't.
@@ -51,6 +52,7 @@ pub(crate) async fn archive_live_queries(
 				}
 			}
 			Ok(None) => {
+				println!("In archive, channel presumed closed");
 				// Channel closed, process whatever is remaining
 				match archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await {
 					Ok(results) => {
@@ -67,6 +69,7 @@ pub(crate) async fn archive_live_queries(
 				}
 			}
 			Err(_elapsed) => {
+				println!("Timedout in archive waiting for scan event receive");
 				// Timeout expired
 				let results = archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
 				for boresult in results {
@@ -112,6 +115,7 @@ async fn archive_live_query_batch(
 		}
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
+				println!("Received tx in archive");
 				trace!("Received tx in archive");
 				// In case this is a retry, we re-hydrate the msg vector
 				// Consume the input message vector of live queries to archive
@@ -142,9 +146,12 @@ async fn archive_live_query_batch(
 					}
 				}
 				// TODO where can the above transaction hard fail? Every op needs rollback?
+				println!("Archive task committing transaction");
 				if let Err(e) = tx.commit().await {
+					println!("An error: {}", e);
 					last_err = Some(e);
 					if let Err(e) = tx.cancel().await {
+						println!("Another error: {}", e);
 						// TODO wrap?
 						last_err = Some(e);
 					}

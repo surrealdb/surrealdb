@@ -586,11 +586,13 @@ impl Datastore {
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
 		loop {
-			if let Err(_elapsed) =
-				timeout(Duration::from_millis(BOOTSTRAP_BATCH_LATENCY.as_millis() as u64), async {
+			if let Err(_elapsed) = timeout(
+				Duration::from_millis((BOOTSTRAP_BATCH_LATENCY.as_millis() * 100) as u64),
+				async {
 					match tx_req_recv.recv().await {
 						None => {
 							// closed
+							println!("Transaction request channel closed, forcing timeout");
 							trace!("Transaction request channel closed, forcing timeout");
 							sleep(
 								Duration::from_millis(BOOTSTRAP_BATCH_LATENCY.as_millis() as u64),
@@ -598,23 +600,28 @@ impl Datastore {
 							.await;
 						}
 						Some(sender) => {
+							println!("Received a transaction request");
 							trace!("Received a transaction request");
 							let tx = self.transaction(Write, Optimistic).await.unwrap();
 							if let Err(mut tx) = sender.send(tx) {
 								// The receiver has been dropped, so we need to cancel the transaction
+								println!("Unable to send a transaction as response to task because the receiver is closed");
 								trace!("Unable to send a transaction as response to task because the receiver is closed");
 								tx.cancel().await.unwrap();
 							}
 						}
 					}
-				})
-				.await
+				},
+			)
+			.await
 			{
+				println!("Timed out waiting for transaction requests. Breaking tx request loop");
 				trace!("Timed out waiting for transaction requests. Breaking tx request loop");
 				break;
 			}
 		}
-		trace!("Finished handling requests");
+		println!("Finished handling requests");
+		trace!("Finished handling requests",);
 
 		// Now run everything together and return any errors that arent captured per record
 		trace!("Joining bootstrap tasks");
@@ -655,6 +662,7 @@ impl Datastore {
 				})
 				.err())
 		{
+			println!("Error in bootstrap join tasks: {:?}", err);
 			return Err(err);
 		}
 		Ok(())

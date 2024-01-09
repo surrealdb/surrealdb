@@ -24,6 +24,7 @@ pub(crate) async fn delete_live_queries(
 		println!("Delete loop!");
 		match tokio::time::timeout(ds::BOOTSTRAP_BATCH_LATENCY, archived_recv.recv()).await {
 			Ok(Some(bor)) => {
+				println!("In delete, got an operation result");
 				if bor.1.is_some() {
 					sender
 						.send(bor)
@@ -44,6 +45,7 @@ pub(crate) async fn delete_live_queries(
 				}
 			}
 			Ok(None) => {
+				println!("Channel closed in delete live queries");
 				// Channel closed, process whatever is remaining
 				let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
 				for boresult in results {
@@ -55,6 +57,7 @@ pub(crate) async fn delete_live_queries(
 				break;
 			}
 			Err(_elapsed) => {
+				println!("Timeout in delete live queries");
 				// Timeout expired
 				let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
 				for boresult in results {
