@@ -75,7 +75,7 @@ impl TryFrom<Strand> for Thing {
 impl TryFrom<&str> for Thing {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::thing_raw(v) {
+		match syn::thing(v) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}

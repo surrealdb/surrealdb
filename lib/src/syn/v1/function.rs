@@ -189,7 +189,7 @@ mod tests {
 	use super::super::builtin::{builtin_name, BuiltinName};
 	use super::*;
 	use crate::sql::Value;
-	use crate::syn::{self, test::Parse};
+	use crate::syn::{self, Parse};
 
 	fn function(i: &str) -> IResult<&str, Function> {
 		alt((defined_function, |i| {

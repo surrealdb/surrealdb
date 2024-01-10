@@ -25,6 +25,14 @@ mod tx;
 
 mod clock;
 #[cfg(test)]
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-rocksdb",
+	feature = "kv-speedb",
+	feature = "kv-indxdb",
+	feature = "kv-tikv",
+	feature = "kv-fdb"
+))]
 mod tests;
 
 pub use self::ds::*;

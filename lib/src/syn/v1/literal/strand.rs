@@ -163,7 +163,7 @@ fn char_unicode_bracketed(i: &str) -> IResult<&str, char> {
 #[cfg(test)]
 mod tests {
 
-	use crate::{sql::Value, syn::test::Parse};
+	use crate::{sql::Value, syn::Parse};
 
 	use super::*;
 

@@ -87,7 +87,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::idiom::Idiom;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn put_none() {

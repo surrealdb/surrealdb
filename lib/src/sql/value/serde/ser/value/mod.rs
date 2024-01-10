@@ -692,7 +692,7 @@ mod tests {
 	#[test]
 	fn duration() {
 		let duration = Duration::default();
-		let value = to_value(&duration).unwrap();
+		let value = to_value(duration).unwrap();
 		let expected = Value::Duration(duration);
 		assert_eq!(value, expected);
 		assert_eq!(expected, to_value(&expected).unwrap());

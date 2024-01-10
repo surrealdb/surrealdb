@@ -180,7 +180,7 @@ jobs:
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
-      
+
       - name: Debug info
         if: always()
         run: |
@@ -189,7 +189,7 @@ jobs:
           df -h
           ps auxf
           cat /tmp/surrealdb.log || true
-          
+
 
   http-server:
     name: HTTP integration tests
@@ -325,6 +325,45 @@ jobs:
           name: code-coverage-report
           path: target/llvm-cov/html/
           retention-days: 5
+
+  test-parser:
+    name: Test workspace with experimental parser
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.71.1
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Free up some disk space
+        run: |
+          (set -x; df -h)
+          # Free up some disk space by removing unused files
+          (set -x; sudo rm -rf /imagegeneration || true)
+          (set -x; sudo rm -rf /opt/az || true)
+          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
+          (set -x; sudo rm -rf /opt/google || true)
+          (set -x; sudo rm -rf /opt/pipx || true)
+          (set -x; df -h)
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test workspace for experimental_parser
+        run: cargo make test-experimental-parser
 
   ws-engine:
     name: WebSocket engine

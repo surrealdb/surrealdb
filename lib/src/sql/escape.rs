@@ -1,4 +1,3 @@
-use nom::character::is_digit;
 use std::borrow::Cow;
 
 const SINGLE: char = '\'';
@@ -54,9 +53,15 @@ pub fn quote_str(s: &str) -> String {
 
 #[inline]
 pub fn quote_plain_str(s: &str) -> String {
-	let mut ret = quote_str(s);
-	#[cfg(not(feature = "experimental_parser"))]
+	#[cfg(not(feature = "experimental-parser"))]
 	{
+		if crate::syn::thing(s).is_ok() {
+			let mut ret = quote_str(s);
+			ret.insert(0, 's');
+			return ret;
+		}
+
+		let mut ret = quote_str(s);
 		// HACK: We need to prefix strands which look like records, uuids, or datetimes with an `s`
 		// otherwise the strands will parsed as a different type when parsed again.
 		// This is not required for the new parser.
@@ -64,13 +69,14 @@ pub fn quote_plain_str(s: &str) -> String {
 		// directly to avoid having to create a common interface between the old and new parser.
 		if crate::syn::v1::literal::uuid(&ret).is_ok()
 			|| crate::syn::v1::literal::datetime(&ret).is_ok()
-			|| crate::syn::thing(&ret).is_ok()
 		{
 			ret.insert(0, 's');
 		}
+		ret
 	}
 
-	ret
+	#[cfg(feature = "experimental-parser")]
+	quote_str(s)
 }
 
 #[inline]
@@ -106,24 +112,16 @@ pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> 
 
 #[inline]
 pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
-	// Presume this is numeric
-	let mut numeric = true;
 	// Loop over each character
-	for x in s.bytes() {
+	for (idx, x) in s.bytes().enumerate() {
+		// the first character is not allowed to be a digit.
+		if idx == 0 && x.is_ascii_digit() {
+			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
+		}
 		// Check if character is allowed
 		if !(x.is_ascii_alphanumeric() || x == b'_') {
 			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
-		// Check if character is non-numeric
-		if !is_digit(x) {
-			numeric = false;
-		}
 	}
-	// Output the id value
-	match numeric {
-		// This is numeric so escape it
-		true => Cow::Owned(format!("{l}{}{r}", s.replace(r, e))),
-		// No need to escape the value
-		_ => Cow::Borrowed(s),
-	}
+	Cow::Borrowed(s)
 }

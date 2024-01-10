@@ -14,10 +14,10 @@ use std::str::{self, FromStr};
 use std::sync::Arc;
 
 async fn config(
-	kvs: &Datastore,
+	_kvs: &Datastore,
 	de_kind: Algorithm,
 	de_code: String,
-	token_header: Header,
+	_token_header: Header,
 ) -> Result<(DecodingKey, Validation), Error> {
 	if de_kind == Algorithm::Jwks {
 		#[cfg(not(feature = "jwks"))]
@@ -27,8 +27,8 @@ async fn config(
 		}
 		#[cfg(feature = "jwks")]
 		// The key identifier header must be present
-		if let Some(kid) = token_header.kid {
-			jwks::config(kvs, &kid, &de_code).await
+		if let Some(kid) = _token_header.kid {
+			jwks::config(_kvs, &kid, &de_code).await
 		} else {
 			Err(Error::MissingTokenHeader("kid".to_string()))
 		}
@@ -1125,7 +1125,7 @@ mod tests {
 		// Test with generic user identifier
 		//
 		{
-			let resource_id = "user:2k9qnabxuxh8k4d5gfto".to_string();
+			let resource_id = "user:`2k9qnabxuxh8k4d5gfto`".to_string();
 			// Prepare the claims object
 			let mut claims = claims.clone();
 			claims.id = Some(resource_id.clone());
@@ -1254,6 +1254,7 @@ mod tests {
 		}
 	}
 
+	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
 		use crate::opt::capabilities::{Capabilities, NetTarget, Targets};

@@ -149,6 +149,7 @@ pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
 }
 
 pub fn knn(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = opt(tag_no_case("knn"))(i)?;
 	let (i, _) = char('<')(i)?;
 	let (i, k) = u32(i)?;
 	let (i, dist) = opt(knn_distance)(i)?;
@@ -227,5 +228,14 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("<3,EUCLIDEAN>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(3, Some(Distance::Euclidean)));
+	}
+
+	#[test]
+	fn test_knn_with_prefix() {
+		let res = knn("knn<5>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<5>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(5, None));
 	}
 }

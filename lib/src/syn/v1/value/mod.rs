@@ -9,7 +9,7 @@ use super::{
 	depth,
 	ending::keyword,
 	error::expected,
-	expression::{cast, future, unary},
+	expression::{augment, cast, future, unary},
 	function::{builtin_function, defined_function, model},
 	idiom::{self, reparse_idiom_start},
 	literal::{
@@ -62,7 +62,7 @@ pub fn value(i: &str) -> IResult<&str, Value> {
 		let _diving = depth::dive(i)?;
 		let (i, r) = cut(value)(i)?;
 		let expr = match r {
-			Value::Expression(r) => r.augment(start, o),
+			Value::Expression(r) => augment(*r, start, o),
 			_ => Expression::new(start, o, r),
 		};
 		let v = Value::from(expr);
@@ -179,7 +179,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		};
 		let (i, r) = cut(value)(i)?;
 		let expr = match r {
-			Value::Expression(r) => r.augment(start, op),
+			Value::Expression(r) => augment(*r, start, op),
 			_ => Expression::new(start, op, r),
 		};
 		let v = Value::from(expr);

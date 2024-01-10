@@ -159,7 +159,7 @@ mod tests {
 	use super::*;
 	use crate::dbs::test::mock;
 	use crate::sql::idiom::Idiom;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn set_none() {

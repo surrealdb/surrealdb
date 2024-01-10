@@ -11,7 +11,6 @@ use crate::{
 	iam::Role,
 	sql::{statements::DefineUserStatement, Ident, Strand},
 };
-use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use nom::{
 	branch::alt,
 	bytes::complete::tag_no_case,
@@ -19,7 +18,6 @@ use nom::{
 	multi::{many0, separated_list1},
 	Err,
 };
-use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
 
 pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 	let (i, _) = tag_no_case("USER")(i)?;
@@ -35,28 +33,19 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 		Ok((i, (name, base, opts)))
 	})(i)?;
 	// Create the base statement
-	let mut res = DefineUserStatement {
+	let mut res = DefineUserStatement::from_parsed_values(
 		name,
 		base,
-		roles: vec!["Viewer".into()], // New users get the viewer role by default
-		code: rand::thread_rng()
-			.sample_iter(&Alphanumeric)
-			.take(128)
-			.map(char::from)
-			.collect::<String>(),
-		..Default::default()
-	};
+		vec!["Viewer".into()], // New users get the viewer role by default
+	);
 	// Assign any defined options
 	for opt in opts {
 		match opt {
 			DefineUserOption::Password(v) => {
-				res.hash = Argon2::default()
-					.hash_password(v.as_ref(), &SaltString::generate(&mut OsRng))
-					.unwrap()
-					.to_string()
+				res.set_password(&v);
 			}
 			DefineUserOption::Passhash(v) => {
-				res.hash = v;
+				res.set_passhash(v);
 			}
 			DefineUserOption::Roles(v) => {
 				res.roles = v;

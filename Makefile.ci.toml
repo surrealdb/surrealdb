@@ -56,6 +56,18 @@ args = [
 	"--skip", "ws_integration"
 ]
 
+
+[tasks.test-experimental-parser]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+args = [
+	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,experimental-parser", "--workspace", "--",
+	"--skip", "api_integration",
+	"--skip", "cli_integration",
+	"--skip", "http_integration",
+	"--skip", "ws_integration"
+]
+
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
