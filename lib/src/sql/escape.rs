@@ -123,7 +123,7 @@ pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str>
 			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
 		// Check if character is non-numeric
-		if x.is_ascii_digit() {
+		if !x.is_ascii_digit() {
 			numeric = false;
 		}
 	}
