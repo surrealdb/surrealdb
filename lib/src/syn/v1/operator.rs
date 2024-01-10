@@ -236,6 +236,6 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<5>", format!("{}", out));
-		assert_eq!(out, Operator::Knn(5));
+		assert_eq!(out, Operator::Knn(5, None));
 	}
 }

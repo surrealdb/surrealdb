@@ -2,8 +2,6 @@
 mod common;
 
 mod ws_integration {
-	use std::time::Duration;
-
 	use super::common;
 
 	/// Tests for the empty protocol format

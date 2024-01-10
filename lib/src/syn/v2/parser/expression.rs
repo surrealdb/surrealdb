@@ -255,6 +255,7 @@ impl Parser<'_> {
 			t!("KNN") => {
 				let start = expected!(self, t!("<")).span;
 				let amount = self.next_token_value()?;
+				let option = self.eat(t!(",")).then(|| self.parse_distance()?);
 				self.expect_closing_delimiter(t!(">"), start)?;
 				Operator::Knn(amount)
 			}

@@ -305,11 +305,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn try_parse_distance(&mut self) -> ParseResult<Option<Distance>> {
-		if !self.eat(t!("DISTANCE")) {
-			return Ok(None);
-		}
-
+	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
 		let dist = match self.next().kind {
 			TokenKind::Distance(x) => match x {
 				DistanceKind::Euclidean => Distance::Euclidean,
@@ -322,8 +318,15 @@ impl Parser<'_> {
 			},
 			x => unexpected!(self, x, "a distance measure"),
 		};
+		Ok(dist)
+	}
 
-		Ok(Some(dist))
+	pub fn try_parse_distance(&mut self) -> ParseResult<Option<Distance>> {
+		if !self.eat(t!("DISTANCE")) {
+			return Ok(None);
+		}
+
+		self.parse_distance().map(Some)
 	}
 
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
