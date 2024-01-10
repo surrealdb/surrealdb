@@ -6443,3 +6443,19 @@ async fn function_custom_optional_args() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn function_outside_database() -> Result<(), Error> {
+	let sql = "RETURN fn::does_not_exist();";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	match res.remove(0).result {
+		Err(Error::DbEmpty) => (),
+		_ => panic!("Query should have failed with error: Specify a database to use"),
+	}
+
+	Ok(())
+}
