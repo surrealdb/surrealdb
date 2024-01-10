@@ -249,7 +249,10 @@ mod tests {
 		let res = id(sql);
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100test"), out);
+		#[cfg(feature = "experimental-parser")]
 		assert_eq!("⟨100test⟩", format!("{}", out));
+		#[cfg(not(feature = "experimental-parser"))]
+		assert_eq!("100test", format!("{}", out));
 	}
 
 	#[test]
