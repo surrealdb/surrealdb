@@ -25,6 +25,7 @@ pub(crate) async fn archive_live_queries(
 ) -> Result<(), Error> {
 	let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(batch_size);
 	loop {
+		println!("Archive start loopiteration ");
 		match tokio::time::timeout(*batch_latency, scan_recv.recv()).await {
 			Ok(Some(bor)) => {
 				println!("In archive, got an operation result");
@@ -32,17 +33,20 @@ pub(crate) async fn archive_live_queries(
 					// send any errors further on, because we don't need to process them
 					// unless we can handle them. Currently we can't.
 					// if we error on send, then we bubble up because this shouldn't happen
-					sender
-						.send(bor)
-						.await
-						.map_err(|_| Error::BootstrapError(ChannelSendError(BootstrapArchive)))?;
+					sender.send(bor).await.map_err(|e| {
+						println!("Error sending error: {:?}", e);
+						error!("Error sending error: {:?}", e);
+						Error::BootstrapError(ChannelSendError(BootstrapArchive))
+					})?;
 				} else {
 					msg.push(bor);
 					if msg.len() >= batch_size {
 						let results =
 							archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
 						for boresult in results {
-							sender.send(boresult).await.map_err(|_| {
+							sender.send(boresult).await.map_err(|e| {
+								println!("Error sending error: {:?}", e);
+								error!("Error sending error: {:?}", e);
 								Error::BootstrapError(ChannelSendError(BootstrapArchive))
 							})?;
 						}
@@ -57,7 +61,9 @@ pub(crate) async fn archive_live_queries(
 				match archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await {
 					Ok(results) => {
 						for boresult in results {
-							sender.send(boresult).await.map_err(|_| {
+							sender.send(boresult).await.map_err(|e| {
+								println!("Error sending error: {:?}", e);
+								error!("Error sending error: {:?}", e);
 								Error::BootstrapError(ChannelSendError(BootstrapArchive))
 							})?;
 						}
@@ -73,15 +79,18 @@ pub(crate) async fn archive_live_queries(
 				// Timeout expired
 				let results = archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
 				for boresult in results {
-					sender
-						.send(boresult)
-						.await
-						.map_err(|_| Error::BootstrapError(ChannelSendError(BootstrapArchive)))?;
+					sender.send(boresult).await.map_err(|e| {
+						println!("Error sending error: {:?}", e);
+						error!("Error sending error: {:?}", e);
+						Error::BootstrapError(ChannelSendError(BootstrapArchive))
+					})?;
 				}
 				// msg should always be drained but in case it isn't, we clear
+				println!("Clearing messages that should already be drained");
 				msg.clear();
 			}
 		}
+		println!("Archive end loop iteration");
 	}
 	Ok(())
 }

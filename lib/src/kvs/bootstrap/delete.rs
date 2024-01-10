@@ -87,8 +87,8 @@ async fn delete_live_query_batch(
 	let mut ret: Vec<BootstrapOperationResult> = vec![];
 	// TODO test failed tx retries
 	let mut last_err = None;
-	for _ in 0..ds::BOOTSTRAP_TX_RETRIES {
-		println!("Started the loop");
+	for i in 0..ds::BOOTSTRAP_TX_RETRIES {
+		println!("Delete live query batch retry attempt {i}");
 		// In case this is a retry, we re-hydrate the msg vector
 		for (lq, e) in ret.drain(..) {
 			msg.push((lq, e));
@@ -101,7 +101,9 @@ async fn delete_live_query_batch(
 		println!("Requesting tx");
 		let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 			oneshot::channel();
-		if let Err(_send_error) = tx_req.send(tx_req_oneshot).await {
+		if let Err(send_error) = tx_req.send(tx_req_oneshot).await {
+			println!("Failed to send tx request: {}", send_error);
+			error!("Failed to send tx request: {}", send_error);
 			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
 			continue;
 		}
@@ -136,6 +138,8 @@ async fn delete_live_query_batch(
 					// place, since that was not merged.
 				}
 				// TODO where can the above transaction hard fail? Every op needs rollback?
+				println!("Committing transaction after {} writes", ret.len());
+				trace!("Committing transaction after {} writes", ret.len());
 				if let Err(e) = tx.commit().await {
 					// TODO wrap?
 					match tx.cancel().await {
