@@ -4,21 +4,8 @@ use roaring::RoaringTreemap;
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-pub(super) struct PriorityNode(f64, u64);
-
-impl PriorityNode {
-	pub(super) fn new(dist: f64, id: u64) -> Self {
-		Self(dist, id)
-	}
-
-	pub(super) fn dist(&self) -> f64 {
-		self.0
-	}
-
-	pub(super) fn id(&self) -> u64 {
-		self.1
-	}
-}
+#[derive(Debug, Clone)]
+pub(super) struct PriorityNode(pub(super) f64, pub(super) u64);
 
 impl PartialEq<Self> for PriorityNode {
 	fn eq(&self, other: &Self) -> bool {

@@ -5,7 +5,7 @@ use crate::sql::index::Distance;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::Entry;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 
 struct HnswIndex<const M: usize, const M0: usize, const EFC: usize> {
 	h: Hnsw<M, M0, EFC>,
@@ -55,50 +55,29 @@ impl<const M: usize, const M0: usize, const EFC: usize> HnswIndex<M, M0, EFC> {
 	}
 }
 #[derive(Debug, Clone)]
-struct EntryPoint {
-	pos: usize,
-	layer: usize,
+struct EnterPoint {
+	id: ElementId,
+	level: usize,
 }
 
 struct Hnsw<const M: usize, const M0: usize, const EFC: usize> {
 	dist: Distance,
-	/// `ml` is multi-layer factor to determine the number of neighbors in different layers.
 	ml: f64,
-	/// `top_ep` is the entry point ID for the top layer of HNSW graph.
-	top_ep: EntryPoint,
-	/// `zero` is a vector that stores the neighbors for the zero layer. M0 here denotes the
-	/// maximum number of connections each node can have in the zero (base) layer.
-	/// `layers` is a vector of nodes where each node represent a data point. The entire vector represents a layer in
-	/// the graph. The index of each element in the vector is the ID of the data point.
-	layers: Vec<Vec<Node<M, M0>>>,
-	/// `elements` stores the actual data points (vectors). Each entry in this vector is a reference-counted SharedVector
-	/// type, so we can share these vectors across different layers/nodes without duplication.
+	layers: Vec<Layer>,
+	enter_point: Option<EnterPoint>,
 	elements: Vec<SharedVector>,
-	/// `rng` is used to generate the random level (layer).
-	/// a new node will be inserted into during the graph construction.
 	rng: SmallRng,
 }
 
-type ElementId = u64;
+struct Layer(HashMap<ElementId, Vec<ElementId>>);
 
-pub struct Node<const M: usize, const M0: usize> {
-	point: ElementId,
-	neighbors: Neighbors<M, M0>,
-}
-
-pub enum Neighbors<const M: usize, const M0: usize> {
-	Zero([ElementId; M0]),
-	Upper([ElementId; M]),
-}
-
-impl<const M: usize, const M0: usize> Neighbors<M, M0> {
-	fn contains(&self, e: &ElementId) -> bool {
-		match self {
-			Neighbors::Zero(a) => a.contains(e),
-			Neighbors::Upper(a) => a.contains(e),
-		}
+impl Layer {
+	fn new() -> Self {
+		Self(HashMap::with_capacity(1))
 	}
 }
+
+type ElementId = u64;
 
 impl<const M: usize, const M0: usize, const EFC: usize> Default for Hnsw<M, M0, EFC> {
 	fn default() -> Self {
@@ -108,30 +87,34 @@ impl<const M: usize, const M0: usize, const EFC: usize> Default for Hnsw<M, M0, 
 
 impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	fn new(ml: Option<f64>, dist: Option<Distance>) -> Self {
-		println!("NEW - M0: {M0} - M: {M} - ml: {ml:?}");
+		println!("NEW - M0: {M0} - M: {M} - ml: {ml:?} - dist: {dist:?}");
 		Self {
 			ml: ml.unwrap_or(1.0 / (M as f64).ln()),
 			dist: dist.unwrap_or(Distance::Euclidean),
-			top_ep: EntryPoint {
-				pos: 0,
-				layer: 0,
-			},
+			enter_point: None,
 			layers: Vec::default(),
 			elements: Vec::default(),
 			rng: SmallRng::from_entropy(),
 		}
 	}
 
-	fn insert(&mut self, q: SharedVector) -> usize {
-		let id = self.elements.len();
+	fn insert(&mut self, q: SharedVector) -> ElementId {
+		let id = self.elements.len() as ElementId;
 		let level = self.get_random_level();
-		println!("Insert q: {q:?} - id: {id} - level: {level}");
-		self.elements.push(q.clone());
-		if self.layers.is_empty() {
-			self.insert_first_element(level)
-		} else {
-			self.insert_element(level, id, q)
+
+		for l in self.layers.len()..=level {
+			println!("Create Layer {l}");
+			self.layers.push(Layer::new());
 		}
+
+		if let Some(ep) = self.enter_point.clone() {
+			self.insert_element(&q, ep, id, level);
+		} else {
+			self.insert_first_element(id, level);
+		}
+
+		self.elements.push(q);
+		id
 	}
 
 	fn get_random_level(&mut self) -> usize {
@@ -140,33 +123,61 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		layer
 	}
 
-	fn insert_first_element(&mut self, level: usize) -> usize {
-		while self.layers.len() <= level {
-			// It's always index 0 with no neighbors since its the first element.
-			let node = Node {
-				point: 0,
-				neighbors: Neighbors::Zero([!0; M0]),
-			};
-			self.layers.push(vec![node]);
-			self.top_ep = EntryPoint {
-				pos: 0,
-				layer: 0,
-			};
+	fn insert_first_element(&mut self, id: ElementId, level: usize) {
+		println!("insert_first_element - id: {id} - level: {level}");
+		for lc in 0..=level {
+			self.layers[lc].0.insert(id, vec![]);
 		}
-		0
+		self.enter_point = Some(EnterPoint {
+			id,
+			level,
+		})
 	}
 
-	fn insert_element(&mut self, _id: usize, level: usize, q: SharedVector) -> usize {
-		let ep = self.top_ep.clone();
-		println!("layers: {} - ep: {ep:?}", self.layers.len());
-		let ep_level = self.layers.len() - 1;
+	fn insert_element(
+		&mut self,
+		q: &SharedVector,
+		mut ep: EnterPoint,
+		id: ElementId,
+		level: usize,
+	) {
+		println!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?}");
+		let graph_ep_level = ep.level;
 
-		for lc in (ep_level..level + 1).rev() {
-			println!("LC: {lc}");
-			let w = self.search_layer(&q, &ep, 1, lc);
+		for lc in ((level + 1)..=ep.level).rev() {
+			println!("1- LC: {lc}");
+			let w = self.search_layer(&q, &ep, 1, lc).into_sorted_vec();
+			ep = EnterPoint {
+				id: w[0].1,
+				level: lc,
+			}
 		}
 
-		todo!()
+		for lc in (0..=ep.level.min(level)).rev() {
+			let layer = &mut self.layers[lc].0;
+			println!("2- LC: {lc}");
+			let w = self.search_layer(&q, &ep, EFC, lc);
+			println!("2- W: {w:?}");
+			let neighbors = self.select_neighbors_simple(w, lc);
+			println!("2- N: {neighbors:?}");
+			for e in neighbors {
+				if let Some(elements) = layer.get_mut(&e) {
+					elements.push(id);
+				} else {
+					unreachable!()
+				}
+				println!("e: : {e:?}");
+			}
+
+			todo!()
+		}
+
+		if level > graph_ep_level {
+			self.enter_point = Some(EnterPoint {
+				id,
+				level,
+			});
+		}
 	}
 
 	/// query element q
@@ -178,28 +189,27 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	fn search_layer(
 		&self,
 		q: &SharedVector,
-		ep: &EntryPoint,
+		ep: &EnterPoint,
 		ef: usize,
 		lc: usize,
 	) -> BinaryHeap<PriorityNode> {
-		let e = self.layers[ep.layer][ep.pos].point;
-		let mut candidates = HashSet::from([e]);
-		let mut visited = candidates.clone();
-		let pr = PriorityNode::new(self.distance(&self.elements[e as usize], q), e);
-		let mut w = BinaryHeap::from([pr]);
-		while !candidates.is_empty() {
-			let (c, c_dist) = self.get_nearest(q, &candidates);
-			let (_, f_dist) = self.get_furthest(q, &candidates);
-			if c_dist > f_dist {
+		let ep_dist = self.distance(&self.elements[ep.id as usize], q);
+		let ep_pr = PriorityNode(ep_dist, ep.id);
+		let mut candidates = BTreeSet::from([ep_pr.clone()]);
+		let mut w = BinaryHeap::from([ep_pr]);
+		let mut visited = HashSet::from([ep.id]);
+		while let Some(c) = candidates.pop_first() {
+			let f_dist = candidates.last().map(|f| f.0).unwrap_or(c.0);
+			if c.0 > f_dist {
 				break;
 			}
-			for e in &self.layers[lc] {
-				if e.neighbors.contains(&c) {
-					if visited.insert(e.point) {
-						let e_dist = self.distance(&self.elements[e.point as usize], q);
+			for (&e_id, e_neighbors) in &self.layers[lc].0 {
+				if e_neighbors.contains(&c.1) {
+					if visited.insert(e_id) {
+						let e_dist = self.distance(&self.elements[e_id as usize], q);
 						if e_dist < f_dist || w.len() < ef {
-							candidates.insert(e.point);
-							w.push(PriorityNode::new(e_dist, e.point));
+							candidates.insert(PriorityNode(e_dist, e_id));
+							w.push(PriorityNode(e_dist, e_id));
 							if w.len() > ef {
 								w.pop();
 							}
@@ -211,34 +221,20 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		w
 	}
 
-	fn get_nearest(&self, q: &SharedVector, candidates: &HashSet<ElementId>) -> (ElementId, f64) {
-		let mut dist = f64::INFINITY;
-		let mut n = 0;
-		for &i in candidates {
-			if let Some(e) = self.elements.get(i as usize) {
-				let d = self.distance(e, q);
-				if d < dist {
-					n = i;
-					dist = d;
-				}
+	fn select_neighbors_simple(&self, w: BinaryHeap<PriorityNode>, lc: usize) -> Vec<ElementId> {
+		let m = if lc == 0 {
+			M0
+		} else {
+			M
+		};
+		let mut n = Vec::with_capacity(m);
+		for pr in w {
+			n.push(pr.1);
+			if n.len() == m {
+				break;
 			}
 		}
-		(n, dist)
-	}
-
-	fn get_furthest(&self, q: &SharedVector, candidates: &HashSet<ElementId>) -> (ElementId, f64) {
-		let mut dist = f64::INFINITY;
-		let mut f = 0;
-		for &i in candidates {
-			if let Some(e) = self.elements.get(i as usize) {
-				let d = self.distance(e, q);
-				if d > dist {
-					f = i;
-					dist = d;
-				}
-			}
-		}
-		(f, dist)
+		n
 	}
 
 	fn distance(&self, v1: &SharedVector, v2: &SharedVector) -> f64 {
