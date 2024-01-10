@@ -168,15 +168,15 @@ impl Function {
 				fnc::run(ctx, opt, txn, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
+				// Check that namespace and database are set to prevent a panic
+				opt.valid_for_ns()?;
+				opt.valid_for_db()?;
 				// Get the full name of this function
 				let name = format!("fn::{s}");
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
 				let val = {
-					// Check that namespace and database are set to prevent a panic
-					opt.valid_for_ns()?;
-					opt.valid_for_db()?;
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
