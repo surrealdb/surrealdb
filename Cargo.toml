@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.0.2"
+version = "1.1.0"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -19,6 +19,7 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
 experimental-parser = ["surrealdb/experimental-parser"]
+jwks = ["surrealdb/jwks"]
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]

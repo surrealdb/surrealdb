@@ -11,18 +11,18 @@ async fn write_scan_nd() {
 	tx.set_nd(Uuid::parse_str("cbefc4fe-8ba0-4898-ab69-782e3ebc06f9").unwrap()).await.unwrap();
 	tx.commit().await.unwrap();
 
-	// Scan limit 1000
+	// Scan in batches of 1
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let vals_lim = tx.scan_nd(1000).await.unwrap();
+	let res_many_batches = tx.scan_nd(1).await.unwrap();
 	tx.cancel().await.unwrap();
 
-	// Scan limit 0
+	// Scan in batches of 100k
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let vals_no_lim = tx.scan_nd(NO_LIMIT).await.unwrap();
+	let res_single_batch = tx.scan_nd(100_000).await.unwrap();
 	tx.cancel().await.unwrap();
 
 	// Assert equal
-	assert_eq!(vals_lim, vals_no_lim);
-	assert_eq!(vals_lim.len(), 2);
-	assert_eq!(vals_no_lim.len(), 2);
+	assert_eq!(res_many_batches, res_single_batch);
+	assert_eq!(res_many_batches.len(), 2);
+	assert_eq!(res_single_batch.len(), 2);
 }

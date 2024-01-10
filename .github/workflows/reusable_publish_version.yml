@@ -84,8 +84,7 @@ jobs:
             git checkout -b releases/stable
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-            version=${major}.${minor}.$(($betaNum - 1))
+            version=${major}.${minor}.0
 
             # Bump the crate version
             sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
