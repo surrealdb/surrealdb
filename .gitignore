@@ -35,6 +35,8 @@ Temporary Items
 
 /target/
 /lib/target/
+/lib/cache/
+/lib/store/
 .idea/
 .vscode/
 /result
