@@ -148,7 +148,7 @@ pub enum Error {
 	HttpDisabled,
 
 	/// it is not possible to set a variable with the specified name
-	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
 		name: String,
 	},
@@ -242,14 +242,16 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
-	#[error("The value '{current}' is not a vector.")]
-	InvalidVectorValue {
-		current: String,
-	},
+	#[error("The value cannot be converted to a vector: {0}")]
+	InvalidVectorValue(String),
 
 	/// Invalid regular expression
 	#[error("Invalid regular expression: {0:?}")]
 	InvalidRegex(String),
+
+	/// Invalid timeout
+	#[error("Invalid timeout: {0:?} seconds")]
+	InvalidTimeout(u64),
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
@@ -622,7 +624,7 @@ pub enum Error {
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
+	/// The query planner did not find an index able to support the match @@ for a given expression
 	#[error("There was no suitable index supporting the expression '{value}'")]
 	NoIndexFoundForMatch {
 		value: String,
@@ -753,9 +755,21 @@ pub enum Error {
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
 
+	/// Auth requires a token header which is missing
+	#[error("Auth token is missing the '{0}' header")]
+	MissingTokenHeader(String),
+
+	/// Auth requires a token claim which is missing
+	#[error("Auth token is missing the '{0}' claim")]
+	MissingTokenClaim(String),
+
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists: {0}")]
 	TxKeyAlreadyExistsCategory(KeyCategory),
+
+	/// The db is running without an available storage engine
+	#[error("The db is running without an available storage engine")]
+	MissingStorageEngine,
 }
 
 impl From<Error> for String {
@@ -848,7 +862,7 @@ impl<T> From<channel::SendError<T>> for Error {
 	}
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "jwks"))]
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())

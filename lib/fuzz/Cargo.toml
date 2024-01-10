@@ -15,7 +15,7 @@ tokio = "1.33.0"
 
 [dependencies.surrealdb]
 path = ".."
-features = ["kv-mem"]
+features = ["kv-mem", "arbitrary"]
 default-features = false
 
 # Prevent this from interfering with workspaces
@@ -34,5 +34,11 @@ doc = false
 [[bin]]
 name = "fuzz_executor"
 path = "fuzz_targets/fuzz_executor.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_structured_executor"
+path = "fuzz_targets/fuzz_structured_executor.rs"
 test = false
 doc = false

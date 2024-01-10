@@ -4,5 +4,5 @@ pub use super::{
 	idiom::plain as idiom,
 	literal::param,
 	thing::thing,
-	value::{array, object, value},
+	value::{array, value},
 };

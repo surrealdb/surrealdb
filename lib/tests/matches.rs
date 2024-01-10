@@ -364,23 +364,30 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 		DEFINE INDEX page_content ON page FIELDS content SEARCH ANALYZER simple BM25;
 		DEFINE INDEX page_host ON page FIELDS host;
 		SELECT id, search::score(1) as sc1, search::score(2) as sc2
-    		FROM page WHERE (title @1@ 'dog' OR content @2@ 'dog');
+		FROM page WHERE (title @1@ 'dog' OR content @2@ 'dog');
+		SELECT id, search::score(1) as sc1, search::score(2) as sc2
+			FROM page WHERE host = 'test'
+			AND (title @1@ 'dog' OR content @2@ 'dog') explain;
  		SELECT id, search::score(1) as sc1, search::score(2) as sc2
     		FROM page WHERE
     		host = 'test'
-    		AND (title @1@ 'dog' OR content @2@ 'dog') 
+    		AND (title @1@ 'dog' OR content @2@ 'dog');
+    	SELECT id, search::score(1) as sc1, search::score(2) as sc2
+    		FROM page WHERE
+    		host = 'test'
+    		AND (title @1@ 'dog' OR content @2@ 'dog') PARALLEL;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 8);
+	assert_eq!(res.len(), 10);
 	//
 	for _ in 0..6 {
 		let _ = res.remove(0).result?;
 	}
 
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val_docs = Value::parse(
 		"[
 				{
 					id: page:1,
@@ -394,23 +401,52 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 				}
 			]",
 	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
-				{
-					id: page:1,
-					sc1: 0f,
-					sc2: -1.5517289638519287f
+			{
+				detail: {
+					plan: {
+						index: 'page_host',
+						operator: '=',
+						value: 'test'
+					},
+					table: 'page'
 				},
-				{
-					id: page:2,
-					sc1: 0f,
-					sc2: -1.6716052293777466f
-				}
-			]",
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'page_title',
+						operator: '@1@',
+						value: 'dog'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'page_content',
+						operator: '@2@',
+						value: 'dog'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			}
+		]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
+
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 	Ok(())
 }

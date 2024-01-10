@@ -1,7 +1,7 @@
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::key::change;
-use crate::kvs::Transaction;
+use crate::kvs::{Limit, ScanPage, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs;
 
@@ -40,14 +40,22 @@ pub async fn read(
 
 	let limit = limit.unwrap_or(100);
 
-	let _x = tx.scan(beg..end, limit).await?;
+	let scan = tx
+		.scan_paged(
+			ScanPage {
+				range: beg..end,
+				limit: Limit::Limited(limit),
+			},
+			limit,
+		)
+		.await?;
 
 	let mut vs: Option<[u8; 10]> = None;
 	let mut buf: Vec<TableMutations> = Vec::new();
 
 	let mut r = Vec::<ChangeSet>::new();
 	// iterate over _x and put decoded elements to r
-	for (k, v) in _x {
+	for (k, v) in scan.values {
 		trace!("read change feed; {k:?}");
 
 		let dec = crate::key::change::Cf::decode(&k).unwrap();

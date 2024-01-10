@@ -1,4 +1,5 @@
 use crate::idx::ft::MatchRef;
+use crate::sql::index::Distance;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -7,6 +8,7 @@ use std::fmt::Write;
 /// Binary operators.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Operator {
 	//
 	Neg, // -
@@ -57,7 +59,7 @@ pub enum Operator {
 	Outside,
 	Intersects,
 	//
-	Knn(u32), // <{k}>
+	Knn(u32, Option<Distance>), // <{k}[,{dist}]>
 	//
 	Rem, // %
 }
@@ -131,12 +133,18 @@ impl fmt::Display for Operator {
 			Self::Intersects => f.write_str("INTERSECTS"),
 			Self::Matches(reference) => {
 				if let Some(r) = reference {
-					write!(f, "@{}@", r)
+					write!(f, "@{r}@")
 				} else {
 					f.write_str("@@")
 				}
 			}
-			Self::Knn(k) => write!(f, "<{}>", k),
+			Self::Knn(k, dist) => {
+				if let Some(d) = dist {
+					write!(f, "<{k},{d}>")
+				} else {
+					write!(f, "<{k}>")
+				}
+			}
 		}
 	}
 }

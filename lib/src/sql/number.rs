@@ -17,6 +17,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	Int(i64),
 	Float(f64),
@@ -318,6 +319,9 @@ impl Number {
 
 	pub fn to_decimal(&self) -> Decimal {
 		match self {
+			// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
+			// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
+			#[allow(warnings)]
 			Number::Int(v) => Decimal::try_from(*v).unwrap_or_default(),
 			Number::Float(v) => Decimal::try_from(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,

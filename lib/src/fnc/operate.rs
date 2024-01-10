@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Transaction;
+use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
@@ -166,32 +166,47 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
-enum IndexOption<'a> {
+enum ExecutorOption<'a> {
 	PreMatch,
 	None,
 	Execute(&'a QueryExecutor, &'a Thing),
 }
 
-fn get_index_option<'a>(
+fn get_executor_and_thing<'a>(
 	ctx: &'a Context<'_>,
-	doc: Option<&'a CursorDoc<'_>>,
-	exp: &'a Expression,
-) -> IndexOption<'a> {
-	if let Some(doc) = doc {
-		if let Some(thg) = doc.rid {
-			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&thg.tb) {
-					if let Some(ir) = doc.ir {
-						if exe.is_iterator_expression(ir, exp) {
-							return IndexOption::PreMatch;
-						}
-					}
-					return IndexOption::Execute(exe, thg);
-				}
+	doc: &'a CursorDoc,
+) -> Option<(&'a QueryExecutor, &'a Thing)> {
+	if let Some(thg) = doc.rid {
+		if let Some(exe) = ctx.get_query_executor() {
+			if exe.is_table(&thg.tb) {
+				return Some((exe, thg));
+			}
+		}
+		if let Some(pla) = ctx.get_query_planner() {
+			if let Some(exe) = pla.get_query_executor(&thg.tb) {
+				return Some((exe, thg));
 			}
 		}
 	}
-	IndexOption::None
+	None
+}
+
+fn get_executor_option<'a>(
+	ctx: &'a Context<'_>,
+	doc: Option<&'a CursorDoc<'_>>,
+	exp: &'a Expression,
+) -> ExecutorOption<'a> {
+	if let Some(doc) = doc {
+		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
+			if let Some(ir) = doc.ir {
+				if exe.is_iterator_expression(ir, exp) {
+					return ExecutorOption::PreMatch;
+				}
+			}
+			return ExecutorOption::Execute(exe, thg);
+		}
+	}
+	ExecutorOption::None
 }
 
 pub(crate) async fn matches(
@@ -200,23 +215,24 @@ pub(crate) async fn matches(
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
 ) -> Result<Value, Error> {
-	match get_index_option(ctx, doc, exp) {
-		IndexOption::PreMatch => Ok(Value::Bool(true)),
-		IndexOption::None => Ok(Value::Bool(false)),
-		IndexOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
+	match get_executor_option(ctx, doc, exp) {
+		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
+		ExecutorOption::None => Ok(Value::Bool(false)),
+		ExecutorOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
 	}
 }
 
 pub(crate) async fn knn(
 	ctx: &Context<'_>,
+	opt: &Options,
 	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
 ) -> Result<Value, Error> {
-	match get_index_option(ctx, doc, exp) {
-		IndexOption::PreMatch => Ok(Value::Bool(true)),
-		IndexOption::None => Ok(Value::Bool(false)),
-		IndexOption::Execute(exe, thg) => exe.knn(txn, thg, exp).await,
+	match get_executor_option(ctx, doc, exp) {
+		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
+		ExecutorOption::None => Ok(Value::Bool(false)),
+		ExecutorOption::Execute(exe, thg) => exe.knn(ctx, opt, txn, thg, doc, exp).await,
 	}
 }
 

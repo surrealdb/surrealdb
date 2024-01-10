@@ -15,7 +15,6 @@ use thiserror::Error;
 mod utils;
 pub use utils::*;
 mod render;
-pub use render::*;
 
 pub type IResult<I, O, E = ParseError<I>> = Result<(I, O), Err<E>>;
 
