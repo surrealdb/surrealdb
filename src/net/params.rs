@@ -49,9 +49,9 @@ impl From<Params> for BTreeMap<String, Value> {
 		v.inner
 			.into_iter()
 			.map(|(k, v)| {
-				#[cfg(feature = "experimental_parser")]
+				#[cfg(feature = "experimental-parser")]
 				let value = surrealdb::syn::json_legacy_strand(&v);
-				#[cfg(not(feature = "experimental_parser"))]
+				#[cfg(not(feature = "experimental-parser"))]
 				let value = surrealdb::syn::json(&v);
 
 				(k, value.unwrap_or_else(|_| Value::from(v)))

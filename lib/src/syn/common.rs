@@ -1,6 +1,6 @@
-#[cfg(feature = "experimental_parser")]
+#[cfg(feature = "experimental-parser")]
 use super::v2::token::Span;
-#[cfg(feature = "experimental_parser")]
+#[cfg(feature = "experimental-parser")]
 use std::ops::Range;
 
 /// A human readable location inside a string.
@@ -41,7 +41,7 @@ impl Location {
 		unreachable!()
 	}
 
-	#[cfg(feature = "experimental_parser")]
+	#[cfg(feature = "experimental-parser")]
 	pub fn of_offset(source: &str, offset: usize) -> Self {
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
@@ -62,7 +62,7 @@ impl Location {
 		unreachable!()
 	}
 
-	#[cfg(feature = "experimental_parser")]
+	#[cfg(feature = "experimental-parser")]
 	pub fn of_span_start(source: &str, span: Span) -> Self {
 		// Bytes of input before substr.
 
@@ -70,14 +70,14 @@ impl Location {
 		Self::of_offset(source, offset)
 	}
 
-	#[cfg(feature = "experimental_parser")]
+	#[cfg(feature = "experimental-parser")]
 	pub fn of_span_end(source: &str, span: Span) -> Self {
 		// Bytes of input before substr.
 		let offset = span.offset as usize + span.len as usize;
 		Self::of_offset(source, offset)
 	}
 
-	#[cfg(feature = "experimental_parser")]
+	#[cfg(feature = "experimental-parser")]
 	pub fn range_of_span(source: &str, span: Span) -> Range<Self> {
 		// Bytes of input before substr.
 		let offset = span.offset as usize;

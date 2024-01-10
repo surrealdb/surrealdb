@@ -53,7 +53,7 @@ pub fn quote_str(s: &str) -> String {
 
 #[inline]
 pub fn quote_plain_str(s: &str) -> String {
-	#[cfg(not(feature = "experimental_parser"))]
+	#[cfg(not(feature = "experimental-parser"))]
 	{
 		if crate::syn::thing(s).is_ok() {
 			let mut ret = quote_str(s);
@@ -75,7 +75,7 @@ pub fn quote_plain_str(s: &str) -> String {
 		ret
 	}
 
-	#[cfg(feature = "experimental_parser")]
+	#[cfg(feature = "experimental-parser")]
 	quote_str(s)
 }
 

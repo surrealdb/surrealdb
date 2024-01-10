@@ -39,7 +39,7 @@ native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/nativ
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
 ml = ["surrealml-core", "ndarray"]
 arbitrary = ["dep:arbitrary", "dep:regex-syntax", "rust_decimal/rust-fuzz", "geo-types/arbitrary", "uuid/arbitrary"]
-experimental_parser = ["dep:phf", "dep:unicase"]
+experimental-parser = ["dep:phf", "dep:unicase"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
 

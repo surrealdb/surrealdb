@@ -3,14 +3,14 @@
 pub mod common;
 pub mod error;
 
-#[cfg(not(feature = "experimental_parser"))]
+#[cfg(not(feature = "experimental-parser"))]
 pub mod v1;
-#[cfg(not(feature = "experimental_parser"))]
+#[cfg(not(feature = "experimental-parser"))]
 pub use v1::{datetime_raw, duration, idiom, json, parse, range, subquery, thing, value};
 
-#[cfg(feature = "experimental_parser")]
+#[cfg(feature = "experimental-parser")]
 pub mod v2;
-#[cfg(feature = "experimental_parser")]
+#[cfg(feature = "experimental-parser")]
 pub use v2::{
 	datetime_raw, duration, idiom, json, json_legacy_strand, parse, range, subquery, thing, value,
 	value_legacy_strand,

@@ -18,7 +18,7 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
-experimental_parser = ["surrealdb/experimental_parser"]
+experimental-parser = ["surrealdb/experimental-parser"]
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
