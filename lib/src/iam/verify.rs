@@ -1254,6 +1254,7 @@ mod tests {
 		}
 	}
 
+	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
 		use crate::opt::capabilities::{Capabilities, NetTarget, Targets};
