@@ -1,3 +1,5 @@
+#[cfg(not(feature = "jwks"))]
+use super::super::super::error::ParseError::Expected;
 use super::super::super::{
 	comment::shouldbespace,
 	ending,
@@ -7,6 +9,8 @@ use super::super::super::{
 	IResult,
 };
 use crate::sql::{statements::DefineTokenStatement, Algorithm, Strand};
+#[cfg(not(feature = "jwks"))]
+use nom::Err;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
@@ -32,6 +36,13 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	for opt in opts {
 		match opt {
 			DefineTokenOption::Type(v) => {
+				#[cfg(not(feature = "jwks"))]
+				if matches!(v, Algorithm::Jwks) {
+					return Err(Err::Error(Expected {
+						tried: i,
+						expected: "the 'jwks' feature to be enabled",
+					}));
+				}
 				res.kind = v;
 			}
 			DefineTokenOption::Value(v) => {

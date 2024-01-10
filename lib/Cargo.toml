@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.0.2"
+version = "1.1.0"
 rust-version = "1.70.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -38,6 +38,8 @@ http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
 ml = ["surrealml-core", "ndarray"]
+jwks = ["dep:reqwest"]
+arbitrary = ["dep:arbitrary", "dep:regex-syntax", "rust_decimal/rust-fuzz", "geo-types/arbitrary", "uuid/arbitrary"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
 
@@ -47,7 +49,7 @@ features = [
     "protocol-ws", "protocol-http",
     "kv-mem", "kv-indxdb", "kv-rocksdb",
     "rustls", "native-tls",
-    "http", "scripting"
+    "http", "scripting", "jwks"
 ]
 targets = []
 
@@ -121,6 +123,9 @@ tracing = "0.1.40"
 trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
 url = "2.5.0"
+arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
+regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
+geo-types = { version = "0.7.12", features = ["arbitrary"] }
 
 [dev-dependencies]
 criterion = { version="0.5.1", features= ["async_tokio"] }

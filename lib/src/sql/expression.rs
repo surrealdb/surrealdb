@@ -16,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expression {
 	Unary {
 		o: Operator,
@@ -204,7 +205,7 @@ impl Expression {
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
 			Operator::Matches(_) => fnc::operate::matches(ctx, txn, doc, self).await,
-			Operator::Knn(_) => fnc::operate::knn(ctx, txn, doc, self).await,
+			Operator::Knn(_, _) => fnc::operate::knn(ctx, opt, txn, doc, self).await,
 			_ => unreachable!(),
 		}
 	}

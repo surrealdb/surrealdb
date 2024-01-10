@@ -17,6 +17,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	Int(i64),
 	Float(f64),

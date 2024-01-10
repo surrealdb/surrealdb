@@ -4,6 +4,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Scoring {
 	Bm {

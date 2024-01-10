@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
+use std::thread::Builder;
 
 use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::dbs::Session;
@@ -161,4 +163,33 @@ pub async fn iam_check_cases(
 	}
 
 	Ok(())
+}
+
+#[allow(dead_code)]
+pub fn with_enough_stack(
+	fut: impl Future<Output = Result<(), Error>> + Send + 'static,
+) -> Result<(), Error> {
+	#[allow(unused_mut)]
+	let mut builder = Builder::new();
+
+	// Roughly how much stack is allocated for surreal server workers in release mode
+	#[cfg(not(debug_assertions))]
+	{
+		builder = builder.stack_size(10_000_000);
+	}
+
+	// Same for debug mode
+	#[cfg(debug_assertions)]
+	{
+		builder = builder.stack_size(24_000_000);
+	}
+
+	builder
+		.spawn(|| {
+			let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+			runtime.block_on(fut)
+		})
+		.unwrap()
+		.join()
+		.unwrap()
 }

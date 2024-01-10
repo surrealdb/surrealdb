@@ -23,6 +23,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
