@@ -26,16 +26,20 @@ pub(crate) async fn delete_live_queries(
 			Ok(Some(bor)) => {
 				println!("In delete, got an operation result");
 				if bor.1.is_some() {
+					// There is an error, we do not process the entry only feed it down
 					sender
 						.send(bor)
 						.await
 						.map_err(|_e| Error::BootstrapError(ChannelSendError(BootstrapDelete)))?;
 				} else {
+					// No error, we process the entry by adding it to the buffer of messages we want to process
 					msg.push(bor);
+					// If the buffer size has exceeded for batch processing then we process
 					if msg.len() >= batch_size {
 						let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
 						for boresult in results {
-							sender.send(boresult).await.map_err(|_e| {
+							sender.send(boresult).await.map_err(|e| {
+								error!("There was an error processing the batch, {}", e);
 								Error::BootstrapError(ChannelSendError(BootstrapDelete))
 							})?;
 						}
@@ -112,6 +116,7 @@ async fn delete_live_query_batch(
 					// TODO check if e has error and send and skip
 					// Delete the node live query
 					println!("Deleting live query: {:?}", lq);
+					// NOTE: deleting missing entries does not error
 					if let Err(e) = tx.del_ndlq(*lq.nd, *lq.lq, &lq.ns, &lq.db).await {
 						println!("Failed deleting node live query: {:?}", e);
 						error!("Failed deleting node live query: {:?}", e);
@@ -138,7 +143,7 @@ async fn delete_live_query_batch(
 							println!(
 								"Commit failed, but rollback succeeded when deleting ndlq+tblq"
 							);
-							trace!("Commit failed, but rollback succeeded when deleting ndlq+tblq");
+							error!("Commit failed, but rollback succeeded when deleting ndlq+tblq");
 							last_err = Some(e);
 						}
 						Err(e2) => {
@@ -204,6 +209,7 @@ mod test {
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
 
+		// Input and output task channels
 		let (input_lq_send, input_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
@@ -213,30 +219,37 @@ mod test {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
 
+		// Start the task
 		let arch_task =
 			tokio::spawn(delete_live_queries(tx_req, input_lq_recv, output_lq_send, 10));
 
 		// deliberately close channel
 		drop(input_lq_send);
 
-		// Wait for output
-		assert!(output_lq_recv.recv().await.is_none());
-
+		// Wait for tasks to complete
 		let (tx_task_res, arch_task_res) =
 			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
 				.await
 				.unwrap();
+
+		// Validate no transactions requested
 		let tx_req_count = tx_task_res.unwrap().unwrap();
 		assert_eq!(tx_req_count, 0);
+
+		// Archive task did not error
 		arch_task_res.unwrap().unwrap();
+
+		// Validate the output channel was closed
+		assert!(output_lq_recv.try_recv().is_err());
 	}
 
 	#[tokio::test]
 	async fn test_invalid_message() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap().with_notifications());
 		let (tx_req, tx_res) = mpsc::channel(1);
-		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
+		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
 
+		// input and output channels
 		let (input_lq_send, input_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
@@ -246,19 +259,19 @@ mod test {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
 
+		// Start delete task
 		let live_query_id = Uuid::from_str("587bebb8-707a-4ae7-91cb-2edbae95423e").unwrap();
-		let arch_task =
+		let delete_task =
 			tokio::spawn(delete_live_queries(tx_req, input_lq_recv, output_lq_send, 10));
 
-		println!("Before send");
 		// Send input request
 		input_lq_send
 			.send((
 				LqValue {
-					nd: Default::default(),
-					ns: "".to_string(),
-					db: "".to_string(),
-					tb: "".to_string(),
+					nd: ds.id,
+					ns: "some_namespace".to_string(),
+					db: "some_database".to_string(),
+					tb: "some_table".to_string(),
 					lq: live_query_id,
 				},
 				None,
@@ -269,21 +282,29 @@ mod test {
 		// End processing
 		drop(input_lq_send);
 
-		println!("sent from test");
-
-		// Wait for output
-		let val = output_lq_recv.recv().await;
-		println!("Received in test");
-		assert!(val.is_none(), "Expected no message as deletes on invalid keys dont cause error");
-
-		// Wait for output
+		// Wait for tasks to complete
 		let (tx_task_res, delete_task_res) =
-			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(delete_task))
 				.await
 				.unwrap();
+		//  Validate number of transactions
 		let tx_req_count = tx_task_res.unwrap().unwrap();
 		assert_eq!(tx_req_count, 1);
+
+		// Validate delete task completed successfully
 		delete_task_res.unwrap().unwrap();
+
+		// Validate a successfully deleted message (even if not exists) does not result in an event
+		let val = output_lq_recv.try_recv();
+		assert!(val.is_err());
+
+		// And the deleted lq is actually deleted
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tb_res =
+			tx.get_tb_live("some_namespace", "some_database", "some_table", &live_query_id.0).await;
+		tx.cancel().await.unwrap();
+		assert!(tb_res.is_err());
+		println!("Finished test")
 	}
 
 	#[tokio::test]
@@ -292,6 +313,7 @@ mod test {
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
 
+		// Setup input and output channels
 		let (input_lq_send, input_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,

@@ -207,6 +207,7 @@ mod test {
 	use std::time::Duration;
 	use tokio::sync::mpsc;
 
+	use crate::kvs::bootstrap::test_util::always_give_tx;
 	use crate::kvs::bootstrap::{archive_live_queries, TxRequestOneshot};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -221,6 +222,7 @@ mod test {
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
 
+		// Declare the input and output channels of the task
 		let (input_lq_send, input_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
@@ -230,6 +232,7 @@ mod test {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
 
+		// Start the task
 		let node_id = Uuid::from_str("921f427a-e9d8-43ef-a419-e018711031cb").unwrap();
 		let arch_task = tokio::spawn(archive_live_queries(
 			tx_req,
@@ -240,18 +243,20 @@ mod test {
 			&RETRY_DURATION,
 		));
 
-		// deliberately close channel
+		// Deliberately close channel to indicate it finished
 		drop(input_lq_send);
 
-		// Wait for output
-		assert!(output_lq_recv.recv().await.is_none());
-
+		// Wait for the task to complete, since we closed the input channel
 		let (tx_task_res, arch_task_res) =
 			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
 				.await
 				.unwrap();
+
+		// Validate the number of transaction requests
 		let tx_req_count = tx_task_res.unwrap().unwrap();
 		assert_eq!(tx_req_count, 0);
+
+		// Validate there was no error
 		arch_task_res.unwrap().unwrap();
 	}
 
@@ -261,6 +266,7 @@ mod test {
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds, tx_res));
 
+		// Declare input and output channels
 		let (input_lq_send, input_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
@@ -270,6 +276,7 @@ mod test {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
 
+		// Declare the live query that we want to archive
 		let node_id = Uuid::from_str("921f427a-e9d8-43ef-a419-e018711031cb").unwrap();
 		let live_query_id = Uuid::from_str("fb063201-dc2f-4cb3-bcd8-db3cbf12affd").unwrap();
 		let arch_task = tokio::spawn(archive_live_queries(
@@ -286,9 +293,9 @@ mod test {
 			.send((
 				LqValue {
 					nd: Default::default(),
-					ns: "".to_string(),
-					db: "".to_string(),
-					tb: "".to_string(),
+					ns: "some_namespace".to_string(),
+					db: "some_database".to_string(),
+					tb: "some_table".to_string(),
 					lq: live_query_id,
 				},
 				None,
@@ -296,12 +303,28 @@ mod test {
 			.await
 			.unwrap();
 
-		// Wait for output
+		// Close channel for shutdown
+		drop(input_lq_send);
+
+		// Wait for tasks to complete
+		let (tx_task_res, arch_task_res) =
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
+				.await
+				.unwrap();
+
+		// Validate the number of transactions
+		let tx_req_count = tx_task_res.unwrap().unwrap();
+		assert_eq!(tx_req_count, 1);
+
+		// Validate there was no error
+		arch_task_res.unwrap().unwrap();
+
+		// Validate the output messages in the channel
 		let val = output_lq_recv.recv().await;
 		assert!(val.is_some());
 		let val = val.unwrap();
 
-		// There is a not found error
+		// And the output message is a not found error
 		assert!(val.1.is_some());
 		let err = val.1.unwrap();
 		match err {
@@ -312,26 +335,15 @@ mod test {
 			}
 			_ => panic!("Expected LvNotFound error"),
 		}
-
-		// Close channel for shutdown
-		drop(input_lq_send);
-
-		// Wait for output
-		let (tx_task_res, arch_task_res) =
-			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
-				.await
-				.unwrap();
-		let tx_req_count = tx_task_res.unwrap().unwrap();
-		assert_eq!(tx_req_count, 1);
-		arch_task_res.unwrap().unwrap();
 	}
 
 	#[tokio::test]
-	async fn test_handles_batches_correctly() {
+	async fn test_task_archives() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let (tx_req, tx_res) = mpsc::channel(1);
 		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
 
+		// Setup task input and output channels
 		let (input_lq_send, input_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
@@ -341,20 +353,12 @@ mod test {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
 
-		let self_node_id = Uuid::from_str("8a7a430b-7e9c-4ff9-8a27-9e2a2ba25b97").unwrap();
+		// Set up a valid live query to be archived
+		let self_node_id = ds.id;
 		let namespace = "sample-namespace";
 		let database = "sample-db";
 		let table = "sampleTable";
 		let sess = Session::owner().with_rt(true).with_ns(namespace).with_db(database);
-		let arch_task = tokio::spawn(archive_live_queries(
-			tx_req,
-			*&self_node_id,
-			input_lq_recv,
-			output_lq_send,
-			10,
-			&RETRY_DURATION,
-		));
-
 		let query = format!("LIVE SELECT * FROM {table}");
 		let mut lq = ds.execute(&query, &sess, None).await.unwrap();
 		assert_eq!(lq.len(), 1);
@@ -365,6 +369,16 @@ mod test {
 				panic!("Expected Uuid")
 			}
 		};
+
+		// Start the task
+		let arch_task = tokio::spawn(archive_live_queries(
+			tx_req,
+			*&self_node_id,
+			input_lq_recv,
+			output_lq_send,
+			10,
+			&RETRY_DURATION,
+		));
 
 		// Send input request
 		input_lq_send
@@ -381,54 +395,33 @@ mod test {
 			.await
 			.unwrap();
 
-		// Wait for output
-		let val = output_lq_recv.recv().await;
-		assert!(val.is_some());
-		let val = val.unwrap();
-
-		// There is a not found error
-		assert!(val.1.is_none());
-
-		// Close channel for shutdown
+		// Close channel to initiate shutdown
 		drop(input_lq_send);
 
-		// Wait for output
+		// Wait for tasks to complete
 		let (tx_task_res, arch_task_res) =
 			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
 				.await
 				.unwrap();
+
+		// Validate the number of transactions
 		let tx_req_count = tx_task_res.unwrap().unwrap();
 		assert_eq!(tx_req_count, 1);
+
+		// Validate the archive task completed without error
 		arch_task_res.unwrap().unwrap();
 
-		// Now verify that it was in fact archived
+		// Process output messages and validate no error
+		let val = output_lq_recv.recv().await;
+		assert!(val.is_some());
+		let val = val.unwrap();
+		assert!(val.1.is_none());
+
+		// Now verify that live query was in fact archived
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let res = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
 		tx.commit().await.unwrap();
 		let live_stm = res.unwrap();
 		assert_eq!(live_stm.archived, Some(self_node_id))
-	}
-
-	async fn always_give_tx(
-		ds: Arc<Datastore>,
-		mut tx_req_channel: mpsc::Receiver<TxRequestOneshot>,
-	) -> Result<u32, Error> {
-		let mut count = 0 as u32;
-		loop {
-			let req = tx_req_channel.recv().await;
-			match req {
-				None => break,
-				Some(r) => {
-					count += 1;
-					let tx = ds.transaction(Write, Optimistic).await?;
-					if let Err(mut tx) = r.send(tx) {
-						// The other side of the channel was probably closed
-						// Do not reduce count, because it was requested
-						tx.cancel().await?;
-					}
-				}
-			}
-		}
-		Ok(count)
 	}
 }

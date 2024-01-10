@@ -6,6 +6,7 @@ use super::{is_allowed, Action, Actor, Error, Level, Resource, Role};
 
 /// Specifies the current authentication for the datastore execution context.
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct Auth {
 	actor: Actor,

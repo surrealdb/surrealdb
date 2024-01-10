@@ -8,6 +8,8 @@ use crate::sql;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// A task that always gives transactions upon request
+/// Task terminates once the channel is closed on the other end
 pub(crate) async fn always_give_tx(
 	ds: Arc<Datastore>,
 	mut tx_req_channel: mpsc::Receiver<TxRequestOneshot>,
@@ -31,6 +33,7 @@ pub(crate) async fn always_give_tx(
 	Ok(count)
 }
 
+/// Cast a response vector to a single uuid to avoid boilerplate
 pub(crate) fn as_uuid(mut responses: Vec<Response>) -> sql::Uuid {
 	assert_eq!(responses.len(), 1);
 	let resp = responses.pop().unwrap().result;

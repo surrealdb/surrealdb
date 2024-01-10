@@ -14,6 +14,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Cast")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Cast(pub Kind, pub Value);
 
 impl PartialOrd for Cast {

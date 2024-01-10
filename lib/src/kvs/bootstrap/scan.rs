@@ -9,6 +9,9 @@ use crate::kvs::Limit::Unlimited;
 use crate::kvs::{BootstrapOperationResult, LqValue, ScanPage};
 use crate::sql::Uuid;
 
+/// Scans the live queries belonging to the provided nodes
+/// All the live queries on the provided nodes will be removed safely (archived, deleted)
+/// using the other tasks
 pub(crate) async fn scan_node_live_queries(
 	tx_req: mpsc::Sender<TxRequestOneshot>,
 	nodes: Vec<Uuid>,
@@ -35,6 +38,11 @@ pub(crate) async fn scan_node_live_queries(
 				while let Some(page) = next_page {
 					match tx.scan_paged(page, batch_size).await {
 						Ok(scan_result) => {
+							println!(
+								"Scan result: {:?} and next page: {:?}",
+								scan_result.values,
+								scan_result.next_page.is_some()
+							);
 							next_page = scan_result.next_page;
 							for (key, value) in scan_result.values {
 								let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
@@ -46,7 +54,9 @@ pub(crate) async fn scan_node_live_queries(
 									tb,
 									lq: lv.lq.into(),
 								};
+								println!("Sending scan lq: {:?}", lq);
 								sender.send((lq, None)).await.map_err(|_| {
+									println!("Error sending");
 									Error::BootstrapError(ChannelSendError(BootstrapScan))
 								})?;
 							}
@@ -63,8 +73,7 @@ pub(crate) async fn scan_node_live_queries(
 			tx.commit().await
 		}
 		Err(_recv_error) => {
-			println!("Failed receiving tx in scan node live queries");
-			// TODO wrap
+			println!("Failed receiving tx in scan node live queries: {:?}", _recv_error);
 			Err(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)))
 		}
 	}
@@ -119,24 +128,45 @@ mod test {
 		// Validate no more live queries
 		assert!(output_lq_recv.recv().await.is_none());
 
-		let (tx_task_res, arch_task_res) =
+		let (tx_task_res, scan_task_res) =
 			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(scan_task))
 				.await
 				.unwrap();
 		let tx_req_count = tx_task_res.unwrap().unwrap();
 		assert_eq!(tx_req_count, 1);
-		arch_task_res.unwrap().unwrap();
+		scan_task_res.unwrap().unwrap();
 	}
 
 	#[tokio::test]
-	async fn scan_dies_no_messages() {}
+	async fn scan_dies_no_messages() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let (tx_req, tx_res) = mpsc::channel(1);
+		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
 
-	#[tokio::test]
-	async fn scan_batches() {}
+		// Create some data
+		let sess = Session::owner().with_ns("namespaceTest").with_db("databaseTest").with_rt(true);
+		let table = "testTable";
+		let query = format!("CREATE {table}");
+		let _create_result = ds.execute(&query, &sess, None).await.unwrap();
 
-	#[tokio::test]
-	async fn scan_failed_tx() {}
+		let (output_lq_send, mut output_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
 
-	#[tokio::test]
-	async fn scan_invalid_input() {}
+		let scan_task =
+			tokio::spawn(scan_node_live_queries(tx_req, vec![ds.id], output_lq_send, 1000));
+
+		// Wait for task to finish as it has nothing to do
+		let (tx_task_res, scan_task_res) =
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(scan_task))
+				.await
+				.unwrap();
+		let tx_req_count = tx_task_res.unwrap().unwrap();
+		assert_eq!(tx_req_count, 1);
+		scan_task_res.unwrap().unwrap();
+
+		// Validate channel is empty and closed
+		assert!(output_lq_recv.try_recv().is_err());
+	}
 }

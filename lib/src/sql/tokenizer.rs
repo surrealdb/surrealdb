@@ -4,6 +4,7 @@ use std::fmt;
 use std::fmt::Display;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Tokenizer {
 	Blank,
