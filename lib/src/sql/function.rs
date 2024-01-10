@@ -174,6 +174,9 @@ impl Function {
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
 				let val = {
+					// Check that namespace and database are set to prevent a panic
+					opt.valid_for_ns()?;
+					opt.valid_for_db()?;
 					// Claim transaction
 					let mut run = txn.lock().await;
 					// Get the function definition
