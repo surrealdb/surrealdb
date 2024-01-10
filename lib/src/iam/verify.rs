@@ -14,10 +14,10 @@ use std::str::{self, FromStr};
 use std::sync::Arc;
 
 async fn config(
-	kvs: &Datastore,
+	_kvs: &Datastore,
 	de_kind: Algorithm,
 	de_code: String,
-	token_header: Header,
+	_token_header: Header,
 ) -> Result<(DecodingKey, Validation), Error> {
 	if de_kind == Algorithm::Jwks {
 		#[cfg(not(feature = "jwks"))]
@@ -27,8 +27,8 @@ async fn config(
 		}
 		#[cfg(feature = "jwks")]
 		// The key identifier header must be present
-		if let Some(kid) = token_header.kid {
-			jwks::config(kvs, &kid, &de_code).await
+		if let Some(kid) = _token_header.kid {
+			jwks::config(_kvs, &kid, &de_code).await
 		} else {
 			Err(Error::MissingTokenHeader("kid".to_string()))
 		}

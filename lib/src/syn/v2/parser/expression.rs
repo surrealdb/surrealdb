@@ -255,9 +255,9 @@ impl Parser<'_> {
 			t!("KNN") => {
 				let start = expected!(self, t!("<")).span;
 				let amount = self.next_token_value()?;
-				let option = self.eat(t!(",")).then(|| self.parse_distance()?);
+				let dist = self.eat(t!(",")).then(|| self.parse_distance()).transpose()?;
 				self.expect_closing_delimiter(t!(">"), start)?;
-				Operator::Knn(amount)
+				Operator::Knn(amount, dist)
 			}
 
 			// should be unreachable as we previously check if the token was a prefix op.
