@@ -275,6 +275,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("RS256") => TokenKind::Algorithm(Algorithm::Rs256),
 	UniCase::ascii("RS384") => TokenKind::Algorithm(Algorithm::Rs384),
 	UniCase::ascii("RS512") => TokenKind::Algorithm(Algorithm::Rs512),
+	UniCase::ascii("JWKS") => TokenKind::Algorithm(Algorithm::Jwks),
 
 	// Distance
 	UniCase::ascii("EUCLIDEAN") => TokenKind::Distance(DistanceKind::Euclidean),
