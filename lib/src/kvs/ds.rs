@@ -594,7 +594,7 @@ impl Datastore {
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
 		loop {
-			if let Err(_elapsed) = timeout(
+			let receive_and_handle_tx_request_task = timeout(
 				Duration::from_millis((BOOTSTRAP_BATCH_LATENCY.as_millis() * 100) as u64),
 				async {
 					match tx_req_recv.recv().await {
@@ -620,9 +620,8 @@ impl Datastore {
 						}
 					}
 				},
-			)
-			.await
-			{
+			);
+			if let Err(_elapsed) = receive_and_handle_tx_request_task.await {
 				println!("Timed out waiting for transaction requests. Breaking tx request loop");
 				trace!("Timed out waiting for transaction requests. Breaking tx request loop");
 				break;
