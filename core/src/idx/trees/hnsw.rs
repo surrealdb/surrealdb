@@ -6,6 +6,7 @@ use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
+use tokio::sync::RwLock;
 
 struct HnswIndex<const M: usize, const M0: usize, const EFC: usize> {
 	h: Hnsw<M, M0, EFC>,
@@ -22,8 +23,8 @@ impl<const M: usize, const M0: usize, const EFC: usize> HnswIndex<M, M0, EFC> {
 		}
 	}
 
-	fn insert(&mut self, o: SharedVector, d: DocId) {
-		self.h.insert(o.clone());
+	async fn insert(&mut self, o: SharedVector, d: DocId) {
+		self.h.insert(o.clone()).await;
 		match self.d.entry(o) {
 			Entry::Occupied(mut e) => {
 				let docs = e.get_mut();
@@ -54,17 +55,12 @@ impl<const M: usize, const M0: usize, const EFC: usize> HnswIndex<M, M0, EFC> {
 		)
 	}
 }
-#[derive(Debug, Clone)]
-struct EnterPoint {
-	id: ElementId,
-	level: usize,
-}
 
 struct Hnsw<const M: usize, const M0: usize, const EFC: usize> {
 	dist: Distance,
 	ml: f64,
-	layers: Vec<Layer>,
-	enter_point: Option<EnterPoint>,
+	layers: Vec<RwLock<Layer>>,
+	enter_point: Option<ElementId>,
 	elements: Vec<SharedVector>,
 	rng: SmallRng,
 }
@@ -98,19 +94,19 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		}
 	}
 
-	fn insert(&mut self, q: SharedVector) -> ElementId {
+	async fn insert(&mut self, q: SharedVector) -> ElementId {
 		let id = self.elements.len() as ElementId;
 		let level = self.get_random_level();
 
 		for l in self.layers.len()..=level {
 			println!("Create Layer {l}");
-			self.layers.push(Layer::new());
+			self.layers.push(RwLock::new(Layer::new()));
 		}
 
 		if let Some(ep) = self.enter_point.clone() {
-			self.insert_element(&q, ep, id, level);
+			self.insert_element(&q, ep, id, level).await;
 		} else {
-			self.insert_first_element(id, level);
+			self.insert_first_element(id, level).await;
 		}
 
 		self.elements.push(q);
@@ -122,60 +118,65 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		(-unif.ln() * self.ml).floor() as usize // calculate the layer
 	}
 
-	fn insert_first_element(&mut self, id: ElementId, level: usize) {
+	async fn insert_first_element(&mut self, id: ElementId, level: usize) {
 		println!("insert_first_element - id: {id} - level: {level}");
 		for lc in 0..=level {
-			self.layers[lc].0.insert(id, vec![]);
+			self.layers[lc].write().await.0.insert(id, vec![]);
 		}
-		self.enter_point = Some(EnterPoint {
-			id,
-			level,
-		})
+		self.enter_point = Some(id);
 	}
 
-	fn insert_element(
+	async fn insert_element(
 		&mut self,
 		q: &SharedVector,
-		mut ep: EnterPoint,
+		mut ep: ElementId,
 		id: ElementId,
 		level: usize,
 	) {
 		println!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?}");
-		let graph_ep_level = ep.level;
+		let init_level = level;
 
-		for lc in ((level + 1)..=ep.level).rev() {
+		for lc in ((level + 1)..=init_level).rev() {
 			println!("1- LC: {lc}");
-			let w = self.search_layer(q, &ep, 1, lc).into_sorted_vec();
-			ep = EnterPoint {
-				id: w[0].1,
-				level: lc,
-			}
+			let w = self.search_layer(q, ep, 1, lc).await.into_sorted_vec();
+			ep = w[0].1;
 		}
 
-		for lc in (0..=ep.level.min(level)).rev() {
+		// TODO: One thread per level
+		let mut m_max = M;
+		for lc in (0..=init_level.min(level)).rev() {
+			if lc == 0 {
+				m_max = M0;
+			}
 			println!("2- LC: {lc}");
-			let w = self.search_layer(q, &ep, EFC, lc);
+			let w = self.search_layer(q, ep, EFC, lc).await;
 			println!("2- W: {w:?}");
-			let neighbors = self.select_neighbors_simple(w, lc);
+			let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
+			self.select_neighbors_simple(&w, m_max, &mut neighbors);
 			println!("2- N: {neighbors:?}");
-			let layer = &mut self.layers[lc].0;
-			for e in neighbors {
-				if let Some(elements) = layer.get_mut(&e) {
-					elements.push(id);
+			// add bidirectional connections from neighbors to q at layer lc
+			let mut layer = self.layers[lc].write().await;
+			layer.0.insert(id, neighbors.clone());
+			for e_id in neighbors {
+				if let Some(e_conn) = layer.0.get_mut(&e_id) {
+					if e_conn.len() >= m_max {
+						self.select_and_shink_neighbors_simple(e_id, id, q, e_conn, m_max);
+					} else {
+						e_conn.push(id);
+					}
 				} else {
 					unreachable!()
 				}
-				println!("e: : {e:?}");
 			}
-
-			todo!()
+			if let Some(next_ep) = w.iter().next() {
+				ep = next_ep.1;
+			} else {
+				unreachable!()
+			}
 		}
 
-		if level > graph_ep_level {
-			self.enter_point = Some(EnterPoint {
-				id,
-				level,
-			});
+		if level > init_level {
+			self.enter_point = Some(id);
 		}
 	}
 
@@ -185,24 +186,24 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	/// elements to return ef
 	/// layer number lc
 	/// Output: ef closest neighbors to q
-	fn search_layer(
+	async fn search_layer(
 		&self,
 		q: &SharedVector,
-		ep: &EnterPoint,
+		ep_id: ElementId,
 		ef: usize,
 		lc: usize,
 	) -> BinaryHeap<PriorityNode> {
-		let ep_dist = self.distance(&self.elements[ep.id as usize], q);
-		let ep_pr = PriorityNode(ep_dist, ep.id);
+		let ep_dist = self.distance(&self.elements[ep_id as usize], q);
+		let ep_pr = PriorityNode(ep_dist, ep_id);
 		let mut candidates = BTreeSet::from([ep_pr.clone()]);
 		let mut w = BinaryHeap::from([ep_pr]);
-		let mut visited = HashSet::from([ep.id]);
+		let mut visited = HashSet::from([ep_id]);
 		while let Some(c) = candidates.pop_first() {
 			let f_dist = candidates.last().map(|f| f.0).unwrap_or(c.0);
 			if c.0 > f_dist {
 				break;
 			}
-			for (&e_id, e_neighbors) in &self.layers[lc].0 {
+			for (&e_id, e_neighbors) in &self.layers[lc].read().await.0 {
 				if e_neighbors.contains(&c.1) {
 					if visited.insert(e_id) {
 						let e_dist = self.distance(&self.elements[e_id as usize], q);
@@ -220,20 +221,36 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		w
 	}
 
-	fn select_neighbors_simple(&self, w: BinaryHeap<PriorityNode>, lc: usize) -> Vec<ElementId> {
-		let m = if lc == 0 {
-			M0
-		} else {
-			M
-		};
-		let mut n = Vec::with_capacity(m);
+	fn select_and_shink_neighbors_simple(
+		&self,
+		e_id: ElementId,
+		new_f_id: ElementId,
+		new_f: &SharedVector,
+		elements: &mut Vec<ElementId>,
+		m_max: usize,
+	) {
+		let e = &self.elements[e_id as usize];
+		let mut w = BinaryHeap::with_capacity(elements.len());
+		w.push(PriorityNode(self.distance(e, new_f), new_f_id));
+		for f_id in elements.drain(..) {
+			let f_dist = self.distance(&self.elements[f_id as usize], e);
+			w.push(PriorityNode(f_dist, f_id));
+		}
+		self.select_neighbors_simple(&w, m_max, elements);
+	}
+
+	fn select_neighbors_simple(
+		&self,
+		w: &BinaryHeap<PriorityNode>,
+		m_max: usize,
+		neighbors: &mut Vec<ElementId>,
+	) {
 		for pr in w {
-			n.push(pr.1);
-			if n.len() == m {
+			neighbors.push(pr.1);
+			if neighbors.len() == m_max {
 				break;
 			}
 		}
-		n
 	}
 
 	fn distance(&self, v1: &SharedVector, v2: &SharedVector) -> f64 {
@@ -256,13 +273,13 @@ mod tests {
 	use std::collections::HashMap;
 	use test_log::test;
 
-	fn insert_collection_one_by_one<const M: usize, const M0: usize, const EFC: usize>(
+	async fn insert_collection_one_by_one<const M: usize, const M0: usize, const EFC: usize>(
 		h: &mut HnswIndex<M, M0, EFC>,
 		collection: &TestCollection,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
-			h.insert(obj.clone(), *doc_id);
+			h.insert(obj.clone(), *doc_id).await;
 			map.insert(*doc_id, obj.clone());
 		}
 		Ok(map)
@@ -300,17 +317,17 @@ mod tests {
 		Ok(())
 	}
 
-	fn test_hnsw_collection<const M: usize, const M0: usize, const EFC: usize>(
+	async fn test_hnsw_collection<const M: usize, const M0: usize, const EFC: usize>(
 		distance: Distance,
 		collection: &TestCollection,
 	) -> Result<(), Error> {
 		let mut h: HnswIndex<M, M0, EFC> = HnswIndex::new(distance);
-		insert_collection_one_by_one::<M, M0, EFC>(&mut h, collection)?;
+		insert_collection_one_by_one::<M, M0, EFC>(&mut h, collection).await?;
 		find_collection::<M, M0, EFC>(&mut h, &collection)?;
 		Ok(())
 	}
 
-	fn test_hnsw_collection_distances<
+	async fn test_hnsw_collection_distances<
 		const D: usize,
 		const M: usize,
 		const M0: usize,
@@ -331,13 +348,13 @@ mod tests {
 				collection.as_ref().len(),
 				vt,
 			);
-			test_hnsw_collection::<M, M0, EFC>(distance, &collection)?;
+			test_hnsw_collection::<M, M0, EFC>(distance, &collection).await?;
 		}
 		Ok(())
 	}
 
-	#[test]
-	fn test_hnsw_unique_xs() -> Result<(), Error> {
+	#[test(tokio::test)]
+	async fn test_hnsw_unique_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
@@ -345,7 +362,8 @@ mod tests {
 			test_hnsw_collection_distances::<DIM, 12, 24, 500>(
 				vt,
 				TestCollection::new_unique(DIM, vt, 2),
-			)?;
+			)
+			.await?;
 		}
 		Ok(())
 	}
