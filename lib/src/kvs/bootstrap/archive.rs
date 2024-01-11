@@ -25,27 +25,31 @@ pub(crate) async fn archive_live_queries(
 ) -> Result<(), Error> {
 	let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(batch_size);
 	loop {
-		println!("Archive start loopiteration ");
+		println!("[ARCHIVE] Archive start loop iteration ");
 		match tokio::time::timeout(*batch_latency, scan_recv.recv()).await {
 			Ok(Some(bor)) => {
-				println!("In archive, got an operation result");
-				if bor.1.is_some() {
+				let is_err = bor.1.is_some();
+				println!("[ARCHIVE] In archive, got an operation result, it was err={}", is_err);
+				if is_err {
 					// send any errors further on, because we don't need to process them
 					// unless we can handle them. Currently we can't.
 					// if we error on send, then we bubble up because this shouldn't happen
 					sender.send(bor).await.map_err(|e| {
-						println!("Error sending error: {:?}", e);
+						println!("[ARCHIVE] Error sending error: {:?}", e);
 						error!("Error sending error: {:?}", e);
 						Error::BootstrapError(ChannelSendError(BootstrapArchive))
 					})?;
 				} else {
+					println!("[ARCHIVE] Buffered message");
 					msg.push(bor);
 					if msg.len() >= batch_size {
+						println!("[ARCHIVE] Buffer size reached and starting batch process");
 						let results =
 							archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
+						println!("[ARCHIVE] Handled batch and sending results {}", results.len());
 						for boresult in results {
 							sender.send(boresult).await.map_err(|e| {
-								println!("Error sending error: {:?}", e);
+								println!("[ARCHIVE] Error sending error: {:?}", e);
 								error!("Error sending error: {:?}", e);
 								Error::BootstrapError(ChannelSendError(BootstrapArchive))
 							})?;
@@ -56,13 +60,20 @@ pub(crate) async fn archive_live_queries(
 				}
 			}
 			Ok(None) => {
-				println!("In archive, channel presumed closed");
+				println!(
+					"[ARCHIVE] In archive, input channel closed, handling buffer count {}",
+					msg.len()
+				);
 				// Channel closed, process whatever is remaining
 				match archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await {
 					Ok(results) => {
+						println!(
+							"[ARCHIVE] Successfully processed remaining archive results: {:?} now sending",
+							results.len()
+						);
 						for boresult in results {
 							sender.send(boresult).await.map_err(|e| {
-								println!("Error sending error: {:?}", e);
+								println!("[ARCHIVE] Error sending error: {:?}", e);
 								error!("Error sending error: {:?}", e);
 								Error::BootstrapError(ChannelSendError(BootstrapArchive))
 							})?;
@@ -70,27 +81,28 @@ pub(crate) async fn archive_live_queries(
 						break;
 					}
 					Err(e) => {
+						println!("[ARCHIVE] Failed to archive live queries: {:?}", e);
 						error!("Failed to archive live queries: {:?}", e);
 					}
 				}
 			}
 			Err(_elapsed) => {
-				println!("Timedout in archive waiting for scan event receive");
+				println!("[ARCHIVE] Timedout in archive waiting for scan event receive");
 				// Timeout expired
 				let results = archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
 				for boresult in results {
 					sender.send(boresult).await.map_err(|e| {
-						println!("Error sending error: {:?}", e);
+						println!("[ARCHIVE] Error sending error: {:?}", e);
 						error!("Error sending error: {:?}", e);
 						Error::BootstrapError(ChannelSendError(BootstrapArchive))
 					})?;
 				}
 				// msg should always be drained but in case it isn't, we clear
-				println!("Clearing messages that should already be drained");
+				println!("[ARCHIVE] Clearing messages that should already be drained");
 				msg.clear();
 			}
 		}
-		println!("Archive end loop iteration");
+		println!("[ARCHIVE] Archive end loop iteration");
 	}
 	Ok(())
 }
@@ -124,7 +136,7 @@ async fn archive_live_query_batch(
 		}
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
-				println!("Received tx in archive");
+				println!("[ARCHIVE] Received tx in archive");
 				trace!("Received tx in archive");
 				// In case this is a retry, we re-hydrate the msg vector
 				// Consume the input message vector of live queries to archive
@@ -141,26 +153,34 @@ async fn archive_live_query_batch(
 					}
 					let lv = lv_res.unwrap();
 					// If the lq is already archived, we can remove it from bootstrap
-					if lv.archived.is_none() {
-						// Mark as archived by us (this node) and write back
-						let archived_lvs = lv.clone().archive(node_id);
-						match tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await {
-							Ok(_) => {
-								ret.push((lq, None));
-							}
-							Err(e) => {
-								ret.push((lq, Some(e)));
+					let already_archived = lv.archived.is_some();
+					match already_archived {
+						true => {
+							// We don't need to do anything, but we do need to forward the result
+							ret.push((lq, None))
+						}
+						false => {
+							// Mark as archived by us (this node) and write back
+							let archived_lvs = lv.clone().archive(node_id);
+							match tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await
+							{
+								Ok(_) => {
+									ret.push((lq, None));
+								}
+								Err(e) => {
+									ret.push((lq, Some(e)));
+								}
 							}
 						}
 					}
 				}
 				// TODO where can the above transaction hard fail? Every op needs rollback?
-				println!("Archive task committing transaction");
+				println!("[ARCHIVE] Archive task committing transaction");
 				if let Err(e) = tx.commit().await {
-					println!("An error: {}", e);
+					println!("[ARCHIVE] An error: {}", e);
 					last_err = Some(e);
 					if let Err(e) = tx.cancel().await {
-						println!("Another error: {}", e);
+						println!("[ARCHIVE] Another error: {}", e);
 						// TODO wrap?
 						last_err = Some(e);
 					}
@@ -425,6 +445,11 @@ mod test {
 		assert!(val.is_some());
 		let val = val.unwrap();
 		assert!(val.1.is_none());
+		assert_eq!(val.0.lq, live_query_id);
+		assert_eq!(val.0.nd, self_node_id);
+		assert_eq!(val.0.ns, namespace);
+		assert_eq!(val.0.db, database);
+		assert_eq!(val.0.tb, table);
 
 		// Now verify that live query was in fact archived
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();

@@ -21,10 +21,10 @@ pub(crate) async fn delete_live_queries(
 ) -> Result<(), Error> {
 	let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(batch_size);
 	loop {
-		println!("Delete loop!");
+		println!("[DELETE] Delete loop!");
 		match tokio::time::timeout(ds::BOOTSTRAP_BATCH_LATENCY, archived_recv.recv()).await {
 			Ok(Some(bor)) => {
-				println!("In delete, got an operation result");
+				println!("[DELETE] In delete, got an operation result");
 				if bor.1.is_some() {
 					// There is an error, we do not process the entry only feed it down
 					sender
@@ -37,6 +37,7 @@ pub(crate) async fn delete_live_queries(
 					// If the buffer size has exceeded for batch processing then we process
 					if msg.len() >= batch_size {
 						let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
+						println!("[DELETE] Sending {} results", results.len());
 						for boresult in results {
 							sender.send(boresult).await.map_err(|e| {
 								error!("There was an error processing the batch, {}", e);
@@ -49,7 +50,7 @@ pub(crate) async fn delete_live_queries(
 				}
 			}
 			Ok(None) => {
-				println!("Channel closed in delete live queries");
+				println!("[DELETE] Channel closed in delete live queries");
 				// Channel closed, process whatever is remaining
 				let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
 				for boresult in results {
@@ -61,7 +62,7 @@ pub(crate) async fn delete_live_queries(
 				break;
 			}
 			Err(_elapsed) => {
-				println!("Timeout in delete live queries");
+				println!("[DELETE] Timeout in delete live queries");
 				// Timeout expired
 				let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
 				for boresult in results {
@@ -88,39 +89,41 @@ async fn delete_live_query_batch(
 	// TODO test failed tx retries
 	let mut last_err = None;
 	for i in 0..ds::BOOTSTRAP_TX_RETRIES {
-		println!("Delete live query batch retry attempt {i}");
+		println!("[DELETE] Delete live query batch retry attempt {i}");
 		// In case this is a retry, we re-hydrate the msg vector
 		for (lq, e) in ret.drain(..) {
+			println!("[DELETE] Delete adding {:?} to batch", lq);
 			msg.push((lq, e));
 		}
 		// Fast-return
 		if msg.is_empty() {
+			println!("[DELETE] Delete fast return because msg is empty");
 			trace!("Delete fast return because msg is empty");
 			break;
 		}
-		println!("Requesting tx");
+		println!("[DELETE] Requesting tx");
 		let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 			oneshot::channel();
 		if let Err(send_error) = tx_req.send(tx_req_oneshot).await {
-			println!("Failed to send tx request: {}", send_error);
+			println!("[DELETE] Failed to send tx request: {}", send_error);
 			error!("Failed to send tx request: {}", send_error);
 			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
 			continue;
 		}
-		println!("Received tx response");
+		println!("[DELETE] Received tx response");
 		trace!("Receiving a tx response in delete");
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
-				println!("Tx response was good");
+				println!("[DELETE] Tx response was good");
 				trace!("Received tx in delete");
 				// Consume the input message vector of live queries to archive
 				for (lq, _e) in msg.drain(..) {
 					// TODO check if e has error and send and skip
 					// Delete the node live query
-					println!("Deleting live query: {:?}", lq);
+					println!("[DELETE] Deleting live query: {:?}", lq);
 					// NOTE: deleting missing entries does not error
 					if let Err(e) = tx.del_ndlq(*lq.nd, *lq.lq, &lq.ns, &lq.db).await {
-						println!("Failed deleting node live query: {:?}", e);
+						println!("[DELETE] Failed deleting node live query: {:?}", e);
 						error!("Failed deleting node live query: {:?}", e);
 						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
@@ -128,7 +131,7 @@ async fn delete_live_query_batch(
 					}
 					// Delete the table live query
 					if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *lq.lq).await {
-						println!("Failed deleting table live query: {:?}", e);
+						println!("[DELETE] Failed deleting table live query: {:?}", e);
 						error!("Failed deleting table live query: {:?}", e);
 						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
@@ -138,28 +141,28 @@ async fn delete_live_query_batch(
 					// place, since that was not merged.
 				}
 				// TODO where can the above transaction hard fail? Every op needs rollback?
-				println!("Committing transaction after {} writes", ret.len());
+				println!("[DELETE] Committing transaction after {} writes", ret.len());
 				trace!("Committing transaction after {} writes", ret.len());
 				if let Err(e) = tx.commit().await {
 					// TODO wrap?
 					match tx.cancel().await {
 						Ok(_) => {
 							println!(
-								"Commit failed, but rollback succeeded when deleting ndlq+tblq"
+								"[DELETE] Commit failed, but rollback succeeded when deleting ndlq+tblq"
 							);
 							error!("Commit failed, but rollback succeeded when deleting ndlq+tblq");
 							last_err = Some(e);
 						}
 						Err(e2) => {
 							// TODO wrap?
-							println!("Failed to rollback tx: {:?}, original: {:?}", e2, e);
+							println!("[DELETE] Failed to rollback tx: {:?}, original: {:?}", e2, e);
 							error!("Failed to rollback tx: {:?}, original: {:?}", e2, e);
 							last_err = Some(e2);
 						}
 					}
 					continue;
 				} else {
-					println!("delete lq committed tx happy path");
+					println!("[DELETE] delete lq committed tx happy path");
 					trace!("delete lq committed tx happy path");
 					break;
 				}

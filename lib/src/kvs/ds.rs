@@ -572,7 +572,7 @@ impl Datastore {
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned delete live query task");
 		let delete_task = tokio::spawn(bootstrap::delete_live_queries(
-			tx_req_send.clone(),
+			tx_req_send,
 			archive_recv,
 			delete_send,
 			BOOTSTRAP_BATCH_SIZE,
@@ -594,38 +594,25 @@ impl Datastore {
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
 		loop {
-			let receive_and_handle_tx_request_task = timeout(
-				Duration::from_millis((BOOTSTRAP_BATCH_LATENCY.as_millis() * 100) as u64),
-				async {
-					match tx_req_recv.recv().await {
-						None => {
-							// closed
-							println!("Transaction request channel closed, forcing timeout");
-							trace!("Transaction request channel closed, forcing timeout");
-							sleep(
-								Duration::from_millis(BOOTSTRAP_BATCH_LATENCY.as_millis() as u64),
-							)
-							.await;
-						}
-						Some(sender) => {
-							println!("Received a transaction request");
-							trace!("Received a transaction request");
-							let tx = self.transaction(Write, Optimistic).await.unwrap();
-							if let Err(mut tx) = sender.send(tx) {
-								// The receiver has been dropped, so we need to cancel the transaction
-								println!("Unable to send a transaction as response to task because the receiver is closed");
-								trace!("Unable to send a transaction as response to task because the receiver is closed");
-								tx.cancel().await.unwrap();
-							}
-						}
+			match tx_req_recv.recv().await {
+				None => {
+					// closed
+					println!("Transaction request channel closed, breaking out of bootstrap");
+					trace!("Transaction request channel closed, breaking out of bootstrap");
+					break;
+				}
+				Some(sender) => {
+					println!("Received a transaction request");
+					trace!("Received a transaction request");
+					let tx = self.transaction(Write, Optimistic).await.unwrap();
+					if let Err(mut tx) = sender.send(tx) {
+						// The receiver has been dropped, so we need to cancel the transaction
+						println!("Unable to send a transaction as response to task because the receiver is closed");
+						trace!("Unable to send a transaction as response to task because the receiver is closed");
+						tx.cancel().await.unwrap();
 					}
-				},
-			);
-			if let Err(_elapsed) = receive_and_handle_tx_request_task.await {
-				println!("Timed out waiting for transaction requests. Breaking tx request loop");
-				trace!("Timed out waiting for transaction requests. Breaking tx request loop");
-				break;
-			}
+				}
+			};
 		}
 		println!("Finished handling requests");
 		trace!("Finished handling requests",);
