@@ -179,7 +179,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.75.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -230,7 +230,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.75.0
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -433,7 +433,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.74.1
           targets: ${{ matrix.arch }}
 
       - name: Output package versions
