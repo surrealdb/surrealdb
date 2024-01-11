@@ -62,14 +62,15 @@ fn option(i: &str) -> IResult<&str, Kind> {
 
 fn record(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("record")(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) =
-		opt(alt((delimited_list1(openparentheses, commas, cut(table), closeparentheses), |i| {
+	let (i, v) = opt(|i| {
+		let (i, _) = mightbespace(i)?;
+		alt((delimited_list1(openparentheses, commas, cut(table), closeparentheses), |i| {
 			let (i, s) = tag("<")(i)?;
 			let (i, v) = separated_list1(verbar, table)(i)?;
 			let (i, _) = expect_terminator(s, char('>'))(i)?;
 			Ok((i, v))
-		})))(i)?;
+		}))(i)
+	})(i)?;
 	Ok((i, Kind::Record(v.unwrap_or_default())))
 }
 
@@ -89,6 +90,7 @@ fn geometry(i: &str) -> IResult<&str, Kind> {
 fn array(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("array")(i)?;
 	let (i, v) = opt(|i| {
+		let (i, _) = mightbespace(i)?;
 		let (i, s) = tag("<")(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, k) = kind(i)?;
