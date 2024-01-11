@@ -1,6 +1,7 @@
 use crate::err::Error;
+use crate::fnc::util::math::deviation::deviation;
 use crate::fnc::util::math::mean::Mean;
-use crate::fnc::util::math::vector::{check_same_dimension, PearsonSimilarity};
+use crate::fnc::util::math::vector::check_same_dimension;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::Number;
@@ -9,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
+use std::iter::Sum;
+use std::ops::{Mul, Sub};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
@@ -140,261 +143,210 @@ impl TreeVector {
 		}
 	}
 
-	fn dot_f64(a: &[f64], b: &[f64]) -> f64 {
-		a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
-	}
-
-	fn dot_f32(a: &[f32], b: &[f32]) -> f32 {
-		a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
-	}
-
-	fn dot_i64(a: &[i64], b: &[i64]) -> i64 {
-		a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
-	}
-
-	fn dot_i32(a: &[i32], b: &[i32]) -> i32 {
-		a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
-	}
-
-	fn dot_i16(a: &[i16], b: &[i16]) -> i16 {
-		a.iter().zip(b.iter()).map(|(a, b)| a * b).sum()
-	}
-
-	fn magnitude_f64(v: &[f64]) -> f64 {
-		v.iter().map(|a| a.powi(2)).sum::<f64>().sqrt()
-	}
-
-	fn magnitude_f32(v: &[f32]) -> f64 {
-		(v.iter().map(|a| a.powi(2)).sum::<f32>() as f64).sqrt()
-	}
-
-	fn magnitude_i64(v: &[i64]) -> f64 {
-		(v.iter().map(|a| a.pow(2)).sum::<i64>() as f64).sqrt()
-	}
-
-	fn magnitude_i32(v: &[i32]) -> f64 {
-		(v.iter().map(|a| a.pow(2)).sum::<i32>() as f64).sqrt()
-	}
-
-	fn magnitude_i16(v: &[i16]) -> f64 {
-		(v.iter().map(|a| a.pow(2)).sum::<i16>() as f64).sqrt()
+	fn chebyshev<T>(a: &[T], b: &[T]) -> Result<f64, Error>
+	where
+		T: ToFloat,
+	{
+		check_same_dimension("vector::distance::chebyshev", a, b)?;
+		Ok(a.iter()
+			.zip(b.iter())
+			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
+			.fold(f64::MIN, f64::max))
 	}
 
 	pub(crate) fn chebyshev_distance(&self, other: &Self) -> Result<f64, Error> {
-		check_same_dimension("vector::distance::chebyshev", self, other)?;
 		match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).fold(f64::MIN, f64::max))
-			}
-			(TreeVector::F32(a), TreeVector::F32(b)) => Ok(a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (*a as f64 - *b as f64).abs())
-				.fold(f64::MIN, f64::max)),
-			(TreeVector::I64(a), TreeVector::I64(b)) => Ok(a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (*a as f64 - *b as f64).abs())
-				.fold(f64::MIN, f64::max)),
-			(TreeVector::I32(a), TreeVector::I32(b)) => Ok(a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (*a as f64 - *b as f64).abs())
-				.fold(f64::MIN, f64::max)),
-			(TreeVector::I16(a), TreeVector::I16(b)) => Ok(a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (*a as f64 - *b as f64).abs())
-				.fold(f64::MIN, f64::max)),
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::chebyshev(a, b),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::chebyshev(a, b),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::chebyshev(a, b),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::chebyshev(a, b),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::chebyshev(a, b),
 			_ => Err(Error::Unreachable("Vector::chebyshev_distance")),
 		}
 	}
+
+	fn dot<T>(a: &[T], b: &[T]) -> T
+	where
+		T: Mul<Output = T> + Copy + Sum,
+	{
+		a.iter().zip(b.iter()).map(|(&x, &y)| x * y).sum()
+	}
+
+	fn magnitude<T>(v: &[T]) -> f64
+	where
+		T: ToFloat,
+	{
+		v.iter().map(|a| a.to_float().powi(2)).sum::<f64>().sqrt()
+	}
+	fn cosine<T>(a: &[T], b: &[T]) -> Result<f64, Error>
+	where
+		T: ToFloat + Mul<Output = T> + Copy + Sum,
+	{
+		check_same_dimension("vector::distance::cosine", a, b)?;
+		Ok(Self::dot(a, b).to_float() / (Self::magnitude(a) * Self::magnitude(b)))
+	}
+
 	pub(crate) fn cosine_distance(&self, other: &Self) -> Result<f64, Error> {
-		check_same_dimension("vector::distance::cosine", self, other)?;
 		match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => {
-				Ok(Self::dot_f64(a, b) / Self::magnitude_f64(a) * Self::magnitude_f64(b))
-			}
-			(TreeVector::F32(a), TreeVector::F32(b)) => {
-				Ok((Self::dot_f32(a, b) as f64) / Self::magnitude_f32(a) * Self::magnitude_f32(b))
-			}
-			(TreeVector::I64(a), TreeVector::I64(b)) => {
-				Ok((Self::dot_i64(a, b) as f64) / Self::magnitude_i64(a) * Self::magnitude_i64(b))
-			}
-			(TreeVector::I32(a), TreeVector::I32(b)) => {
-				Ok((Self::dot_i32(a, b) as f64) / Self::magnitude_i32(a) * Self::magnitude_i32(b))
-			}
-			(TreeVector::I16(a), TreeVector::I16(b)) => {
-				Ok((Self::dot_i16(a, b) as f64) / Self::magnitude_i16(a) * Self::magnitude_i16(b))
-			}
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::cosine(a, b),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::cosine(a, b),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::cosine(a, b),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::cosine(a, b),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::cosine(a, b),
 			_ => Err(Error::Unreachable("Vector::cosine_distance")),
 		}
 	}
 
+	fn euclidean<T>(a: &[T], b: &[T]) -> Result<f64, Error>
+	where
+		T: ToFloat,
+	{
+		check_same_dimension("vector::distance::euclidean", a, b)?;
+		Ok(a.iter()
+			.zip(b.iter())
+			.map(|(a, b)| (a.to_float() - b.to_float()).powi(2))
+			.sum::<f64>()
+			.sqrt())
+	}
+
 	pub(crate) fn euclidean_distance(&self, other: &Self) -> Result<f64, Error> {
-		check_same_dimension("vector::distance::euclidean", self, other)?;
 		match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt())
-			}
-			(TreeVector::F32(a), TreeVector::F32(b)) => Ok(a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (*a as f64 - *b as f64).powi(2))
-				.sum::<f64>()
-				.sqrt()),
-			(TreeVector::I64(a), TreeVector::I64(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i64>() as f64).sqrt())
-			}
-			(TreeVector::I32(a), TreeVector::I32(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i32>() as f64).sqrt())
-			}
-			(TreeVector::I16(a), TreeVector::I16(b)) => {
-				Ok((a.iter().zip(b.iter()).map(|(a, b)| (a - b).pow(2)).sum::<i16>() as f64).sqrt())
-			}
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::euclidean(a, b),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::euclidean(a, b),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::euclidean(a, b),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::euclidean(a, b),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::euclidean(a, b),
 			_ => Err(Error::Unreachable("Vector::euclidean_distance")),
 		}
 	}
+	fn hamming<T>(a: &[T], b: &[T]) -> Result<f64, Error>
+	where
+		T: PartialEq,
+	{
+		check_same_dimension("vector::distance::hamming", a, b)?;
+		Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
+	}
 
 	pub(crate) fn hamming_distance(&self, other: &Self) -> Result<f64, Error> {
-		check_same_dimension("vector::distance::hamming", self, other)?;
 		match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(TreeVector::F32(a), TreeVector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(TreeVector::I64(a), TreeVector::I64(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(TreeVector::I32(a), TreeVector::I32(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
-			(TreeVector::I16(a), TreeVector::I16(b)) => {
-				Ok(a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64)
-			}
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::hamming(a, b),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::hamming(a, b),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::hamming(a, b),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::hamming(a, b),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::hamming(a, b),
 			_ => Err(Error::Unreachable("Vector::hamming_distance")),
 		}
 	}
 
-	fn jaccard_f64(a: &[f64], b: &[f64]) -> f64 {
+	fn jaccard_f64(a: &[f64], b: &[f64]) -> Result<f64, Error> {
+		check_same_dimension("vector::distance::jaccard", a, b)?;
 		let set_a: HashSet<u64> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
 		let set_b: HashSet<u64> = HashSet::from_iter(b.iter().map(|f| f.to_bits()));
 		let intersection_size = set_a.intersection(&set_b).count() as f64;
 		let union_size = set_a.union(&set_b).count() as f64;
-		intersection_size / union_size
+		Ok(intersection_size / union_size)
 	}
 
-	fn jaccard_f32(a: &[f32], b: &[f32]) -> f64 {
+	fn jaccard_f32(a: &[f32], b: &[f32]) -> Result<f64, Error> {
+		check_same_dimension("vector::distance::jaccard", a, b)?;
 		let set_a: HashSet<u32> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
 		let set_b: HashSet<u32> = HashSet::from_iter(b.iter().map(|f| f.to_bits()));
 		let intersection_size = set_a.intersection(&set_b).count() as f64;
 		let union_size = set_a.union(&set_b).count() as f64;
-		intersection_size / union_size
+		Ok(intersection_size / union_size)
 	}
 
-	fn jaccard_integers<T>(a: &[T], b: &[T]) -> f64
+	fn jaccard_integers<T>(a: &[T], b: &[T]) -> Result<f64, Error>
 	where
 		T: Eq + Hash,
 	{
+		check_same_dimension("vector::distance::jaccard", a, b)?;
 		let set_a: HashSet<&T> = HashSet::from_iter(a.iter());
 		let set_b: HashSet<&T> = HashSet::from_iter(b.iter());
 		let intersection_size = set_a.intersection(&set_b).count() as f64;
 		let union_size = set_a.union(&set_b).count() as f64;
-		intersection_size / union_size
+		Ok(intersection_size / union_size)
 	}
 
 	pub(crate) fn jaccard_similarity(&self, other: &Self) -> Result<f64, Error> {
-		check_same_dimension("vector::distance::jaccard", self, other)?;
 		match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => Ok(Self::jaccard_f64(a, b)),
-			(TreeVector::F32(a), TreeVector::F32(b)) => Ok(Self::jaccard_f32(a, b)),
-			(TreeVector::I64(a), TreeVector::I64(b)) => Ok(Self::jaccard_integers(a, b)),
-			(TreeVector::I32(a), TreeVector::I32(b)) => Ok(Self::jaccard_integers(a, b)),
-			(TreeVector::I16(a), TreeVector::I16(b)) => Ok(Self::jaccard_integers(a, b)),
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::jaccard_f64(a, b),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::jaccard_f32(a, b),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::jaccard_integers(a, b),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::jaccard_integers(a, b),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::jaccard_integers(a, b),
 			_ => Err(Error::Unreachable("Vector::jaccard_similarity")),
 		}
 	}
 
+	fn manhattan<T>(a: &[T], b: &[T]) -> Result<f64, Error>
+	where
+		T: Sub<Output = T> + ToFloat + Copy,
+	{
+		check_same_dimension("vector::distance::manhattan", a, b)?;
+		Ok(a.iter().zip(b.iter()).map(|(&a, &b)| ((a - b).to_float()).abs()).sum())
+	}
+
 	pub(crate) fn manhattan_distance(&self, other: &Self) -> Result<f64, Error> {
-		check_same_dimension("vector::distance::manhattan", self, other)?;
 		match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum())
-			}
-			(TreeVector::F32(a), TreeVector::F32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (*a as f64 - *b as f64).abs()).sum::<f64>())
-			}
-			(TreeVector::I64(a), TreeVector::I64(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i64>() as f64)
-			}
-			(TreeVector::I32(a), TreeVector::I32(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i32>() as f64)
-			}
-			(TreeVector::I16(a), TreeVector::I16(b)) => {
-				Ok(a.iter().zip(b.iter()).map(|(a, b)| (a - b).abs()).sum::<i16>() as f64)
-			}
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::manhattan(a, b),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::manhattan(a, b),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::manhattan(a, b),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::manhattan(a, b),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::manhattan(a, b),
 			_ => Err(Error::Unreachable("Vector::manhattan_distance")),
 		}
 	}
-	pub(crate) fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
-		check_same_dimension("vector::distance::minkowski", self, other)?;
-		let dist = match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().powf(order.to_float()))
-				.sum::<f64>(),
-			(TreeVector::F32(a), TreeVector::F32(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().powf(order.to_float() as f32))
-				.sum::<f32>() as f64,
-			(TreeVector::I64(a), TreeVector::I64(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i64>() as f64,
-			(TreeVector::I32(a), TreeVector::I32(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i32>() as f64,
-			(TreeVector::I16(a), TreeVector::I16(b)) => a
-				.iter()
-				.zip(b.iter())
-				.map(|(a, b)| (a - b).abs().pow(order.to_int() as u32))
-				.sum::<i16>() as f64,
-			_ => return Err(Error::Unreachable("Vector::minkowski_distance")),
-		};
-		Ok(dist.powf(1.0 / order.to_float()))
+
+	fn minkowski<T>(a: &[T], b: &[T], order: f64) -> Result<f64, Error>
+	where
+		T: ToFloat,
+	{
+		check_same_dimension("vector::distance::minkowski", a, b)?;
+		let dist: f64 = a
+			.iter()
+			.zip(b.iter())
+			.map(|(a, b)| (a.to_float() - b.to_float()).abs().powf(order))
+			.sum();
+		Ok(dist.powf(1.0 / order))
 	}
 
-	fn pearson<T>(&a: &[T], b: &[T]) -> f64
+	pub(crate) fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<f64, Error> {
+		let order = order.to_float();
+		match (self, other) {
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::minkowski(a, b, order),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::minkowski(a, b, order),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::minkowski(a, b, order),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::minkowski(a, b, order),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::minkowski(a, b, order),
+			_ => Err(Error::Unreachable("Vector::minkowski_distance")),
+		}
+	}
+
+	fn pearson<T>(a: &[T], b: &[T]) -> Result<f64, Error>
 	where
-		T: Mean + ToFloat,
+		T: ToFloat,
 	{
+		check_same_dimension("vector::similarity::pearson", a, b)?;
 		let m1 = a.mean();
 		let m2 = b.mean();
 		let covar: f64 =
 			a.iter().zip(b.iter()).map(|(x, y)| (x.to_float() - m1) * (y.to_float() - m2)).sum();
 		let covar = covar / a.len() as f64;
-		let std_dev1 = crate::fnc::util::math::deviation::deviation(a, m1, false);
-		let std_dev2 = crate::fnc::util::math::deviation::deviation(b, m2, false);
-		Ok((covar / (std_dev1 * std_dev2)).into())
+		let std_dev1 = deviation(a, m1, false);
+		let std_dev2 = deviation(b, m2, false);
+		Ok(covar / (std_dev1 * std_dev2))
 	}
 
-	fn pearson_similarity(&self, other: &Self) -> Result<Number, Error> {
-		check_same_dimension("vector::similarity::pearson", self, other)?;
+	fn pearson_similarity(&self, other: &Self) -> Result<f64, Error> {
 		match (self, other) {
-			(TreeVector::F64(a), TreeVector::F64(b)) => todo!(),
-			(TreeVector::F32(a), TreeVector::F32(b)) => todo!(),
-			(TreeVector::I64(a), TreeVector::I64(b)) => todo!(),
-			(TreeVector::I32(a), TreeVector::I32(b)) => todo!(),
-			(TreeVector::I16(a), TreeVector::I16(b)) => todo!(),
-			_ => return Err(Error::Unreachable("Vector::pearson_similarity")),
-		};
+			(TreeVector::F64(a), TreeVector::F64(b)) => Self::pearson(a, b),
+			(TreeVector::F32(a), TreeVector::F32(b)) => Self::pearson(a, b),
+			(TreeVector::I64(a), TreeVector::I64(b)) => Self::pearson(a, b),
+			(TreeVector::I32(a), TreeVector::I32(b)) => Self::pearson(a, b),
+			(TreeVector::I16(a), TreeVector::I16(b)) => Self::pearson(a, b),
+			_ => Err(Error::Unreachable("Vector::pearson_similarity")),
+		}
 	}
 
 	pub(crate) fn distance(&self, dist: &Distance, other: &Self) -> Result<f64, Error> {
@@ -406,7 +358,7 @@ impl TreeVector {
 			Distance::Jaccard => self.jaccard_similarity(other),
 			Distance::Manhattan => self.manhattan_distance(other),
 			Distance::Minkowski(order) => self.minkowski_distance(other, order),
-			Distance::Pearson => todo!(),
+			Distance::Pearson => self.pearson_similarity(other),
 		}
 	}
 }

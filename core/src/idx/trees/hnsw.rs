@@ -119,8 +119,7 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 
 	fn get_random_level(&mut self) -> usize {
 		let unif: f64 = self.rng.gen(); // generate a uniform random number between 0 and 1
-		let layer = (-unif.ln() * self.ml).floor() as usize; // calculate the layer
-		layer
+		(-unif.ln() * self.ml).floor() as usize // calculate the layer
 	}
 
 	fn insert_first_element(&mut self, id: ElementId, level: usize) {
@@ -146,7 +145,7 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 
 		for lc in ((level + 1)..=ep.level).rev() {
 			println!("1- LC: {lc}");
-			let w = self.search_layer(&q, &ep, 1, lc).into_sorted_vec();
+			let w = self.search_layer(q, &ep, 1, lc).into_sorted_vec();
 			ep = EnterPoint {
 				id: w[0].1,
 				level: lc,
@@ -154,12 +153,12 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		}
 
 		for lc in (0..=ep.level.min(level)).rev() {
-			let layer = &mut self.layers[lc].0;
 			println!("2- LC: {lc}");
-			let w = self.search_layer(&q, &ep, EFC, lc);
+			let w = self.search_layer(q, &ep, EFC, lc);
 			println!("2- W: {w:?}");
 			let neighbors = self.select_neighbors_simple(w, lc);
 			println!("2- N: {neighbors:?}");
+			let layer = &mut self.layers[lc].0;
 			for e in neighbors {
 				if let Some(elements) = layer.get_mut(&e) {
 					elements.push(id);

@@ -17,15 +17,7 @@ impl Eq for PriorityNode {}
 
 impl PartialOrd for PriorityNode {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		match self.0.partial_cmp(&other.0) {
-			None => {}
-			Some(o) => {
-				if !matches!(o, Ordering::Equal) {
-					return Some(o);
-				}
-			}
-		}
-		self.1.partial_cmp(&other.1)
+		Some(self.cmp(other))
 	}
 }
 
@@ -51,7 +43,7 @@ impl PartialEq<Self> for PriorityResult {
 }
 impl PartialOrd for PriorityResult {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		self.0.partial_cmp(&other.0)
+		Some(self.cmp(other))
 	}
 }
 

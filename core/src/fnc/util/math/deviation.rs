@@ -16,7 +16,7 @@ impl Deviation for Vec<Number> {
 
 // This function is exposed to optimise the pearson distance calculation.
 // As the mean of the vector is already calculated, we pass it as a parameter rather than recalculating it.
-pub(super) fn deviation<T>(v: &[T], mean: f64, sample: bool) -> f64
+pub(crate) fn deviation<T>(v: &[T], mean: f64, sample: bool) -> f64
 where
 	T: ToFloat,
 {

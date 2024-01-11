@@ -34,19 +34,19 @@ impl ToFloat for f32 {
 	}
 }
 
-impl ToFloat for u64 {
+impl ToFloat for i64 {
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
 }
 
-impl ToFloat for u32 {
+impl ToFloat for i32 {
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
 }
 
-impl ToFloat for u16 {
+impl ToFloat for i16 {
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
