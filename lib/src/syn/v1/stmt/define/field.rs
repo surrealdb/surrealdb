@@ -144,3 +144,20 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, v) = permissions(i, Permission::Full)?;
 	Ok((i, DefineFieldOption::Permissions(v)))
 }
+
+#[cfg(test)]
+mod test {
+	use super::field;
+
+	fn assert_parsable(sql: &str) {
+		let res = field(sql);
+		assert!(res.is_ok());
+		let (_, out) = res.unwrap();
+		assert_eq!(format!("DEFINE {}", sql), format!("{}", out))
+	}
+
+	#[test]
+	fn define_field_record_type_permissions() {
+		assert_parsable("FIELD attributes[*] ON listing TYPE record PERMISSIONS FULL")
+	}
+}
