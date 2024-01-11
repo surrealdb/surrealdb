@@ -69,6 +69,7 @@ pub fn quote_plain_str(s: &str) -> String {
 		// directly to avoid having to create a common interface between the old and new parser.
 		if crate::syn::v1::literal::uuid(&ret).is_ok()
 			|| crate::syn::v1::literal::datetime(&ret).is_ok()
+			|| crate::syn::thing(&ret).is_ok()
 		{
 			ret.insert(0, 's');
 		}
@@ -110,6 +111,32 @@ pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> 
 	Cow::Borrowed(s)
 }
 
+#[cfg(not(feature = "experimental-parser"))]
+#[inline]
+pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
+	// Presume this is numeric
+	let mut numeric = true;
+	// Loop over each character
+	for x in s.bytes() {
+		// Check if character is allowed
+		if !(x.is_ascii_alphanumeric() || x == b'_') {
+			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
+		}
+		// Check if character is non-numeric
+		if !x.is_ascii_digit() {
+			numeric = false;
+		}
+	}
+	// Output the id value
+	match numeric {
+		// This is numeric so escape it
+		true => Cow::Owned(format!("{l}{}{r}", s.replace(r, e))),
+		// No need to escape the value
+		_ => Cow::Borrowed(s),
+	}
+}
+
+#[cfg(feature = "experimental-parser")]
 #[inline]
 pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
 	// Loop over each character
