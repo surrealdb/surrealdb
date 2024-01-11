@@ -17,3 +17,37 @@ pub mod top;
 pub mod trimean;
 pub mod variance;
 pub mod vector;
+
+pub trait ToFloat {
+	fn to_float(&self) -> f64;
+}
+
+impl ToFloat for f64 {
+	fn to_float(&self) -> f64 {
+		*self
+	}
+}
+
+impl ToFloat for f32 {
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
+impl ToFloat for u64 {
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
+impl ToFloat for u32 {
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
+impl ToFloat for u16 {
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}

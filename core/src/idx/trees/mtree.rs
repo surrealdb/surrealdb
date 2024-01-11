@@ -106,7 +106,7 @@ impl MTreeIndex {
 				expected: self.dim,
 			});
 		}
-		let mut vec = Vector::new(self.vector_type, a.len());
+		let mut vec = TreeVector::new(self.vector_type, a.len());
 		for v in a.0 {
 			if let Value::Number(n) = v {
 				vec.add(n);
@@ -120,8 +120,8 @@ impl MTreeIndex {
 		Ok(Arc::new(vec))
 	}
 
-	fn extract_vector(&self, v: Value) -> Result<Vector, Error> {
-		let mut vec = Vector::new(self.vector_type, self.dim);
+	fn extract_vector(&self, v: Value) -> Result<TreeVector, Error> {
+		let mut vec = TreeVector::new(self.vector_type, self.dim);
 		Self::check_vector_value(v, &mut vec)?;
 		if vec.len() != self.dim {
 			return Err(Error::InvalidVectorDimension {
@@ -132,7 +132,7 @@ impl MTreeIndex {
 		Ok(vec)
 	}
 
-	fn check_vector_value(value: Value, vec: &mut Vector) -> Result<(), Error> {
+	fn check_vector_value(value: Value, vec: &mut TreeVector) -> Result<(), Error> {
 		match value {
 			Value::Array(a) => {
 				for v in a {
@@ -236,7 +236,7 @@ impl MTree {
 					#[cfg(debug_assertions)]
 					debug!("Leaf found - id: {} - len: {}", node.id, n.len(),);
 					for (o, p) in n {
-						let d = self.distance.compute(o, v)?;
+						let d = self.calculate_distance(o, v)?;
 						if res.check_add(d) {
 							#[cfg(debug_assertions)]
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
@@ -248,7 +248,7 @@ impl MTree {
 					#[cfg(debug_assertions)]
 					debug!("Internal found - id: {} - {:?}", node.id, n);
 					for (o, p) in n {
-						let d = self.distance.compute(o, v)?;
+						let d = self.calculate_distance(o, v)?;
 						let min_dist = (d - p.radius).max(0.0);
 						if res.check_add(min_dist) {
 							debug!("Queue add - dist: {} - node: {}", min_dist, p.node);
@@ -382,7 +382,7 @@ impl MTree {
 				}
 				MTreeNode::Internal(ref n) => {
 					for (o, p) in n {
-						let d = self.distance.compute(o, object)?;
+						let d = self.calculate_distance(o, object)?;
 						if d <= p.radius {
 							queue.push(p.node);
 						}
@@ -465,8 +465,8 @@ impl MTree {
 				if nup.len() <= self.state.capacity as usize {
 					// Let parentDistance(Op) = d(Op, parent(N));
 					if let Some(pc) = parent_center {
-						p1.parent_dist = self.distance.compute(&o1, pc)?;
-						p2.parent_dist = self.distance.compute(&o2, pc)?;
+						p1.parent_dist = self.calculate_distance(&o1, pc)?;
+						p2.parent_dist = self.calculate_distance(&o2, pc)?;
 					} else {
 						p1.parent_dist = 0.0;
 						p2.parent_dist = 0.0;
@@ -528,7 +528,7 @@ impl MTree {
 		let mut closest = None;
 		let mut dist = f64::MAX;
 		for (o, p) in node {
-			let d = self.distance.compute(o, object)?;
+			let d = self.calculate_distance(o, object)?;
 			if d < dist {
 				closest = Some((o.clone(), p.clone()));
 				dist = d;
@@ -566,7 +566,7 @@ impl MTree {
 			Entry::Vacant(e) => {
 				// Let parentDistance(Oi) = d(Oi, parent(N))
 				let parent_dist = if let Some(pc) = parent_center {
-					self.distance.compute(pc, e.key())?
+					self.calculate_distance(pc, e.key())?
 				} else {
 					0.0
 				};
@@ -662,13 +662,13 @@ impl MTree {
 		let mut dist_cache = HashMap::with_capacity(n * 2);
 		for (i, o1) in objects.iter().enumerate() {
 			for o2 in objects.iter().take(n).skip(i + 1) {
-				let distance = self.distance.compute(o1, o2)?;
+				let distance = self.calculate_distance(o1, o2)?;
 				dist_cache.insert((o1.clone(), o2.clone()), distance);
 				dist_cache.insert((o2.clone(), o1.clone()), distance); // Because the distance function is symmetric
 				#[cfg(debug_assertions)]
 				{
 					// Check that the distance is commutative
-					assert_eq!(self.distance.compute(o2, o1)?, distance);
+					assert_eq!(self.calculate_distance(o2, o1)?, distance);
 					debug!(
 						"dist_cache - len: {} - dist: {} - o1: {:?} - o2: {:?})",
 						dist_cache.len(),
@@ -710,12 +710,33 @@ impl MTree {
 		Ok(if let Some(p) = parent {
 			let mut max_dist = 0f64;
 			for o in node.keys() {
-				max_dist = max_dist.max(self.distance.compute(p, o)?);
+				max_dist = max_dist.max(self.calculate_distance(p, o)?);
 			}
 			max_dist
 		} else {
 			0.0
 		})
+	}
+
+	fn calculate_distance(&self, v1: &SharedVector, v2: &SharedVector) -> Result<f64, Error> {
+		if v1.eq(v2) {
+			return Ok(0.0);
+		}
+		let dist = match &self.distance {
+			Distance::Euclidean => v1.euclidean_distance(v2)?,
+			Distance::Manhattan => v1.manhattan_distance(v2)?,
+			Distance::Minkowski(order) => v1.minkowski_distance(v2, order)?,
+			_ => return Err(Error::UnsupportedDistance(self.distance.clone())),
+		};
+		if dist.is_finite() {
+			Ok(dist)
+		} else {
+			Err(Error::InvalidVectorDistance {
+				left: v1.clone(),
+				right: v2.clone(),
+				dist,
+			})
+		}
 	}
 
 	async fn delete(
@@ -829,7 +850,7 @@ impl MTree {
 		let mut n_updated = false;
 		// For each On E N
 		for (on_obj, on_entry) in &n_node {
-			let on_od_dist = self.distance.compute(on_obj, &od)?;
+			let on_od_dist = self.calculate_distance(on_obj, &od)?;
 			#[cfg(debug_assertions)]
 			debug!("on_od_dist: {:?} / {} / {}", on_obj.as_ref(), on_od_dist, on_entry.radius);
 			// If (d(Od, On) <= r(On))
@@ -947,7 +968,7 @@ impl MTree {
 		// Find node entry Onn € N, e <> 0, for which d(On, Onn) is a minimum
 		for (onn_obj, onn_entry) in n_node.iter() {
 			if onn_entry.node != p.id {
-				let d = self.distance.compute(&on_obj, onn_obj)?;
+				let d = self.calculate_distance(&on_obj, onn_obj)?;
 				if min.is_nan() || d < min {
 					onn = Some((onn_obj.clone(), onn_entry.clone()));
 				}
@@ -1005,7 +1026,7 @@ impl MTree {
 				// for each Op E P
 				for (p_obj, mut p_entry) in p_node {
 					// Let parentDistance(Op) = d(Op, Onn);
-					p_entry.parent_dist = self.distance.compute(&p_obj, &onn_obj)?;
+					p_entry.parent_dist = self.calculate_distance(&p_obj, &onn_obj)?;
 					// Add Op to S;
 					s.insert(p_obj, p_entry);
 				}
@@ -1027,7 +1048,7 @@ impl MTree {
 				// for each Op E P
 				for (p_obj, mut p_entry) in p_node {
 					// Let parentDistance(Op) = d(Op, Onn);
-					p_entry.parent_dist = self.distance.compute(&p_obj, &onn_obj)?;
+					p_entry.parent_dist = self.calculate_distance(&p_obj, &onn_obj)?;
 					// Add Op to S;
 					s.insert(p_obj, p_entry);
 				}
@@ -1073,8 +1094,8 @@ impl MTree {
 			MTreeNode::Leaf(n) => self.split_node(store, p.id, p.key, n).await?,
 		};
 		if let Some(pc) = parent_center {
-			e1.parent_dist = self.distance.compute(&o1, pc)?;
-			e2.parent_dist = self.distance.compute(&o2, pc)?;
+			e1.parent_dist = self.calculate_distance(&o1, pc)?;
+			e2.parent_dist = self.calculate_distance(&o2, pc)?;
 		} else {
 			e1.parent_dist = 0.0;
 			e2.parent_dist = 0.0;
@@ -1435,7 +1456,7 @@ mod tests {
 		InternalMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
-	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::idx::trees::vector::{SharedVector, TreeVector};
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
@@ -1975,7 +1996,7 @@ mod tests {
 			let mut dist = 0.0;
 			for doc in res.docs {
 				let o = map.get(&doc).unwrap();
-				let d = t.distance.compute(obj, o)?;
+				let d = t.calculate_distance(obj, o)?;
 				debug!("doc: {doc} - d: {d} - {obj:?} - {o:?}");
 				assert!(d >= dist, "d: {d} - dist: {dist}");
 				dist = d;
@@ -2193,7 +2214,7 @@ mod tests {
 
 	fn check_leaf_vec(
 		m: &BTreeMap<SharedVector, ObjectProperties>,
-		obj: &Vector,
+		obj: &TreeVector,
 		parent_dist: f64,
 		docs: &[DocId],
 	) {
@@ -2207,7 +2228,7 @@ mod tests {
 
 	fn check_routing_vec(
 		m: &InternalMap,
-		center: &Vector,
+		center: &TreeVector,
 		parent_dist: f64,
 		node_id: NodeId,
 		radius: f64,
@@ -2381,7 +2402,7 @@ mod tests {
 					let next_depth = depth + 1;
 					for (o, p) in entries {
 						if let Some(center) = center.as_ref() {
-							let pd = t.distance.compute(center, o)?;
+							let pd = t.calculate_distance(center, o)?;
 							assert_eq!(pd, p.parent_dist, "Incorrect parent distance");
 							assert!(pd + p.radius <= radius);
 						}
@@ -2399,7 +2420,7 @@ mod tests {
 							panic!("Leaf object already exists: {:?}", o);
 						}
 						if let Some(center) = center.as_ref() {
-							let pd = t.distance.compute(center, &o)?;
+							let pd = t.calculate_distance(center, &o)?;
 							debug!("calc_dist: {:?} {:?} = {}", center, &o, pd);
 							assert_eq!(pd, p.parent_dist, "Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}", p.parent_dist, t.distance, pd, node_id, o.as_ref(), center.as_ref() );
 						}

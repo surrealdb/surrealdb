@@ -4,12 +4,7 @@ use crate::fnc::util::math::mean::Mean;
 use crate::sql::Number;
 use std::collections::HashSet;
 
-pub trait Add {
-	/// Addition of two vectors
-	fn add(&self, other: &Self) -> Result<Vec<Number>, Error>;
-}
-
-fn check_same_dimension(fnc: &str, a: &[Number], b: &[Number]) -> Result<(), Error> {
+pub(crate) fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<(), Error> {
 	if a.len() != b.len() {
 		Err(Error::InvalidArguments {
 			name: String::from(fnc),
@@ -18,6 +13,11 @@ fn check_same_dimension(fnc: &str, a: &[Number], b: &[Number]) -> Result<(), Err
 	} else {
 		Ok(())
 	}
+}
+
+pub trait Add {
+	/// Addition of two vectors
+	fn add(&self, other: &Self) -> Result<Vec<Number>, Error>;
 }
 
 impl Add for Vec<Number> {
@@ -49,8 +49,7 @@ pub trait CosineSimilarity {
 impl CosineSimilarity for Vec<Number> {
 	fn cosine_similarity(&self, other: &Self) -> Result<Number, Error> {
 		check_same_dimension("vector::similarity::cosine", self, other)?;
-		let d = dot(self, other);
-		Ok(d / (self.magnitude() * other.magnitude()))
+		Ok(dot(self, other) / (self.magnitude() * other.magnitude()))
 	}
 }
 

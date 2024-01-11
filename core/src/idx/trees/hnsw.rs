@@ -238,7 +238,7 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	}
 
 	fn distance(&self, v1: &SharedVector, v2: &SharedVector) -> f64 {
-		self.dist.compute(v1, v2).unwrap_or(f64::INFINITY)
+		v1.distance(&self.dist, v2).unwrap_or(f64::INFINITY)
 	}
 
 	fn knn_search(&self, _q: &SharedVector, _k: usize, _ef: usize) -> Vec<(SharedVector, f64)> {
