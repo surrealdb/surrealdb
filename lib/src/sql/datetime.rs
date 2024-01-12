@@ -72,7 +72,7 @@ impl TryFrom<i64> for Datetime {
 	type Error = ();
 	fn try_from(v: i64) -> Result<Self, Self::Error> {
 		match Utc.timestamp_opt(v, 0) {
-			LocalResult::Single(v) => Ok(Self(v.into())),
+			LocalResult::Single(v) => Ok(Self(v)),
 			_ => Err(()),
 		}
 	}
