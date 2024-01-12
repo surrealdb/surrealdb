@@ -5,54 +5,19 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
-use crate::sql::array::Uniq;
-use crate::sql::array::{array, Array};
-use crate::sql::block::{block, Block};
-use crate::sql::builtin::builtin_name;
-use crate::sql::bytes::Bytes;
-use crate::sql::cast::{cast, Cast};
-use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
-use crate::sql::constant::Constant;
-use crate::sql::datetime::{datetime, Datetime};
-use crate::sql::duration::{duration, Duration};
-use crate::sql::edges::{edges, Edges};
-use crate::sql::ending::keyword;
-use crate::sql::error::IResult;
-use crate::sql::expression::{unary, Expression};
-use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{builtin_function, defined_function, Function};
-use crate::sql::future::{future, Future};
-use crate::sql::geometry::{geometry, Geometry};
-use crate::sql::id::{Gen, Id};
-use crate::sql::idiom::{self, reparse_idiom_start, Idiom};
-use crate::sql::kind::Kind;
-use crate::sql::mock::{mock, Mock};
-use crate::sql::model::{model, Model};
-use crate::sql::number::{number, Number};
-use crate::sql::object::{key, object, Object};
-use crate::sql::operation::Operation;
-use crate::sql::param::{param, Param};
-use crate::sql::part::Part;
-use crate::sql::range::{range, Range};
-use crate::sql::regex::{regex, Regex};
-use crate::sql::strand::{strand, Strand};
-use crate::sql::subquery::{subquery, Subquery};
-use crate::sql::table::{table, Table};
-use crate::sql::thing::{thing, Thing};
-use crate::sql::uuid::{uuid as unique, Uuid};
-use crate::sql::{builtin, operator, Query};
+use crate::sql::{
+	array::Uniq,
+	fmt::{Fmt, Pretty},
+	id::{Gen, Id},
+	model::Model,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
+	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
+	Strand, Subquery, Table, Thing, Uuid,
+};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use derive::Store;
 use geo::Point;
-use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
-use nom::character::complete::char;
-use nom::combinator::{self, cut, into, opt};
-use nom::multi::separated_list0;
-use nom::multi::separated_list1;
-use nom::sequence::terminated;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -68,6 +33,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -91,23 +57,9 @@ impl Display for Values {
 	}
 }
 
-pub fn values(i: &str) -> IResult<&str, Values> {
-	let (i, v) = separated_list1(commas, value)(i)?;
-	Ok((i, Values(v)))
-}
-
-pub fn selects(i: &str) -> IResult<&str, Values> {
-	let (i, v) = separated_list1(commas, select)(i)?;
-	Ok((i, Values(v)))
-}
-
-pub fn whats(i: &str) -> IResult<&str, Values> {
-	let (i, v) = separated_list1(commas, what)(i)?;
-	Ok((i, Values(v)))
-}
-
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Value {
 	// These value types are simple values which
@@ -149,12 +101,11 @@ pub enum Value {
 	Edges(Box<Edges>),
 	Future(Box<Future>),
 	Constant(Constant),
-	// Closure(Box<Closure>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
 	Query(Query),
-	MlModel(Box<Model>),
+	Model(Box<Model>),
 	// Add new variants here
 }
 
@@ -307,7 +258,7 @@ impl From<Function> for Value {
 
 impl From<Model> for Value {
 	fn from(v: Model) -> Self {
-		Value::MlModel(Box::new(v))
+		Value::Model(Box::new(v))
 	}
 }
 
@@ -503,6 +454,18 @@ impl From<Vec<Operation>> for Value {
 	}
 }
 
+impl From<Vec<bool>> for Value {
+	fn from(v: Vec<bool>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
+impl From<HashMap<&str, Value>> for Value {
+	fn from(v: HashMap<&str, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
 impl From<HashMap<String, Value>> for Value {
 	fn from(v: HashMap<String, Value>) -> Self {
 		Value::Object(Object::from(v))
@@ -511,6 +474,12 @@ impl From<HashMap<String, Value>> for Value {
 
 impl From<BTreeMap<String, Value>> for Value {
 	fn from(v: BTreeMap<String, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<BTreeMap<&str, Value>> for Value {
+	fn from(v: BTreeMap<&str, Value>) -> Self {
 		Value::Object(Object::from(v))
 	}
 }
@@ -546,6 +515,12 @@ impl From<Id> for Value {
 				Gen::Uuid => Id::uuid().into(),
 			},
 		}
+	}
+}
+
+impl From<Query> for Value {
+	fn from(q: Query) -> Self {
+		Value::Query(q)
 	}
 }
 
@@ -749,6 +724,16 @@ impl TryFrom<Value> for Number {
 	}
 }
 
+impl TryFrom<&Value> for Number {
+	type Error = Error;
+	fn try_from(value: &Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => Ok(x.clone()),
+			_ => Err(Error::TryFrom(value.to_string(), "Number")),
+		}
+	}
+}
+
 impl TryFrom<Value> for Datetime {
 	type Error = Error;
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
@@ -766,6 +751,18 @@ impl TryFrom<Value> for Object {
 			Value::Object(x) => Ok(x),
 			_ => Err(Error::TryFrom(value.to_string(), "Object")),
 		}
+	}
+}
+
+impl FromIterator<Value> for Value {
+	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
+		Value::Array(Array(iter.into_iter().collect()))
+	}
+}
+
+impl FromIterator<(String, Value)> for Value {
+	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
+		Value::Object(Object(iter.into_iter().collect()))
 	}
 }
 
@@ -865,6 +862,11 @@ impl Value {
 	/// Check if this Value is a Mock
 	pub fn is_mock(&self) -> bool {
 		matches!(self, Value::Mock(_))
+	}
+
+	/// Check if this Value is a Param
+	pub fn is_param(&self) -> bool {
+		matches!(self, Value::Param(_))
 	}
 
 	/// Check if this Value is a Range
@@ -1074,7 +1076,7 @@ impl Value {
 	pub fn can_start_idiom(&self) -> bool {
 		match self {
 			Value::Function(x) => !x.is_script(),
-			Value::MlModel(_)
+			Value::Model(_)
 			| Value::Subquery(_)
 			| Value::Constant(_)
 			| Value::Datetime(_)
@@ -1085,7 +1087,8 @@ impl Value {
 			| Value::Array(_)
 			| Value::Param(_)
 			| Value::Edges(_)
-			| Value::Thing(_) => true,
+			| Value::Thing(_)
+			| Value::Table(_) => true,
 			_ => false,
 		}
 	}
@@ -1123,7 +1126,7 @@ impl Value {
 	/// Treat a string as a table name
 	pub fn could_be_table(self) -> Value {
 		match self {
-			Value::Strand(v) => Table::from(v.0).into(),
+			Value::Strand(v) => Value::Table(v.0.into()),
 			_ => self,
 		}
 	}
@@ -1297,7 +1300,7 @@ impl Value {
 			Value::Number(Number::Decimal(v)) => match v.try_into() {
 				// The Decimal can be represented as a f64
 				Ok(v) => Ok(v),
-				// Ths Decimal loses precision
+				// This Decimal loses precision
 				_ => Err(Error::CoerceTo {
 					from: self,
 					into: "f64".into(),
@@ -1373,7 +1376,7 @@ impl Value {
 			Value::Number(Number::Decimal(ref v)) => match v.to_f64() {
 				// The Decimal can be represented as a Float
 				Some(v) => Ok(Number::Float(v)),
-				// Ths BigDecimal loses precision
+				// This BigDecimal loses precision
 				None => Err(Error::CoerceTo {
 					from: self,
 					into: "float".into(),
@@ -1396,7 +1399,7 @@ impl Value {
 			Value::Number(Number::Int(v)) => match Decimal::from_i64(v) {
 				// The Int can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
-				// Ths Int does not convert to a Decimal
+				// This Int does not convert to a Decimal
 				None => Err(Error::CoerceTo {
 					from: self,
 					into: "decimal".into(),
@@ -1406,7 +1409,7 @@ impl Value {
 			Value::Number(Number::Float(v)) => match Decimal::from_f64(v) {
 				// The Float can be represented as a Decimal
 				Some(v) => Ok(Number::Decimal(v)),
-				// Ths Float does not convert to a Decimal
+				// This Float does not convert to a Decimal
 				None => Err(Error::CoerceTo {
 					from: self,
 					into: "decimal".into(),
@@ -1429,6 +1432,21 @@ impl Value {
 			_ => Err(Error::CoerceTo {
 				from: self,
 				into: "number".into(),
+			}),
+		}
+	}
+
+	/// Try to coerce this value to a `Regex`
+	pub(crate) fn coerce_to_regex(self) -> Result<Regex, Error> {
+		match self {
+			// Allow any Regex value
+			Value::Regex(v) => Ok(v),
+			// Allow any string value
+			Value::Strand(v) => Ok(v.as_str().parse()?),
+			// Anything else raises an error
+			_ => Err(Error::CoerceTo {
+				from: self,
+				into: "regex".into(),
 			}),
 		}
 	}
@@ -1797,7 +1815,7 @@ impl Value {
 			Value::Strand(ref v) => match v.parse::<bool>() {
 				// The string can be represented as a Float
 				Ok(v) => Ok(v),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "bool".into(),
@@ -1832,7 +1850,7 @@ impl Value {
 			Value::Strand(ref v) => match v.parse::<i64>() {
 				// The string can be represented as a Float
 				Ok(v) => Ok(Number::Int(v)),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "int".into(),
@@ -1867,7 +1885,7 @@ impl Value {
 			Value::Strand(ref v) => match v.parse::<f64>() {
 				// The string can be represented as a Float
 				Ok(v) => Ok(Number::Float(v)),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "float".into(),
@@ -1887,10 +1905,13 @@ impl Value {
 			// Allow any decimal number
 			Value::Number(v) if v.is_decimal() => Ok(v),
 			// Attempt to convert an int number
+			// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
+			// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
+			#[allow(warnings)]
 			Value::Number(Number::Int(ref v)) => match Decimal::try_from(*v) {
 				// The Int can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
-				// Ths Int does not convert to a Decimal
+				// This Int does not convert to a Decimal
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
@@ -1900,7 +1921,7 @@ impl Value {
 			Value::Number(Number::Float(ref v)) => match Decimal::try_from(*v) {
 				// The Float can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
-				// Ths Float does not convert to a Decimal
+				// This Float does not convert to a Decimal
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
@@ -1910,7 +1931,7 @@ impl Value {
 			Value::Strand(ref v) => match Decimal::from_str(v) {
 				// The string can be represented as a Decimal
 				Ok(v) => Ok(Number::Decimal(v)),
-				// Ths string is not a Decimal
+				// This string is not a Decimal
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "decimal".into(),
@@ -1933,7 +1954,7 @@ impl Value {
 			Value::Strand(ref v) => match Number::from_str(v) {
 				// The string can be represented as a Float
 				Ok(v) => Ok(v),
-				// Ths string is not a float
+				// This string is not a float
 				_ => Err(Error::ConvertTo {
 					from: self,
 					into: "number".into(),
@@ -2008,7 +2029,7 @@ impl Value {
 			Value::Strand(ref v) => match Uuid::try_from(v.as_str()) {
 				// The string can be represented as a uuid
 				Ok(v) => Ok(v),
-				// Ths string is not a uuid
+				// This string is not a uuid
 				Err(_) => Err(Error::ConvertTo {
 					from: self,
 					into: "uuid".into(),
@@ -2031,7 +2052,7 @@ impl Value {
 			Value::Strand(ref v) => match Datetime::try_from(v.as_str()) {
 				// The string can be represented as a datetime
 				Ok(v) => Ok(v),
-				// Ths string is not a datetime
+				// This string is not a datetime
 				Err(_) => Err(Error::ConvertTo {
 					from: self,
 					into: "datetime".into(),
@@ -2054,7 +2075,7 @@ impl Value {
 			Value::Strand(ref v) => match Duration::try_from(v.as_str()) {
 				// The string can be represented as a duration
 				Ok(v) => Ok(v),
-				// Ths string is not a duration
+				// This string is not a duration
 				Err(_) => Err(Error::ConvertTo {
 					from: self,
 					into: "duration".into(),
@@ -2137,6 +2158,10 @@ impl Value {
 		match self {
 			// Records are allowed
 			Value::Thing(v) => Ok(v),
+			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
+				from: Value::Strand(v),
+				into: "record".into(),
+			}),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -2328,8 +2353,10 @@ impl Value {
 			Value::Duration(_) => true,
 			Value::Datetime(_) => true,
 			Value::Geometry(_) => true,
-			Value::Array(v) => v.iter().all(Value::is_static),
-			Value::Object(v) => v.values().all(Value::is_static),
+			Value::Array(v) => v.is_static(),
+			Value::Object(v) => v.is_static(),
+			Value::Expression(v) => v.is_static(),
+			Value::Function(v) => v.is_static(),
 			Value::Constant(_) => true,
 			_ => false,
 		}
@@ -2512,7 +2539,7 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value using natrual numerical comparison
+	/// Compare this Value to another Value using natural numerical comparison
 	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
@@ -2520,7 +2547,7 @@ impl Value {
 		}
 	}
 
-	/// Compare this Value to another Value lexicographically and using natrual numerical comparison
+	/// Compare this Value to another Value lexicographically and using natural numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
@@ -2546,7 +2573,7 @@ impl fmt::Display for Value {
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
 			Value::Function(v) => write!(f, "{v}"),
-			Value::MlModel(v) => write!(f, "{v}"),
+			Value::Model(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
 			Value::Geometry(v) => write!(f, "{v}"),
 			Value::Idiom(v) => write!(f, "{v}"),
@@ -2577,7 +2604,7 @@ impl Value {
 			Value::Function(v) => {
 				v.is_custom() || v.is_script() || v.args().iter().any(Value::writeable)
 			}
-			Value::MlModel(m) => m.parameters.writeable(),
+			Value::Model(m) => m.args.iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.writeable(),
 			_ => false,
@@ -2608,7 +2635,7 @@ impl Value {
 			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::MlModel(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Model(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
@@ -2694,6 +2721,23 @@ impl TryDiv for Value {
 
 // ------------------------------
 
+pub(crate) trait TryRem<Rhs = Self> {
+	type Output;
+	fn try_rem(self, v: Self) -> Result<Self::Output, Error>;
+}
+
+impl TryRem for Value {
+	type Output = Self;
+	fn try_rem(self, other: Self) -> Result<Self, Error> {
+		Ok(match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
+			(v, w) => return Err(Error::TryRem(v.to_raw_string(), w.to_raw_string())),
+		})
+	}
+}
+
+// ------------------------------
+
 pub(crate) trait TryPow<Rhs = Self> {
 	type Output;
 	fn try_pow(self, v: Self) -> Result<Self::Output, Error>;
@@ -2726,215 +2770,12 @@ impl TryNeg for Value {
 	}
 }
 
-/// Parse any `Value` including expressions
-pub fn value(i: &str) -> IResult<&str, Value> {
-	let (i, start) = single(i)?;
-	if let (i, Some(o)) = opt(operator::binary)(i)? {
-		let _diving = crate::sql::parser::depth::dive(i)?;
-		let (i, r) = cut(value)(i)?;
-		let expr = match r {
-			Value::Expression(r) => r.augment(start, o),
-			_ => Expression::new(start, o, r),
-		};
-		let v = Value::from(expr);
-		Ok((i, v))
-	} else {
-		Ok((i, start))
-	}
-}
-
-/// Parse any `Value` excluding binary expressions
-pub fn single(i: &str) -> IResult<&str, Value> {
-	// Dive in `single` (as opposed to `value`) since it is directly
-	// called by `Cast`
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, v) = alt((
-		alt((
-			terminated(
-				alt((
-					combinator::value(Value::None, tag_no_case("NONE")),
-					combinator::value(Value::Null, tag_no_case("NULL")),
-					combinator::value(Value::Bool(true), tag_no_case("true")),
-					combinator::value(Value::Bool(false), tag_no_case("false")),
-				)),
-				keyword,
-			),
-			into(idiom::multi_without_start),
-		)),
-		alt((
-			into(future),
-			into(cast),
-			path_like,
-			into(geometry),
-			into(subquery),
-			into(datetime),
-			into(duration),
-			into(unique),
-			into(number),
-			into(unary),
-			into(object),
-			into(array),
-		)),
-		alt((
-			into(block),
-			into(param),
-			into(regex),
-			into(mock),
-			into(edges),
-			into(range),
-			into(thing),
-			into(strand),
-			into(idiom::path),
-		)),
-	))(i)?;
-	reparse_idiom_start(v, i)
-}
-
-pub fn select_start(i: &str) -> IResult<&str, Value> {
-	let (i, v) = alt((
-		alt((
-			into(unary),
-			combinator::value(Value::None, tag_no_case("NONE")),
-			combinator::value(Value::Null, tag_no_case("NULL")),
-			combinator::value(Value::Bool(true), tag_no_case("true")),
-			combinator::value(Value::Bool(false), tag_no_case("false")),
-			into(idiom::multi_without_start),
-		)),
-		alt((
-			into(future),
-			into(cast),
-			path_like,
-			into(geometry),
-			into(subquery),
-			into(datetime),
-			into(duration),
-			into(unique),
-			into(number),
-			into(object),
-			into(array),
-			into(block),
-			into(param),
-			into(regex),
-			into(mock),
-			into(edges),
-			into(range),
-			into(thing),
-			into(table),
-			into(strand),
-		)),
-	))(i)?;
-	reparse_idiom_start(v, i)
-}
-
-/// A path like production: Constants, predefined functions, user defined functions and ml models.
-pub fn path_like(i: &str) -> IResult<&str, Value> {
-	alt((into(defined_function), into(model), |i| {
-		let (i, v) = builtin_name(i)?;
-		match v {
-			builtin::BuiltinName::Constant(x) => Ok((i, x.into())),
-			builtin::BuiltinName::Function(name) => {
-				builtin_function(name, i).map(|(i, v)| (i, v.into()))
-			}
-		}
-	}))(i)
-}
-
-pub fn select(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, start) = select_start(i)?;
-	if let (i, Some(op)) = opt(operator::binary)(i)? {
-		// In a binary expression single ident's arent tables but paths.
-		let start = match start {
-			Value::Table(Table(x)) => Value::Idiom(Idiom::from(x)),
-			x => x,
-		};
-		let (i, r) = cut(value)(i)?;
-		let expr = match r {
-			Value::Expression(r) => r.augment(start, op),
-			_ => Expression::new(start, op, r),
-		};
-		let v = Value::from(expr);
-		Ok((i, v))
-	} else {
-		Ok((i, start))
-	}
-}
-
-/// Used in CREATE, UPDATE, and DELETE clauses
-pub fn what(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, v) = alt((
-		into(idiom::multi_without_start),
-		path_like,
-		into(subquery),
-		into(datetime),
-		into(duration),
-		into(future),
-		into(block),
-		into(param),
-		into(mock),
-		into(edges),
-		into(range),
-		into(thing),
-		into(table),
-	))(i)?;
-	reparse_idiom_start(v, i)
-}
-
-/// Used to parse any simple JSON-like value
-pub fn json(i: &str) -> IResult<&str, Value> {
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	// Use a specific parser for JSON objects
-	fn object(i: &str) -> IResult<&str, Object> {
-		let (i, _) = char('{')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, v) = separated_list0(commas, |i| {
-			let (i, k) = key(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = char(':')(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, v) = json(i)?;
-			Ok((i, (String::from(k), v)))
-		})(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = opt(char(','))(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('}')(i)?;
-		Ok((i, Object(v.into_iter().collect())))
-	}
-	// Use a specific parser for JSON arrays
-	fn array(i: &str) -> IResult<&str, Array> {
-		let (i, _) = char('[')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, v) = separated_list0(commas, json)(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = opt(char(','))(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(']')(i)?;
-		Ok((i, Array(v)))
-	}
-	// Parse any simple JSON-like value
-	alt((
-		combinator::value(Value::Null, tag_no_case("null".as_bytes())),
-		combinator::value(Value::Bool(true), tag_no_case("true".as_bytes())),
-		combinator::value(Value::Bool(false), tag_no_case("false".as_bytes())),
-		into(datetime),
-		into(geometry),
-		into(unique),
-		into(number),
-		into(object),
-		into(array),
-		into(thing),
-		into(strand),
-	))(i)
-}
-
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::sql::test::Parse;
 	use crate::sql::uuid::Uuid;
+	use crate::syn::Parse;
 
 	#[test]
 	fn check_none() {

@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Documentation
+    url: https://github.com/surrealdb/docs.surrealdb.com/issues/new/choose
+    about: Report issues with the documentation here.
   - name: Question or idea
     url: https://github.com/surrealdb/surrealdb/discussions
     about: Ask questions and discuss ideas here.

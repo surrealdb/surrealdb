@@ -10,12 +10,12 @@ args = ["check", "--locked", "--workspace"]
 [tasks.ci-check-wasm]
 category = "CI - CHECK"
 command = "cargo"
-args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http", "--target", "wasm32-unknown-unknown"]
+args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks", "--target", "wasm32-unknown-unknown"]
 
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -25,25 +25,43 @@ args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting", "--workspace", "--test", "cli_integration", "--", "cli_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting,jwks", "--workspace", "--test", "cli_integration", "--", "cli_integration", "--nocapture"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem", "--workspace", "--test", "http_integration", "--", "http_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration", "--nocapture"]
 
 [tasks.ci-ws-integration]
-category = "CI - INTEGRATION TESTS"
+category = "WS - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem", "--workspace", "--test", "ws_integration", "--", "ws_integration", "--nocapture"]
+
+[tasks.ci-ml-integration]
+category = "ML - INTEGRATION TESTS"
+command = "cargo"
+env = { RUST_LOG={ value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
 
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
-	"llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http", "--workspace", "--",
+	"llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
+	"--skip", "api_integration",
+	"--skip", "cli_integration",
+	"--skip", "http_integration",
+	"--skip", "ws_integration"
+]
+
+
+[tasks.test-experimental-parser]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+args = [
+	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,experimental-parser", "--workspace", "--",
 	"--skip", "api_integration",
 	"--skip", "cli_integration",
 	"--skip", "http_integration",
@@ -76,7 +94,7 @@ command = "cargo"
 args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--test", "api", "api_integration::${_TEST_API_ENGINE}"]
 
 [tasks.ci-api-integration]
-env = { _START_SURREALDB_PATH = "fdb:/etc/foundationdb/fdb.cluster" }
+env = { _START_SURREALDB_PATH = "memory" }
 private = true
 run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"], fork = true }
 
@@ -143,54 +161,64 @@ run_task = { name = ["start-tikv", "ci-api-integration-tikv-tests", "stop-tikv"]
 category = "CI - SERVICES"
 dependencies = ["build-surrealdb"]
 script = """
-   #!/bin/bash -ex
+    #!/bin/bash -ex
 
-   target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb.log &
+    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
-   echo $! > /tmp/surreal.pid
+    echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
 
-   set +e
-   echo "Waiting for surreal to be ready..."
-   tries=0
-   while [[ $tries < 5 ]]; do
-           target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
-           tries=$((tries + 1))
-   done
+    set +e
+    echo "Waiting for surreal to be ready..."
+    tries=0
+    while [[ $tries < 5 ]]; do
+            target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
+            tries=$((tries + 1))
+    done
 
-   echo "ERROR: Surreal is unhealthy!"
-   exit 1
+    echo "ERROR: Surreal is unhealthy!"
+    exit 1
 """
 
 [tasks.stop-surrealdb]
 category = "CI - SERVICES"
 script = """
-        kill $(cat /tmp/surreal.pid) || true
-        sleep 5
-        kill -9 $(cat /tmp/surreal.pid) || true
+    kill $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
+    sleep 5
+    kill -9 $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
 """
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
 script = """
-   #!/bin/bash -ex
+    #!/bin/bash -ex
 
-   ${HOME}/.tiup/bin/tiup install pd tikv playground
+    ${HOME}/.tiup/bin/tiup install pd tikv playground
 
-   ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor &>/tmp/tiup.log &
+    playground_attempts=0
+    while [[ $playground_attempts < 5 ]]; do
+        nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor > /tmp/tiup.log &
 
-   echo $! > /tmp/tiup.pid
+        echo $! > /tmp/tiup.pid
 
-   set +e
-   echo "Waiting for tiup playground to be ready..."
-   tries=0
-   while [[ $tries < 10 ]]; do
-           ${HOME}/.tiup/bin/tiup playground display >/dev/null && echo "Ready!" && exit 0 || sleep 5
-           tries=$((tries + 1))
-   done
-   set -e
+        set +e
+        echo "Waiting for tiup playground to be ready..."
+        tries=0
+        while [[ $tries < 10 ]]; do
+                ${HOME}/.tiup/bin/tiup playground display >/dev/null && echo "Ready!" && exit 0 || sleep 5
+                tries=$((tries + 1))
+        done
+        set -e
 
-   echo "ERROR: TiUP Playground is unhealthy!"
-   exit 1
+        echo "ERROR: TiUP Playground is unhealthy! Try again..."
+        kill $(cat /tmp/tiup.pid) || true
+
+        playground_attempts=$((playground_attempts + 1))
+    done
+
+    echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
+    cat /tmp/tiup.log
+
+    exit 1
 """
 
 [tasks.stop-tikv]
@@ -204,37 +232,63 @@ script = "kill $(cat /tmp/tiup.pid) || true"
 [tasks.build-surrealdb]
 category = "CI - BUILD"
 command = "cargo"
-args = ["build", "--locked", "--no-default-features", "--features", "storage-mem,storage-fdb"]
+args = ["build", "--locked", "--no-default-features", "--features", "storage-mem"]
 
 #
-# Benchmarks
+# Benchmarks - Common
 #
-[tasks.bench-run-baseline]
+[tasks.ci-bench]
 category = "CI - BENCHMARK"
 command = "cargo"
-args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http", "--", "--save-baseline", "baseline"]
+args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http,jwks", "${@}"]
 
-[tasks.bench-save-baseline]
-category = "CI - BENCHMARK"
-script = "cp -r target/criterion /tmp/criterion"
+#
+# Benchmarks - SDB - Per Target
+#
+[env]
+BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = ["BENCH_WORKER_THREADS"] } }
+BENCH_NUM_OPS = { value = "1000", condition = { env_not_set = ["BENCH_NUM_OPS"] } }
+BENCH_DURATION = { value = "30", condition = { env_not_set = ["BENCH_DURATION"] } }
+BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = ["BENCH_SAMPLE_SIZE"] } }
+BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-fdb-7_1", condition = { env_not_set = ["BENCH_FEATURES"] } }
 
-[tasks.bench-restore-baseline]
-category = "CI - BENCHMARK"
-script = "mkdir -p target && cp -r /tmp/criterion target/criterion"
-
-[tasks.bench-baseline]
-category = "CI - BENCHMARK"
-run_task = { name = ["bench-run-baseline", "bench-save-baseline"] }
-
-[tasks.bench-run-changes]
-category = "CI - BENCHMARK"
+[tasks.bench-target]
+private = true
+category = "CI - BENCHMARK - SurrealDB Target"
 command = "cargo"
-args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http", "--", "--save-baseline", "changes"]
+args = ["bench", "--package", "surrealdb", "--bench", "sdb", "--no-default-features", "--features", "${BENCH_FEATURES}", "${@}"]
 
-[tasks.bench-changes]
-category = "CI - BENCHMARK"
-run_task = { name = ["bench-restore-baseline", "bench-run-changes"] }
+[tasks.bench-lib-mem]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "lib-mem" }
+run_task = { name = ["bench-target"] }
 
-[tasks.bench-compare]
-category = "CI - BENCHMARK"
-script = "critcmp baseline changes | tee benchmark_results"
+[tasks.bench-lib-rocksdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "lib-rocksdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-lib-fdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "lib-fdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-mem]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-mem" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-rocksdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-fdb]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-fdb" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-ws]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
+run_task = { name = ["bench-target"] }

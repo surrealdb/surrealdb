@@ -3,26 +3,27 @@
 async fn snapshot() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
-	let (ds, _) = new_ds(node_id).await;
+	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let (ds, _) = new_ds(node_id, clock).await;
 	// Insert an initial key
-	let mut tx = ds.transaction(true, false).await.unwrap();
+	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set("test", "some text").await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx1 = ds.transaction(false, false).await.unwrap();
+	let mut tx1 = ds.transaction(Read, Optimistic).await.unwrap();
 	// Check that the key was inserted ok
 	let val = tx1.get("test").await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a new writeable transaction
-	let mut txw = ds.transaction(true, false).await.unwrap();
+	let mut txw = ds.transaction(Write, Optimistic).await.unwrap();
 	// Update the test key content
 	txw.set("test", "other text").await.unwrap();
 	// Create a readonly transaction
-	let mut tx2 = ds.transaction(false, false).await.unwrap();
+	let mut tx2 = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx2.get("test").await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a readonly transaction
-	let mut tx3 = ds.transaction(false, false).await.unwrap();
+	let mut tx3 = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx3.get("test").await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Update the test key content
@@ -37,7 +38,7 @@ async fn snapshot() {
 	// Commit the writable transaction
 	txw.commit().await.unwrap();
 	// Check that the key was updated ok
-	let mut tx = ds.transaction(false, false).await.unwrap();
+	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get("test").await.unwrap().unwrap();
 	assert_eq!(val, b"extra text");
 	tx.cancel().await.unwrap();

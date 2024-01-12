@@ -7,9 +7,11 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
-use crate::key::debug;
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::clock::SizedClock;
 use crate::kvs::Check;
 use crate::kvs::LqValue;
 use crate::sql;
@@ -30,6 +32,7 @@ use sql::statements::DefineEventStatement;
 use sql::statements::DefineFieldStatement;
 use sql::statements::DefineFunctionStatement;
 use sql::statements::DefineIndexStatement;
+use sql::statements::DefineModelStatement;
 use sql::statements::DefineNamespaceStatement;
 use sql::statements::DefineParamStatement;
 use sql::statements::DefineScopeStatement;
@@ -42,11 +45,39 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use uuid::Uuid;
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
+#[derive(Copy, Clone, Debug)]
+pub enum Limit {
+	Unlimited,
+	Limited(u32),
+}
+
+pub struct ScanPage<K>
+where
+	K: Into<Key> + Debug,
+{
+	pub range: Range<K>,
+	pub limit: Limit,
+}
+
+impl From<Range<Vec<u8>>> for ScanPage<Vec<u8>> {
+	fn from(value: Range<Vec<u8>>) -> Self {
+		ScanPage {
+			range: value,
+			limit: Limit::Unlimited,
+		}
+	}
+}
+
+pub struct ScanResult<K>
+where
+	K: Into<Key> + Debug,
+{
+	pub next_page: Option<ScanPage<K>>,
+	pub values: Vec<(Key, Val)>,
+}
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
@@ -55,6 +86,7 @@ pub struct Transaction {
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
+	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -71,6 +103,25 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Transaction),
+}
+#[derive(Copy, Clone)]
+pub enum TransactionType {
+	Read,
+	Write,
+}
+
+impl From<bool> for TransactionType {
+	fn from(value: bool) -> Self {
+		match value {
+			true => TransactionType::Write,
+			false => TransactionType::Read,
+		}
+	}
+}
+
+pub enum LockType {
+	Pessimistic,
+	Optimistic,
 }
 
 impl fmt::Display for Transaction {
@@ -256,10 +307,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Into<Vec<u8>> + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Del {:?}", crate::key::debug::sprint_key(&key.clone().into()));
+		trace!("Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -510,7 +561,7 @@ impl Transaction {
 		val: V,
 	) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
 		#[cfg(debug_assertions)]
@@ -568,13 +619,11 @@ impl Transaction {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[allow(unused_variables)]
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -585,12 +634,12 @@ impl Transaction {
 			Transaction {
 				inner: Inner::RocksDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -600,12 +649,12 @@ impl Transaction {
 			Transaction {
 				inner: Inner::TiKV(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
 				..
-			} => v.put(key, val).await,
+			} => v.put(category, key, val).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -617,14 +666,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key> + Debug + Clone,
+		K: Into<Key> + Debug,
 	{
 		#[cfg(debug_assertions)]
-		trace!(
-			"Scan {:?} - {:?}",
-			debug::sprint_key(&rng.start.clone().into()),
-			debug::sprint_key(&rng.end.clone().into())
-		);
+		trace!("Scan {:?} - {:?}", rng.start, rng.end);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -659,6 +704,79 @@ impl Transaction {
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	#[allow(unused_variables)]
+	pub async fn scan_paged<K>(
+		&mut self,
+		page: ScanPage<K>,
+		batch_limit: u32,
+	) -> Result<ScanResult<K>, Error>
+	where
+		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
+	{
+		#[cfg(debug_assertions)]
+		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
+		let range = page.range.clone();
+		let res = match self {
+			#[cfg(feature = "kv-mem")]
+			Transaction {
+				inner: Inner::Mem(v),
+				..
+			} => v.scan(range, batch_limit),
+			#[cfg(feature = "kv-rocksdb")]
+			Transaction {
+				inner: Inner::RocksDB(v),
+				..
+			} => v.scan(range, batch_limit).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.scan(range, batch_limit).await,
+			#[cfg(feature = "kv-indxdb")]
+			Transaction {
+				inner: Inner::IndxDB(v),
+				..
+			} => v.scan(range, batch_limit).await,
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => v.scan(range, batch_limit).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(v),
+				..
+			} => v.scan(range, batch_limit).await,
+			#[allow(unreachable_patterns)]
+			_ => Err(Error::MissingStorageEngine),
+		};
+		// Construct next page
+		res.map(|tup_vec: Vec<(Key, Val)>| {
+			if tup_vec.len() < batch_limit as usize {
+				ScanResult {
+					next_page: None,
+					values: tup_vec,
+				}
+			} else {
+				let (mut rng, limit) = (page.range, page.limit);
+				rng.start = match tup_vec.last() {
+					Some((k, _)) => K::from(k.clone().add(0)),
+					None => rng.start,
+				};
+				ScanResult {
+					next_page: Some(ScanPage {
+						range: rng,
+						limit,
+					}),
+					values: tup_vec,
+				}
+			}
+		})
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -766,43 +884,25 @@ impl Transaction {
 		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
 		// Start processing
-		while num > 0 {
+		while let Some(page) = next_page {
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
+			let res = self.scan_paged(page, 1000).await?;
+			next_page = res.next_page;
+			let res = res.values;
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
 			}
 			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, v) in res.into_iter() {
 				// Delete
 				out.push((k, v));
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(out)
@@ -816,44 +916,49 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
+		match self {
+			#[cfg(feature = "kv-tikv")]
+			Transaction {
+				inner: Inner::TiKV(v),
+				..
+			} => v.delr(rng, limit).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FoundationDB(v),
+				..
+			} => v.delr(rng).await,
+			#[allow(unreachable_patterns)]
+			_ => self._delr(rng, limit).await,
+		}
+	}
+
+	/// Delete a range of keys from the datastore.
+	///
+	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
+	async fn _delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	where
+		K: Into<Key> + Debug,
+	{
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		// Start processing
-		while num > 0 {
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
+		while let Some(page) = next_page {
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
+			let res = self.scan_paged(page, limit).await?;
+			next_page = res.next_page;
+			let res = res.values;
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
 			}
 			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, _) in res.into_iter() {
 				// Delete
 				self.del(k).await?;
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(())
@@ -869,43 +974,25 @@ impl Transaction {
 		trace!("Getp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
 		// Start processing
-		while num > 0 {
+		let mut next_page = Some(ScanPage {
+			range: beg..end,
+			limit: Limit::Limited(limit),
+		});
+		while let Some(page) = next_page {
+			let res = self.scan_paged(page, 1000).await?;
+			next_page = res.next_page;
 			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
+			let res = res.values;
 			// Exit when settled
-			if n == 0 {
+			if res.is_empty() {
 				break;
-			}
+			};
 			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+			for (k, v) in res.into_iter() {
 				// Delete
 				out.push((k, v));
-				// Count
-				num -= 1;
 			}
 		}
 		Ok(out)
@@ -921,44 +1008,9 @@ impl Transaction {
 		trace!("Delp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
-		// Start processing
-		while num > 0 {
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
-				// Delete
-				self.del(k).await?;
-				// Count
-				num -= 1;
-			}
-		}
+		let min = beg.clone();
+		let max = end.clone();
+		self.delr(min..max, limit).await?;
 		Ok(())
 	}
 
@@ -979,7 +1031,7 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
+	pub async fn set_nd(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(id);
 		match self.get_nd(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
@@ -988,9 +1040,9 @@ impl Transaction {
 			None => {
 				let value = ClusterMembership {
 					name: id.to_string(),
-					heartbeat: self.clock(),
+					heartbeat: self.clock().await,
 				};
-				self.put(key, value).await?;
+				self.put(key.key_category(), key, value).await?;
 				Ok(())
 			}
 		}
@@ -1006,23 +1058,28 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) fn clock(&self) -> Timestamp {
+	/// Clock retrieves the current timestamp, without guaranteeing
+	/// monotonicity in all implementations.
+	///
+	/// It is used for unreliable ordering of events as well as
+	/// handling of timeouts. Operations that are not guaranteed to be correct.
+	/// But also allows for lexicographical ordering.
+	///
+	/// Public for tests, but not required for usage from a user perspective.
+	pub async fn clock(&mut self) -> Timestamp {
 		// Use a timestamp oracle if available
-		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
-			Ok(duration) => duration.as_millis(),
-			Err(error) => panic!("Clock may have gone backwards: {:?}", error.duration()),
-		};
-		Timestamp {
-			value: now as u64,
-		}
+		// Match, because we cannot have sized traits or async traits
+		self.clock.write().await.now().await
 	}
 
 	// Set heartbeat
 	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		// We do not need to do a read, we always want to overwrite
+		let key_enc = key.encode()?;
 		self.put(
-			key,
+			key.key_category(),
+			key_enc,
 			ClusterMembership {
 				name: id.to_string(),
 				heartbeat: timestamp,
@@ -1033,123 +1090,61 @@ impl Transaction {
 	}
 
 	pub async fn del_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::root::hb::Hb::new(timestamp.clone(), id);
+		let key = crate::key::root::hb::Hb::new(timestamp, id);
 		self.del(key).await?;
 		Ok(())
 	}
 
 	// Delete a cluster registration entry
-	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
+	pub async fn del_nd(&mut self, node: Uuid) -> Result<(), Error> {
 		let key = crate::key::root::nd::Nd::new(node);
-		self.del(key).await
+		let key_enc = key.encode()?;
+		self.del(key_enc).await
 	}
 
 	// Delete the live query notification registry on the table
-	// Return the Table ID
-	pub async fn del_ndlq(&mut self, nd: &Uuid) -> Result<Uuid, Error> {
-		// This isn't implemented because it is covered by del_nd
-		// Will add later for remote node kill
-		Err(Error::NdNotFound {
-			value: format!("Missing cluster node {:?}", nd),
-		})
+	pub async fn del_ndlq(&mut self, nd: Uuid, lq: Uuid, ns: &str, db: &str) -> Result<(), Error> {
+		let key = crate::key::node::lq::Lq::new(nd, lq, ns, db);
+		let key_enc = key.encode()?;
+		self.del(key_enc).await
 	}
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
 	pub async fn scan_hb(
 		&mut self,
 		time_to: &Timestamp,
-		limit: u32,
+		batch_size: u32,
 	) -> Result<Vec<crate::key::root::hb::Hb>, Error> {
 		let beg = crate::key::root::hb::Hb::prefix();
 		let end = crate::key::root::hb::Hb::suffix(time_to);
-		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<crate::key::root::hb::Hb> = vec![];
 		// Start processing
-		while num > 0 {
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, _)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan_paged(page, batch_size).await?;
+			next_page = res.next_page;
+			for (k, _) in res.values.into_iter() {
 				out.push(crate::key::root::hb::Hb::decode(k.as_slice())?);
-				// Count
-				num -= 1;
 			}
 		}
-		trace!("scan_hb: {:?}", out);
 		Ok(out)
 	}
 
-	pub async fn scan_cl(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+	/// scan_nd will scan all the cluster membership registers
+	/// setting limit to 0 will result in scanning all entries
+	pub async fn scan_nd(&mut self, batch_size: u32) -> Result<Vec<ClusterMembership>, Error> {
 		let beg = crate::key::root::nd::Nd::prefix();
 		let end = crate::key::root::nd::Nd::suffix();
-		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
-		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
-		let mut nxt: Option<Key> = None;
-		let mut num = limit;
 		let mut out: Vec<ClusterMembership> = vec![];
 		// Start processing
-		while num > 0 {
-			// Get records batch
-			let res = match nxt {
-				None => {
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-				Some(ref mut beg) => {
-					beg.push(0x00);
-					let min = beg.clone();
-					let max = end.clone();
-					let num = std::cmp::min(1000, num);
-					self.scan(min..max, num).await?
-				}
-			};
-			// Get total results
-			let n = res.len();
-			// Exit when settled
-			if n == 0 {
-				break;
-			}
-			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
-				// Ready the next
-				if n == i + 1 {
-					nxt = Some(k.clone());
-				}
-				out.push((&v).into());
-				// Count
-				num -= 1;
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan_paged(page, batch_size).await?;
+			next_page = res.next_page;
+			for (_, v) in res.values.into_iter() {
+				out.push(v.into());
 			}
 		}
-		trace!("scan_hb: {:?}", out);
 		Ok(out)
 	}
 
@@ -1172,31 +1167,31 @@ impl Transaction {
 		self.del(key).await
 	}
 
-	pub async fn scan_ndlq<'a>(&mut self, node: &Uuid, limit: u32) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::node::lq::prefix_nd(node);
-		let suff = crate::key::node::lq::suffix_nd(node);
-		trace!(
-			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&pref),
-			crate::key::debug::sprint_key(&suff),
-		);
-		let rng = pref..suff;
-		let scanned = self.scan(rng, limit).await?;
-		let mut res: Vec<LqValue> = vec![];
-		for (key, value) in scanned {
-			trace!("scan_lq: key={:?} value={:?}", &key, &value);
-			let lq = crate::key::node::lq::Lq::decode(key.as_slice())?;
-			let tb: String = String::from_utf8(value).unwrap();
-			trace!("scan_lq Found tb: {:?}", tb);
-			res.push(LqValue {
-				nd: lq.nd.into(),
-				ns: lq.ns.to_string(),
-				db: lq.db.to_string(),
-				tb,
-				lq: lq.lq.into(),
-			});
+	pub async fn scan_ndlq<'a>(
+		&mut self,
+		node: &Uuid,
+		batch_size: u32,
+	) -> Result<Vec<LqValue>, Error> {
+		let beg = crate::key::node::lq::prefix_nd(node);
+		let end = crate::key::node::lq::suffix_nd(node);
+		let mut out: Vec<LqValue> = vec![];
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan_paged(page, batch_size).await?;
+			next_page = res.next_page;
+			for (key, value) in res.values.into_iter() {
+				let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
+				let tb: String = String::from_utf8(value).unwrap();
+				out.push(LqValue {
+					nd: lv.nd.into(),
+					ns: lv.ns.to_string(),
+					db: lv.db.to_string(),
+					tb,
+					lq: lv.lq.into(),
+				});
+			}
 		}
-		Ok(res)
+		Ok(out)
 	}
 
 	pub async fn scan_tblq<'a>(
@@ -1204,33 +1199,31 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		limit: u32,
+		batch_size: u32,
 	) -> Result<Vec<LqValue>, Error> {
-		let pref = crate::key::table::lq::prefix(ns, db, tb);
-		let suff = crate::key::table::lq::suffix(ns, db, tb);
-		trace!(
-			"Scanning range from pref={}, suff={}",
-			crate::key::debug::sprint_key(&pref),
-			crate::key::debug::sprint_key(&suff),
-		);
-		let rng = pref..suff;
-		let scanned = self.scan(rng, limit).await?;
-		let mut res: Vec<LqValue> = vec![];
-		for (key, value) in scanned {
-			trace!("scan_lv: key={:?} value={:?}", &key, &value);
-			let val: LiveStatement = value.into();
-			let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
-			res.push(LqValue {
-				nd: val.node,
-				ns: lv.ns.to_string(),
-				db: lv.db.to_string(),
-				tb: lv.tb.to_string(),
-				lq: val.id.clone(),
-			});
+		let beg = crate::key::table::lq::prefix(ns, db, tb);
+		let end = crate::key::table::lq::suffix(ns, db, tb);
+		let mut out: Vec<LqValue> = vec![];
+		let mut next_page = Some(ScanPage::from(beg..end));
+		while let Some(page) = next_page {
+			let res = self.scan_paged(page, batch_size).await?;
+			next_page = res.next_page;
+			for (key, value) in res.values.into_iter() {
+				let lv = crate::key::table::lq::Lq::decode(key.as_slice())?;
+				let val: LiveStatement = value.into();
+				out.push(LqValue {
+					nd: val.node,
+					ns: lv.ns.to_string(),
+					db: lv.db.to_string(),
+					tb: lv.tb.to_string(),
+					lq: val.id,
+				});
+			}
 		}
-		Ok(res)
+		Ok(out)
 	}
 
+	/// Add live query to table
 	pub async fn putc_tblq(
 		&mut self,
 		ns: &str,
@@ -1241,7 +1234,8 @@ impl Transaction {
 	) -> Result<(), Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		#[cfg(debug_assertions)]
+		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}
 
@@ -1454,6 +1448,29 @@ impl Transaction {
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Pas(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve all model definitions for a specific database.
+	pub async fn all_db_models(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineModelStatement]>, Error> {
+		let key = crate::key::database::ml::prefix(ns, db);
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Mls(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::database::ml::prefix(ns, db);
+			let end = crate::key::database::ml::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Mls(Arc::clone(&val)));
 			val
 		})
 	}
@@ -1741,6 +1758,21 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific model definition from a database.
+	pub async fn get_db_model(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ml: &str,
+		vn: &str,
+	) -> Result<DefineModelStatement, Error> {
+		let key = crate::key::database::ml::new(ns, db, ml, vn);
+		let val = self.get(key).await?.ok_or(Error::MlNotFound {
+			value: format!("{ml}<{vn}>"),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific database token definition.
 	pub async fn get_db_token(
 		&mut self,
@@ -1860,7 +1892,7 @@ impl Transaction {
 						name: ns.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::NsNotFound {
@@ -1889,7 +1921,7 @@ impl Transaction {
 						name: db.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::DbNotFound {
@@ -1919,7 +1951,7 @@ impl Transaction {
 						name: sc.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::ScNotFound {
@@ -1950,7 +1982,7 @@ impl Transaction {
 						permissions: Permissions::none(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(val)
 				}
 				true => Err(Error::TbNotFound {
@@ -2079,6 +2111,31 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve a specific model definition.
+	pub async fn get_and_cache_db_model(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ml: &str,
+		vn: &str,
+	) -> Result<Arc<DefineModelStatement>, Error> {
+		let key = crate::key::database::ml::new(ns, db, ml, vn).encode()?;
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ml(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::MlNotFound {
+				value: format!("{ml}<{vn}>"),
+			})?;
+			let val: Arc<DefineModelStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Ml(Arc::clone(&val)));
+			val
+		})
+	}
+
 	/// Retrieve a specific table index definition.
 	pub async fn get_and_cache_tb_index(
 		&mut self,
@@ -2120,7 +2177,7 @@ impl Transaction {
 						name: ns.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::NsNotFound {
@@ -2149,7 +2206,7 @@ impl Transaction {
 						name: db.to_owned().into(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::DbNotFound {
@@ -2180,7 +2237,7 @@ impl Transaction {
 						permissions: Permissions::none(),
 						..Default::default()
 					};
-					self.put(key, &val).await?;
+					self.put(key.key_category(), key, &val).await?;
 					Ok(Arc::new(val))
 				}
 				true => Err(Error::TbNotFound {
@@ -2377,55 +2434,35 @@ impl Transaction {
 					// Fetch records
 					let beg = crate::key::thing::prefix(ns, db, &tb.name);
 					let end = crate::key::thing::suffix(ns, db, &tb.name);
-					let mut nxt: Option<Vec<u8>> = None;
-					loop {
-						let res = match nxt {
-							None => {
-								let min = beg.clone();
-								let max = end.clone();
-								self.scan(min..max, 1000).await?
-							}
-							Some(ref mut beg) => {
-								beg.push(0x00);
-								let min = beg.clone();
-								let max = end.clone();
-								self.scan(min..max, 1000).await?
-							}
-						};
-						if !res.is_empty() {
-							// Get total results
-							let n = res.len();
-							// Exit when settled
-							if n == 0 {
-								break;
-							}
-							// Loop over results
-							for (i, (k, v)) in res.into_iter().enumerate() {
-								// Ready the next
-								if n == i + 1 {
-									nxt = Some(k.clone());
-								}
-								// Parse the key and the value
-								let k: crate::key::thing::Thing = (&k).into();
-								let v: Value = (&v).into();
-								let t = Thing::from((k.tb, k.id));
-								// Check if this is a graph edge
-								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
-									// This is a graph edge record
-									(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
-										let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
-										chn.send(bytes!(sql)).await?;
-									}
-									// This is a normal record
-									_ => {
-										let sql = format!("UPDATE {t} CONTENT {v};");
-										chn.send(bytes!(sql)).await?;
-									}
-								}
-							}
-							continue;
+					let mut nxt: Option<ScanPage<Vec<u8>>> = Some(ScanPage::from(beg..end));
+					while nxt.is_some() {
+						let res = self.scan_paged(nxt.unwrap(), 1000).await?;
+						nxt = res.next_page;
+						let res = res.values;
+						if res.is_empty() {
+							break;
 						}
-						break;
+						// Loop over results
+						for (k, v) in res.into_iter() {
+							// Parse the key and the value
+							let k: crate::key::thing::Thing = (&k).into();
+							let v: Value = (&v).into();
+							let t = Thing::from((k.tb, k.id));
+							// Check if this is a graph edge
+							match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+								// This is a graph edge record
+								(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
+									let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
+									chn.send(bytes!(sql)).await?;
+								}
+								// This is a normal record
+								_ => {
+									let sql = format!("UPDATE {t} CONTENT {v};");
+									chn.send(bytes!(sql)).await?;
+								}
+							}
+						}
+						continue;
 					}
 					chn.send(bytes!("")).await?;
 				}
@@ -2610,7 +2647,7 @@ impl Transaction {
 	//
 	// Under the hood, this function calls the transaction's `set_versionstamped_key` for each change.
 	// Every change must be recorded by calling this struct's `record_change` function beforehand.
-	// If there was no preceeding `record_change` function calls for this transaction, this function will do nothing.
+	// If there were no preceding `record_change` function calls for this transaction, this function will do nothing.
 	//
 	// This function should be called only after all the changes have been made to the transaction.
 	// Otherwise, changes are missed in the change feed.
@@ -2734,15 +2771,17 @@ impl Transaction {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests {
+	use crate::key::database::all::All;
+	use crate::key::database::tb::Tb;
 	use crate::{
-		kvs::Datastore,
+		kvs::{Datastore, LockType::*, TransactionType::*},
 		sql::{statements::DefineUserStatement, Base},
 	};
 
 	#[tokio::test]
 	async fn test_get_root_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent KV user
 		let res = txn.get_root_user("nonexistent").await;
@@ -2755,7 +2794,7 @@ mod tests {
 			..Default::default()
 		};
 		let key = crate::key::root::us::new("user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_root_user("user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap()
@@ -2764,7 +2803,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_get_ns_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent NS user
 		let res = txn.get_ns_user("ns", "nonexistent").await;
@@ -2781,7 +2820,7 @@ mod tests {
 		};
 
 		let key = crate::key::namespace::us::new("ns", "user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_ns_user("ns", "user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap();
@@ -2790,7 +2829,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_get_db_user() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// Retrieve non-existent DB user
 		let res = txn.get_db_user("ns", "db", "nonexistent").await;
@@ -2807,7 +2846,7 @@ mod tests {
 		};
 
 		let key = crate::key::database::us::new("ns", "db", "user");
-		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		txn.set(key, data.to_owned()).await.unwrap();
 		let res = txn.get_db_user("ns", "db", "user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap();
@@ -2816,7 +2855,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_root_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_root_users().await.unwrap();
@@ -2831,8 +2870,8 @@ mod tests {
 
 		let key1 = crate::key::root::us::new("user1");
 		let key2 = crate::key::root::us::new("user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 		let res = txn.all_root_users().await.unwrap();
 
 		assert_eq!(res.len(), 2);
@@ -2843,7 +2882,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_ns_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_ns_users("ns").await.unwrap();
@@ -2858,8 +2897,8 @@ mod tests {
 
 		let key1 = crate::key::namespace::us::new("ns", "user1");
 		let key2 = crate::key::namespace::us::new("ns", "user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 
 		txn.cache.clear();
 
@@ -2873,7 +2912,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_all_db_users() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 
 		// When there are no users
 		let res = txn.all_db_users("ns", "db").await.unwrap();
@@ -2888,8 +2927,8 @@ mod tests {
 
 		let key1 = crate::key::database::us::new("ns", "db", "user1");
 		let key2 = crate::key::database::us::new("ns", "db", "user2");
-		let _ = txn.set(key1, data.to_owned()).await.unwrap();
-		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		txn.set(key1, data.to_owned()).await.unwrap();
+		txn.set(key2, data.to_owned()).await.unwrap();
 
 		txn.cache.clear();
 
@@ -2904,43 +2943,84 @@ mod tests {
 	async fn test_seqs() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let nsid = txn.get_next_ns_id().await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(nsid, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let dbid = txn.get_next_db_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(dbid, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let tbid1 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(tbid1, 0);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		let tbid2 = txn.get_next_tb_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 		assert_eq!(tbid2, 1);
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_tb_id(nsid, dbid, tbid1).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_db_id(nsid, dbid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
 
-		let mut txn = ds.transaction(true, false).await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
 		txn.remove_ns_id(nsid).await.unwrap();
 		txn.complete_changes(false).await.unwrap();
 		txn.commit().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn test_delp() {
+		let ds = Datastore::new("memory").await.unwrap();
+		// Create entries
+		{
+			let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+			for i in 0..2500 {
+				let t = format!("{i}");
+				let tb = Tb::new("test", "test", &t);
+				txn.set(tb, vec![]).await.unwrap();
+			}
+			txn.commit().await.unwrap();
+		}
+
+		let beg = crate::key::database::tb::prefix("test", "test");
+		let end = crate::key::database::tb::suffix("test", "test");
+		let rng = beg..end;
+
+		// Check we have the table keys
+		{
+			let mut txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.getr(rng.clone(), u32::MAX).await.unwrap();
+			assert_eq!(res.len(), 2500);
+		}
+
+		// Delete using the prefix
+		{
+			let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+			let all = All::new("test", "test");
+			txn.delp(all, u32::MAX).await.unwrap();
+			txn.commit().await.unwrap();
+		}
+
+		// Check we don't have any table key anymore
+		{
+			let mut txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.getr(rng, u32::MAX).await.unwrap();
+			assert_eq!(res.len(), 0);
+		}
 	}
 }

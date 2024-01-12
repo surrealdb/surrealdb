@@ -9,7 +9,10 @@ use crate::api::engine::any::Any;
 #[cfg(feature = "protocol-http")]
 use crate::api::engine::remote::http;
 use crate::api::err::Error;
-use crate::api::opt::Endpoint;
+#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(feature = "protocol-http")]
+use crate::api::opt::Tls;
+use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
@@ -18,9 +21,9 @@ use crate::api::Result;
 use crate::api::Surreal;
 #[allow(unused_imports)]
 use crate::error::Db as DbError;
-#[cfg(feature = "protocol-http")]
-use crate::http::ClientBuilder;
 use flume::Receiver;
+#[cfg(feature = "protocol-http")]
+use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -58,11 +61,12 @@ impl Connection for Any {
 			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
-			match address.url.scheme() {
-				"fdb" => {
+			match EndpointKind::from(address.url.scheme()) {
+				EndpointKind::FoundationDb => {
 					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -73,10 +77,11 @@ impl Connection for Any {
 					);
 				}
 
-				"mem" => {
+				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -87,10 +92,11 @@ impl Connection for Any {
 					);
 				}
 
-				"file" | "rocksdb" => {
+				EndpointKind::File | EndpointKind::RocksDb => {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -102,10 +108,11 @@ impl Connection for Any {
 					.into());
 				}
 
-				"speedb" => {
+				EndpointKind::SpeeDb => {
 					#[cfg(feature = "kv-speedb")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -117,10 +124,11 @@ impl Connection for Any {
 					.into());
 				}
 
-				"tikv" => {
+				EndpointKind::TiKv => {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
 						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
@@ -131,7 +139,7 @@ impl Connection for Any {
 					);
 				}
 
-				"http" | "https" => {
+				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -158,22 +166,19 @@ impl Connection for Any {
 					.into());
 				}
 
-				"ws" | "wss" => {
+				EndpointKind::Ws | EndpointKind::Wss => {
 					#[cfg(feature = "protocol-ws")]
 					{
+						features.insert(ExtraFeatures::LiveQueries);
 						let url = address.url.join(engine::remote::ws::PATH)?;
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						let maybe_connector = address.config.tls_config.map(Connector::from);
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
 						let config = WebSocketConfig {
-							max_write_buffer_size: match capacity {
-								0 => usize::MAX,
-								capacity => capacity * engine::remote::ws::native::MAX_MESSAGE_SIZE,
-							},
 							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
 							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
-							accept_unmasked_frames: false,
+							max_write_buffer_size: engine::remote::ws::native::MAX_MESSAGE_SIZE,
 							..Default::default()
 						};
 						let socket = engine::remote::ws::native::connect(
@@ -198,10 +203,7 @@ impl Connection for Any {
 					)
 					.into());
 				}
-
-				scheme => {
-					return Err(Error::Scheme(scheme.to_owned()).into());
-				}
+				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}
 
 			Ok(Surreal {

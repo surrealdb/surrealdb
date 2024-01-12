@@ -5,6 +5,7 @@ use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
+use foundationdb::options;
 use futures::TryStreamExt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use std::sync::Arc;
 // self or the fdb-rs Transaction it contains.
 //
 // We use mutex from the futures crate instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
+use crate::key::error::KeyCategory;
 use foundationdb::options::MutationType;
 use futures::lock::Mutex;
 use once_cell::sync::Lazy;
@@ -85,10 +87,20 @@ impl Datastore {
 		let _fdbnet = (*FDBNET).clone();
 
 		match foundationdb::Database::from_path(path) {
-			Ok(db) => Ok(Datastore {
-				db,
-				_fdbnet,
-			}),
+			Ok(db) => {
+				db.set_option(options::DatabaseOption::TransactionRetryLimit(5)).map_err(|e| {
+					Error::Ds(format!("Unable to set transaction retry limit: {}", e))
+				})?;
+				db.set_option(options::DatabaseOption::TransactionTimeout(5000))
+					.map_err(|e| Error::Ds(format!("Unable to set transaction timeout: {}", e)))?;
+				db.set_option(options::DatabaseOption::TransactionMaxRetryDelay(500)).map_err(
+					|e| Error::Ds(format!("Unable to set transaction max retry delay: {}", e)),
+				)?;
+				Ok(Datastore {
+					db,
+					_fdbnet,
+				})
+			}
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
@@ -299,7 +311,12 @@ impl Transaction {
 	/// Suppose you've sent a query like `CREATE author:john SET ...` with
 	/// the namespace `test` and the database `test`-
 	/// You'll see SurrealDB sets a value to the key `/*test\x00*test\x00*author\x00*\x00\x00\x00\x01john\x00`.
-	pub(crate) async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	pub(crate) async fn put<K, V>(
+		&mut self,
+		category: KeyCategory,
+		key: K,
+		val: V,
+	) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -314,7 +331,7 @@ impl Transaction {
 		}
 		let key: Vec<u8> = key.into();
 		if self.exi(key.clone().as_slice()).await? {
-			return Err(Error::TxKeyAlreadyExists);
+			return Err(Error::TxKeyAlreadyExistsCategory(category));
 		}
 		// Set the key
 		let key: &[u8] = &key[..];
@@ -511,5 +528,26 @@ impl Transaction {
 			}
 		}
 		Ok(res)
+	}
+
+	/// Delete a range of keys from the databases
+	pub(crate) async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		let begin: &[u8] = &rng.start.into();
+		let end: &[u8] = &rng.end.into();
+		let inner = self.inner.lock().await;
+		let inner = inner.as_ref().unwrap();
+		inner.clear_range(begin, end);
+		Ok(())
 	}
 }

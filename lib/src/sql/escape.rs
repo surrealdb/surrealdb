@@ -1,5 +1,3 @@
-use crate::sql::common::val_u8;
-use nom::character::is_digit;
 use std::borrow::Cow;
 
 const SINGLE: char = '\'';
@@ -54,6 +52,35 @@ pub fn quote_str(s: &str) -> String {
 }
 
 #[inline]
+pub fn quote_plain_str(s: &str) -> String {
+	#[cfg(not(feature = "experimental-parser"))]
+	{
+		if crate::syn::thing(s).is_ok() {
+			let mut ret = quote_str(s);
+			ret.insert(0, 's');
+			return ret;
+		}
+
+		let mut ret = quote_str(s);
+		// HACK: We need to prefix strands which look like records, uuids, or datetimes with an `s`
+		// otherwise the strands will parsed as a different type when parsed again.
+		// This is not required for the new parser.
+		// Because this only required for the old parse we just reference the partial parsers
+		// directly to avoid having to create a common interface between the old and new parser.
+		if crate::syn::v1::literal::uuid(&ret).is_ok()
+			|| crate::syn::v1::literal::datetime(&ret).is_ok()
+			|| crate::syn::thing(&ret).is_ok()
+		{
+			ret.insert(0, 's');
+		}
+		ret
+	}
+
+	#[cfg(feature = "experimental-parser")]
+	quote_str(s)
+}
+
+#[inline]
 /// Escapes a key if necessary
 pub fn escape_key(s: &str) -> Cow<'_, str> {
 	escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)
@@ -76,7 +103,7 @@ pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> 
 	// Loop over each character
 	for x in s.bytes() {
 		// Check if character is allowed
-		if !val_u8(x) {
+		if !(x.is_ascii_alphanumeric() || x == b'_') {
 			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
 	}
@@ -84,6 +111,7 @@ pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> 
 	Cow::Borrowed(s)
 }
 
+#[cfg(not(feature = "experimental-parser"))]
 #[inline]
 pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
 	// Presume this is numeric
@@ -91,11 +119,11 @@ pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str>
 	// Loop over each character
 	for x in s.bytes() {
 		// Check if character is allowed
-		if !val_u8(x) {
+		if !(x.is_ascii_alphanumeric() || x == b'_') {
 			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
 		// Check if character is non-numeric
-		if !is_digit(x) {
+		if !x.is_ascii_digit() {
 			numeric = false;
 		}
 	}
@@ -106,4 +134,21 @@ pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str>
 		// No need to escape the value
 		_ => Cow::Borrowed(s),
 	}
+}
+
+#[cfg(feature = "experimental-parser")]
+#[inline]
+pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
+	// Loop over each character
+	for (idx, x) in s.bytes().enumerate() {
+		// the first character is not allowed to be a digit.
+		if idx == 0 && x.is_ascii_digit() {
+			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
+		}
+		// Check if character is allowed
+		if !(x.is_ascii_alphanumeric() || x == b'_') {
+			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
+		}
+	}
+	Cow::Borrowed(s)
 }

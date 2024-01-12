@@ -145,7 +145,7 @@ impl Session {
 		Session::for_level(Level::Root, Role::Editor)
 	}
 
-	/// Create a system session for the root level with Viwer role
+	/// Create a system session for the root level with Viewer role
 	pub fn viewer() -> Session {
 		Session::for_level(Level::Root, Role::Viewer)
 	}

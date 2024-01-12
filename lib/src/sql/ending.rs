@@ -80,7 +80,13 @@ pub fn duration(i: &str) -> IResult<&str, ()> {
 
 pub fn field(i: &str) -> IResult<&str, ()> {
 	peek(alt((
-		value((), preceded(shouldbespace, tag_no_case("FROM"))),
+		value(
+			(),
+			preceded(
+				shouldbespace,
+				alt((tag_no_case("FROM"), tag_no_case("TIMEOUT"), tag_no_case("PARALLEL"))),
+			),
+		),
 		value((), char(';')),
 		value((), eof),
 	)))(i)

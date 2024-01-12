@@ -3,10 +3,8 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
-use crate::sql::comment::mightbespace;
-use crate::sql::error::IResult;
-use crate::sql::operator::{self, Operator};
-use crate::sql::value::{single, Value};
+use crate::sql::operator::Operator;
+use crate::sql::value::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -18,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expression {
 	Unary {
 		o: Operator,
@@ -49,29 +48,6 @@ impl Expression {
 			r,
 		}
 	}
-	/// Augment an existing expression
-	pub(crate) fn augment(mut self, l: Value, o: Operator) -> Self {
-		match &mut self {
-			Self::Binary {
-				l: left,
-				o: op,
-				..
-			} if o.precedence() >= op.precedence() => match left {
-				Value::Expression(x) => {
-					*x.as_mut() = std::mem::take(x).augment(l, o);
-					self
-				}
-				_ => {
-					*left = Self::new(l, o, std::mem::take(left)).into();
-					self
-				}
-			},
-			e => {
-				let r = Value::from(std::mem::take(e));
-				Self::new(l, o, r)
-			}
-		}
-	}
 }
 
 impl Expression {
@@ -86,6 +62,20 @@ impl Expression {
 				r,
 				..
 			} => l.writeable() || r.writeable(),
+		}
+	}
+
+	pub(crate) fn is_static(&self) -> bool {
+		match self {
+			Self::Unary {
+				v,
+				..
+			} => v.is_static(),
+			Self::Binary {
+				l,
+				r,
+				..
+			} => l.is_static() && r.is_static(),
 		}
 	}
 
@@ -119,6 +109,8 @@ impl Expression {
 				let operand = v.compute(ctx, opt, txn, doc).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
+					// TODO: Check if it is a number?
+					Operator::Add => Ok(operand),
 					Operator::Not => fnc::operate::not(operand),
 					op => unreachable!("{op:?} is not a unary op"),
 				};
@@ -164,6 +156,7 @@ impl Expression {
 			Operator::Sub => fnc::operate::sub(l, r),
 			Operator::Mul => fnc::operate::mul(l, r),
 			Operator::Div => fnc::operate::div(l, r),
+			Operator::Rem => fnc::operate::rem(l, r),
 			Operator::Pow => fnc::operate::pow(l, r),
 			Operator::Equal => fnc::operate::equal(&l, &r),
 			Operator::Exact => fnc::operate::exact(&l, &r),
@@ -191,7 +184,7 @@ impl Expression {
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
 			Operator::Matches(_) => fnc::operate::matches(ctx, txn, doc, self).await,
-			Operator::Knn(_) => fnc::operate::knn(ctx, txn, doc, self).await,
+			Operator::Knn(_, _) => fnc::operate::knn(ctx, opt, txn, doc, self).await,
 			_ => unreachable!(),
 		}
 	}
@@ -210,119 +203,5 @@ impl fmt::Display for Expression {
 				r,
 			} => write!(f, "{l} {o} {r}"),
 		}
-	}
-}
-
-pub fn unary(i: &str) -> IResult<&str, Expression> {
-	let (i, o) = operator::unary(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = single(i)?;
-	Ok((
-		i,
-		Expression::Unary {
-			o,
-			v,
-		},
-	))
-}
-
-#[cfg(test)]
-pub fn binary(i: &str) -> IResult<&str, Expression> {
-	let (i, l) = single(i)?;
-	let (i, o) = operator::binary(i)?;
-	// Make sure to dive if the query is a right-deep binary tree.
-	let _diving = crate::sql::parser::depth::dive(i)?;
-	let (i, r) = crate::sql::value::value(i)?;
-	let v = match r {
-		Value::Expression(r) => r.augment(l, o),
-		_ => Expression::new(l, o, r),
-	};
-	Ok((i, v))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn expression_statement() {
-		let sql = "true AND false";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("true AND false", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_left_opened() {
-		let sql = "3 * 3 * 3 = 27";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_left_closed() {
-		let sql = "(3 * 3 * 3) = 27";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("(3 * 3 * 3) = 27", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_right_opened() {
-		let sql = "27 = 3 * 3 * 3";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_right_closed() {
-		let sql = "27 = (3 * 3 * 3)";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("27 = (3 * 3 * 3)", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_both_opened() {
-		let sql = "3 * 3 * 3 = 3 * 3 * 3";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_both_closed() {
-		let sql = "(3 * 3 * 3) = (3 * 3 * 3)";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("(3 * 3 * 3) = (3 * 3 * 3)", format!("{}", out));
-	}
-
-	#[test]
-	fn expression_unary() {
-		let sql = "-a";
-		let res = unary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
-	}
-
-	#[test]
-	fn expression_with_unary() {
-		let sql = "-(5) + 5";
-		let res = binary(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{}", out));
 	}
 }

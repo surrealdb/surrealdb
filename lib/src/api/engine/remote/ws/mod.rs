@@ -8,15 +8,18 @@ pub(crate) mod wasm;
 use crate::api;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
+use crate::api::engine::remote::duration_from_str;
 use crate::api::err::Error;
+use crate::api::method::query::QueryResult;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Notification;
 use crate::dbs::Status;
+use crate::method::Stats;
 use crate::opt::IntoEndpoint;
-use crate::sql::Array;
-use crate::sql::Strand;
 use crate::sql::Value;
+use indexmap::IndexMap;
 use serde::Deserialize;
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -83,6 +86,7 @@ pub(crate) struct Failure {
 pub(crate) enum Data {
 	Other(Value),
 	Query(Vec<QueryMethodResponse>),
+	Live(Notification),
 }
 
 type ServerResult = std::result::Result<Data, Failure>;
@@ -101,7 +105,6 @@ impl From<Failure> for Error {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct QueryMethodResponse {
-	#[allow(dead_code)]
 	time: String,
 	status: Status,
 	result: Value,
@@ -111,23 +114,31 @@ impl DbResponse {
 	fn from(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
 			Data::Other(value) => Ok(DbResponse::Other(value)),
-			Data::Query(results) => Ok(DbResponse::Query(api::Response(
-				results
-					.into_iter()
-					.map(|response| match response.status {
-						Status::Ok => match response.result {
-							Value::Array(Array(values)) => Ok(values),
-							Value::None | Value::Null => Ok(vec![]),
-							value => Ok(vec![value]),
-						},
-						Status::Err => match response.result {
-							Value::Strand(Strand(message)) => Err(Error::Query(message).into()),
-							message => Err(Error::Query(message.to_string()).into()),
-						},
-					})
-					.enumerate()
-					.collect(),
-			))),
+			Data::Query(responses) => {
+				let mut map =
+					IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
+
+				for (index, response) in responses.into_iter().enumerate() {
+					let stats = Stats {
+						execution_time: duration_from_str(&response.time),
+					};
+					match response.status {
+						Status::Ok => {
+							map.insert(index, (stats, Ok(response.result)));
+						}
+						Status::Err => {
+							map.insert(
+								index,
+								(stats, Err(Error::Query(response.result.as_raw_string()).into())),
+							);
+						}
+					}
+				}
+
+				Ok(DbResponse::Query(api::Response(map)))
+			}
+			// Live notifications don't call this method
+			Data::Live(..) => unreachable!(),
 		}
 	}
 }

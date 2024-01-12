@@ -409,7 +409,7 @@ impl Options {
 
 	/// Get current Node ID
 	pub fn id(&self) -> Result<Uuid, Error> {
-		self.id.ok_or(Error::Unreachable)
+		self.id.ok_or(Error::Unreachable("Options::id"))
 	}
 
 	/// Get currently selected NS
@@ -516,7 +516,7 @@ impl Options {
 			}
 		};
 
-		// Check permissions if the autor is not already allowed to do the action
+		// Check permissions if the author is not already allowed to do the action
 		!is_allowed
 	}
 }

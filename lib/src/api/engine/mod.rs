@@ -153,6 +153,7 @@ struct IntervalStream {
 }
 
 impl IntervalStream {
+	#[allow(unused)]
 	fn new(interval: Interval) -> Self {
 		Self {
 			inner: interval,

@@ -2,6 +2,8 @@
 
 pub mod engine;
 pub mod err;
+#[cfg(feature = "protocol-http")]
+pub mod headers;
 pub mod method;
 pub mod opt;
 
@@ -26,7 +28,7 @@ use std::sync::OnceLock;
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
-const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0-beta.9, <2.0.0", "20230701.55918b7c");
+const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <2.0.0", "20230701.55918b7c");
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
@@ -103,7 +105,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			// Avoid establising another connection if already connected
+			// Avoid establishing another connection if already connected
 			if self.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}
@@ -123,6 +125,7 @@ where
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) enum ExtraFeatures {
 	Backup,
+	LiveQueries,
 }
 
 /// A database client instance for embedded or remote databases
@@ -140,7 +143,9 @@ where
 		// invalid version requirements should be caught during development
 		let req = VersionReq::parse(versions).expect("valid supported versions");
 		let build_meta = BuildMetadata::new(build_meta).expect("valid supported build metadata");
-		let version = self.version().await?;
+		let mut version = self.version().await?;
+		// we would like to be able to connect to pre-releases too
+		version.pre = Default::default();
 		let server_build = &version.build;
 		if !req.matches(&version) {
 			return Err(Error::VersionMismatch {

@@ -86,7 +86,8 @@ SurrealDB is an end-to-end cloud-native database designed for modern application
 - **Granular access control**: SurrealDB provides row-level permissions-based access control, giving you the ability to manage data access with precision.
 
 
-View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), the product [roadmap](https://surrealdb.com/roadmap), and [documentation](https://surrealdb.com/docs).
+View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), and [documentation](https://surrealdb.com/docs).
+
 
 <img src="./img/interface.png">
 
@@ -199,28 +200,28 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
 
 ##### Client side apps
 
-- [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
-- [x] [Getting started with WebAssembly](https://surrealdb.com/docs/integration/libraries/webassembly)
-- [x] [Getting started with Ember.js](https://surrealdb.com/docs/integration/libraries/emberjs)
-- [ ] [Getting started with React.js](https://surrealdb.com/docs/integration/libraries/reactjs)
-- [ ] [Getting started with Angular.js](https://surrealdb.com/docs/integration/libraries/angularjs)
-- [ ] [Getting started with Vue.js](https://surrealdb.com/docs/integration/libraries/vuejs)
-- [ ] [Getting started with Apollo GraphQL](https://surrealdb.com/docs/integration/libraries/apollo)
+- [x] [Getting started with Javascript](https://docs.surrealdb.com/docs/integration/sdks/javascript)
+- [x] [Getting started with WebAssembly](https://docs.surrealdb.com/docs/integration/sdks/webassembly)
+- [x] [Getting started with Ember.js](https://docs.surrealdb.com/docs/integration/sdks/emberjs)
+- [ ] [Getting started with React.js](https://docs.surrealdb.com/docs/integration/sdks/reactjs)
+- [ ] [Getting started with Angular.js](https://docs.surrealdb.com/docs/integration/sdks/angularjs)
+- [ ] [Getting started with Vue.js](https://docs.surrealdb.com/docs/integration/sdks/vuejs)
+- [ ] [Getting started with Apollo GraphQL](https://docs.surrealdb.com/docs/integration/sdks/apollo)
 
 ##### Server side code
 
-- [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
-- [x] [Getting started with Node.js](https://surrealdb.com/docs/integration/libraries/nodejs)
-- [x] [Getting started with Golang](https://surrealdb.com/docs/integration/libraries/golang)
-- [x] [Getting started with Rust](https://surrealdb.com/docs/integration/libraries/rust)
-- [x] [Getting started with Deno](https://surrealdb.com/docs/integration/libraries/deno)
-- [ ] [Getting started with Python](https://surrealdb.com/docs/integration/libraries/python) (coming soon)
-- [ ] [Getting started with C](https://surrealdb.com/docs/integration/libraries/c) (coming soon)
-- [ ] [Getting started with Java](https://surrealdb.com/docs/integration/libraries/java) (coming soon)
-- [ ] [Getting started with Ruby](https://surrealdb.com/docs/integration/libraries/ruby) (coming soon)
-- [ ] [Getting started with PHP](https://surrealdb.com/docs/integration/libraries/php) (coming soon)
-- [ ] [Getting started with Swift](https://surrealdb.com/docs/integration/libraries/swift) (coming soon)
-- [ ] [Getting started with R](https://surrealdb.com/docs/integration/libraries/r) (coming soon)
+- [x] [Getting started with Javascript](https://docs.surrealdb.com/docs/integration/sdks/javascript)
+- [x] [Getting started with Node.js](https://docs.surrealdb.com/docs/integration/sdks/nodejs)
+- [x] [Getting started with Golang](https://docs.surrealdb.com/docs/integration/sdks/golang)
+- [x] [Getting started with Rust](https://docs.surrealdb.com/docs/integration/sdks/rust)
+- [x] [Getting started with Deno](https://docs.surrealdb.com/docs/integration/sdks/deno)
+- [ ] [Getting started with Python](https://docs.surrealdb.com/docs/integration/sdks/python) (coming soon)
+- [ ] [Getting started with C](https://docs.surrealdb.com/docs/integration/sdks/c) (coming soon)
+- [ ] [Getting started with Java](https://docs.surrealdb.com/docs/integration/sdks/java) (coming soon)
+- [ ] [Getting started with Ruby](https://docs.surrealdb.com/docs/integration/sdks/ruby) (coming soon)
+- [ ] [Getting started with PHP](https://docs.surrealdb.com/docs/integration/sdks/php) (coming soon)
+- [ ] [Getting started with Swift](https://docs.surrealdb.com/docs/integration/sdks/swift) (coming soon)
+- [ ] [Getting started with R](https://docs.surrealdb.com/docs/integration/sdks/r) (coming soon)
 
 <h2><img height="20" src="./img/features.svg">&nbsp;&nbsp;Quick look</h2>
 
@@ -260,7 +261,7 @@ DEFINE INDEX email ON TABLE user COLUMNS email UNIQUE;
 
 -- Create a new event whenever a user changes their email address
 DEFINE EVENT email ON TABLE user WHEN $before.email != $after.email THEN (
-	CREATE event SET user = $this, time = time::now(), value = $after.email, action = 'email_changed'
+	CREATE event SET user = $value, time = time::now(), value = $after.email, action = 'email_changed'
 );
 ```
 

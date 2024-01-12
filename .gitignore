@@ -39,12 +39,13 @@ Temporary Items
 .vscode/
 /result
 /bin/
-/docker/
 /.direnv/
 
 # -----------------------------------
 # Specific
 # -----------------------------------
 
+/cache/
+/store/
 surreal
 history.txt

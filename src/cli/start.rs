@@ -14,6 +14,7 @@ use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
+use surrealdb::engine::any::IntoEndpoint;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
@@ -155,6 +156,13 @@ pub async fn init(
 		// Output SurrealDB logo
 		println!("{LOGO}");
 	}
+	// Clean the path
+	let endpoint = path.into_endpoint()?;
+	let path = if endpoint.path.is_empty() {
+		endpoint.url.to_string()
+	} else {
+		endpoint.path
+	};
 	// Setup the cli options
 	let _ = config::CF.set(Config {
 		bind: listen_addresses.first().cloned().unwrap(),
@@ -174,12 +182,10 @@ pub async fn init(
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
-	#[cfg(feature = "has-storage")]
 	let nd = node::init(ct.clone());
 	// Start the web server
 	net::init(ct).await?;
 	// Wait for the node agent to stop
-	#[cfg(feature = "has-storage")]
 	if let Err(e) = nd.await {
 		error!("Node agent failed while running: {}", e);
 		return Err(Error::NodeAgent);

@@ -27,6 +27,14 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_AUTH", long = "auth")]
 	#[arg(default_value_t = false)]
 	auth_enabled: bool,
+	// TODO(gguillemas): Remove this argument once the legacy authentication is deprecated in v2.0.0
+	#[arg(
+		help = "Whether to enable explicit authentication level selection",
+		help_heading = "Authentication"
+	)]
+	#[arg(env = "SURREAL_AUTH_LEVEL_ENABLED", long = "auth-level-enabled")]
+	#[arg(default_value_t = false)]
+	auth_level_enabled: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
@@ -204,6 +212,8 @@ pub async fn init(
 		query_timeout,
 		transaction_timeout,
 		auth_enabled,
+		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
+		auth_level_enabled,
 		caps,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
@@ -225,6 +235,11 @@ pub async fn init(
 	} else {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
+	// Log whether authentication levels are enabled
+	// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
+	if auth_level_enabled {
+		info!("Authentication levels are enabled");
+	}
 
 	let caps = caps.into();
 	debug!("Server capabilities: {caps}");
@@ -237,6 +252,7 @@ pub async fn init(
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(auth_enabled)
+		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
 
 	dbs.bootstrap().await?;
@@ -261,8 +277,8 @@ mod tests {
 	use std::str::FromStr;
 
 	use surrealdb::dbs::Session;
-	use surrealdb::iam::verify::verify_creds;
-	use surrealdb::kvs::Datastore;
+	use surrealdb::iam::verify::verify_root_creds;
+	use surrealdb::kvs::{Datastore, LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
@@ -278,15 +294,15 @@ mod tests {
 
 		// Setup the initial user if there are no root users
 		assert_eq!(
-			ds.transaction(false, false).await.unwrap().all_root_users().await.unwrap().len(),
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			0
 		);
 		ds.setup_initial_creds(creds).await.unwrap();
 		assert_eq!(
-			ds.transaction(false, false).await.unwrap().all_root_users().await.unwrap().len(),
+			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			1
 		);
-		verify_creds(&ds, None, None, creds.username, creds.password).await.unwrap();
+		verify_root_creds(&ds, creds.username, creds.password).await.unwrap();
 
 		// Do not setup the initial root user if there are root users:
 		// Test the scenario by making sure the custom password doesn't change.
@@ -294,7 +310,7 @@ mod tests {
 		let sess = Session::owner();
 		ds.execute(sql, &sess, None).await.unwrap();
 		let pass_hash = ds
-			.transaction(false, false)
+			.transaction(Read, Optimistic)
 			.await
 			.unwrap()
 			.get_root_user(creds.username)
@@ -305,7 +321,7 @@ mod tests {
 		ds.setup_initial_creds(creds).await.unwrap();
 		assert_eq!(
 			pass_hash,
-			ds.transaction(false, false)
+			ds.transaction(Read, Optimistic)
 				.await
 				.unwrap()
 				.get_root_user(creds.username)

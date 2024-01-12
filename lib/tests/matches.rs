@@ -39,7 +39,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 					}
 			]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -49,7 +49,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -89,7 +89,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 				},
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -99,7 +99,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -143,7 +143,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 					}
 			]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -158,7 +158,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -212,7 +212,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 					}
 			]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -274,7 +274,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -291,7 +291,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	for _ in 0..6 {
@@ -306,7 +306,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -329,7 +329,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	for _ in 0..7 {
@@ -345,11 +345,108 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 			}
 		]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_without_complex_query() -> Result<(), Error> {
+	let sql = r"
+		CREATE page:1 SET title = 'the quick brown', content = 'fox jumped over the lazy dog', host = 'test';
+		CREATE page:2 SET title = 'the fast fox', content = 'jumped over the lazy dog', host = 'test';
+		DEFINE ANALYZER simple TOKENIZERS blank,class;
+		DEFINE INDEX page_title ON page FIELDS title SEARCH ANALYZER simple BM25;
+		DEFINE INDEX page_content ON page FIELDS content SEARCH ANALYZER simple BM25;
+		DEFINE INDEX page_host ON page FIELDS host;
+		SELECT id, search::score(1) as sc1, search::score(2) as sc2
+		FROM page WHERE (title @1@ 'dog' OR content @2@ 'dog');
+		SELECT id, search::score(1) as sc1, search::score(2) as sc2
+			FROM page WHERE host = 'test'
+			AND (title @1@ 'dog' OR content @2@ 'dog') explain;
+ 		SELECT id, search::score(1) as sc1, search::score(2) as sc2
+    		FROM page WHERE
+    		host = 'test'
+    		AND (title @1@ 'dog' OR content @2@ 'dog');
+    	SELECT id, search::score(1) as sc1, search::score(2) as sc2
+    		FROM page WHERE
+    		host = 'test'
+    		AND (title @1@ 'dog' OR content @2@ 'dog') PARALLEL;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 10);
+	//
+	for _ in 0..6 {
+		let _ = res.remove(0).result?;
+	}
+
+	let tmp = res.remove(0).result?;
+	let val_docs = Value::parse(
+		"[
+				{
+					id: page:1,
+					sc1: 0f,
+					sc2: -1.5517289638519287f
+				},
+				{
+					id: page:2,
+					sc1: 0f,
+					sc2: -1.6716052293777466f
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				detail: {
+					plan: {
+						index: 'page_host',
+						operator: '=',
+						value: 'test'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'page_title',
+						operator: '@1@',
+						value: 'dog'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					plan: {
+						index: 'page_content',
+						operator: '@2@',
+						value: 'dog'
+					},
+					table: 'page'
+				},
+				operation: 'Iterate Index'
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
+
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 	Ok(())
 }

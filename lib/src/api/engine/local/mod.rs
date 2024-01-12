@@ -28,6 +28,8 @@ pub(crate) mod wasm;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
@@ -41,26 +43,54 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::channel;
+use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::iam::check::check_ns_db;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::iam::Action;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::kvs::{LockType, TransactionType};
+use crate::method::Stats;
 use crate::opt::IntoEndpoint;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::sql::statements::DefineModelStatement;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::sql::statements::DefineStatement;
+use crate::sql::statements::KillStatement;
 use crate::sql::Array;
 use crate::sql::Query;
 use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
+use crate::sql::Uuid;
 use crate::sql::Value;
+use channel::Sender;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use futures::StreamExt;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use surrealml_core::storage::surml_file::SurMlFile;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -361,39 +391,34 @@ impl Surreal<Db> {
 	}
 }
 
-fn process(responses: Vec<Response>) -> Result<QueryResponse> {
+fn process(responses: Vec<Response>) -> QueryResponse {
 	let mut map = IndexMap::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
+		let stats = Stats {
+			execution_time: Some(response.time),
+		};
 		match response.result {
-			Ok(value) => match value {
-				Value::Array(Array(array)) => map.insert(index, Ok(array)),
-				Value::None | Value::Null => map.insert(index, Ok(vec![])),
-				value => map.insert(index, Ok(vec![value])),
-			},
-			Err(error) => map.insert(index, Err(error.into())),
+			Ok(value) => map.insert(index, (stats, Ok(value))),
+			Err(error) => map.insert(index, (stats, Err(error.into()))),
 		};
 	}
-	Ok(QueryResponse(map))
+	QueryResponse(map)
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
-	if let Some(result) = process(responses)?.0.remove(&0) {
-		let mut vec = result?;
+	if let Some((_stats, result)) = process(responses).0.remove(&0) {
+		let value = result?;
 		match one {
-			true => match vec.pop() {
-				Some(Value::Array(Array(mut vec))) => {
+			true => match value {
+				Value::Array(Array(mut vec)) => {
 					if let [value] = &mut vec[..] {
 						return Ok(mem::take(value));
 					}
 				}
-				Some(Value::None | Value::Null) | None => {}
-				Some(value) => {
-					return Ok(value);
-				}
+				Value::None | Value::Null => {}
+				value => return Ok(value),
 			},
-			false => {
-				return Ok(Value::Array(Array(vec)));
-			}
+			false => return Ok(value),
 		}
 	}
 	match one {
@@ -406,17 +431,42 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 async fn export(
 	kvs: &Datastore,
 	sess: &Session,
-	ns: String,
-	db: String,
 	chn: channel::Sender<Vec<u8>>,
+	ml_config: Option<MlConfig>,
 ) -> Result<()> {
-	if let Err(error) = kvs.export(sess, ns, db, chn).await?.await {
-		if let crate::error::Db::Channel(message) = error {
-			// This is not really an error. Just logging it for improved visibility.
-			trace!("{message}");
-			return Ok(());
+	match ml_config {
+		#[cfg(feature = "ml")]
+		Some(MlConfig::Export {
+			name,
+			version,
+		}) => {
+			// Ensure a NS and DB are set
+			let (nsv, dbv) = check_ns_db(sess)?;
+			// Check the permissions level
+			kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			// Start a new readonly transaction
+			let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+			// Attempt to get the model definition
+			let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
+			// Export the file data in to the store
+			let mut data = crate::obs::stream(info.hash.to_owned()).await?;
+			// Process all stream values
+			while let Some(Ok(bytes)) = data.next().await {
+				if chn.send(bytes.to_vec()).await.is_err() {
+					break;
+				}
+			}
 		}
-		return Err(error.into());
+		_ => {
+			if let Err(error) = kvs.export(sess, chn).await?.await {
+				if let crate::error::Db::Channel(message) = error {
+					// This is not really an error. Just logging it for improved visibility.
+					trace!("{message}");
+					return Ok(());
+				}
+				return Err(error.into());
+			}
+		}
 	}
 	Ok(())
 }
@@ -439,11 +489,25 @@ where
 	})
 }
 
+async fn kill_live_query(
+	kvs: &Datastore,
+	id: Uuid,
+	session: &Session,
+	vars: BTreeMap<String, Value>,
+) -> Result<Value> {
+	let query = Query(Statements(vec![Statement::Kill(KillStatement {
+		id: id.into(),
+	})]));
+	let response = kvs.process(query, session, Some(vars)).await?;
+	take(true, response).await
+}
+
 async fn router(
 	(_, method, param): (i64, Method, Param),
 	kvs: &Arc<Datastore>,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
+	live_queries: &mut HashMap<Uuid, Sender<Notification>>,
 ) -> Result<DbResponse> {
 	let mut params = param.other;
 
@@ -543,23 +607,21 @@ async fn router(
 				}
 				None => unreachable!(),
 			};
-			let response = process(response)?;
+			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
 		#[cfg(target_arch = "wasm32")]
 		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
-			let ns = session.ns.clone().unwrap_or_default();
-			let db = session.db.clone().unwrap_or_default();
-			let (tx, rx) = channel::new(1);
+			let (tx, rx) = crate::channel::bounded(1);
 
-			match (param.file, param.sender) {
+			match (param.file, param.bytes_sender) {
 				(Some(path), None) => {
 					let (mut writer, mut reader) = io::duplex(10_240);
 
 					// Write to channel.
-					let export = export(kvs, session, ns, db, tx);
+					let export = export(kvs, session, tx, param.ml_config);
 
 					// Read from channel and write to pipe.
 					let bridge = async move {
@@ -600,7 +662,7 @@ async fn router(
 					let session = session.clone();
 					tokio::spawn(async move {
 						let export = async {
-							if let Err(error) = export(&kvs, &session, ns, db, tx).await {
+							if let Err(error) = export(&kvs, &session, tx, param.ml_config).await {
 								let _ = backup.send(Err(error)).await;
 							}
 						};
@@ -634,15 +696,63 @@ async fn router(
 					.into());
 				}
 			};
-			let mut statements = String::new();
-			if let Err(error) = file.read_to_string(&mut statements).await {
-				return Err(Error::FileRead {
-					path,
-					error,
+			let responses = match param.ml_config {
+				#[cfg(feature = "ml")]
+				Some(MlConfig::Import) => {
+					// Ensure a NS and DB are set
+					let (nsv, dbv) = check_ns_db(session)?;
+					// Check the permissions level
+					kvs.check(session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+					// Create a new buffer
+					let mut buffer = Vec::new();
+					// Load all the uploaded file chunks
+					if let Err(error) = file.read_to_end(&mut buffer).await {
+						return Err(Error::FileRead {
+							path,
+							error,
+						}
+						.into());
+					}
+					// Check that the SurrealML file is valid
+					let file = match SurMlFile::from_bytes(buffer) {
+						Ok(file) => file,
+						Err(error) => {
+							return Err(Error::FileRead {
+								path,
+								error,
+							}
+							.into());
+						}
+					};
+					// Convert the file back in to raw bytes
+					let data = file.to_bytes();
+					// Calculate the hash of the model file
+					let hash = crate::obs::hash(&data);
+					// Insert the file data in to the store
+					crate::obs::put(&hash, data).await?;
+					// Insert the model in to the database
+					let query = DefineStatement::Model(DefineModelStatement {
+						hash,
+						name: file.header.name.to_string().into(),
+						version: file.header.version.to_string(),
+						comment: Some(file.header.description.to_string().into()),
+						..Default::default()
+					})
+					.into();
+					kvs.process(query, session, Some(vars.clone())).await?
 				}
-				.into());
-			}
-			let responses = kvs.execute(&statements, &*session, Some(vars.clone())).await?;
+				_ => {
+					let mut statements = String::new();
+					if let Err(error) = file.read_to_string(&mut statements).await {
+						return Err(Error::FileRead {
+							path,
+							error,
+						}
+						.into());
+					}
+					kvs.execute(&statements, &*session, Some(vars.clone())).await?
+				}
+			};
 			for response in responses {
 				response.result?;
 			}
@@ -655,7 +765,11 @@ async fn router(
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			match kvs.compute(value, &*session, Some(vars.clone())).await? {
+			let var = Some(map! {
+				key.clone() => Value::None,
+				=> vars
+			});
+			match kvs.compute(value, &*session, var).await? {
 				Value::None => vars.remove(&key),
 				v => vars.insert(key, v),
 			};
@@ -668,27 +782,20 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Live => {
-			let table = match &mut params[..] {
-				[value] => mem::take(value),
-				_ => unreachable!(),
-			};
-			let mut vars = BTreeMap::new();
-			vars.insert("table".to_owned(), table);
-			let response = kvs
-				.execute("LIVE SELECT * FROM type::table($table)", &*session, Some(vars))
-				.await?;
-			let value = take(true, response).await?;
-			Ok(DbResponse::Other(value))
+			if let Some(sender) = param.notification_sender {
+				if let [Value::Uuid(id)] = &params[..1] {
+					live_queries.insert(*id, sender);
+				}
+			}
+			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Kill => {
-			let id = match &mut params[..] {
-				[value] => mem::take(value),
+			let id = match &params[..] {
+				[Value::Uuid(id)] => *id,
 				_ => unreachable!(),
 			};
-			let mut vars = BTreeMap::new();
-			vars.insert("id".to_owned(), id);
-			let response = kvs.execute("KILL type::string($id)", &*session, Some(vars)).await?;
-			let value = take(true, response).await?;
+			live_queries.remove(&id);
+			let value = kill_live_query(kvs, id, session, vars.clone()).await?;
 			Ok(DbResponse::Other(value))
 		}
 	}

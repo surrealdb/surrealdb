@@ -98,7 +98,6 @@
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-//#![cfg_attr(test, deny(warnings))]
 
 #[macro_use]
 extern crate tracing;
@@ -134,12 +133,19 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(any(feature = "ml", feature = "jwks"))]
+#[doc(hidden)]
+pub mod obs;
+#[doc(hidden)]
+pub mod syn;
 
 #[doc(inline)]
 pub use api::engine;
+#[cfg(feature = "protocol-http")]
+#[doc(hidden)]
+pub use api::headers;
 #[doc(inline)]
 pub use api::method;
 #[doc(inline)]
@@ -158,7 +164,8 @@ pub use api::Surreal;
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use channel::bounded as new;
+	pub use channel::bounded;
+	pub use channel::unbounded;
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }
@@ -167,6 +174,39 @@ pub mod channel {
 pub mod error {
 	pub use crate::api::err::Error as Api;
 	pub use crate::err::Error as Db;
+}
+
+/// The action performed on a record
+///
+/// This is used in live query notifications.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum Action {
+	Create,
+	Update,
+	Delete,
+}
+
+impl From<dbs::Action> for Action {
+	fn from(action: dbs::Action) -> Self {
+		match action {
+			dbs::Action::Create => Self::Create,
+			dbs::Action::Update => Self::Update,
+			dbs::Action::Delete => Self::Delete,
+		}
+	}
+}
+
+/// A live query notification
+///
+/// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.
+/// For deletions the data is the record before it was deleted. For everything else, it's the newly created record or updated record depending on whether
+/// the action is create or update.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub struct Notification<R> {
+	pub action: Action,
+	pub data: R,
 }
 
 /// An error originating from the SurrealDB client library

@@ -1,0 +1,59 @@
+# Use this workflow to trigger beta releases, both initial beta.1 and subsequent beta.x releases
+
+name: Beta release
+
+run-name: "Beta release (publish: ${{ inputs.publish }}, bump version: ${{ inputs.bump-version }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Publish the beta release"
+      bump-version:
+        required: false
+        type: boolean
+        default: false
+        description: "Bump the version of the current beta if this is not the initial one"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+
+jobs:
+  checks:
+    name: Pre-release checks
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.outputs.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine the correct branch
+        id: outputs
+        run: |
+          set -x
+          if git branch -r | grep -w 'releases/beta'; then
+            echo "branch=releases/beta" >> $GITHUB_OUTPUT
+          else
+            echo "branch=main" >> $GITHUB_OUTPUT
+          fi
+
+  release:
+    name: Prepare beta release
+    needs: [checks]
+    uses: ./.github/workflows/reusable_publish_version.yml
+    with:
+      environment: beta
+      git-ref: ${{ needs.checks.outputs.branch }}
+      bump-version: ${{ inputs.bump-version }}
+      publish: ${{ inputs.publish }}
+      create-release: ${{ inputs.publish }}
+    secrets: inherit

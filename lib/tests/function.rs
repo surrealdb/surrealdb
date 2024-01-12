@@ -5,6 +5,7 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::{Number, Value};
+use test_log::test;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	let db = new_ds().await?;
@@ -13,7 +14,7 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			let desired_value = Value::parse(*desired_response);
+			let desired_value = Value::parse(desired_response);
 			// If both values are NaN, they are equal from a test PoV
 			if !desired_value.is_nan() || !v.is_nan() {
 				assert_eq!(
@@ -2427,6 +2428,15 @@ async fn function_math_pow() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::from(1045678.375);
 	assert_eq!(tmp, val);
+
+	let sql = r#"
+		RETURN math::pow(101, 50);
+	"#;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	let res = res.remove(0).result;
+	assert!(matches!(res, Err(Error::TryPow(_, _))));
 	//
 	Ok(())
 }
@@ -2672,7 +2682,7 @@ async fn function_math_variance() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_meta_id() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::id("person:tobie");
+		RETURN meta::id(r"person:tobie");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2689,7 +2699,7 @@ async fn function_parse_meta_id() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_meta_table() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::table("person:tobie");
+		RETURN meta::table(r"person:tobie");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2703,10 +2713,14 @@ async fn function_parse_meta_table() -> Result<(), Error> {
 	Ok(())
 }
 
+// --------------------------------------------------
+// object
+// --------------------------------------------------
+
 #[tokio::test]
-async fn function_parse_meta_tb() -> Result<(), Error> {
+async fn function_object_entries() -> Result<(), Error> {
 	let sql = r#"
-		RETURN meta::tb("person:tobie");
+		RETURN object::entries({ a: 1, b: 2 });
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2714,7 +2728,75 @@ async fn function_parse_meta_tb() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("person");
+	let val = Value::parse("[ [ 'a', 1 ], [ 'b', 2 ] ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_from_entries() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::from_entries([ [ 'a', 1 ], [ 'b', 2 ] ]);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("{ a: 1, b: 2 }");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_keys() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::keys({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[ 'a', 'b' ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_len() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::len({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("2");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_object_values() -> Result<(), Error> {
+	let sql = r#"
+		RETURN object::values({ a: 1, b: 2 });
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[ 1, 2 ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3297,6 +3379,120 @@ async fn function_string_ends_with() -> Result<(), Error> {
 	Ok(())
 }
 
+#[test(tokio::test)]
+async fn function_search_analyzer() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE FUNCTION fn::stripHtml($html: string) {
+            RETURN string::replace($html, /<[^>]*>/, "");
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['This', 'is', 'a', 'sample', 'of', 'HTML']");
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[test(tokio::test)]
+async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE FUNCTION fn::unsupportedFunction() {
+            RETURN 1;
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::unsupportedFunction TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	match res.remove(0).result {
+		Err(Error::InvalidArguments {
+			name,
+			message,
+		}) => {
+			assert_eq!(&name, "fn::unsupportedFunction");
+			assert_eq!(&message, "The function expects 0 arguments.");
+		}
+		_ => panic!("Should have fail!"),
+	}
+	Ok(())
+}
+
+#[test(tokio::test)]
+async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE FUNCTION fn::unsupportedReturnedType($html: string) {
+            RETURN 1;
+        };
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::unsupportedReturnedType TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..2 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	match res.remove(0).result {
+		Err(Error::InvalidFunction {
+			name,
+			message,
+		}) => {
+			assert_eq!(&name, "unsupportedReturnedType");
+			assert_eq!(&message, "The function should return a string.");
+		}
+		r => panic!("Unexpected result: {:?}", r),
+	}
+	Ok(())
+}
+
+#[test(tokio::test)]
+async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
+	let sql = r#"
+        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::doesNotExist TOKENIZERS blank,class;
+		RETURN search::analyze('htmlAnalyzer', '<p>This is a <em>sample</em> of HTML</p>');
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	match res.remove(0).result {
+		Err(Error::FcNotFound {
+			value,
+		}) => {
+			assert_eq!(&value, "doesNotExist");
+		}
+		r => panic!("Unexpected result: {:?}", r),
+	}
+	Ok(())
+}
+
 #[tokio::test]
 async fn function_parse_is_alphanum() -> Result<(), Error> {
 	let sql = r#"
@@ -3564,7 +3760,7 @@ async fn function_parse_is_url() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN string::is::uuid(u"e72bee20-f49b-11ec-b939-0242ac120002");
 		RETURN string::is::uuid("this is a test!");
 	"#;
 	let dbs = new_ds().await?;
@@ -3664,6 +3860,49 @@ async fn function_string_lowercase() -> Result<(), Error> {
 	Ok(())
 }
 
+// "<[^>]*>" , ""
+
+#[tokio::test]
+async fn function_string_replace_with_regex() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::replace('<p>This is a <em>sample</em> string with <a href="\\#">HTML</a> tags.</p>', /<[^>]*>/, "");
+		RETURN string::replace('<p>This one is already <strong>compiled!<strong></p>', /<[^>]*>/, "");
+"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("This is a sample string with HTML tags.");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("This one is already compiled!");
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_matches() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::matches("foo", /foo/);
+		RETURN string::matches("bar", /foo/);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
 #[tokio::test]
 async fn function_string_repeat() -> Result<(), Error> {
 	let sql = r#"
@@ -3756,7 +3995,7 @@ async fn function_string_similarity_fuzzy() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -3788,7 +4027,7 @@ async fn function_string_similarity_smithwaterman() -> Result<(), Error> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -4025,9 +4264,9 @@ async fn function_string_words() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_ceil() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::ceil("1987-06-22T08:30:45Z", 1w);
-		RETURN time::ceil("1987-06-22T08:30:45Z", 1y);
-		RETURN time::ceil("2023-05-11T03:09:00Z", 1s);
+		RETURN time::ceil(d"1987-06-22T08:30:45Z", 1w);
+		RETURN time::ceil(d"1987-06-22T08:30:45Z", 1y);
+		RETURN time::ceil(d"2023-05-11T03:09:00Z", 1s);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4035,15 +4274,15 @@ async fn function_time_ceil() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-25T00:00:00Z'");
+	let val = Value::parse("d'1987-06-25T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-12-28T00:00:00Z'");
+	let val = Value::parse("d'1987-12-28T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2023-05-11T03:09:00Z'");
+	let val = Value::parse("d'2023-05-11T03:09:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4053,7 +4292,7 @@ async fn function_time_ceil() -> Result<(), Error> {
 async fn function_time_day() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::day();
-		RETURN time::day("1987-06-22T08:30:45Z");
+		RETURN time::day(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4073,9 +4312,9 @@ async fn function_time_day() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_floor() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::floor("1987-06-22T08:30:45Z", 1w);
-		RETURN time::floor("1987-06-22T08:30:45Z", 1y);
-		RETURN time::floor("2023-05-11T03:09:00Z", 1s);
+		RETURN time::floor(d"1987-06-22T08:30:45Z", 1w);
+		RETURN time::floor(d"1987-06-22T08:30:45Z", 1y);
+		RETURN time::floor(d"2023-05-11T03:09:00Z", 1s);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4083,15 +4322,15 @@ async fn function_time_floor() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-18T00:00:00Z'");
+	let val = Value::parse("d'1987-06-18T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1986-12-28T00:00:00Z'");
+	let val = Value::parse("d'1986-12-28T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2023-05-11T03:09:00Z'");
+	let val = Value::parse("d'2023-05-11T03:09:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4100,8 +4339,8 @@ async fn function_time_floor() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_format() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::format("1987-06-22T08:30:45Z", "%Y-%m-%d");
-		RETURN time::format("1987-06-22T08:30:45Z", "%T");
+		RETURN time::format(d"1987-06-22T08:30:45Z", "%Y-%m-%d");
+		RETURN time::format(d"1987-06-22T08:30:45Z", "%T");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4122,8 +4361,8 @@ async fn function_time_format() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_group() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::group("1987-06-22T08:30:45Z", 'hour');
-		RETURN time::group("1987-06-22T08:30:45Z", 'month');
+		RETURN time::group(d"1987-06-22T08:30:45Z", 'hour');
+		RETURN time::group(d"1987-06-22T08:30:45Z", 'month');
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4131,11 +4370,11 @@ async fn function_time_group() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-22T08:00:00Z'");
+	let val = Value::parse("d'1987-06-22T08:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-01T00:00:00Z'");
+	let val = Value::parse("d'1987-06-01T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4145,7 +4384,7 @@ async fn function_time_group() -> Result<(), Error> {
 async fn function_time_hour() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::hour();
-		RETURN time::hour("1987-06-22T08:30:45Z");
+		RETURN time::hour(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4165,7 +4404,7 @@ async fn function_time_hour() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_min() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::min(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
+		RETURN time::min([d"1987-06-22T08:30:45Z", d"1988-06-22T08:30:45Z"]);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4173,7 +4412,7 @@ async fn function_time_min() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-22T08:30:45Z'");
+	let val = Value::parse("d'1987-06-22T08:30:45Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4182,7 +4421,7 @@ async fn function_time_min() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_max() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::max(["1987-06-22T08:30:45Z", "1988-06-22T08:30:45Z"]);
+		RETURN time::max([d"1987-06-22T08:30:45Z", d"1988-06-22T08:30:45Z"]);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4190,7 +4429,7 @@ async fn function_time_max() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1988-06-22T08:30:45Z'");
+	let val = Value::parse("d'1988-06-22T08:30:45Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4200,7 +4439,7 @@ async fn function_time_max() -> Result<(), Error> {
 async fn function_time_minute() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::minute();
-		RETURN time::minute("1987-06-22T08:30:45Z");
+		RETURN time::minute(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4221,7 +4460,7 @@ async fn function_time_minute() -> Result<(), Error> {
 async fn function_time_month() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::month();
-		RETURN time::month("1987-06-22T08:30:45Z");
+		RETURN time::month(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4242,7 +4481,7 @@ async fn function_time_month() -> Result<(), Error> {
 async fn function_time_nano() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::nano();
-		RETURN time::nano("1987-06-22T08:30:45Z");
+		RETURN time::nano(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4254,6 +4493,48 @@ async fn function_time_nano() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(551349045000000000i64);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_micros() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::micros();
+		RETURN time::micros(d"1987-06-22T08:30:45Z");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_number());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(551349045000000i64);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_time_millis() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::millis();
+		RETURN time::millis(d"1987-06-22T08:30:45Z");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_number());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(551349045000i64);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4278,8 +4559,8 @@ async fn function_time_now() -> Result<(), Error> {
 #[tokio::test]
 async fn function_time_round() -> Result<(), Error> {
 	let sql = r#"
-		RETURN time::round("1987-06-22T08:30:45Z", 1w);
-		RETURN time::round("1987-06-22T08:30:45Z", 1y);
+		RETURN time::round(d"1987-06-22T08:30:45Z", 1w);
+		RETURN time::round(d"1987-06-22T08:30:45Z", 1y);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4287,11 +4568,11 @@ async fn function_time_round() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-25T00:00:00Z'");
+	let val = Value::parse("d'1987-06-25T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1986-12-28T00:00:00Z'");
+	let val = Value::parse("d'1986-12-28T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4301,7 +4582,7 @@ async fn function_time_round() -> Result<(), Error> {
 async fn function_time_second() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::second();
-		RETURN time::second("1987-06-22T08:30:45Z");
+		RETURN time::second(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4322,7 +4603,7 @@ async fn function_time_second() -> Result<(), Error> {
 async fn function_time_unix() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::unix();
-		RETURN time::unix("1987-06-22T08:30:45Z");
+		RETURN time::unix(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4343,7 +4624,7 @@ async fn function_time_unix() -> Result<(), Error> {
 async fn function_time_wday() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::wday();
-		RETURN time::wday("1987-06-22T08:30:45Z");
+		RETURN time::wday(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4364,7 +4645,7 @@ async fn function_time_wday() -> Result<(), Error> {
 async fn function_time_week() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::week();
-		RETURN time::week("1987-06-22T08:30:45Z");
+		RETURN time::week(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4385,7 +4666,7 @@ async fn function_time_week() -> Result<(), Error> {
 async fn function_time_yday() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::yday();
-		RETURN time::yday("1987-06-22T08:30:45Z");
+		RETURN time::yday(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4406,7 +4687,7 @@ async fn function_time_yday() -> Result<(), Error> {
 async fn function_time_year() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::year();
-		RETURN time::year("1987-06-22T08:30:45Z");
+		RETURN time::year(d"1987-06-22T08:30:45Z");
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -4424,6 +4705,28 @@ async fn function_time_year() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_time_from_nanos() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::from::nanos(384025770384840000);
+		RETURN time::from::nanos(2840257704384440000);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_from_micros() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::from::micros(384025770384840);
@@ -4435,11 +4738,11 @@ async fn function_time_from_micros() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-03T17:49:30.384840Z'");
+	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-01-02T08:28:24.384440Z'");
+	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4457,11 +4760,11 @@ async fn function_time_from_millis() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-03T17:49:33.840Z'");
+	let val = Value::parse("d'1982-03-03T17:49:33.840Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-01-02T08:28:24.440Z'");
+	let val = Value::parse("d'2060-01-02T08:28:24.440Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4479,11 +4782,11 @@ async fn function_time_from_secs() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-04T01:37:20Z'");
+	let val = Value::parse("d'1982-03-04T01:37:20Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-03-05T09:27:20Z'");
+	let val = Value::parse("d'2060-03-05T09:27:20Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4501,11 +4804,11 @@ async fn function_time_from_unix() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1982-03-04T01:37:20Z'");
+	let val = Value::parse("d'1982-03-04T01:37:20Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2060-03-05T09:27:20Z'");
+	let val = Value::parse("d'2060-03-05T09:27:20Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4549,11 +4852,11 @@ async fn function_type_datetime() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'1987-06-22T00:00:00Z'");
+	let val = Value::parse("d'1987-06-22T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'2022-08-01T00:00:00Z'");
+	let val = Value::parse("d'2022-08-01T00:00:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -4745,7 +5048,7 @@ async fn function_type_is_collection() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_datetime() -> Result<(), Error> {
 	let sql = r#"
-		RETURN type::is::datetime(<datetime> "2023-09-04T11:22:38.247Z");
+		RETURN type::is::datetime(<datetime> d"2023-09-04T11:22:38.247Z");
 		RETURN type::is::datetime("123");
 	"#;
 	let dbs = new_ds().await?;
@@ -4889,6 +5192,28 @@ async fn function_type_is_line() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_type_is_none() -> Result<(), Error> {
+	let sql = r#"
+		RETURN type::is::none(none);
+		RETURN type::is::none("123");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::from(true);
@@ -5169,7 +5494,7 @@ async fn function_type_is_string() -> Result<(), Error> {
 #[tokio::test]
 async fn function_type_is_uuid() -> Result<(), Error> {
 	let sql = r#"
-		RETURN type::is::uuid(<uuid> "018a6065-a80a-765e-b640-9fcb330a2f4f");
+		RETURN type::is::uuid(<uuid> u"018a6065-a80a-765e-b640-9fcb330a2f4f");
 		RETURN type::is::uuid("123");
 	"#;
 	let dbs = new_ds().await?;
@@ -5297,13 +5622,14 @@ async fn function_type_thing() -> Result<(), Error> {
 	let sql = r#"
 		CREATE type::thing('person', 'test');
 		CREATE type::thing('person', 1434619);
+		CREATE type::thing(<string> person:john);
 		CREATE type::thing('city', '8e60244d-95f6-4f95-9e30-09a98977efb0');
 		CREATE type::thing('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -5320,6 +5646,16 @@ async fn function_type_thing() -> Result<(), Error> {
 		"[
 			{
 				id: person:1434619,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:john,
 			}
 		]",
 	);
@@ -6014,6 +6350,112 @@ pub async fn function_http_disabled() -> Result<(), Error> {
 	assert!(matches!(res, Err(Error::HttpDisabled)));
 	let res = test_queries("RETURN http::delete({})", &["NONE"]).await;
 	assert!(matches!(res, Err(Error::HttpDisabled)));
+
+	Ok(())
+}
+
+// Tests for custom defined functions
+
+#[tokio::test]
+async fn function_custom_optional_args() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE FUNCTION fn::zero_arg() { [] };
+		DEFINE FUNCTION fn::one_arg($a: bool) { [$a] };
+		DEFINE FUNCTION fn::last_option($a: bool, $b: option<bool>) { [$a, $b] };
+		DEFINE FUNCTION fn::middle_option($a: bool, $b: option<bool>, $c: bool) { [$a, $b, $c] };
+
+		RETURN fn::zero_arg();
+		RETURN fn::one_arg();
+		RETURN fn::last_option();
+		RETURN fn::middle_option();
+
+		RETURN fn::zero_arg(true);
+		RETURN fn::one_arg(true);
+		RETURN fn::last_option(true);
+		RETURN fn::last_option(true, false);
+		RETURN fn::middle_option(true, false, true);
+		RETURN fn::middle_option(true, NONE, true);
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 14);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::one_arg" && message == "The function expects 1 argument." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::a(). The function expects 1 argument.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::last_option" && message == "The function expects 1 to 2 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::last_option(). The function expects 1 to 2 arguments.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::middle_option" && message == "The function expects 3 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::middle_option(). The function expects 3 arguments.")
+	}
+	//
+	match res.remove(0).result {
+		Err(surrealdb::error::Db::InvalidArguments { name, message }) if name == "fn::zero_arg" && message == "The function expects 0 arguments." => (),
+		_ => panic!("Query should have failed with error: Incorrect arguments for function fn::zero_arg(). The function expects 0 arguments.")
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, NONE]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, false]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, false, true]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[true, NONE, true]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_outside_database() -> Result<(), Error> {
+	let sql = "RETURN fn::does_not_exist();";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	match res.remove(0).result {
+		Err(Error::DbEmpty) => (),
+		_ => panic!("Query should have failed with error: Specify a database to use"),
+	}
 
 	Ok(())
 }

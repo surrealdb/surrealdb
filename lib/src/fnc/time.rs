@@ -148,8 +148,22 @@ pub fn month((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 
 pub fn nano((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
-		Some(v) => v.timestamp_nanos().into(),
-		None => Datetime::default().timestamp_nanos().into(),
+		Some(v) => v.timestamp_nanos_opt().unwrap_or_default().into(),
+		None => Datetime::default().timestamp_nanos_opt().unwrap_or_default().into(),
+	})
+}
+
+pub fn millis((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	Ok(match val {
+		Some(v) => v.timestamp_millis().into(),
+		None => Datetime::default().timestamp_millis().into(),
+	})
+}
+
+pub fn micros((val,): (Option<Datetime>,)) -> Result<Value, Error> {
+	Ok(match val {
+		Some(v) => v.timestamp_micros().into(),
+		None => Datetime::default().timestamp_micros().into(),
 	})
 }
 
@@ -231,6 +245,27 @@ pub mod from {
 	use crate::sql::datetime::Datetime;
 	use crate::sql::value::Value;
 	use chrono::{NaiveDateTime, Offset, TimeZone, Utc};
+
+	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
+		const NANOS_PER_SEC: i64 = 1_000_000_000;
+
+		let seconds = val.div_euclid(NANOS_PER_SEC);
+		let nanoseconds = val.rem_euclid(NANOS_PER_SEC) as u32;
+
+		match NaiveDateTime::from_timestamp_opt(seconds, nanoseconds) {
+			Some(v) => match Utc.fix().from_local_datetime(&v).earliest() {
+				Some(v) => Ok(Datetime::from(v.with_timezone(&Utc)).into()),
+				None => Err(Error::InvalidArguments {
+					name: String::from("time::from::nanos"),
+					message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
+				}),
+			}
+			None => Err(Error::InvalidArguments {
+				name: String::from("time::from::nanos"),
+				message: String::from("The first argument must be an in-bounds number of nanoseconds relative to January 1, 1970 0:00:00 UTC."),
+			}),
+		}
+	}
 
 	pub fn micros((val,): (i64,)) -> Result<Value, Error> {
 		match NaiveDateTime::from_timestamp_micros(val) {

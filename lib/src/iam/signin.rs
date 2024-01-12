@@ -1,11 +1,11 @@
-use super::verify::verify_creds;
+use super::verify::{verify_creds_legacy, verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level};
-use crate::cnf::SERVER_NAME;
+use crate::cnf::{INSECURE_FORWARD_SCOPE_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
-use crate::kvs::Datastore;
+use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::Object;
 use crate::sql::Value;
 use chrono::{Duration, Utc};
@@ -21,6 +21,7 @@ pub async fn signin(
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
 	let sc = vars.get("SC").or_else(|| vars.get("sc"));
+
 	// Check if the parameters exist
 	match (ns, db, sc) {
 		// SCOPE signin
@@ -84,7 +85,7 @@ pub async fn signin(
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 					// Attempt to signin to root
-					super::signin::kv(kvs, session, user, pass).await
+					super::signin::root(kvs, session, user, pass).await
 				}
 				_ => Err(Error::MissingUserOrPass),
 			}
@@ -102,7 +103,7 @@ pub async fn sc(
 	vars: Object,
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, false).await?;
+	let mut tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified scope from storage
 	let scope = tx.get_sc(&ns, &db, &sc).await;
 	// Ensure that the transaction is cancelled
@@ -116,7 +117,9 @@ pub async fn sc(
 					// Setup the query params
 					let vars = Some(vars.0);
 					// Setup the system session for finding the signin record
-					let sess = Session::editor().with_ns(&ns).with_db(&db);
+					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+					sess.ip = session.ip.clone();
+					sess.or = session.or.clone();
 					// Compute the value with the params
 					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded
@@ -169,7 +172,11 @@ pub async fn sc(
 							}
 							_ => Err(Error::NoRecordFound),
 						},
-						_ => Err(Error::SigninQueryFailed),
+						Err(e) => match e {
+							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+							_ => Err(Error::SigninQueryFailed),
+						},
 					}
 				}
 				_ => Err(Error::ScopeNoSignin),
@@ -187,9 +194,17 @@ pub async fn db(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Attempt to authenticate as the user
-	match verify_creds(kvs, Some(&ns), Some(&db), &user, &pass).await {
-		Ok((auth, u)) => {
+	let verify_creds = if kvs.is_auth_level_enabled() {
+		verify_db_creds(kvs, &ns, &db, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, Some(&ns), Some(&db), &user, &pass).await {
+			Ok((_, u)) => Ok(u),
+			Err(e) => Err(e),
+		}
+	};
+	match verify_creds {
+		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -211,7 +226,7 @@ pub async fn db(
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.au = Arc::new(auth);
+			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -230,9 +245,17 @@ pub async fn ns(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Attempt to authenticate as the user
-	match verify_creds(kvs, Some(&ns), None, &user, &pass).await {
-		Ok((auth, u)) => {
+	let verify_creds = if kvs.is_auth_level_enabled() {
+		verify_ns_creds(kvs, &ns, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, Some(&ns), None, &user, &pass).await {
+			Ok((_, u)) => Ok(u),
+			Err(e) => Err(e),
+		}
+	};
+	match verify_creds {
+		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -252,7 +275,7 @@ pub async fn ns(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
-			session.au = Arc::new(auth);
+			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -260,19 +283,28 @@ pub async fn ns(
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
-		Err(e) => Err(e),
+		// The password did not verify
+		_ => Err(Error::InvalidAuth),
 	}
 }
 
-pub async fn kv(
+pub async fn root(
 	kvs: &Datastore,
 	session: &mut Session,
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Attempt to authenticate as the user
-	match verify_creds(kvs, None, None, &user, &pass).await {
-		Ok((auth, u)) => {
+	let verify_creds = if kvs.is_auth_level_enabled() {
+		verify_root_creds(kvs, &user, &pass).await
+	} else {
+		// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
+		match verify_creds_legacy(kvs, None, None, &user, &pass).await {
+			Ok((_, u)) => Ok(u),
+			Err(e) => Err(e),
+		}
+	};
+	match verify_creds {
+		Ok(u) => {
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
@@ -290,7 +322,7 @@ pub async fn kv(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into());
-			session.au = Arc::new(auth);
+			session.au = Arc::new((&u, Level::Root).into());
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
@@ -298,6 +330,7 @@ pub async fn kv(
 				_ => Err(Error::TokenMakingFailed),
 			}
 		}
-		Err(e) => Err(e),
+		// The password did not verify
+		_ => Err(Error::InvalidAuth),
 	}
 }

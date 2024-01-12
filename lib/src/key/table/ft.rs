@@ -1,3 +1,5 @@
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 /// Stores a DEFINE TABLE AS config definition
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -31,6 +33,12 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::all::new(ns, db, tb).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'f', b't', 0xff]);
 	k
+}
+
+impl KeyRequirements for Ft<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::TableView
+	}
 }
 
 impl<'a> Ft<'a> {

@@ -29,7 +29,8 @@ async fn define_global_param() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
-			params: { test: 'DEFINE PARAM $test VALUE 12345' },
+			models: {},
+			params: { test: 'DEFINE PARAM $test VALUE 12345 PERMISSIONS FULL' },
 			scopes: {},
 			tables: {},
 			users: {},
@@ -80,8 +81,24 @@ async fn define_protected_param() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Found 'auth' but it is not possible to set a variable with this name"#
+		Some(e) if e.to_string() == "'auth' is a protected variable and cannot be set"
 	));
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn parameter_outside_database() -> Result<(), Error> {
+	let sql = "RETURN $does_not_exist;";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+
+	match res.remove(0).result {
+		Err(Error::DbEmpty) => (),
+		_ => panic!("Query should have failed with error: Specify a database to use"),
+	}
+
 	Ok(())
 }

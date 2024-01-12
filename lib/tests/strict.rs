@@ -255,6 +255,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			analyzers: {},
 			tokens: {},
 			functions: {},
+			models: {},
 			params: {},
 			scopes: {},
 			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
@@ -267,7 +268,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			events: {},
-			fields: { extra: 'DEFINE FIELD extra ON test VALUE true' },
+			fields: { extra: 'DEFINE FIELD extra ON test VALUE true PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},

@@ -7,11 +7,15 @@ pub(crate) mod wasm;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
 use crate::api::engine::merge_statement;
 use crate::api::engine::patch_statement;
+use crate::api::engine::remote::duration_from_str;
 use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
@@ -110,27 +114,40 @@ enum Auth {
 	Basic {
 		user: String,
 		pass: String,
+		ns: Option<String>,
+		db: Option<String>,
 	},
 	Bearer {
 		token: String,
 	},
 }
 
-trait Authenticate: Sized {
-	fn auth(self, auth: &Option<Auth>) -> Result<Self>;
+trait Authenticate {
+	fn auth(self, auth: &Option<Auth>) -> Self;
 }
 
-impl Authenticate for Request {
-	fn auth(self, auth: &Option<Auth>) -> Result<Self> {
+impl Authenticate for RequestBuilder {
+	fn auth(self, auth: &Option<Auth>) -> Self {
 		match auth {
 			Some(Auth::Basic {
 				user,
 				pass,
-			}) => Ok(self.basic_auth(user, Some(pass))),
+				ns,
+				db,
+			}) => {
+				let mut req = self.basic_auth(user, Some(pass));
+				if let Some(ns) = ns {
+					req = req.header(&AUTH_NS, ns);
+				}
+				if let Some(db) = db {
+					req = req.header(&AUTH_DB, db);
+				}
+				req
+			}
 			Some(Auth::Bearer {
 				token,
-			}) => Ok(self.bearer_auth(token)?),
-			None => Ok(self),
+			}) => self.bearer_auth(token),
+			None => self,
 		}
 	}
 }
@@ -138,9 +155,11 @@ impl Authenticate for Request {
 type HttpQueryResponse = (String, Status, Value);
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Root {
+struct Credentials {
 	user: String,
 	pass: String,
+	ns: Option<String>,
+	db: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,7 +170,7 @@ struct AuthResponse {
 	token: Option<String>,
 }
 
-async fn submit_auth(request: Request) -> Result<Value> {
+async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let response: AuthResponse =
@@ -162,7 +181,7 @@ async fn submit_auth(request: Request) -> Result<Value> {
 	Ok(response.token.into())
 }
 
-async fn query(request: Request) -> Result<QueryResponse> {
+async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let responses = deserialize::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
@@ -171,18 +190,17 @@ async fn query(request: Request) -> Result<QueryResponse> {
 			error,
 		}
 	})?;
-	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
-	for (index, (_time, status, value)) in responses.into_iter().enumerate() {
+	let mut map = IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
+	for (index, (execution_time, status, value)) in responses.into_iter().enumerate() {
+		let stats = Stats {
+			execution_time: duration_from_str(&execution_time),
+		};
 		match status {
 			Status::Ok => {
-				match value {
-					Value::Array(Array(array)) => map.insert(index, Ok(array)),
-					Value::None | Value::Null => map.insert(index, Ok(vec![])),
-					value => map.insert(index, Ok(vec![value])),
-				};
+				map.insert(index, (stats, Ok(value)));
 			}
 			Status::Err => {
-				map.insert(index, Err(Error::Query(value.as_raw_string()).into()));
+				map.insert(index, (stats, Err(Error::Query(value.as_raw_string()).into())));
 			}
 		}
 	}
@@ -191,23 +209,19 @@ async fn query(request: Request) -> Result<QueryResponse> {
 }
 
 async fn take(one: bool, request: Request) -> Result<Value> {
-	if let Some(result) = query(request).await?.0.remove(&0) {
-		let mut vec = result?;
+	if let Some((_stats, result)) = query(request).await?.0.remove(&0) {
+		let value = result?;
 		match one {
-			true => match vec.pop() {
-				Some(Value::Array(Array(mut vec))) => {
+			true => match value {
+				Value::Array(Array(mut vec)) => {
 					if let [value] = &mut vec[..] {
 						return Ok(mem::take(value));
 					}
 				}
-				Some(Value::None | Value::Null) | None => {}
-				Some(value) => {
-					return Ok(value);
-				}
+				Value::None | Value::Null => {}
+				value => return Ok(value),
 			},
-			false => {
-				return Ok(Value::Array(Array(vec)));
-			}
+			false => return Ok(value),
 		}
 	}
 	match one {
@@ -371,10 +385,10 @@ async fn router(
 			request = request.auth(auth)?.body("RETURN true");
 			take(true, request).await?;
 			if let Some(ns) = ns {
-				headers.insert("NS", ns);
+				headers.insert(&NS_LEGACY, ns);
 			}
 			if let Some(db) = db {
-				headers.insert("DB", db);
+				headers.insert(&DB_LEGACY, db);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}
@@ -387,14 +401,18 @@ async fn router(
 			let request = client.post(path)?.headers(headers.clone()).auth(auth)?.body(credentials);
 			let value = submit_auth(request).await?;
 			if let [credentials] = &mut params[..] {
-				if let Ok(Root {
+				if let Ok(Credentials {
 					user,
 					pass,
+					ns,
+					db,
 				}) = from_value(mem::take(credentials))
 				{
 					*auth = Some(Auth::Basic {
 						user,
 						pass,
+						ns,
+						db,
 					});
 				} else {
 					*auth = Some(Auth::Bearer {
@@ -502,7 +520,14 @@ async fn router(
 		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
-			let path = base_url.join(Method::Export.as_str())?;
+			let path = match param.ml_config {
+				#[cfg(feature = "ml")]
+				Some(MlConfig::Export {
+					name,
+					version,
+				}) => base_url.join(&format!("ml/export/{name}/{version}"))?,
+				_ => base_url.join(Method::Export.as_str())?,
+			};
 			let request = client
 				.get(path)?
 				.headers(headers.clone())
@@ -513,7 +538,11 @@ async fn router(
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Import => {
-			let path = base_url.join(Method::Import.as_str())?;
+			let path = match param.ml_config {
+				#[cfg(feature = "ml")]
+				Some(MlConfig::Import) => base_url.join("ml/import")?,
+				_ => base_url.join(Method::Import.as_str())?,
+			};
 			let file = param.file.expect("file to import from");
 			let request = client
 				.post(path)?

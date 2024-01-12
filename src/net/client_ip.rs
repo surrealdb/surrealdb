@@ -24,12 +24,14 @@ pub enum ClientIp {
 	Socket,
 	/// Cloudflare connecting IP
 	#[clap(name = "CF-Connecting-IP")]
-	CfConectingIp,
+	CfConnectingIp,
 	/// Fly.io client IP
 	#[clap(name = "Fly-Client-IP")]
+	#[allow(clippy::enum_variant_names)]
 	FlyClientIp,
 	/// Akamai, Cloudflare true client IP
 	#[clap(name = "True-Client-IP")]
+	#[allow(clippy::enum_variant_names)]
 	TrueClientIP,
 	/// Nginx real IP
 	#[clap(name = "X-Real-IP")]
@@ -44,7 +46,7 @@ impl std::fmt::Display for ClientIp {
 		match self {
 			ClientIp::None => write!(f, "None"),
 			ClientIp::Socket => write!(f, "Socket"),
-			ClientIp::CfConectingIp => write!(f, "CF-Connecting-IP"),
+			ClientIp::CfConnectingIp => write!(f, "CF-Connecting-IP"),
 			ClientIp::FlyClientIp => write!(f, "Fly-Client-IP"),
 			ClientIp::TrueClientIP => write!(f, "True-Client-IP"),
 			ClientIp::XRealIp => write!(f, "X-Real-IP"),
@@ -58,7 +60,7 @@ impl ClientIp {
 		match self {
 			ClientIp::None => false,
 			ClientIp::Socket => false,
-			ClientIp::CfConectingIp => true,
+			ClientIp::CfConnectingIp => true,
 			ClientIp::FlyClientIp => true,
 			ClientIp::TrueClientIP => true,
 			ClientIp::XRealIp => true,

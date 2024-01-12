@@ -111,7 +111,8 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
-	use crate::kvs::Datastore;
+	use crate::key::key_req::KeyRequirements;
+	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
 	use crate::sql::statements::show::ShowSince;
@@ -128,18 +129,24 @@ mod tests {
 		let ns = "myns";
 		let db = "mydb";
 		let tb = "mytb";
-		let mut dns = DefineNamespaceStatement::default();
-		dns.name = crate::sql::Ident(ns.to_string());
-		let mut ddb = DefineDatabaseStatement::default();
-		ddb.name = crate::sql::Ident(db.to_string());
-		ddb.changefeed = Some(ChangeFeed {
-			expiry: Duration::from_secs(10),
-		});
-		let mut dtb = DefineTableStatement::default();
-		dtb.name = tb.into();
-		dtb.changefeed = Some(ChangeFeed {
-			expiry: Duration::from_secs(10),
-		});
+		let dns = DefineNamespaceStatement {
+			name: crate::sql::Ident(ns.to_string()),
+			..Default::default()
+		};
+		let ddb = DefineDatabaseStatement {
+			name: crate::sql::Ident(db.to_string()),
+			changefeed: Some(ChangeFeed {
+				expiry: Duration::from_secs(10),
+			}),
+			..Default::default()
+		};
+		let dtb = DefineTableStatement {
+			name: tb.into(),
+			changefeed: Some(ChangeFeed {
+				expiry: Duration::from_secs(10),
+			}),
+			..Default::default()
+		};
 
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -148,10 +155,13 @@ mod tests {
 		// work.
 		//
 
-		let mut tx0 = ds.transaction(true, false).await.unwrap();
-		tx0.put(&crate::key::root::ns::new(ns), dns).await.unwrap();
-		tx0.put(&crate::key::namespace::db::new(ns, db), ddb).await.unwrap();
-		tx0.put(&crate::key::database::tb::new(ns, db, tb), dtb.clone()).await.unwrap();
+		let mut tx0 = ds.transaction(Write, Optimistic).await.unwrap();
+		let ns_root = crate::key::root::ns::new(ns);
+		tx0.put(ns_root.key_category(), &ns_root, dns).await.unwrap();
+		let db_root = crate::key::namespace::db::new(ns, db);
+		tx0.put(db_root.key_category(), &db_root, ddb).await.unwrap();
+		let tb_root = crate::key::database::tb::new(ns, db, tb);
+		tx0.put(tb_root.key_category(), &tb_root, dtb.clone()).await.unwrap();
 		tx0.commit().await.unwrap();
 
 		// Let the db remember the timestamp for the current versionstamp
@@ -162,7 +172,7 @@ mod tests {
 		// Write things to the table.
 		//
 
-		let mut tx1 = ds.transaction(true, false).await.unwrap();
+		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap();
 		let thing_a = Thing {
 			tb: tb.to_owned(),
 			id: Id::String("A".to_string()),
@@ -170,9 +180,9 @@ mod tests {
 		let value_a: super::Value = "a".into();
 		tx1.record_change(ns, db, tb, &thing_a, Cow::Borrowed(&value_a));
 		tx1.complete_changes(true).await.unwrap();
-		let _r1 = tx1.commit().await.unwrap();
+		tx1.commit().await.unwrap();
 
-		let mut tx2 = ds.transaction(true, false).await.unwrap();
+		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let thing_c = Thing {
 			tb: tb.to_owned(),
 			id: Id::String("C".to_string()),
@@ -180,9 +190,9 @@ mod tests {
 		let value_c: Value = "c".into();
 		tx2.record_change(ns, db, tb, &thing_c, Cow::Borrowed(&value_c));
 		tx2.complete_changes(true).await.unwrap();
-		let _r2 = tx2.commit().await.unwrap();
+		tx2.commit().await.unwrap();
 
-		let x = ds.transaction(true, false).await;
+		let x = ds.transaction(Write, Optimistic).await;
 		let mut tx3 = x.unwrap();
 		let thing_b = Thing {
 			tb: tb.to_owned(),
@@ -200,74 +210,74 @@ mod tests {
 		tx3.commit().await.unwrap();
 
 		// Note that we committed tx1, tx2, and tx3 in this order so far.
-		// Therfore, the change feeds should give us
+		// Therefore, the change feeds should give us
 		// the mutations in the commit order, which is tx1, tx3, then tx2.
 
 		let start: u64 = 0;
 
-		let mut tx4 = ds.transaction(true, false).await.unwrap();
+		let mut tx4 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r =
 			crate::cf::read(&mut tx4, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await
 				.unwrap();
 		tx4.commit().await.unwrap();
 
-		let mut want: Vec<ChangeSet> = Vec::new();
-		want.push(ChangeSet(
-			vs::u64_to_versionstamp(2),
-			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
-				vec![TableMutation::Set(
-					Thing::from(("mytb".to_string(), "A".to_string())),
-					Value::from("a"),
-				)],
-			)]),
-		));
-		want.push(ChangeSet(
-			vs::u64_to_versionstamp(3),
-			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
-				vec![TableMutation::Set(
-					Thing::from(("mytb".to_string(), "C".to_string())),
-					Value::from("c"),
-				)],
-			)]),
-		));
-		want.push(ChangeSet(
-			vs::u64_to_versionstamp(4),
-			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
-				vec![
-					TableMutation::Set(
-						Thing::from(("mytb".to_string(), "B".to_string())),
-						Value::from("b"),
-					),
-					TableMutation::Set(
+		let want: Vec<ChangeSet> = vec![
+			ChangeSet(
+				vs::u64_to_versionstamp(2),
+				DatabaseMutation(vec![TableMutations(
+					"mytb".to_string(),
+					vec![TableMutation::Set(
+						Thing::from(("mytb".to_string(), "A".to_string())),
+						Value::from("a"),
+					)],
+				)]),
+			),
+			ChangeSet(
+				vs::u64_to_versionstamp(3),
+				DatabaseMutation(vec![TableMutations(
+					"mytb".to_string(),
+					vec![TableMutation::Set(
 						Thing::from(("mytb".to_string(), "C".to_string())),
-						Value::from("c2"),
-					),
-				],
-			)]),
-		));
+						Value::from("c"),
+					)],
+				)]),
+			),
+			ChangeSet(
+				vs::u64_to_versionstamp(4),
+				DatabaseMutation(vec![TableMutations(
+					"mytb".to_string(),
+					vec![
+						TableMutation::Set(
+							Thing::from(("mytb".to_string(), "B".to_string())),
+							Value::from("b"),
+						),
+						TableMutation::Set(
+							Thing::from(("mytb".to_string(), "C".to_string())),
+							Value::from("c2"),
+						),
+					],
+				)]),
+			),
+		];
 
 		assert_eq!(r, want);
 
-		let mut tx5 = ds.transaction(true, false).await.unwrap();
+		let mut tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
 		crate::cf::gc_db(&mut tx5, ns, db, vs::u64_to_versionstamp(4), Some(10)).await.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
 		// Now we should see the gc_all results
-		let mut tx6 = ds.transaction(true, false).await.unwrap();
+		let mut tx6 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r =
 			crate::cf::read(&mut tx6, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
 				.await
 				.unwrap();
 		tx6.commit().await.unwrap();
 
-		let mut want: Vec<ChangeSet> = Vec::new();
-		want.push(ChangeSet(
+		let want: Vec<ChangeSet> = vec![ChangeSet(
 			vs::u64_to_versionstamp(4),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
@@ -282,13 +292,13 @@ mod tests {
 					),
 				],
 			)]),
-		));
+		)];
 		assert_eq!(r, want);
 
 		// Now we should see the gc_all results
 		ds.tick_at((ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
-		let mut tx7 = ds.transaction(true, false).await.unwrap();
+		let mut tx7 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r = crate::cf::read(&mut tx7, ns, db, Some(tb), ShowSince::Timestamp(ts), Some(10))
 			.await
 			.unwrap();

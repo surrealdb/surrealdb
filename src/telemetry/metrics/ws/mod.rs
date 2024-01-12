@@ -3,7 +3,7 @@ use std::time::Instant;
 use once_cell::sync::Lazy;
 use opentelemetry::KeyValue;
 use opentelemetry::{
-	metrics::{Histogram, MetricsError, ObservableUpDownCounter, Unit},
+	metrics::{Histogram, MetricsError, Unit, UpDownCounter},
 	Context as TelemetryContext,
 };
 
@@ -17,9 +17,9 @@ pub static RPC_SERVER_DURATION: Lazy<Histogram<u64>> = Lazy::new(|| {
 		.init()
 });
 
-pub static RPC_SERVER_ACTIVE_CONNECTIONS: Lazy<ObservableUpDownCounter<i64>> = Lazy::new(|| {
+pub static RPC_SERVER_ACTIVE_CONNECTIONS: Lazy<UpDownCounter<i64>> = Lazy::new(|| {
 	METER_DURATION
-		.i64_observable_up_down_counter("rpc.server.active_connections")
+		.i64_up_down_counter("rpc.server.active_connections")
 		.with_description("The number of active WebSocket connections.")
 		.init()
 });
@@ -41,7 +41,7 @@ pub static RPC_SERVER_RESPONSE_SIZE: Lazy<Histogram<u64>> = Lazy::new(|| {
 });
 
 fn otel_common_attrs() -> Vec<KeyValue> {
-	vec![KeyValue::new("rpc.system", "jsonrpc"), KeyValue::new("rpc.service", "surrealdb")]
+	vec![KeyValue::new("rpc.service", "surrealdb")]
 }
 
 /// Registers the callback that increases the number of active RPC connections.
@@ -57,8 +57,8 @@ pub fn on_disconnect() -> Result<(), MetricsError> {
 pub(super) fn observe_active_connection(value: i64) -> Result<(), MetricsError> {
 	let attrs = otel_common_attrs();
 
-	METER_DURATION
-		.register_callback(move |cx| RPC_SERVER_ACTIVE_CONNECTIONS.observe(cx, value, &attrs))
+	RPC_SERVER_ACTIVE_CONNECTIONS.add(&TelemetryContext::current(), value, &attrs);
+	Ok(())
 }
 
 //

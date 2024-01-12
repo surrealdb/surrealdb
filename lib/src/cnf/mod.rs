@@ -35,3 +35,10 @@ pub const SERVER_NAME: &str = "SurrealDB";
 
 /// Datastore processor batch size for scan operations
 pub const PROCESSOR_BATCH_SIZE: u32 = 50;
+
+/// Forward all signup/signin query errors to a client trying authenticate to a scope. Do not use in production.
+pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> = Lazy::new(|| {
+	option_env!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS")
+		.and_then(|s| s.parse::<bool>().ok())
+		.unwrap_or(false)
+});

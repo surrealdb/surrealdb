@@ -1,14 +1,18 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
-use crate::sql::error::RenderedError as RenderedParserError;
+use crate::idx::trees::vector::SharedVector;
+use crate::key::error::KeyCategory;
 use crate::sql::idiom::Idiom;
+use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
+use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use std::io::Error as IoError;
@@ -42,8 +46,8 @@ pub enum Error {
 	RetryWithId(Thing),
 
 	/// The database encountered unreachable logic
-	#[error("The database encountered unreachable logic")]
-	Unreachable,
+	#[error("The database encountered unreachable logic: {0}")]
+	Unreachable(&'static str),
 
 	/// Statement has been deprecated
 	#[error("{0}")]
@@ -79,6 +83,7 @@ pub enum Error {
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
+	#[deprecated(note = "Use TxKeyAlreadyExistsCategory")]
 	TxKeyAlreadyExists,
 
 	/// The key exceeds a limit set by the KV store
@@ -143,7 +148,7 @@ pub enum Error {
 	HttpDisabled,
 
 	/// it is not possible to set a variable with the specified name
-	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
 		name: String,
 	},
@@ -190,6 +195,12 @@ pub enum Error {
 		message: String,
 	},
 
+	/// There was an error with the provided machine learning model
+	#[error("Problem with machine learning computation. {message}")]
+	InvalidModel {
+		message: String,
+	},
+
 	/// There was a problem running the specified function
 	#[error("There was a problem running the {name}() function. {message}")]
 	InvalidFunction {
@@ -216,6 +227,14 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
+	#[error("Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
+	InvalidVectorDistance {
+		left: SharedVector,
+		right: SharedVector,
+		dist: f64,
+	},
+
+	/// The size of the vector is incorrect
 	#[error("The vector element ({current}) is not a number.")]
 	InvalidVectorType {
 		current: String,
@@ -223,10 +242,16 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
-	#[error("The value '{current}' is not a vector.")]
-	InvalidVectorValue {
-		current: String,
-	},
+	#[error("The value cannot be converted to a vector: {0}")]
+	InvalidVectorValue(String),
+
+	/// Invalid regular expression
+	#[error("Invalid regular expression: {0:?}")]
+	InvalidRegex(String),
+
+	/// Invalid timeout
+	#[error("Invalid timeout: {0:?} seconds")]
+	InvalidTimeout(u64),
 
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout")]
@@ -300,6 +325,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested model does not exist
+	#[error("The model 'ml::{value}' does not exist")]
+	MlNotFound {
+		value: String,
+	},
+
 	/// The requested scope does not exist
 	#[error("The scope '{value}' does not exist")]
 	ScNotFound {
@@ -359,6 +390,9 @@ pub enum Error {
 	IxNotFound {
 		value: String,
 	},
+
+	#[error("Unsupported distance: {0}")]
+	UnsupportedDistance(Distance),
 
 	/// The requested root user does not exist
 	#[error("The root user '{value}' does not exist")]
@@ -546,6 +580,10 @@ pub enum Error {
 	#[error("Cannot perform division with '{0}' and '{1}'")]
 	TryDiv(String, String),
 
+	/// Cannot perform remainder
+	#[error("Cannot perform remainder with '{0}' and '{1}'")]
+	TryRem(String, String),
+
 	/// Cannot perform power
 	#[error("Cannot raise the value '{0}' with '{1}'")]
 	TryPow(String, String),
@@ -558,6 +596,7 @@ pub enum Error {
 	#[error("Cannot convert from '{0}' to '{1}'")]
 	TryFrom(String, &'static str),
 
+	/// There was an error processing a remote HTTP request
 	#[error("There was an error processing a remote HTTP request: {0}")]
 	Http(String),
 
@@ -582,11 +621,11 @@ pub enum Error {
 	Revision(#[from] RevisionError),
 
 	/// The index has been found to be inconsistent
-	#[error("Index is corrupted")]
-	CorruptedIndex,
+	#[error("Index is corrupted: {0}")]
+	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the match @@ operator on a given expression
-	#[error("There was no suitable full-text index supporting the expression '{value}'")]
+	/// The query planner did not find an index able to support the match @@ for a given expression
+	#[error("There was no suitable index supporting the expression '{value}'")]
 	NoIndexFoundForMatch {
 		value: String,
 	},
@@ -610,6 +649,14 @@ pub enum Error {
 	/// Represents an underlying error while reading UTF8 characters
 	#[error("Utf8 error: {0}")]
 	Utf8Error(#[from] FromUtf8Error),
+
+	/// Represents an underlying error with the Object Store
+	#[error("Object Store error: {0}")]
+	ObsError(#[from] ObjectStoreError),
+
+	/// There was an error with model computation
+	#[error("There was an error with model computation: {0}")]
+	ModelComputation(String),
 
 	/// The feature has not yet being implemented
 	#[error("Feature not yet implemented: {feature}")]
@@ -707,6 +754,22 @@ pub enum Error {
 	/// Auth was expected to be set but was unknown
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
+
+	/// Auth requires a token header which is missing
+	#[error("Auth token is missing the '{0}' header")]
+	MissingTokenHeader(String),
+
+	/// Auth requires a token claim which is missing
+	#[error("Auth token is missing the '{0}' claim")]
+	MissingTokenClaim(String),
+
+	/// The key being inserted in the transaction already exists
+	#[error("The key being inserted already exists: {0}")]
+	TxKeyAlreadyExistsCategory(KeyCategory),
+
+	/// The db is running without an available storage engine
+	#[error("The db is running without an available storage engine")]
+	MissingStorageEngine,
 }
 
 impl From<Error> for String {
@@ -727,11 +790,19 @@ impl From<JWTError> for Error {
 	}
 }
 
+impl From<regex::Error> for Error {
+	fn from(error: regex::Error) -> Self {
+		Error::InvalidRegex(error.to_string())
+	}
+}
+
 #[cfg(feature = "kv-mem")]
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
-			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			echodb::err::Error::KeyAlreadyExists => {
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
+			}
 			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -742,7 +813,9 @@ impl From<echodb::err::Error> for Error {
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
 		match e {
-			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			indxdb::err::Error::KeyAlreadyExists => {
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
+			}
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
 			_ => Error::Tx(e.to_string()),
 		}
@@ -753,7 +826,9 @@ impl From<indxdb::err::Error> for Error {
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
-			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
+			tikv::Error::DuplicateKeyInsertion => {
+				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
+			}
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
@@ -787,7 +862,7 @@ impl<T> From<channel::SendError<T>> for Error {
 	}
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http" feature = "jwks"))]
 impl From<crate::http::Error> for Error {
 	fn from(e: crate::http::Error) -> Error {
 		Error::Http(e.to_string())

@@ -1,11 +1,28 @@
 # Default owners for the repository
 * @tobiemh
 
-# Configuration for GitHub
-/.github/ @tobiemh
+# Configuration for CI
+/.github/ @surrealdb/ci
+
+# Configuration for deployment
+.dockerignore @surrealdb/ci
+build.rs @surrealdb/ci
+*.nix @surrealdb/ci
+/.cargo/ @surrealdb/ci
+/.config/ @surrealdb/ci
+/dev/ @surrealdb/ci
+/pkg/ @surrealdb/ci
+Makefile @surrealdb/ci
+Makefile.* @surrealdb/ci
+
+# General owners for the database
+/doc/ @surrealdb/db
+/lib/ @surrealdb/db
+/src/ @surrealdb/db
 
 # Code for fuzzing configuration
 /lib/fuzz/ @surrealdb/security
+SECURITY.md @surrealdb/security
 
 # Code and tests for the Rust API
 /lib/CARGO.md @surrealdb/api
@@ -16,26 +33,38 @@
 /lib/src/tests/api.rs @surrealdb/api
 
 # Code and tests for indexing
-/lib/src/idx/ @surrealdb/indexing
+/lib/src/idx/ @surrealdb/ix
 
-# Code and tests for scripting
-/lib/src/fnc/script/ @surrealdb/scripting
+# Code and tests for changefeeds
+/lib/src/cf/ @surrealdb/cf
+/lib/src/idg/ @surrealdb/cf
+/lib/src/vs/ @surrealdb/cf
+
+# Tests related to the storage
+/lib/src/key/ @surrealdb/kv
+/lib/src/kvs/ @surrealdb/kv
+
+# Code and tests for querying
+/lib/src/sql/ @surrealdb/ql
+/lib/src/syn/ @surrealdb/ql
+/lib/src/fnc/ @surrealdb/ql
 
 # Code and tests for the server
-/src/net/ @surrealdb/api
-/src/rpc/ @surrealdb/api
-/tests/http_integration.rs @surrealdb/api
-/tests/ws_integration.rs @surrealdb/api
+/src/* @surrealdb/net
+/src/cnf/ @surrealdb/net
+/src/err/ @surrealdb/net
+/src/net/ @surrealdb/net
+/src/rpc/ @surrealdb/net
+/src/telemetry/ @surrealdb/net
+/tests/common/ @surrealdb/net
+/tests/http_integration.rs @surrealdb/net
+/tests/ws_integration.rs @surrealdb/net
 
 # Code and tests for the command-line
 /src/cli/ @surrealdb/cli
+/src/dbs/ @surrealdb/cli
+/tests/common/ @surrealdb/cli
 /tests/cli_integration.rs @surrealdb/cli
 
-# Code and tests for opentelemetry
-/src/telemetry/ @surrealdb/monitoring
-
-# Tests related to the key-value store
-/lib/src/kvs/tests/ @tobiemh @phughk
-
-# IAM
+# Code and tests for authentication
 /lib/src/iam/ @surrealdb/api @surrealdb/security

@@ -1,8 +1,6 @@
-use crate::sql::error::IResult;
-use nom::bytes::complete::escaped;
-use nom::bytes::complete::is_not;
-use nom::character::complete::anychar;
-use nom::character::complete::char;
+use once_cell::sync::Lazy;
+use quick_cache::sync::Cache;
+use quick_cache::GuardResult;
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
@@ -12,8 +10,8 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::str;
 use std::str::FromStr;
+use std::{env, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 
@@ -28,6 +26,27 @@ impl Regex {
 	}
 }
 
+fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
+	static REGEX_CACHE: Lazy<Cache<String, regex::Regex>> = Lazy::new(|| {
+		let cache_size: usize = env::var("SURREAL_REGEX_CACHE_SIZE")
+			.map_or(1000, |v| v.parse().unwrap_or(1000))
+			.max(10); // The minimum cache size is 10
+		Cache::new(cache_size)
+	});
+	match REGEX_CACHE.get_value_or_guard(str, None) {
+		GuardResult::Value(v) => Ok(v),
+		GuardResult::Guard(g) => {
+			let re = regex::Regex::new(str)?;
+			g.insert(re.clone()).ok();
+			Ok(re)
+		}
+		GuardResult::Timeout => {
+			warn!("Regex cache timeout");
+			regex::Regex::new(str)
+		}
+	}
+}
+
 impl FromStr for Regex {
 	type Err = <regex::Regex as FromStr>::Err;
 
@@ -35,7 +54,7 @@ impl FromStr for Regex {
 		if s.contains('\0') {
 			Err(regex::Error::Syntax("regex contained NUL byte".to_owned()))
 		} else {
-			regex::Regex::new(&s.replace("\\/", "/")).map(Self)
+			regex_new(&s.replace("\\/", "/")).map(Self)
 		}
 	}
 }
@@ -127,37 +146,5 @@ impl<'de> Deserialize<'de> for Regex {
 		}
 
 		deserializer.deserialize_newtype_struct(TOKEN, RegexNewtypeVisitor)
-	}
-}
-
-pub fn regex(i: &str) -> IResult<&str, Regex> {
-	let (i, _) = char('/')(i)?;
-	let (i, v) = escaped(is_not("\\/"), '\\', anychar)(i)?;
-	let (i, _) = char('/')(i)?;
-	let regex = v.parse().map_err(|_| nom::Err::Error(crate::sql::ParseError::Base(v)))?;
-	Ok((i, regex))
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn regex_simple() {
-		let sql = "/test/";
-		let res = regex(sql);
-		let out = res.unwrap().1;
-		assert_eq!("/test/", format!("{}", out));
-		assert_eq!(out, "test".parse().unwrap());
-	}
-
-	#[test]
-	fn regex_complex() {
-		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
-		let res = regex(sql);
-		let out = res.unwrap().1;
-		assert_eq!(r"/(?i)test/[a-z]+/\s\d\w{1}.*/", format!("{}", out));
-		assert_eq!(out, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
 	}
 }

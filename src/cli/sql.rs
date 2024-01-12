@@ -1,6 +1,8 @@
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
+	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
 };
+use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
 use rustyline::error::ReadlineError;
@@ -9,8 +11,8 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities;
-use surrealdb::engine::any::connect;
-use surrealdb::opt::auth::Root;
+use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::Response;
@@ -22,7 +24,7 @@ pub struct SqlCommandArguments {
 	#[command(flatten)]
 	auth: AuthArguments,
 	#[command(flatten)]
-	sel: Option<DatabaseSelectionOptionalArguments>,
+	level: LevelSelectionArguments,
 	/// Whether database responses should be pretty printed
 	#[arg(long)]
 	pretty: bool,
@@ -32,6 +34,9 @@ pub struct SqlCommandArguments {
 	/// Whether omitting semicolon causes a newline
 	#[arg(long)]
 	multi: bool,
+	/// Whether to show welcome message
+	#[arg(long, env = "SURREAL_HIDE_WELCOME")]
+	hide_welcome: bool,
 }
 
 pub async fn init(
@@ -39,14 +44,19 @@ pub async fn init(
 		auth: AuthArguments {
 			username,
 			password,
+			auth_level,
 		},
 		conn: DatabaseConnectionArguments {
 			endpoint,
 		},
-		sel,
+		level: LevelSelectionArguments {
+			namespace,
+			database,
+		},
 		pretty,
 		json,
 		multi,
+		hide_welcome,
 		..
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
@@ -55,26 +65,31 @@ pub async fn init(
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 
-	let client = if let Some((username, password)) = username.zip(password) {
-		let root = Root {
-			username: &username,
-			password: &password,
+	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
+	// If we are connecting directly to a datastore (i.e. file://local.db or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	let client = if username.is_some()
+		&& password.is_some()
+		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
+	{
+		debug!("Connecting to the database engine with authentication");
+		let creds = CredentialsBuilder::default()
+			.with_username(username.as_deref())
+			.with_password(password.as_deref())
+			.with_namespace(namespace.as_deref())
+			.with_database(database.as_deref());
+
+		let client = connect(endpoint).await?;
+
+		debug!("Signing in to the database engine at '{:?}' level", auth_level);
+		match auth_level {
+			CredentialsLevel::Root => client.signin(creds.root()?).await?,
+			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
+			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
 
-		// Connect to the database engine with authentication
-		//
-		// * For local engines, here we enable authentication and in the signin below we actually authenticate.
-		// * For remote engines, we connect to the endpoint and then signin.
-		#[cfg(feature = "has-storage")]
-		let address = (endpoint, config.user(root));
-		#[cfg(not(feature = "has-storage"))]
-		let address = endpoint;
-		let client = connect(address).await?;
-
-		// Sign in to the server
-		client.signin(root).await?;
 		client
 	} else {
+		debug!("Connecting to the database engine without authentication");
 		connect((endpoint, config)).await?
 	};
 
@@ -88,27 +103,51 @@ pub async fn init(
 	let _ = rl.load_history("history.txt");
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
+
 	// Keep track of current namespace/database.
-	if let Some(DatabaseSelectionOptionalArguments {
-		namespace,
-		database,
-	}) = sel
-	{
-		let is_not_empty = |s: &&str| !s.is_empty();
-		let namespace = namespace.as_deref().map(str::trim).filter(is_not_empty);
-		let database = database.as_deref().map(str::trim).filter(is_not_empty);
-		match (namespace, database) {
-			(Some(namespace), Some(database)) => {
-				client.use_ns(namespace).use_db(database).await?;
-				prompt = format!("{namespace}/{database}> ");
-			}
-			(Some(namespace), None) => {
-				client.use_ns(namespace).await?;
-				prompt = format!("{namespace}> ");
-			}
-			_ => {}
+	let is_not_empty = |s: &&str| !s.is_empty();
+	let namespace = namespace.as_deref().map(str::trim).filter(is_not_empty);
+	let database = database.as_deref().map(str::trim).filter(is_not_empty);
+	match (namespace, database) {
+		(Some(namespace), Some(database)) => {
+			client.use_ns(namespace).use_db(database).await?;
+			prompt = format!("{namespace}/{database}> ");
 		}
-	};
+		(Some(namespace), None) => {
+			client.use_ns(namespace).await?;
+			prompt = format!("{namespace}> ");
+		}
+		_ => {}
+	}
+
+	if !hide_welcome {
+		let hints = [
+			(true, "Different statements within a query should be separated by a (;) semicolon."),
+			(!multi, "To create a multi-line query, end your lines with a (\\) backslash, and press enter."),
+			(true, "To exit, send a SIGTERM or press CTRL+C")
+		]
+		.iter()
+		.filter(|(show, _)| *show)
+		.map(|(_, hint)| format!("#    - {hint}"))
+		.collect::<Vec<String>>()
+		.join("\n");
+
+		eprintln!(
+			"
+#
+#  Welcome to the SurrealDB SQL shell
+#
+#  How to use this shell:
+{hints}
+#
+#  Consult https://surrealdb.com/docs/cli/sql for further instructions
+#
+#  SurrealDB version: {}
+#
+		",
+			*PKG_VERSION
+		);
+	}
 
 	// Loop over each command-line input
 	loop {
@@ -167,7 +206,7 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let res = client.query(query).await;
+				let res = client.query(query).with_stats().await;
 				match process(pretty, json, res) {
 					Ok(v) => {
 						println!("{v}\n");
@@ -210,42 +249,68 @@ pub async fn init(
 	Ok(())
 }
 
-fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
+fn process(
+	pretty: bool,
+	json: bool,
+	res: surrealdb::Result<WithStats<Response>>,
+) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let value = if num_statements > 1 {
-		let mut output = Vec::<Value>::with_capacity(num_statements);
-		for index in 0..num_statements {
-			output.push(match response.take(index) {
-				Ok(v) => v,
-				Err(e) => e.to_string().into(),
-			});
-		}
-		Value::from(output)
-	} else {
-		response.take(0)?
-	};
+	let mut vec = Vec::<(Stats, Value)>::with_capacity(num_statements);
+	for index in 0..num_statements {
+		let (stats, result) = response
+			.take(index)
+			.ok_or_else(|| {
+				format!("Expected some result for a query with index {index}, but found none")
+			})
+			.map_err(Error::Other)?;
+		let output = result.unwrap_or_else(|e| e.to_string().into());
+		vec.push((stats, output));
+	}
+
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => value.to_string(),
-		// Yes prettify the SurrealQL response
-		(false, true) => format!("{value:#}"),
-		// Don't pretty print the JSON response
-		(true, false) => serde_json::to_string(&value.into_json()).unwrap(),
-		// Yes prettify the JSON response
-		(true, true) => {
-			let mut buf = Vec::new();
-			let mut serializer = serde_json::Serializer::with_formatter(
-				&mut buf,
-				PrettyFormatter::with_indent(b"\t"),
-			);
-			value.into_json().serialize(&mut serializer).unwrap();
-			String::from_utf8(buf).unwrap()
+		(false, false) => {
+			Value::from(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>()).to_string()
 		}
+		// Yes prettify the SurrealQL response
+		(false, true) => vec
+			.into_iter()
+			.enumerate()
+			.map(|(index, (stats, value))| {
+				let query_num = index + 1;
+				let execution_time = stats.execution_time.unwrap_or_default();
+				format!("-- Query {query_num} (execution time: {execution_time:?})\n{value:#}",)
+			})
+			.collect::<Vec<String>>()
+			.join("\n"),
+		// Don't pretty print the JSON response
+		(true, false) => {
+			let value = Value::from(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>());
+			serde_json::to_string(&value.into_json()).unwrap()
+		}
+		// Yes prettify the JSON response
+		(true, true) => vec
+			.into_iter()
+			.enumerate()
+			.map(|(index, (stats, value))| {
+				let mut buf = Vec::new();
+				let mut serializer = serde_json::Serializer::with_formatter(
+					&mut buf,
+					PrettyFormatter::with_indent(b"\t"),
+				);
+				value.into_json().serialize(&mut serializer).unwrap();
+				let output = String::from_utf8(buf).unwrap();
+				let query_num = index + 1;
+				let execution_time = stats.execution_time.unwrap_or_default();
+				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)
+			})
+			.collect::<Vec<String>>()
+			.join("\n"),
 	})
 }
 

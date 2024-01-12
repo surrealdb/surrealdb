@@ -4,37 +4,26 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::iam::Action;
-use crate::sql::comment::mightbespace;
-use crate::sql::common::val_char;
-use crate::sql::common::{commas, openparentheses};
-use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
-use crate::sql::script::{script as func, Script};
-use crate::sql::value::{value, Value};
+use crate::sql::script::Script;
+use crate::sql::value::Value;
 use crate::sql::Permission;
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
-use nom::branch::alt;
-use nom::bytes::complete::tag;
-use nom::bytes::complete::take_while1;
-use nom::character::complete::char;
-use nom::combinator::{cut, recognize};
-use nom::multi::separated_list1;
-use nom::sequence::terminated;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::error::expected;
-use super::util::delimited_list0;
+use super::Kind;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
@@ -101,6 +90,14 @@ impl Function {
 		matches!(self, Self::Script(_, _))
 	}
 
+	/// Check if this function has static arguments
+	pub fn is_static(&self) -> bool {
+		match self {
+			Self::Normal(_, a) => a.iter().all(Value::is_static),
+			_ => false,
+		}
+	}
+
 	/// Check if this function is a rolling function
 	pub fn is_rolling(&self) -> bool {
 		match self {
@@ -119,6 +116,7 @@ impl Function {
 		match self {
 			Self::Normal(f, _) if f == "array::distinct" => true,
 			Self::Normal(f, _) if f == "array::first" => true,
+			Self::Normal(f, _) if f == "array::flatten" => true,
 			Self::Normal(f, _) if f == "array::group" => true,
 			Self::Normal(f, _) if f == "array::last" => true,
 			Self::Normal(f, _) if f == "count" => true,
@@ -170,8 +168,12 @@ impl Function {
 				fnc::run(ctx, opt, txn, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
+				// Check that a database is set to prevent a panic
+				opt.valid_for_db()?;
+				// Get the full name of this function
+				let name = format!("fn::{s}");
 				// Check this function is allowed
-				ctx.check_allowed_function(format!("fn::{s}").as_str())?;
+				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
 				let val = {
 					// Claim transaction
@@ -200,14 +202,23 @@ impl Function {
 						}
 					}
 				}
-				// Return the value
-				// Check the function arguments
-				if x.len() != val.args.len() {
+				// Get the number of function arguments
+				let max_args_len = val.args.len();
+				// Track the number of required arguments
+				let mut min_args_len = 0;
+				// Check for any final optional arguments
+				val.args.iter().rev().for_each(|(_, kind)| match kind {
+					Kind::Option(_) if min_args_len == 0 => {}
+					_ => min_args_len += 1,
+				});
+				// Check the necessary arguments are passed
+				if x.len() < min_args_len || max_args_len < x.len() {
 					return Err(Error::InvalidArguments {
 						name: format!("fn::{}", val.name),
-						message: match val.args.len() {
-							1 => String::from("The function expects 1 argument."),
-							l => format!("The function expects {l} arguments."),
+						message: match (min_args_len, max_args_len) {
+							(1, 1) => String::from("The function expects 1 argument."),
+							(r, t) if r == t => format!("The function expects {r} arguments."),
+							(r, t) => format!("The function expects {r} to {t} arguments."),
 						},
 					});
 				}
@@ -251,144 +262,5 @@ impl fmt::Display for Function {
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
 		}
-	}
-}
-
-pub fn defined_function(i: &str) -> IResult<&str, Function> {
-	alt((custom, script))(i)
-}
-
-pub fn builtin_function<'a>(name: &'a str, i: &'a str) -> IResult<&'a str, Function> {
-	let (i, a) = expected(
-		"function arguments",
-		delimited_list0(openparentheses, commas, terminated(cut(value), mightbespace), char(')')),
-	)(i)?;
-	Ok((i, Function::Normal(name.to_string(), a)))
-}
-
-pub fn custom(i: &str) -> IResult<&str, Function> {
-	let (i, _) = tag("fn::")(i)?;
-	cut(|i| {
-		let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, a) = expected(
-			"function arguments",
-			delimited_list0(
-				cut(openparentheses),
-				commas,
-				terminated(cut(value), mightbespace),
-				char(')'),
-			),
-		)(i)?;
-		Ok((i, Function::Custom(s.to_string(), a)))
-	})(i)
-}
-
-fn script(i: &str) -> IResult<&str, Function> {
-	let (i, _) = tag("function")(i)?;
-	cut(|i| {
-		let (i, _) = mightbespace(i)?;
-		let (i, a) = delimited_list0(
-			openparentheses,
-			commas,
-			terminated(cut(value), mightbespace),
-			char(')'),
-		)(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('{')(i)?;
-		let (i, v) = func(i)?;
-		let (i, _) = char('}')(i)?;
-		Ok((i, Function::Script(v, a)))
-	})(i)
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::sql::{
-		builtin::{builtin_name, BuiltinName},
-		test::Parse,
-	};
-
-	fn function(i: &str) -> IResult<&str, Function> {
-		alt((defined_function, |i| {
-			let (i, name) = builtin_name(i)?;
-			let BuiltinName::Function(x) = name else {
-				panic!("not a function")
-			};
-			builtin_function(x, i)
-		}))(i)
-	}
-
-	#[test]
-	fn function_single() {
-		let sql = "count()";
-		let res = function(sql);
-		let out = res.unwrap().1;
-		assert_eq!("count()", format!("{}", out));
-		assert_eq!(out, Function::Normal(String::from("count"), vec![]));
-	}
-
-	#[test]
-	fn function_single_not() {
-		let sql = "not(10)";
-		let res = function(sql);
-		let out = res.unwrap().1;
-		assert_eq!("not(10)", format!("{}", out));
-		assert_eq!(out, Function::Normal("not".to_owned(), vec![10.into()]));
-	}
-
-	#[test]
-	fn function_module() {
-		let sql = "rand::uuid()";
-		let res = function(sql);
-		let out = res.unwrap().1;
-		assert_eq!("rand::uuid()", format!("{}", out));
-		assert_eq!(out, Function::Normal(String::from("rand::uuid"), vec![]));
-	}
-
-	#[test]
-	fn function_arguments() {
-		let sql = "string::is::numeric(null)";
-		let res = function(sql);
-		let out = res.unwrap().1;
-		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
-		assert_eq!(out, Function::Normal(String::from("string::is::numeric"), vec![Value::Null]));
-	}
-
-	#[test]
-	fn function_simple_together() {
-		let sql = "function() { return 'test'; }";
-		let res = function(sql);
-		let out = res.unwrap().1;
-		assert_eq!("function() { return 'test'; }", format!("{}", out));
-		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
-	}
-
-	#[test]
-	fn function_simple_whitespace() {
-		let sql = "function () { return 'test'; }";
-		let res = function(sql);
-		let out = res.unwrap().1;
-		assert_eq!("function() { return 'test'; }", format!("{}", out));
-		assert_eq!(out, Function::Script(Script::parse(" return 'test'; "), vec![]));
-	}
-
-	#[test]
-	fn function_script_expression() {
-		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
-		let res = function(sql);
-		let out = res.unwrap().1;
-		assert_eq!(
-			"function() { return this.tags.filter(t => { return t.length > 3; }); }",
-			format!("{}", out)
-		);
-		assert_eq!(
-			out,
-			Function::Script(
-				Script::parse(" return this.tags.filter(t => { return t.length > 3; }); "),
-				vec![]
-			)
-		);
 	}
 }

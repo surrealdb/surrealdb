@@ -7,7 +7,8 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
+use crate::kvs::TransactionType;
+use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
@@ -16,9 +17,14 @@ use crate::sql::value::Value;
 use crate::sql::Base;
 use channel::Receiver;
 use futures::lock::Mutex;
+use futures::StreamExt;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
 use tracing::instrument;
 use trice::Instant;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 pub(crate) struct Executor<'a> {
 	err: bool,
@@ -44,10 +50,10 @@ impl<'a> Executor<'a> {
 	/// - false if
 	///   - couldn't create transaction (sets err flag)
 	///   - a transaction has already begun
-	async fn begin(&mut self, write: bool) -> bool {
+	async fn begin(&mut self, write: TransactionType) -> bool {
 		match self.txn.as_ref() {
 			Some(_) => false,
-			None => match self.kvs.transaction(write, false).await {
+			None => match self.kvs.transaction(write, Optimistic).await {
 				Ok(v) => {
 					self.txn = Some(Arc::new(Mutex::new(v)));
 					true
@@ -64,7 +70,7 @@ impl<'a> Executor<'a> {
 	///
 	/// # Return
 	///
-	/// An `Err` if the transaction could not be commited;
+	/// An `Err` if the transaction could not be committed;
 	/// otherwise returns `Ok`.
 	async fn commit(&mut self, local: bool) -> Result<(), Error> {
 		if local {
@@ -135,24 +141,27 @@ impl<'a> Executor<'a> {
 	}
 
 	/// Consume the live query notifications
-	async fn clear(&self, _: &Context<'_>, rcv: Receiver<Notification>) {
-		while rcv.try_recv().is_ok() {
-			// Ignore notification
-		}
+	async fn clear(&self, _: &Context<'_>, mut rcv: Receiver<Notification>) {
+		spawn(async move {
+			while rcv.next().await.is_some() {
+				// Ignore notification
+			}
+		});
 	}
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
-	async fn flush(&self, ctx: &Context<'_>, rcv: Receiver<Notification>) {
-		if let Some(chn) = ctx.notifications() {
-			while let Ok(v) = rcv.try_recv() {
-				let _ = chn.send(v).await;
+	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
+		let sender = ctx.notifications();
+		spawn(async move {
+			while let Some(notification) = rcv.next().await {
+				if let Some(chn) = &sender {
+					if chn.send(notification).await.is_err() {
+						break;
+					}
+				}
 			}
-		} else {
-			while rcv.try_recv().is_ok() {
-				// Ignore notification
-			}
-		}
+		});
 	}
 
 	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
@@ -222,7 +231,7 @@ impl<'a> Executor<'a> {
 				}
 				// Begin a new transaction
 				Statement::Begin(_) => {
-					self.begin(true).await;
+					self.begin(Write).await;
 					continue;
 				}
 				// Cancel a running transaction
@@ -258,7 +267,7 @@ impl<'a> Executor<'a> {
 				// Process param definition statements
 				Statement::Set(stm) => {
 					// Create a transaction
-					let loc = self.begin(stm.writeable()).await;
+					let loc = self.begin(stm.writeable().into()).await;
 					// Check the transaction
 					match self.err {
 						// We failed to create a transaction
@@ -311,7 +320,7 @@ impl<'a> Executor<'a> {
 					// Compute the statement normally
 					false => {
 						// Create a transaction
-						let loc = self.begin(stm.writeable()).await;
+						let loc = self.begin(stm.writeable().into()).await;
 						// Check the transaction
 						match self.err {
 							// We failed to create a transaction
@@ -323,14 +332,18 @@ impl<'a> Executor<'a> {
 								let res = match stm.timeout() {
 									// There is a timeout clause
 									Some(timeout) => {
-										// Set statement timeout
-										ctx.add_timeout(timeout);
-										// Process the statement
-										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-										// Catch statement timeout
-										match ctx.is_timedout() {
-											true => Err(Error::QueryTimedout),
-											false => res,
+										// Set statement timeout or propagate the error
+										if let Err(err) = ctx.add_timeout(timeout) {
+											Err(err)
+										} else {
+											// Process the statement
+											let res =
+												stm.compute(&ctx, &opt, &self.txn(), None).await;
+											// Catch statement timeout
+											match ctx.is_timedout() {
+												true => Err(Error::QueryTimedout),
+												false => res,
+											}
 										}
 									}
 									// There is no timeout clause
@@ -435,7 +448,7 @@ mod tests {
 			{
 				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-				let res = ds.execute(statement, &session, None).await;
+				let res = ds.execute(statement, session, None).await;
 
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
@@ -478,6 +491,37 @@ mod tests {
 				"anonymous user should be able to set options when auth is disabled: {:?}",
 				res
 			)
+		}
+	}
+
+	#[tokio::test]
+	async fn check_execute_timeout() {
+		// With small timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 2s";
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
+		}
+		// With large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 31540000s"; // 1 year
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
+		}
+		// With very large timeout
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
+			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
+			assert!(
+				err.contains("Invalid timeout"),
+				"Expected to find invalid timeout error: {:?}",
+				err
+			);
 		}
 	}
 }

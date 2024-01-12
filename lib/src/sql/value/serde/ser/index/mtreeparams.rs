@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::index::{Distance, MTreeParams};
+use crate::sql::index::{Distance, MTreeParams, VectorType};
 use crate::sql::value::serde::ser;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -23,15 +23,6 @@ impl ser::Serializer for Serializer {
 	const EXPECTED: &'static str = "a struct `MTreeParams`";
 
 	#[inline]
-	fn serialize_struct(
-		self,
-		_name: &'static str,
-		_len: usize,
-	) -> Result<Self::SerializeStruct, Error> {
-		Ok(SerializeMTree::default())
-	}
-
-	#[inline]
 	fn serialize_newtype_struct<T>(
 		self,
 		_name: &'static str,
@@ -42,14 +33,26 @@ impl ser::Serializer for Serializer {
 	{
 		value.serialize(self.wrap())
 	}
+
+	#[inline]
+	fn serialize_struct(
+		self,
+		_name: &'static str,
+		_len: usize,
+	) -> Result<Self::SerializeStruct, Error> {
+		Ok(SerializeMTree::default())
+	}
 }
 
 #[derive(Default)]
 pub(super) struct SerializeMTree {
 	dimension: u16,
 	distance: Distance,
+	vector_type: VectorType,
 	capacity: u16,
 	doc_ids_order: u32,
+	doc_ids_cache: u32,
+	mtree_cache: u32,
 }
 impl serde::ser::SerializeStruct for SerializeMTree {
 	type Ok = MTreeParams;
@@ -66,11 +69,20 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 			"distance" => {
 				self.distance = value.serialize(ser::distance::Serializer.wrap())?;
 			}
+			"vector_type" => {
+				self.vector_type = value.serialize(ser::vectortype::Serializer.wrap())?;
+			}
 			"capacity" => {
 				self.capacity = value.serialize(ser::primitive::u16::Serializer.wrap())?;
 			}
 			"doc_ids_order" => {
 				self.doc_ids_order = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"doc_ids_cache" => {
+				self.doc_ids_cache = value.serialize(ser::primitive::u32::Serializer.wrap())?;
+			}
+			"mtree_cache" => {
+				self.mtree_cache = value.serialize(ser::primitive::u32::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `MTreeParams {{ {key} }}`")));
@@ -83,8 +95,11 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 		Ok(MTreeParams {
 			dimension: self.dimension,
 			distance: self.distance,
+			vector_type: self.vector_type,
 			capacity: self.capacity,
 			doc_ids_order: self.doc_ids_order,
+			doc_ids_cache: self.doc_ids_cache,
+			mtree_cache: self.mtree_cache,
 		})
 	}
 }
@@ -94,8 +109,11 @@ fn mtree_params() {
 	let params = MTreeParams {
 		dimension: 1,
 		distance: Default::default(),
+		vector_type: Default::default(),
 		capacity: 2,
 		doc_ids_order: 3,
+		doc_ids_cache: 4,
+		mtree_cache: 5,
 	};
 	let serialized = params.serialize(Serializer.wrap()).unwrap();
 	assert_eq!(params, serialized);

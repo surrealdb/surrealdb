@@ -5,7 +5,9 @@ use crate::dbs::capabilities::FuncTarget;
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
-use crate::idx::planner::QueryPlanner;
+use crate::idx::planner::executor::QueryExecutor;
+use crate::idx::planner::{IterationStage, QueryPlanner};
+use crate::idx::trees::store::IndexStores;
 use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
@@ -43,6 +45,12 @@ pub struct Context<'a> {
 	notifications: Option<Sender<Notification>>,
 	// An optional query planner
 	query_planner: Option<&'a QueryPlanner<'a>>,
+	// An optional query executor
+	query_executor: Option<QueryExecutor>,
+	// An optional iteration stage
+	iteration_stage: Option<IterationStage>,
+	// The index store
+	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 }
@@ -65,16 +73,41 @@ impl<'a> Debug for Context<'a> {
 }
 
 impl<'a> Context<'a> {
-	/// Create an empty background context.
-	pub fn background() -> Self {
-		Context {
+	pub(crate) fn from_ds(
+		time_out: Option<Duration>,
+		capabilities: Capabilities,
+		index_stores: IndexStores,
+	) -> Result<Context<'a>, Error> {
+		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
+			query_executor: None,
+			iteration_stage: None,
+			capabilities: Arc::new(capabilities),
+			index_stores,
+		};
+		if let Some(timeout) = time_out {
+			ctx.add_timeout(timeout)?;
+		}
+		Ok(ctx)
+	}
+	/// Create an empty background context.
+	pub fn background() -> Self {
+		Self {
+			values: HashMap::default(),
+			parent: None,
+			deadline: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: None,
+			query_planner: None,
+			query_executor: None,
+			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
+			index_stores: IndexStores::default(),
 		}
 	}
 
@@ -87,7 +120,10 @@ impl<'a> Context<'a> {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner,
+			query_executor: parent.query_executor.clone(),
+			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
+			index_stores: parent.index_stores.clone(),
 		}
 	}
 
@@ -118,9 +154,16 @@ impl<'a> Context<'a> {
 	}
 
 	/// Add a timeout to the context. If the current timeout is sooner than
-	/// the provided timeout, this method does nothing.
-	pub fn add_timeout(&mut self, timeout: Duration) {
-		self.add_deadline(Instant::now() + timeout)
+	/// the provided timeout, this method does nothing. If the result of the
+	/// addition causes an overflow, this method returns an error.
+	pub fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+		match Instant::now().checked_add(timeout) {
+			Some(deadline) => {
+				self.add_deadline(deadline);
+				Ok(())
+			}
+			None => Err(Error::InvalidTimeout(timeout.as_secs())),
+		}
 	}
 
 	/// Add the LIVE query notification channel to the context, so that we
@@ -129,9 +172,16 @@ impl<'a> Context<'a> {
 		self.notifications = chn.cloned()
 	}
 
-	/// Set the query planner
 	pub(crate) fn set_query_planner(&mut self, qp: &'a QueryPlanner) {
 		self.query_planner = Some(qp);
+	}
+
+	pub(crate) fn set_query_executor(&mut self, qe: QueryExecutor) {
+		self.query_executor = Some(qe);
+	}
+
+	pub(crate) fn set_iteration_stage(&mut self, is: IterationStage) {
+		self.iteration_stage = Some(is);
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
@@ -146,6 +196,19 @@ impl<'a> Context<'a> {
 
 	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
 		self.query_planner
+	}
+
+	pub(crate) fn get_query_executor(&self) -> Option<&QueryExecutor> {
+		self.query_executor.as_ref()
+	}
+
+	pub(crate) fn get_iteration_stage(&self) -> Option<&IterationStage> {
+		self.iteration_stage.as_ref()
+	}
+
+	/// Get the index_store for this context/ds
+	pub(crate) fn get_index_stores(&self) -> &IndexStores {
+		&self.index_stores
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may

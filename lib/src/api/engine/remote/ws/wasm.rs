@@ -11,9 +11,11 @@ use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
+use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
@@ -82,9 +84,12 @@ impl Connection for Client {
 
 			conn_rx.into_recv_async().await??;
 
+			let mut features = HashSet::new();
+			features.insert(ExtraFeatures::LiveQueries);
+
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
-					features: HashSet::new(),
+					features,
 					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
@@ -150,6 +155,7 @@ pub(crate) fn router(
 			Message::Binary(value)
 		};
 
+		let mut var_stash = IndexMap::new();
 		let mut vars = IndexMap::new();
 		let mut replay = IndexMap::new();
 
@@ -160,6 +166,7 @@ pub(crate) fn router(
 				0 => HashMap::new(),
 				capacity => HashMap::with_capacity(capacity),
 			};
+			let mut live_queries = HashMap::new();
 
 			let mut interval = time::interval(PING_INTERVAL);
 			// don't bombard the server with pings if we miss some ticks
@@ -195,12 +202,33 @@ pub(crate) fn router(
 						match method {
 							Method::Set => {
 								if let [Value::Strand(Strand(key)), value] = &params[..2] {
-									vars.insert(key.to_owned(), value.clone());
+									var_stash.insert(id, (key.clone(), value.clone()));
 								}
 							}
 							Method::Unset => {
 								if let [Value::Strand(Strand(key))] = &params[..1] {
 									vars.remove(key);
+								}
+							}
+							Method::Live => {
+								if let Some(sender) = param.notification_sender {
+									if let [Value::Uuid(id)] = &params[..1] {
+										live_queries.insert(*id, sender);
+									}
+								}
+								if response
+									.into_send_async(Ok(DbResponse::Other(Value::None)))
+									.await
+									.is_err()
+								{
+									trace!("Receiver dropped");
+								}
+								// There is nothing to send to the server here
+								continue;
+							}
+							Method::Kill => {
+								if let [Value::Uuid(id)] = &params[..1] {
+									live_queries.remove(id);
 								}
 							}
 							_ => {}
@@ -261,14 +289,69 @@ pub(crate) fn router(
 						last_activity = Instant::now();
 						match Response::try_from(&message) {
 							Ok(option) => {
+								// We are only interested in responses that are not empty
 								if let Some(response) = option {
 									trace!("{response:?}");
-									if let Some(Ok(id)) = response.id.map(Value::coerce_to_i64) {
-										if let Some((_method, sender)) = routes.remove(&id) {
-											let _res = sender
-												.into_send_async(DbResponse::from(response.result))
-												.await;
+									match response.id {
+										// If `id` is set this is a normal response
+										Some(id) => {
+											if let Ok(id) = id.coerce_to_i64() {
+												// We can only route responses with IDs
+												if let Some((method, sender)) = routes.remove(&id) {
+													if matches!(method, Method::Set) {
+														if let Some((key, value)) =
+															var_stash.remove(&id)
+														{
+															vars.insert(key, value);
+														}
+													}
+													// Send the response back to the caller
+													let _res = sender
+														.into_send_async(DbResponse::from(
+															response.result,
+														))
+														.await;
+												}
+											}
 										}
+										// If `id` is not set, this may be a live query notification
+										None => match response.result {
+											Ok(Data::Live(notification)) => {
+												let live_query_id = notification.id;
+												// Check if this live query is registered
+												if let Some(sender) =
+													live_queries.get(&live_query_id)
+												{
+													// Send the notification back to the caller or kill live query if the receiver is already dropped
+													if sender.send(notification).await.is_err() {
+														live_queries.remove(&live_query_id);
+														let kill = {
+															let mut request = BTreeMap::new();
+															request.insert(
+																"method".to_owned(),
+																Method::Kill.as_str().into(),
+															);
+															request.insert(
+																"params".to_owned(),
+																vec![Value::from(live_query_id)]
+																	.into(),
+															);
+															let value = Value::from(request);
+															let value = serialize(&value).unwrap();
+															Message::Binary(value)
+														};
+														if let Err(error) =
+															socket_sink.send(kill).await
+														{
+															trace!("failed to send kill query to the server; {error:?}");
+															break;
+														}
+													}
+												}
+											}
+											Ok(..) => { /* Ignored responses like pings */ }
+											Err(error) => error!("{error:?}"),
+										},
 									}
 								}
 							}
@@ -322,7 +405,14 @@ pub(crate) fn router(
 							}
 						}
 					}
+					// Close connection request received
 					Either::Request(None) => {
+						match ws.close().await {
+							Ok(..) => trace!("Connection closed successfully"),
+							Err(error) => {
+								warn!("Failed to close database connection; {error}")
+							}
+						}
 						break 'router;
 					}
 				}

@@ -1,4 +1,6 @@
 //! Stores a graph edge pointer
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use crate::sql::dir::Dir;
 use crate::sql::id::Id;
 use crate::sql::thing::Thing;
@@ -161,6 +163,12 @@ pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Ve
 	k
 }
 
+impl KeyRequirements for Graph<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::Graph
+	}
+}
+
 impl<'a> Graph<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, eg: Dir, fk: &'a Thing) -> Self {
 		Self {
@@ -185,7 +193,7 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		use crate::sql::test::Parse;
+		use crate::syn::Parse;
 		let fk = Thing::parse("other:test");
 		#[rustfmt::skip]
 		let val = Graph::new(

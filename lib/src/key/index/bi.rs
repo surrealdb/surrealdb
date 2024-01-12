@@ -1,5 +1,7 @@
 //! Stores doc keys for doc_ids
 use crate::idx::trees::store::NodeId;
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +20,12 @@ pub struct Bi<'a> {
 	_f: u8,
 	_g: u8,
 	pub node_id: NodeId,
+}
+
+impl KeyRequirements for Bi<'_> {
+	fn key_category(&self) -> KeyCategory {
+		KeyCategory::IndexDocKeys
+	}
 }
 
 impl<'a> Bi<'a> {

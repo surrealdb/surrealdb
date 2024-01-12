@@ -31,6 +31,7 @@ impl Response {
 	pub fn speed(&self) -> String {
 		format!("{:?}", self.time)
 	}
+
 	/// Retrieve the response as a normal result
 	pub fn output(self) -> Result<Value, Error> {
 		self.result

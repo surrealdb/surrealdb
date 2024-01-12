@@ -16,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Constant")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,
@@ -114,40 +115,5 @@ impl fmt::Display for Constant {
 			Self::MathTau => "math::TAU",
 			Self::TimeEpoch => "time::EPOCH",
 		})
-	}
-}
-
-#[cfg(test)]
-mod tests {
-
-	use crate::sql::builtin::{builtin_name, BuiltinName};
-
-	use super::*;
-
-	#[test]
-	fn constant_lowercase() {
-		let sql = "math::pi";
-		let res = builtin_name(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
-	}
-
-	#[test]
-	fn constant_uppercase() {
-		let sql = "MATH::PI";
-		let res = builtin_name(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
-	}
-
-	#[test]
-	fn constant_mixedcase() {
-		let sql = "math::PI";
-		let res = builtin_name(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
 	}
 }

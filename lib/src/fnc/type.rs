@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::parser::idiom;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::syn;
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
@@ -35,7 +35,7 @@ pub async fn field(
 	match (opt, txn) {
 		(Some(opt), Some(txn)) => {
 			// Parse the string as an Idiom
-			let idi = idiom(&val)?;
+			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
 			match opt.projections {
 				true => Ok(idi.compute(ctx, opt, txn, doc).await?),
@@ -60,7 +60,7 @@ pub async fn fields(
 			let mut args: Vec<Value> = Vec::with_capacity(val.len());
 			for v in val {
 				// Parse the string as an Idiom
-				let idi = idiom(&v)?;
+				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
 				match opt.projections {
 					true => args.push(idi.compute(ctx, opt, txn, doc).await?),
@@ -114,14 +114,23 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 		})
 	} else {
 		match arg1 {
-			Value::Thing(v) => v.into(),
-			_ => Value::None,
-		}
+			Value::Thing(v) => Ok(v),
+			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
+				from: Value::Strand(v),
+				into: "record".into(),
+			}),
+			v => Err(Error::ConvertTo {
+				from: v,
+				into: "record".into(),
+			}),
+		}?
+		.into()
 	})
 }
 
 pub mod is {
 	use crate::err::Error;
+	use crate::sql::table::Table;
 	use crate::sql::value::Value;
 	use crate::sql::Geometry;
 
@@ -169,6 +178,10 @@ pub mod is {
 		Ok(matches!(arg, Value::Geometry(Geometry::Line(_))).into())
 	}
 
+	pub fn none((arg,): (Value,)) -> Result<Value, Error> {
+		Ok(arg.is_none().into())
+	}
+
 	pub fn null((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_null().into())
 	}
@@ -203,7 +216,7 @@ pub mod is {
 
 	pub fn record((arg, table): (Value, Option<String>)) -> Result<Value, Error> {
 		Ok(match table {
-			Some(tb) => arg.is_record_of_table(tb).into(),
+			Some(tb) => arg.is_record_type(&[Table(tb)]).into(),
 			None => arg.is_record().into(),
 		})
 	}

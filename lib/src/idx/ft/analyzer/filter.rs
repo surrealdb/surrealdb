@@ -182,8 +182,8 @@ pub(super) enum Term {
 mod tests {
 	use crate::idx::ft::analyzer::tests::test_analyzer;
 
-	#[test]
-	fn test_arabic_stemmer() {
+	#[tokio::test]
+	async fn test_arabic_stemmer() {
 		let input =
 			"الكلاب تحب الجري في الحديقة، لكن كلبي الصغير يفضل النوم في سريره بدلاً من الجري";
 		let output = vec![
@@ -194,17 +194,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(arabic);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ar);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ar);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ara);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_danish_stemmer() {
+	#[tokio::test]
+	async fn test_danish_stemmer() {
 		let input = "Hunde elsker at løbe i parken, men min lille hund foretrækker at sove i sin kurv frem for at løbe.";
 		let output = vec![
 			"hund",
@@ -234,17 +237,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(danish);",
 			input,
 			&output,
-		);
+		)
+		.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(dan);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(da);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(da);", input, &output)
+			.await;
 	}
 
-	#[test]
-	fn test_dutch_stemmer() {
+	#[tokio::test]
+	async fn test_dutch_stemmer() {
 		let input = "Honden houden ervan om in het park te rennen, maar mijn kleine hond slaapt liever in zijn mand dan te rennen.";
 		let output = vec![
 			"hond", "houd", "ervan", "om", "in", "het", "park", "te", "renn", ",", "mar", "mijn",
@@ -254,17 +260,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(dutch);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(nl);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(nl);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(nld);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_english_stemmer() {
+	#[tokio::test]
+	async fn test_english_stemmer() {
 		let input = "Teachers are often teaching, but my favorite teacher prefers reading in her spare time rather than teaching.";
 		let output = vec![
 			"teacher", "are", "often", "teach", ",", "but", "my", "favorit", "teacher", "prefer",
@@ -274,17 +283,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(english);",
 			input,
 			&output,
-		);
+		)
+		.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(eng);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(en);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(en);", input, &output)
+			.await;
 	}
 
-	#[test]
-	fn test_french_stemmer() {
+	#[tokio::test]
+	async fn test_french_stemmer() {
 		let input = "Les chiens adorent courir dans le parc, mais mon petit chien aime plutôt se blottir sur le canapé que de courir";
 		let output = [
 			"le", "chien", "adorent", "cour", "dan", "le", "parc", ",", "mais", "mon", "pet",
@@ -294,17 +306,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(french);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(fr);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(fr);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(fra);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_german_stemmer() {
+	#[tokio::test]
+	async fn test_german_stemmer() {
 		let input = "Hunde lieben es, im Park zu laufen, aber mein kleiner Hund zieht es vor, auf dem Sofa zu schlafen, statt zu laufen.";
 		let output = [
 			"hund", "lieb", "es", ",", "im", "park", "zu", "lauf", ",", "aber", "mein", "klein",
@@ -315,17 +330,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(german);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(de);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(de);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(deu);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_greek_stemmer() {
+	#[tokio::test]
+	async fn test_greek_stemmer() {
 		let input = "Τα σκυλιά αγαπούν να τρέχουν στο πάρκο, αλλά ο μικρός μου σκύλος προτιμά να κοιμάται στο κρεβάτι του αντί να τρέχει.";
 		let output = [
 			"τα",
@@ -356,17 +374,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(greek);",
 			input,
 			&output,
-		);
+		)
+		.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ell);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(el);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(el);", input, &output)
+			.await;
 	}
 
-	#[test]
-	fn test_hungarian_stemmer() {
+	#[tokio::test]
+	async fn test_hungarian_stemmer() {
 		let input = "A kutyák szeretnek futni a parkban, de az én kicsi kutyám inkább alszik a kosarában, mintsem fut.";
 		let output = [
 			"a", "kutya", "szeret", "futn", "a", "par", ",", "de", "az", "én", "kics", "kutya",
@@ -376,17 +397,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(hungarian);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(hu);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(hu);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(hun);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_italian_stemmer() {
+	#[tokio::test]
+	async fn test_italian_stemmer() {
 		let input = "I cani amano correre nel parco, ma il mio piccolo cane preferisce dormire nel suo cesto piuttosto che correre.";
 		let output = [
 			"i", "can", "aman", "corr", "nel", "parc", ",", "ma", "il", "mio", "piccol", "can",
@@ -396,17 +420,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(italian);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(it);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(it);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ita);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_norwegian_stemmer() {
+	#[tokio::test]
+	async fn test_norwegian_stemmer() {
 		let input = "Hunder elsker å løpe i parken, men min lille hund foretrekker å sove i sengen sin heller enn å løpe.";
 		let output = [
 			"hund",
@@ -436,17 +463,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(norwegian);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(no);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(no);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(nor);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_portuguese_stemmer() {
+	#[tokio::test]
+	async fn test_portuguese_stemmer() {
 		let input = "Os cães adoram correr no parque, mas o meu pequeno cão prefere dormir na sua cama em vez de correr.";
 		let output = [
 			"os", "cã", "ador", "corr", "no", "parqu", ",", "mas", "o", "meu", "pequen", "cã",
@@ -456,17 +486,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(portuguese);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(pt);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(pt);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(por);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_romanian_stemmer() {
+	#[tokio::test]
+	async fn test_romanian_stemmer() {
 		let input = "Câinii adoră să alerge în parc, dar cățelul meu preferă să doarmă în coșul lui decât să alerge.";
 		let output = [
 			"câin", "ador", "să", "alerg", "în", "parc", ",", "dar", "cățel", "meu", "prefer",
@@ -476,17 +509,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(romanian);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ro);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ro);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(ron);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_russian_stemmer() {
+	#[tokio::test]
+	async fn test_russian_stemmer() {
 		let input = "Собаки любят бегать в парке, но моя маленькая собака предпочитает спать в своей корзине, а не бегать.";
 		let output = [
 			"собак",
@@ -514,17 +550,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(russian);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ru);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ru);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(rus);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_spanish_stemmer() {
+	#[tokio::test]
+	async fn test_spanish_stemmer() {
 		let input = "Los perros aman correr en el parque, pero mi pequeño perro prefiere dormir en su cama en lugar de correr.";
 		let output = [
 			"los", "perr", "aman", "corr", "en", "el", "parqu", ",", "per", "mi", "pequeñ", "perr",
@@ -534,17 +573,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(spanish);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(es);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(es);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(spa);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_swedish_stemmer() {
+	#[tokio::test]
+	async fn test_swedish_stemmer() {
 		let input = "Hundar älskar att springa i parken, men min lilla hund föredrar att sova i sin säng istället för att springa.";
 		let output = [
 			"hund",
@@ -574,17 +616,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(swedish);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(sv);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(sv);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(swe);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_tamil_stemmer() {
+	#[tokio::test]
+	async fn test_tamil_stemmer() {
 		let input = "நாய்கள் பூங்காவில் ஓடுவதை விரும்புகின்றன, ஆனால் என் சிறிய நாய் அதன் படுகையில் தூங்குவதை விரும்புகின்றது, ஓட இல்லை.";
 		let output = [
 			"ந\u{bbe}ய",
@@ -617,17 +662,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(tamil);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ta);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(ta);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(tam);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_turkish_stemmer() {
+	#[tokio::test]
+	async fn test_turkish_stemmer() {
 		let input = "Köpekler parkta koşmayı sever, ama benim küçük köpeğim koşmaktansa yatağında uyumayı tercih eder.";
 		let output = [
 			"köpek", "park", "koşma", "sever", ",", "am", "be", "küçük", "köpek", "koşmak",
@@ -637,30 +685,35 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(turkish);",
 			input,
 			&output,
-		);
-		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(tr);", input, &output);
+		)
+		.await;
+		test_analyzer("ANALYZER test TOKENIZERS blank,class FILTERS snowball(tr);", input, &output)
+			.await;
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS snowball(tur);",
 			input,
 			&output,
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_ngram() {
+	#[tokio::test]
+	async fn test_ngram() {
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "le", "lea", "ia", "iac", "ac", "act", "ct", "cta", "es", "est"],
-		);
+		)
+		.await;
 	}
 
-	#[test]
-	fn test_edgengram() {
+	#[tokio::test]
+	async fn test_edgengram() {
 		test_analyzer(
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "ia", "iac", "es", "est"],
-		);
+		)
+		.await;
 	}
 }
