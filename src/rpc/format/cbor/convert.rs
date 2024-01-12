@@ -42,6 +42,25 @@ impl TryFrom<Cbor> for Value {
 				.collect::<Result<Value, &str>>(),
 			Data::Tag(t, v) => {
 				match t {
+					// A literal datetime
+					TAG_DATETIME => match *v {
+						Data::Text(v) => match Datetime::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err("Expected a valid Datetime value"),
+						},
+						_ => Err("Expected a CBOR text data type"),
+					},
+					// A datetime, represented as the number of seconds since EPOCH
+					TAG_DATETIME_EPOCH => match *v {
+						Data::Integer(v) => match i64::try_from(i128::from(v)) {
+							Ok(v) => match Datetime::try_from(v) {
+								Ok(v) => Ok(v.into()),
+								_ => Err("Expected a valid Datetime value"),
+							},
+							_ => Err("Expected a i64 number"),
+						},
+						_ => Err("Expected a CBOR number data type"),
+					},
 					// A literal NONE
 					TAG_NONE => Ok(Value::None),
 					// A literal uuid
@@ -67,25 +86,6 @@ impl TryFrom<Cbor> for Value {
 							_ => Err("Expected a valid Duration value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
-					},
-					// A literal datetime
-					TAG_DATETIME => match *v {
-						Data::Text(v) => match Datetime::try_from(v) {
-							Ok(v) => Ok(v.into()),
-							_ => Err("Expected a valid Datetime value"),
-						},
-						_ => Err("Expected a CBOR text data type"),
-					},
-					// A literal datetime, represented as the number of seconds since EPOCH
-					TAG_DATETIME_EPOCH => match *v {
-						Data::Integer(v) => match i64::try_from(i128::from(v)) {
-							Ok(v) => match Datetime::try_from(v) {
-								Ok(v) => Ok(v.into()),
-								_ => Err("Expected a valid Datetime value"),
-							},
-							_ => Err("Expected a i64 number"),
-						},
-						_ => Err("Expected a CBOR number data type"),
 					},
 					// A literal recordid
 					TAG_RECORDID => match *v {
