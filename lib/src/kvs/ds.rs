@@ -517,159 +517,147 @@ impl Datastore {
 			}
 		}?;
 
-		let to_bootstrap = false;
-		if to_bootstrap {
-			trace!("Bootstrapping {}", self.id);
-			let mut tx = self.transaction(Write, Optimistic).await?;
-			let dead_nodes = match self.register_and_remove_dead_nodes(&mut tx, &self.id).await {
-				Ok(archived) => {
-					tx.commit().await?;
-					archived
+		trace!("Bootstrapping {}", self.id);
+		let mut tx = self.transaction(Write, Optimistic).await?;
+		let dead_nodes = match self.register_and_remove_dead_nodes(&mut tx, &self.id).await {
+			Ok(archived) => {
+				tx.commit().await?;
+				archived
+			}
+			Err(e) => {
+				error!("Error bootstrapping mark phase: {:?}", e);
+				tx.cancel().await?;
+				return Err(e);
+			}
+		};
+
+		// The transaction request pair is used for receiving requests for new transactions
+		// it contains one-shot senders so that the transaction can be sent and forgotten
+		let (tx_req_send, mut tx_req_recv): (
+			mpsc::Sender<oneshot::Sender<Transaction>>,
+			mpsc::Receiver<oneshot::Sender<Transaction>>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+
+		// In several new transactions, scan all removed node live queries
+		let (scan_send, scan_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		let scan_task = tokio::spawn(bootstrap::scan_node_live_queries(
+			tx_req_send.clone(),
+			dead_nodes,
+			scan_send,
+			BOOTSTRAP_BATCH_SIZE as u32,
+		));
+
+		// In several new transactions, archive removed node live queries
+		let (archive_send, archive_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		trace!("Spawned archive task");
+		let archive_task = tokio::spawn(bootstrap::archive_live_queries(
+			tx_req_send.clone(),
+			self.id,
+			scan_recv,
+			archive_send,
+			BOOTSTRAP_BATCH_SIZE,
+			&BOOTSTRAP_BATCH_LATENCY,
+		));
+
+		// In several new transactions, delete archived node live queries
+		let (delete_send, mut delete_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		trace!("Spawned delete live query task");
+		let delete_task = tokio::spawn(bootstrap::delete_live_queries(
+			tx_req_send,
+			archive_recv,
+			delete_send,
+			BOOTSTRAP_BATCH_SIZE,
+		));
+
+		// We then need to collect and log the errors
+		// It's also important to consume from the channel otherwise things will block
+		trace!("Spawned delete handler task");
+		let delete_handler_task = tokio::spawn(async move {
+			while let Some(res) = delete_recv.recv().await {
+				let (_lq, e) = res;
+				if let Some(e) = e {
+					error!("Error deleting lq during bootstrap: {:?}", e);
 				}
-				Err(e) => {
-					error!("Error bootstrapping mark phase: {:?}", e);
-					tx.cancel().await?;
-					return Err(e);
+			}
+		});
+
+		// Handle transaction requests
+		// This loop will continue to run until all channels have been closed above
+		trace!("Handling bootstrap transaction requests");
+		loop {
+			match tx_req_recv.recv().await {
+				None => {
+					// closed
+					println!("Transaction request channel closed, breaking out of bootstrap");
+					trace!("Transaction request channel closed, breaking out of bootstrap");
+					break;
+				}
+				Some(sender) => {
+					println!("Received a transaction request");
+					trace!("Received a transaction request");
+					let tx = self.transaction(Write, Optimistic).await.unwrap();
+					if let Err(mut tx) = sender.send(tx) {
+						// The receiver has been dropped, so we need to cancel the transaction
+						println!("Unable to send a transaction as response to task because the receiver is closed");
+						trace!("Unable to send a transaction as response to task because the receiver is closed");
+						tx.cancel().await.unwrap();
+					}
 				}
 			};
+		}
+		println!("Finished handling requests");
+		trace!("Finished handling requests",);
 
-			// The transaction request pair is used for receiving requests for new transactions
-			// it contains one-shot senders so that the transaction can be sent and forgotten
-			let (tx_req_send, mut tx_req_recv): (
-				mpsc::Sender<oneshot::Sender<Transaction>>,
-				mpsc::Receiver<oneshot::Sender<Transaction>>,
-			) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
+		// Now run everything together and return any errors that arent captured per record
+		trace!("Joining bootstrap tasks");
+		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
+			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
 
-			// In several new transactions, scan all removed node live queries
-			let (scan_send, scan_recv): (
-				mpsc::Sender<BootstrapOperationResult>,
-				mpsc::Receiver<BootstrapOperationResult>,
-			) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-			let scan_task = tokio::spawn(bootstrap::scan_node_live_queries(
-				tx_req_send.clone(),
-				dead_nodes,
-				scan_send,
-				BOOTSTRAP_BATCH_SIZE as u32,
-			));
+		// Throw errors from join tasks
+		let scan_err = join_scan_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapScan, e))
+		})?;
+		let arch_err = join_arch_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapArchive, e))
+		})?;
+		let del_err = join_del_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapDelete, e))
+		})?;
+		join_log_err.map_err(|e| {
+			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapStageLog, e))
+		})?;
 
-			// In several new transactions, archive removed node live queries
-			let (archive_send, archive_recv): (
-				mpsc::Sender<BootstrapOperationResult>,
-				mpsc::Receiver<BootstrapOperationResult>,
-			) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-			trace!("Spawned archive task");
-			let archive_task = tokio::spawn(bootstrap::archive_live_queries(
-				tx_req_send.clone(),
-				self.id,
-				scan_recv,
-				archive_send,
-				BOOTSTRAP_BATCH_SIZE,
-				&BOOTSTRAP_BATCH_LATENCY,
-			));
-
-			// In several new transactions, delete archived node live queries
-			let (delete_send, mut delete_recv): (
-				mpsc::Sender<BootstrapOperationResult>,
-				mpsc::Receiver<BootstrapOperationResult>,
-			) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-			trace!("Spawned delete live query task");
-			let delete_task = tokio::spawn(bootstrap::delete_live_queries(
-				tx_req_send,
-				archive_recv,
-				delete_send,
-				BOOTSTRAP_BATCH_SIZE,
-			));
-
-			// We then need to collect and log the errors
-			// It's also important to consume from the channel otherwise things will block
-			trace!("Spawned delete handler task");
-			let delete_handler_task = tokio::spawn(async move {
-				while let Some(res) = delete_recv.recv().await {
-					let (_lq, e) = res;
-					if let Some(e) = e {
-						error!("Error deleting lq during bootstrap: {:?}", e);
-					}
-				}
-			});
-
-			// Handle transaction requests
-			// This loop will continue to run until all channels have been closed above
-			trace!("Handling bootstrap transaction requests");
-			loop {
-				match tx_req_recv.recv().await {
-					None => {
-						// closed
-						println!("Transaction request channel closed, breaking out of bootstrap");
-						trace!("Transaction request channel closed, breaking out of bootstrap");
-						break;
-					}
-					Some(sender) => {
-						println!("Received a transaction request");
-						trace!("Received a transaction request");
-						let tx = self.transaction(Write, Optimistic).await.unwrap();
-						if let Err(mut tx) = sender.send(tx) {
-							// The receiver has been dropped, so we need to cancel the transaction
-							println!("Unable to send a transaction as response to task because the receiver is closed");
-							trace!("Unable to send a transaction as response to task because the receiver is closed");
-							tx.cancel().await.unwrap();
-						}
-					}
-				};
-			}
-			println!("Finished handling requests");
-			trace!("Finished handling requests",);
-
-			// Now run everything together and return any errors that arent captured per record
-			trace!("Joining bootstrap tasks");
-			let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
-				tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
-
-			// Throw errors from join tasks
-			let scan_err = join_scan_err.map_err(|e| {
-				Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapScan, e))
-			})?;
-			let arch_err = join_arch_err.map_err(|e| {
-				Error::BootstrapError(BootstrapCause::JoinTaskError(
-					TaskVariant::BootstrapArchive,
-					e,
-				))
-			})?;
-			let del_err = join_del_err.map_err(|e| {
-				Error::BootstrapError(BootstrapCause::JoinTaskError(
-					TaskVariant::BootstrapDelete,
-					e,
-				))
-			})?;
-			join_log_err.map_err(|e| {
-				Error::BootstrapError(BootstrapCause::JoinTaskError(
-					TaskVariant::BootstrapStageLog,
-					e,
-				))
-			})?;
-
-			// Handle all the possible hard errors from tasks
-			if let Some(err) = scan_err
+		// Handle all the possible hard errors from tasks
+		if let Some(err) = scan_err
+			.map_err(|e| {
+				error!("an error occurred in the scan task: {:?}", e);
+				Error::Internal("an error occurred in the scan task")
+			})
+			.err()
+			.or(arch_err
 				.map_err(|e| {
-					error!("an error occurred in the scan task: {:?}", e);
-					Error::Internal("an error occurred in the scan task")
+					error!("an error occurred in the archive task: {:?}", e);
+					Error::Internal("an error occurred in the archive task")
 				})
-				.err()
-				.or(arch_err
-					.map_err(|e| {
-						error!("an error occurred in the archive task: {:?}", e);
-						Error::Internal("an error occurred in the archive task")
-					})
-					.err())
-				.or(del_err
-					.map_err(|e| {
-						error!("an error occurred in the del task: {:?}", e);
-						Error::Internal("an error occurred in the del task")
-					})
-					.err())
-			{
-				println!("Error in bootstrap join tasks: {:?}", err);
-				return Err(err);
-			}
+				.err())
+			.or(del_err
+				.map_err(|e| {
+					error!("an error occurred in the del task: {:?}", e);
+					Error::Internal("an error occurred in the del task")
+				})
+				.err())
+		{
+			println!("Error in bootstrap join tasks: {:?}", err);
+			return Err(err);
 		}
 		Ok(())
 	}

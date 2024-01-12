@@ -1,11 +1,10 @@
 mod parse;
-
 use parse::Parse;
 use std::str::FromStr;
 
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::{KvsAction, KvsNotification, Session};
+use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql;
@@ -414,25 +413,18 @@ async fn delete_filtered_live_notification() -> Result<(), Error> {
 
 	// Validate notification
 	let notifications = dbs.notifications().expect("expected notifications");
-	let mut notification = notifications.recv().await.unwrap();
-	assert_ne!(notification.timestamp, Default::default());
-	notification.timestamp = Default::default();
-	assert_ne!(notification.notification_id, Default::default());
-	notification.notification_id = Default::default();
+	let notification = notifications.recv().await.unwrap();
 	assert_eq!(
 		notification,
-		KvsNotification {
-			live_id,
-			node_id,
-			notification_id: Default::default(),
-			action: KvsAction::Delete,
+		Notification {
+			id: live_id,
+			action: Action::Delete,
 			result: Value::parse(
 				"{
 					id: person:test_true,
 					condition: true,
 				}"
 			),
-			timestamp: Default::default()
 		}
 	);
 	Ok(())
