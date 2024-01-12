@@ -8,12 +8,13 @@ use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
-const TAG_NONE: u64 = 78_773_250;
-const TAG_UUID: u64 = 78_773_251;
-const TAG_DECIMAL: u64 = 78_773_252;
-const TAG_DURATION: u64 = 78_773_253;
-const TAG_DATETIME: u64 = 78_773_254;
-const TAG_RECORDID: u64 = 78_773_255;
+const TAG_DATETIME: u64 = 0;
+const TAG_DATETIME_EPOCH: u64 = 1;
+const TAG_NONE: u64 = 6;
+const TAG_UUID: u64 = 7;
+const TAG_DECIMAL: u64 = 8;
+const TAG_DURATION: u64 = 9;
+const TAG_RECORDID: u64 = 10;
 
 #[derive(Debug)]
 pub struct Cbor(pub Data);
@@ -74,6 +75,17 @@ impl TryFrom<Cbor> for Value {
 							_ => Err("Expected a valid Datetime value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
+					},
+					// A literal datetime, represented as the number of seconds since EPOCH
+					TAG_DATETIME_EPOCH => match *v {
+						Data::Integer(v) => match i64::try_from(i128::from(v)) {
+							Ok(v) => match Datetime::try_from(v) {
+								Ok(v) => Ok(v.into()),
+								_ => Err("Expected a valid Datetime value"),
+							},
+							_ => Err("Expected a i64 number"),
+						},
+						_ => Err("Expected a CBOR number data type"),
 					},
 					// A literal recordid
 					TAG_RECORDID => match *v {
