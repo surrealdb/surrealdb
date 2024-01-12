@@ -1,7 +1,7 @@
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
-use chrono::{DateTime, LocalResult, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -63,16 +63,6 @@ impl TryFrom<&str> for Datetime {
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::datetime_raw(v) {
 			Ok(v) => Ok(v),
-			_ => Err(()),
-		}
-	}
-}
-
-impl TryFrom<i64> for Datetime {
-	type Error = ();
-	fn try_from(v: i64) -> Result<Self, Self::Error> {
-		match Utc.timestamp_opt(v, 0) {
-			LocalResult::Single(v) => Ok(Self(v)),
 			_ => Err(()),
 		}
 	}
