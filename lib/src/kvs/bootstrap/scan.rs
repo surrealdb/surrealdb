@@ -26,7 +26,6 @@ pub(crate) async fn scan_node_live_queries(
 	trace!("Receiving a tx response in scan");
 	match tx_res_oneshot.await {
 		Ok(mut tx) => {
-			println!("[SCAN] Received tx in scan - {:?} nodes", nodes);
 			trace!("Received tx in scan - {:?} nodes", nodes);
 			for nd in nodes {
 				let beg = crate::key::node::lq::prefix_nd(&nd.0);
@@ -38,11 +37,6 @@ pub(crate) async fn scan_node_live_queries(
 				while let Some(page) = next_page {
 					match tx.scan_paged(page, batch_size).await {
 						Ok(scan_result) => {
-							println!(
-								"[SCAN] Scan result: {:?} and next page: {:?}",
-								scan_result.values,
-								scan_result.next_page.is_some()
-							);
 							next_page = scan_result.next_page;
 							for (key, value) in scan_result.values {
 								let lv = crate::key::node::lq::Lq::decode(key.as_slice())?;
@@ -54,15 +48,13 @@ pub(crate) async fn scan_node_live_queries(
 									tb,
 									lq: lv.lq.into(),
 								};
-								println!("[SCAN] Sending scan lq: {:?}", lq);
-								sender.send((lq, None)).await.map_err(|_| {
-									println!("[SCAN] Error sending");
+								sender.send((lq, None)).await.map_err(|e| {
+									error!("Failed to send message: {}", e);
 									Error::BootstrapError(ChannelSendError(BootstrapScan))
 								})?;
 							}
 						}
 						Err(e) => {
-							println!("[SCAN] Failed scanning node live queries: {:?}", e);
 							error!("Failed scanning node live queries: {:?}", e);
 							tx.cancel().await?;
 							return Err(e);
@@ -72,8 +64,8 @@ pub(crate) async fn scan_node_live_queries(
 			}
 			tx.commit().await
 		}
-		Err(_recv_error) => {
-			println!("[SCAN] Failed receiving tx in scan node live queries: {:?}", _recv_error);
+		Err(recv_error) => {
+			error!("Failed receiving tx in scan node live queries: {:?}", recv_error);
 			Err(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)))
 		}
 	}

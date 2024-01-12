@@ -597,24 +597,20 @@ impl Datastore {
 			match tx_req_recv.recv().await {
 				None => {
 					// closed
-					println!("Transaction request channel closed, breaking out of bootstrap");
 					trace!("Transaction request channel closed, breaking out of bootstrap");
 					break;
 				}
 				Some(sender) => {
-					println!("Received a transaction request");
 					trace!("Received a transaction request");
 					let tx = self.transaction(Write, Optimistic).await.unwrap();
 					if let Err(mut tx) = sender.send(tx) {
 						// The receiver has been dropped, so we need to cancel the transaction
-						println!("Unable to send a transaction as response to task because the receiver is closed");
 						trace!("Unable to send a transaction as response to task because the receiver is closed");
 						tx.cancel().await.unwrap();
 					}
 				}
 			};
 		}
-		println!("Finished handling requests");
 		trace!("Finished handling requests",);
 
 		// Now run everything together and return any errors that arent captured per record
@@ -656,7 +652,7 @@ impl Datastore {
 				})
 				.err())
 		{
-			println!("Error in bootstrap join tasks: {:?}", err);
+			error!("Error in bootstrap join tasks: {:?}", err);
 			return Err(err);
 		}
 		Ok(())
@@ -1103,14 +1099,6 @@ impl Datastore {
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
-			let backtrace = std::backtrace::Backtrace::force_capture();
-			if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
-				println!("{}", backtrace);
-			}
-			println!(
-				"AUTH FAILED IN PROCESS. AUTH={:?}, ANON={:?} CAP={:?}",
-				self.auth_enabled, sess.au, self.capabilities
-			);
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: "process".to_string(),
@@ -1175,10 +1163,6 @@ impl Datastore {
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
-			println!(
-				"FAILED AUTH TRACE IN COMPUTE. Auth={:?}, capabilities={:?}",
-				self.auth_enabled, self.capabilities
-			);
 			return Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: "compute".to_string(),

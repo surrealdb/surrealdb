@@ -34,7 +34,6 @@ mod mem {
 	use crate::kvs::Transaction;
 	use crate::kvs::TransactionType;
 	use serial_test::serial;
-	use tracing_subscriber::layer::SubscriberExt;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
 		(
