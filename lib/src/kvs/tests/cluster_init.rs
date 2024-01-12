@@ -69,7 +69,7 @@ async fn expired_nodes_are_garbage_collected() {
 #[tokio::test]
 #[serial]
 async fn expired_nodes_get_live_queries_archived() {
-	init_logs();
+	// init_logs();
 	let old_node = Uuid::from_str("c756ed5a-3b19-4303-bce2-5e0edf72e66b").unwrap();
 	let old_time = Timestamp {
 		value: 123000,

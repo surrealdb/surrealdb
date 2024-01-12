@@ -46,7 +46,11 @@ fn _is_allowed(
 
 	let req = Request::new(actor, action, resource, context);
 
+	println!("POLICY IS: {:?}", policy_set);
+	println!("AUTHORIZER : {:?}", authorizer);
+	println!("REQUEST : {:?}", req);
 	let res = authorizer.is_authorized(&req, &policy_set, &entities);
+	println!("RESPONSE : {:?}", res);
 
 	(res.decision() == Decision::Allow, res)
 }

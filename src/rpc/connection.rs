@@ -342,6 +342,7 @@ impl Connection {
 						req_cx.with_method(&req.method).with_size(len),
 					);
 					// Process the message
+					println!("Processing message {:?}: {:?}", req.method, req.params);
 					let res =
 						Connection::process_message(rpc.clone(), &req.method, req.params).await;
 					// Process the response

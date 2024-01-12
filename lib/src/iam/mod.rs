@@ -46,6 +46,14 @@ pub fn is_allowed(
 	match policies::is_allowed(actor, action, resource, ctx.unwrap_or(Context::empty())) {
 		(allowed, _) if allowed => Ok(()),
 		_ => {
+			let backtrace = std::backtrace::Backtrace::force_capture();
+			if let std::backtrace::BacktraceStatus::Captured = backtrace.status() {
+				println!("{}", backtrace);
+			}
+			println!(
+				"IS ALLOWED INVOKED FAILED AUTH actor: {:?}, action: {:?}, resource: {:?}",
+				actor, action, resource
+			);
 			let err = Error::NotAllowed {
 				actor: actor.to_string(),
 				action: action.to_string(),

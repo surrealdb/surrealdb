@@ -458,4 +458,97 @@ mod test {
 		let live_stm = res.unwrap();
 		assert_eq!(live_stm.archived, Some(self_node_id))
 	}
+
+	#[tokio::test]
+	async fn test_task_still_forwards_already_archived_live_queries() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let (tx_req, tx_res) = mpsc::channel(1);
+		let tx_task = tokio::spawn(always_give_tx(ds.clone(), tx_res));
+
+		// Setup task input and output channels
+		let (input_lq_send, input_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+		let (output_lq_send, mut output_lq_recv): (
+			mpsc::Sender<BootstrapOperationResult>,
+			mpsc::Receiver<BootstrapOperationResult>,
+		) = mpsc::channel(10);
+
+		// Set up a valid live query to be archived
+		let self_node_id = ds.id;
+		let namespace = "sample-namespace";
+		let database = "sample-db";
+		let table = "sampleTable";
+		let sess = Session::owner().with_rt(true).with_ns(namespace).with_db(database);
+		let query = format!("LIVE SELECT * FROM {table}");
+		let mut lq = ds.execute(&query, &sess, None).await.unwrap();
+		assert_eq!(lq.len(), 1);
+		let live_query_id = lq.remove(0).result.unwrap();
+		let live_query_id = match live_query_id {
+			Value::Uuid(u) => u,
+			_ => {
+				panic!("Expected Uuid")
+			}
+		};
+
+		// Start the task
+		let arch_task = tokio::spawn(archive_live_queries(
+			tx_req,
+			*&self_node_id,
+			input_lq_recv,
+			output_lq_send,
+			10,
+			&RETRY_DURATION,
+		));
+
+		// Send input request
+		input_lq_send
+			.send((
+				LqValue {
+					nd: self_node_id,
+					ns: sess.ns.unwrap(),
+					db: sess.db.unwrap(),
+					tb: table.to_string(),
+					lq: live_query_id,
+				},
+				None,
+			))
+			.await
+			.unwrap();
+
+		// Close channel to initiate shutdown
+		drop(input_lq_send);
+
+		// Wait for tasks to complete
+		let (tx_task_res, arch_task_res) =
+			tokio::time::timeout(Duration::from_millis(1000), tx_task.join(arch_task))
+				.await
+				.unwrap();
+
+		// Validate the number of transactions
+		let tx_req_count = tx_task_res.unwrap().unwrap();
+		assert_eq!(tx_req_count, 1);
+
+		// Validate the archive task completed without error
+		arch_task_res.unwrap().unwrap();
+
+		// Process output messages and validate no error
+		let val = output_lq_recv.recv().await;
+		assert!(val.is_some());
+		let val = val.unwrap();
+		assert!(val.1.is_none());
+		assert_eq!(val.0.lq, live_query_id);
+		assert_eq!(val.0.nd, self_node_id);
+		assert_eq!(val.0.ns, namespace);
+		assert_eq!(val.0.db, database);
+		assert_eq!(val.0.tb, table);
+
+		// Now verify that live query was in fact archived
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let res = tx.get_tb_live(namespace, database, table, &live_query_id.0).await;
+		tx.commit().await.unwrap();
+		let live_stm = res.unwrap();
+		assert_eq!(live_stm.archived, Some(self_node_id))
+	}
 }
