@@ -413,6 +413,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Query(query) => json!(query),
 		Value::Subquery(subquery) => json!(subquery),
 		Value::Expression(expression) => json!(expression),
+		Value::Spread(spread) => json!(spread),
 	}
 }
 
@@ -622,6 +623,7 @@ mod tests {
 			for map in [BTreeMap::new(), map!("done".to_owned() => true)] {
 				let value = Value::Object(sql::Object(
 					map.iter().map(|(key, value)| (key.clone(), Value::from(*value))).collect(),
+					vec![],
 				));
 
 				let simple_json = into_json(value.clone(), true);

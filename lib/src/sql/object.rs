@@ -22,29 +22,32 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 #[serde(rename = "$surrealdb::private::sql::Object")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
+pub struct Object(
+	#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>,
+	pub Vec<Value>,
+);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
-		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect(), vec![])
 	}
 }
 
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Self(v)
+		Self(v, vec![])
 	}
 }
 
 impl From<HashMap<&str, Value>> for Object {
 	fn from(v: HashMap<&str, Value>) -> Self {
-		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect(), vec![])
 	}
 }
 
 impl From<HashMap<String, Value>> for Object {
 	fn from(v: HashMap<String, Value>) -> Self {
-		Self(v.into_iter().collect())
+		Self(v.into_iter().collect(), vec![])
 	}
 }
 
@@ -56,62 +59,65 @@ impl From<Option<Self>> for Object {
 
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
-		Self(match v {
-			Operation::Add {
-				path,
-				value,
-			} => map! {
-				String::from("op") => Value::from("add"),
-				String::from("path") => path.to_path().into(),
-				String::from("value") => value
+		Self(
+			match v {
+				Operation::Add {
+					path,
+					value,
+				} => map! {
+					String::from("op") => Value::from("add"),
+					String::from("path") => path.to_path().into(),
+					String::from("value") => value
+				},
+				Operation::Remove {
+					path,
+				} => map! {
+					String::from("op") => Value::from("remove"),
+					String::from("path") => path.to_path().into()
+				},
+				Operation::Replace {
+					path,
+					value,
+				} => map! {
+					String::from("op") => Value::from("replace"),
+					String::from("path") => path.to_path().into(),
+					String::from("value") => value
+				},
+				Operation::Change {
+					path,
+					value,
+				} => map! {
+					String::from("op") => Value::from("change"),
+					String::from("path") => path.to_path().into(),
+					String::from("value") => value
+				},
+				Operation::Copy {
+					path,
+					from,
+				} => map! {
+					String::from("op") => Value::from("copy"),
+					String::from("path") => path.to_path().into(),
+					String::from("from") => from.to_path().into()
+				},
+				Operation::Move {
+					path,
+					from,
+				} => map! {
+					String::from("op") => Value::from("move"),
+					String::from("path") => path.to_path().into(),
+					String::from("from") => from.to_path().into()
+				},
+				Operation::Test {
+					path,
+					value,
+				} => map! {
+					String::from("op") => Value::from("test"),
+					String::from("path") => path.to_path().into(),
+					String::from("value") => value
+				},
 			},
-			Operation::Remove {
-				path,
-			} => map! {
-				String::from("op") => Value::from("remove"),
-				String::from("path") => path.to_path().into()
-			},
-			Operation::Replace {
-				path,
-				value,
-			} => map! {
-				String::from("op") => Value::from("replace"),
-				String::from("path") => path.to_path().into(),
-				String::from("value") => value
-			},
-			Operation::Change {
-				path,
-				value,
-			} => map! {
-				String::from("op") => Value::from("change"),
-				String::from("path") => path.to_path().into(),
-				String::from("value") => value
-			},
-			Operation::Copy {
-				path,
-				from,
-			} => map! {
-				String::from("op") => Value::from("copy"),
-				String::from("path") => path.to_path().into(),
-				String::from("from") => from.to_path().into()
-			},
-			Operation::Move {
-				path,
-				from,
-			} => map! {
-				String::from("op") => Value::from("move"),
-				String::from("path") => path.to_path().into(),
-				String::from("from") => from.to_path().into()
-			},
-			Operation::Test {
-				path,
-				value,
-			} => map! {
-				String::from("op") => Value::from("test"),
-				String::from("path") => path.to_path().into(),
-				String::from("value") => value
-			},
-		})
+			vec![],
+		)
 	}
 }
 
@@ -221,13 +227,26 @@ impl Object {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
+		for v in &self.1 {
+			match v.compute(ctx, opt, txn, doc).await {
+				Ok(v) => match v {
+					Value::Object(v) => {
+						for (k, v) in v.iter() {
+							x.insert(k.clone(), v.clone());
+						}
+					}
+					_ => return Err(Error::Thrown("Spread is not an object".into())),
+				},
+				Err(e) => return Err(e),
+			};
+		}
 		for (k, v) in self.iter() {
 			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};
 		}
-		Ok(Value::Object(Object(x)))
+		Ok(Value::Object(Object(x, vec![])))
 	}
 
 	pub(crate) fn is_static(&self) -> bool {

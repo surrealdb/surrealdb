@@ -233,7 +233,7 @@ impl ser::Serializer for Serializer {
 			)))),
 			sql::array::TOKEN => Ok(Value::Array(Array(value.serialize(vec::Serializer.wrap())?))),
 			sql::object::TOKEN => {
-				Ok(Value::Object(Object(value.serialize(map::Serializer.wrap())?)))
+				Ok(Value::Object(Object(value.serialize(map::Serializer.wrap())?, vec![])))
 			}
 			sql::uuid::TOKEN => {
 				Ok(Value::Uuid(Uuid(value.serialize(ser::uuid::Serializer.wrap())?)))
@@ -458,7 +458,7 @@ impl serde::ser::SerializeMap for SerializeMap {
 	}
 
 	fn end(self) -> Result<Value, Error> {
-		Ok(Value::Object(Object(self.0.end()?)))
+		Ok(Value::Object(Object(self.0.end()?, vec![])))
 	}
 }
 
@@ -559,7 +559,7 @@ impl serde::ser::SerializeStruct for SerializeStruct {
 			Self::Thing(thing) => Ok(Value::Thing(thing.end()?)),
 			Self::Edges(edges) => Ok(Value::Edges(Box::new(edges.end()?))),
 			Self::Range(range) => Ok(Value::Range(Box::new(range.end()?))),
-			Self::Unknown(map) => Ok(Value::Object(Object(map.end()?))),
+			Self::Unknown(map) => Ok(Value::Object(Object(map.end()?, vec![]))),
 		}
 	}
 }

@@ -39,7 +39,7 @@ impl ser::Serializer for Serializer {
 			"String" => Ok(Id::String(value.serialize(ser::string::Serializer.wrap())?)),
 			"Array" => Ok(Id::Array(Array(value.serialize(ser::value::vec::Serializer.wrap())?))),
 			"Object" => {
-				Ok(Id::Object(Object(value.serialize(ser::value::map::Serializer.wrap())?)))
+				Ok(Id::Object(Object(value.serialize(ser::value::map::Serializer.wrap())?, vec![])))
 			}
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))

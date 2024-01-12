@@ -106,7 +106,7 @@ pub enum Value {
 	Expression(Box<Expression>),
 	Query(Query),
 	Model(Box<Model>),
-	// Add new variants here
+	Spread(Box<Value>), // Add new variants here
 }
 
 impl Eq for Value {}
@@ -762,7 +762,7 @@ impl FromIterator<Value> for Value {
 
 impl FromIterator<(String, Value)> for Value {
 	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
-		Value::Object(Object(iter.into_iter().collect()))
+		Value::Object(Object(iter.into_iter().collect(), vec![]))
 	}
 }
 
@@ -2589,6 +2589,7 @@ impl fmt::Display for Value {
 			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
+			Value::Spread(v) => write!(f, "...{v}"),
 		}
 	}
 }

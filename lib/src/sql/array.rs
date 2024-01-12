@@ -140,7 +140,13 @@ impl Array {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
 			match v.compute(ctx, opt, txn, doc).await {
-				Ok(v) => x.push(v),
+				Ok(v) => match &v {
+					Value::Spread(v) => match v.deref() {
+						Value::Array(v) => v.iter().for_each(|v| x.push(v.clone())),
+						_ => return Err(Error::Thrown("Spread value not an array".into())),
+					},
+					_ => x.push(v),
+				},
 				Err(e) => return Err(e),
 			};
 		}
