@@ -1,9 +1,9 @@
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
-use crate::dbs::KvsNotification;
 use crate::dbs::{
-	node::Timestamp, Attach, Capabilities, Executor, Options, Response, Session, Variables,
+	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
+	Variables,
 };
 use crate::err::{BootstrapCause, Error, TaskVariant};
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -19,6 +19,7 @@ use crate::opt::capabilities::NetTarget;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::Oracle;
+use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -130,8 +131,7 @@ pub struct Datastore {
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	notification_channel:
-		OnceLock<(channel::Sender<KvsNotification>, channel::Receiver<KvsNotification>)>,
+	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<RwLock<SizedClock>>,
 	// The index store cache
@@ -373,7 +373,7 @@ impl Datastore {
 			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
-			notification_channel: OnceLock::new(),
+			notification_channel: None,
 			capabilities: Capabilities::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
@@ -394,8 +394,8 @@ impl Datastore {
 	}
 
 	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(self) -> Self {
-		self.notification_channel.set(channel::bounded(TX_LQ_CHANNEL_SIZE)).unwrap();
+	pub fn with_notifications(mut self) -> Self {
+		self.notification_channel = Some(channel::bounded(TX_LQ_CHANNEL_SIZE));
 		self
 	}
 
@@ -1014,7 +1014,7 @@ impl Datastore {
 			Optimistic => false,
 		};
 
-		let inner = match &*self.inner {
+		let inner = match self.inner.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -1131,12 +1131,13 @@ impl Datastore {
 			.into());
 		}
 		// Create a new query options
-		let opt = Options::new()
+		let opt = Options::default()
 			.with_id(self.id.0)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
-			.with_strict(self.strict)
 			.with_live(sess.live())
+			.with_auth(sess.au.clone())
+			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
@@ -1147,7 +1148,7 @@ impl Datastore {
 			self.index_stores.clone(),
 		)?;
 		// Setup the notification channel
-		if let Some(channel) = self.notification_channel.get() {
+		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1215,7 +1216,7 @@ impl Datastore {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = self.notification_channel.get() {
+		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1284,7 +1285,7 @@ impl Datastore {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = self.notification_channel.get() {
+		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
@@ -1326,8 +1327,8 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
-	pub fn notifications(&self) -> Option<channel::Receiver<KvsNotification>> {
-		self.notification_channel.get().map(|v| v.1.clone())
+	pub fn notifications(&self) -> Option<Receiver<Notification>> {
+		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
@@ -1342,7 +1343,7 @@ impl Datastore {
 	pub async fn export(
 		&self,
 		sess: &Session,
-		chn: channel::Sender<Vec<u8>>,
+		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;

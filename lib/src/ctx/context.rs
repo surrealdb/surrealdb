@@ -3,7 +3,7 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::FuncTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, KvsNotification};
+use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
@@ -42,7 +42,7 @@ pub struct Context<'a> {
 	// A collection of read only values stored in this context.
 	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
 	// Stores the notification channel if available
-	notifications: Option<Sender<KvsNotification>>,
+	notifications: Option<Sender<Notification>>,
 	// An optional query planner
 	query_planner: Option<&'a QueryPlanner<'a>>,
 	// An optional query executor
@@ -168,7 +168,7 @@ impl<'a> Context<'a> {
 
 	/// Add the LIVE query notification channel to the context, so that we
 	/// can send notifications to any subscribers.
-	pub fn add_notifications(&mut self, chn: Option<&Sender<KvsNotification>>) {
+	pub fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
 		self.notifications = chn.cloned()
 	}
 
@@ -190,7 +190,7 @@ impl<'a> Context<'a> {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
 	}
 
-	pub fn notifications(&self) -> Option<Sender<KvsNotification>> {
+	pub fn notifications(&self) -> Option<Sender<Notification>> {
 		self.notifications.clone()
 	}
 
