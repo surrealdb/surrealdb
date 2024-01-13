@@ -80,6 +80,8 @@ where
 			}
 			let mut live_queries = IndexMap::new();
 			let mut checked = false;
+			// Adjusting offsets as a workaround to https://github.com/surrealdb/surrealdb/issues/3318
+			let mut offset = 0;
 			for (index, stmt) in statements.iter().enumerate() {
 				if let Statement::Live(stmt) = stmt {
 					if !checked && !router.features.contains(&ExtraFeatures::LiveQueries) {
@@ -87,13 +89,18 @@ where
 					}
 					checked = true;
 					live_queries.insert(
-						index,
+						index - offset,
 						Ok(LiveStatement {
 							// Make sure the live query has a different ID from the initial one
 							id: Uuid::new_v4(),
 							..stmt.clone()
 						}),
 					);
+				} else if matches!(
+					stmt,
+					Statement::Begin(..) | Statement::Commit(..) | Statement::Cancel(..)
+				) {
+					offset += 1;
 				}
 			}
 			let query = sql::Query(Statements(statements));
