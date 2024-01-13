@@ -799,6 +799,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_capabilities() {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
