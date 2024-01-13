@@ -825,7 +825,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}
@@ -855,7 +856,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}
@@ -901,7 +903,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}
