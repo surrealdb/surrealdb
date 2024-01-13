@@ -634,6 +634,11 @@ impl WithStats<Response> {
 	pub fn num_statements(&self) -> usize {
 		self.0.num_statements()
 	}
+
+	/// Returns the unwrapped response
+	pub fn into_inner(self) -> Response {
+		self.0
+	}
 }
 
 #[cfg(test)]
