@@ -723,9 +723,9 @@ impl MTree {
 			return Ok(0.0);
 		}
 		let dist = match &self.distance {
-			Distance::Euclidean => v1.euclidean_distance(v2)?,
-			Distance::Manhattan => v1.manhattan_distance(v2)?,
-			Distance::Minkowski(order) => v1.minkowski_distance(v2, order)?,
+			Distance::Euclidean => v1.euclidean_distance(v2),
+			Distance::Manhattan => v1.manhattan_distance(v2),
+			Distance::Minkowski(order) => v1.minkowski_distance(v2, order.to_float()),
 			_ => return Err(Error::UnsupportedDistance(self.distance.clone())),
 		};
 		if dist.is_finite() {
@@ -1959,6 +1959,7 @@ mod tests {
 				}
 				let expected_len = collection.as_ref().len().min(knn);
 				if expected_len != res.docs.len() {
+					#[cfg(debug_assertions)]
 					debug!("{:?}", res.visited_nodes);
 					check_tree_properties(&mut tx, &mut st, t).await?;
 				}

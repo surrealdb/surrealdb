@@ -1,9 +1,12 @@
 use crate::idx::docids::DocId;
+#[cfg(debug_assertions)]
 use crate::idx::trees::store::NodeId;
 use roaring::RoaringTreemap;
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+#[cfg(debug_assertions)]
+use std::collections::HashMap;
+use std::collections::{BTreeMap, VecDeque};
 #[derive(Debug, Clone)]
 pub(super) struct PriorityNode(pub(super) f64, pub(super) u64);
 
@@ -250,7 +253,9 @@ impl KnnResultBuilder {
 			}
 			Entry::Occupied(mut e) => {
 				let d = e.get_mut();
-				d.append_from(docs);
+				if let Some(n) = d.append_from(docs) {
+					e.insert(n);
+				}
 			}
 		}
 

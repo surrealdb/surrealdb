@@ -14,8 +14,8 @@ struct HnswIndex<const M: usize, const M0: usize, const EFC: usize> {
 }
 
 impl<const M: usize, const M0: usize, const EFC: usize> HnswIndex<M, M0, EFC> {
-	fn new(_distance: Distance) -> Self {
-		let h = Hnsw::default();
+	fn new(distance: Distance) -> Self {
+		let h = Hnsw::new(None, distance);
 		let d = HashMap::new();
 		HnswIndex {
 			h,
@@ -38,13 +38,14 @@ impl<const M: usize, const M0: usize, const EFC: usize> HnswIndex<M, M0, EFC> {
 		}
 	}
 
-	fn search(&mut self, o: &SharedVector, n: usize, ef: usize) -> KnnResult {
-		let neighbors = self.h.knn_search(o, n, ef);
+	async fn search(&mut self, o: &SharedVector, n: usize, ef: usize) -> KnnResult {
+		let neighbors = self.h.knn_search(o, n, ef).await;
 		let mut builder = KnnResultBuilder::new(n);
-		for (e, d) in neighbors {
-			if builder.check_add(d) {
-				if let Some(docs) = self.d.get(&e) {
-					builder.add(d, docs);
+		for pn in neighbors {
+			if builder.check_add(pn.0) {
+				let v = &self.h.elements[pn.1 as usize];
+				if let Some(docs) = self.d.get(v) {
+					builder.add(pn.0, docs);
 				}
 			}
 		}
@@ -57,8 +58,8 @@ impl<const M: usize, const M0: usize, const EFC: usize> HnswIndex<M, M0, EFC> {
 }
 
 struct Hnsw<const M: usize, const M0: usize, const EFC: usize> {
-	dist: Distance,
 	ml: f64,
+	dist: Distance,
 	layers: Vec<RwLock<Layer>>,
 	enter_point: Option<ElementId>,
 	elements: Vec<SharedVector>,
@@ -75,18 +76,12 @@ impl Layer {
 
 type ElementId = u64;
 
-impl<const M: usize, const M0: usize, const EFC: usize> Default for Hnsw<M, M0, EFC> {
-	fn default() -> Self {
-		Self::new(None, None)
-	}
-}
-
 impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
-	fn new(ml: Option<f64>, dist: Option<Distance>) -> Self {
-		debug!("NEW - M0: {M0} - M: {M} - ml: {ml:?} - dist: {dist:?}");
+	fn new(ml: Option<f64>, dist: Distance) -> Self {
+		debug!("NEW - M0: {M0} - M: {M} - ml: {ml:?}");
 		Self {
 			ml: ml.unwrap_or(1.0 / (M as f64).ln()),
-			dist: dist.unwrap_or(Distance::Euclidean),
+			dist,
 			enter_point: None,
 			layers: Vec::default(),
 			elements: Vec::default(),
@@ -139,12 +134,9 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		debug!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?} - top-layer: {top_layer_level}");
 
 		for lc in ((level + 1)..=top_layer_level).rev() {
-			debug!("1 - LC: {lc}");
 			let w = self.search_layer(q, ep, 1, lc).await;
-			debug!("1 - W: {w:?}");
 			if let Some(n) = w.first() {
 				ep = n.1;
-				debug!("1 - EP: {ep}");
 			}
 		}
 
@@ -287,11 +279,26 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	}
 
 	fn distance(&self, v1: &SharedVector, v2: &SharedVector) -> f64 {
-		v1.distance(&self.dist, v2).unwrap_or(f64::INFINITY)
+		self.dist.dist(v1, v2)
 	}
 
-	fn knn_search(&self, _q: &SharedVector, _k: usize, _ef: usize) -> Vec<(SharedVector, f64)> {
-		todo!()
+	async fn knn_search(&self, q: &SharedVector, k: usize, ef: usize) -> Vec<PriorityNode> {
+		if let Some(mut ep) = self.enter_point.clone() {
+			let l = self.layers.len();
+			for lc in (1..l).rev() {
+				let w = self.search_layer(q, ep, 1, lc).await;
+				if let Some(n) = w.first() {
+					ep = n.1;
+				} else {
+					unreachable!()
+				}
+			}
+			let w = self.search_layer(q, ep, ef, 0).await;
+			let w: Vec<PriorityNode> = w.into_iter().collect();
+			w.into_iter().take(k).collect()
+		} else {
+			vec![]
+		}
 	}
 }
 
@@ -300,7 +307,7 @@ mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::hnsw::HnswIndex;
-	use crate::idx::trees::knn::tests::TestCollection;
+	use crate::idx::trees::knn::tests::{new_vec, TestCollection};
 	use crate::idx::trees::vector::SharedVector;
 	use crate::sql::index::{Distance, VectorType};
 	use std::collections::HashMap;
@@ -318,22 +325,23 @@ mod tests {
 		Ok(map)
 	}
 
-	fn find_collection<const M: usize, const M0: usize, const EFC: usize>(
+	async fn find_collection<const M: usize, const M0: usize, const EFC: usize>(
 		h: &mut HnswIndex<M, M0, EFC>,
 		collection: &TestCollection,
 	) -> Result<(), Error> {
 		let max_knn = 20.max(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
-				let res = h.search(obj, knn, 500);
+				let res = h.search(obj, knn, 500).await;
 				if collection.is_unique() {
 					assert!(
 						res.docs.contains(doc_id),
-						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
+						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?} - Dist: {}",
 						obj,
 						knn,
 						doc_id,
-						res.docs
+						res.docs,
+						h.h.dist
 					);
 				}
 				let expected_len = collection.as_ref().len().min(knn);
@@ -356,48 +364,102 @@ mod tests {
 	) -> Result<(), Error> {
 		let mut h: HnswIndex<M, M0, EFC> = HnswIndex::new(distance);
 		insert_collection_one_by_one::<M, M0, EFC>(&mut h, collection).await?;
-		find_collection::<M, M0, EFC>(&mut h, &collection)?;
+		find_collection::<M, M0, EFC>(&mut h, &collection).await?;
 		Ok(())
 	}
 
-	async fn test_hnsw_collection_distances<
-		const D: usize,
-		const M: usize,
-		const M0: usize,
-		const EFC: usize,
-	>(
-		vt: VectorType,
-		collection: TestCollection,
-	) -> Result<(), Error> {
-		for distance in [
-			Distance::Euclidean,
-			Distance::Manhattan,
-			Distance::Hamming,
-			Distance::Minkowski(2.into()),
-		] {
-			debug!(
-				"Distance: {:?} - Collection: {} - Vector type: {}",
-				distance,
-				collection.as_ref().len(),
-				vt,
-			);
-			test_hnsw_collection::<M, M0, EFC>(distance, &collection).await?;
+	#[test(tokio::test)]
+	async fn test_hnsw_unique_col_10_dim_2_all_distances() -> Result<(), Error> {
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			for distance in [
+				Distance::Euclidean,
+				Distance::Manhattan,
+				Distance::Hamming,
+				Distance::Jaccard,
+				Distance::Minkowski(2.into()),
+				Distance::Pearson,
+				Distance::Cosine,
+				Distance::Chebyshev,
+			] {
+				test_hnsw_collection::<12, 24, 500>(
+					distance,
+					&TestCollection::new_unique(10, vt, 2),
+				)
+				.await?;
+			}
 		}
 		Ok(())
 	}
 
 	#[test(tokio::test)]
-	async fn test_hnsw_unique_xs() -> Result<(), Error> {
-		for vt in
-			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
-		{
-			const DIM: usize = 10;
-			test_hnsw_collection_distances::<DIM, 12, 24, 500>(
-				vt,
-				TestCollection::new_unique(DIM, vt, 2),
+	async fn test_hnsw_unique_coll_20_dim_1536() -> Result<(), Error> {
+		for vt in [VectorType::F32, VectorType::I32] {
+			test_hnsw_collection::<12, 24, 500>(
+				Distance::Hamming,
+				&TestCollection::new_unique(20, vt, 1536),
 			)
 			.await?;
 		}
 		Ok(())
+	}
+
+	fn test_distance(dist: Distance, size: usize, dim: usize) {
+		let mut coll = Vec::with_capacity(size);
+		for i in 1..=size {
+			let v1 = new_vec(i as i64, VectorType::F32, dim);
+			let v2 = new_vec((i * 2) as i64, VectorType::F32, dim);
+			coll.push((v1, v2));
+		}
+		for (v1, v2) in &coll {
+			assert_ne!(dist.dist(v1, v2), 0.0, "v1 {v1:?} - v2 {v2:?}");
+		}
+	}
+
+	#[test]
+	fn test_distance_chebyshev() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Chebyshev);
+		test_distance(h.h.dist, 10000, 1536);
+	}
+
+	#[test]
+	fn test_distance_cosine() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Cosine);
+		test_distance(h.h.dist, 10000, 1536);
+	}
+
+	#[test]
+	fn test_distance_euclidean() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Euclidean);
+		test_distance(h.h.dist, 10000, 1536);
+	}
+
+	#[test]
+	fn test_distance_hamming() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Hamming);
+		test_distance(h.h.dist, 10000, 1536);
+	}
+
+	#[test]
+	fn test_distance_jaccard() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Jaccard);
+		test_distance(h.h.dist, 10000, 1536);
+	}
+	#[test]
+	fn test_distance_manhattan() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Manhattan);
+		test_distance(h.h.dist, 10000, 1536);
+	}
+	#[test]
+	fn test_distance_minkowski() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Minkowski(2.into()));
+		test_distance(h.h.dist, 10000, 1536);
+	}
+
+	#[test]
+	fn test_distance_pearson() {
+		let h: HnswIndex<12, 24, 500> = HnswIndex::new(Distance::Pearson);
+		test_distance(h.h.dist, 10000, 1536);
 	}
 }
