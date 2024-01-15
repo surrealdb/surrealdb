@@ -284,6 +284,7 @@ fn process(
 			}
 		};
 		while let Some(Notification {
+			query_id,
 			action,
 			data,
 			..
@@ -293,18 +294,22 @@ fn process(
 				// Don't prettify the SurrealQL response
 				(false, false) => {
 					let value = Value::from(map! {
-						String::from("action") => format!("{action:?}").into(),
-						String::from("data") => data,
+						String::from("id") => query_id.into(),
+						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+						String::from("result") => data,
 					});
 					value.to_string()
 				}
 				// Yes prettify the SurrealQL response
-				(false, true) => format!("-- Notification (action: {action:?})\n{data:#}"),
+				(false, true) => format!(
+					"-- Notification (action: {action:?}, live query ID: {query_id})\n{data:#}"
+				),
 				// Don't pretty print the JSON response
 				(true, false) => {
 					let value = Value::from(map! {
-						String::from("action") => format!("{action:?}").into(),
-						String::from("data") => data,
+						String::from("id") => query_id.into(),
+						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+						String::from("result") => data,
 					});
 					value.into_json().to_string()
 				}
@@ -317,7 +322,7 @@ fn process(
 					);
 					data.into_json().serialize(&mut serializer).unwrap();
 					let output = String::from_utf8(buf).unwrap();
-					format!("-- Notification (action: {action:?})\n{output:#}")
+					format!("-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}")
 				}
 			};
 			if tx.send(Ok(format!("\n{message}"))).await.is_err() {

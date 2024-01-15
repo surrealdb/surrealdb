@@ -273,17 +273,13 @@ pub struct Stream<'r, C: Connection, R, T = ()> {
 }
 
 macro_rules! poll_next {
-	($action:ident, $result:ident => $body:expr) => {
+	($notification:ident => $body:expr) => {
 		fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 			let Some(ref mut rx) = self.as_mut().rx else {
 				return Poll::Ready(None);
 			};
 			match rx.poll_next_unpin(cx) {
-				Poll::Ready(Some(dbs::Notification {
-					$action,
-					$result,
-					..
-				})) => $body,
+				Poll::Ready(Some($notification)) => $body,
 				Poll::Ready(None) => Poll::Ready(None),
 				Poll::Pending => Poll::Pending,
 			}
@@ -298,15 +294,23 @@ where
 	type Item = Notification<Value>;
 
 	poll_next! {
-		action, result => Poll::Ready(Some(Notification { action: action.into(), data: result }))
+		notification => Poll::Ready(Some(Notification {
+			query_id: notification.id.0,
+			action: notification.action.into(),
+			data: notification.result,
+		}))
 	}
 }
 
 macro_rules! poll_next_and_convert {
 	() => {
 		poll_next! {
-			action, result => match from_value(result) {
-				Ok(data) => Poll::Ready(Some(Ok(Notification { action: action.into(), data }))),
+			notification => match from_value(notification.result) {
+				Ok(data) => Poll::Ready(Some(Ok(Notification {
+					data,
+					query_id: notification.id.0,
+					action: notification.action.into(),
+				}))),
 				Err(error) => Poll::Ready(Some(Err(error.into()))),
 			}
 		}
