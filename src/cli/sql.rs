@@ -276,7 +276,7 @@ fn process(
 	}
 
 	tokio::spawn(async move {
-		let mut stream = match response.into_inner().stream::<Value>(()).await {
+		let mut stream = match response.into_inner().stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
 				tx.send(Err(error.into())).await.ok();

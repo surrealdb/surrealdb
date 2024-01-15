@@ -51,7 +51,6 @@ pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
-pub use query::QueryStreamFuture;
 pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
@@ -642,7 +641,7 @@ where
 			client: Cow::Borrowed(self),
 			query: vec![query.into_query()],
 			bindings: Ok(Default::default()),
-			kill_live_queries: true,
+			register_live_queries: true,
 		}
 	}
 

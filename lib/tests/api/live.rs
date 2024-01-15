@@ -190,7 +190,6 @@ async fn live_select_query() {
 			.await
 			.unwrap()
 			.stream::<Notification<_>>(0)
-			.await
 			.unwrap();
 
 		// Create a record
@@ -227,7 +226,6 @@ async fn live_select_query() {
 			.await
 			.unwrap()
 			.stream::<Value>(0)
-			.await
 			.unwrap();
 
 		// Create a record
@@ -249,7 +247,6 @@ async fn live_select_query() {
 			.await
 			.unwrap()
 			.stream::<Notification<_>>(())
-			.await
 			.unwrap();
 
 		// Create a record
@@ -286,7 +283,6 @@ async fn live_select_query() {
 			.await
 			.unwrap()
 			.stream::<Value>(())
-			.await
 			.unwrap();
 
 		// Create a record

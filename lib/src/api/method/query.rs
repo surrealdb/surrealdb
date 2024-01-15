@@ -13,14 +13,12 @@ use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::sql;
-use crate::sql::statements::LiveStatement;
 use crate::sql::to_value;
 use crate::sql::Array;
 use crate::sql::Object;
 use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
-use crate::sql::Uuid;
 use crate::sql::Value;
 use crate::Notification;
 use crate::Surreal;
@@ -48,7 +46,7 @@ pub struct Query<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) query: Vec<Result<Vec<Statement>>>,
 	pub(super) bindings: Result<BTreeMap<String, Value>>,
-	pub(super) kill_live_queries: bool,
+	pub(crate) register_live_queries: bool,
 }
 
 impl<C> Query<'_, C>
@@ -73,60 +71,51 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
+			// Extract the router from the client
 			let router = self.client.router.extract()?;
+			// Combine all query statements supplied
 			let mut statements = Vec::with_capacity(self.query.len());
 			for query in self.query {
 				statements.extend(query?);
 			}
-			let mut live_queries = IndexMap::new();
-			let mut checked = false;
-			// Adjusting offsets as a workaround to https://github.com/surrealdb/surrealdb/issues/3318
-			let mut offset = 0;
-			for (index, stmt) in statements.iter().enumerate() {
-				if let Statement::Live(stmt) = stmt {
-					if !checked && !router.features.contains(&ExtraFeatures::LiveQueries) {
-						return Err(Error::LiveQueriesNotSupported.into());
-					}
-					checked = true;
-					live_queries.insert(
-						index - offset,
-						Ok(LiveStatement {
-							// Make sure the live query has a different ID from the initial one
-							id: Uuid::new_v4(),
-							..stmt.clone()
-						}),
-					);
-				} else if matches!(
-					stmt,
-					Statement::Begin(..) | Statement::Commit(..) | Statement::Cancel(..)
-				) {
-					offset += 1;
-				}
-			}
-			let query = sql::Query(Statements(statements));
+			// Build the query and execute it
+			let query = sql::Query(Statements(statements.clone()));
 			let param = Param::query(query, self.bindings?);
 			let mut conn = Client::new(Method::Query);
 			let mut response = conn.execute_query(router, param).await?;
-			if self.kill_live_queries && !live_queries.is_empty() {
-				let indices = live_queries.keys().copied().collect::<Vec<_>>();
-				for index in indices {
-					if let Some((stats, result)) = response.results.remove(&index) {
-						match result {
-							Ok(id) => {
-								// If the query contained live queries we want to kill them.
-								// We will restart them lazily when the user starts listening for them.
-								// We don't simply remove live queries from the query because we want to run
-								// queries unaltered.
-								live::kill(&self.client, id);
-								// Replace the live query ID with the new ID
-								if let Some(Ok(stmt)) = live_queries.get(&index) {
-									response.results.insert(index, (stats, Ok(stmt.id.into())));
-								}
-							}
-							Err(error) => {
-								live_queries.insert(index, Err(error));
-							}
+			// Register live queries if necessary
+			if self.register_live_queries {
+				let mut live_queries = IndexMap::new();
+				let mut checked = false;
+				// Adjusting offsets as a workaround to https://github.com/surrealdb/surrealdb/issues/3318
+				let mut offset = 0;
+				for (index, stmt) in statements.into_iter().enumerate() {
+					if let Statement::Live(stmt) = stmt {
+						if !checked && !router.features.contains(&ExtraFeatures::LiveQueries) {
+							return Err(Error::LiveQueriesNotSupported.into());
 						}
+						checked = true;
+						if let Some((_, Ok(id))) = response.results.get(&index) {
+							let result =
+								live::register::<Client>(router, id.clone()).await.map(|rx| {
+									Stream {
+										id: stmt.id.into(),
+										rx: Some(rx),
+										client: Surreal {
+											router: self.client.router.clone(),
+											engine: PhantomData,
+										},
+										response_type: PhantomData,
+										engine: PhantomData,
+									}
+								});
+							live_queries.insert(index - offset, result);
+						}
+					} else if matches!(
+						stmt,
+						Statement::Begin(..) | Statement::Commit(..) | Statement::Cancel(..)
+					) {
+						offset += 1;
 					}
 				}
 				response.live_queries = live_queries;
@@ -245,18 +234,7 @@ pub(crate) type QueryResult = Result<Value>;
 pub struct Response {
 	pub(crate) client: Surreal<Any>,
 	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
-	pub(crate) live_queries: IndexMap<usize, Result<LiveStatement>>,
-}
-
-/// A future that resolves into a query stream
-#[derive(Debug)]
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct QueryStreamFuture<R>(pub(crate) InnerStream<R>);
-
-#[derive(Debug)]
-pub(crate) enum InnerStream<R> {
-	One(Stream<'static, Any, R, sql::Query>),
-	Many(Vec<Stream<'static, Any, R, sql::Query>>),
+	pub(crate) live_queries: IndexMap<usize, Result<Stream<'static, Any, Value>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
@@ -392,20 +370,20 @@ impl Response {
 	///
 	/// // Stream the result of the live query at the given index
 	/// // while deserialising into the User type
-	/// let mut stream = response.stream::<Notification<User>>(0).await?;
+	/// let mut stream = response.stream::<Notification<User>>(0)?;
 	///
 	/// // Stream raw values instead
-	/// let mut stream = response.stream::<Value>(0).await?;
+	/// let mut stream = response.stream::<Value>(0)?;
 	///
 	/// // Combine and stream all `LIVE SELECT` statements in this query
-	/// let mut stream = response.stream::<Value>(()).await?;
+	/// let mut stream = response.stream::<Value>(())?;
 	/// #
 	/// # Ok(())
 	/// # }
 	/// ```
 	///
 	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
-	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> QueryStreamFuture<R> {
+	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
 		index.query_stream(self)
 	}
 

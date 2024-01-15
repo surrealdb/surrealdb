@@ -1,19 +1,13 @@
 use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
-use crate::method::query::{InnerStream, QueryStreamFuture};
-use crate::method::{self, live};
+use crate::method;
 use crate::method::{Stats, Stream};
 use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
 use crate::{syn, Notification};
 use futures::future::Either;
-use futures::stream::{select_all, FuturesUnordered};
-use futures::Future;
-use futures::TryStreamExt;
+use futures::stream::select_all;
 use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::mem;
-use std::pin::Pin;
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
@@ -433,45 +427,28 @@ where
 /// A way to take a query stream future from a query response
 pub trait QueryStream<R> {
 	/// Retrieves the query stream future
-	fn query_stream(self, response: &mut QueryResponse) -> QueryStreamFuture<R>;
+	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<R>>;
 }
 
 impl QueryStream<Value> for usize {
-	fn query_stream(self, response: &mut QueryResponse) -> QueryStreamFuture<Value> {
-		let statement = response.live_queries.remove(&self).unwrap_or_else(|| {
+	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
+		let stream = response.live_queries.remove(&self).unwrap_or_else(|| {
 			match response.results.contains_key(&self) {
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
 			}
-		});
-		let stream = InnerStream::One(Stream {
-			statement: Some(statement),
-			id: Value::None,
-			rx: None,
-			client: response.client.clone(),
-			response_type: PhantomData,
-			engine: PhantomData,
-			stream_type: PhantomData,
-		});
-		QueryStreamFuture(stream)
+		})?;
+		Ok(method::QueryStream(Either::Left(stream)))
 	}
 }
 
 impl QueryStream<Value> for () {
-	fn query_stream(self, response: &mut QueryResponse) -> QueryStreamFuture<Value> {
+	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
-		for (_, statement) in mem::take(&mut response.live_queries) {
-			streams.push(Stream {
-				statement: Some(statement),
-				id: Value::None,
-				rx: None,
-				client: response.client.clone(),
-				response_type: PhantomData,
-				engine: PhantomData,
-				stream_type: PhantomData,
-			});
+		for (_, result) in mem::take(&mut response.live_queries) {
+			streams.push(result?);
 		}
-		QueryStreamFuture(InnerStream::Many(streams))
+		Ok(method::QueryStream(Either::Right(select_all(streams))))
 	}
 }
 
@@ -479,23 +456,23 @@ impl<R> QueryStream<Notification<R>> for usize
 where
 	R: DeserializeOwned + Unpin,
 {
-	fn query_stream(self, response: &mut QueryResponse) -> QueryStreamFuture<Notification<R>> {
-		let statement = response.live_queries.remove(&self).unwrap_or_else(|| {
+	fn query_stream(
+		self,
+		response: &mut QueryResponse,
+	) -> Result<method::QueryStream<Notification<R>>> {
+		let mut stream = response.live_queries.remove(&self).unwrap_or_else(|| {
 			match response.results.contains_key(&self) {
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
 			}
-		});
-		let stream = InnerStream::One(Stream {
-			statement: Some(statement),
-			id: Value::None,
-			rx: None,
-			client: response.client.clone(),
+		})?;
+		Ok(method::QueryStream(Either::Left(Stream {
+			client: stream.client.clone(),
+			engine: stream.engine,
+			id: mem::take(&mut stream.id),
+			rx: stream.rx.take(),
 			response_type: PhantomData,
-			engine: PhantomData,
-			stream_type: PhantomData,
-		});
-		QueryStreamFuture(stream)
+		})))
 	}
 }
 
@@ -503,90 +480,21 @@ impl<R> QueryStream<Notification<R>> for ()
 where
 	R: DeserializeOwned + Unpin,
 {
-	fn query_stream(self, response: &mut QueryResponse) -> QueryStreamFuture<Notification<R>> {
+	fn query_stream(
+		self,
+		response: &mut QueryResponse,
+	) -> Result<method::QueryStream<Notification<R>>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
-		for (_, statement) in mem::take(&mut response.live_queries) {
+		for (_, result) in mem::take(&mut response.live_queries) {
+			let mut stream = result?;
 			streams.push(Stream {
-				statement: Some(statement),
-				id: Value::None,
-				rx: None,
-				client: response.client.clone(),
+				client: stream.client.clone(),
+				engine: stream.engine,
+				id: mem::take(&mut stream.id),
+				rx: stream.rx.take(),
 				response_type: PhantomData,
-				engine: PhantomData,
-				stream_type: PhantomData,
 			});
 		}
-		QueryStreamFuture(InnerStream::Many(streams))
+		Ok(method::QueryStream(Either::Right(select_all(streams))))
 	}
-}
-
-macro_rules! into_future {
-	() => {
-		fn into_future(mut self) -> Self::IntoFuture {
-			match &mut self.0 {
-				InnerStream::One(stream) => {
-					let statement =
-						mem::take(&mut stream.statement).unwrap_or_else(|| unreachable!());
-					let client = stream.client.clone();
-					Box::pin(async move {
-						let (id, rx) = live::query(&Cow::Borrowed(&client), statement?).await?;
-						Ok(method::QueryStream(Either::Left(Stream {
-							id,
-							rx: Some(rx),
-							client,
-							statement: None,
-							response_type: PhantomData,
-							engine: PhantomData,
-							stream_type: PhantomData,
-						})))
-					})
-				}
-				InnerStream::Many(vec) => {
-					let mut vec = mem::take(vec);
-					Box::pin(async move {
-						let mut streams = Vec::with_capacity(vec.len());
-						for stream in &mut vec {
-							let statement = mem::take(&mut stream.statement)
-								.unwrap_or_else(|| unreachable!())?;
-							let client = stream.client.clone();
-							streams.push(async move {
-								match live::query(&Cow::Borrowed(&client), statement).await {
-									Ok((id, rx)) => Ok(Stream {
-										id,
-										rx: Some(rx),
-										client,
-										statement: None,
-										response_type: PhantomData,
-										engine: PhantomData,
-										stream_type: PhantomData,
-									}),
-									Err(error) => Err(error),
-								}
-							});
-						}
-						let streams: Vec<_> =
-							FuturesUnordered::from_iter(streams).try_collect().await?;
-						Ok(method::QueryStream(Either::Right(select_all(streams))))
-					})
-				}
-			}
-		}
-	};
-}
-
-impl IntoFuture for QueryStreamFuture<Value> {
-	type Output = Result<method::QueryStream<Value>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
-
-	into_future! {}
-}
-
-impl<R> IntoFuture for QueryStreamFuture<Notification<R>>
-where
-	R: DeserializeOwned + Unpin + Send + Sync + 'static,
-{
-	type Output = Result<method::QueryStream<Notification<R>>>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync>>;
-
-	into_future! {}
 }

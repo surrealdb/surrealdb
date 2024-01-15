@@ -1,5 +1,6 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
+use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
@@ -31,8 +32,6 @@ use crate::Surreal;
 use channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
-
-use std::borrow::Cow;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -91,7 +90,14 @@ macro_rules! into_future {
 						Resource::Edges(edges) => return Err(Error::LiveOnEdges(edges).into()),
 					},
 				}
-				let (id, rx) = query(&client, stmt).await?;
+				let query = Query {
+					client: client.clone(),
+					query: vec![Ok(vec![Statement::Live(stmt)])],
+					bindings: Ok(Default::default()),
+					register_live_queries: false,
+				};
+				let id: Value = query.await?.take(0)?;
+				let rx = register::<Client>(router, id.clone()).await?;
 				Ok(Stream {
 					id,
 					rx: Some(rx),
@@ -99,36 +105,27 @@ macro_rules! into_future {
 						router: client.router.clone(),
 						engine: PhantomData,
 					},
-					statement: None,
 					response_type: PhantomData,
 					engine: PhantomData,
-					stream_type: PhantomData,
 				})
 			})
 		}
 	};
 }
 
-pub(crate) async fn query<'r, Client>(
-	client: &Surreal<Client>,
-	stmt: LiveStatement,
-) -> Result<(Value, Receiver<dbs::Notification>)>
+pub(crate) async fn register<Client>(
+	router: &Router,
+	id: Value,
+) -> Result<Receiver<dbs::Notification>>
 where
 	Client: Connection,
 {
-	let query = Query {
-		client: Cow::Owned(client.clone()),
-		query: vec![Ok(vec![Statement::Live(stmt)])],
-		bindings: Ok(Default::default()),
-		kill_live_queries: false,
-	};
-	let id: Value = query.await?.take(0)?;
 	let mut conn = Client::new(Method::Live);
 	let (tx, rx) = channel::unbounded();
 	let mut param = Param::notification_sender(tx);
-	param.other = vec![id.clone()];
-	conn.execute_unit(client.router.extract()?, param).await?;
-	Ok((id, rx))
+	param.other = vec![id];
+	conn.execute_unit(router, param).await?;
+	Ok(rx)
 }
 
 fn cond_from_range(range: crate::sql::Range) -> Option<Cond> {
@@ -260,16 +257,14 @@ where
 /// A stream of live query notifications
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
-pub struct Stream<'r, C: Connection, R, T = ()> {
+pub struct Stream<'r, C: Connection, R> {
 	pub(crate) client: Surreal<Any>,
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
 	pub(crate) engine: PhantomData<&'r C>,
 	pub(crate) id: Value,
 	pub(crate) rx: Option<Receiver<dbs::Notification>>,
-	pub(crate) statement: Option<Result<LiveStatement>>,
 	pub(crate) response_type: PhantomData<R>,
-	pub(crate) stream_type: PhantomData<T>,
 }
 
 macro_rules! poll_next {
@@ -355,15 +350,12 @@ where
 	spawn(async move {
 		if let Ok(router) = client.router.extract() {
 			let mut conn = Client::new(Method::Kill);
-			match conn.execute_unit(router, Param::new(vec![id.clone()])).await {
-				Ok(()) => trace!("Live query {id} dropped successfully"),
-				Err(error) => warn!("Failed to drop live query {id}; {error}"),
-			}
+			conn.execute_unit(router, Param::new(vec![id.clone()])).await.ok();
 		}
 	});
 }
 
-impl<Client, R, T> Drop for Stream<'_, Client, R, T>
+impl<Client, R> Drop for Stream<'_, Client, R>
 where
 	Client: Connection,
 {
@@ -371,7 +363,7 @@ where
 	///
 	/// This kills the live query process responsible for this stream.
 	fn drop(&mut self) {
-		if !self.id.is_none() && self.statement.is_none() {
+		if !self.id.is_none() && self.rx.is_some() {
 			let id = mem::take(&mut self.id);
 			kill(&self.client, id);
 		}
