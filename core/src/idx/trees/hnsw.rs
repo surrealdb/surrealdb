@@ -5,7 +5,7 @@ use crate::sql::index::Distance;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use tokio::sync::RwLock;
 
 struct HnswIndex<const M: usize, const M0: usize, const EFC: usize> {
@@ -83,7 +83,7 @@ impl<const M: usize, const M0: usize, const EFC: usize> Default for Hnsw<M, M0, 
 
 impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	fn new(ml: Option<f64>, dist: Option<Distance>) -> Self {
-		println!("NEW - M0: {M0} - M: {M} - ml: {ml:?} - dist: {dist:?}");
+		debug!("NEW - M0: {M0} - M: {M} - ml: {ml:?} - dist: {dist:?}");
 		Self {
 			ml: ml.unwrap_or(1.0 / (M as f64).ln()),
 			dist: dist.unwrap_or(Distance::Euclidean),
@@ -97,14 +97,15 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	async fn insert(&mut self, q: SharedVector) -> ElementId {
 		let id = self.elements.len() as ElementId;
 		let level = self.get_random_level();
+		let layers = self.layers.len();
 
-		for l in self.layers.len()..=level {
-			println!("Create Layer {l}");
+		for l in layers..=level {
+			debug!("Create Layer {l}");
 			self.layers.push(RwLock::new(Layer::new()));
 		}
 
 		if let Some(ep) = self.enter_point.clone() {
-			self.insert_element(&q, ep, id, level).await;
+			self.insert_element(&q, ep, id, level, layers - 1).await;
 		} else {
 			self.insert_first_element(id, level).await;
 		}
@@ -119,11 +120,12 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 	}
 
 	async fn insert_first_element(&mut self, id: ElementId, level: usize) {
-		println!("insert_first_element - id: {id} - level: {level}");
+		debug!("insert_first_element - id: {id} - level: {level}");
 		for lc in 0..=level {
 			self.layers[lc].write().await.0.insert(id, vec![]);
 		}
 		self.enter_point = Some(id);
+		debug!("E - EP: {id}");
 	}
 
 	async fn insert_element(
@@ -132,51 +134,82 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		mut ep: ElementId,
 		id: ElementId,
 		level: usize,
+		top_layer_level: usize,
 	) {
-		println!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?}");
-		let init_level = level;
+		debug!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?} - top-layer: {top_layer_level}");
 
-		for lc in ((level + 1)..=init_level).rev() {
-			println!("1- LC: {lc}");
-			let w = self.search_layer(q, ep, 1, lc).await.into_sorted_vec();
-			ep = w[0].1;
+		for lc in ((level + 1)..=top_layer_level).rev() {
+			debug!("1 - LC: {lc}");
+			let w = self.search_layer(q, ep, 1, lc).await;
+			debug!("1 - W: {w:?}");
+			if let Some(n) = w.first() {
+				ep = n.1;
+				debug!("1 - EP: {ep}");
+			}
 		}
 
 		// TODO: One thread per level
 		let mut m_max = M;
-		for lc in (0..=init_level.min(level)).rev() {
+		for lc in (0..=top_layer_level.min(level)).rev() {
 			if lc == 0 {
 				m_max = M0;
 			}
-			println!("2- LC: {lc}");
+			debug!("2 - LC: {lc}");
 			let w = self.search_layer(q, ep, EFC, lc).await;
-			println!("2- W: {w:?}");
+			debug!("2 - W: {w:?}");
 			let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
 			self.select_neighbors_simple(&w, m_max, &mut neighbors);
-			println!("2- N: {neighbors:?}");
+			debug!("2 - N: {neighbors:?}");
 			// add bidirectional connections from neighbors to q at layer lc
 			let mut layer = self.layers[lc].write().await;
 			layer.0.insert(id, neighbors.clone());
+			debug!("2 - Layer: {:?}", layer.0);
 			for e_id in neighbors {
 				if let Some(e_conn) = layer.0.get_mut(&e_id) {
 					if e_conn.len() >= m_max {
-						self.select_and_shink_neighbors_simple(e_id, id, q, e_conn, m_max);
+						self.select_and_shrink_neighbors_simple(e_id, id, q, e_conn, m_max);
 					} else {
 						e_conn.push(id);
 					}
 				} else {
-					unreachable!()
+					unreachable!("Element: {}", e_id)
 				}
 			}
-			if let Some(next_ep) = w.iter().next() {
-				ep = next_ep.1;
+			if let Some(n) = w.first() {
+				ep = n.1;
+				debug!("2 - EP: {ep}");
 			} else {
-				unreachable!()
+				unreachable!("W is empty")
 			}
 		}
 
-		if level > init_level {
+		for lc in (top_layer_level + 1)..=level {
+			let mut layer = self.layers[lc].write().await;
+			if layer.0.insert(id, vec![]).is_some() {
+				unreachable!("Already there {id}");
+			}
+		}
+
+		if level > top_layer_level {
 			self.enter_point = Some(id);
+			debug!("E - EP: {id}");
+		}
+		self.debug_print_check().await;
+	}
+
+	async fn debug_print_check(&self) {
+		debug!("EP: {:?}", self.enter_point);
+		for (i, l) in self.layers.iter().enumerate() {
+			let l = l.read().await;
+			debug!("LAYER {i} {:?}", l.0);
+			let m_max = if i == 0 {
+				M0
+			} else {
+				M
+			};
+			for f in l.0.values() {
+				assert!(f.len() <= m_max);
+			}
 		}
 	}
 
@@ -192,11 +225,11 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		ep_id: ElementId,
 		ef: usize,
 		lc: usize,
-	) -> BinaryHeap<PriorityNode> {
+	) -> BTreeSet<PriorityNode> {
 		let ep_dist = self.distance(&self.elements[ep_id as usize], q);
 		let ep_pr = PriorityNode(ep_dist, ep_id);
 		let mut candidates = BTreeSet::from([ep_pr.clone()]);
-		let mut w = BinaryHeap::from([ep_pr]);
+		let mut w = BTreeSet::from([ep_pr]);
 		let mut visited = HashSet::from([ep_id]);
 		while let Some(c) = candidates.pop_first() {
 			let f_dist = candidates.last().map(|f| f.0).unwrap_or(c.0);
@@ -209,9 +242,9 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 						let e_dist = self.distance(&self.elements[e_id as usize], q);
 						if e_dist < f_dist || w.len() < ef {
 							candidates.insert(PriorityNode(e_dist, e_id));
-							w.push(PriorityNode(e_dist, e_id));
+							w.insert(PriorityNode(e_dist, e_id));
 							if w.len() > ef {
-								w.pop();
+								w.pop_last();
 							}
 						}
 					}
@@ -221,7 +254,7 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		w
 	}
 
-	fn select_and_shink_neighbors_simple(
+	fn select_and_shrink_neighbors_simple(
 		&self,
 		e_id: ElementId,
 		new_f_id: ElementId,
@@ -230,18 +263,18 @@ impl<const M: usize, const M0: usize, const EFC: usize> Hnsw<M, M0, EFC> {
 		m_max: usize,
 	) {
 		let e = &self.elements[e_id as usize];
-		let mut w = BinaryHeap::with_capacity(elements.len());
-		w.push(PriorityNode(self.distance(e, new_f), new_f_id));
+		let mut w = BTreeSet::default();
+		w.insert(PriorityNode(self.distance(e, new_f), new_f_id));
 		for f_id in elements.drain(..) {
 			let f_dist = self.distance(&self.elements[f_id as usize], e);
-			w.push(PriorityNode(f_dist, f_id));
+			w.insert(PriorityNode(f_dist, f_id));
 		}
 		self.select_neighbors_simple(&w, m_max, elements);
 	}
 
 	fn select_neighbors_simple(
 		&self,
-		w: &BinaryHeap<PriorityNode>,
+		w: &BTreeSet<PriorityNode>,
 		m_max: usize,
 		neighbors: &mut Vec<ElementId>,
 	) {
