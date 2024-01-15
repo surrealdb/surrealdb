@@ -2,7 +2,7 @@
 #[serial]
 async fn write_scan_hb() {
 	let nd = uuid::Uuid::parse_str("e80540d4-2869-4bf3-ae27-790a538c53f3").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(nd, clock).await.unwrap();
 
 	// Add 2 nodes

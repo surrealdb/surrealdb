@@ -1,6 +1,5 @@
 use crate::kvs::clock::SizedClock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
@@ -18,7 +17,7 @@ pub(crate) enum Kvs {
 
 // This type is unsused when no store is enabled.
 #[allow(dead_code)]
-type ClockType = Arc<RwLock<SizedClock>>;
+type ClockType = Arc<SizedClock>;
 
 #[cfg(feature = "kv-mem")]
 mod mem {
@@ -44,7 +43,7 @@ mod mem {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("361893b5-a041-40c0-996c-c3a8828ef06b").unwrap();
-		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
@@ -90,7 +89,7 @@ mod rocksdb {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("22358e5e-87bd-4040-8c63-01db896191ab").unwrap();
-		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 

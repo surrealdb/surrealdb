@@ -20,7 +20,7 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
-	pub async fn now(&mut self) -> Timestamp {
+	pub async fn now(&self) -> Timestamp {
 		match self {
 			SizedClock::System(c) => c.now(),
 			#[cfg(test)]
@@ -61,7 +61,7 @@ impl FakeClock {
 		}
 	}
 
-	pub async fn set(&mut self, timestamp: Timestamp) {
+	pub async fn set(&self, timestamp: Timestamp) {
 		self.now.store(timestamp.value, Ordering::SeqCst);
 	}
 }
