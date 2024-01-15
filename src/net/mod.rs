@@ -24,6 +24,7 @@ use crate::cli::CF;
 use crate::cnf;
 use crate::err::Error;
 use crate::net::signals::graceful_shutdown;
+use crate::rpc::notifications;
 use crate::telemetry::metrics::HttpMetricsLayer;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -170,36 +171,39 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 
 	let axum_app = axum_app.layer(service);
 
-	// Setup the graceful shutdown
+	// Get a new server handler
 	let handle = Handle::new();
-	let shutdown_handler = graceful_shutdown(ct, handle.clone());
-
+	// Setup the graceful shutdown handler
+	let shutdown_handler = graceful_shutdown(ct.clone(), handle.clone());
+	// Spawn a task to handle notifications
+	tokio::spawn(async move { notifications(ct.clone()).await });
+	// If a certificate and key are specified then setup TLS
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
-		// configure certificate and private key used by https
+		// Configure certificate and private key used by https
 		let tls = RustlsConfig::from_pem_file(cert, key).await.unwrap();
-
+		// Setup the Axum server with TLS
 		let server = axum_server::bind_rustls(opt.bind, tls);
-
+		// Log the server startup to the CLI
 		info!(target: LOG, "Started web server on {}", &opt.bind);
-
+		// Start the server and listen for connections
 		server
 			.handle(handle)
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
 			.await?;
 	} else {
+		// Setup the Axum server
 		let server = axum_server::bind(opt.bind);
-
+		// Log the server startup to the CLI
 		info!(target: LOG, "Started web server on {}", &opt.bind);
-
+		// Start the server and listen for connections
 		server
 			.handle(handle)
 			.serve(axum_app.into_make_service_with_connect_info::<SocketAddr>())
 			.await?;
 	};
-
 	// Wait for the shutdown to finish
 	let _ = shutdown_handler.await;
-
+	// Log the server shutdown to the CLI
 	info!(target: LOG, "Web server stopped. Bye!");
 
 	Ok(())
