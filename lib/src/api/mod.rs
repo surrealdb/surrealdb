@@ -17,6 +17,7 @@ use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use semver::BuildMetadata;
 use semver::VersionReq;
+use std::fmt;
 use std::fmt::Debug;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -131,7 +132,6 @@ pub(crate) enum ExtraFeatures {
 }
 
 /// A database client instance for embedded or remote databases
-#[derive(Debug)]
 pub struct Surreal<C: Connection> {
 	router: Arc<OnceLock<Router>>,
 	engine: PhantomData<C>,
@@ -176,6 +176,18 @@ where
 			router: self.router.clone(),
 			engine: self.engine,
 		}
+	}
+}
+
+impl<C> Debug for Surreal<C>
+where
+	C: Connection,
+{
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Surreal")
+			.field("router", &self.router)
+			.field("engine", &self.engine)
+			.finish()
 	}
 }
 
