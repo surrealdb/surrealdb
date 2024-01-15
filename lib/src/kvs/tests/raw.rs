@@ -246,7 +246,7 @@ async fn scan() {
 async fn scan_paged() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("6572a13c-a7a0-4e19-be62-18acb4e854f5").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();

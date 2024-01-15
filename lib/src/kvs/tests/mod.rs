@@ -135,7 +135,7 @@ mod speedb {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("5877e580-12ac-49e4-95e1-3c407c4887f3").unwrap();
-		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
@@ -182,7 +182,7 @@ mod tikv {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("18717a0f-0ab0-421e-b20c-e69fb03e90a3").unwrap();
-		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
@@ -229,7 +229,7 @@ mod fdb {
 		// Shared node id for one-off transactions
 		// We should delete this, node IDs should be known.
 		let new_tx_uuid = Uuid::parse_str("50f5bdf5-8abe-406b-8002-a79c942f510f").unwrap();
-		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
 	}
 
