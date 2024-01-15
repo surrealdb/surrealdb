@@ -95,7 +95,6 @@ async fn archive_live_query_batch(
 	msg: &mut Vec<BootstrapOperationResult>,
 ) -> Result<Vec<BootstrapOperationResult>, Error> {
 	let mut ret: Vec<BootstrapOperationResult> = vec![];
-	// TODO test failed tx retries
 	let mut last_err = None;
 	for _ in 0..ds::BOOTSTRAP_TX_RETRIES {
 		for (lq, e) in ret.drain(..) {
@@ -125,7 +124,6 @@ async fn archive_live_query_batch(
 						.await;
 					// Maybe it won't work. Not handled atm, so treat as valid error
 					if let Err(e) = lv_res {
-						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
 						continue;
 					}
@@ -152,7 +150,6 @@ async fn archive_live_query_batch(
 						}
 					}
 				}
-				// TODO where can the above transaction hard fail? Every op needs rollback?
 				if let Err(e) = tx.commit().await {
 					error!("Error committing transaction during archive: {}", e);
 					last_err = Some(e);
@@ -164,7 +161,6 @@ async fn archive_live_query_batch(
 					trace!("archive committed tx happy path");
 					break;
 				}
-				// TODO second happy path commit?
 				trace!("archive committing tx second happy");
 				if let Err(e) = tx.commit().await {
 					trace!("failed to commit tx: {:?}", e);

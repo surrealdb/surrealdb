@@ -12,7 +12,9 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::kvs::{
+	bootstrap, LockType, LockType::*, SendTransaction, TransactionType, TransactionType::*,
+};
 use crate::opt::auth::Root;
 #[cfg(feature = "jwks")]
 use crate::opt::capabilities::NetTarget;
@@ -21,15 +23,15 @@ use crate::syn;
 use crate::vs::Oracle;
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
+use std::cell::OnceCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot, RwLock};
-use tokio::time::{sleep, timeout};
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
@@ -534,8 +536,8 @@ impl Datastore {
 		// The transaction request pair is used for receiving requests for new transactions
 		// it contains one-shot senders so that the transaction can be sent and forgotten
 		let (tx_req_send, mut tx_req_recv): (
-			mpsc::Sender<oneshot::Sender<Transaction>>,
-			mpsc::Receiver<oneshot::Sender<Transaction>>,
+			mpsc::Sender<oneshot::Sender<SendTransaction>>,
+			mpsc::Receiver<oneshot::Sender<SendTransaction>>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 
 		// In several new transactions, scan all removed node live queries
@@ -602,7 +604,7 @@ impl Datastore {
 				}
 				Some(sender) => {
 					trace!("Received a transaction request");
-					let tx = self.transaction(Write, Optimistic).await.unwrap();
+					let tx = self.transaction_send(Write, Optimistic).await.unwrap();
 					if let Err(mut tx) = sender.send(tx) {
 						// The receiver has been dropped, so we need to cancel the transaction
 						trace!("Unable to send a transaction as response to task because the receiver is closed");
@@ -962,6 +964,23 @@ impl Datastore {
 		node_id: Uuid,
 	) -> Result<(), Error> {
 		tx.set_hb(timestamp, node_id.0).await
+	}
+
+	pub async fn transaction_send(
+		&self,
+		tx_type: TransactionType,
+		lock: LockType,
+	) -> Result<SendTransaction, Error> {
+		#[cfg(not(feature = "kv-indexdb"))]
+		{
+			self.transaction(tx_type, lock).await
+		}
+		#[cfg(feature = "kv-indexdb")]
+		{
+			let once = OnceCell::new();
+			once.set(self.transaction(tx_type, lock).await);
+			Arc::new(once)
+		}
 	}
 
 	// -----

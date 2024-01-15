@@ -44,7 +44,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -88,6 +88,12 @@ pub struct Transaction {
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
+
+#[cfg(not(feature = "kv-indexdb"))]
+pub(crate) type SendTransaction = Transaction;
+// Wasm IndexDB Transactions are not Send, so we wrap them
+#[cfg(feature = "kv-indexdb")]
+pub(crate) type SendTransaction = Arc<OnceLock<Transaction>>;
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {

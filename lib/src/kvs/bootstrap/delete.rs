@@ -81,9 +81,8 @@ async fn delete_live_query_batch(
 	msg: &mut Vec<BootstrapOperationResult>,
 ) -> Result<Vec<BootstrapOperationResult>, Error> {
 	let mut ret: Vec<BootstrapOperationResult> = vec![];
-	// TODO test failed tx retries
 	let mut last_err = None;
-	for i in 0..ds::BOOTSTRAP_TX_RETRIES {
+	for _ in 0..ds::BOOTSTRAP_TX_RETRIES {
 		// In case this is a retry, we re-hydrate the msg vector
 		for (lq, e) in ret.drain(..) {
 			msg.push((lq, e));
@@ -106,36 +105,30 @@ async fn delete_live_query_batch(
 				trace!("Received tx in delete");
 				// Consume the input message vector of live queries to archive
 				for (lq, _e) in msg.drain(..) {
-					// TODO check if e has error and send and skip
 					// Delete the node live query
 					// NOTE: deleting missing entries does not error
 					if let Err(e) = tx.del_ndlq(*lq.nd, *lq.lq, &lq.ns, &lq.db).await {
 						error!("Failed deleting node live query: {:?}", e);
-						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
 						continue;
 					}
 					// Delete the table live query
 					if let Err(e) = tx.del_tblq(&lq.ns, &lq.db, &lq.tb, *lq.lq).await {
 						error!("Failed deleting table live query: {:?}", e);
-						// TODO wrap error with context that this step failed; requires self-ref error
 						ret.push((lq, Some(e)));
 						continue;
 					}
 					// We do not delete the notifications - they should not be written in the first
 					// place, since that was not merged.
 				}
-				// TODO where can the above transaction hard fail? Every op needs rollback?
 				trace!("Committing transaction after {} writes", ret.len());
 				if let Err(e) = tx.commit().await {
-					// TODO wrap?
 					match tx.cancel().await {
 						Ok(_) => {
 							error!("Commit failed, but rollback succeeded when deleting ndlq+tblq");
 							last_err = Some(e);
 						}
 						Err(e2) => {
-							// TODO wrap?
 							error!("Failed to rollback tx: {:?}, original: {:?}", e2, e);
 							last_err = Some(e2);
 						}
