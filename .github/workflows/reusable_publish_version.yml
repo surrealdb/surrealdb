@@ -84,8 +84,7 @@ jobs:
             git checkout -b releases/stable
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-            version=${major}.${minor}.$(($betaNum - 1))
+            version=${major}.${minor}.0
 
             # Bump the crate version
             sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
@@ -180,7 +179,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.75.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -231,7 +230,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.75.0
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -434,7 +433,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.74.1
           targets: ${{ matrix.arch }}
 
       - name: Output package versions

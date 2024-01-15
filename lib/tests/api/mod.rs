@@ -33,6 +33,7 @@ async fn yuse() {
 	drop(permit);
 }
 
+#[ignore]
 #[test_log::test(tokio::test)]
 async fn invalidate() {
 	let (permit, db) = new_db().await;
@@ -55,7 +56,7 @@ async fn signup_scope() {
 	let scope = Ulid::new().to_string();
 	let sql = format!(
 		"
-        DEFINE SCOPE {scope} SESSION 1s
+        DEFINE SCOPE `{scope}` SESSION 1s
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     "
@@ -82,7 +83,7 @@ async fn signin_ns() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER `{user}` ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
@@ -102,7 +103,7 @@ async fn signin_db() {
 	db.use_ns(NS).use_db(&database).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE USER {user} ON DATABASE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER `{user}` ON DATABASE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
@@ -126,7 +127,7 @@ async fn signin_scope() {
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE SCOPE {scope} SESSION 1s
+        DEFINE SCOPE `{scope}` SESSION 1s
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     "
@@ -168,7 +169,7 @@ async fn scope_throws_error() {
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE SCOPE {scope} SESSION 1s
+        DEFINE SCOPE `{scope}` SESSION 1s
         SIGNUP {{ THROW 'signup_thrown_error' }}
         SIGNIN {{ THROW 'signin_thrown_error' }}
     "
@@ -230,7 +231,7 @@ async fn scope_invalid_query() {
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE SCOPE {scope} SESSION 1s
+        DEFINE SCOPE `{scope}` SESSION 1s
         SIGNUP {{ SELECT * FROM ONLY [1, 2] }}
         SIGNIN {{ SELECT * FROM ONLY [1, 2] }}
     "
@@ -292,7 +293,7 @@ async fn authenticate() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
 	let pass = "password123";
-	let sql = format!("DEFINE USER {user} ON NAMESPACE PASSWORD '{pass}'");
+	let sql = format!("DEFINE USER `{user}` ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();

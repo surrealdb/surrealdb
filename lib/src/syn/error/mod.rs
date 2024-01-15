@@ -2,6 +2,9 @@ use std::{fmt, ops::Range};
 
 use super::common::Location;
 
+mod nom_error;
+pub use nom_error::ParseError;
+
 #[derive(Clone, Debug)]
 pub struct RenderedError {
 	pub text: String,

@@ -90,8 +90,7 @@ mod tests {
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 		println!("---");
-		//
-		let id2 = "foo:['f8e238f2-e734-47b8-9a16-476b291bd78a']";
+		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
 		let thing = syn::thing(id2).expect("Failed to parse the ID");
 		let id2 = thing.id;
 		let val = Thing::new("testns", "testdb", "testtb", id2);

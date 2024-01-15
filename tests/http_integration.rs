@@ -1413,7 +1413,7 @@ mod http_integration {
 		let res = client
 			.post(format!("http://{addr}/sql"))
 			.basic_auth(USER, Some(PASS))
-			.body(format!("CREATE |{table}:1..{num_records}| SET default = 'content'"))
+			.body(format!("CREATE |`{table}`:1..{num_records}| SET default = 'content'"))
 			.send()
 			.await?;
 		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();

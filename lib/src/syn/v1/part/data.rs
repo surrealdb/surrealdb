@@ -72,7 +72,6 @@ pub fn single(i: &str) -> IResult<&str, Data> {
 
 pub fn values(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("(")(i)?;
-	// TODO: look at call tree here.
 	let (i, fields) = separated_list1(commas, plain)(i)?;
 	let (i, _) = tag_no_case(")")(i)?;
 	let (i, _) = shouldbespace(i)?;

@@ -24,6 +24,12 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
+	pub(crate) fn random_code() -> String {
+		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+	}
+}
+
+impl DefineScopeStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -45,10 +51,6 @@ impl DefineScopeStatement {
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
-	}
-
-	pub fn random_code() -> String {
-		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
 	}
 }
 

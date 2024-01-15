@@ -18,6 +18,8 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
+experimental-parser = ["surrealdb/experimental-parser"]
+jwks = ["surrealdb/jwks"]
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
@@ -59,6 +61,7 @@ reqwest = { version = "0.11.22", default-features = false, features = ["blocking
 rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }
+serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }

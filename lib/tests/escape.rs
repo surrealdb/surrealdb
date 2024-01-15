@@ -11,8 +11,8 @@ async fn complex_ids() -> Result<(), Error> {
 	let sql = r#"
 		CREATE person:100 SET test = 'One';
 		CREATE person:00100;
-		CREATE 'person:100';
-		CREATE "person:100";
+		CREATE r'person:100';
+		CREATE r"person:100";
 		CREATE person:⟨100⟩ SET test = 'Two';
 		CREATE person:`100`;
 		SELECT * FROM person;

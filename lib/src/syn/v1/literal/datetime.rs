@@ -29,8 +29,8 @@ fn datetime_single(i: &str) -> IResult<&str, Datetime> {
 
 fn datetime_double(i: &str) -> IResult<&str, Datetime> {
 	alt((
-		delimited(tag("d\""), cut(datetime_raw), cut(char('\"'))),
-		delimited(char('\"'), datetime_raw, char('\"')),
+		delimited(tag("d\""), cut(datetime_raw), cut(char('"'))),
+		delimited(char('"'), datetime_raw, char('"')),
 	))(i)
 }
 
@@ -194,7 +194,7 @@ mod tests {
 
 	// use chrono::Date;
 
-	use crate::{sql::Value, syn::test::Parse};
+	use crate::{sql::Value, syn::Parse};
 
 	use super::*;
 

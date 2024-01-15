@@ -48,29 +48,6 @@ impl Expression {
 			r,
 		}
 	}
-	/// Augment an existing expression
-	pub(crate) fn augment(mut self, l: Value, o: Operator) -> Self {
-		match &mut self {
-			Self::Binary {
-				l: left,
-				o: op,
-				..
-			} if o.precedence() >= op.precedence() => match left {
-				Value::Expression(x) => {
-					*x.as_mut() = std::mem::take(x).augment(l, o);
-					self
-				}
-				_ => {
-					*left = Self::new(l, o, std::mem::take(left)).into();
-					self
-				}
-			},
-			e => {
-				let r = Value::from(std::mem::take(e));
-				Self::new(l, o, r)
-			}
-		}
-	}
 }
 
 impl Expression {
@@ -132,6 +109,8 @@ impl Expression {
 				let operand = v.compute(ctx, opt, txn, doc).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
+					// TODO: Check if it is a number?
+					Operator::Add => Ok(operand),
 					Operator::Not => fnc::operate::not(operand),
 					op => unreachable!("{op:?} is not a unary op"),
 				};
