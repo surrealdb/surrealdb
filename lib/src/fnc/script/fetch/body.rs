@@ -1,139 +1,137 @@
-use crate::fnc::script::fetch::{stream::ReadableStream, RequestError};
-use bytes::{Bytes, BytesMut};
-use futures::{future, Stream, TryStreamExt};
-use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
-use std::{
-	cell::{Cell, RefCell},
-	result::Result as StdResult,
-};
+use crate::http::header::{self, HeaderMap};
+use crate::http::Body as BackendBody;
+use bytes::Bytes;
+use futures::Stream;
+use js::{Class, Ctx, Error, FromJs, Result, Type, Value};
+use mime::Mime;
+use std::error::Error as StdError;
+use std::result::Result as StdResult;
 
-use super::classes::Blob;
-
-pub type StreamItem = StdResult<Bytes, RequestError>;
-
-#[derive(Clone)]
-pub enum BodyKind {
-	Buffer,
-	String,
-	Blob(String),
-}
-
-pub enum BodyData {
-	Buffer(Bytes),
-	Stream(RefCell<ReadableStream<StreamItem>>),
-	// Returned when the body is already taken
-	Used,
-}
+use super::{classes::Blob, util};
 
 /// A struct representing the body mixin.
 ///
 /// Implements [`FromJs`] for conversion from `Blob`, `ArrayBuffer`, any `TypedBuffer` and `String`.
-pub struct Body {
-	/// The type of body
+pub struct Body(BackendBody);
+
+/// The type from which a body was created.
+pub enum BodyKind {
+	String,
+	Bytes,
+	Blob(Mime),
+	FormData,
+}
+
+pub struct BodyAndKind {
+	pub body: Body,
 	pub kind: BodyKind,
-	/// The data of the body
-	pub data: Cell<BodyData>,
+}
+
+impl BodyAndKind {
+	/// Applies the content type to the headers and returns the body.
+	pub fn apply_to_headers(self, headers: &mut HeaderMap) -> Body {
+		match self.kind {
+			BodyKind::String => {
+				headers.entry(header::CONTENT_TYPE).or_insert_with(|| {
+					let mime = mime::TEXT_PLAIN_UTF_8.to_string();
+					// TEXT_PLAIN should be a valid header value.
+					mime.parse().unwrap()
+				});
+			}
+			BodyKind::Bytes => {}
+			BodyKind::Blob(mime) => {
+				// Mime's should always a valid header value.
+				headers
+					.entry(header::CONTENT_TYPE)
+					.or_insert_with(|| mime.to_string().parse().unwrap());
+			}
+			BodyKind::FormData => todo!(),
+		}
+		self.body
+	}
+}
+
+impl Default for BodyAndKind {
+	fn default() -> Self {
+		Self {
+			body: Body::empty(),
+			kind: BodyKind::Bytes,
+		}
+	}
 }
 
 impl Default for Body {
 	fn default() -> Self {
-		Body::new()
+		Body::empty()
 	}
 }
 
 impl Body {
 	/// Create a new used body.
-	pub fn new() -> Self {
-		Body {
-			kind: BodyKind::Buffer,
-			data: Cell::new(BodyData::Used),
-		}
+	pub fn used() -> Self {
+		Body(BackendBody::used())
 	}
 
-	/// Returns whether the body is already used.
-	pub fn used(&self) -> bool {
-		match self.data.replace(BodyData::Used) {
-			BodyData::Used => true,
-			x => {
-				self.data.set(x);
-				false
-			}
-		}
+	/// Create a new used body.
+	pub fn empty() -> Self {
+		Body(BackendBody::empty())
 	}
 
-	/// Create a body from a buffer.
-	pub fn buffer<B>(kind: BodyKind, buffer: B) -> Self
-	where
-		B: Into<Bytes>,
-	{
-		let bytes = buffer.into();
-		Body {
-			kind,
-			data: Cell::new(BodyData::Buffer(bytes)),
-		}
+	/// Returns wther the body is alread used.
+	pub fn is_used(&self) -> bool {
+		self.0.is_used()
 	}
 
 	/// Create a body from a stream.
-	pub fn stream<S>(kind: BodyKind, stream: S) -> Self
+	pub fn stream<S, O, E>(stream: S) -> Self
 	where
-		S: Stream<Item = StreamItem> + Send + Sync + 'static,
+		S: Stream<Item = StdResult<O, E>> + Send + Sync + 'static,
+		Bytes: From<O>,
+		E: StdError + Send + Sync + 'static,
 	{
-		Body {
-			kind,
-			data: Cell::new(BodyData::Stream(RefCell::new(ReadableStream::new(stream)))),
-		}
+		Body(BackendBody::wrap_stream(stream))
 	}
 
 	/// Returns the data from the body as a buffer.
 	///
 	/// if the body is a stream this future only returns when the full body is consumed.
-	pub async fn to_buffer(&self) -> StdResult<Option<Bytes>, RequestError> {
-		match self.data.replace(BodyData::Used) {
-			BodyData::Buffer(x) => Ok(Some(x)),
-			BodyData::Stream(stream) => {
-				let stream = stream.into_inner();
-				let mut res = BytesMut::new();
-				stream
-					.try_for_each(|x| {
-						res.extend_from_slice(&x);
-						future::ready(Ok(()))
-					})
-					.await?;
-				Ok(Some(res.freeze()))
-			}
-			BodyData::Used => Ok(None),
-		}
+	pub async fn into_buffer(self) -> StdResult<Option<Bytes>, String> {
+		self.0.into_buffer().await.transpose().map_err(|e| e.to_string())
 	}
 
 	/// Clones the body teeing any possible underlying streems
-	pub fn clone_js(&self, ctx: Ctx<'_>) -> Self {
-		let data = match self.data.replace(BodyData::Used) {
-			BodyData::Buffer(x) => {
-				let res = BodyData::Buffer(x.clone());
-				self.data.set(BodyData::Buffer(x));
-				res
-			}
-			BodyData::Stream(stream) => {
-				let (tee, drive) = stream.borrow_mut().tee();
-				ctx.spawn(drive);
-				self.data.set(BodyData::Stream(stream));
-				BodyData::Stream(RefCell::new(tee))
-			}
-			BodyData::Used => BodyData::Used,
-		};
-		Self {
-			kind: self.kind.clone(),
-			data: Cell::new(data),
+	pub fn clone_js(&mut self, ctx: &Ctx<'_>) -> Self {
+		let (res, future) = self.0.tee();
+		if let Some(future) = future {
+			ctx.spawn(future);
 		}
+		Body(res)
+	}
+
+	pub fn into_backend_body(self) -> BackendBody {
+		self.0
 	}
 }
 
-impl<'js> FromJs<'js> for Body {
-	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
+impl<B> From<B> for Body
+where
+	BackendBody: From<B>,
+{
+	fn from(value: B) -> Self {
+		Body(BackendBody::from(value))
+	}
+}
+
+impl<'js> FromJs<'js> for BodyAndKind {
+	fn from_js(_ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = match value.type_of() {
 			Type::String => {
 				let string = value.as_string().unwrap().to_string()?;
-				return Ok(Body::buffer(BodyKind::String, string));
+				let body = Body::from(string);
+				return Ok(BodyAndKind {
+					body,
+					kind: BodyKind::String,
+				});
 			}
 			Type::Object => value.as_object().unwrap(),
 			x => {
@@ -146,61 +144,21 @@ impl<'js> FromJs<'js> for Body {
 		};
 		if let Some(x) = Class::<Blob>::from_object(object.clone()) {
 			let borrow = x.borrow();
-			return Ok(Body::buffer(BodyKind::Blob(borrow.mime.clone()), borrow.data.clone()));
+			let body = Body::from(borrow.data.clone());
+			return Ok(BodyAndKind {
+				body,
+				// for now
+				kind: BodyKind::Blob(mime::STAR_STAR),
+			});
 		}
-		if let Ok(x) = TypedArray::<i8>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Ok(x) = TypedArray::<u8>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Ok(x) = TypedArray::<i16>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Ok(x) = TypedArray::<u16>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Ok(x) = TypedArray::<i32>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Ok(x) = TypedArray::<u32>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Ok(x) = TypedArray::<i64>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Ok(x) = TypedArray::<u64>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
-		}
-		if let Some(x) = ArrayBuffer::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
-				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+
+		if let Some(bytes) = util::buffer_source_to_bytes(object)? {
+			let bytes = Bytes::copy_from_slice(bytes);
+			let body = Body::from(bytes);
+			return Ok(BodyAndKind {
+				body,
+				kind: BodyKind::Bytes,
+			});
 		}
 
 		Err(Error::FromJs {

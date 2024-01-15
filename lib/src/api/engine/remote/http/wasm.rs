@@ -9,11 +9,13 @@ use crate::api::opt::Endpoint;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::http::header::HeaderMap;
+use crate::http::ClientBuilder;
 use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
 use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
+use once_cell::sync::OnceCell;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::future::Future;
@@ -79,12 +81,12 @@ impl Connection for Client {
 	}
 }
 
-async fn client(base_url: &Url) -> Result<reqwest::Client> {
+async fn client(base_url: &Url) -> Result<crate::http::Client> {
 	let headers = super::default_headers();
 	let builder = ClientBuilder::new().default_headers(headers);
 	let client = builder.build()?;
 	let health = base_url.join(Method::Health.as_str())?;
-	super::health(client.get(health)).await?;
+	super::health(client.get(health)?).await?;
 	Ok(client)
 }
 

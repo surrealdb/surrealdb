@@ -6,17 +6,14 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::http::ClientBuilder;
 use flume::Receiver;
 use futures::StreamExt;
 use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
-use reqwest::ClientBuilder;
+use lib_http::header::HeaderMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -47,19 +44,14 @@ impl Connection for Client {
 
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			if let Some(tls) = address.config.tls_config {
-				builder = match tls {
-					#[cfg(feature = "native-tls")]
-					Tls::Native(config) => builder.use_preconfigured_tls(config),
-					#[cfg(feature = "rustls")]
-					Tls::Rust(config) => builder.use_preconfigured_tls(config),
-				};
+				builder = builder.with_tls(tls);
 			}
 
 			let client = builder.build()?;
 
 			let base_url = address.url;
 
-			super::health(client.get(base_url.join(Method::Health.as_str())?)).await?;
+			super::health(client.get(base_url.join(Method::Health.as_str())?)?).await?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => flume::unbounded(),
@@ -72,7 +64,7 @@ impl Connection for Client {
 			features.insert(ExtraFeatures::Backup);
 
 			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(Router {
+				router: Arc::new(OnceLock::from(Router {
 					features,
 					conn: PhantomData,
 					sender: route_tx,
@@ -99,7 +91,11 @@ impl Connection for Client {
 	}
 }
 
-pub(crate) fn router(base_url: Url, client: reqwest::Client, route_rx: Receiver<Option<Route>>) {
+pub(crate) fn router(
+	base_url: Url,
+	client: crate::http::Client,
+	route_rx: Receiver<Option<Route>>,
+) {
 	tokio::spawn(async move {
 		let mut headers = HeaderMap::new();
 		let mut vars = IndexMap::new();

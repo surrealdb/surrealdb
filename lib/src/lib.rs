@@ -133,6 +133,8 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
+#[cfg(feature = "http")]
+pub mod http;
 #[cfg(any(feature = "ml", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;

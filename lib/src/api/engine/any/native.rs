@@ -148,17 +148,12 @@ impl Connection for Any {
 						let mut builder = ClientBuilder::new().default_headers(headers);
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
 						if let Some(tls) = address.config.tls_config {
-							builder = match tls {
-								#[cfg(feature = "native-tls")]
-								Tls::Native(config) => builder.use_preconfigured_tls(config),
-								#[cfg(feature = "rustls")]
-								Tls::Rust(config) => builder.use_preconfigured_tls(config),
-							};
+							builder = builder.with_tls(tls)
 						}
 						let client = builder.build()?;
 						let base_url = address.url;
 						engine::remote::http::health(
-							client.get(base_url.join(Method::Health.as_str())?),
+							client.get(base_url.join(Method::Health.as_str())?)?,
 						)
 						.await?;
 						engine::remote::http::native::router(base_url, client, route_rx);
@@ -180,7 +175,6 @@ impl Connection for Any {
 						let maybe_connector = address.config.tls_config.map(Connector::from);
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
-
 						let config = WebSocketConfig {
 							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
 							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),

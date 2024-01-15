@@ -1,10 +1,22 @@
 //! Response class implementation
 
-mod init;
+use super::{Blob, Headers};
+use crate::fnc::script::fetch::{
+	body::{Body, BodyAndKind},
+	util,
+};
+use crate::http::header::{self, HeaderValue};
 use bytes::Bytes;
-pub use init::ResponseInit;
+use js::{
+	class::Trace,
+	prelude::{Opt, This},
+	ArrayBuffer, Class, Ctx, Exception, Result, Value,
+};
+use std::mem;
+use url::Url;
 
-use js::{class::Trace, prelude::Opt, ArrayBuffer, Class, Ctx, Exception, Result, Value};
+mod init;
+pub use init::ResponseInit;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -17,27 +29,24 @@ pub enum ResponseType {
 	OpaqueRedirect,
 }
 
-use reqwest::Url;
-
-use crate::fnc::script::fetch::{
-	body::{Body, BodyKind},
-	util, RequestError,
-};
-
-use super::{Blob, Headers};
-
 #[allow(dead_code)]
 #[derive(Trace)]
 #[js::class]
+#[qjs(rename_all = "camelCase")]
 pub struct Response<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) body: Body,
-	pub(crate) init: ResponseInit<'js>,
 	#[qjs(skip_trace)]
 	pub(crate) url: Option<Url>,
 	#[qjs(skip_trace)]
 	pub(crate) r#type: ResponseType,
 	pub(crate) was_redirected: bool,
+	#[qjs(get)]
+	pub(crate) status: u16,
+	#[qjs(get)]
+	pub(crate) status_text: String,
+	#[qjs(get)]
+	pub(crate) headers: Class<'js, Headers>,
 }
 
 #[js::methods]
@@ -49,29 +58,41 @@ impl<'js> Response<'js> {
 	#[qjs(constructor)]
 	pub fn new(
 		ctx: Ctx<'js>,
-		body: Opt<Option<Body>>,
+		body: Opt<Option<BodyAndKind>>,
 		init: Opt<ResponseInit<'js>>,
 	) -> Result<Self> {
-		let init = match init.into_inner() {
+		let ResponseInit {
+			status,
+			status_text,
+			headers,
+		} = match init.into_inner() {
 			Some(x) => x,
 			None => ResponseInit::default(ctx.clone())?,
 		};
 		let body = body.into_inner().and_then(|x| x);
-		if body.is_some() && util::is_null_body_status(init.status) {
-			// Null body statuses are not allowed to have a body.
-			return Err(Exception::throw_type(
-				&ctx,
-				&format!("Response with status `{}` is not allowed to have a body", init.status),
-			));
-		}
-		let body = body.unwrap_or_default();
+		let body = if let Some(body) = body {
+			if util::is_null_body_status(status) {
+				// Null body statuses are not allowed to have a body.
+				return Err(Exception::throw_type(
+					&ctx,
+					&format!("Response with status `{}` is not allowed to have a body", status),
+				));
+			}
+
+			let mut headers = headers.try_borrow_mut()?;
+			body.apply_to_headers(&mut headers.inner)
+		} else {
+			Body::empty()
+		};
 
 		Ok(Response {
 			body,
-			init,
 			url: None,
 			r#type: ResponseType::Default,
 			was_redirected: false,
+			status,
+			headers,
+			status_text,
 		})
 	}
 
@@ -81,27 +102,17 @@ impl<'js> Response<'js> {
 
 	#[qjs(get, rename = "bodyUsed")]
 	pub fn body_used(&self) -> bool {
-		self.body.used()
-	}
-
-	#[qjs(get)]
-	pub fn status(&self) -> u16 {
-		self.init.status
+		self.body.is_used()
 	}
 
 	#[qjs(get)]
 	pub fn ok(&self) -> bool {
-		util::is_ok_status(self.init.status)
+		util::is_ok_status(self.status)
 	}
 
 	#[qjs(get)]
 	pub fn redirected(&self) -> bool {
 		self.was_redirected
-	}
-
-	#[qjs(get, rename = "statusText")]
-	pub fn status_text(&self) -> String {
-		self.init.status_text.clone()
 	}
 
 	#[qjs(get, rename = "type")]
@@ -114,11 +125,6 @@ impl<'js> Response<'js> {
 			ResponseType::Opaque => "opaque",
 			ResponseType::OpaqueRedirect => "opaqueredirect",
 		}
-	}
-
-	#[qjs(get)]
-	pub fn headers(&self) -> Class<'js, Headers> {
-		self.init.headers.clone()
 	}
 
 	#[qjs(get)]
@@ -146,36 +152,46 @@ impl<'js> Response<'js> {
 
 	// Creates a copy of the request object
 	#[qjs(rename = "clone")]
-	pub fn clone_js(&self, ctx: Ctx<'js>) -> Self {
+	pub fn clone_js(&mut self, ctx: Ctx<'js>) -> Self {
 		Response {
-			body: self.body.clone_js(ctx),
-			init: self.init.clone(),
+			headers: self.headers.clone(),
+			body: self.body.clone_js(&ctx),
 			url: self.url.clone(),
 			r#type: self.r#type,
 			was_redirected: self.was_redirected,
+			status_text: self.status_text.clone(),
+			status: self.status,
 		}
 	}
 
 	#[qjs(skip)]
-	async fn take_buffer(&self, ctx: &Ctx<'js>) -> Result<Bytes> {
-		match self.body.to_buffer().await {
+	async fn take_buffer(this: This<Class<'js, Self>>, ctx: &Ctx<'js>) -> Result<Bytes> {
+		// Manually borrowing the class to ensure we don't hold the guard across awaits.
+		let body = {
+			let mut borrow = this.try_borrow_mut()?;
+			mem::replace(&mut borrow.body, Body::used())
+		};
+
+		if body.is_used() {
+			return Err(Exception::throw_type(ctx, "Body unusable"));
+		}
+
+		match body.into_buffer().await {
 			Ok(Some(x)) => Ok(x),
-			Ok(None) => Err(Exception::throw_type(ctx, "Body unusable")),
-			Err(e) => match e {
-				RequestError::Reqwest(e) => {
-					Err(Exception::throw_type(ctx, &format!("stream failed: {e}")))
-				}
-			},
+			Ok(None) => Ok(Bytes::new()),
+			Err(e) => Err(Exception::throw_type(ctx, &format!("stream failed: {e}"))),
 		}
 	}
 
 	// Returns a promise with the response body as a Blob
-	pub async fn blob(&self, ctx: Ctx<'js>) -> Result<Blob> {
-		let headers = self.init.headers.clone();
+	pub async fn blob(this: This<Class<'js, Self>>, ctx: Ctx<'js>) -> Result<Blob> {
 		let mime = {
-			let headers = headers.borrow();
+			// Don't hold the borrow across take_buffer
+			let borrow = this.try_borrow()?;
+			let headers = borrow.headers.clone();
+			let headers = headers.try_borrow()?;
 			let headers = &headers.inner;
-			let types = headers.get_all(reqwest::header::CONTENT_TYPE);
+			let types = headers.get_all(crate::http::header::CONTENT_TYPE);
 			// TODO: This is not according to spec.
 			types
 				.iter()
@@ -185,7 +201,7 @@ impl<'js> Response<'js> {
 				.to_owned()
 		};
 
-		let data = self.take_buffer(&ctx).await?;
+		let data = Self::take_buffer(this, &ctx).await?;
 		Ok(Blob {
 			mime,
 			data,
@@ -194,19 +210,22 @@ impl<'js> Response<'js> {
 
 	// Returns a promise with the response body as FormData
 	#[qjs(rename = "formData")]
-	pub async fn form_data(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
+	pub async fn form_data(
+		_this: This<Class<'js, Response<'js>>>,
+		ctx: Ctx<'js>,
+	) -> Result<Value<'js>> {
 		Err(Exception::throw_internal(&ctx, "Not yet implemented"))
 	}
 
 	// Returns a promise with the response body as JSON
-	pub async fn json(&self, ctx: Ctx<'js>) -> Result<Value<'js>> {
-		let text = self.text(ctx.clone()).await?;
+	pub async fn json(this: This<Class<'js, Self>>, ctx: Ctx<'js>) -> Result<Value<'js>> {
+		let text = Self::text(this, ctx.clone()).await?;
 		ctx.json_parse(text)
 	}
 
 	// Returns a promise with the response body as text
-	pub async fn text(&self, ctx: Ctx<'js>) -> Result<String> {
-		let data = self.take_buffer(&ctx).await?;
+	pub async fn text(this: This<Class<'js, Self>>, ctx: Ctx<'js>) -> Result<String> {
+		let data = Self::take_buffer(this, &ctx).await?;
 
 		// Skip UTF-BOM
 		if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -218,8 +237,11 @@ impl<'js> Response<'js> {
 
 	// Returns a promise with the response body as text
 	#[qjs(rename = "arrayBuffer")]
-	pub async fn array_buffer(&self, ctx: Ctx<'js>) -> Result<ArrayBuffer<'js>> {
-		let data = self.take_buffer(&ctx).await?;
+	pub async fn array_buffer(
+		this: This<Class<'js, Self>>,
+		ctx: Ctx<'js>,
+	) -> Result<ArrayBuffer<'js>> {
+		let data = Self::take_buffer(this, &ctx).await?;
 		ArrayBuffer::new(ctx, data)
 	}
 
@@ -238,16 +260,28 @@ impl<'js> Response<'js> {
 			json.ok_or_else(|| Exception::throw_type(&ctx, "Value is not JSON serializable"))?;
 		let json = json.to_string()?;
 
-		let init = if let Some(init) = init.into_inner() {
+		let ResponseInit {
+			status,
+			status_text,
+			headers,
+		} = if let Some(init) = init.into_inner() {
 			init
 		} else {
 			ResponseInit::default(ctx)?
 		};
 
+		headers.try_borrow_mut()?.inner.entry(header::CONTENT_TYPE).or_insert_with(|| {
+			let mime = mime::APPLICATION_JSON;
+			// Should always be a correct header value;
+			HeaderValue::try_from(mime.to_string()).unwrap()
+		});
+
 		Ok(Response {
 			url: None,
-			body: Body::buffer(BodyKind::Buffer, json),
-			init,
+			body: Body::from(json),
+			status,
+			status_text,
+			headers,
 			r#type: ResponseType::Default,
 			was_redirected: false,
 		})
@@ -259,12 +293,10 @@ impl<'js> Response<'js> {
 		let headers = Class::instance(ctx, Headers::new_empty())?;
 		Ok(Response {
 			url: None,
-			body: Body::new(),
-			init: ResponseInit {
-				status: 0,
-				status_text: String::new(),
-				headers,
-			},
+			body: Body::empty(),
+			status: 0,
+			status_text: String::new(),
+			headers,
 			r#type: ResponseType::Error,
 			was_redirected: false,
 		})
@@ -282,16 +314,17 @@ impl<'js> Response<'js> {
 			return Err(Exception::throw_range(&ctx, "Status code is not a redirect status"));
 		}
 
-		let headers = Class::instance(ctx, Headers::new_empty())?;
+		let mut headers = Headers::new_empty();
+		// A valid url should be a valid header value.
+		headers.inner.insert(header::LOCATION, HeaderValue::try_from(url.to_string()).unwrap());
+		let headers = Class::instance(ctx, headers)?;
 
 		Ok(Response {
 			url: Some(url),
-			body: Body::new(),
-			init: ResponseInit {
-				status,
-				status_text: String::new(),
-				headers,
-			},
+			body: Body::empty(),
+			status,
+			status_text: String::new(),
+			headers,
 			r#type: ResponseType::Default,
 			was_redirected: false,
 		})
@@ -309,10 +342,12 @@ mod test {
 			ctx.eval::<Promise<()>,_>(r#"
 				(async () => {
 					let resp = new Response();
-					assert(resp.bodyUsed);
+					assert(!resp.bodyUsed);
 					assert.seq(resp.status,200);
 					assert.seq(resp.ok,true);
 					assert.seq(resp.statusText,'');
+					assert.seq(await resp.text(),'');
+					assert(resp.bodyUsed);
 
 					// invalid status
 					assert.mustThrow(() => {
@@ -329,6 +364,7 @@ mod test {
 					assert.seq(resp.ok,true);
 					assert.seq(resp.statusText,'');
 					assert.seq(resp.headers.get("SomeHeader"),"Some-Value");
+					assert.seq(resp.headers.get("content-type"),"application/json");
 					let obj = await resp.json();
 					assert.seq(typeof obj, "object");
 					assert.seq(obj.a, 1);
@@ -344,6 +380,7 @@ mod test {
 					resp = Response.redirect("http://a");
 					assert.seq(resp.status,302);
 					assert.seq(resp.ok,false);
+					assert.seq(resp.headers.get("location"),"http://a/");
 
 					// not a redirect status
 					assert.mustThrow(() => {
@@ -362,6 +399,7 @@ mod test {
 
 					resp = new Response("some text");
 					let resp_2 = resp.clone();
+					assert.seq(resp.headers.get("content-type"),"text/plain; charset=utf-8");
 					assert.seq(await resp.text(),"some text");
 					assert.seq(await resp_2.text(),"some text");
 

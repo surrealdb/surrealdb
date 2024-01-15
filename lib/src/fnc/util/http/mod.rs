@@ -1,20 +1,25 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::{Bytes, Object, Strand, Value};
-use crate::syn;
-
-use reqwest::header::CONTENT_TYPE;
-use reqwest::{Client, RequestBuilder, Response};
+use crate::http::{Client, Request, Response};
+use crate::sql::object::Object;
+use crate::sql::strand::Strand;
+use crate::sql::value::Value;
+use crate::sql::{json, Bytes};
+use lib_http::header::CONTENT_TYPE;
 use url::Url;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
-	reqwest::Url::parse(uri).is_ok()
+	url::Url::parse(uri).is_ok()
 }
 
-fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
+fn encode_body(req: Request, body: Value) -> Request {
 	match body {
-		Value::Bytes(bytes) => req.header(CONTENT_TYPE, "application/octet-stream").body(bytes.0),
-		_ if body.is_some() => req.json(&body.into_json()),
+		Value::Bytes(bytes) => req
+			.header(CONTENT_TYPE, "application/octet-stream")
+			.expect("header should be correct")
+			.body(bytes.0),
+		// TODO: Check if this is actually correct.
+		_ if body.is_some() => req.json(&body.into_json()).expect("serialization should succeed"),
 		_ => req,
 	}
 }
@@ -52,14 +57,14 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new HEAD request
-	let mut req = cli.head(url);
+	let mut req = cli.head(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
@@ -81,14 +86,14 @@ pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Res
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.get(url);
+	let mut req = cli.get(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
@@ -112,14 +117,14 @@ pub async fn put(
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.put(url);
+	let mut req = cli.put(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Submit the request body
 	req = encode_body(req, body);
@@ -145,14 +150,14 @@ pub async fn post(
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.post(url);
+	let mut req = cli.post(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Submit the request body
 	req = encode_body(req, body);
@@ -178,14 +183,14 @@ pub async fn patch(
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.patch(url);
+	let mut req = cli.patch(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Submit the request body
 	req = encode_body(req, body);
@@ -210,14 +215,14 @@ pub async fn delete(
 	// Set a default client with no timeout
 	let cli = Client::builder().build()?;
 	// Start a new GET request
-	let mut req = cli.delete(url);
+	let mut req = cli.delete(url)?;
 	// Add the User-Agent header
 	if cfg!(not(target_arch = "wasm32")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header("User-Agent", "SurrealDB")?;
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
+		req = req.header(k.as_str(), v.to_raw_string())?;
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {

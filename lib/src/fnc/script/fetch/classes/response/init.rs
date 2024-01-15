@@ -11,7 +11,7 @@ use crate::fnc::script::fetch::{classes::Headers, util};
 /// Struct containing data from the init argument from the Response constructor.
 #[derive(Clone)]
 pub struct ResponseInit<'js> {
-	// u16 instead of reqwest::StatusCode since javascript allows non valid status codes in some
+	// u16 instead of lib_http::status::StatusCode since javascript allows non valid status codes in some
 	// circumstances.
 	pub status: u16,
 	pub status_text: StdString,
