@@ -1254,6 +1254,105 @@ mod tests {
 		}
 	}
 
+	#[tokio::test]
+	async fn test_token_scope_custom_claims() {
+		use std::collections::HashMap;
+
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON SCOPE test TYPE HS512 VALUE '{secret}';").as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		//
+		// Token with valid custom claims of different types
+		//
+		let now = Utc::now().timestamp();
+		let later = (Utc::now() + Duration::hours(1)).timestamp();
+		{
+			let claims_json = format!(
+				r#"
+				{{
+					"iss": "surrealdb-test",
+					"iat": {now},
+					"nbf": {now},
+					"exp": {later},
+					"tk": "token",
+					"ns": "test",
+					"db": "test",
+					"sc": "test",
+
+					"string_claim": "test",
+					"bool_claim": true,
+					"int_claim": 123456,
+					"float_claim": 123.456,
+					"array_claim": [
+						"test_1",
+						"test_2"
+					],
+					"object_claim": {{
+						"test_1": "value_1",
+						"test_2": {{
+							"test_2_1": "value_2_1",
+							"test_2_2": "value_2_2"
+						}}
+					}}
+				}}
+				"#
+			);
+			let claims = serde_json::from_str::<Claims>(&claims_json).unwrap();
+			// Create the token
+			let enc = match encode(&HEADER, &claims, &key) {
+				Ok(enc) => enc,
+				Err(err) => panic!("Failed to decode token: {:?}", err),
+			};
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			let tk = match sess.tk {
+				Some(Value::Object(tk)) => tk,
+				_ => panic!("Session token is not an object"),
+			};
+			let string_claim = tk.get("string_claim").unwrap();
+			assert_eq!(*string_claim, Value::Strand("test".into()));
+			let bool_claim = tk.get("bool_claim").unwrap();
+			assert_eq!(*bool_claim, Value::Bool(true.into()));
+			let int_claim = tk.get("int_claim").unwrap();
+			assert_eq!(*int_claim, Value::Number(123456.into()));
+			let float_claim = tk.get("float_claim").unwrap();
+			assert_eq!(*float_claim, Value::Number(123.456.into()));
+			let array_claim = tk.get("array_claim").unwrap();
+			assert_eq!(*array_claim, Value::Array(vec!["test_1", "test_2"].into()));
+			let object_claim = tk.get("object_claim").unwrap();
+			let mut test_object: HashMap<String, Value> = HashMap::new();
+			test_object.insert("test_1".to_string(), Value::Strand("value_1".into()));
+			let mut test_object_child = HashMap::new();
+			test_object_child.insert("test_2_1".to_string(), Value::Strand("value_2_1".into()));
+			test_object_child.insert("test_2_2".to_string(), Value::Strand("value_2_2".into()));
+			test_object.insert("test_2".to_string(), Value::Object(test_object_child.into()));
+			assert_eq!(*object_claim, Value::Object(test_object.into()));
+		}
+	}
+
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
