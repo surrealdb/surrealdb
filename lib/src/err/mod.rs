@@ -242,10 +242,8 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
-	#[error("The value '{current}' is not a vector.")]
-	InvalidVectorValue {
-		current: String,
-	},
+	#[error("The value cannot be converted to a vector: {0}")]
+	InvalidVectorValue(String),
 
 	/// Invalid regular expression
 	#[error("Invalid regular expression: {0:?}")]
@@ -626,7 +624,7 @@ pub enum Error {
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the match @@ or knn <> operator for a given expression
+	/// The query planner did not find an index able to support the match @@ for a given expression
 	#[error("There was no suitable index supporting the expression '{value}'")]
 	NoIndexFoundForMatch {
 		value: String,
