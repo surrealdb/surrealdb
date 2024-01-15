@@ -95,6 +95,7 @@ where
 							return Err(Error::LiveQueriesNotSupported.into());
 						}
 						checked = true;
+						let index = index - offset;
 						if let Some((_, Ok(id))) = response.results.get(&index) {
 							let result =
 								live::register::<Client>(router, id.clone()).await.map(|rx| {
@@ -109,7 +110,7 @@ where
 										engine: PhantomData,
 									}
 								});
-							live_queries.insert(index - offset, result);
+							live_queries.insert(index, result);
 						}
 					} else if matches!(
 						stmt,

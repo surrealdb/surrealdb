@@ -279,7 +279,9 @@ async fn live_select_query() {
 
 		// Start listening
 		let mut users = db
+			.query("BEGIN")
 			.query(format!("LIVE SELECT * FROM {table}"))
+			.query("COMMIT")
 			.await
 			.unwrap()
 			.stream::<Value>(())
