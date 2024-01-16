@@ -278,11 +278,11 @@ impl<'a> IndexOperation<'a> {
 
 				let key = self.get_unique_index_key(&n);
 
-				if n.is_some_none_or_null() {
-					run.del(&key).await?
-				}
+				if run.put(key, self.rid, None).await.is_err() {
+					if n.is_some_none_or_null() {
+						return Ok(());
+					}
 
-				if run.putc(key, self.rid, None).await.is_err() {
 					let key = self.get_unique_index_key(&n);
 					let val = run.get(key).await?.unwrap();
 					let rid: Thing = val.into();
