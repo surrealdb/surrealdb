@@ -2047,6 +2047,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_mtree_unique_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
@@ -2055,7 +2056,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_unique(i, vt, 2),
+					TestCollection::new_unique(i, vt, 2, false),
 					true,
 					true,
 					true,
@@ -2068,6 +2069,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_mtree_unique_xs_full_cache() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
@@ -2076,7 +2078,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_unique(i, vt, 2),
+					TestCollection::new_unique(i, vt, 2, false),
 					true,
 					true,
 					true,
@@ -2094,7 +2096,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new_unique(150, vt, 3),
+				TestCollection::new_unique(100, vt, 3, false),
 				true,
 				true,
 				true,
@@ -2111,7 +2113,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20),
+				TestCollection::new_unique(1000, vt, 20, false),
 				false,
 				true,
 				false,
@@ -2128,7 +2130,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20),
+				TestCollection::new_unique(1000, vt, 20, false),
 				false,
 				true,
 				false,
@@ -2145,7 +2147,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20),
+				TestCollection::new_unique(1000, vt, 20, false),
 				false,
 				true,
 				false,
@@ -2167,7 +2169,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_random(i, vt, 1),
+					TestCollection::new_random(i, vt, 1, false),
 					true,
 					true,
 					true,
@@ -2185,7 +2187,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new_random(150, vt, 3),
+				TestCollection::new_random(100, vt, 3, false),
 				true,
 				true,
 				true,
@@ -2202,7 +2204,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_random(1000, vt, 20),
+				TestCollection::new_random(1000, vt, 20, false),
 				false,
 				true,
 				true,

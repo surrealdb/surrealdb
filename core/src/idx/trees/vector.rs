@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::iter::Sum;
-use std::ops::{Mul, Sub};
+use std::ops::{Add, Mul, Sub};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
@@ -162,24 +161,35 @@ impl TreeVector {
 		}
 	}
 
-	fn dot<T>(a: &[T], b: &[T]) -> T
+	fn dot<T>(a: &[T], b: &[T]) -> f64
 	where
-		T: Mul<Output = T> + Copy + Sum,
+		T: Mul<Output = T> + Copy + ToFloat + Add<Output = T>,
 	{
-		a.iter().zip(b.iter()).map(|(&x, &y)| x * y).sum()
+		a.iter().zip(b.iter()).map(|(&x, &y)| (x * y).to_float()).sum()
 	}
 
 	fn magnitude<T>(v: &[T]) -> f64
 	where
-		T: ToFloat,
+		T: ToFloat + Mul<Output = T> + Add<Output = T>,
 	{
 		v.iter().map(|a| a.to_float().powi(2)).sum::<f64>().sqrt()
 	}
+
+	fn normalize<T>(v: &[T]) -> Vec<f64>
+	where
+		T: ToFloat + Mul<Output = T> + Add<Output = T> + Copy,
+	{
+		let mag = Self::magnitude(v);
+		v.iter().map(|&a| a.to_float() / mag).collect()
+	}
+
 	fn cosine<T>(a: &[T], b: &[T]) -> f64
 	where
-		T: ToFloat + Mul<Output = T> + Copy + Sum,
+		T: ToFloat + Mul<Output = T> + Add<Output = T> + Copy,
 	{
-		Self::dot(a, b).to_float() / (Self::magnitude(a) * Self::magnitude(b))
+		let a = Self::normalize(a);
+		let b = Self::normalize(b);
+		Self::dot(&a, &b)
 	}
 
 	pub(crate) fn cosine_distance(&self, other: &Self) -> f64 {

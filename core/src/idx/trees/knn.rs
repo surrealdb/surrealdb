@@ -319,18 +319,19 @@ pub(super) mod tests {
 	use crate::idx::trees::vector::{SharedVector, TreeVector};
 	use crate::sql::index::VectorType;
 	use crate::sql::Number;
-	use rand::prelude::StdRng;
+	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
+	use std::collections::HashSet;
 	use std::sync::Arc;
 
-	pub(super) fn get_seed_rnd() -> StdRng {
+	pub(crate) fn get_seed_rnd() -> SmallRng {
 		let seed: u64 = std::env::var("TEST_SEED")
 			.unwrap_or_else(|_| rand::random::<u64>().to_string())
 			.parse()
 			.expect("Failed to parse seed");
 		debug!("Seed: {}", seed);
 		// Create a seeded RNG
-		StdRng::seed_from_u64(seed)
+		SmallRng::seed_from_u64(seed)
 	}
 
 	pub(in crate::idx::trees) enum TestCollection {
@@ -357,13 +358,19 @@ pub(super) mod tests {
 	}
 
 	pub(in crate::idx::trees) fn new_random_vec(
-		rng: &mut StdRng,
+		rng: &mut SmallRng,
 		t: VectorType,
 		dim: usize,
+		for_jaccard: bool,
 	) -> SharedVector {
 		let mut vec = TreeVector::new(t, dim);
+		let generator: fn(&mut SmallRng) -> Number = if for_jaccard {
+			|rng| Number::Int(rng.gen_range(-1..=1))
+		} else {
+			|rng| Number::Float(rng.gen_range(-5.0..=5.0))
+		};
 		for _ in 0..dim {
-			vec.add(Number::Float(rng.gen_range(-5.0..5.0)));
+			vec.add(generator(rng));
 		}
 		Arc::new(vec)
 	}
@@ -373,11 +380,20 @@ pub(super) mod tests {
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
+			for_jaccard: bool,
 		) -> TestCollection {
-			let mut collection = vec![];
-			for doc_id in 0..collection_size as DocId {
-				collection.push((doc_id, new_vec((doc_id + 1) as i64, vector_type, dimension)));
+			let mut rng = get_seed_rnd();
+			let mut vector_set = HashSet::with_capacity(collection_size);
+			let mut attempts = collection_size * 2;
+			while vector_set.len() < collection_size {
+				vector_set.insert(new_random_vec(&mut rng, vector_type, dimension, for_jaccard));
+				attempts -= 1;
+				if attempts == 0 {
+					panic!("Fail generating a unique random collection");
+				}
 			}
+			let collection =
+				vector_set.into_iter().enumerate().map(|(i, v)| (i as DocId, v)).collect();
 			TestCollection::Unique(collection)
 		}
 
@@ -385,14 +401,17 @@ pub(super) mod tests {
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
+			for_jaccard: bool,
 		) -> TestCollection {
 			let mut rng = get_seed_rnd();
 			let mut collection = vec![];
 
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				collection
-					.push((doc_id as DocId, new_random_vec(&mut rng, vector_type, dimension)));
+				collection.push((
+					doc_id as DocId,
+					new_random_vec(&mut rng, vector_type, dimension, for_jaccard),
+				));
 			}
 			TestCollection::NonUnique(collection)
 		}
