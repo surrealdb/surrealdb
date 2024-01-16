@@ -33,7 +33,6 @@ async fn yuse() {
 	drop(permit);
 }
 
-#[ignore]
 #[test_log::test(tokio::test)]
 async fn invalidate() {
 	let (permit, db) = new_db().await;
