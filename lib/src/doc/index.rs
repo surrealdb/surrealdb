@@ -279,7 +279,7 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_unique_index_key(&n);
 
 				if run.putc(key, self.rid, None).await.is_err() {
-					if n.is_some_none_or_null() {
+					if n.is_any_none_or_null() {
 						return Ok(());
 					}
 

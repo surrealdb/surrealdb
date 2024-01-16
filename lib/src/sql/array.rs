@@ -151,7 +151,7 @@ impl Array {
 		self.0.iter().all(|v| v.is_none_or_null())
 	}
 
-	pub(crate) fn is_some_none_or_null(&self) -> bool {
+	pub(crate) fn is_any_none_or_null(&self) -> bool {
 		self.0.iter().any(|v| v.is_none_or_null())
 	}
 
