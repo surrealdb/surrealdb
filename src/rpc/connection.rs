@@ -6,8 +6,8 @@ use crate::err::Error;
 use crate::rpc::args::Take;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::Format;
-use crate::rpc::response::{failure, success, Data, IntoRpcResponse};
-use crate::rpc::{WebSocketRef, CONN_CLOSED_ERR, LIVE_QUERIES, WEBSOCKETS};
+use crate::rpc::response::{failure, Data, IntoRpcResponse};
+use crate::rpc::{CONN_CLOSED_ERR, LIVE_QUERIES, WEBSOCKETS};
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
@@ -34,12 +34,13 @@ use tracing::Span;
 use uuid::Uuid;
 
 pub struct Connection {
-	id: Uuid,
-	session: Session,
-	format: Format,
-	vars: BTreeMap<String, Value>,
-	limiter: Arc<Semaphore>,
-	canceller: CancellationToken,
+	pub(crate) id: Uuid,
+	pub(crate) format: Format,
+	pub(crate) session: Session,
+	pub(crate) vars: BTreeMap<String, Value>,
+	pub(crate) limiter: Arc<Semaphore>,
+	pub(crate) canceller: CancellationToken,
+	pub(crate) channels: (Sender<Message>, Receiver<Message>),
 }
 
 impl Connection {
@@ -50,23 +51,24 @@ impl Connection {
 		// Create and store the RPC connection
 		Arc::new(RwLock::new(Connection {
 			id,
-			session,
 			format,
+			session,
 			vars: BTreeMap::new(),
 			limiter: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
 			canceller: CancellationToken::new(),
+			channels: channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS),
 		}))
 	}
 
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Connection>>, ws: WebSocket) {
-		// Split the socket into send and recv
-		let (sender, receiver) = ws.split();
-		// Create an internal channel between the receiver and the sender
-		let (internal_sender, internal_receiver) =
-			channel::bounded(*WEBSOCKET_MAX_CONCURRENT_REQUESTS);
-
+		// Get the WebSocket ID
 		let id = rpc.read().await.id;
+		// Split the socket into sending and receiving streams
+		let (sender, receiver) = ws.split();
+		// Create an internal channel for sending and receiving
+		let internal_sender = rpc.read().await.channels.0.clone();
+		let internal_receiver = rpc.read().await.channels.1.clone();
 
 		trace!("WebSocket {} connected", id);
 
@@ -75,17 +77,13 @@ impl Connection {
 		}
 
 		// Add this WebSocket to the list
-		WEBSOCKETS
-			.write()
-			.await
-			.insert(id, WebSocketRef(internal_sender.clone(), rpc.read().await.canceller.clone()));
+		WEBSOCKETS.write().await.insert(id, rpc.clone());
 
 		// Spawn async tasks for the WebSocket
 		let mut tasks = JoinSet::new();
 		tasks.spawn(Self::ping(rpc.clone(), internal_sender.clone()));
 		tasks.spawn(Self::read(rpc.clone(), receiver, internal_sender.clone()));
 		tasks.spawn(Self::write(rpc.clone(), sender, internal_receiver.clone()));
-		tasks.spawn(Self::notifications(rpc.clone()));
 
 		// Wait until all tasks finish
 		while let Some(res) = tasks.join_next().await {
@@ -259,38 +257,6 @@ impl Connection {
 		}
 		// Abort all tasks
 		tasks.shutdown().await;
-	}
-
-	/// Send live query notifications to the client
-	async fn notifications(rpc: Arc<RwLock<Connection>>) {
-		if let Some(channel) = DB.get().unwrap().notifications() {
-			let canceller = rpc.read().await.canceller.clone();
-			loop {
-				tokio::select! {
-					//
-					biased;
-					// Check if this has shutdown
-					_ = canceller.cancelled() => break,
-					//
-					msg = channel.recv() => {
-						if let Ok(notification) = msg {
-							// Find which WebSocket the notification belongs to
-							if let Some(id) = LIVE_QUERIES.read().await.get(&notification.id) {
-								// Check to see if the WebSocket exists
-								if let Some(WebSocketRef(ws, _)) = WEBSOCKETS.read().await.get(id) {
-									// Serialize the message to send
-									let message = success(None, notification);
-									// Get the current output format
-									let format = rpc.read().await.format;
-									// Send the notification to the client
-									message.send(format, ws).await
-								}
-							}
-						}
-					},
-				}
-			}
-		}
 	}
 
 	/// Handle individual WebSocket messages
