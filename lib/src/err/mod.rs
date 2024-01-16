@@ -802,6 +802,8 @@ pub enum TaskVariant {
 	BootstrapDelete,
 	#[error("Bootstrap tx supplier task")]
 	BootstrapStageLog,
+	#[error("Bootstrap tx request handler")]
+	BootstrapTxRequestHandler,
 }
 
 #[derive(Error, Debug)]

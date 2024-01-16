@@ -89,12 +89,6 @@ pub struct Transaction {
 	pub(super) clock: Arc<RwLock<SizedClock>>,
 }
 
-#[cfg(not(feature = "kv-indexdb"))]
-pub(crate) type SendTransaction = Transaction;
-// Wasm IndexDB Transactions are not Send, so we wrap them
-#[cfg(feature = "kv-indexdb")]
-pub(crate) type SendTransaction = Arc<OnceLock<Transaction>>;
-
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
 	#[cfg(feature = "kv-mem")]
