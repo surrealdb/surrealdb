@@ -278,7 +278,7 @@ impl<'a> IndexOperation<'a> {
 
 				let key = self.get_unique_index_key(&n);
 
-				if run.put(key, self.rid, None).await.is_err() {
+				if run.putc(key, self.rid, None).await.is_err() {
 					if n.is_some_none_or_null() {
 						return Ok(());
 					}
