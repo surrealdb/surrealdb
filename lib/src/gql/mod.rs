@@ -20,7 +20,6 @@ use graphql_parser::query;
 use graphql_parser::schema;
 use graphql_parser::schema::Definition;
 use graphql_parser::schema::Field;
-use graphql_parser::schema::InputObjectType;
 use graphql_parser::schema::InterfaceType;
 use graphql_parser::schema::ObjectType;
 use graphql_parser::schema::ScalarType;
@@ -34,8 +33,6 @@ pub fn parse_and_transpile(txt: &str) -> Result<Query, Error> {
 		parse_query::<&str>(txt).map_err(|e| Error::Thrown(e.to_string()))?;
 
 	info!("graphql ast: {:#?}", ast);
-
-	// info!("surreal ast: {:#?}", crate::syn::parse("SELECT * FROM person")?);
 
 	let mut query: Vec<Statement> = vec![];
 
@@ -164,30 +161,6 @@ fn transpile_selection_set<'a>(
 			query::Selection::Field(f) => {
 				let args: BTreeMap<&str, schema::Value<&str>> =
 					f.arguments.iter().cloned().collect();
-				// let (limit, start) = args.get("pagination").map_or((None, None), |v| {
-				// 	let schema::Value::Object(o) = v else {
-				// 		panic!("must be object, should be caught be validation")
-				// 	};
-				// 	let limit = o
-				// 		.get("limit")
-				// 		.map(|v| {
-				// 			let schema::Value::Int(i) = v else {
-				// 				panic!("must be int, should be caught be validation")
-				// 			};
-				// 			i.as_i64()
-				// 		})
-				// 		.flatten();
-				// 	let start = o
-				// 		.get("start")
-				// 		.map(|v| {
-				// 			let schema::Value::Int(i) = v else {
-				// 				panic!("must be int, should be caught be validation")
-				// 			};
-				// 			i.as_i64()
-				// 		})
-				// 		.flatten();
-				// 	(limit, start)
-				// });
 				let limit = args
 					.get("limit")
 					.map(|v| {
@@ -206,11 +179,53 @@ fn transpile_selection_set<'a>(
 						i.as_i64()
 					})
 					.flatten();
+				// where : {value: {gt: 0.5}}
+				// Value::Expression(Expression::Binary {l: Expression::Field(Field {name: "value".to_string(), ..Default::default()}), o: Operator::MoreThan, r: Expression::Value(Value::Float(0.5))}
+				let filter = args.get("where").map(|v| {
+					let schema::Value::Object(o) = v else {
+						panic!("must be object, should be caught be validation")
+					};
+					assert!(o.len() == 1, "multiple fields not currently supported");
+					let (field_name, cond) = o.into_iter().next().unwrap();
+					let schema::Value::Object(cond) = cond else {
+						panic!("must be object, should be caught be validation")
+					};
+					assert!(cond.len() == 1, "multiple conditions not currently supported");
+					let (op, val) = cond.into_iter().next().unwrap();
+					let op = match *op {
+						"eq" => sql::Operator::Equal,
+						"gt" => sql::Operator::MoreThan,
+						"ge" => sql::Operator::MoreThanOrEqual,
+						"lt" => sql::Operator::LessThan,
+						"le" => sql::Operator::LessThanOrEqual,
+						_ => panic!("unsupported operator"),
+					};
+					let rhs = match val {
+						schema::Value::Int(i) => {
+							sql::Value::Number(sql::Number::Int(i.as_i64().unwrap()))
+						}
+						schema::Value::Float(f) => {
+							sql::Value::Number(sql::Number::Float(f.clone()))
+						}
+						_ => panic!("unsupported value"),
+					};
+					sql::Cond(sql::Value::Expression(
+						sql::Expression::Binary {
+							l: sql::Value::Idiom(sql::Idiom(vec![sql::Part::Field(sql::Ident(
+								field_name.to_string(),
+							))])),
+							o: op,
+							r: rhs,
+						}
+						.into(),
+					))
+				});
 				Statement::Select(SelectStatement {
 					expr: Fields::all(),
 					what: Values(vec![sql::Value::Table(Table(f.name.to_string()))]),
 					limit: limit.map(|l| Limit(l.into())),
 					start: start.map(|s| Start(s.into())),
+					cond: filter,
 					..Default::default()
 				})
 			}
