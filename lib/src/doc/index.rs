@@ -272,14 +272,21 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				if !n.is_all_none_or_null() {
+				if n.is_all_none_or_null() {
+					continue;
+				}
+
+				let key = self.get_unique_index_key(&n);
+
+				if n.is_some_none_or_null() {
+					run.del(&key).await?
+				}
+
+				if run.putc(key, self.rid, None).await.is_err() {
 					let key = self.get_unique_index_key(&n);
-					if run.putc(key, self.rid, None).await.is_err() {
-						let key = self.get_unique_index_key(&n);
-						let val = run.get(key).await?.unwrap();
-						let rid: Thing = val.into();
-						return self.err_index_exists(rid, n);
-					}
+					let val = run.get(key).await?.unwrap();
+					let rid: Thing = val.into();
+					return self.err_index_exists(rid, n);
 				}
 			}
 		}

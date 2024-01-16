@@ -266,7 +266,7 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn create_on_none_values_with_unique_index() -> Result<(), Error> {
+async fn create_on_none_values_with_single_field_unique_index() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX national_id_idx ON foo FIELDS national_id UNIQUE;
 		CREATE foo SET name = 'John Doe';
@@ -279,6 +279,28 @@ async fn create_on_none_values_with_unique_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	for _ in 0..3 {
+		let _ = res.remove(0).result?;
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn create_on_none_values_with_multi_field_unique_index() -> Result<(), Error> {
+	let sql = "
+        DEFINE TABLE foo SCHEMAFULL;
+        DEFINE FIELD name ON TABLE foo TYPE string;
+        DEFINE FIELD national_id ON TABLE foo TYPE option<string>;
+        DEFINE INDEX foo_national_id_name_idx ON foo FIELDS national_id, name UNIQUE;
+        CREATE foo SET name = 'John Doe';
+        CREATE foo SET name = 'John Doe';
+    ";
+
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	for _ in 0..6 {
 		let _ = res.remove(0).result?;
 	}
 	Ok(())
