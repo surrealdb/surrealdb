@@ -333,24 +333,27 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
 				let res = h.search(obj, knn, 500).await;
+				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 				if collection.is_unique() {
 					assert!(
-						res.docs.contains(doc_id),
-						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?} - Dist: {}",
+						docs.contains(doc_id),
+						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?} - Dist: {} - Coll: {:?}",
 						obj,
 						knn,
 						doc_id,
 						res.docs,
-						h.h.dist
+						h.h.dist,
+						collection,
 					);
 				}
 				let expected_len = collection.as_ref().len().min(knn);
 				assert_eq!(
 					expected_len,
 					res.docs.len(),
-					"Wrong knn count - Expected: {} - Got: {} - Collection: {}",
+					"Wrong knn count - Expected: {} - Got: {:?} - Dist: {} - Collection: {}",
 					expected_len,
-					res.docs.len(),
+					res.docs,
+					h.h.dist,
 					collection.as_ref().len(),
 				)
 			}
@@ -369,7 +372,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_hnsw_unique_col_10_dim_2_all_distances() -> Result<(), Error> {
+	async fn test_hnsw_unique_col_10_dim_2() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
@@ -378,14 +381,38 @@ mod tests {
 				Distance::Manhattan,
 				Distance::Hamming,
 				Distance::Minkowski(2.into()),
-				// Distance::Pearson, TODO: Check why it is failing
-				Distance::Cosine,
 				Distance::Chebyshev,
 			] {
 				let for_jaccard = distance == Distance::Jaccard;
 				test_hnsw_collection::<12, 24, 500>(
 					distance,
 					&TestCollection::new_unique(10, vt, 2, for_jaccard),
+				)
+				.await?;
+			}
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn test_hnsw_random_col_10_dim_2() -> Result<(), Error> {
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			for distance in [
+				// Distance::Chebyshev, TODO
+				Distance::Cosine,
+				Distance::Euclidean,
+				// Distance::Hamming, TODO
+				// Distance::Jaccard, TODO
+				Distance::Manhattan,
+				Distance::Minkowski(2.into()),
+				// Distance::Pearson,  TODO
+			] {
+				let for_jaccard = distance == Distance::Jaccard;
+				test_hnsw_collection::<12, 24, 500>(
+					distance,
+					&TestCollection::new_random(10, vt, 2, for_jaccard),
 				)
 				.await?;
 			}

@@ -4,11 +4,12 @@ use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::Number;
 use revision::revisioned;
+use rust_decimal::prelude::Zero;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Mul, Sub};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
@@ -140,6 +141,16 @@ impl TreeVector {
 		}
 	}
 
+	pub(super) fn is_null(&self) -> bool {
+		match self {
+			TreeVector::F64(a) => !a.iter().any(|a| !a.is_zero()),
+			TreeVector::F32(a) => !a.iter().any(|a| !a.is_zero()),
+			TreeVector::I64(a) => !a.iter().any(|a| !a.is_zero()),
+			TreeVector::I32(a) => !a.iter().any(|a| !a.is_zero()),
+			TreeVector::I16(a) => !a.iter().any(|a| !a.is_zero()),
+		}
+	}
+
 	fn chebyshev<T>(a: &[T], b: &[T]) -> f64
 	where
 		T: ToFloat,
@@ -163,33 +174,50 @@ impl TreeVector {
 
 	fn dot<T>(a: &[T], b: &[T]) -> f64
 	where
-		T: Mul<Output = T> + Copy + ToFloat + Add<Output = T>,
+		T: Mul<Output = T> + Copy + ToFloat,
 	{
-		a.iter().zip(b.iter()).map(|(&x, &y)| (x * y).to_float()).sum()
+		a.iter().zip(b.iter()).map(|(&x, &y)| x.to_float() * y.to_float()).sum::<f64>()
 	}
 
 	fn magnitude<T>(v: &[T]) -> f64
 	where
-		T: ToFloat + Mul<Output = T> + Add<Output = T>,
+		T: ToFloat + Copy,
 	{
-		v.iter().map(|a| a.to_float().powi(2)).sum::<f64>().sqrt()
+		v.iter()
+			.map(|&x| {
+				let x = x.to_float();
+				x * x
+			})
+			.sum::<f64>()
+			.sqrt()
 	}
 
 	fn normalize<T>(v: &[T]) -> Vec<f64>
 	where
-		T: ToFloat + Mul<Output = T> + Add<Output = T> + Copy,
+		T: ToFloat + Copy,
 	{
 		let mag = Self::magnitude(v);
-		v.iter().map(|&a| a.to_float() / mag).collect()
+		if mag == 0.0 {
+			vec![0.0; v.len()] // Return a zero vector if magnitude is zero
+		} else {
+			v.iter().map(|&x| x.to_float() / mag).collect()
+		}
 	}
 
 	fn cosine<T>(a: &[T], b: &[T]) -> f64
 	where
-		T: ToFloat + Mul<Output = T> + Add<Output = T> + Copy,
+		T: ToFloat + Mul<Output = T> + Copy,
 	{
-		let a = Self::normalize(a);
-		let b = Self::normalize(b);
-		Self::dot(&a, &b)
+		let norm_a = Self::normalize(a);
+		let norm_b = Self::normalize(b);
+		let mut s = Self::dot(&norm_a, &norm_b);
+		if s < -1.0 {
+			s = -1.0;
+		}
+		if s > 1.0 {
+			s = 1.0;
+		}
+		1.0 - s
 	}
 
 	pub(crate) fn cosine_distance(&self, other: &Self) -> f64 {

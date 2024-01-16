@@ -91,7 +91,7 @@ impl MTreeIndex {
 		tx: &mut Transaction,
 		a: Array,
 		k: usize,
-	) -> Result<VecDeque<DocId>, Error> {
+	) -> Result<VecDeque<(DocId, f64)>, Error> {
 		// Extract the vector
 		let vector = self.check_vector_array(a)?;
 		// Lock the store
@@ -1922,7 +1922,8 @@ mod tests {
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Read, cache_size).await;
 				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
-				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
+				let docs: Vec<DocId> = res.docs.into_iter().map(|(d, _)| d).collect();
+				assert!(!docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
 				let (mut st, mut tx) =
@@ -1947,9 +1948,10 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
 				let res = t.knn_search(&mut tx, &mut st, obj, knn).await?;
+				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 				if collection.is_unique() {
 					assert!(
-						res.docs.contains(doc_id),
+						docs.contains(doc_id),
 						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
 						obj,
 						knn,
@@ -1995,9 +1997,8 @@ mod tests {
 			);
 			// We check that the results are sorted by ascending distance
 			let mut dist = 0.0;
-			for doc in res.docs {
+			for (doc, d) in res.docs {
 				let o = map.get(&doc).unwrap();
-				let d = t.calculate_distance(obj, o)?;
 				debug!("doc: {doc} - d: {d} - {obj:?} - {o:?}");
 				assert!(d >= dist, "d: {d} - dist: {dist}");
 				dist = d;
@@ -2321,9 +2322,9 @@ mod tests {
 		.await
 	}
 
-	fn check_knn(res: &VecDeque<DocId>, expected: Vec<DocId>) {
-		let expected: VecDeque<DocId> = expected.into_iter().collect();
-		assert_eq!(res, &expected);
+	fn check_knn(res: &VecDeque<(DocId, f64)>, expected: Vec<DocId>) {
+		let res: Vec<DocId> = res.into_iter().map(|(doc, _)| *doc).collect();
+		assert_eq!(res, expected);
 	}
 
 	#[derive(Default, Debug)]

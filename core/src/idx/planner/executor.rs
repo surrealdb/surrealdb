@@ -363,7 +363,10 @@ impl QueryExecutor {
 	fn new_mtree_index_knn_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
 			if let Some(mte) = self.0.mt_entries.get(exp.as_ref()) {
-				let it = DocIdsIterator::new(mte.doc_ids.clone(), mte.res.clone());
+				let it = DocIdsIterator::new(
+					mte.doc_ids.clone(),
+					mte.res.iter().map(|(d, _)| *d).collect(),
+				);
 				return Some(ThingIterator::Knn(it));
 			}
 		}
@@ -533,7 +536,7 @@ impl FtEntry {
 #[derive(Clone)]
 pub(super) struct MtEntry {
 	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<DocId>,
+	res: VecDeque<(DocId, f64)>,
 }
 
 impl MtEntry {

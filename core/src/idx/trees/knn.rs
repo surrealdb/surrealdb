@@ -181,16 +181,32 @@ impl Docs {
 		}
 	}
 
-	pub(super) fn insert(&mut self, d: DocId) -> Option<Self> {
+	fn contains(&self, d: DocId) -> bool {
 		match self {
-			Docs::One(o) => Some(Docs::Vec2([*o, d])),
-			Docs::Vec2(a) => Some(Docs::Vec3([a[0], a[1], d])),
-			Docs::Vec3(a) => Some(Docs::Vec4([a[0], a[1], a[2], d])),
-			Docs::Vec4(a) => Some(Docs::Bits(RoaringTreemap::from([a[0], a[1], a[2], a[3], d]))),
-			Docs::Bits(b) => {
-				b.insert(d);
-				None
+			Docs::One(o) => *o == d,
+			Docs::Vec2(a) => a.contains(&d),
+			Docs::Vec3(a) => a.contains(&d),
+			Docs::Vec4(a) => a.contains(&d),
+			Docs::Bits(b) => b.contains(d),
+		}
+	}
+
+	pub(super) fn insert(&mut self, d: DocId) -> Option<Self> {
+		if !self.contains(d) {
+			match self {
+				Docs::One(o) => Some(Docs::Vec2([*o, d])),
+				Docs::Vec2(a) => Some(Docs::Vec3([a[0], a[1], d])),
+				Docs::Vec3(a) => Some(Docs::Vec4([a[0], a[1], a[2], d])),
+				Docs::Vec4(a) => {
+					Some(Docs::Bits(RoaringTreemap::from([a[0], a[1], a[2], a[3], d])))
+				}
+				Docs::Bits(b) => {
+					b.insert(d);
+					None
+				}
 			}
+		} else {
+			None
 		}
 	}
 }
@@ -280,16 +296,16 @@ impl KnnResultBuilder {
 		#[cfg(debug_assertions)]
 		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
 		let mut left = self.knn;
-		for (_, docs) in self.priority_list {
+		for (pr, docs) in self.priority_list {
 			let dl = docs.len();
 			if dl > left {
 				for doc_id in docs.iter().take(left as usize) {
-					sorted_docs.push_back(doc_id);
+					sorted_docs.push_back((doc_id, pr.0));
 				}
 				break;
 			}
 			for doc_id in docs.iter() {
-				sorted_docs.push_back(doc_id);
+				sorted_docs.push_back((doc_id, pr.0));
 			}
 			left -= dl;
 			// We don't expect anymore result, we can leave
@@ -307,7 +323,7 @@ impl KnnResultBuilder {
 }
 
 pub struct KnnResult {
-	pub(in crate::idx::trees) docs: VecDeque<DocId>,
+	pub(in crate::idx::trees) docs: VecDeque<(DocId, f64)>,
 	#[cfg(debug_assertions)]
 	#[allow(dead_code)]
 	pub(in crate::idx::trees) visited_nodes: HashMap<NodeId, usize>,
@@ -334,6 +350,7 @@ pub(super) mod tests {
 		SmallRng::seed_from_u64(seed)
 	}
 
+	#[derive(Debug)]
 	pub(in crate::idx::trees) enum TestCollection {
 		Unique(Vec<(DocId, SharedVector)>),
 		NonUnique(Vec<(DocId, SharedVector)>),
@@ -372,7 +389,12 @@ pub(super) mod tests {
 		for _ in 0..dim {
 			vec.add(generator(rng));
 		}
-		Arc::new(vec)
+		if vec.is_null() {
+			// Some similarities (cosine) is undefined for null vector.
+			new_random_vec(rng, t, dim, for_jaccard)
+		} else {
+			Arc::new(vec)
+		}
 	}
 
 	impl TestCollection {
