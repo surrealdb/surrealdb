@@ -12,7 +12,9 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::{bootstrap, LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::kvs::{
+	bootstrap, LockType, LockType::*, SendTransaction, TransactionType, TransactionType::*,
+};
 use crate::opt::auth::Root;
 #[cfg(feature = "jwks")]
 use crate::opt::capabilities::NetTarget;
@@ -29,13 +31,9 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::spawn;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tracing::instrument;
 use tracing::trace;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::spawn_local as spawn;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
@@ -538,8 +536,8 @@ impl Datastore {
 		// The transaction request pair is used for receiving requests for new transactions
 		// it contains one-shot senders so that the transaction can be sent and forgotten
 		let (tx_req_send, mut tx_req_recv): (
-			mpsc::Sender<oneshot::Sender<Transaction>>,
-			mpsc::Receiver<oneshot::Sender<Transaction>>,
+			mpsc::Sender<oneshot::Sender<SendTransaction>>,
+			mpsc::Receiver<oneshot::Sender<SendTransaction>>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 
 		// In several new transactions, scan all removed node live queries
@@ -547,7 +545,7 @@ impl Datastore {
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let scan_task = spawn(bootstrap::scan_node_live_queries(
+		let scan_task = tokio::spawn(bootstrap::scan_node_live_queries(
 			tx_req_send.clone(),
 			dead_nodes,
 			scan_send,
@@ -560,7 +558,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned archive task");
-		let archive_task = spawn(bootstrap::archive_live_queries(
+		let archive_task = tokio::spawn(bootstrap::archive_live_queries(
 			tx_req_send.clone(),
 			self.id,
 			scan_recv,
@@ -575,7 +573,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned delete live query task");
-		let delete_task = spawn(bootstrap::delete_live_queries(
+		let delete_task = tokio::spawn(bootstrap::delete_live_queries(
 			tx_req_send,
 			archive_recv,
 			delete_send,
@@ -585,7 +583,7 @@ impl Datastore {
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
 		trace!("Spawned delete handler task");
-		let delete_handler_task = spawn(async move {
+		let delete_handler_task = tokio::spawn(async move {
 			while let Some(res) = delete_recv.recv().await {
 				let (_lq, e) = res;
 				if let Some(e) = e {
@@ -597,29 +595,30 @@ impl Datastore {
 		// Handle transaction requests
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
-		let (spawn_local, _local_set) = {
-			#[cfg(not(target_arch = "wasm32"))]
-			{
-				let local_set = tokio::task::LocalSet::new();
-				(|f| tokio::task::LocalSet::spawn_local(&local_set, f), Some(local_set))
-			}
-			#[cfg(target_arch = "wasm32")]
-			{
-				(spawn, None)
-			}
-		};
-
-		let tx_req_handler = bootstrap::transaction::TxRequestHandler {
-			ds: &self,
-			tx_req_recv: &mut tx_req_recv,
-		};
-
-		let tx_task = spawn_local(tx_req_handler.handle_tx_requests());
+		loop {
+			match tx_req_recv.recv().await {
+				None => {
+					// closed
+					trace!("Transaction request channel closed, breaking out of bootstrap");
+					break;
+				}
+				Some(sender) => {
+					trace!("Received a transaction request");
+					let tx = self.transaction_send(Write, Optimistic).await.unwrap();
+					if let Err(mut tx) = sender.send(tx) {
+						// The receiver has been dropped, so we need to cancel the transaction
+						trace!("Unable to send a transaction as response to task because the receiver is closed");
+						tx.cancel().await.unwrap();
+					}
+				}
+			};
+		}
+		trace!("Finished handling requests",);
 
 		// Now run everything together and return any errors that arent captured per record
 		trace!("Joining bootstrap tasks");
-		let (join_scan_err, join_arch_err, join_del_err, join_log_err, join_tx_err) =
-			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task, tx_task);
+		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
+			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
 
 		// Throw errors from join tasks
 		let scan_err = join_scan_err.map_err(|e| {
@@ -633,12 +632,6 @@ impl Datastore {
 		})?;
 		join_log_err.map_err(|e| {
 			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapStageLog, e))
-		})?;
-		join_tx_err.map_err(|e| {
-			Error::BootstrapError(BootstrapCause::JoinTaskError(
-				TaskVariant::BootstrapTxRequestHandler,
-				e,
-			))
 		})?;
 
 		// Handle all the possible hard errors from tasks
@@ -971,6 +964,23 @@ impl Datastore {
 		node_id: Uuid,
 	) -> Result<(), Error> {
 		tx.set_hb(timestamp, node_id.0).await
+	}
+
+	pub async fn transaction_send(
+		&self,
+		tx_type: TransactionType,
+		lock: LockType,
+	) -> Result<SendTransaction, Error> {
+		#[cfg(not(feature = "kv-indexdb"))]
+		{
+			self.transaction(tx_type, lock).await
+		}
+		#[cfg(feature = "kv-indexdb")]
+		{
+			let once = OnceCell::new();
+			once.set(self.transaction(tx_type, lock).await);
+			Arc::new(once)
+		}
 	}
 
 	// -----
