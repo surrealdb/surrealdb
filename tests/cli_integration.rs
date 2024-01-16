@@ -24,6 +24,11 @@ mod cli_integration {
 	}
 
 	#[test]
+	fn version_short() {
+		assert!(common::run("v").output().is_ok());
+	}
+
+	#[test]
 	fn help() {
 		assert!(common::run("help").output().is_ok());
 	}
