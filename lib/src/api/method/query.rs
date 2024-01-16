@@ -96,20 +96,25 @@ where
 						}
 						checked = true;
 						let index = index - offset;
-						if let Some((_, Ok(id))) = response.results.get(&index) {
+						if let Some((_, result)) = response.results.get(&index) {
 							let result =
-								live::register::<Client>(router, id.clone()).await.map(|rx| {
-									Stream {
-										id: stmt.id.into(),
-										rx: Some(rx),
-										client: Surreal {
-											router: self.client.router.clone(),
+								match result {
+									Ok(id) => live::register::<Client>(router, id.clone())
+										.await
+										.map(|rx| Stream {
+											id: stmt.id.into(),
+											rx: Some(rx),
+											client: Surreal {
+												router: self.client.router.clone(),
+												engine: PhantomData,
+											},
+											response_type: PhantomData,
 											engine: PhantomData,
-										},
-										response_type: PhantomData,
-										engine: PhantomData,
-									}
-								});
+										}),
+									// This is a live query. We are using this as a workaround to avoid
+									// creating another public error variant for this internal error.
+									Err(..) => Err(Error::NotLiveQuery(index).into()),
+								};
 							live_queries.insert(index, result);
 						}
 					} else if matches!(

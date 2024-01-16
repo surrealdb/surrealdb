@@ -189,6 +189,10 @@ pub enum Error {
 	/// Tried to access a query statement falling outside the bounds of the statements supplied
 	#[error("Query statement {0} is out of bounds")]
 	QueryIndexOutOfBounds(usize),
+
+	/// Called `Response::take` or `Response::stream` on a query response more than once
+	#[error("Tried to take a query response that has already been taken")]
+	ResponseAlreadyTaken,
 }
 
 #[cfg(feature = "protocol-http")]

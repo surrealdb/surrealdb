@@ -432,12 +432,19 @@ pub trait QueryStream<R> {
 
 impl QueryStream<Value> for usize {
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
-		let stream = response.live_queries.remove(&self).unwrap_or_else(|| {
-			match response.results.contains_key(&self) {
+		let stream = response
+			.live_queries
+			.remove(&self)
+			.and_then(|result| match result {
+				Err(crate::Error::Api(Error::NotLiveQuery(..))) => {
+					response.results.remove(&self).and_then(|x| x.1.err().map(Err))
+				}
+				result => Some(result),
+			})
+			.unwrap_or_else(|| match response.results.contains_key(&self) {
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
-			}
-		})?;
+			})?;
 		Ok(method::QueryStream(Either::Left(stream)))
 	}
 }
@@ -445,8 +452,19 @@ impl QueryStream<Value> for usize {
 impl QueryStream<Value> for () {
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
-		for (_, result) in mem::take(&mut response.live_queries) {
-			streams.push(result?);
+		for (index, result) in mem::take(&mut response.live_queries) {
+			match result {
+				Ok(stream) => streams.push(stream),
+				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.remove(&index) {
+					Some((stats, Err(error))) => {
+						response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
+						return Err(error);
+					}
+					Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
+					None => { return Err(Error::ResponseAlreadyTaken.into()); }
+				}
+				Err(error) => { return Err(error); }
+			}
 		}
 		Ok(method::QueryStream(Either::Right(select_all(streams))))
 	}
@@ -460,12 +478,19 @@ where
 		self,
 		response: &mut QueryResponse,
 	) -> Result<method::QueryStream<Notification<R>>> {
-		let mut stream = response.live_queries.remove(&self).unwrap_or_else(|| {
-			match response.results.contains_key(&self) {
+		let mut stream = response
+			.live_queries
+			.remove(&self)
+			.and_then(|result| match result {
+				Err(crate::Error::Api(Error::NotLiveQuery(..))) => {
+					response.results.remove(&self).and_then(|x| x.1.err().map(Err))
+				}
+				result => Some(result),
+			})
+			.unwrap_or_else(|| match response.results.contains_key(&self) {
 				true => Err(Error::NotLiveQuery(self).into()),
 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
-			}
-		})?;
+			})?;
 		Ok(method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
 			engine: stream.engine,
@@ -485,8 +510,19 @@ where
 		response: &mut QueryResponse,
 	) -> Result<method::QueryStream<Notification<R>>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
-		for (_, result) in mem::take(&mut response.live_queries) {
-			let mut stream = result?;
+		for (index, result) in mem::take(&mut response.live_queries) {
+			let mut stream = match result {
+				Ok(stream) => stream,
+				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.remove(&index) {
+					Some((stats, Err(error))) => {
+						response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
+						return Err(error);
+					}
+					Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
+					None => { return Err(Error::ResponseAlreadyTaken.into()); }
+				}
+				Err(error) => { return Err(error); }
+			};
 			streams.push(Stream {
 				client: stream.client.clone(),
 				engine: stream.engine,
