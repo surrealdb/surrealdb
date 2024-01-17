@@ -233,13 +233,18 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	fn get_unique_index_key(&self, v: &'a Array) -> key::index::Index {
+		let id = match v.is_any_none_or_null() {
+			true => Some(&self.rid.id),
+			false => None,
+		};
+
 		crate::key::index::Index::new(
 			self.opt.ns(),
 			self.opt.db(),
 			&self.ix.what,
 			&self.ix.name,
 			v,
-			None,
+			id,
 		)
 	}
 
@@ -279,10 +284,6 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_unique_index_key(&n);
 
 				if run.putc(key, self.rid, None).await.is_err() {
-					if n.is_any_none_or_null() {
-						return Ok(());
-					}
-
 					let key = self.get_unique_index_key(&n);
 					let val = run.get(key).await?.unwrap();
 					let rid: Thing = val.into();
