@@ -1,11 +1,30 @@
-use super::tx::Transaction;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Poll, Wake};
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
+use futures_lite::future::FutureExt;
+use tokio::sync::{mpsc, oneshot, RwLock};
+use tracing::instrument;
+use tracing::trace;
+
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
 use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
 	Variables,
 };
-use crate::err::{BootstrapCause, Error, TaskVariant};
+use crate::err::Error;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
@@ -21,28 +40,8 @@ use crate::opt::capabilities::NetTarget;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::Oracle;
-use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
-use futures_lite::future::FutureExt;
-use std::cell::OnceCell;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::ops::DerefMut;
-use std::sync::Arc;
-use std::task::{Poll, Wake};
-use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::spawn;
-use tokio::sync::{mpsc, oneshot, RwLock};
-use tracing::instrument;
-use tracing::trace;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local;
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
+use super::tx::Transaction;
 
 /// Bootstrap dead node garbage collection has a limit in size in case of catastrophe
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -561,12 +560,17 @@ impl Datastore {
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let mut scan_task = spawn(bootstrap::scan_node_live_queries(
+
+		let scan_task = bootstrap::scan_node_live_queries(
 			tx_req_send.clone(),
 			dead_nodes,
 			scan_send,
 			BOOTSTRAP_BATCH_SIZE as u32,
-		));
+		);
+
+		// Wasm doesnt have multithreading
+		#[cfg(not(target_arch = "wasm32"))]
+		let mut scan_task = tokio::spawn(scan_task);
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
@@ -574,39 +578,49 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned archive task");
-		let mut archive_task = spawn(bootstrap::archive_live_queries(
+		let archive_task = bootstrap::archive_live_queries(
 			tx_req_send.clone(),
 			self.id,
 			scan_recv,
 			archive_send,
 			BOOTSTRAP_BATCH_SIZE,
 			&BOOTSTRAP_BATCH_LATENCY,
-		));
+		);
+
+		// Wasm doesnt have multithreading
+		#[cfg(not(target_arch = "wasm32"))]
+		let mut archive_task = tokio::spawn(archive_task);
 
 		// In several new transactions, delete archived node live queries
-		let (delete_send, mut delete_recv): (
+		let (delete_send, delete_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned delete live query task");
-		let mut delete_task = spawn(bootstrap::delete_live_queries(
+		let delete_task = bootstrap::delete_live_queries(
 			tx_req_send,
 			archive_recv,
 			delete_send,
 			BOOTSTRAP_BATCH_SIZE,
-		));
+		);
+		// Wasm doesnt have multithreading
+		#[cfg(not(target_arch = "wasm32"))]
+		let mut delete_task = tokio::spawn(delete_task);
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
 		trace!("Spawned delete handler task");
-		let mut delete_handler_task = spawn(async move {
-			while let Some(res) = delete_recv.recv().await {
-				let (_lq, e) = res;
-				if let Some(e) = e {
-					error!("Error deleting lq during bootstrap: {:?}", e);
-				}
-			}
-		});
+		let delete_handler_task = create_delete_handler_future(delete_recv);
+
+		// Wasm doesnt have multithreading
+		#[cfg(not(target_arch = "wasm32"))]
+		let mut delete_handler_task = tokio::spawn(delete_handler_task);
+		#[cfg(target_arch = "wasm32")]
+		let mut delete_handler_task = Pin::new(delete_handler_task);
+
+		// Polled futures need to be pinned
+		#[cfg(target_arch = "wasm32")]
+		let delete_handler_task = Pin::new(delete_handler_task);
 
 		// Handle transaction requests
 		// This loop will continue to run until all channels have been closed above
@@ -674,6 +688,7 @@ impl Datastore {
 			error!("archive task failed: {:?}", e);
 			Error::Internal("archive task failed")
 		})?;
+		#[cfg(not(target_arch = "wasm32"))]
 		let _ = arch_err?;
 
 		let del_err = match delete_task.poll(&mut ctx) {
@@ -684,13 +699,15 @@ impl Datastore {
 			error!("delete task failed: {:?}", e);
 			Error::Internal("delete task failed")
 		})?;
+		#[cfg(not(target_arch = "wasm32"))]
 		let _ = del_err?;
 
-		let del_handler_err = match delete_handler_task.poll(&mut ctx) {
+		let _del_handler_err = match delete_handler_task.poll(&mut ctx) {
 			Poll::Ready(r) => Ok(r),
 			Poll::Pending => Err(Error::Internal("delete handler task did not complete")),
 		}?;
-		let _ = del_handler_err.map_err(|e| {
+		#[cfg(not(target_arch = "wasm32"))]
+		let _ = _del_handler_err.map_err(|e| {
 			error!("delete handler task failed: {:?}", e);
 			Error::Internal("delete handler task failed")
 		})?;
@@ -1397,5 +1414,16 @@ impl Datastore {
 		}
 		// All ok
 		Ok(())
+	}
+}
+
+async fn create_delete_handler_future(
+	mut delete_recv: mpsc::Receiver<BootstrapOperationResult>,
+) -> () {
+	while let Some(res) = Pin::new(&mut delete_recv).recv().await {
+		let (_lq, e) = res;
+		if let Some(e) = e {
+			error!("Error deleting lq during bootstrap: {:?}", e);
+		}
 	}
 }

@@ -69,7 +69,6 @@ async fn expired_nodes_are_garbage_collected() {
 #[tokio::test]
 #[serial]
 async fn expired_nodes_get_live_queries_archived() {
-	// init_logs();
 	let old_node = Uuid::from_str("c756ed5a-3b19-4303-bce2-5e0edf72e66b").unwrap();
 	let old_time = Timestamp {
 		value: 123000,
@@ -393,16 +392,4 @@ async fn set_fake_clock(fake_clock: Arc<RwLock<SizedClock>>, time: Timestamp) {
 			panic!("Clock is not fake")
 		}
 	}
-}
-
-fn init_logs() {
-	let registry = tracing_subscriber::registry();
-
-	// THIS STUFF IS NOT AVAILABLE AS IS IN TELEMETRY IN CLI
-	// Setup logging layer
-	// let registry = registry.with(logs::new(self.filter.clone()));
-	//
-	// // Setup tracing layer
-	// let registry = registry.with(traces::new(self.filter));
-	registry.init();
 }

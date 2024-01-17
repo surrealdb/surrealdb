@@ -5372,6 +5372,7 @@ dependencies = [
  "pbkdf2",
  "pharos",
  "pin-project-lite",
+ "pin-utils",
  "pprof",
  "quick_cache",
  "radix_trie",

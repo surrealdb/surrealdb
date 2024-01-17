@@ -1,3 +1,4 @@
+use std::pin::Pin;
 use std::time::Duration;
 
 use rand::Rng;
@@ -37,7 +38,8 @@ pub(crate) async fn delete_live_queries(
 					msg.push(bor);
 					// If the buffer size has exceeded for batch processing then we process
 					if msg.len() >= batch_size {
-						let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
+						let results =
+							delete_live_query_batch(tx_req.clone(), Pin::new(&mut msg)).await?;
 						for boresult in results {
 							sender.send(boresult).await.map_err(|e| {
 								error!("There was an error processing the batch, {}", e);
@@ -51,7 +53,7 @@ pub(crate) async fn delete_live_queries(
 			}
 			Ok(None) => {
 				// Channel closed, process whatever is remaining
-				let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
+				let results = delete_live_query_batch(tx_req.clone(), Pin::new(&mut msg)).await?;
 				for boresult in results {
 					sender
 						.send(boresult)
@@ -62,7 +64,7 @@ pub(crate) async fn delete_live_queries(
 			}
 			Err(_elapsed) => {
 				// Timeout expired
-				let results = delete_live_query_batch(tx_req.clone(), &mut msg).await?;
+				let results = delete_live_query_batch(tx_req.clone(), Pin::new(&mut msg)).await?;
 				for boresult in results {
 					sender
 						.send(boresult)
@@ -82,14 +84,14 @@ pub(crate) async fn delete_live_queries(
 /// Delete the node lq, table lq, and notifications
 async fn delete_live_query_batch(
 	tx_req: mpsc::Sender<TxRequestOneshot>,
-	msg: &mut Vec<BootstrapOperationResult>,
+	mut msg: Pin<&mut Vec<BootstrapOperationResult>>,
 ) -> Result<Vec<BootstrapOperationResult>, Error> {
 	let mut ret: Vec<BootstrapOperationResult> = vec![];
 	let mut last_err = None;
 	for _ in 0..ds::BOOTSTRAP_TX_RETRIES {
 		// In case this is a retry, we re-hydrate the msg vector
 		for (lq, e) in ret.drain(..) {
-			msg.push((lq, e));
+			(*msg).push((lq, e));
 		}
 		// Fast-return
 		if msg.is_empty() {
@@ -108,7 +110,7 @@ async fn delete_live_query_batch(
 			Ok(mut tx) => {
 				trace!("Received tx in delete");
 				// Consume the input message vector of live queries to archive
-				for (lq, _e) in msg.drain(..) {
+				for (lq, _e) in (*msg).drain(..) {
 					// Delete the node live query
 					// NOTE: deleting missing entries does not error
 					if let Err(e) = tx.del_ndlq(*lq.nd, *lq.lq, &lq.ns, &lq.db).await {

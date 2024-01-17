@@ -201,16 +201,17 @@ async fn archive_live_query_batch(
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod test {
-	use crate::dbs::Session;
-	use crate::err::Error;
-	use futures_concurrency::future::FutureExt;
 	use std::str::FromStr;
 	use std::sync::Arc;
 	use std::time::Duration;
+
+	use futures_concurrency::future::FutureExt;
 	use tokio::sync::mpsc;
 
+	use crate::dbs::Session;
+	use crate::err::Error;
+	use crate::kvs::bootstrap::archive_live_queries;
 	use crate::kvs::bootstrap::test_util::always_give_tx;
-	use crate::kvs::bootstrap::{archive_live_queries, TxRequestOneshot};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::kvs::{BootstrapOperationResult, Datastore, LqValue};
@@ -229,7 +230,7 @@ mod test {
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);
-		let (output_lq_send, mut output_lq_recv): (
+		let (output_lq_send, _output_lq_recv): (
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(10);

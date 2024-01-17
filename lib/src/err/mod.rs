@@ -1,3 +1,17 @@
+use std::io::Error as IoError;
+use std::string::FromUtf8Error;
+
+use base64_lib::DecodeError as Base64Error;
+use bincode::Error as BincodeError;
+use fst::Error as FstError;
+use jsonwebtoken::errors::Error as JWTError;
+use object_store::Error as ObjectStoreError;
+use revision::Error as RevisionError;
+use serde::Serialize;
+use storekey::decode::Error as DecodeError;
+use storekey::encode::Error as EncodeError;
+use thiserror::Error;
+
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -8,19 +22,6 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
-use base64_lib::DecodeError as Base64Error;
-use bincode::Error as BincodeError;
-use fst::Error as FstError;
-use jsonwebtoken::errors::Error as JWTError;
-use object_store::Error as ObjectStoreError;
-use revision::Error as RevisionError;
-use serde::Serialize;
-use std::io::Error as IoError;
-use std::string::FromUtf8Error;
-use storekey::decode::Error as DecodeError;
-use storekey::encode::Error as EncodeError;
-use thiserror::Error;
-use tokio::task::JoinError as TokioJoinError;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
