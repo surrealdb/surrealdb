@@ -5351,6 +5351,7 @@ dependencies = [
  "fst",
  "futures",
  "futures-concurrency",
+ "futures-lite 2.0.1",
  "fuzzy-matcher",
  "geo 0.27.0",
  "geo-types",

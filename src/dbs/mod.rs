@@ -255,7 +255,10 @@ pub async fn init(
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
 
-	dbs.bootstrap().await?;
+	if let Err(e) = dbs.bootstrap().await {
+		error!("Failed to bootstrap database: {e}");
+		return Err(e.into());
+	}
 
 	if let Some(user) = opt.user.as_ref() {
 		dbs.setup_initial_creds(Root {

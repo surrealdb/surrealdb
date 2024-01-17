@@ -787,8 +787,6 @@ pub enum BootstrapCause {
 	ChannelSendError(ChannelVariant),
 	#[error("Failed to recv from channel: {0}")]
 	ChannelRecvError(ChannelVariant),
-	#[error("Failed to join task: {0}")]
-	JoinTaskError(TaskVariant, TokioJoinError),
 }
 
 #[derive(Error, Debug)]

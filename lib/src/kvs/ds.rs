@@ -23,17 +23,24 @@ use crate::syn;
 use crate::vs::Oracle;
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
+use futures_lite::future::FutureExt;
 use std::cell::OnceCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::DerefMut;
 use std::sync::Arc;
+use std::task::{Poll, Wake};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tracing::instrument;
 use tracing::trace;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
@@ -71,6 +78,14 @@ pub struct LqValue {
 	pub db: String,
 	pub tb: String,
 	pub lq: Uuid,
+}
+
+pub struct DummyWaker {}
+
+impl Wake for DummyWaker {
+	fn wake(self: Arc<Self>) {}
+
+	fn wake_by_ref(self: &Arc<Self>) {}
 }
 
 #[derive(Debug)]
@@ -505,6 +520,7 @@ impl Datastore {
 	// In tests, it should be outside any other transaction - in isolation.
 	// We cannot easily systematise this, since we aren't counting transactions created.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
+		let waker = std::task::Waker::from(Arc::new(DummyWaker {}));
 		// First we clear unreachable state that could exist by upgrading from
 		// previous beta versions
 		trace!("Clearing unreachable state");
@@ -545,7 +561,7 @@ impl Datastore {
 			mpsc::Sender<BootstrapOperationResult>,
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
-		let scan_task = tokio::spawn(bootstrap::scan_node_live_queries(
+		let mut scan_task = spawn(bootstrap::scan_node_live_queries(
 			tx_req_send.clone(),
 			dead_nodes,
 			scan_send,
@@ -558,7 +574,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned archive task");
-		let archive_task = tokio::spawn(bootstrap::archive_live_queries(
+		let mut archive_task = spawn(bootstrap::archive_live_queries(
 			tx_req_send.clone(),
 			self.id,
 			scan_recv,
@@ -573,7 +589,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned delete live query task");
-		let delete_task = tokio::spawn(bootstrap::delete_live_queries(
+		let mut delete_task = spawn(bootstrap::delete_live_queries(
 			tx_req_send,
 			archive_recv,
 			delete_send,
@@ -583,7 +599,7 @@ impl Datastore {
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
 		trace!("Spawned delete handler task");
-		let delete_handler_task = tokio::spawn(async move {
+		let mut delete_handler_task = spawn(async move {
 			while let Some(res) = delete_recv.recv().await {
 				let (_lq, e) = res;
 				if let Some(e) = e {
@@ -596,11 +612,30 @@ impl Datastore {
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
 		loop {
+			info!("Doing the loop");
+			// Check all tasks; We cannot join, as wasm is single threaded
+			let (scan_complete, archive_complete, delete_complete, delete_handler_complete) = {
+				let mut ctx = std::task::Context::from_waker(&waker);
+				(
+					// We need to check is finished because polling a completed future panics
+					scan_task.is_finished() || scan_task.poll(&mut ctx).is_ready(),
+					archive_task.is_finished() || archive_task.poll(&mut ctx).is_ready(),
+					delete_task.is_finished() || delete_task.poll(&mut ctx).is_ready(),
+					delete_handler_task.is_finished()
+						|| delete_handler_task.poll(&mut ctx).is_ready(),
+				)
+			};
+			let complete =
+				scan_complete && archive_complete && delete_complete && delete_handler_complete;
 			match tx_req_recv.recv().await {
 				None => {
 					// closed
 					trace!("Transaction request channel closed, breaking out of bootstrap");
-					break;
+					if complete {
+						break;
+					} else {
+						trace!("Transaction request channel closed but tasks not yet complete: scan={}, archive={}, delete={}, del_handler={}", scan_complete, archive_complete, delete_complete, delete_handler_complete);
+					}
 				}
 				Some(sender) => {
 					trace!("Received a transaction request");
@@ -612,51 +647,54 @@ impl Datastore {
 					}
 				}
 			};
+			if complete {
+				break;
+			}
 		}
 		trace!("Finished handling requests",);
 
 		// Now run everything together and return any errors that arent captured per record
 		trace!("Joining bootstrap tasks");
-		let (join_scan_err, join_arch_err, join_del_err, join_log_err) =
-			tokio::join!(scan_task, archive_task, delete_task, delete_handler_task);
-
+		let mut ctx = std::task::Context::from_waker(&waker);
 		// Throw errors from join tasks
-		let scan_err = join_scan_err.map_err(|e| {
-			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapScan, e))
-		})?;
-		let arch_err = join_arch_err.map_err(|e| {
-			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapArchive, e))
-		})?;
-		let del_err = join_del_err.map_err(|e| {
-			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapDelete, e))
-		})?;
-		join_log_err.map_err(|e| {
-			Error::BootstrapError(BootstrapCause::JoinTaskError(TaskVariant::BootstrapStageLog, e))
+		let scan_err = match scan_task.poll(&mut ctx) {
+			Poll::Ready(r) => Ok(r),
+			Poll::Pending => Err(Error::Internal("scan task did not complete")),
+		}?;
+		let _ = scan_err.map_err(|e| {
+			error!("scan task failed: {:?}", e);
+			Error::Internal("scan task failed")
 		})?;
 
-		// Handle all the possible hard errors from tasks
-		if let Some(err) = scan_err
-			.map_err(|e| {
-				error!("an error occurred in the scan task: {:?}", e);
-				Error::Internal("an error occurred in the scan task")
-			})
-			.err()
-			.or(arch_err
-				.map_err(|e| {
-					error!("an error occurred in the archive task: {:?}", e);
-					Error::Internal("an error occurred in the archive task")
-				})
-				.err())
-			.or(del_err
-				.map_err(|e| {
-					error!("an error occurred in the del task: {:?}", e);
-					Error::Internal("an error occurred in the del task")
-				})
-				.err())
-		{
-			error!("Error in bootstrap join tasks: {:?}", err);
-			return Err(err);
-		}
+		let arch_err = match archive_task.poll(&mut ctx) {
+			Poll::Ready(r) => Ok(r),
+			Poll::Pending => Err(Error::Internal("archive task did not complete")),
+		}?;
+		let arch_err = arch_err.map_err(|e| {
+			error!("archive task failed: {:?}", e);
+			Error::Internal("archive task failed")
+		})?;
+		let _ = arch_err?;
+
+		let del_err = match delete_task.poll(&mut ctx) {
+			Poll::Ready(r) => Ok(r),
+			Poll::Pending => Err(Error::Internal("delete task did not complete")),
+		}?;
+		let del_err = del_err.map_err(|e| {
+			error!("delete task failed: {:?}", e);
+			Error::Internal("delete task failed")
+		})?;
+		let _ = del_err?;
+
+		let del_handler_err = match delete_handler_task.poll(&mut ctx) {
+			Poll::Ready(r) => Ok(r),
+			Poll::Pending => Err(Error::Internal("delete handler task did not complete")),
+		}?;
+		let _ = del_handler_err.map_err(|e| {
+			error!("delete handler task failed: {:?}", e);
+			Error::Internal("delete handler task failed")
+		})?;
+
 		Ok(())
 	}
 

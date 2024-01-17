@@ -126,6 +126,7 @@ url = "2.5.0"
 arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
 geo-types = { version = "0.7.12", features = ["arbitrary"] }
+futures-lite = "2.0.1"
 
 [dev-dependencies]
 criterion = { version="0.5.1", features= ["async_tokio"] }

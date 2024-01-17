@@ -20,6 +20,9 @@ pub(crate) async fn delete_live_queries(
 	batch_size: usize,
 ) -> Result<(), Error> {
 	let mut msg: Vec<BootstrapOperationResult> = Vec::with_capacity(batch_size);
+	trace!("Pausing for sake of testing");
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	trace!("Resuming");
 	loop {
 		match tokio::time::timeout(ds::BOOTSTRAP_BATCH_LATENCY, archived_recv.recv()).await {
 			Ok(Some(bor)) => {
@@ -71,6 +74,7 @@ pub(crate) async fn delete_live_queries(
 			}
 		}
 	}
+	trace!("Finished delete task, returning");
 	Ok(())
 }
 

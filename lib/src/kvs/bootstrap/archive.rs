@@ -82,6 +82,7 @@ pub(crate) async fn archive_live_queries(
 				msg.clear();
 			}
 		}
+		trace!("Finished archive task, waiting for next message")
 	}
 	Ok(())
 }
