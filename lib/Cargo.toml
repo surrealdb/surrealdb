@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.1.0"
+version = "1.1.1"
 rust-version = "1.70.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -82,7 +82,7 @@ hex = { version = "0.4.3", optional = false }
 indexmap = { version = "2.1.0", features = ["serde"] }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "0.4.0", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
+js = { version = "0.4.2", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties","rust-alloc"], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 lexicmp = "0.1.0"
 md-5 = "0.10.6"
