@@ -13,7 +13,6 @@ use crate::sql::Value::Table;
 use crate::sql::{Fields, Value};
 use test_log::test;
 use tokio::sync::RwLock;
-use tracing_subscriber::util::SubscriberInitExt;
 use uuid;
 
 #[tokio::test]
