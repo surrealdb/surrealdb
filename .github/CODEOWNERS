@@ -15,6 +15,11 @@ build.rs @surrealdb/ci
 Makefile @surrealdb/ci
 Makefile.* @surrealdb/ci
 
+# Configuration for Rust dependencies
+Cargo.lock @surrealdb/security
+Cargo.toml @surrealdb/security
+lib/Cargo.toml @surrealdb/security
+
 # General owners for the database
 /doc/ @surrealdb/db
 /lib/ @surrealdb/db

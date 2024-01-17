@@ -250,7 +250,7 @@ mod tests {
 	use crate::sql::id::Id;
 	use crate::sql::idiom::Idiom;
 	use crate::sql::thing::Thing;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn get_none() {

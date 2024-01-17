@@ -16,7 +16,6 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
@@ -31,26 +30,19 @@ pub(crate) struct Route {
 
 /// Message router
 #[derive(Debug)]
-pub struct Router<C: api::Connection> {
-	pub(crate) conn: PhantomData<C>,
+pub struct Router {
 	pub(crate) sender: Sender<Option<Route>>,
 	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,
 }
 
-impl<C> Router<C>
-where
-	C: api::Connection,
-{
+impl Router {
 	pub(crate) fn next_id(&self) -> i64 {
 		self.last_id.fetch_add(1, Ordering::SeqCst)
 	}
 }
 
-impl<C> Drop for Router<C>
-where
-	C: api::Connection,
-{
+impl Drop for Router {
 	fn drop(&mut self) {
 		let _res = self.sender.send(None);
 	}
@@ -189,7 +181,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	#[allow(clippy::type_complexity)]
 	fn send<'r>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>>
 	where
@@ -226,7 +218,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	/// Execute all methods except `query`
 	fn execute<'r, R>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + 'r>>
 	where
@@ -243,7 +235,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	/// Execute methods that return an optional single response
 	fn execute_opt<'r, R>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Option<R>>> + Send + Sync + 'r>>
 	where
@@ -262,7 +254,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	/// Execute methods that return multiple responses
 	fn execute_vec<'r, R>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Vec<R>>> + Send + Sync + 'r>>
 	where
@@ -283,7 +275,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	/// Execute methods that return nothing
 	fn execute_unit<'r>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + 'r>>
 	where
@@ -306,7 +298,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	/// Execute methods that return a raw value
 	fn execute_value<'r>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + Sync + 'r>>
 	where
@@ -321,7 +313,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	/// Execute the `query` method
 	fn execute_query<'r>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + 'r>>
 	where

@@ -7,7 +7,7 @@ mod part;
 mod stmt;
 
 mod block;
-pub(crate) mod builtin;
+mod builtin;
 mod comment;
 mod common;
 mod depth;
@@ -79,10 +79,6 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	parse_impl(input, idiom::plain)
 }
 
-pub fn datetime(input: &str) -> Result<Datetime, Error> {
-	parse_impl(input, literal::datetime)
-}
-
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	parse_impl(input, literal::datetime_all_raw)
 }
@@ -91,20 +87,12 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 	parse_impl(input, literal::duration)
 }
 
-pub fn path_like(input: &str) -> Result<Value, Error> {
-	parse_impl(input, value::path_like)
-}
-
 pub fn range(input: &str) -> Result<Range, Error> {
 	parse_impl(input, literal::range)
 }
 
 /// Parses a SurrealQL [`Thing`]
 pub fn thing(input: &str) -> Result<Thing, Error> {
-	parse_impl(input, thing::thing)
-}
-
-pub fn thing_raw(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, thing::thing_raw)
 }
 

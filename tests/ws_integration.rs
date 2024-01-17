@@ -1,9 +1,7 @@
 // RUST_LOG=warn cargo make ci-ws-integration
-
 mod common;
 
 mod ws_integration {
-
 	use super::common;
 
 	/// Tests for the empty protocol format

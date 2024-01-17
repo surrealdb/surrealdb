@@ -8,12 +8,12 @@ use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
-const TAG_NONE: u64 = 78_773_250;
-const TAG_UUID: u64 = 78_773_251;
-const TAG_DECIMAL: u64 = 78_773_252;
-const TAG_DURATION: u64 = 78_773_253;
-const TAG_DATETIME: u64 = 78_773_254;
-const TAG_RECORDID: u64 = 78_773_255;
+const TAG_DATETIME: u64 = 0;
+const TAG_NONE: u64 = 6;
+const TAG_UUID: u64 = 7;
+const TAG_DECIMAL: u64 = 8;
+const TAG_DURATION: u64 = 9;
+const TAG_RECORDID: u64 = 10;
 
 #[derive(Debug)]
 pub struct Cbor(pub Data);
@@ -41,6 +41,14 @@ impl TryFrom<Cbor> for Value {
 				.collect::<Result<Value, &str>>(),
 			Data::Tag(t, v) => {
 				match t {
+					// A literal datetime
+					TAG_DATETIME => match *v {
+						Data::Text(v) => match Datetime::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err("Expected a valid Datetime value"),
+						},
+						_ => Err("Expected a CBOR text data type"),
+					},
 					// A literal NONE
 					TAG_NONE => Ok(Value::None),
 					// A literal uuid
@@ -64,14 +72,6 @@ impl TryFrom<Cbor> for Value {
 						Data::Text(v) => match Duration::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Duration value"),
-						},
-						_ => Err("Expected a CBOR text data type"),
-					},
-					// A literal datetime
-					TAG_DATETIME => match *v {
-						Data::Text(v) => match Datetime::try_from(v) {
-							Ok(v) => Ok(v.into()),
-							_ => Err("Expected a valid Datetime value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
 					},

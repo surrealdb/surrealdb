@@ -22,9 +22,11 @@ impl Display for Action {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Notification {
-	// Live query ID
+	/// The id of the LIVE query to which this notification belongs
 	pub id: Uuid,
+	/// The CREATE / UPDATE / DELETE action which caused this notification
 	pub action: Action,
+	/// The resulting notification content, usually the altered record content
 	pub result: Value,
 }
 

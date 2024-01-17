@@ -255,6 +255,18 @@ impl Datastore {
 		#[allow(unused_variables)]
 		let default_clock: Arc<RwLock<SizedClock>> =
 			Arc::new(RwLock::new(SizedClock::System(SystemClock::new())));
+
+		// removes warning if no storage is enabled.
+		#[cfg(not(any(
+			feature = "kv-mem",
+			feature = "kv-rocksdb",
+			feature = "kv-speedb",
+			feature = "kv-indxdb",
+			feature = "kv-tikv",
+			feature = "kv-fdb"
+		)))]
+		let _ = (clock_override, default_clock);
+
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, Arc<RwLock<SizedClock>>) = match path {
 			"memory" => {

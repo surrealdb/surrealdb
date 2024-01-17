@@ -1,9 +1,14 @@
+use super::live;
+use super::Stream;
+
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::err::Error;
 use crate::api::opt;
 use crate::api::Connection;
+use crate::api::ExtraFeatures;
 use crate::api::Result;
+use crate::engine::any::Any;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
@@ -15,7 +20,11 @@ use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::Notification;
 use crate::Surreal;
+use futures::future::Either;
+use futures::stream::SelectAll;
+use futures::StreamExt;
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -24,8 +33,11 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::future::Future;
 use std::future::IntoFuture;
+use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
 /// A query future
 #[derive(Debug)]
@@ -34,6 +46,7 @@ pub struct Query<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) query: Vec<Result<Vec<Statement>>>,
 	pub(super) bindings: Result<BTreeMap<String, Value>>,
+	pub(crate) register_live_queries: bool,
 }
 
 impl<C> Query<'_, C>
@@ -58,14 +71,66 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
+			// Extract the router from the client
+			let router = self.client.router.extract()?;
+			// Combine all query statements supplied
 			let mut statements = Vec::with_capacity(self.query.len());
 			for query in self.query {
 				statements.extend(query?);
 			}
-			let query = sql::Query(Statements(statements));
+			// Build the query and execute it
+			let query = sql::Query(Statements(statements.clone()));
 			let param = Param::query(query, self.bindings?);
 			let mut conn = Client::new(Method::Query);
-			conn.execute_query(self.client.router.extract()?, param).await
+			let mut response = conn.execute_query(router, param).await?;
+			// Register live queries if necessary
+			if self.register_live_queries {
+				let mut live_queries = IndexMap::new();
+				let mut checked = false;
+				// Adjusting offsets as a workaround to https://github.com/surrealdb/surrealdb/issues/3318
+				let mut offset = 0;
+				for (index, stmt) in statements.into_iter().enumerate() {
+					if let Statement::Live(stmt) = stmt {
+						if !checked && !router.features.contains(&ExtraFeatures::LiveQueries) {
+							return Err(Error::LiveQueriesNotSupported.into());
+						}
+						checked = true;
+						let index = index - offset;
+						if let Some((_, result)) = response.results.get(&index) {
+							let result =
+								match result {
+									Ok(id) => live::register::<Client>(router, id.clone())
+										.await
+										.map(|rx| Stream {
+											id: stmt.id.into(),
+											rx: Some(rx),
+											client: Surreal {
+												router: self.client.router.clone(),
+												engine: PhantomData,
+											},
+											response_type: PhantomData,
+											engine: PhantomData,
+										}),
+									// This is a live query. We are using this as a workaround to avoid
+									// creating another public error variant for this internal error.
+									Err(..) => Err(Error::NotLiveQuery(index).into()),
+								};
+							live_queries.insert(index, result);
+						}
+					} else if matches!(
+						stmt,
+						Statement::Begin(..) | Statement::Commit(..) | Statement::Cancel(..)
+					) {
+						offset += 1;
+					}
+				}
+				response.live_queries = live_queries;
+			}
+			response.client = Surreal {
+				router: self.client.router.clone(),
+				engine: PhantomData,
+			};
+			Ok(response)
 		})
 	}
 }
@@ -172,9 +237,47 @@ pub(crate) type QueryResult = Result<Value>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
-pub struct Response(pub(crate) IndexMap<usize, (Stats, QueryResult)>);
+pub struct Response {
+	pub(crate) client: Surreal<Any>,
+	pub(crate) results: IndexMap<usize, (Stats, QueryResult)>,
+	pub(crate) live_queries: IndexMap<usize, Result<Stream<'static, Any, Value>>>,
+}
+
+/// A `LIVE SELECT` stream from the `query` method
+#[derive(Debug)]
+#[must_use = "streams do nothing unless you poll them"]
+pub struct QueryStream<R>(
+	pub(crate) Either<Stream<'static, Any, R>, SelectAll<Stream<'static, Any, R>>>,
+);
+
+impl futures::Stream for QueryStream<Value> {
+	type Item = Notification<Value>;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		self.as_mut().0.poll_next_unpin(cx)
+	}
+}
+
+impl<R> futures::Stream for QueryStream<Notification<R>>
+where
+	R: DeserializeOwned + Unpin,
+{
+	type Item = Result<Notification<R>>;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		self.as_mut().0.poll_next_unpin(cx)
+	}
+}
 
 impl Response {
+	pub(crate) fn new() -> Self {
+		Self {
+			client: Surreal::init(),
+			results: Default::default(),
+			live_queries: Default::default(),
+		}
+	}
+
 	/// Takes and returns records returned from the database
 	///
 	/// A query that only returns one result can be deserialized into an
@@ -185,7 +288,6 @@ impl Response {
 	///
 	/// ```no_run
 	/// use serde::Deserialize;
-	/// use surrealdb::sql;
 	///
 	/// #[derive(Debug, Deserialize)]
 	/// # #[allow(dead_code)]
@@ -244,6 +346,53 @@ impl Response {
 		index.query_result(self)
 	}
 
+	/// Takes and streams records returned from a `LIVE SELECT` query
+	///
+	/// This is the counterpart to [Response::take] used to stream the results
+	/// of a live query.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use serde::Deserialize;
+	/// use surrealdb::Notification;
+	/// use surrealdb::sql::Value;
+	///
+	/// #[derive(Debug, Deserialize)]
+	/// # #[allow(dead_code)]
+	/// struct User {
+	///     id: String,
+	///     balance: String
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// let mut response = db
+	///     // Stream all changes to the user table
+	///     .query("LIVE SELECT * FROM user")
+	///     .await?;
+	///
+	/// // Stream the result of the live query at the given index
+	/// // while deserialising into the User type
+	/// let mut stream = response.stream::<Notification<User>>(0)?;
+	///
+	/// // Stream raw values instead
+	/// let mut stream = response.stream::<Value>(0)?;
+	///
+	/// // Combine and stream all `LIVE SELECT` statements in this query
+	/// let mut stream = response.stream::<Value>(())?;
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	///
+	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
+	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
+		index.query_stream(self)
+	}
+
 	/// Take all errors from the query response
 	///
 	/// The errors are keyed by the corresponding index of the statement that failed.
@@ -264,14 +413,14 @@ impl Response {
 	/// ```
 	pub fn take_errors(&mut self) -> HashMap<usize, crate::Error> {
 		let mut keys = Vec::new();
-		for (key, result) in &self.0 {
+		for (key, result) in &self.results {
 			if result.1.is_err() {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some((_, Err(error))) = self.0.remove(&key) {
+			if let Some((_, Err(error))) = self.results.remove(&key) {
 				errors.insert(key, error);
 			}
 		}
@@ -295,14 +444,14 @@ impl Response {
 	/// ```
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
-		for (key, result) in &self.0 {
+		for (key, result) in &self.results {
 			if result.1.is_err() {
 				first_error = Some(*key);
 				break;
 			}
 		}
 		if let Some(key) = first_error {
-			if let Some((_, Err(error))) = self.0.remove(&key) {
+			if let Some((_, Err(error))) = self.results.remove(&key) {
 				return Err(error);
 			}
 		}
@@ -326,7 +475,7 @@ impl Response {
 	/// # Ok(())
 	/// # }
 	pub fn num_statements(&self) -> usize {
-		self.0.len()
+		self.results.len()
 	}
 }
 
@@ -423,14 +572,14 @@ impl WithStats<Response> {
 	/// ```
 	pub fn take_errors(&mut self) -> HashMap<usize, (Stats, crate::Error)> {
 		let mut keys = Vec::new();
-		for (key, result) in &self.0 .0 {
+		for (key, result) in &self.0.results {
 			if result.1.is_err() {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some((stats, Err(error))) = self.0 .0.remove(&key) {
+			if let Some((stats, Err(error))) = self.0.results.remove(&key) {
 				errors.insert(key, (stats, error));
 			}
 		}
@@ -476,6 +625,11 @@ impl WithStats<Response> {
 	pub fn num_statements(&self) -> usize {
 		self.0.num_statements()
 	}
+
+	/// Returns the unwrapped response
+	pub fn into_inner(self) -> Response {
+		self.0
+	}
 }
 
 #[cfg(test)]
@@ -509,36 +663,48 @@ mod tests {
 
 	#[test]
 	fn take_from_an_empty_response() {
-		let mut response = Response(Default::default());
+		let mut response = Response::new();
 		let value: Value = response.take(0).unwrap();
 		assert!(value.is_none());
 
-		let mut response = Response(Default::default());
+		let mut response = Response::new();
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = Response(Default::default());
+		let mut response = Response::new();
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
 
 	#[test]
 	fn take_from_an_errored_query() {
-		let mut response = Response(to_map(vec![Err(Error::ConnectionUninitialised.into())]));
+		let mut response = Response {
+			results: to_map(vec![Err(Error::ConnectionUninitialised.into())]),
+			..Response::new()
+		};
 		response.take::<Option<()>>(0).unwrap_err();
 	}
 
 	#[test]
 	fn take_from_empty_records() {
-		let mut response = Response(to_map(vec![]));
+		let mut response = Response {
+			results: to_map(vec![]),
+			..Response::new()
+		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Default::default());
 
-		let mut response = Response(to_map(vec![]));
+		let mut response = Response {
+			results: to_map(vec![]),
+			..Response::new()
+		};
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = Response(to_map(vec![]));
+		let mut response = Response {
+			results: to_map(vec![]),
+			..Response::new()
+		};
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
@@ -547,45 +713,66 @@ mod tests {
 	fn take_from_a_scalar_response() {
 		let scalar = 265;
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(scalar.into())]),
+			..Response::new()
+		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Value::from(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(scalar.into())]),
+			..Response::new()
+		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(scalar.into())]),
+			..Response::new()
+		};
 		let vec: Vec<usize> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 
 		let scalar = true;
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(scalar.into())]),
+			..Response::new()
+		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, Value::from(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(scalar.into())]),
+			..Response::new()
+		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = Response(to_map(vec![Ok(scalar.into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(scalar.into())]),
+			..Response::new()
+		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 	}
 
 	#[test]
 	fn take_preserves_order() {
-		let mut response = Response(to_map(vec![
-			Ok(0.into()),
-			Ok(1.into()),
-			Ok(2.into()),
-			Ok(3.into()),
-			Ok(4.into()),
-			Ok(5.into()),
-			Ok(6.into()),
-			Ok(7.into()),
-		]));
+		let mut response = Response {
+			results: to_map(vec![
+				Ok(0.into()),
+				Ok(1.into()),
+				Ok(2.into()),
+				Ok(3.into()),
+				Ok(4.into()),
+				Ok(5.into()),
+				Ok(6.into()),
+				Ok(7.into()),
+			]),
+			..Response::new()
+		};
 		let Some(four): Option<i32> = response.take(4).unwrap() else {
 			panic!("query not found");
 		};
@@ -609,17 +796,26 @@ mod tests {
 		};
 		let value = to_value(summary.clone()).unwrap();
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone())]),
+			..Response::new()
+		};
 		let title: Value = response.take("title").unwrap();
 		assert_eq!(title, Value::from(summary.title.as_str()));
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone())]),
+			..Response::new()
+		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
 			panic!("title not found");
 		};
 		assert_eq!(title, summary.title);
 
-		let mut response = Response(to_map(vec![Ok(value)]));
+		let mut response = Response {
+			results: to_map(vec![Ok(value)]),
+			..Response::new()
+		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![summary.title]);
 
@@ -629,7 +825,10 @@ mod tests {
 		};
 		let value = to_value(article.clone()).unwrap();
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone())]),
+			..Response::new()
+		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
 			panic!("title not found");
 		};
@@ -639,27 +838,45 @@ mod tests {
 		};
 		assert_eq!(body, article.body);
 
-		let mut response = Response(to_map(vec![Ok(value.clone())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(value.clone())]),
+			..Response::new()
+		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title.clone()]);
 
-		let mut response = Response(to_map(vec![Ok(value)]));
+		let mut response = Response {
+			results: to_map(vec![Ok(value)]),
+			..Response::new()
+		};
 		let value: Value = response.take("title").unwrap();
 		assert_eq!(value, Value::from(article.title));
 	}
 
 	#[test]
 	fn take_partial_records() {
-		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(vec![true, false].into())]),
+			..Response::new()
+		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
 
-		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
+		let mut response = Response {
+			results: to_map(vec![Ok(vec![true, false].into())]),
+			..Response::new()
+		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
-		let mut response = Response(to_map(vec![Ok(vec![true, false].into())]));
-		let Err(Api(Error::LossyTake(Response(mut map)))): Result<Option<bool>> = response.take(0)
+		let mut response = Response {
+			results: to_map(vec![Ok(vec![true, false].into())]),
+			..Response::new()
+		};
+		let Err(Api(Error::LossyTake(Response {
+			results: mut map,
+			..
+		}))): Result<Option<bool>> = response.take(0)
 		else {
 			panic!("silently dropping records not allowed");
 		};
@@ -682,7 +899,10 @@ mod tests {
 			Ok(7.into()),
 			Err(Error::DuplicateRequestId(0).into()),
 		];
-		let response = Response(to_map(response));
+		let response = Response {
+			results: to_map(response),
+			..Response::new()
+		};
 		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err()
 		else {
 			panic!("check did not return the first error");
@@ -704,7 +924,10 @@ mod tests {
 			Ok(7.into()),
 			Err(Error::DuplicateRequestId(0).into()),
 		];
-		let mut response = Response(to_map(response));
+		let mut response = Response {
+			results: to_map(response),
+			..Response::new()
+		};
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);

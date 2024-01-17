@@ -5,18 +5,11 @@ use crate::syn::{
 use nom::error::ErrorKind;
 use nom::error::FromExternalError;
 use nom::error::ParseError as NomParseError;
-use nom::Err;
 use std::fmt::Write;
 use std::num::ParseFloatError;
 use std::num::ParseIntError;
 use std::ops::Bound;
 use thiserror::Error;
-
-mod utils;
-pub use utils::*;
-mod render;
-
-pub type IResult<I, O, E = ParseError<I>> = Result<(I, O), Err<E>>;
 
 #[derive(Error, Debug, Clone)]
 pub enum ParseError<I> {

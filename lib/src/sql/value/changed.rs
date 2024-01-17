@@ -42,7 +42,7 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[test]
 	fn changed_none() {

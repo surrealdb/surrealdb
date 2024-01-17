@@ -13,7 +13,7 @@ mod tests {
 	use super::*;
 	use crate::sql::id::Id;
 	use crate::sql::thing::Thing;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn rid_none() {
