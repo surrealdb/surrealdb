@@ -1,11 +1,12 @@
-use crate::err::Error;
-use crate::err::Error::TimestampOverflow;
-use crate::sql::{Duration, Object};
+use std::ops::{Add, Sub};
+
 use derive::{Key, Store};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
-use std::ops::{Add, Sub};
+
+use crate::err::Error;
+use crate::err::Error::TimestampOverflow;
+use crate::sql::Duration;
 
 // NOTE: This is not a statement, but as per layering, keeping it here till we
 // have a better structure.
@@ -26,16 +27,6 @@ pub struct ClusterMembership {
 #[revisioned(revision = 1)]
 pub struct Timestamp {
 	pub value: u64,
-}
-
-impl Display for Timestamp {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let obj: Object = map! {
-			"value".to_string() => self.value.to_string().into(),
-		}
-		.into();
-		write!(f, "{}", obj)
-	}
 }
 
 impl From<u64> for Timestamp {
@@ -90,10 +81,11 @@ impl Sub<&Duration> for &Timestamp {
 
 #[cfg(test)]
 mod test {
-	use crate::dbs::node::Timestamp;
-	use crate::sql::Duration;
 	use chrono::prelude::Utc;
 	use chrono::TimeZone;
+
+	use crate::dbs::node::Timestamp;
+	use crate::sql::Duration;
 
 	#[test]
 	fn timestamps_can_be_added_duration() {

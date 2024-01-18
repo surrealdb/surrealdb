@@ -414,12 +414,18 @@ impl Options {
 
 	/// Get currently selected NS
 	pub fn ns(&self) -> &str {
-		self.ns.as_ref().map(AsRef::as_ref).unwrap()
+		self.ns
+			.as_ref()
+			.map(AsRef::as_ref)
+			.expect("Expected the options to have a namespace specified")
 	}
 
 	/// Get currently selected DB
 	pub fn db(&self) -> &str {
-		self.db.as_ref().map(AsRef::as_ref).unwrap()
+		self.db
+			.as_ref()
+			.map(AsRef::as_ref)
+			.expect("Expected the options to have a database specified")
 	}
 
 	/// Check whether this request supports realtime queries
