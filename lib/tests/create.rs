@@ -291,18 +291,20 @@ async fn create_on_none_values_with_multi_field_unique_index() -> Result<(), Err
         DEFINE FIELD name ON TABLE foo TYPE string;
         DEFINE FIELD national_id ON TABLE foo TYPE option<string>;
         DEFINE INDEX foo_national_id_name_idx ON foo FIELDS national_id, name UNIQUE;
-        CREATE foo SET name = 'John Doe';
-        CREATE foo SET name = 'John Doe';
+        CREATE foo:1 SET name = 'John Doe'; 
+        CREATE foo:2 SET name = 'John Doe';
     ";
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
+
 	assert_eq!(res.len(), 6);
-	//
-	for _ in 0..6 {
-		let _ = res.remove(0).result?;
-	}
+
+	let expected_to_not_be_error = res.last();
+	assert!(expected_to_not_be_error.is_some());
+	assert!(expected_to_not_be_error.unwrap().result.is_ok());
+
 	Ok(())
 }
 
