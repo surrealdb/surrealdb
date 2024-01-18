@@ -1,6 +1,5 @@
 use std::pin::Pin;
 
-use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 

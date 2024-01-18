@@ -701,7 +701,7 @@ impl Datastore {
 			Error::Internal("archive task failed".to_string())
 		})?;
 		#[cfg(not(target_arch = "wasm32"))]
-		let _ = arch_err?;
+		arch_err?;
 
 		let del_err = match delete_task.poll(&mut ctx) {
 			Poll::Ready(r) => Ok(r),
@@ -712,7 +712,7 @@ impl Datastore {
 			Error::Internal("delete task failed".to_string())
 		})?;
 		#[cfg(not(target_arch = "wasm32"))]
-		let _ = del_err?;
+		del_err?;
 
 		let _del_handler_err = match delete_handler_task.poll(&mut ctx) {
 			Poll::Ready(r) => Ok(r),
@@ -721,7 +721,7 @@ impl Datastore {
 			}
 		}?;
 		#[cfg(not(target_arch = "wasm32"))]
-		let _ = _del_handler_err.map_err(|e| {
+		_del_handler_err.map_err(|e| {
 			error!("delete handler task failed: {:?}", e);
 			Error::Internal("delete handler task failed".to_string())
 		})?;
@@ -1430,9 +1430,7 @@ impl Datastore {
 	}
 }
 
-async fn create_delete_handler_future(
-	mut delete_recv: mpsc::Receiver<BootstrapOperationResult>,
-) -> () {
+async fn create_delete_handler_future(mut delete_recv: mpsc::Receiver<BootstrapOperationResult>) {
 	while let Some(res) = Pin::new(&mut delete_recv).recv().await {
 		let (_lq, e) = res;
 		if let Some(e) = e {
