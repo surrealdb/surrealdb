@@ -340,7 +340,7 @@ async fn define_table_view_with_alias() -> Result<(), Error> {
 	res.remove(0).result.unwrap();
 
 	let select = res.remove(0).result.unwrap();
-	let val = Value::parse("[[{ count: 3, f: 1, id: foo:[1] }, { count: 1, f: 2, id: foo:[2] }]]");
+	let val = Value::parse("[{ count: 3, f: 1, id: foo:[1] }, { count: 1, f: 2, id: foo:[2] }]");
 	assert_eq!(select, val);
 
 	Ok(())
