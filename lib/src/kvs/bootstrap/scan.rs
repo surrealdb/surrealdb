@@ -1,8 +1,6 @@
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use crate::err::BootstrapCause::{ChannelRecvError, ChannelSendError};
-use crate::err::ChannelVariant::{BootstrapScan, BootstrapTxSupplier};
 use crate::err::Error;
 use crate::kvs::bootstrap::{TxRequestOneshot, TxResponseOneshot};
 use crate::kvs::Limit::Unlimited;
@@ -20,9 +18,7 @@ pub(crate) async fn scan_node_live_queries(
 ) -> Result<(), Error> {
 	let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 		oneshot::channel();
-	if let Err(_send_error) = tx_req.send(tx_req_oneshot).await {
-		return Err(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
-	}
+	tx_req.send(tx_req_oneshot).await.expect("Bootstrap scan task unable to send tx request");
 	trace!("Receiving a tx response in scan");
 	match tx_res_oneshot.await {
 		Ok(mut tx) => {
@@ -48,14 +44,13 @@ pub(crate) async fn scan_node_live_queries(
 									tb,
 									lq: lv.lq.into(),
 								};
-								sender.send((lq, None)).await.map_err(|e| {
-									error!("Failed to send message: {}", e);
-									Error::BootstrapError(ChannelSendError(BootstrapScan))
-								})?;
+								sender
+									.send((lq, None))
+									.await
+									.expect("Bootstrap scan task unable to send found live query");
 							}
 						}
 						Err(e) => {
-							error!("Failed scanning node live queries: {:?}", e);
 							tx.cancel().await?;
 							return Err(e);
 						}
@@ -65,8 +60,7 @@ pub(crate) async fn scan_node_live_queries(
 			tx.commit().await
 		}
 		Err(recv_error) => {
-			error!("Failed receiving tx in scan node live queries: {:?}", recv_error);
-			Err(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)))
+			panic!("Failed receiving tx in scan node live queries: {:?}", recv_error);
 		}
 	}
 }
@@ -74,14 +68,16 @@ pub(crate) async fn scan_node_live_queries(
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod test {
+	use std::sync::Arc;
+	use std::time::Duration;
+
+	use futures_concurrency::future::FutureExt;
+	use tokio::sync::mpsc;
+
 	use crate::dbs::Session;
 	use crate::kvs::bootstrap::scan_node_live_queries;
 	use crate::kvs::bootstrap::test_util::{always_give_tx, as_uuid};
 	use crate::kvs::{BootstrapOperationResult, Datastore};
-	use futures_concurrency::future::FutureExt;
-	use std::sync::Arc;
-	use std::time::Duration;
-	use tokio::sync::mpsc;
 
 	#[tokio::test]
 	async fn scan_picks_up() {

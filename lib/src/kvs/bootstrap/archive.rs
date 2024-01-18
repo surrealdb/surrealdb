@@ -4,8 +4,6 @@ use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use crate::err::BootstrapCause::{ChannelRecvError, ChannelSendError};
-use crate::err::ChannelVariant::{BootstrapArchive, BootstrapTxSupplier};
 use crate::err::Error;
 use crate::kvs::bootstrap::{TxRequestOneshot, TxResponseOneshot};
 use crate::kvs::{ds, BootstrapOperationResult};
@@ -27,25 +25,21 @@ pub(crate) async fn archive_live_queries(
 	loop {
 		match tokio::time::timeout(*batch_latency, scan_recv.recv()).await {
 			Ok(Some(bor)) => {
-				let is_err = bor.1.is_some();
-				if is_err {
+				let bootstrap_operation_result_is_err = bor.1.is_some();
+				if bootstrap_operation_result_is_err {
 					// send any errors further on, because we don't need to process them
 					// unless we can handle them. Currently we can't.
 					// if we error on send, then we bubble up because this shouldn't happen
-					sender.send(bor).await.map_err(|e| {
-						error!("Error sending error: {:?}", e);
-						Error::BootstrapError(ChannelSendError(BootstrapArchive))
-					})?;
+					sender.send(bor).await.expect(
+						"The bootstrap archive task was unable to send a bootstrap operation error",
+					);
 				} else {
 					msg.push(bor);
 					if msg.len() >= batch_size {
 						let results =
 							archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
 						for boresult in results {
-							sender.send(boresult).await.map_err(|e| {
-								error!("Error sending error: {:?}", e);
-								Error::BootstrapError(ChannelSendError(BootstrapArchive))
-							})?;
+							sender.send(boresult).await.expect("The bootstrap archive task was unable to send a bootstrap operation message as part of batch");
 						}
 						// msg should always be drained but in case it isn't, we clear
 						msg.clear();
@@ -57,10 +51,7 @@ pub(crate) async fn archive_live_queries(
 				match archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await {
 					Ok(results) => {
 						for boresult in results {
-							sender.send(boresult).await.map_err(|e| {
-								error!("Error sending error: {:?}", e);
-								Error::BootstrapError(ChannelSendError(BootstrapArchive))
-							})?;
+							sender.send(boresult).await.expect("The bootstrap archive task was unable to send a bootstrap operation message after the input channel was closed")
 						}
 						break;
 					}
@@ -73,10 +64,7 @@ pub(crate) async fn archive_live_queries(
 				// Timeout expired
 				let results = archive_live_query_batch(tx_req.clone(), node_id, &mut msg).await?;
 				for boresult in results {
-					sender.send(boresult).await.map_err(|e| {
-						error!("Error sending error: {:?}", e);
-						Error::BootstrapError(ChannelSendError(BootstrapArchive))
-					})?;
+					sender.send(boresult).await.expect("The bootstrap archive task was unable to send a bootstrap operation message after the timeout expired");
 				}
 				// msg should always be drained but in case it isn't, we clear
 				msg.clear();
@@ -109,81 +97,74 @@ async fn archive_live_query_batch(
 		trace!("Receiving a tx response in archive");
 		let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 			oneshot::channel();
-		if let Err(_send_error) = tx_req.send(tx_req_oneshot).await {
-			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
-			continue;
-		}
-		match tx_res_oneshot.await {
-			Ok(mut tx) => {
-				trace!("Received tx in archive");
-				// In case this is a retry, we re-hydrate the msg vector
-				// Consume the input message vector of live queries to archive
-				for (lq, _error_should_not_exist) in msg.drain(..) {
-					// Retrieve the existing table live query
-					let lv_res = tx
-						.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq)
-						.await;
-					// Maybe it won't work. Not handled atm, so treat as valid error
-					if let Err(e) = lv_res {
-						ret.push((lq, Some(e)));
-						continue;
-					}
-					let lv = lv_res.unwrap();
-					// If the lq is already archived, we can remove it from bootstrap
-					let already_archived = lv.archived.is_some();
-					match already_archived {
-						true => {
-							// We don't need to do anything, but we do need to forward the result
-							ret.push((lq, None))
+		tx_req
+			.send(tx_req_oneshot)
+			.await
+			.expect("The bootstrap archive task was unable to send a transaction request");
+		let mut tx = tx_res_oneshot
+			.await
+			.expect("Bootstrap archive task did not receive a transaction request response");
+		trace!("Received tx in archive");
+		// In case this is a retry, we re-hydrate the msg vector
+		// Consume the input message vector of live queries to archive
+		for (lq, _error_should_not_exist) in msg.drain(..) {
+			// Retrieve the existing table live query
+			let lv_res =
+				tx.get_tb_live(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await;
+			// Maybe it won't work. Not handled atm, so treat as valid error
+			if let Err(e) = lv_res {
+				ret.push((lq, Some(e)));
+				continue;
+			}
+			let lv = lv_res.unwrap();
+			// If the lq is already archived, we can remove it from bootstrap
+			let already_archived = lv.archived.is_some();
+			match already_archived {
+				true => {
+					// We don't need to do anything, but we do need to forward the result
+					ret.push((lq, None))
+				}
+				false => {
+					// Mark as archived by us (this node) and write back
+					let archived_lvs = lv.clone().archive(node_id);
+					match tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await {
+						Ok(_) => {
+							ret.push((lq, None));
 						}
-						false => {
-							// Mark as archived by us (this node) and write back
-							let archived_lvs = lv.clone().archive(node_id);
-							match tx.putc_tblq(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lv)).await
-							{
-								Ok(_) => {
-									ret.push((lq, None));
-								}
-								Err(e) => {
-									ret.push((lq, Some(e)));
-								}
-							}
+						Err(e) => {
+							ret.push((lq, Some(e)));
 						}
 					}
 				}
-				if let Err(e) = tx.commit().await {
-					error!("Error committing transaction during archive: {}", e);
-					last_err = Some(e);
-					if let Err(e) = tx.cancel().await {
-						error!("Error cancelling transaction during archive: {}", e);
-						last_err = Some(e);
-					}
-				} else {
-					trace!("archive committed tx happy path");
-					break;
-				}
-				trace!("archive committing tx second happy");
-				if let Err(e) = tx.commit().await {
-					trace!("failed to commit tx: {:?}", e);
-					last_err = Some(e);
-					if let Err(e) = tx.cancel().await {
-						trace!("failed to rollback tx: {:?}", e);
-						// TODO wrap?
-						last_err = Some(e);
-					}
-				} else {
-					break;
-				}
-				trace!("outside the commit check");
-			}
-			Err(e) => {
-				error!("Failed to archive live queries: {:?}", e);
-				last_err = Some(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)));
 			}
 		}
+		if let Err(e) = tx.commit().await {
+			error!("Error committing transaction during archive: {}", e);
+			last_err = Some(e);
+			if let Err(e) = tx.cancel().await {
+				error!("Error cancelling transaction during archive: {}", e);
+				last_err = Some(e);
+			}
+		} else {
+			trace!("archive committed tx happy path");
+			break;
+		}
+		trace!("archive committing tx second happy");
+		if let Err(e) = tx.commit().await {
+			error!("failed to commit tx: {:?}", e);
+			last_err = Some(e);
+			if let Err(e) = tx.cancel().await {
+				error!("failed to rollback tx: {:?}", e);
+				last_err = Some(e);
+			}
+		} else {
+			break;
+		}
+		trace!("outside the commit check");
+		// Check if we should retry
 		if last_err.is_some() {
 			// If there are 2 conflicting bootstraps, we don't want them to continue
-			// continue colliding at the same time. So we scatter the retry sleep
+			// colliding at the same time. So we scatter the retry sleep
 			let scatter_sleep = rand::thread_rng()
 				.gen_range(ds::BOOTSTRAP_TX_RETRY_LOW_MILLIS..ds::BOOTSTRAP_TX_RETRY_HIGH_MILLIS);
 			tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;

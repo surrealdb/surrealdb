@@ -772,48 +772,6 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
-
-	/// Error that can happen at any point during bootstrap
-	/// TODO change this to heartbeat? cleanup? cluster lifecycle?
-	/// there is overlap between bootstrap and heartbeat, but then there will be errors in lq that
-	/// arent bootstrap (definitely) or heartbeat (maybe)
-	#[error("Bootstrap failure: {0}")]
-	BootstrapError(BootstrapCause),
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum BootstrapCause {
-	#[error("Failed to send to channel: {0}")]
-	ChannelSendError(ChannelVariant),
-	#[error("Failed to recv from channel: {0}")]
-	ChannelRecvError(ChannelVariant),
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum TaskVariant {
-	#[error("Bootstrap scan task")]
-	BootstrapScan,
-	#[error("Bootstrap archive task")]
-	BootstrapArchive,
-	#[error("Bootstrap delete task")]
-	BootstrapDelete,
-	#[error("Bootstrap tx supplier task")]
-	BootstrapStageLog,
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum ChannelVariant {
-	#[error("Bootstrap scan channel")]
-	BootstrapScan,
-	#[error("Bootstrap archive channel")]
-	BootstrapArchive,
-	#[error("Bootstrap delete channel")]
-	BootstrapDelete,
-	#[error("Bootstrap tx supplier")]
-	BootstrapTxSupplier,
 }
 
 #[derive(Error, Debug)]

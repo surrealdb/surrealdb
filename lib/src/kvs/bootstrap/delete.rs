@@ -1,12 +1,9 @@
 use std::pin::Pin;
-use std::time::Duration;
 
 use rand::Rng;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use crate::err::BootstrapCause::{ChannelRecvError, ChannelSendError};
-use crate::err::ChannelVariant::{BootstrapDelete, BootstrapTxSupplier};
 use crate::err::Error;
 use crate::kvs::bootstrap::{TxRequestOneshot, TxResponseOneshot};
 use crate::kvs::{ds, BootstrapOperationResult};
@@ -26,10 +23,9 @@ pub(crate) async fn delete_live_queries(
 			Ok(Some(bor)) => {
 				if bor.1.is_some() {
 					// There is an error, we do not process the entry only feed it down
-					sender
-						.send(bor)
-						.await
-						.map_err(|_e| Error::BootstrapError(ChannelSendError(BootstrapDelete)))?;
+					sender.send(bor).await.expect(
+						"The bootstrap delete task was unable to send a bootstrap operation error",
+					)
 				} else {
 					// No error, we process the entry by adding it to the buffer of messages we want to process
 					msg.push(bor);
@@ -38,10 +34,7 @@ pub(crate) async fn delete_live_queries(
 						let results =
 							delete_live_query_batch(tx_req.clone(), Pin::new(&mut msg)).await?;
 						for boresult in results {
-							sender.send(boresult).await.map_err(|e| {
-								error!("There was an error processing the batch, {}", e);
-								Error::BootstrapError(ChannelSendError(BootstrapDelete))
-							})?;
+							sender.send(boresult).await.expect("The bootstrap delete task was unable to send a bootstrap operation result");
 						}
 						// msg should always be drained but in case it isn't, we clear
 						msg.clear();
@@ -55,7 +48,7 @@ pub(crate) async fn delete_live_queries(
 					sender
 						.send(boresult)
 						.await
-						.map_err(|_e| Error::BootstrapError(ChannelSendError(BootstrapDelete)))?;
+						.expect("The bootstrap delete task was unable to send a bootstrap operation result after input channel closed");
 				}
 				break;
 			}
@@ -66,7 +59,7 @@ pub(crate) async fn delete_live_queries(
 					sender
 						.send(boresult)
 						.await
-						.map_err(|_e| Error::BootstrapError(ChannelSendError(BootstrapDelete)))?;
+						.expect("The bootstrap delete task was unable to send a bootstrap operation result after timeout expired")
 				}
 				// msg should always be drained but in case it isn't, we clear
 				msg.clear();
@@ -97,11 +90,7 @@ async fn delete_live_query_batch(
 		}
 		let (tx_req_oneshot, tx_res_oneshot): (TxRequestOneshot, TxResponseOneshot) =
 			oneshot::channel();
-		if let Err(send_error) = tx_req.send(tx_req_oneshot).await {
-			error!("Failed to send tx request: {}", send_error);
-			last_err = Some(Error::BootstrapError(ChannelSendError(BootstrapTxSupplier)));
-			continue;
-		}
+		tx_req.send(tx_req_oneshot).await.expect("Bootstrap delete task failed to send tx request");
 		trace!("Receiving a tx response in delete");
 		match tx_res_oneshot.await {
 			Ok(mut tx) => {
@@ -142,20 +131,13 @@ async fn delete_live_query_batch(
 					break;
 				}
 			}
-			Err(_recv_error) => {
+			Err(recv_error) => {
 				// Channel dropped without sending from other side
-				last_err = Some(Error::BootstrapError(ChannelRecvError(BootstrapTxSupplier)));
+				panic!(
+					"Bootstrap delete task failed receiving tx in delete live queries: {:?}",
+					recv_error
+				);
 			}
-		}
-		if last_err.is_some() {
-			// If there are 2 conflicting bootstraps, we don't want them to continue
-			// continue colliding at the same time. So we scatter the retry sleep
-			let scatter_sleep = rand::thread_rng()
-				.gen_range(ds::BOOTSTRAP_TX_RETRY_LOW_MILLIS..ds::BOOTSTRAP_TX_RETRY_HIGH_MILLIS);
-			tokio::time::sleep(Duration::from_millis(scatter_sleep)).await;
-		} else {
-			// Successful transaction 🎉
-			break;
 		}
 	}
 	if let Some(e) = last_err {
