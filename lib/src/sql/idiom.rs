@@ -159,7 +159,9 @@ impl Idiom {
 			_ => match doc {
 				// There is a current document
 				Some(v) => {
-					v.doc.get(ctx, opt, txn, doc, self).await?.compute(ctx, opt, txn, doc).await
+					v.doc.get(ctx, opt, txn, doc, self).await?)
+						.compute(ctx, opt, txn, doc)
+						.await
 				}
 				// There isn't any document
 				None => Ok(Value::None),
