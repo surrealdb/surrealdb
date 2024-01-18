@@ -319,6 +319,34 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_table_view_with_alias() -> Result<(), Error> {
+	let sql = "
+		CREATE bar SET v = 1;
+		CREATE bar SET v = 1;
+		CREATE bar SET v = 1;
+		CREATE bar SET v = 2;
+		DEFINE TABLE foo AS SELECT v as f, count() FROM bar GROUP BY f
+		SELECT * FROM foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+
+	res.remove(0).result.unwrap();
+
+	let select = res.remove(0).result.unwrap();
+	let val = Value::parse("[[{ count: 3, f: 1, id: foo:[1] }, { count: 1, f: 2, id: foo:[2] }]]");
+	assert_eq!(select, val);
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_event() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT test ON user WHEN true THEN (
