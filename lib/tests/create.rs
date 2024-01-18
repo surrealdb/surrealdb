@@ -301,9 +301,9 @@ async fn create_on_none_values_with_multi_field_unique_index() -> Result<(), Err
 
 	assert_eq!(res.len(), 6);
 
-	let expected_to_not_be_error = res.last();
-	assert!(expected_to_not_be_error.is_some());
-	assert!(expected_to_not_be_error.unwrap().result.is_ok());
+	let expected_to_not_be_index_contains_error = res.last();
+	assert!(expected_to_not_be_index_contains_error.is_some());
+	assert!(expected_to_not_be_index_contains_error.unwrap().result.is_ok());
 
 	Ok(())
 }
