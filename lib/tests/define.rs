@@ -325,7 +325,7 @@ async fn define_table_view_with_alias() -> Result<(), Error> {
 		CREATE bar SET v = 1;
 		CREATE bar SET v = 1;
 		CREATE bar SET v = 2;
-		DEFINE TABLE foo AS SELECT v as f, count() FROM bar GROUP BY f
+		DEFINE TABLE foo AS SELECT v as f, count() FROM bar GROUP BY f;
 		SELECT * FROM foo;
 	";
 	let dbs = new_ds().await?;
