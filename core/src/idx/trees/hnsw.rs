@@ -4,9 +4,10 @@ use crate::idx::trees::knn::{Docs, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::IndexStores;
 use crate::idx::trees::vector::{SharedVector, TreeVector};
 use crate::idx::IndexKeyBase;
-use crate::kvs::{Transaction, TransactionType};
+use crate::kvs::{Key, Transaction, TransactionType};
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::{Array, Thing, Value};
+use radix_trie::{Trie, TrieCommon};
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::Entry;
@@ -19,23 +20,14 @@ pub(crate) struct HnswIndex {
 	vector_type: VectorType,
 	hnsw: Hnsw,
 	vec_docs: HashMap<SharedVector, Docs>,
-	doc_ids: Arc<RwLock<DocIds>>,
+	doc_ids: Trie<Key, DocId>,
 }
 
 impl HnswIndex {
-	pub(crate) async fn new(
-		ixs: &IndexStores,
-		tx: &mut Transaction,
-		ikb: IndexKeyBase,
-		p: &HnswParams,
-		tt: TransactionType,
-	) -> Result<Self, Error> {
-		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(ixs, tx, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
-		));
+	pub(crate) async fn new(p: &HnswParams) -> Result<Self, Error> {
+		let doc_ids = Trie::default();
 		let dim = p.dimension as usize;
 		let vector_type = p.vector_type;
-		// TODO: Persistence of HNSW + VecDocs
 		let hnsw = Hnsw::new(p);
 		let vec_docs = HashMap::new();
 		Ok(HnswIndex {
@@ -54,8 +46,14 @@ impl HnswIndex {
 		content: Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
-		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
-		let doc_id = *resolved.doc_id();
+		let doc_key: Key = rid.into();
+		let doc_id = if let Some(doc_id) = self.doc_ids.get(&doc_key) {
+			*doc_id
+		} else {
+			let doc_id = self.doc_ids.len() as u64;
+			self.doc_ids.insert(doc_key, doc_id);
+			doc_id
+		};
 		// Index the values
 		for v in content {
 			// Extract the vector
@@ -95,13 +93,13 @@ impl HnswIndex {
 		a: Array,
 		n: usize,
 		ef: usize,
-	) -> Result<VecDeque<(DocId, f64)>, Error> {
+	) -> Result<VecDeque<(Thing, f64)>, Error> {
 		// Extract the vector
 		let vector = Arc::new(TreeVector::try_from_array(self.vector_type, a)?);
 		vector.check_dimension(self.dim)?;
 		// Do the search
-		let res = self.search(&vector, n, ef).await;
-		Ok(res.docs)
+		let _res = self.search(&vector, n, ef).await;
+		todo!()
 	}
 
 	async fn search(&self, o: &SharedVector, n: usize, ef: usize) -> KnnResult {
@@ -122,12 +120,8 @@ impl HnswIndex {
 		)
 	}
 
-	pub(in crate::idx) fn doc_ids(&self) -> Arc<RwLock<DocIds>> {
-		self.doc_ids.clone()
-	}
 	pub(crate) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		self.doc_ids.write().await.finish(tx).await?;
-		Ok(())
+		todo!()
 	}
 }
 
