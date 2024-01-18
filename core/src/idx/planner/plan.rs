@@ -151,6 +151,7 @@ pub(super) enum IndexOperator {
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
 	Knn(Array, u32),
+	Ann(Array, usize, usize),
 }
 
 impl IndexOption {
@@ -207,6 +208,10 @@ impl IndexOption {
 			}
 			IndexOperator::Knn(a, k) => {
 				e.insert("operator", Value::from(format!("<{}>", k)));
+				e.insert("value", Value::Array(a.clone()));
+			}
+			IndexOperator::Ann(a, n, ef) => {
+				e.insert("operator", Value::from(format!("<{},{}>", n, ef)));
 				e.insert("value", Value::Array(a.clone()));
 			}
 		};

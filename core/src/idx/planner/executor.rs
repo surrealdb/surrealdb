@@ -16,6 +16,7 @@ use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
 use crate::idx::planner::{IterationStage, KnnSet};
+use crate::idx::trees::hnsw::HnswIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
@@ -30,6 +31,8 @@ use tokio::sync::RwLock;
 pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>, Distance);
 pub(super) type KnnExpressions =
 	HashMap<Arc<Expression>, (u32, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
+pub(super) type AnnExpressions =
+	HashMap<Arc<Expression>, (usize, Arc<Idiom>, Arc<Vec<Number>>, usize)>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -42,6 +45,7 @@ pub(super) struct InnerQueryExecutor {
 	it_entries: Vec<IteratorEntry>,
 	index_definitions: Vec<DefineIndexStatement>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
+	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
 	knn_entries: HashMap<Arc<Expression>, KnnEntry>,
 }
 
@@ -87,6 +91,8 @@ impl InnerQueryExecutor {
 		let mut ft_map = HashMap::default();
 		let mut mt_map: HashMap<IndexRef, MTreeIndex> = HashMap::default();
 		let mut mt_entries = HashMap::default();
+		let mut hnsw_map: HashMap<IndexRef, HnswIndex> = HashMap::default();
+		let mut hnsw_entries = HashMap::default();
 		let mut knn_entries = HashMap::with_capacity(knns.len());
 
 		// Create all the instances of FtIndex
@@ -151,6 +157,28 @@ impl InnerQueryExecutor {
 							mt_entries.insert(exp, entry);
 						}
 					}
+					Index::Hnsw(p) => {
+						if let IndexOperator::Ann(a, n, ef) = io.op() {
+							let mut tx = txn.lock().await;
+							let entry = if let Some(hnsw) = hnsw_map.get(&ix_ref) {
+								HnswEntry::new(hnsw, a.clone(), *n, *ef).await?
+							} else {
+								let ikb = IndexKeyBase::new(opt, idx_def);
+								let hnsw = HnswIndex::new(
+									ctx.get_index_stores(),
+									&mut tx,
+									ikb,
+									p,
+									TransactionType::Read,
+								)
+								.await?;
+								let entry = HnswEntry::new(&hnsw, a.clone(), *n, *ef).await?;
+								hnsw_map.insert(ix_ref, hnsw);
+								entry
+							};
+							hnsw_entries.insert(exp, entry);
+						}
+					}
 					_ => {}
 				}
 			}
@@ -168,6 +196,7 @@ impl InnerQueryExecutor {
 			it_entries: Vec::new(),
 			index_definitions: im.definitions,
 			mt_entries,
+			hnsw_entries,
 			knn_entries,
 		})
 	}
@@ -274,6 +303,7 @@ impl QueryExecutor {
 								..
 							} => self.new_search_index_iterator(it_ref, io.clone()).await,
 							Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(it_ref)),
+							Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(it_ref)),
 						}
 					} else {
 						Ok(None)
@@ -366,6 +396,19 @@ impl QueryExecutor {
 				let it = DocIdsIterator::new(
 					mte.doc_ids.clone(),
 					mte.res.iter().map(|(d, _)| *d).collect(),
+				);
+				return Some(ThingIterator::Knn(it));
+			}
+		}
+		None
+	}
+
+	fn new_hnsw_index_ann_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
+			if let Some(he) = self.0.hnsw_entries.get(exp.as_ref()) {
+				let it = DocIdsIterator::new(
+					he.doc_ids.clone(),
+					he.res.iter().map(|(d, _)| *d).collect(),
 				);
 				return Some(ThingIterator::Knn(it));
 			}
@@ -550,6 +593,22 @@ impl MtEntry {
 		Ok(Self {
 			res,
 			doc_ids: mt.doc_ids(),
+		})
+	}
+}
+
+#[derive(Clone)]
+pub(super) struct HnswEntry {
+	doc_ids: Arc<RwLock<DocIds>>,
+	res: VecDeque<(DocId, f64)>,
+}
+
+impl HnswEntry {
+	async fn new(h: &HnswIndex, a: Array, n: usize, ef: usize) -> Result<Self, Error> {
+		let res = h.knn_search(a, n, ef).await?;
+		Ok(Self {
+			res,
+			doc_ids: h.doc_ids(),
 		})
 	}
 }

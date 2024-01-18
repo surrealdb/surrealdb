@@ -1,10 +1,10 @@
+use crate::err::Error;
 use crate::fnc::util::math::deviation::deviation;
 use crate::fnc::util::math::mean::Mean;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
-use crate::sql::Number;
+use crate::sql::{Array, Number, Value};
 use revision::revisioned;
-use rust_decimal::prelude::Zero;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -111,14 +111,51 @@ impl Ord for TreeVector {
 }
 
 impl TreeVector {
-	pub(super) fn new(t: VectorType, l: usize) -> Self {
+	pub(super) fn new(t: VectorType, d: usize) -> Self {
 		match t {
-			VectorType::F64 => Self::F64(Vec::with_capacity(l)),
-			VectorType::F32 => Self::F32(Vec::with_capacity(l)),
-			VectorType::I64 => Self::I64(Vec::with_capacity(l)),
-			VectorType::I32 => Self::I32(Vec::with_capacity(l)),
-			VectorType::I16 => Self::I16(Vec::with_capacity(l)),
+			VectorType::F64 => Self::F64(Vec::with_capacity(d)),
+			VectorType::F32 => Self::F32(Vec::with_capacity(d)),
+			VectorType::I64 => Self::I64(Vec::with_capacity(d)),
+			VectorType::I32 => Self::I32(Vec::with_capacity(d)),
+			VectorType::I16 => Self::I16(Vec::with_capacity(d)),
 		}
+	}
+
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: Value) -> Result<Self, Error> {
+		let mut vec = TreeVector::new(t, d);
+		vec.check_vector_value(v)?;
+		Ok(vec)
+	}
+
+	fn check_vector_value(&mut self, value: Value) -> Result<(), Error> {
+		match value {
+			Value::Array(a) => {
+				for v in a {
+					self.check_vector_value(v)?;
+				}
+				Ok(())
+			}
+			Value::Number(n) => {
+				self.add(n);
+				Ok(())
+			}
+			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
+		}
+	}
+
+	pub(super) fn try_from_array(t: VectorType, a: Array) -> Result<Self, Error> {
+		let mut vec = TreeVector::new(t, a.len());
+		for v in a.0 {
+			if let Value::Number(n) = v {
+				vec.add(n);
+			} else {
+				return Err(Error::InvalidVectorType {
+					current: v.clone().to_string(),
+					expected: "Number",
+				});
+			}
+		}
+		Ok(vec)
 	}
 
 	pub(super) fn add(&mut self, n: Number) {
@@ -141,14 +178,19 @@ impl TreeVector {
 		}
 	}
 
-	pub(super) fn is_null(&self) -> bool {
-		match self {
-			TreeVector::F64(a) => !a.iter().any(|a| !a.is_zero()),
-			TreeVector::F32(a) => !a.iter().any(|a| !a.is_zero()),
-			TreeVector::I64(a) => !a.iter().any(|a| !a.is_zero()),
-			TreeVector::I32(a) => !a.iter().any(|a| !a.is_zero()),
-			TreeVector::I16(a) => !a.iter().any(|a| !a.is_zero()),
+	pub(super) fn check_expected_dimension(current: usize, expected: usize) -> Result<(), Error> {
+		if current != expected {
+			Err(Error::InvalidVectorDimension {
+				current,
+				expected,
+			})
+		} else {
+			Ok(())
 		}
+	}
+
+	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<(), Error> {
+		Self::check_expected_dimension(self.len(), expected_dim)
 	}
 
 	fn chebyshev<T>(a: &[T], b: &[T]) -> f64
@@ -386,5 +428,79 @@ impl Distance {
 			Distance::Minkowski(order) => a.minkowski_distance(b, order.to_float()),
 			Distance::Pearson => a.pearson_similarity(b),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec};
+	use crate::sql::index::{Distance, VectorType};
+
+	fn test_distance(dist: Distance, size: usize, dim: usize) {
+		let mut rng = get_seed_rnd();
+		let mut coll = Vec::with_capacity(size);
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			let integer = dist == Distance::Jaccard;
+			for _ in 0..size {
+				let v1 = new_random_vec(&mut rng, vt, dim, integer);
+				let v2 = new_random_vec(&mut rng, vt, dim, integer);
+				coll.push((v1, v2));
+			}
+			let mut num_zero = 0;
+			for (i, (v1, v2)) in coll.iter().enumerate() {
+				let d = dist.dist(v1, v2);
+				assert!(
+					d.is_finite() && !d.is_nan(),
+					"i: {i} - vt: {vt} - v1: {v1:?} - v2: {v2:?}"
+				);
+				assert_ne!(d, f64::NAN, "i: {i} - vt: {vt} - v1: {v1:?} - v2: {v2:?}");
+				assert_ne!(d, f64::INFINITY, "i: {i} - vt: {vt} - v1: {v1:?} - v2: {v2:?}");
+				if d == 0.0 {
+					num_zero += 1;
+				}
+			}
+			let zero_rate = num_zero as f64 / size as f64;
+			assert!(zero_rate < 0.1, "vt: {vt} - zero_rate: {zero_rate}");
+		}
+	}
+
+	#[test]
+	fn test_distance_chebyshev() {
+		test_distance(Distance::Chebyshev, 2000, 1536);
+	}
+
+	#[test]
+	fn test_distance_cosine() {
+		test_distance(Distance::Cosine, 2000, 1536);
+	}
+
+	#[test]
+	fn test_distance_euclidean() {
+		test_distance(Distance::Euclidean, 2000, 1536);
+	}
+
+	#[test]
+	fn test_distance_hamming() {
+		test_distance(Distance::Hamming, 2000, 1536);
+	}
+
+	#[test]
+	fn test_distance_jaccard() {
+		test_distance(Distance::Jaccard, 1000, 1536);
+	}
+	#[test]
+	fn test_distance_manhattan() {
+		test_distance(Distance::Manhattan, 2000, 1536);
+	}
+	#[test]
+	fn test_distance_minkowski() {
+		test_distance(Distance::Minkowski(2.into()), 2000, 1536);
+	}
+
+	#[test]
+	fn test_distance_pearson() {
+		test_distance(Distance::Pearson, 2000, 1536);
 	}
 }

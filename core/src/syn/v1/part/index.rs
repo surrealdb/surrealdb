@@ -1,6 +1,6 @@
 use super::super::{
 	comment::{mightbespace, shouldbespace},
-	literal::{ident, scoring},
+	literal::{ident, number, scoring},
 	IResult,
 };
 use crate::sql::{
@@ -8,6 +8,7 @@ use crate::sql::{
 	Ident, Index,
 };
 
+use crate::sql::index::HnswParams;
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
@@ -16,7 +17,7 @@ use nom::{
 };
 
 pub fn index(i: &str) -> IResult<&str, Index> {
-	alt((unique, search, mtree))(i)
+	alt((unique, search, mtree, hnsw))(i)
 }
 
 pub fn unique(i: &str) -> IResult<&str, Index> {
@@ -123,6 +124,18 @@ pub fn mtree_distance(i: &str) -> IResult<&str, Distance> {
 	))(i)
 }
 
+pub fn hnsw_distance(i: &str) -> IResult<&str, Distance> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag_no_case("DIST")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	alt((
+		map(tag_no_case("COSINE"), |_| Distance::Cosine),
+		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
+		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),
+		minkowski,
+	))(i)
+}
+
 pub fn minkowski(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = tag_no_case("MINKOWSKI")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -187,4 +200,72 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 			}),
 		))
 	})(i)
+}
+
+pub fn hnsw(i: &str) -> IResult<&str, Index> {
+	let (i, _) = tag_no_case("HNSW")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	cut(|i| {
+		let (i, dimension) = dimension(i)?;
+		let (i, distance) = opt(hnsw_distance)(i)?;
+		let (i, vector_type) = opt(vector_type)(i)?;
+		let (i, ef_construction) = opt(ef_construction)(i)?;
+		let (i, m) = opt(m)(i)?;
+		let (i, m0) = opt(m0)(i)?;
+		let (i, ml) = opt(ml)(i)?;
+		let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
+		let (i, doc_ids_cache) = opt(doc_ids_cache)(i)?;
+		let ef_construction = ef_construction.unwrap_or(150);
+		let m = m.unwrap_or(12);
+		let m0 = m0.unwrap_or(m * 2);
+		let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
+		let doc_ids_order = doc_ids_order.unwrap_or(100);
+		let doc_ids_cache = doc_ids_cache.unwrap_or(100);
+		Ok((
+			i,
+			Index::Hnsw(HnswParams {
+				dimension,
+				distance: distance.unwrap_or(Distance::Euclidean),
+				vector_type: vector_type.unwrap_or(VectorType::F64),
+				m,
+				m0,
+				ef_construction,
+				ml,
+				doc_ids_order,
+				doc_ids_cache,
+			}),
+		))
+	})(i)
+}
+
+pub fn m(i: &str) -> IResult<&str, u16> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("M")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, m) = u16(i)?;
+	Ok((i, m))
+}
+
+pub fn m0(i: &str) -> IResult<&str, u16> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("M0")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, m0) = u16(i)?;
+	Ok((i, m0))
+}
+
+pub fn ml(i: &str) -> IResult<&str, f64> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ML")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, ml) = number(i)?;
+	Ok((i, ml.to_float()))
+}
+
+pub fn ef_construction(i: &str) -> IResult<&str, u16> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EFC")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, efc) = u16(i)?;
+	Ok((i, efc))
 }

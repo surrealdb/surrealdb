@@ -76,11 +76,13 @@ impl MTreeIndex {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
-		// Index the values
+		// Lock the index
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = self.extract_vector(v)?.into();
+			let vector = TreeVector::try_from_value(self.vector_type, self.dim, v)?.into();
+			vector.check_dimension(self.dim)?;
+			// Insert the vector in the index
 			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
 		}
 		Ok(())
@@ -93,61 +95,13 @@ impl MTreeIndex {
 		k: usize,
 	) -> Result<VecDeque<(DocId, f64)>, Error> {
 		// Extract the vector
-		let vector = self.check_vector_array(a)?;
-		// Lock the store
-		let res = self.mtree.read().await.knn_search(tx, &self.store, &vector, k).await?;
+		let vector = Arc::new(TreeVector::try_from_array(self.vector_type, a)?);
+		vector.check_dimension(self.dim)?;
+		// Lock the index
+		let mtree = self.mtree.read().await;
+		// Do the search
+		let res = mtree.knn_search(tx, &self.store, &vector, k).await?;
 		Ok(res.docs)
-	}
-
-	fn check_vector_array(&self, a: Array) -> Result<SharedVector, Error> {
-		if a.0.len() != self.dim {
-			return Err(Error::InvalidVectorDimension {
-				current: a.0.len(),
-				expected: self.dim,
-			});
-		}
-		let mut vec = TreeVector::new(self.vector_type, a.len());
-		for v in a.0 {
-			if let Value::Number(n) = v {
-				vec.add(n);
-			} else {
-				return Err(Error::InvalidVectorType {
-					current: v.clone().to_string(),
-					expected: "Number",
-				});
-			}
-		}
-		Ok(Arc::new(vec))
-	}
-
-	fn extract_vector(&self, v: Value) -> Result<TreeVector, Error> {
-		let mut vec = TreeVector::new(self.vector_type, self.dim);
-		Self::check_vector_value(v, &mut vec)?;
-		if vec.len() != self.dim {
-			return Err(Error::InvalidVectorDimension {
-				current: vec.len(),
-				expected: self.dim,
-			});
-		}
-		Ok(vec)
-	}
-
-	fn check_vector_value(value: Value, vec: &mut TreeVector) -> Result<(), Error> {
-		match value {
-			Value::Array(a) => {
-				for v in a {
-					Self::check_vector_value(v, vec)?;
-				}
-				Ok(())
-			}
-			Value::Number(n) => {
-				vec.add(n);
-				Ok(())
-			}
-			_ => Err(Error::InvalidVectorValue {
-				current: value.clone().to_raw_string(),
-			}),
-		}
 	}
 
 	pub(crate) async fn remove_document(
@@ -157,10 +111,13 @@ impl MTreeIndex {
 		content: Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(tx, rid.into()).await? {
+			// Lock the index
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = self.extract_vector(v)?.into();
+				let vector = TreeVector::try_from_value(self.vector_type, self.dim, v)?.into();
+				vector.check_dimension(self.dim)?;
+				// Remove the vector
 				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
 			}
 		}

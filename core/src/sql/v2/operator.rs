@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 /// Binary operators.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Operator {
 	//
@@ -60,6 +60,8 @@ pub enum Operator {
 	Intersects,
 	//
 	Knn(u32, Option<Distance>), // <{k}[,{dist}]>
+	#[revision(start = 2)]
+	Ann(u32, u32), // <{k},{ef}>
 	//
 	Rem, // %
 }
@@ -144,6 +146,9 @@ impl fmt::Display for Operator {
 				} else {
 					write!(f, "<{k}>")
 				}
+			}
+			Self::Ann(k, ef) => {
+				write!(f, "<{k},{ef}>")
 			}
 		}
 	}

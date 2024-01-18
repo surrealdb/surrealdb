@@ -337,6 +337,7 @@ pub(super) mod tests {
 	use crate::sql::Number;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
+	use rust_decimal::prelude::Zero;
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
@@ -394,6 +395,18 @@ pub(super) mod tests {
 			new_random_vec(rng, t, dim, for_jaccard)
 		} else {
 			Arc::new(vec)
+		}
+	}
+
+	impl TreeVector {
+		pub(super) fn is_null(&self) -> bool {
+			match self {
+				TreeVector::F64(a) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::F32(a) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::I64(a) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::I32(a) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::I16(a) => !a.iter().any(|a| !a.is_zero()),
+			}
 		}
 	}
 
