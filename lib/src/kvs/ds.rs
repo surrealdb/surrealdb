@@ -685,43 +685,45 @@ impl Datastore {
 		// Throw errors from join tasks
 		let scan_err = match scan_task.poll(&mut ctx) {
 			Poll::Ready(r) => Ok(r),
-			Poll::Pending => Err(Error::Internal("scan task did not complete")),
+			Poll::Pending => Err(Error::Internal("scan task did not complete".to_string())),
 		}?;
 		let _ = scan_err.map_err(|e| {
 			error!("scan task failed: {:?}", e);
-			Error::Internal("scan task failed")
+			Error::Internal("scan task failed".to_string())
 		})?;
 
 		let arch_err = match archive_task.poll(&mut ctx) {
 			Poll::Ready(r) => Ok(r),
-			Poll::Pending => Err(Error::Internal("archive task did not complete")),
+			Poll::Pending => Err(Error::Internal("archive task did not complete".to_string())),
 		}?;
 		let arch_err = arch_err.map_err(|e| {
 			error!("archive task failed: {:?}", e);
-			Error::Internal("archive task failed")
+			Error::Internal("archive task failed".to_string())
 		})?;
 		#[cfg(not(target_arch = "wasm32"))]
 		let _ = arch_err?;
 
 		let del_err = match delete_task.poll(&mut ctx) {
 			Poll::Ready(r) => Ok(r),
-			Poll::Pending => Err(Error::Internal("delete task did not complete")),
+			Poll::Pending => Err(Error::Internal("delete task did not complete".to_string())),
 		}?;
 		let del_err = del_err.map_err(|e| {
 			error!("delete task failed: {:?}", e);
-			Error::Internal("delete task failed")
+			Error::Internal("delete task failed".to_string())
 		})?;
 		#[cfg(not(target_arch = "wasm32"))]
 		let _ = del_err?;
 
 		let _del_handler_err = match delete_handler_task.poll(&mut ctx) {
 			Poll::Ready(r) => Ok(r),
-			Poll::Pending => Err(Error::Internal("delete handler task did not complete")),
+			Poll::Pending => {
+				Err(Error::Internal("delete handler task did not complete".to_string()))
+			}
 		}?;
 		#[cfg(not(target_arch = "wasm32"))]
 		let _ = _del_handler_err.map_err(|e| {
 			error!("delete handler task failed: {:?}", e);
-			Error::Internal("delete handler task failed")
+			Error::Internal("delete handler task failed".to_string())
 		})?;
 
 		Ok(())
@@ -928,8 +930,7 @@ impl Datastore {
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
 		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
-			error!("Clock may have gone backwards: {:?}", e.duration());
-			Error::Internal("Clock may have gone backwards")
+			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
 		})?;
 		let ts = now.as_secs();
 		self.tick_at(ts).await?;

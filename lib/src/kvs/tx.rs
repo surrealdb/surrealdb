@@ -1683,8 +1683,7 @@ impl Transaction {
 			let lq_key = crate::key::node::lq::Lq::decode(key.as_slice())?;
 			trace!("Value is {:?}", &value);
 			let lq_value = String::from_utf8(value).map_err(|e| {
-				error!("Failed to decode a value while reading LQ: {}", e);
-				Error::Internal("Failed to decode a value while reading LQ")
+				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
 			})?;
 			let lqv = LqValue {
 				nd: (*nd).into(),
@@ -2701,7 +2700,9 @@ impl Transaction {
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
-				return Err(Error::Internal("ts is less than or equal to the latest ts"));
+				return Err(Error::Internal(
+					"ts is less than or equal to the latest ts".to_string(),
+				));
 			}
 		}
 		self.set(ts_key, vs).await?;
@@ -2726,7 +2727,7 @@ impl Transaction {
 				sl.copy_from_slice(v);
 				return Ok(Some(sl));
 			} else {
-				return Err(Error::Internal("versionstamp is not 10 bytes"));
+				return Err(Error::Internal("versionstamp is not 10 bytes".to_string()));
 			}
 		}
 		Ok(None)

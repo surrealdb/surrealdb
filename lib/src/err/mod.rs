@@ -680,7 +680,7 @@ pub enum Error {
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors
 	#[error("Internal database error: {0}")]
-	Internal(&'static str),
+	Internal(String),
 
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
@@ -776,6 +776,7 @@ pub enum Error {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
+// TODO
 pub enum ContextCause {
 	#[error("Expected the context to include 'session'")]
 	MissingSession,

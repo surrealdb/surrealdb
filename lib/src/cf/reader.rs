@@ -30,7 +30,7 @@ pub async fn read(
 				Some(vs) => change::prefix_ts(ns, db, vs),
 				None => {
 					return Err(Error::Internal(
-						"no versionstamp associated to this timestamp exists yet",
+						"no versionstamp associated to this timestamp exists yet".to_string(),
 					))
 				}
 			}
