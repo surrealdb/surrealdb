@@ -4,8 +4,7 @@ use super::super::super::{
 	error::{expect_tag_no_case, expected},
 	literal::{ident, strand},
 	value::{value, values},
-	IResult,
-	ParseError
+	IResult, ParseError,
 };
 use crate::sql::{statements::DefineEventStatement, Strand, Value, Values};
 use nom::{
