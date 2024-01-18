@@ -774,14 +774,6 @@ pub enum Error {
 	MissingStorageEngine,
 }
 
-#[derive(Error, Debug)]
-#[non_exhaustive]
-// TODO
-pub enum ContextCause {
-	#[error("Expected the context to include 'session'")]
-	MissingSession,
-}
-
 impl From<Error> for String {
 	fn from(e: Error) -> String {
 		e.to_string()
