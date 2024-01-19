@@ -1,9 +1,11 @@
+use std::cell::OnceCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Poll, Wake};
+use std::task::{Poll, Wake, Waker};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use futures_lite::future::FutureExt;
+use once_cell::sync::Lazy;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tracing::instrument;
 use tracing::trace;
@@ -86,6 +89,8 @@ impl Wake for DummyWaker {
 
 	fn wake_by_ref(self: &Arc<Self>) {}
 }
+
+const waker: Lazy<Waker> = Lazy::new(|| std::task::Waker::from(Arc::new(DummyWaker {})));
 
 #[derive(Debug)]
 pub(crate) enum LqType {
@@ -531,7 +536,6 @@ impl Datastore {
 	// In tests, it should be outside any other transaction - in isolation.
 	// We cannot easily systematise this, since we aren't counting transactions created.
 	pub async fn bootstrap(&self) -> Result<(), Error> {
-		let waker = std::task::Waker::from(Arc::new(DummyWaker {}));
 		// First we clear unreachable state that could exist by upgrading from
 		// previous beta versions
 		trace!("Clearing unreachable state");
@@ -637,22 +641,56 @@ impl Datastore {
 		// Handle transaction requests
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
+		let waker_borrow = &(*waker);
+		let mut scan_state = None;
+		let mut archive_state = None;
+		let mut delete_state = None;
+		let mut delete_handler_state = None;
 		loop {
 			info!("Doing the loop");
 			// Check all tasks; We cannot join, as wasm is single threaded
-			let (scan_complete, archive_complete, delete_complete, delete_handler_complete) = {
-				let mut ctx = std::task::Context::from_waker(&waker);
-				(
-					// We need to check is finished because polling a completed future panics
-					scan_task.is_finished() || scan_task.poll(&mut ctx).is_ready(),
-					archive_task.is_finished() || archive_task.poll(&mut ctx).is_ready(),
-					delete_task.is_finished() || delete_task.poll(&mut ctx).is_ready(),
-					delete_handler_task.is_finished()
-						|| delete_handler_task.poll(&mut ctx).is_ready(),
-				)
-			};
-			let complete =
-				scan_complete && archive_complete && delete_complete && delete_handler_complete;
+			{
+				// We declare the context in a block to make this Send
+				let mut ctx = std::task::Context::from_waker(&waker_borrow);
+				if scan_state.is_none() {
+					match scan_task.poll(&mut ctx) {
+						Poll::Ready(r) => {
+							scan_state = Some(r);
+						}
+						Poll::Pending => {}
+					}
+				}
+				if archive_state.is_none() {
+					match archive_task.poll(&mut ctx) {
+						Poll::Ready(r) => {
+							archive_state = Some(r);
+						}
+						Poll::Pending => {}
+					}
+				}
+				if delete_state.is_none() {
+					match delete_task.poll(&mut ctx) {
+						Poll::Ready(r) => {
+							delete_state = Some(r);
+						}
+						Poll::Pending => {}
+					}
+				}
+				if delete_handler_state.is_none() {
+					match delete_handler_task.poll(&mut ctx) {
+						Poll::Ready(r) => {
+							delete_handler_state = Some(r);
+						}
+						Poll::Pending => {}
+					}
+				}
+			}
+
+			let complete = scan_state.is_some()
+				&& archive_state.is_some()
+				&& delete_state.is_some()
+				&& delete_handler_state.is_some();
+
 			match tx_req_recv.recv().await {
 				None => {
 					// closed
@@ -660,7 +698,7 @@ impl Datastore {
 					if complete {
 						break;
 					} else {
-						trace!("Transaction request channel closed but tasks not yet complete: scan={}, archive={}, delete={}, del_handler={}", scan_complete, archive_complete, delete_complete, delete_handler_complete);
+						trace!("Transaction request channel closed but tasks not yet complete: scan={:?}, archive={:?}, delete={:?}, del_handler={:?}", scan_state, archive_state, delete_state, delete_handler_state);
 					}
 				}
 				Some(sender) => {
@@ -681,50 +719,44 @@ impl Datastore {
 
 		// Now run everything together and return any errors that arent captured per record
 		trace!("Joining bootstrap tasks");
-		let mut ctx = std::task::Context::from_waker(&waker);
+		let waker_borrow = &(*waker);
+		let mut ctx = std::task::Context::from_waker(waker_borrow);
 		// Throw errors from join tasks
-		let scan_err = match scan_task.poll(&mut ctx) {
-			Poll::Ready(r) => Ok(r),
-			Poll::Pending => Err(Error::Internal("scan task did not complete".to_string())),
+		let scan_err = match scan_state {
+			None => Err(Error::Internal("scan task did not complete".to_string())),
+			Some(Err(e)) => Err(Error::Internal(format!("scan task failed to complete: {:?}", e))),
+			Some(Ok(r)) => Ok(r),
 		}?;
-		let _ = scan_err.map_err(|e| {
-			error!("scan task failed: {:?}", e);
-			Error::Internal("scan task failed".to_string())
-		})?;
+		let _ =
+			scan_err.as_ref().map_err(|e| Error::Internal(format!("scan task failed: {}", e)))?;
 
-		let arch_err = match archive_task.poll(&mut ctx) {
-			Poll::Ready(r) => Ok(r),
-			Poll::Pending => Err(Error::Internal("archive task did not complete".to_string())),
-		}?;
-		let arch_err = arch_err.map_err(|e| {
-			error!("archive task failed: {:?}", e);
-			Error::Internal("archive task failed".to_string())
-		})?;
-		#[cfg(not(target_arch = "wasm32"))]
-		arch_err?;
-
-		let del_err = match delete_task.poll(&mut ctx) {
-			Poll::Ready(r) => Ok(r),
-			Poll::Pending => Err(Error::Internal("delete task did not complete".to_string())),
-		}?;
-		let del_err = del_err.map_err(|e| {
-			error!("delete task failed: {:?}", e);
-			Error::Internal("delete task failed".to_string())
-		})?;
-		#[cfg(not(target_arch = "wasm32"))]
-		del_err?;
-
-		let _del_handler_err = match delete_handler_task.poll(&mut ctx) {
-			Poll::Ready(r) => Ok(r),
-			Poll::Pending => {
-				Err(Error::Internal("delete handler task did not complete".to_string()))
+		let arch_err = match archive_state {
+			None => Err(Error::Internal("archive task did not complete".to_string())),
+			Some(Err(ref e)) => {
+				Err(Error::Internal(format!("archive task failed to complete: {:?}", e)))
 			}
+			Some(Ok(ref r)) => Ok(r),
 		}?;
-		#[cfg(not(target_arch = "wasm32"))]
-		_del_handler_err.map_err(|e| {
-			error!("delete handler task failed: {:?}", e);
-			Error::Internal("delete handler task failed".to_string())
-		})?;
+		let _ = arch_err
+			.as_ref()
+			.map_err(|e| Error::Internal(format!("archive task failed: {}", e)))?;
+
+		let del_err = match delete_state {
+			Some(Ok(ref r)) => Ok(r),
+			None => Err(Error::Internal("delete task did not complete".to_string())),
+			Some(Err(ref e)) => Err(Error::Internal(format!("delete task failed: {}", e))),
+		}?;
+		let _ =
+			del_err.as_ref().map_err(|e| Error::Internal(format!("delete task failed: {}", e)))?;
+
+		let _del_handler_err = match delete_state {
+			Some(Ok(Ok(ref r))) => Ok(()),
+			Some(Ok(Err(ref e))) => {
+				Err(Error::Internal(format!("delete handler task failed: {}", e)))
+			}
+			Some(Err(ref e)) => Err(Error::Internal(format!("delete handler task failed: {}", e))),
+			None => Err(Error::Internal("delete handler task did not complete".to_string())),
+		}?;
 
 		Ok(())
 	}
