@@ -27,8 +27,6 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
-	// #[revision(start = 2)]
-	// pub relation: Option<(Option<Kind>, Option<Kind>)>,
 	#[revision(start = 2)]
 	pub table_type: TableType,
 }
