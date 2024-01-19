@@ -24,7 +24,7 @@ fn split_raw(i: &str) -> IResult<&str, Split> {
 mod tests {
 
 	use super::*;
-	use crate::{sql::Idiom, syn::test::Parse};
+	use crate::{sql::Idiom, syn::Parse};
 
 	#[test]
 	fn split_statement() {

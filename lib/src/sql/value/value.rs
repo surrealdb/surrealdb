@@ -1087,7 +1087,8 @@ impl Value {
 			| Value::Array(_)
 			| Value::Param(_)
 			| Value::Edges(_)
-			| Value::Thing(_) => true,
+			| Value::Thing(_)
+			| Value::Table(_) => true,
 			_ => false,
 		}
 	}
@@ -2774,7 +2775,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::uuid::Uuid;
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	#[test]
 	fn check_none() {

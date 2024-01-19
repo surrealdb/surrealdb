@@ -193,7 +193,7 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		use crate::syn::test::Parse;
+		use crate::syn::Parse;
 		let fk = Thing::parse("other:test");
 		#[rustfmt::skip]
 		let val = Graph::new(

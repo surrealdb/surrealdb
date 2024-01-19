@@ -8,8 +8,7 @@ use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
-use crate::sql::Value;
-use crate::syn::path_like;
+use crate::sql::{Function, Strand, Value};
 use async_recursion::async_recursion;
 use filter::Filter;
 use std::collections::hash_map::Entry;
@@ -194,26 +193,16 @@ impl Analyzer {
 		txn: &Transaction,
 		mut input: String,
 	) -> Result<Tokens, Error> {
-		if let Some(function_name) = &self.function {
-			let fns = format!("fn::{function_name}(\"{input}\")");
-			match path_like(&fns) {
-				Ok(func_value) => {
-					let val = func_value.compute(ctx, opt, txn, None).await?;
-					if let Value::Strand(val) = val {
-						input = val.0;
-					} else {
-						return Err(Error::InvalidFunction {
-							name: function_name.to_string(),
-							message: "The function should return a string.".to_string(),
-						});
-					}
-				}
-				Err(e) => {
-					return Err(Error::InvalidFunction {
-						name: function_name.to_string(),
-						message: e.to_string(),
-					})
-				}
+		if let Some(function_name) = self.function.clone() {
+			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
+			let val = fns.compute(ctx, opt, txn, None).await?;
+			if let Value::Strand(val) = val {
+				input = val.0;
+			} else {
+				return Err(Error::InvalidFunction {
+					name: function_name,
+					message: "The function should return a string.".to_string(),
+				});
 			}
 		}
 		if let Some(t) = &self.tokenizers {

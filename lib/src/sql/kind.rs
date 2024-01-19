@@ -1,5 +1,4 @@
-use crate::sql::fmt::Fmt;
-use crate::sql::table::Table;
+use crate::sql::{fmt::Fmt, Table};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

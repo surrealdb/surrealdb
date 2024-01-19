@@ -18,8 +18,8 @@ async fn create_with_id() -> Result<(), Error> {
 		CREATE person CONTENT { id: person:jaime, name: 'Jaime' };
 		CREATE user CONTENT { id: 1, name: 'Robert' };
 		CREATE city CONTENT { id: 'london', name: 'London' };
-		CREATE city CONTENT { id: '8e60244d-95f6-4f95-9e30-09a98977efb0', name: 'London' };
-		CREATE temperature CONTENT { id: ['London', '2022-09-30T20:25:01.406828Z'], name: 'London' };
+		CREATE city CONTENT { id: u'8e60244d-95f6-4f95-9e30-09a98977efb0', name: 'London' };
+		CREATE temperature CONTENT { id: ['London', d'2022-09-30T20:25:01.406828Z'], name: 'London' };
 		CREATE test CONTENT { id: other:715917898417176677 };
 		CREATE test CONTENT { id: other:⟨715917898.417176677⟩ };
 		CREATE test CONTENT { id: other:9223372036854775808 };
@@ -105,7 +105,7 @@ async fn create_with_id() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				id: temperature:['London', '2022-09-30T20:25:01.406828Z'],
+				id: temperature:['London', d'2022-09-30T20:25:01.406828Z'],
 				name: 'London'
 			}
 		]",

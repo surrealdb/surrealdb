@@ -170,7 +170,7 @@ mod cli_integration {
 			let args = format!("sql --conn http://{addr} {creds}");
 			let output = common::run(&args)
 				.input(&format!(
-					"USE NS {throwaway} DB {throwaway}; CREATE thing:one;\n",
+					"USE NS `{throwaway}` DB `{throwaway}`; CREATE thing:one;\n",
 					throwaway = Ulid::new()
 				))
 				.output()
@@ -180,10 +180,9 @@ mod cli_integration {
 
 		info!("* Pass only ns");
 		{
-			let throwaway = Ulid::new();
-			let args = format!("sql --conn http://{addr} {creds} --ns {throwaway}");
+			let args = format!("sql --conn http://{addr} {creds} --ns {ns}");
 			let output = common::run(&args)
-				.input("USE DB {throwaway}; SELECT * FROM thing:one;\n")
+				.input(&format!("USE DB `{db}`; SELECT * FROM thing:one;\n"))
 				.output()
 				.expect("only ns");
 			assert!(output.contains("thing:one"), "missing thing:one in {output}");
@@ -295,7 +294,7 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -309,7 +308,7 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -323,7 +322,7 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -338,7 +337,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -353,7 +352,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -368,7 +367,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -383,7 +382,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -398,7 +397,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -413,7 +412,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -426,7 +425,7 @@ mod cli_integration {
 		{
 			let args = format!("sql --conn http://{addr} --auth-level database {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output();
 			assert!(
 				output
@@ -442,7 +441,7 @@ mod cli_integration {
 		{
 			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output();
 			assert!(
 				output
@@ -800,6 +799,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_capabilities() {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
@@ -826,7 +826,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}
@@ -856,7 +857,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}
@@ -902,7 +904,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}

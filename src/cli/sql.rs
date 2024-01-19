@@ -5,6 +5,8 @@ use crate::cli::abstraction::{
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
+use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use futures_util::{SinkExt, StreamExt};
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
@@ -15,7 +17,7 @@ use surrealdb::engine::any::{connect, IntoEndpoint};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::sql::{self, Statement, Value};
-use surrealdb::Response;
+use surrealdb::{Notification, Response};
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -149,6 +151,10 @@ pub async fn init(
 		);
 	}
 
+	// Set up the print job
+	let (tx, rx) = mpsc::unbounded();
+	tokio::spawn(printer(rx));
+
 	// Loop over each command-line input
 	loop {
 		// Prompt the user to input SQL and check the input.
@@ -206,15 +212,12 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let res = client.query(query).with_stats().await;
-				match process(pretty, json, res) {
-					Ok(v) => {
-						println!("{v}\n");
-					}
-					Err(e) => {
-						eprintln!("{e}\n");
-						continue;
-					}
+				let result = client.query(query).with_stats().await;
+				let result = process(pretty, json, result, tx.clone());
+				let result_is_error = result.is_err();
+				tx.clone().send(result).await.expect("print job terminated unexpectedly");
+				if result_is_error {
+					continue;
 				}
 				// Persist the variables extracted from the query
 				for (key, value) in vars {
@@ -253,6 +256,7 @@ fn process(
 	pretty: bool,
 	json: bool,
 	res: surrealdb::Result<WithStats<Response>>,
+	mut tx: UnboundedSender<Result<String, Error>>,
 ) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
@@ -270,6 +274,62 @@ fn process(
 		let output = result.unwrap_or_else(|e| e.to_string().into());
 		vec.push((stats, output));
 	}
+
+	tokio::spawn(async move {
+		let mut stream = match response.into_inner().stream::<Value>(()) {
+			Ok(stream) => stream,
+			Err(error) => {
+				tx.send(Err(error.into())).await.ok();
+				return;
+			}
+		};
+		while let Some(Notification {
+			query_id,
+			action,
+			data,
+			..
+		}) = stream.next().await
+		{
+			let message = match (json, pretty) {
+				// Don't prettify the SurrealQL response
+				(false, false) => {
+					let value = Value::from(map! {
+						String::from("id") => query_id.into(),
+						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+						String::from("result") => data,
+					});
+					value.to_string()
+				}
+				// Yes prettify the SurrealQL response
+				(false, true) => format!(
+					"-- Notification (action: {action:?}, live query ID: {query_id})\n{data:#}"
+				),
+				// Don't pretty print the JSON response
+				(true, false) => {
+					let value = Value::from(map! {
+						String::from("id") => query_id.into(),
+						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+						String::from("result") => data,
+					});
+					value.into_json().to_string()
+				}
+				// Yes prettify the JSON response
+				(true, true) => {
+					let mut buf = Vec::new();
+					let mut serializer = serde_json::Serializer::with_formatter(
+						&mut buf,
+						PrettyFormatter::with_indent(b"\t"),
+					);
+					data.into_json().serialize(&mut serializer).unwrap();
+					let output = String::from_utf8(buf).unwrap();
+					format!("-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}")
+				}
+			};
+			if tx.send(Ok(format!("\n{message}"))).await.is_err() {
+				return;
+			}
+		}
+	});
 
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
@@ -312,6 +372,19 @@ fn process(
 			.collect::<Vec<String>>()
 			.join("\n"),
 	})
+}
+
+async fn printer(mut rx: UnboundedReceiver<Result<String, Error>>) {
+	while let Some(result) = rx.next().await {
+		match result {
+			Ok(v) => {
+				println!("{v}\n");
+			}
+			Err(e) => {
+				eprintln!("{e}\n");
+			}
+		}
+	}
 }
 
 #[derive(Completer, Helper, Highlighter, Hinter)]
