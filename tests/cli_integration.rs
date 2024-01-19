@@ -112,6 +112,24 @@ mod cli_integration {
 			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
 		}
 
+		info!("* Advanced uncomputed variable to be computed before saving");
+		{
+			let args = format!(
+				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+			let output = common::run(&args)
+				.input(
+					"DEFINE PARAM $something VALUE <set>[1, 2, 3]; \
+				$something;
+				",
+				)
+				.output()
+				.unwrap();
+
+			assert!(output.contains("[1, 2, 3]"), "missing success in {output}");
+		}
+
 		info!("* Multi-statement (and multi-line) query including error(s) over WS");
 		{
 			let args = format!(
