@@ -1,5 +1,5 @@
 use crate::cli::abstraction::OptionalDatabaseConnectionArguments;
-use crate::env::release;
+use crate::env::RELEASE;
 use crate::err::Error;
 use clap::Args;
 use surrealdb::engine::any::connect;
@@ -25,7 +25,7 @@ pub async fn init(
 		println!("{}", get_server_version_string(e).await?);
 	} else {
 		// Print local CLI version
-		println!("{}", release());
+		println!("{}", *RELEASE);
 	}
 	Ok(())
 }
