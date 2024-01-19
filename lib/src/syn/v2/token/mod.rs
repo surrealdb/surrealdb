@@ -42,6 +42,14 @@ impl Span {
 			len,
 		}
 	}
+
+	// returns a zero-length span that starts after the current span.
+	pub fn after(self) -> Span {
+		Span {
+			offset: self.offset + self.len,
+			len: 0,
+		}
+	}
 }
 
 #[repr(u8)]

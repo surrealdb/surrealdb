@@ -1,21 +1,23 @@
 use crate::{
 	sql::{
-		statements::SelectStatement, Explain, Ident, Idioms, Limit, Order, Orders, Split, Splits,
-		Start, Values, Version, With,
+		statements::SelectStatement, Explain, Field, Fields, Ident, Idioms, Limit, Order, Orders,
+		Split, Splits, Start, Values, Version, With,
 	},
 	syn::v2::{
 		parser::{
+			error::MissingKind,
 			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
-		token::t,
+		token::{t, Span},
 	},
 };
 
 impl Parser<'_> {
 	pub(crate) fn parse_select_stmt(&mut self) -> ParseResult<SelectStatement> {
-		//
+		let before = self.peek().span;
 		let expr = self.parse_fields()?;
+		let fields_span = before.covers(self.last_span());
 
 		let omit = self.eat(t!("OMIT")).then(|| self.parse_idiom_list()).transpose()?.map(Idioms);
 
@@ -31,9 +33,9 @@ impl Parser<'_> {
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition()?;
-		let split = self.try_parse_split()?;
-		let group = self.try_parse_group()?;
-		let order = self.try_parse_orders()?;
+		let split = self.try_parse_split(&expr, fields_span)?;
+		let group = self.try_parse_group(&expr, fields_span)?;
+		let order = self.try_parse_orders(&expr, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
 			let start = self.try_parse_start()?;
 			let limit = self.try_parse_limit()?;
@@ -91,48 +93,82 @@ impl Parser<'_> {
 		Ok(Some(with))
 	}
 
-	fn try_parse_split(&mut self) -> ParseResult<Option<Splits>> {
+	fn try_parse_split(
+		&mut self,
+		fields: &Fields,
+		fields_span: Span,
+	) -> ParseResult<Option<Splits>> {
 		if !self.eat(t!("SPLIT")) {
 			return Ok(None);
 		}
 
 		self.eat(t!("ON"));
 
-		let mut res = vec![Split(self.parse_basic_idiom()?)];
+		let has_all = fields.contains(&Field::All);
+
+		let before = self.peek().span;
+		let split = self.parse_basic_idiom()?;
+		let split_span = before.covers(self.last_span());
+		if !has_all {
+			Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
+		}
+
+		let mut res = vec![Split(split)];
 		while self.eat(t!(",")) {
-			res.push(Split(self.parse_basic_idiom()?));
+			let before = self.peek().span;
+			let split = self.parse_basic_idiom()?;
+			let split_span = before.covers(self.last_span());
+			if !has_all {
+				Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
+			}
+			res.push(Split(split))
 		}
 		Ok(Some(Splits(res)))
 	}
 
-	fn try_parse_orders(&mut self) -> ParseResult<Option<Orders>> {
+	fn try_parse_orders(
+		&mut self,
+		fields: &Fields,
+		fields_span: Span,
+	) -> ParseResult<Option<Orders>> {
 		if !self.eat(t!("ORDER")) {
 			return Ok(None);
 		}
 
 		self.eat(t!("BY"));
 
-		let orders = match self.peek_kind() {
-			t!("RAND") => {
-				self.pop_peek();
-				let start = expected!(self, t!("(")).span;
-				self.expect_closing_delimiter(t!(")"), start)?;
-				vec![Order {
-					order: Default::default(),
-					random: true,
-					collate: false,
-					numeric: false,
-					direction: true,
-				}]
-			}
-			_ => {
-				let mut orders = vec![self.parse_order()?];
-				while self.eat(t!(",")) {
-					orders.push(self.parse_order()?);
-				}
-				orders
-			}
+		if let t!("RAND") = self.peek_kind() {
+			self.pop_peek();
+			let start = expected!(self, t!("(")).span;
+			self.expect_closing_delimiter(t!(")"), start)?;
+			return Ok(Some(Orders(vec![Order {
+				order: Default::default(),
+				random: true,
+				collate: false,
+				numeric: false,
+				direction: true,
+			}])));
 		};
+
+		let has_all = fields.contains(&Field::All);
+
+		let before = self.recent_span();
+		let order = self.parse_order()?;
+		let order_span = before.covers(self.last_span());
+		if !has_all {
+			Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
+		}
+
+		let mut orders = vec![order];
+		while self.eat(t!(",")) {
+			let before = self.recent_span();
+			let order = self.parse_order()?;
+			let order_span = before.covers(self.last_span());
+			if !has_all {
+				Self::check_idiom(MissingKind::Order, fields, fields_span, &order, order_span)?;
+			}
+			orders.push(order)
+		}
 
 		Ok(Some(Orders(orders)))
 	}

@@ -163,8 +163,13 @@ impl<'a> Parser<'a> {
 
 	/// Returns the span of the next token if it was already peeked, otherwise returns the token of
 	/// the last consumed token.
-	pub fn last_span(&mut self) -> Span {
+	pub fn recent_span(&mut self) -> Span {
 		self.token_buffer.first().map(|x| x.span).unwrap_or(self.last_span)
+	}
+
+	///  returns the token of the last consumed token.
+	pub fn last_span(&mut self) -> Span {
+		self.last_span
 	}
 
 	/// Eat the next token if it is of the given kind.
@@ -187,7 +192,7 @@ impl<'a> Parser<'a> {
 					expected: kind,
 					should_close,
 				},
-				self.last_span(),
+				self.recent_span(),
 			));
 		}
 		Ok(())

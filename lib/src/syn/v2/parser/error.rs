@@ -19,6 +19,13 @@ pub enum IntErrorKind {
 }
 
 #[derive(Debug)]
+pub enum MissingKind {
+	Group,
+	Split,
+	Order,
+}
+
+#[derive(Debug)]
 pub enum ParseErrorKind {
 	/// The parser encountered an unexpected token.
 	Unexpected {
@@ -57,6 +64,11 @@ pub enum ParseErrorKind {
 	/// Matched a path which was invalid.
 	InvalidPath {
 		possibly: Option<&'static str>,
+	},
+	MissingField {
+		field: Span,
+		idiom: String,
+		kind: MissingKind,
 	},
 	NoWhitespace,
 	/// A path in the parser which was not yet finished.
@@ -223,6 +235,35 @@ impl ParseError {
 				RenderedError {
 					text: text.to_string(),
 					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::MissingField {
+				field,
+				idiom,
+				kind,
+			} => {
+				let text = match kind {
+					MissingKind::Group => {
+						format!("Missing group idiom `{idiom}` in statement selection")
+					}
+					MissingKind::Split => {
+						format!("Missing split idiom `{idiom}` in statement selection")
+					}
+					MissingKind::Order => {
+						format!("Missing order idiom `{idiom}` in statement selection")
+					}
+				};
+				let locations = Location::range_of_span(source, self.at);
+				let snippet_error = Snippet::from_source_location_range(source, locations, None);
+				let locations = Location::range_of_span(source, *field);
+				let snippet_hint = Snippet::from_source_location_range(
+					source,
+					locations,
+					Some("Idiom missing here"),
+				);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet_error, snippet_hint],
 				}
 			}
 		}
