@@ -24,11 +24,17 @@ pub(super) fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
-	Router::new().route("/gql/schema", get(schema_handler)).route("/gql", post(handler))
+	Router::new()
+		.route("/gql/schema", get(schema_handler))
+		.route("/gql", post(handler))
+		.route("/gql", get(schema_handler))
+		.route("/graphql", post(handler))
+		.route("/graphql", get(schema_handler))
 }
 
 async fn schema_handler() -> String {
 	let schema =
+		// TODO: figure out how to handle ns and db
 		gql::get_schema(DB.get().unwrap(), "test".to_string(), "test".to_string()).await.unwrap();
 
 	schema.to_string()
