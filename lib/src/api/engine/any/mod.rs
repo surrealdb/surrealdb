@@ -193,6 +193,7 @@ impl Surreal<Any> {
 	pub fn connect(&self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
 			router: self.router.clone(),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -242,6 +243,7 @@ impl Surreal<Any> {
 pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 	Connect {
 		router: Arc::new(OnceLock::new()),
+		engine: PhantomData,
 		address: address.into_endpoint(),
 		capacity: 0,
 		client: PhantomData,
