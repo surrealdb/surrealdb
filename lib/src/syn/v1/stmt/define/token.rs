@@ -12,7 +12,6 @@ use crate::{
 	sql::{statements::DefineTokenStatement, Algorithm, Strand},
 	syn::v1::ParseError,
 };
-#[cfg(not(feature = "jwks"))]
 use nom::Err;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
