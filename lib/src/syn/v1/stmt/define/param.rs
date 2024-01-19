@@ -7,10 +7,13 @@ use super::super::super::{
 	value::value,
 	IResult,
 };
-use crate::sql::{statements::DefineParamStatement, Permission, Strand, Value};
+use crate::{
+	sql::{statements::DefineParamStatement, Permission, Strand, Value},
+	syn::v1::ParseError,
+};
 use nom::{
 	branch::alt, bytes::complete::tag_no_case, character::complete::char, combinator::cut,
-	multi::many0,
+	multi::many0, Err,
 };
 
 pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
@@ -41,7 +44,11 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 	}
 	// Check necessary options
 	if res.value.is_none() {
-		// TODO throw error
+		return Err(Err::Failure(ParseError::ExplainedExpected {
+			tried: i,
+			expected: "a VALUE clause",
+			explained: "A param requires a VALUE clause to be defined.",
+		}));
 	}
 	// Return the statement
 	Ok((i, res))
@@ -79,4 +86,18 @@ fn param_permissions(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(permission)(i)?;
 	Ok((i, DefineParamOption::Permissions(v)))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn define_param_without_value_clause() {
+		let sql = "PARAM test";
+		let res = param(sql);
+
+		assert_eq!(res.is_err(), true)
+	}
 }
