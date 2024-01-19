@@ -870,9 +870,9 @@ async fn field_definition_readonly() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD birthdate ON person TYPE datetime READONLY;
-		CREATE person:test SET birthdate = '2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = '2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = '2024-12-13T21:27:55.632Z';
+		CREATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
+		UPDATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
+		UPDATE person:test SET birthdate = d'2024-12-13T21:27:55.632Z';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -889,7 +889,7 @@ async fn field_definition_readonly() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				birthdate: '2023-12-13T21:27:55.632Z',
+				birthdate: d'2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
@@ -900,7 +900,7 @@ async fn field_definition_readonly() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 			{
-				birthdate: '2023-12-13T21:27:55.632Z',
+				birthdate: d'2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
