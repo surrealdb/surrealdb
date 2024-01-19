@@ -258,6 +258,7 @@ fn statements() -> Vec<Statement> {
 				Kind::Number,
 				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10)),
 			])))),
+			readonly: false,
 			value: Some(Value::Null),
 			assert: Some(Value::Bool(true)),
 			default: Some(Value::Bool(false)),
