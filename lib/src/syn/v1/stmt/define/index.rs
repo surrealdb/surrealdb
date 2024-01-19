@@ -58,8 +58,8 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	if res.cols.is_empty() {
 		return Err(Err::Failure(ParseError::ExplainedExpected {
 			tried: i,
-			expected: "a COLUMNS clause",
-			explained: "An index requires a COLUMNS clause to be defined.",
+			expected: "a COLUMNS or FIELDS clause",
+			explained: "An index requires a COLUMNS or FIELDS clause to be defined.",
 		}));
 	}
 	// Return the statement
