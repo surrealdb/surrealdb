@@ -1,0 +1,19 @@
+# Create Docker Image for native Windows Server 2022 & 2019
+# Windows requires the host OS version to match the container OS version.
+ARG WinVer=ltsc2022
+# ltsc2022 = Windows Server 2022
+# ltsc2019 = Windows Server 2019
+FROM mcr.microsoft.com/windows/nanoserver:${WinVer} as build
+
+LABEL Description="SurrealDB" Vendor="SurrealDB" Version="v1.0.0"
+# Create surrealdb directory
+WORKDIR c:/surrealdb
+# Add to PATH env
+USER ContainerAdministrator
+RUN setx /M PATH "%PATH%;C:\\surrealdb"
+USER ContainerUser
+
+# download windows surreal
+RUN curl -s -o surreal.exe https://download.surrealdb.com/v1.0.0/surreal-v1.0.0.windows-amd64.exe
+
+ENTRYPOINT ["C:/surrealdb/surreal.exe"]
