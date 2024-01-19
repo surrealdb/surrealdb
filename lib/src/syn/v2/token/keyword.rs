@@ -68,6 +68,7 @@ keyword! {
 	Event => "EVENT",
 	Else => "ELSE",
 	End => "END",
+	Exists => "EXISTS",
 	Explain => "EXPLAIN",
 	False => "false",
 	Fetch => "FETCH",

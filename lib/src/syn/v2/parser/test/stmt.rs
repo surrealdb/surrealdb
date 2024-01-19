@@ -1106,6 +1106,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Table(RemoveTableStatement {
 			name: Ident("foo".to_owned()),
+			if_exists: false,
 		}))
 	);
 
