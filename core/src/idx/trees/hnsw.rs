@@ -24,19 +24,19 @@ pub(crate) struct HnswIndex {
 }
 
 impl HnswIndex {
-	pub(crate) async fn new(p: &HnswParams) -> Result<Self, Error> {
+	pub(crate) fn new(p: &HnswParams) -> Self {
 		let doc_ids = Trie::default();
 		let dim = p.dimension as usize;
 		let vector_type = p.vector_type;
 		let hnsw = Hnsw::new(p);
 		let vec_docs = HashMap::new();
-		Ok(HnswIndex {
+		HnswIndex {
 			dim,
 			vector_type,
 			hnsw,
 			vec_docs,
 			doc_ids,
-		})
+		}
 	}
 
 	pub(crate) async fn index_document(

@@ -9,15 +9,16 @@ use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
-	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
+	MatchesThingIterator, ThingIterator, ThingsIterator, UniqueEqualThingIterator,
+	UniqueRangeThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
 use crate::idx::planner::{IterationStage, KnnSet};
-use crate::idx::trees::hnsw::HnswIndex;
 use crate::idx::trees::mtree::MTreeIndex;
+use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::{Key, TransactionType};
@@ -91,7 +92,7 @@ impl InnerQueryExecutor {
 		let mut ft_map = HashMap::default();
 		let mut mt_map: HashMap<IndexRef, MTreeIndex> = HashMap::default();
 		let mut mt_entries = HashMap::default();
-		let mut hnsw_map: HashMap<IndexRef, HnswIndex> = HashMap::default();
+		let mut hnsw_map: HashMap<IndexRef, SharedHnswIndex> = HashMap::default();
 		let mut hnsw_entries = HashMap::default();
 		let mut knn_entries = HashMap::with_capacity(knns.len());
 
@@ -159,20 +160,13 @@ impl InnerQueryExecutor {
 					}
 					Index::Hnsw(p) => {
 						if let IndexOperator::Ann(a, n, ef) = io.op() {
-							let mut tx = txn.lock().await;
-							let entry = if let Some(hnsw) = hnsw_map.get(&ix_ref) {
+							let entry = if let Some(hnsw) = hnsw_map.get(&ix_ref).cloned() {
 								HnswEntry::new(hnsw, a.clone(), *n, *ef).await?
 							} else {
-								let ikb = IndexKeyBase::new(opt, idx_def);
-								let hnsw = HnswIndex::new(
-									ctx.get_index_stores(),
-									&mut tx,
-									ikb,
-									p,
-									TransactionType::Read,
-								)
-								.await?;
-								let entry = HnswEntry::new(&hnsw, a.clone(), *n, *ef).await?;
+								let hnsw =
+									ctx.get_index_stores().get_index_hnsw(opt, idx_def, p).await;
+								let entry =
+									HnswEntry::new(hnsw.clone(), a.clone(), *n, *ef).await?;
 								hnsw_map.insert(ix_ref, hnsw);
 								entry
 							};
@@ -406,11 +400,8 @@ impl QueryExecutor {
 	fn new_hnsw_index_ann_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
 			if let Some(he) = self.0.hnsw_entries.get(exp.as_ref()) {
-				let it = DocIdsIterator::new(
-					he.doc_ids.clone(),
-					he.res.iter().map(|(d, _)| *d).collect(),
-				);
-				return Some(ThingIterator::Knn(it));
+				let it = ThingsIterator::new(he.res.iter().map(|(thg, _)| thg.clone()).collect());
+				return Some(ThingIterator::Things(it));
 			}
 		}
 		None
@@ -599,16 +590,14 @@ impl MtEntry {
 
 #[derive(Clone)]
 pub(super) struct HnswEntry {
-	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<(DocId, f64)>,
+	res: VecDeque<(Thing, f64)>,
 }
 
 impl HnswEntry {
-	async fn new(h: &HnswIndex, a: Array, n: usize, ef: usize) -> Result<Self, Error> {
-		let res = h.knn_search(a, n, ef).await?;
+	async fn new(h: SharedHnswIndex, a: Array, n: usize, ef: usize) -> Result<Self, Error> {
+		let res = h.read().await.knn_search(a, n, ef).await?;
 		Ok(Self {
 			res,
-			doc_ids: h.doc_ids(),
 		})
 	}
 }

@@ -6,13 +6,13 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::{BTreeNode, BTreeStore};
-use crate::idx::trees::hnsw::HnswIndex;
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
-use crate::idx::trees::store::hnsw::HnswIndexes;
+use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::sql::index::HnswParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
 use std::fmt::{Debug, Display, Formatter};
@@ -240,13 +240,14 @@ impl IndexStores {
 		TreeStore::new(keys, cache, tt).await
 	}
 
-	pub(in crate::idx) async fn get_store_hnsw(
+	pub(in crate::idx) async fn get_index_hnsw(
 		&self,
-		keys: TreeNodeProvider,
-		generation: u64,
-		tt: TransactionType,
-	) -> HnswIndex {
-		let cache = self.0.hnsw_indexes.get(generation, &keys).await;
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		p: &HnswParams,
+	) -> SharedHnswIndex {
+		let ikb = IndexKeyBase::new(opt, ix);
+		self.0.hnsw_indexes.get(&ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(
@@ -315,9 +316,8 @@ impl IndexStores {
 		self.0.mtree_caches.remove_cache(&TreeNodeProvider::Vector(ikb.clone())).await;
 	}
 
-	async fn remove_hnsw_cache(&self, ikb: IndexKeyBase) {
-		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::DocIds(ikb.clone())).await;
-		self.0.hnsw_indexes.remove_cache(&TreeNodeProvider::Vector(ikb.clone())).await;
+	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) {
+		self.0.hnsw_indexes.remove(&ikb).await;
 	}
 
 	pub async fn is_empty(&self) -> bool {
