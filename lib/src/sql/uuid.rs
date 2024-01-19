@@ -13,6 +13,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 )]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Uuid(pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {

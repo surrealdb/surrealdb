@@ -1,6 +1,8 @@
 //! The full type definitions for the SurrealQL query language
 
 pub(crate) mod algorithm;
+#[cfg(feature = "arbitrary")]
+pub(crate) mod arbitrary;
 pub(crate) mod array;
 pub(crate) mod base;
 pub(crate) mod block;
@@ -29,7 +31,6 @@ pub(crate) mod group;
 pub(crate) mod id;
 pub(crate) mod ident;
 pub(crate) mod idiom;
-pub mod index;
 pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
@@ -65,6 +66,9 @@ pub(crate) mod value;
 pub(crate) mod version;
 pub(crate) mod view;
 pub(crate) mod with;
+
+#[doc(hidden)]
+pub mod index;
 
 pub mod serde;
 pub mod statements;
@@ -147,4 +151,4 @@ mod parser {
 	pub use crate::syn::*;
 }
 
-pub use self::parser::{idiom, json, parse, subquery, thing, value};
+pub use self::parser::{error::ParseError, idiom, json, parse, subquery, thing, value};

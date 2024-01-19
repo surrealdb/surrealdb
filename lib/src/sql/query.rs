@@ -1,6 +1,6 @@
 use crate::sql::fmt::Pretty;
-use crate::sql::statement::{Statement, Statements};
 use crate::sql::statements::{DefineStatement, RemoveStatement};
+use crate::sql::{Statement, Statements};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 #[serde(rename = "$surrealdb::private::sql::Query")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Query(pub Statements);
 
 impl From<DefineStatement> for Query {

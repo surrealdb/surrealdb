@@ -10,12 +10,12 @@ args = ["check", "--locked", "--workspace"]
 [tasks.ci-check-wasm]
 category = "CI - CHECK"
 command = "cargo"
-args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http", "--target", "wasm32-unknown-unknown"]
+args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks", "--target", "wasm32-unknown-unknown"]
 
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -25,22 +25,22 @@ args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,st
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting", "--workspace", "--test", "cli_integration", "--", "cli_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting,jwks", "--workspace", "--test", "cli_integration", "--", "cli_integration", "--nocapture"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression", "--workspace", "--test", "http_integration", "--", "http_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration", "--nocapture"]
 
 [tasks.ci-ws-integration]
-category = "CI - INTEGRATION TESTS"
+category = "WS - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem", "--workspace", "--test", "ws_integration", "--", "ws_integration", "--nocapture"]
 
 [tasks.ci-ml-integration]
-category = "CI - INTEGRATION TESTS"
+category = "ML - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_LOG={ value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
@@ -49,7 +49,19 @@ args = ["test", "--locked", "--features", "storage-mem,ml", "--workspace", "--te
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
-	"llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http", "--workspace", "--",
+	"llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
+	"--skip", "api_integration",
+	"--skip", "cli_integration",
+	"--skip", "http_integration",
+	"--skip", "ws_integration"
+]
+
+
+[tasks.test-experimental-parser]
+category = "CI - INTEGRATION TESTS"
+command = "cargo"
+args = [
+	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,experimental-parser", "--workspace", "--",
 	"--skip", "api_integration",
 	"--skip", "cli_integration",
 	"--skip", "http_integration",
@@ -228,7 +240,7 @@ args = ["build", "--locked", "--no-default-features", "--features", "storage-mem
 [tasks.ci-bench]
 category = "CI - BENCHMARK"
 command = "cargo"
-args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http", "${@}"]
+args = ["bench", "--quiet", "--package", "surrealdb", "--no-default-features", "--features", "kv-mem,scripting,http,jwks", "${@}"]
 
 #
 # Benchmarks - SDB - Per Target

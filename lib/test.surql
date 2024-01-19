@@ -88,8 +88,8 @@ SELECT
     ],
 	math::PI > 3.14 AS check_constant,
     test AS `some thing`,
-    '2012-04-23T18:25:43.511Z' AS utctime,
-    '2012-04-23T18:25:43.511-08:00' AS pacifictime,
+    d'2012-04-23T18:25:43.511Z' AS utctime,
+    d'2012-04-23T18:25:43.511-08:00' AS pacifictime,
     {
         key: (3 + 1 + 2),
         other: 9 * 7,
@@ -98,7 +98,7 @@ SELECT
         }
     } AS object,
     rand::uuid::v4() AS a_uuid_field,
-    "ff36afd6-6689-4c02-8c8c-7df478924645" AS ⟨another id field⟩,
+    u"ff36afd6-6689-4c02-8c8c-7df478924645" AS ⟨another id field⟩,
 	if true {
 		'Yay'
 	} else {
@@ -125,16 +125,16 @@ WHERE IF true THEN 'YAY' ELSE 'OOPS' END
     AND (3 + 3 * 4) = 6
     AND 3 + 3 * 4 = 6
     AND ages CONTAINS 18
-    AND if IS true
+    AND `if` IS true
     AND 346 <= 789
     AND 678 >= 345
     AND (
         then = true
-        OR if = true
-        OR create is NONE
-        OR delete = NULL
-        OR delete INSIDE ['one', 'two', 'three']
+        OR `if` = true
+        OR `create` is NONE
+        OR `delete` = NULL
+        OR `delete` INSIDE ['one', 'two', 'three']
     )
 SPLIT test.things
-VERSION '2019-01-01T08:00:00Z'
+VERSION d'2019-01-01T08:00:00Z'
 TIMEOUT 2w;

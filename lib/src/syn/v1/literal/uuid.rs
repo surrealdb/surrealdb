@@ -54,7 +54,7 @@ fn uuid_raw(i: &str) -> IResult<&str, Uuid> {
 #[cfg(test)]
 mod tests {
 
-	use crate::{sql::Value, syn::test::Parse};
+	use crate::{sql::Value, syn::Parse};
 
 	use super::*;
 

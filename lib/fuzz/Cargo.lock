@@ -1037,6 +1037,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "567495020b114f1ce9bed679b29975aa0bfae06ac22beacd5cfde5dabe7b05d6"
 dependencies = [
  "approx",
+ "arbitrary",
  "num-traits",
  "rstar",
  "serde",
@@ -2020,6 +2021,9 @@ name = "regex-syntax"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
+dependencies = [
+ "arbitrary",
+]
 
 [[package]]
 name = "rend"
@@ -2175,6 +2179,7 @@ version = "1.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06676aec5ccb8fc1da723cc8c0f9a46549f21ebb8753d3915c6c41db1e7f1dc4"
 dependencies = [
+ "arbitrary",
  "arrayvec",
  "borsh",
  "bytes",
@@ -2555,10 +2560,11 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surrealdb"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "addr",
  "any_ascii",
+ "arbitrary",
  "argon2",
  "async-channel",
  "async-executor",
@@ -2596,6 +2602,7 @@ dependencies = [
  "radix_trie",
  "rand",
  "regex",
+ "regex-syntax 0.8.2",
  "revision",
  "roaring",
  "rust-stemmers",
@@ -2973,6 +2980,7 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e395fcf16a7a3d8127ec99782007af141946b4795001f876d54fb0d55978560"
 dependencies = [
+ "arbitrary",
  "atomic",
  "getrandom",
  "serde",

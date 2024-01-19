@@ -14,6 +14,7 @@ use std::fmt::{self, Display, Formatter, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Fields,

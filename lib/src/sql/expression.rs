@@ -16,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expression {
 	Unary {
 		o: Operator,
@@ -45,29 +46,6 @@ impl Expression {
 			l,
 			o,
 			r,
-		}
-	}
-	/// Augment an existing expression
-	pub(crate) fn augment(mut self, l: Value, o: Operator) -> Self {
-		match &mut self {
-			Self::Binary {
-				l: left,
-				o: op,
-				..
-			} if o.precedence() >= op.precedence() => match left {
-				Value::Expression(x) => {
-					*x.as_mut() = std::mem::take(x).augment(l, o);
-					self
-				}
-				_ => {
-					*left = Self::new(l, o, std::mem::take(left)).into();
-					self
-				}
-			},
-			e => {
-				let r = Value::from(std::mem::take(e));
-				Self::new(l, o, r)
-			}
 		}
 	}
 }
@@ -131,6 +109,8 @@ impl Expression {
 				let operand = v.compute(ctx, opt, txn, doc).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
+					// TODO: Check if it is a number?
+					Operator::Add => Ok(operand),
 					Operator::Not => fnc::operate::not(operand),
 					op => unreachable!("{op:?} is not a unary op"),
 				};
@@ -204,7 +184,7 @@ impl Expression {
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
 			Operator::Matches(_) => fnc::operate::matches(ctx, txn, doc, self).await,
-			Operator::Knn(_) => fnc::operate::knn(ctx, txn, doc, self).await,
+			Operator::Knn(_, _) => fnc::operate::knn(ctx, opt, txn, doc, self).await,
 			_ => unreachable!(),
 		}
 	}

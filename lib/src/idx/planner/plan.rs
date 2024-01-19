@@ -308,7 +308,7 @@ impl RangeQueryBuilder {
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::sql::{Array, Idiom, Value};
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;
 

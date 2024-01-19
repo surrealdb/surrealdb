@@ -1,6 +1,9 @@
-use std::fmt;
+use std::{fmt, ops::Range};
 
-use super::Location;
+use super::common::Location;
+
+mod nom_error;
+pub use nom_error::ParseError;
 
 #[derive(Clone, Debug)]
 pub struct RenderedError {
@@ -42,6 +45,8 @@ pub struct Snippet {
 	location: Location,
 	/// The offset, in chars, into the snippet where the location is.
 	offset: usize,
+	/// The amount of characters that are part of area to be pointed to.
+	length: usize,
 	/// A possible explanation for this snippet.
 	explain: Option<String>,
 }
@@ -65,6 +70,29 @@ impl Snippet {
 			truncation,
 			location,
 			offset,
+			length: 1,
+			explain: explain.map(|x| x.into()),
+		}
+	}
+
+	pub fn from_source_location_range(
+		source: &str,
+		location: Range<Location>,
+		explain: Option<&'static str>,
+	) -> Self {
+		let line = source.split('\n').nth(location.start.line - 1).unwrap();
+		let (line, truncation, offset) = Self::truncate_line(line, location.start.column - 1);
+		let length = if location.start.line == location.end.line {
+			location.end.column - location.start.column
+		} else {
+			1
+		};
+		Snippet {
+			source: line.to_owned(),
+			truncation,
+			location: location.start,
+			offset,
+			length,
 			explain: explain.map(|x| x.into()),
 		}
 	}
@@ -124,7 +152,10 @@ impl fmt::Display for Snippet {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		// extra spacing for the line number
 		let spacing = self.location.line.ilog10() as usize + 1;
-		writeln!(f, "{:>spacing$} |", "")?;
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
+		f.write_str(" |\n")?;
 		write!(f, "{:>spacing$} | ", self.location.line)?;
 		match self.truncation {
 			Truncation::None => {
@@ -143,11 +174,21 @@ impl fmt::Display for Snippet {
 
 		let error_offset = self.offset
 			+ if matches!(self.truncation, Truncation::Start | Truncation::Both) {
-				4
+				3
 			} else {
-				1
+				0
 			};
-		write!(f, "{:>spacing$} | {:>error_offset$} ", "", "^",)?;
+		for _ in 0..spacing {
+			f.write_str(" ")?;
+		}
+		f.write_str(" | ")?;
+		for _ in 0..error_offset {
+			f.write_str(" ")?;
+		}
+		for _ in 0..self.length {
+			write!(f, "^")?;
+		}
+		write!(f, " ")?;
 		if let Some(ref explain) = self.explain {
 			write!(f, "{explain}")?;
 		}
@@ -157,9 +198,8 @@ impl fmt::Display for Snippet {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::error::{Location, Truncation};
-
-	use super::Snippet;
+	use super::{RenderedError, Snippet, Truncation};
+	use crate::syn::common::Location;
 
 	#[test]
 	fn truncate_whitespace() {
@@ -221,5 +261,31 @@ mod test {
 			snippet.source.as_str(),
 			"aaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		);
+	}
+
+	#[test]
+	fn render() {
+		let error = RenderedError {
+			text: "some_error".to_string(),
+			snippets: vec![Snippet {
+				source: "hallo error".to_owned(),
+				truncation: Truncation::Both,
+				location: Location {
+					line: 4,
+					column: 10,
+				},
+				offset: 6,
+				length: 5,
+				explain: Some("this is wrong".to_owned()),
+			}],
+		};
+
+		let error_string = format!("{}", error);
+		let expected = r#"some_error
+  |
+4 | ...hallo error...
+  |          ^^^^^ this is wrong
+"#;
+		assert_eq!(error_string, expected)
 	}
 }

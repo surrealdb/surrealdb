@@ -90,17 +90,17 @@ impl Connection for Client {
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
 					features,
-					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				engine: PhantomData,
 			})
 		})
 	}
 
 	fn send<'r>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
 		Box::pin(async move {
@@ -155,6 +155,7 @@ pub(crate) fn router(
 			Message::Binary(value)
 		};
 
+		let mut var_stash = IndexMap::new();
 		let mut vars = IndexMap::new();
 		let mut replay = IndexMap::new();
 
@@ -201,7 +202,7 @@ pub(crate) fn router(
 						match method {
 							Method::Set => {
 								if let [Value::Strand(Strand(key)), value] = &params[..2] {
-									vars.insert(key.to_owned(), value.clone());
+									var_stash.insert(id, (key.clone(), value.clone()));
 								}
 							}
 							Method::Unset => {
@@ -296,8 +297,14 @@ pub(crate) fn router(
 										Some(id) => {
 											if let Ok(id) = id.coerce_to_i64() {
 												// We can only route responses with IDs
-												if let Some((_method, sender)) = routes.remove(&id)
-												{
+												if let Some((method, sender)) = routes.remove(&id) {
+													if matches!(method, Method::Set) {
+														if let Some((key, value)) =
+															var_stash.remove(&id)
+														{
+															vars.insert(key, value);
+														}
+													}
 													// Send the response back to the caller
 													let _res = sender
 														.into_send_async(DbResponse::from(

@@ -15,6 +15,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,
@@ -74,7 +75,7 @@ impl TryFrom<Strand> for Thing {
 impl TryFrom<&str> for Thing {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::thing_raw(v) {
+		match syn::thing(v) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}

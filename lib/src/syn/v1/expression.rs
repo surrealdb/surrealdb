@@ -7,7 +7,7 @@ use super::{
 	value::single,
 	IResult,
 };
-use crate::sql::{Cast, Expression, Future};
+use crate::sql::{Cast, Expression, Future, Operator, Value};
 use nom::{bytes::complete::tag, character::complete::char, combinator::cut, sequence::delimited};
 
 pub fn cast(i: &str) -> IResult<&str, Cast> {
@@ -30,10 +30,32 @@ pub fn unary(i: &str) -> IResult<&str, Expression> {
 	))
 }
 
+/// Augment an existing expression
+pub(crate) fn augment(mut this: Expression, l: Value, o: Operator) -> Expression {
+	match &mut this {
+		Expression::Binary {
+			l: left,
+			o: op,
+			..
+		} if o.precedence() >= op.precedence() => match left {
+			Value::Expression(x) => {
+				*x.as_mut() = augment(std::mem::take(x), l, o);
+				this
+			}
+			_ => {
+				*left = Expression::new(l, o, std::mem::take(left)).into();
+				this
+			}
+		},
+		e => {
+			let r = Value::from(std::mem::take(e));
+			Expression::new(l, o, r)
+		}
+	}
+}
+
 #[cfg(test)]
 pub fn binary(i: &str) -> IResult<&str, Expression> {
-	use crate::sql::Value;
-
 	use super::depth;
 	use super::value;
 
@@ -43,7 +65,7 @@ pub fn binary(i: &str) -> IResult<&str, Expression> {
 	let _diving = depth::dive(i)?;
 	let (i, r) = value::value(i)?;
 	let v = match r {
-		Value::Expression(r) => r.augment(l, o),
+		Value::Expression(r) => augment(*r, l, o),
 		_ => Expression::new(l, o, r),
 	};
 	Ok((i, v))

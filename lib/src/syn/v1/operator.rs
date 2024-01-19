@@ -2,12 +2,14 @@ use super::{
 	comment::{mightbespace, shouldbespace},
 	IResult,
 };
+use crate::sql::index::Distance;
 use crate::sql::{Dir, Operator};
+use crate::syn::v1::part::index::minkowski;
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
 	character::complete::{char, u32, u8},
-	combinator::{cut, opt, value},
+	combinator::{cut, map, opt, value},
 };
 
 pub fn assigner(i: &str) -> IResult<&str, Operator> {
@@ -132,11 +134,27 @@ pub fn matches(i: &str) -> IResult<&str, Operator> {
 	})(i)
 }
 
+pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
+	let (i, _) = char(',')(i)?;
+	alt((
+		map(tag_no_case("CHEBYSHEV"), |_| Distance::Chebyshev),
+		map(tag_no_case("COSINE"), |_| Distance::Cosine),
+		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
+		map(tag_no_case("HAMMING"), |_| Distance::Hamming),
+		map(tag_no_case("JACCARD"), |_| Distance::Jaccard),
+		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),
+		minkowski,
+		map(tag_no_case("PEARSON"), |_| Distance::Pearson),
+	))(i)
+}
+
 pub fn knn(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = opt(tag_no_case("knn"))(i)?;
 	let (i, _) = char('<')(i)?;
 	let (i, k) = u32(i)?;
+	let (i, dist) = opt(knn_distance)(i)?;
 	let (i, _) = char('>')(i)?;
-	Ok((i, Operator::Knn(k)))
+	Ok((i, Operator::Knn(k, dist)))
 }
 
 pub fn dir(i: &str) -> IResult<&str, Dir> {
@@ -200,6 +218,24 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<5>", format!("{}", out));
-		assert_eq!(out, Operator::Knn(5));
+		assert_eq!(out, Operator::Knn(5, None));
+	}
+
+	#[test]
+	fn test_knn_with_distance() {
+		let res = knn("<3,EUCLIDEAN>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<3,EUCLIDEAN>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(3, Some(Distance::Euclidean)));
+	}
+
+	#[test]
+	fn test_knn_with_prefix() {
+		let res = knn("knn<5>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<5>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(5, None));
 	}
 }

@@ -1,8 +1,10 @@
+use crate::sql::json;
 use crate::sql::Object;
 use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 
@@ -58,6 +60,10 @@ pub struct Claims {
 	#[serde(alias = "https://surrealdb.com/roles")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub roles: Option<Vec<String>>,
+
+	#[serde(flatten)]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub custom_claims: Option<HashMap<String, serde_json::Value>>,
 }
 
 impl From<Claims> for Value {
@@ -103,6 +109,28 @@ impl From<Claims> for Value {
 		// Add RL field if set
 		if let Some(role) = v.roles {
 			out.insert("RL".to_string(), role.into());
+		}
+		// Add custom claims if set
+		if let Some(custom_claims) = v.custom_claims {
+			for (claim, value) in custom_claims {
+				// Serialize the raw JSON string representing the claim value
+				let claim_json = match serde_json::to_string(&value) {
+					Ok(claim_json) => claim_json,
+					Err(err) => {
+						debug!("Failed to serialize token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				// Parse that JSON string into the corresponding SurrealQL value
+				let claim_value = match json(&claim_json) {
+					Ok(claim_value) => claim_value,
+					Err(err) => {
+						debug!("Failed to parse token claim '{}': {}", claim, err);
+						continue;
+					}
+				};
+				out.insert(claim, claim_value);
+			}
 		}
 		// Return value
 		out.into()

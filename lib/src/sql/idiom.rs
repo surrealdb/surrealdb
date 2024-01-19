@@ -2,13 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::fmt::{fmt_separated_by, Fmt};
-use crate::sql::part::Next;
-use crate::sql::part::Part;
-use crate::sql::paths::{ID, IN, META, OUT};
-use crate::sql::value::Value;
-use md5::Digest;
-use md5::Md5;
+use crate::sql::{
+	fmt::{fmt_separated_by, Fmt},
+	part::Next,
+	paths::{ID, IN, META, OUT},
+	Part, Value,
+};
+use md5::{Digest, Md5};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -19,6 +19,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -45,6 +46,7 @@ impl Display for Idioms {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
@@ -69,6 +71,11 @@ impl From<Vec<Part>> for Idiom {
 impl From<&[Part]> for Idiom {
 	fn from(v: &[Part]) -> Self {
 		Self(v.to_vec())
+	}
+}
+impl From<Part> for Idiom {
+	fn from(v: Part) -> Self {
+		Self(vec![v])
 	}
 }
 

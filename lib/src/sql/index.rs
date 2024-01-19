@@ -1,3 +1,8 @@
+use crate::err::Error;
+use crate::fnc::util::math::vector::{
+	ChebyshevDistance, CosineSimilarity, EuclideanDistance, HammingDistance, JaccardSimilarity,
+	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
+};
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 use crate::sql::Number;
@@ -7,6 +12,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Index {
 	/// (Basic) non unique
@@ -21,6 +27,7 @@ pub enum Index {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
 pub struct SearchParams {
 	pub az: Ident,
@@ -41,6 +48,7 @@ pub struct SearchParams {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
 pub struct MTreeParams {
 	pub dimension: u16,
@@ -55,27 +63,52 @@ pub struct MTreeParams {
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Distance {
+	Chebyshev,
+	Cosine,
 	#[default]
 	Euclidean,
-	Manhattan,
 	Hamming,
+	Jaccard,
+	Manhattan,
 	Minkowski(Number),
+	Pearson,
+}
+
+impl Distance {
+	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
+		match self {
+			Distance::Cosine => v1.cosine_similarity(v2),
+			Distance::Chebyshev => v1.chebyshev_distance(v2),
+			Distance::Euclidean => v1.euclidean_distance(v2),
+			Distance::Hamming => v1.hamming_distance(v2),
+			Distance::Jaccard => v1.jaccard_similarity(v2),
+			Distance::Manhattan => v1.manhattan_distance(v2),
+			Distance::Minkowski(r) => v1.minkowski_distance(v2, r),
+			Distance::Pearson => v1.pearson_similarity(v2),
+		}
+	}
 }
 
 impl Display for Distance {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
+			Self::Chebyshev => f.write_str("CHEBYSHEV"),
+			Self::Cosine => f.write_str("COSINE"),
 			Self::Euclidean => f.write_str("EUCLIDEAN"),
-			Self::Manhattan => f.write_str("MANHATTAN"),
 			Self::Hamming => f.write_str("HAMMING"),
+			Self::Jaccard => f.write_str("JACCARD"),
+			Self::Manhattan => f.write_str("MANHATTAN"),
 			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
+			Self::Pearson => f.write_str("PEARSON"),
 		}
 	}
 }
 
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum VectorType {
 	#[default]

@@ -68,6 +68,7 @@ impl Surreal<Client> {
 	) -> Connect<Client, ()> {
 		Connect {
 			router: self.router.clone(),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -135,7 +136,10 @@ impl DbResponse {
 					}
 				}
 
-				Ok(DbResponse::Query(api::Response(map)))
+				Ok(DbResponse::Query(api::Response {
+					results: map,
+					..api::Response::new()
+				}))
 			}
 			// Live notifications don't call this method
 			Data::Live(..) => unreachable!(),

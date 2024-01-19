@@ -121,7 +121,7 @@ fn rule(i: &str) -> IResult<&str, Vec<(PermissionKind, Permission)>> {
 #[cfg(test)]
 mod test {
 	use crate::sql::{Expression, Value};
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 
 	use super::*;
 

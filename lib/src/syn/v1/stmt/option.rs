@@ -9,7 +9,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::tag_no_case,
 	character::complete::char,
-	combinator::{cut, opt, value},
+	combinator::{opt, value},
 	sequence::tuple,
 };
 
@@ -19,10 +19,10 @@ pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	let (i, n) = ident(i)?;
 	let (i, v) = expected(
 		"'=' followed by a value for the option",
-		cut(opt(alt((
+		opt(alt((
 			value(true, tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE")))),
 			value(false, tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE")))),
-		)))),
+		))),
 	)(i)?;
 	Ok((
 		i,

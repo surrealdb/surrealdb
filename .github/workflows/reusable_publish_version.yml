@@ -56,7 +56,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: 1.74.1
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -84,8 +84,7 @@ jobs:
             git checkout -b releases/stable
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
-            version=${major}.${minor}.$(($betaNum - 1))
+            version=${major}.${minor}.0
 
             # Bump the crate version
             sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
@@ -169,7 +168,7 @@ jobs:
             echo "build-metadata=${date}.${rev}" >> $GITHUB_OUTPUT
           else
             echo "name=v${version}" >> $GITHUB_OUTPUT
-            echo "build-metadata=\"\"" >> $GITHUB_OUTPUT
+            echo "build-metadata=" >> $GITHUB_OUTPUT
           fi
 
   test:
@@ -180,7 +179,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.75.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -231,7 +230,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.75.0
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -280,10 +279,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               cargo build --features $features --release --locked --target x86_64-apple-darwin
@@ -291,6 +290,7 @@ jobs:
               # Package
               cp target/x86_64-apple-darwin/release/surreal surreal
               chmod +x surreal
+              ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.txt
 
@@ -306,10 +306,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               cargo build --features $features --release --locked --target aarch64-apple-darwin
@@ -329,10 +329,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               docker build \
@@ -347,6 +347,7 @@ jobs:
               
               # Package
               chmod +x surreal
+              ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.txt
 
@@ -359,10 +360,10 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               docker build \
@@ -377,6 +378,7 @@ jobs:
 
               # Package
               chmod +x surreal
+              ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.txt
 
@@ -392,15 +394,16 @@ jobs:
 
               # Build
               features=storage-tikv
-              if [[ "${{ inputs.http-compression}}" == "true" ]]; then
+              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
-              if [[ "${{ inputs.ml}}" == "true" ]]; then
+              if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
               fi
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
               # Package
+              ./target/x86_64-pc-windows-msvc/release/surreal.exe version
               cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.exe | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.windows-amd64.txt
 
@@ -430,7 +433,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.71.1
+          toolchain: 1.74.1
           targets: ${{ matrix.arch }}
 
       - name: Output package versions
@@ -469,7 +472,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: 1.74.1
 
       - name: Install release-plz
         run: cargo install --force --locked --version 0.3.30 release-plz

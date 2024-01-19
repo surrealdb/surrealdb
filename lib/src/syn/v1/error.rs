@@ -1,7 +1,7 @@
-use super::{IResult, ParseError};
-use nom::bytes::complete::tag_no_case;
-use nom::Err;
-use nom::Parser;
+pub use crate::syn::error::ParseError;
+use nom::{bytes::complete::tag_no_case, Err, Parser};
+
+pub type IResult<I, O, E = ParseError<I>> = Result<(I, O), Err<E>>;
 
 pub fn expected<I, O, P>(expect: &'static str, mut parser: P) -> impl FnMut(I) -> IResult<I, O>
 where

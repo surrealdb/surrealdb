@@ -181,6 +181,18 @@ pub enum Error {
 	/// Tried to use a range query on an edge or edges
 	#[error("Live queries on edges not supported: {0}")]
 	LiveOnEdges(Edges),
+
+	/// Tried to access a query statement as a live query when it isn't a live query
+	#[error("Query statement {0} is not a live query")]
+	NotLiveQuery(usize),
+
+	/// Tried to access a query statement falling outside the bounds of the statements supplied
+	#[error("Query statement {0} is out of bounds")]
+	QueryIndexOutOfBounds(usize),
+
+	/// Called `Response::take` or `Response::stream` on a query response more than once
+	#[error("Tried to take a query response that has already been taken")]
+	ResponseAlreadyTaken,
 }
 
 #[cfg(feature = "protocol-http")]

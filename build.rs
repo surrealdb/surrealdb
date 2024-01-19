@@ -1,3 +1,4 @@
+use semver::BuildMetadata;
 use std::process::Command;
 use std::{env, str};
 
@@ -15,8 +16,12 @@ fn main() {
 }
 
 fn build_metadata() -> Option<String> {
-	if let Ok(metadata) = env::var(BUILD_METADATA) {
-		return Some(metadata);
+	if let Ok(input) = env::var(BUILD_METADATA) {
+		let metadata = input.trim();
+		if let Err(error) = BuildMetadata::new(metadata) {
+			panic!("invalid build metadata `{input}`: {error}");
+		}
+		return Some(metadata.to_owned());
 	}
 	let date = git()
 		.args(["show", "--no-patch", "--format=%ad", "--date=format:%Y%m%d"])

@@ -1,17 +1,15 @@
+use crate::syn::{
+	common::Location,
+	error::{RenderedError, Snippet},
+};
 use nom::error::ErrorKind;
 use nom::error::FromExternalError;
 use nom::error::ParseError as NomParseError;
-use nom::Err;
 use std::fmt::Write;
 use std::num::ParseFloatError;
 use std::num::ParseIntError;
 use std::ops::Bound;
 use thiserror::Error;
-
-mod utils;
-pub use utils::*;
-mod render;
-pub use render::*;
 
 #[derive(Error, Debug, Clone)]
 pub enum ParseError<I> {
@@ -128,46 +126,6 @@ impl<I: Clone> ParseError<I> {
 			..
 		}) = self;
 		tried.clone()
-	}
-}
-
-/// A location inside a string.
-///
-/// Locations are 1 indexed, the first character on the first line being on line 1 column 1.
-#[derive(Clone, Copy, Debug)]
-pub struct Location {
-	pub line: usize,
-	/// In chars.
-	pub column: usize,
-}
-
-impl Location {
-	/// Returns the location of the start of substring in the larger input string.
-	///
-	/// Assumption: substr must be a subslice of input.
-	pub fn of_in(substr: &str, input: &str) -> Self {
-		// Bytes of input before substr.
-		let offset = (substr.as_ptr() as usize)
-			.checked_sub(input.as_ptr() as usize)
-			.expect("tried to find location of substring in unrelated string");
-		// Bytes of input prior to line being iteratated.
-		let mut bytes_prior = 0;
-		for (line_idx, line) in input.split('\n').enumerate() {
-			// +1 for the '\n'
-			let bytes_so_far = bytes_prior + line.len() + 1;
-			if bytes_so_far > offset {
-				// found line.
-				let line_offset = offset - bytes_prior;
-				let column = line[..line_offset].chars().count();
-				// +1 because line and column are 1 index.
-				return Self {
-					line: line_idx + 1,
-					column: column + 1,
-				};
-			}
-			bytes_prior = bytes_so_far;
-		}
-		unreachable!()
 	}
 }
 
@@ -441,8 +399,6 @@ impl ParseError<&str> {
 		}
 	}
 }
-
-pub type IResult<I, O, E = ParseError<I>> = Result<(I, O), Err<E>>;
 
 impl<I> FromExternalError<I, ParseIntError> for ParseError<I> {
 	fn from_external_error(input: I, _kind: ErrorKind, e: ParseIntError) -> Self {

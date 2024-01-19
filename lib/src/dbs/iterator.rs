@@ -10,6 +10,7 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::IterationStage;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -23,6 +24,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
 
+#[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table),
@@ -69,6 +71,19 @@ pub(crate) struct Iterator {
 	results: Vec<Value>,
 	// Iterator input values
 	entries: Vec<Iterable>,
+}
+
+impl Clone for Iterator {
+	fn clone(&self) -> Self {
+		Self {
+			run: self.run.clone(),
+			limit: self.limit,
+			start: self.start,
+			error: None,
+			results: vec![],
+			entries: self.entries.clone(),
+		}
+	}
 }
 
 impl Iterator {
@@ -289,7 +304,19 @@ impl Iterator {
 
 		if do_iterate {
 			// Process prepared values
-			self.iterate(&cancel_ctx, opt, txn, stm).await?;
+			if let Some(qp) = ctx.get_query_planner() {
+				while let Some(s) = qp.next_iteration_stage().await {
+					let is_last = matches!(s, IterationStage::Iterate(_));
+					cancel_ctx.set_iteration_stage(s);
+					if is_last {
+						self.iterate(&cancel_ctx, opt, txn, stm).await?;
+					} else {
+						self.clone().iterate(&cancel_ctx, opt, txn, stm).await?;
+					};
+				}
+			} else {
+				self.iterate(&cancel_ctx, opt, txn, stm).await?;
+			}
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -577,9 +604,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			// Distinct is passed only for iterators that really requires it
-			let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
-			v.iterate(ctx, opt, txn, stm, self, dis).await?;
+			v.iterate(ctx, opt, txn, stm, self, distinct.as_mut()).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -604,16 +629,14 @@ impl Iterator {
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					// Distinct is passed only for iterators that really requires it
-					let dis = SyncDistinct::requires_distinct(ctx, distinct.as_mut(), &v);
-					v.iterate(ctx, opt, txn, stm, self, dis).await?;
+					v.iterate(ctx, opt, txn, stm, self, distinct.as_mut()).await?;
 				}
 				// Everything processed ok
 				Ok(())
 			}
 			// Run statements in parallel
 			true => {
-				// If any iterator requires distinct, we new to create a global distinct instance
+				// If any iterator requires distinct, we need to create a global distinct instance
 				let distinct = AsyncDistinct::new(ctx);
 				// Create a new executor
 				let e = executor::Executor::new();
@@ -628,8 +651,7 @@ impl Iterator {
 					// Process all prepared values
 					for v in vals {
 						// Distinct is passed only for iterators that really requires it
-						let dis = AsyncDistinct::requires_distinct(ctx, distinct.as_ref(), &v);
-						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), dis))
+						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), distinct.clone()))
 							// Ensure we detach the spawned task
 							.detach();
 					}

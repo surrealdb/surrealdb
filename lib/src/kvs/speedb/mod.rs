@@ -445,7 +445,7 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Create result set
-		let mut res = vec![];
+		let mut res: Vec<(Key, Val)> = vec![];
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();

@@ -9,15 +9,15 @@ use surrealdb::sql::Value;
 #[tokio::test]
 async fn select_limit_fetch() -> Result<(), Error> {
 	let sql = "
-		CREATE temperature:1 SET country = 'GBP', time = '2020-01-01T08:00:00Z';
-		CREATE temperature:2 SET country = 'GBP', time = '2020-02-01T08:00:00Z';
-		CREATE temperature:3 SET country = 'GBP', time = '2020-03-01T08:00:00Z';
-		CREATE temperature:4 SET country = 'GBP', time = '2021-01-01T08:00:00Z';
-		CREATE temperature:5 SET country = 'GBP', time = '2021-01-01T08:00:00Z';
-		CREATE temperature:6 SET country = 'EUR', time = '2021-01-01T08:00:00Z';
-		CREATE temperature:7 SET country = 'USD', time = '2021-01-01T08:00:00Z';
-		CREATE temperature:8 SET country = 'AUD', time = '2021-01-01T08:00:00Z';
-		CREATE temperature:9 SET country = 'CHF', time = '2023-01-01T08:00:00Z';
+		CREATE temperature:1 SET country = 'GBP', time = d'2020-01-01T08:00:00Z';
+		CREATE temperature:2 SET country = 'GBP', time = d'2020-02-01T08:00:00Z';
+		CREATE temperature:3 SET country = 'GBP', time = d'2020-03-01T08:00:00Z';
+		CREATE temperature:4 SET country = 'GBP', time = d'2021-01-01T08:00:00Z';
+		CREATE temperature:5 SET country = 'GBP', time = d'2021-01-01T08:00:00Z';
+		CREATE temperature:6 SET country = 'EUR', time = d'2021-01-01T08:00:00Z';
+		CREATE temperature:7 SET country = 'USD', time = d'2021-01-01T08:00:00Z';
+		CREATE temperature:8 SET country = 'AUD', time = d'2021-01-01T08:00:00Z';
+		CREATE temperature:9 SET country = 'CHF', time = d'2023-01-01T08:00:00Z';
 		SELECT *, time::year(time) AS year FROM temperature;
 		SELECT count(), time::year(time) AS year, country FROM temperature GROUP BY country, year;
 	";
@@ -32,7 +32,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'GBP',
 				id: temperature:1,
-				time: '2020-01-01T08:00:00Z'
+				time: d'2020-01-01T08:00:00Z'
 			}
 		]",
 	);
@@ -44,7 +44,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'GBP',
 				id: temperature:2,
-				time: '2020-02-01T08:00:00Z'
+				time: d'2020-02-01T08:00:00Z'
 			}
 		]",
 	);
@@ -56,7 +56,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'GBP',
 				id: temperature:3,
-				time: '2020-03-01T08:00:00Z'
+				time: d'2020-03-01T08:00:00Z'
 			}
 		]",
 	);
@@ -68,7 +68,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'GBP',
 				id: temperature:4,
-				time: '2021-01-01T08:00:00Z'
+				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
 	);
@@ -80,7 +80,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'GBP',
 				id: temperature:5,
-				time: '2021-01-01T08:00:00Z'
+				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
 	);
@@ -92,7 +92,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'EUR',
 				id: temperature:6,
-				time: '2021-01-01T08:00:00Z'
+				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
 	);
@@ -104,7 +104,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'USD',
 				id: temperature:7,
-				time: '2021-01-01T08:00:00Z'
+				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
 	);
@@ -116,7 +116,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'AUD',
 				id: temperature:8,
-				time: '2021-01-01T08:00:00Z'
+				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
 	);
@@ -128,7 +128,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'CHF',
 				id: temperature:9,
-				time: '2023-01-01T08:00:00Z'
+				time: d'2023-01-01T08:00:00Z'
 			}
 		]",
 	);
@@ -140,55 +140,55 @@ async fn select_limit_fetch() -> Result<(), Error> {
 			{
 				country: 'GBP',
 				id: temperature:1,
-				time: '2020-01-01T08:00:00Z',
+				time: d'2020-01-01T08:00:00Z',
 				year: 2020
 			},
 			{
 				country: 'GBP',
 				id: temperature:2,
-				time: '2020-02-01T08:00:00Z',
+				time: d'2020-02-01T08:00:00Z',
 				year: 2020
 			},
 			{
 				country: 'GBP',
 				id: temperature:3,
-				time: '2020-03-01T08:00:00Z',
+				time: d'2020-03-01T08:00:00Z',
 				year: 2020
 			},
 			{
 				country: 'GBP',
 				id: temperature:4,
-				time: '2021-01-01T08:00:00Z',
+				time: d'2021-01-01T08:00:00Z',
 				year: 2021
 			},
 			{
 				country: 'GBP',
 				id: temperature:5,
-				time: '2021-01-01T08:00:00Z',
+				time: d'2021-01-01T08:00:00Z',
 				year: 2021
 			},
 			{
 				country: 'EUR',
 				id: temperature:6,
-				time: '2021-01-01T08:00:00Z',
+				time: d'2021-01-01T08:00:00Z',
 				year: 2021
 			},
 			{
 				country: 'USD',
 				id: temperature:7,
-				time: '2021-01-01T08:00:00Z',
+				time: d'2021-01-01T08:00:00Z',
 				year: 2021
 			},
 			{
 				country: 'AUD',
 				id: temperature:8,
-				time: '2021-01-01T08:00:00Z',
+				time: d'2021-01-01T08:00:00Z',
 				year: 2021
 			},
 			{
 				country: 'CHF',
 				id: temperature:9,
-				time: '2023-01-01T08:00:00Z',
+				time: d'2023-01-01T08:00:00Z',
 				year: 2023
 			}
 		]",

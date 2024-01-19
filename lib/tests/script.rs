@@ -163,10 +163,10 @@ async fn script_function_types() -> Result<(), Error> {
 		"[
 			{
 				id: article:test,
-				created_at: '1995-12-17T03:24:00Z',
+				created_at: d'1995-12-17T03:24:00Z',
 				next_signin: 1w2d6h,
 				manager: user:joanna,
-				identifier: '03412258-988f-47cd-82db-549902cdaffe',
+				identifier: u'03412258-988f-47cd-82db-549902cdaffe',
 			}
 		]",
 	);

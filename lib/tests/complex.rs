@@ -4,8 +4,7 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
-use std::future::Future;
-use std::thread::Builder;
+use helpers::with_enough_stack;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
@@ -24,7 +23,7 @@ fn self_referential_field() -> Result<(), Error> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
 		//
 		Ok(())
 	})
@@ -44,7 +43,7 @@ fn cyclic_fields() -> Result<(), Error> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
 		//
 		Ok(())
 	})
@@ -68,7 +67,7 @@ fn cyclic_records() -> Result<(), Error> {
 		assert!(tmp.is_ok());
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
 		//
 		Ok(())
 	})
@@ -216,34 +215,6 @@ async fn run_queries(
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
-}
-
-fn with_enough_stack(
-	fut: impl Future<Output = Result<(), Error>> + Send + 'static,
-) -> Result<(), Error> {
-	#[allow(unused_mut)]
-	let mut builder = Builder::new();
-
-	// Roughly how much stack is allocated for surreal server workers in release mode
-	#[cfg(not(debug_assertions))]
-	{
-		builder = builder.stack_size(10_000_000);
-	}
-
-	// Same for debug mode
-	#[cfg(debug_assertions)]
-	{
-		builder = builder.stack_size(24_000_000);
-	}
-
-	builder
-		.spawn(|| {
-			let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
-			runtime.block_on(fut)
-		})
-		.unwrap()
-		.join()
-		.unwrap()
 }
 
 fn cast_chain(n: usize) -> String {

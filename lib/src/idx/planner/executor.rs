@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
+use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::scorer::BM25Scorer;
@@ -10,21 +11,30 @@ use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
 };
+use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
+use crate::idx::planner::{IterationStage, KnnSet};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::{Key, TransactionType};
-use crate::sql::index::Index;
+use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Object, Table, Thing, Value};
+use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(crate) struct QueryExecutor {
+pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>, Distance);
+pub(super) type KnnExpressions =
+	HashMap<Arc<Expression>, (u32, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
+
+#[derive(Clone)]
+pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
+
+pub(super) struct InnerQueryExecutor {
 	table: String,
 	ft_map: HashMap<IndexRef, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
@@ -32,6 +42,13 @@ pub(crate) struct QueryExecutor {
 	it_entries: Vec<IteratorEntry>,
 	index_definitions: Vec<DefineIndexStatement>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
+	knn_entries: HashMap<Arc<Expression>, KnnEntry>,
+}
+
+impl From<InnerQueryExecutor> for QueryExecutor {
+	fn from(value: InnerQueryExecutor) -> Self {
+		Self(Arc::new(value))
+	}
 }
 
 pub(crate) type IteratorRef = u16;
@@ -56,19 +73,21 @@ impl IteratorEntry {
 		}
 	}
 }
-impl QueryExecutor {
+impl InnerQueryExecutor {
 	pub(super) async fn new(
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		table: &Table,
 		im: IndexesMap,
+		knns: KnnExpressions,
 	) -> Result<Self, Error> {
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
 		let mut ft_map = HashMap::default();
 		let mut mt_map: HashMap<IndexRef, MTreeIndex> = HashMap::default();
 		let mut mt_entries = HashMap::default();
+		let mut knn_entries = HashMap::with_capacity(knns.len());
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Idioms and MatchRef
@@ -137,6 +156,10 @@ impl QueryExecutor {
 			}
 		}
 
+		for (exp, (knn, id, obj, dist)) in knns {
+			knn_entries.insert(exp, (KnnPriorityList::new(knn as usize), id, obj, dist));
+		}
+
 		Ok(Self {
 			table: table.0.clone(),
 			ft_map,
@@ -145,18 +168,7 @@ impl QueryExecutor {
 			it_entries: Vec::new(),
 			index_definitions: im.definitions,
 			mt_entries,
-		})
-	}
-
-	pub(crate) async fn knn(
-		&self,
-		_txn: &Transaction,
-		_thg: &Thing,
-		exp: &Expression,
-	) -> Result<Value, Error> {
-		// If no previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundForMatch {
-			value: exp.to_string(),
+			knn_entries,
 		})
 	}
 
@@ -165,14 +177,58 @@ impl QueryExecutor {
 		self.it_entries.push(it_entry);
 		ir as IteratorRef
 	}
+}
 
-	pub(crate) fn is_distinct(&self, ir: IteratorRef) -> bool {
-		(ir as usize) < self.it_entries.len()
+impl QueryExecutor {
+	pub(crate) async fn knn(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		thg: &Thing,
+		doc: Option<&CursorDoc<'_>>,
+		exp: &Expression,
+	) -> Result<Value, Error> {
+		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
+			if let Some(e) = e {
+				if let Some(e) = e.get(thg.tb.as_str()) {
+					if let Some(things) = e.get(exp) {
+						if things.contains(thg) {
+							return Ok(Value::Bool(true));
+						}
+					}
+				}
+			}
+			Ok(Value::Bool(false))
+		} else {
+			if let Some((p, id, val, dist)) = self.0.knn_entries.get(exp) {
+				let v: Vec<Number> = id.compute(ctx, opt, txn, doc).await?.try_into()?;
+				let dist = dist.compute(&v, val.as_ref())?;
+				p.add(dist, thg).await;
+			}
+			Ok(Value::Bool(true))
+		}
+	}
+
+	pub(super) async fn build_knn_set(&self) -> KnnSet {
+		let mut set = HashMap::with_capacity(self.0.knn_entries.len());
+		for (exp, (p, _, _, _)) in &self.0.knn_entries {
+			set.insert(exp.clone(), p.build().await);
+		}
+		set
+	}
+
+	pub(crate) fn is_table(&self, tb: &str) -> bool {
+		self.0.table.eq(tb)
+	}
+
+	pub(crate) fn has_knn(&self) -> bool {
+		!self.0.knn_entries.is_empty()
 	}
 
 	/// Returns `true` if either the expression is matching the current iterator.
 	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
-		match self.it_entries.get(ir as usize) {
+		match self.0.it_entries.get(ir as usize) {
 			Some(IteratorEntry::Single(e, ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
 			_ => false,
@@ -180,11 +236,11 @@ impl QueryExecutor {
 	}
 
 	pub(crate) fn explain(&self, itr: IteratorRef) -> Value {
-		match self.it_entries.get(itr as usize) {
+		match self.0.it_entries.get(itr as usize) {
 			Some(ie) => {
 				let mut e = HashMap::default();
 				let ir = ie.explain(&mut e);
-				if let Some(ix) = self.index_definitions.get(ir as usize) {
+				if let Some(ix) = self.0.index_definitions.get(ir as usize) {
 					e.insert("index", Value::from(ix.name.0.to_owned()));
 				}
 				Value::from(Object::from(e))
@@ -207,10 +263,10 @@ impl QueryExecutor {
 		opt: &Options,
 		it_ref: IteratorRef,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(it_entry) = self.it_entries.get(it_ref as usize) {
+		if let Some(it_entry) = self.0.it_entries.get(it_ref as usize) {
 			match it_entry {
 				IteratorEntry::Single(_, io) => {
-					if let Some(ix) = self.index_definitions.get(io.ix_ref() as usize) {
+					if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
 						match ix.index {
 							Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
 							Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
@@ -255,7 +311,7 @@ impl QueryExecutor {
 		from: &RangeValue,
 		to: &RangeValue,
 	) -> Option<ThingIterator> {
-		if let Some(ix) = self.index_definitions.get(ir as usize) {
+		if let Some(ix) = self.0.index_definitions.get(ir as usize) {
 			match ix.index {
 				Index::Idx => {
 					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
@@ -291,10 +347,10 @@ impl QueryExecutor {
 		it_ref: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(it_ref as usize) {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
 			if let Matches(_, _) = io.op() {
-				if let Some(fti) = self.ft_map.get(&io.ix_ref()) {
-					if let Some(fte) = self.exp_entries.get(exp.as_ref()) {
+				if let Some(fti) = self.0.ft_map.get(&io.ix_ref()) {
+					if let Some(fte) = self.0.exp_entries.get(exp.as_ref()) {
 						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
 						return Ok(Some(ThingIterator::Matches(it)));
 					}
@@ -305,8 +361,8 @@ impl QueryExecutor {
 	}
 
 	fn new_mtree_index_knn_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.it_entries.get(it_ref as usize) {
-			if let Some(mte) = self.mt_entries.get(exp.as_ref()) {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
+			if let Some(mte) = self.0.mt_entries.get(exp.as_ref()) {
 				let it = DocIdsIterator::new(mte.doc_ids.clone(), mte.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
@@ -322,8 +378,8 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		// Otherwise, we look for the first possible index options, and evaluate the expression
 		// Does the record id match this executor's table?
-		if thg.tb.eq(&self.table) {
-			if let Some(ft) = self.exp_entries.get(exp) {
+		if thg.tb.eq(&self.0.table) {
+			if let Some(ft) = self.0.exp_entries.get(exp) {
 				let mut run = txn.lock().await;
 				let doc_key: Key = thg.into();
 				if let Some(doc_id) =
@@ -358,7 +414,7 @@ impl QueryExecutor {
 
 	fn get_ft_entry(&self, match_ref: &Value) -> Option<&FtEntry> {
 		if let Some(mr) = Self::get_match_ref(match_ref) {
-			self.mr_entries.get(&mr)
+			self.0.mr_entries.get(&mr)
 		} else {
 			None
 		}
@@ -366,7 +422,7 @@ impl QueryExecutor {
 
 	fn get_ft_entry_and_index(&self, match_ref: &Value) -> Option<(&FtEntry, &FtIndex)> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
-			if let Some(ft) = self.ft_map.get(&e.0.index_option.ix_ref()) {
+			if let Some(ft) = self.0.ft_map.get(&e.0.index_option.ix_ref()) {
 				return Some((e, ft));
 			}
 		}
