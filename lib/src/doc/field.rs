@@ -31,6 +31,13 @@ impl<'a> Document<'a> {
 				let old = self.initial.doc.pick(&k);
 				// Get the input value
 				let inp = inp.pick(&k);
+				// Check for READONLY clause
+				if fd.readonly && !self.is_new() && val != old {
+					return Err(Error::FieldReadonly {
+						field: fd.name.clone(),
+						thing: rid.to_string(),
+					});
+				}
 				// Get the default value
 				let def = match &fd.default {
 					Some(v) => Some(v),
@@ -71,14 +78,17 @@ impl<'a> Document<'a> {
 				}
 				// Check for a VALUE clause
 				if let Some(expr) = &fd.value {
-					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("input", &inp);
-					ctx.add_value("value", &val);
-					ctx.add_value("after", &val);
-					ctx.add_value("before", &old);
-					// Process the VALUE clause
-					val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
+					// Only run value clause for mutable and new fields
+					if !fd.readonly || self.is_new() {
+						// Configure the context
+						let mut ctx = Context::new(ctx);
+						ctx.add_value("input", &inp);
+						ctx.add_value("value", &val);
+						ctx.add_value("after", &val);
+						ctx.add_value("before", &old);
+						// Process the VALUE clause
+						val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
+					}
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {

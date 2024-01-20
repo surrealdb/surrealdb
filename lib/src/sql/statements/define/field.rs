@@ -13,12 +13,14 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	pub flex: bool,
 	pub kind: Option<Kind>,
+	#[revision(start = 2)]
+	pub readonly: bool,
 	pub value: Option<Value>,
 	pub assert: Option<Value>,
 	pub default: Option<Value>,
@@ -67,6 +69,9 @@ impl Display for DefineFieldStatement {
 		}
 		if let Some(ref v) = self.default {
 			write!(f, " DEFAULT {v}")?
+		}
+		if self.readonly {
+			write!(f, " READONLY")?
 		}
 		if let Some(ref v) = self.value {
 			write!(f, " VALUE {v}")?

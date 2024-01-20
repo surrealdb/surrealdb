@@ -24,10 +24,10 @@ impl DefineParamStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_doc: Option<&CursorDoc<'_>>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
@@ -35,11 +35,16 @@ impl DefineParamStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Compute the param
+		let val = DefineParamStatement {
+			value: self.value.compute(ctx, opt, txn, doc).await?,
+			..self.clone()
+		};
 		// Process the statement
 		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
+		run.set(key, val).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
