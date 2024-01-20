@@ -8,8 +8,9 @@ use crate::{
 			DefineNamespaceStatement, DefineParamStatement, DefineScopeStatement, DefineStatement,
 			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
 		},
+		table_type,
 		tokenizer::Tokenizer,
-		Ident, Idioms, Index, Param, Permissions, Scoring, Strand, Values,
+		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType, Values,
 	},
 	syn::v2::{
 		parser::{
@@ -264,6 +265,7 @@ impl Parser<'_> {
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
+			table_type: TableType::Normal,
 			..Default::default()
 		};
 
@@ -276,6 +278,10 @@ impl Parser<'_> {
 				t!("DROP") => {
 					self.pop_peek();
 					res.drop = true;
+				}
+				t!("RELATION") => {
+					self.pop_peek();
+					res.table_type = TableType::Relation(self.parse_relation_schema()?);
 				}
 				t!("SCHEMALESS") => {
 					self.pop_peek();
@@ -655,5 +661,50 @@ impl Parser<'_> {
 			}
 		}
 		Ok(res)
+	}
+
+	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {
+		let mut res = table_type::Relation {
+			from: None,
+			to: None,
+		};
+		loop {
+			match self.peek_kind() {
+				t!("FROM") => {
+					self.pop_peek();
+					let from = self.parse_tables()?;
+					res.from = Some(from);
+				}
+				t!("TO") => {
+					self.pop_peek();
+					let to = self.parse_tables()?;
+					res.to = Some(to);
+				}
+				_ => break,
+			}
+		}
+		Ok(res)
+	}
+
+	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
+		let mut names = Vec::new();
+		let mut expect_name = true;
+		loop {
+			match expect_name {
+				true => {
+					let ident = self.next_token_value::<Ident>()?;
+					names.push(ident.into());
+					expect_name = false;
+				}
+				false => {
+					if self.eat(t!("|")) {
+						expect_name = true;
+					} else {
+						break;
+					}
+				}
+			}
+		}
+		Ok(Kind::Record(names))
 	}
 }
