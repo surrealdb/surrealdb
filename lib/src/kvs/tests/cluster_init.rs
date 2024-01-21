@@ -378,7 +378,7 @@ async fn test_asymmetric_difference() {
 
 async fn set_fake_clock(fake_clock: Arc<SizedClock>, time: Timestamp) {
 	let clock = match &*fake_clock {
-		SizedClock::Fake(f) => f.clone(),
+		SizedClock::Fake(f) => f,
 		_ => panic!("Clock is not fake"),
 	};
 	clock.set(time).await;
