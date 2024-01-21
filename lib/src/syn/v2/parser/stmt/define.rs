@@ -372,6 +372,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.kind = Some(self.parse_inner_kind()?);
 				}
+				t!("READONLY") => {
+					self.pop_peek();
+					res.readonly = true;
+				}
 				t!("VALUE") => {
 					self.pop_peek();
 					res.value = Some(self.parse_value()?);

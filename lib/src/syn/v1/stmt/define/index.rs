@@ -7,13 +7,17 @@ use super::super::super::{
 	part::index,
 	IResult,
 };
-use crate::sql::{statements::DefineIndexStatement, Idioms, Index, Strand};
+use crate::{
+	sql::{statements::DefineIndexStatement, Idioms, Index, Strand},
+	syn::v1::ParseError,
+};
 use nom::{
 	branch::alt,
 	bytes::complete::tag_no_case,
 	combinator::{cut, opt},
 	multi::many0,
 	sequence::tuple,
+	Err,
 };
 
 pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
@@ -52,7 +56,11 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	}
 	// Check necessary options
 	if res.cols.is_empty() {
-		// TODO throw error
+		return Err(Err::Failure(ParseError::ExplainedExpected {
+			tried: i,
+			expected: "a COLUMNS or FIELDS clause",
+			explained: "An index requires a COLUMNS or FIELDS clause to be defined.",
+		}));
 	}
 	// Return the statement
 	Ok((i, res))
@@ -230,5 +238,13 @@ mod tests {
 			idx.to_string(),
 			"DEFINE INDEX my_index ON my_table FIELDS my_col MTREE DIMENSION 4 DIST EUCLIDEAN TYPE F64 CAPACITY 40 DOC_IDS_ORDER 100 DOC_IDS_CACHE 100 MTREE_CACHE 100"
 		);
+	}
+
+	#[test]
+	fn define_index_without_columns_clause() {
+		let sql = "INDEX test ON test";
+		let res = index(sql);
+
+		assert_eq!(res.is_err(), true)
 	}
 }

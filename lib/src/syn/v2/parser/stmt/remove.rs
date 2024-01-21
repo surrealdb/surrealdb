@@ -65,8 +65,16 @@ impl Parser<'_> {
 			}
 			t!("TABLE") => {
 				let name = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
+					if_exists,
 				})
 			}
 			t!("EVENT") => {

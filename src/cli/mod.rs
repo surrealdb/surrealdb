@@ -13,6 +13,7 @@ pub(crate) mod validator;
 mod version;
 
 use crate::cnf::LOGO;
+use crate::env::RELEASE;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
 pub use config::CF;
@@ -42,8 +43,8 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 
 #[derive(Parser, Debug)]
 #[command(name = "SurrealDB command-line interface and server", bin_name = "surreal")]
-#[command(about = INFO, before_help = LOGO)]
-#[command(disable_version_flag = true, arg_required_else_help = true)]
+#[command(version = RELEASE.as_str(), about = INFO, before_help = LOGO)]
+#[command(disable_version_flag = false, arg_required_else_help = true)]
 struct Cli {
 	#[command(subcommand)]
 	command: Commands,

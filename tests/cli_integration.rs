@@ -19,13 +19,33 @@ mod cli_integration {
 	const TWO_SECS: time::Duration = time::Duration::new(2, 0);
 
 	#[test]
-	fn version() {
+	fn version_command() {
 		assert!(common::run("version").output().is_ok());
 	}
 
 	#[test]
-	fn help() {
+	fn version_flag_short() {
+		assert!(common::run("-V").output().is_ok());
+	}
+
+	#[test]
+	fn version_flag_long() {
+		assert!(common::run("--version").output().is_ok());
+	}
+
+	#[test]
+	fn help_command() {
 		assert!(common::run("help").output().is_ok());
+	}
+
+	#[test]
+	fn help_flag_short() {
+		assert!(common::run("-h").output().is_ok());
+	}
+
+	#[test]
+	fn help_flag_long() {
+		assert!(common::run("--help").output().is_ok());
 	}
 
 	#[test]
@@ -110,6 +130,24 @@ mod cli_integration {
 
 			// TODO: Once backups are functional, update this test.
 			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
+		}
+
+		info!("* Advanced uncomputed variable to be computed before saving");
+		{
+			let args = format!(
+				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+			let output = common::run(&args)
+				.input(
+					"DEFINE PARAM $something VALUE <set>[1, 2, 3]; \
+				$something;
+				",
+				)
+				.output()
+				.unwrap();
+
+			assert!(output.contains("[1, 2, 3]"), "missing success in {output}");
 		}
 
 		info!("* Multi-statement (and multi-line) query including error(s) over WS");
