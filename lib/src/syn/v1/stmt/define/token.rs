@@ -8,8 +8,10 @@ use super::super::super::{
 	part::base_or_scope,
 	IResult,
 };
-use crate::sql::{statements::DefineTokenStatement, Algorithm, Strand};
-#[cfg(not(feature = "jwks"))]
+use crate::{
+	sql::{statements::DefineTokenStatement, Algorithm, Strand},
+	syn::v1::ParseError,
+};
 use nom::Err;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
@@ -55,7 +57,11 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	}
 	// Check necessary options
 	if res.code.is_empty() {
-		// TODO throw error
+		return Err(Err::Failure(ParseError::ExplainedExpected {
+			tried: i,
+			expected: "a VALUE clause",
+			explained: "A token requires a VALUE clause to be defined.",
+		}));
 	}
 	// Return the statement
 	Ok((i, res))
@@ -93,4 +99,18 @@ fn token_comment(i: &str) -> IResult<&str, DefineTokenOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineTokenOption::Comment(v)))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn define_token_without_value_clause() {
+		let sql = "TOKEN test ON test";
+		let res = token(sql);
+
+		assert_eq!(res.is_err(), true)
+	}
 }
