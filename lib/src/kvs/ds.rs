@@ -578,7 +578,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 
-		let scan_task = bootstrap::scan_node_live_queries(
+		let mut scan_task = bootstrap::scan_node_live_queries(
 			tx_req_send.clone(),
 			dead_nodes,
 			scan_send,
@@ -588,6 +588,8 @@ impl Datastore {
 		// Wasm doesnt have multithreading
 		#[cfg(not(target_arch = "wasm32"))]
 		let mut scan_task = tokio::spawn(scan_task);
+		// #[cfg(target_arch = "wasm32")]
+		let mut scan_task = Box::pin(scan_task);
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
@@ -595,7 +597,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned archive task");
-		let archive_task = bootstrap::archive_live_queries(
+		let mut archive_task = bootstrap::archive_live_queries(
 			tx_req_send.clone(),
 			self.id,
 			scan_recv,
@@ -607,6 +609,8 @@ impl Datastore {
 		// Wasm doesnt have multithreading
 		#[cfg(not(target_arch = "wasm32"))]
 		let mut archive_task = tokio::spawn(archive_task);
+		#[cfg(target_arch = "wasm32")]
+		let mut archive_task = Box::pin(archive_task);
 
 		// In several new transactions, delete archived node live queries
 		let (delete_send, delete_recv): (
@@ -614,7 +618,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned delete live query task");
-		let delete_task = bootstrap::delete_live_queries(
+		let mut delete_fut = bootstrap::delete_live_queries(
 			tx_req_send,
 			archive_recv,
 			delete_send,
@@ -622,22 +626,20 @@ impl Datastore {
 		);
 		// Wasm doesnt have multithreading
 		#[cfg(not(target_arch = "wasm32"))]
-		let mut delete_task = tokio::spawn(delete_task);
+		let mut delete_task = tokio::spawn(delete_fut);
+		#[cfg(target_arch = "wasm32")]
+		let mut delete_task = Box::pin(delete_fut);
 
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
 		trace!("Spawned delete handler task");
-		let delete_handler_task = create_delete_handler_future(delete_recv);
+		let mut delete_handler_fut = create_delete_handler_future(delete_recv);
 
 		// Wasm doesnt have multithreading
 		#[cfg(not(target_arch = "wasm32"))]
-		let mut delete_handler_task = tokio::spawn(delete_handler_task);
+		let mut delete_handler_task = tokio::spawn(delete_handler_fut);
 		#[cfg(target_arch = "wasm32")]
-		let mut delete_handler_task = Pin::new(delete_handler_task);
-
-		// Polled futures need to be pinned
-		#[cfg(target_arch = "wasm32")]
-		let delete_handler_task = Pin::new(delete_handler_task);
+		let mut delete_handler_task = Box::pin(delete_handler_fut);
 
 		// Handle transaction requests
 		// This loop will continue to run until all channels have been closed above
@@ -1441,6 +1443,7 @@ async fn create_delete_handler_future(
 	Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn poll_future_wasm32_safe(
 	mut task: &mut JoinHandle<Result<(), Error>>,
 ) -> Option<Result<(), Error>> {
@@ -1456,6 +1459,18 @@ fn poll_future_wasm32_safe(
 				tokio_error
 			))));
 		}
+		Poll::Pending => None,
+	}
+}
+#[cfg(target_arch = "wasm32")]
+fn poll_future_wasm32_safe<A>(mut task: &mut Pin<Box<A>>) -> Option<Result<(), Error>>
+where
+	A: Future<Output = Result<(), Error>>,
+{
+	let waker_borrow = &(*waker);
+	let mut ctx = std::task::Context::from_waker(&waker_borrow);
+	match task.as_mut().poll(&mut ctx) {
+		Poll::Ready(r) => Some(r),
 		Poll::Pending => None,
 	}
 }
