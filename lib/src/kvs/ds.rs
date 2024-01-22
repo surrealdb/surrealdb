@@ -15,6 +15,7 @@ use futures::{lock::Mutex, Future};
 use futures_lite::future::FutureExt;
 use once_cell::sync::Lazy;
 use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::task::JoinHandle;
 use tracing::instrument;
 use tracing::trace;
 
@@ -641,48 +642,26 @@ impl Datastore {
 		// Handle transaction requests
 		// This loop will continue to run until all channels have been closed above
 		trace!("Handling bootstrap transaction requests");
-		let waker_borrow = &(*waker);
-		let mut scan_state = None;
-		let mut archive_state = None;
-		let mut delete_state = None;
-		let mut delete_handler_state = None;
+		let mut scan_state: Option<Result<(), Error>> = None;
+		let mut archive_state: Option<Result<(), Error>> = None;
+		let mut delete_state: Option<Result<(), Error>> = None;
+		let mut delete_handler_state: Option<Result<(), Error>> = None;
 		loop {
 			info!("Doing the loop");
 			// Check all tasks; We cannot join, as wasm is single threaded
 			{
 				// We declare the context in a block to make this Send
-				let mut ctx = std::task::Context::from_waker(&waker_borrow);
 				if scan_state.is_none() {
-					match scan_task.poll(&mut ctx) {
-						Poll::Ready(r) => {
-							scan_state = Some(r);
-						}
-						Poll::Pending => {}
-					}
+					scan_state = poll_future_wasm32_safe(&mut scan_task);
 				}
 				if archive_state.is_none() {
-					match archive_task.poll(&mut ctx) {
-						Poll::Ready(r) => {
-							archive_state = Some(r);
-						}
-						Poll::Pending => {}
-					}
+					archive_state = poll_future_wasm32_safe(&mut archive_task);
 				}
 				if delete_state.is_none() {
-					match delete_task.poll(&mut ctx) {
-						Poll::Ready(r) => {
-							delete_state = Some(r);
-						}
-						Poll::Pending => {}
-					}
+					delete_state = poll_future_wasm32_safe(&mut delete_task);
 				}
 				if delete_handler_state.is_none() {
-					match delete_handler_task.poll(&mut ctx) {
-						Poll::Ready(r) => {
-							delete_handler_state = Some(r);
-						}
-						Poll::Pending => {}
-					}
+					delete_handler_state = poll_future_wasm32_safe(&mut delete_handler_task);
 				}
 			}
 
@@ -719,43 +698,31 @@ impl Datastore {
 
 		// Now run everything together and return any errors that arent captured per record
 		trace!("Joining bootstrap tasks");
-		let waker_borrow = &(*waker);
-		let mut ctx = std::task::Context::from_waker(waker_borrow);
 		// Throw errors from join tasks
-		let scan_err = match scan_state {
+		let _scan_err = match scan_state {
 			None => Err(Error::Internal("scan task did not complete".to_string())),
 			Some(Err(e)) => Err(Error::Internal(format!("scan task failed to complete: {:?}", e))),
 			Some(Ok(r)) => Ok(r),
 		}?;
-		let _ =
-			scan_err.as_ref().map_err(|e| Error::Internal(format!("scan task failed: {}", e)))?;
 
-		let arch_err = match archive_state {
+		let _arch_err = match archive_state {
 			None => Err(Error::Internal("archive task did not complete".to_string())),
 			Some(Err(ref e)) => {
 				Err(Error::Internal(format!("archive task failed to complete: {:?}", e)))
 			}
 			Some(Ok(ref r)) => Ok(r),
 		}?;
-		let _ = arch_err
-			.as_ref()
-			.map_err(|e| Error::Internal(format!("archive task failed: {}", e)))?;
 
-		let del_err = match delete_state {
+		let _del_err = match delete_state {
 			Some(Ok(ref r)) => Ok(r),
 			None => Err(Error::Internal("delete task did not complete".to_string())),
 			Some(Err(ref e)) => Err(Error::Internal(format!("delete task failed: {}", e))),
 		}?;
-		let _ =
-			del_err.as_ref().map_err(|e| Error::Internal(format!("delete task failed: {}", e)))?;
 
-		let _del_handler_err = match delete_state {
-			Some(Ok(Ok(ref r))) => Ok(()),
-			Some(Ok(Err(ref e))) => {
-				Err(Error::Internal(format!("delete handler task failed: {}", e)))
-			}
-			Some(Err(ref e)) => Err(Error::Internal(format!("delete handler task failed: {}", e))),
+		let _del_handler_err = match delete_handler_state {
+			Some(Ok(ref r)) => Ok(r),
 			None => Err(Error::Internal("delete handler task did not complete".to_string())),
+			Some(Err(ref e)) => Err(Error::Internal(format!("delete handler task failed: {}", e))),
 		}?;
 
 		Ok(())
@@ -1462,11 +1429,33 @@ impl Datastore {
 	}
 }
 
-async fn create_delete_handler_future(mut delete_recv: mpsc::Receiver<BootstrapOperationResult>) {
+async fn create_delete_handler_future(
+	mut delete_recv: mpsc::Receiver<BootstrapOperationResult>,
+) -> Result<(), Error> {
 	while let Some(res) = Pin::new(&mut delete_recv).recv().await {
 		let (_lq, e) = res;
 		if let Some(e) = e {
 			error!("Error deleting lq during bootstrap: {:?}", e);
 		}
+	}
+	Ok(())
+}
+
+fn poll_future_wasm32_safe(
+	mut task: &mut JoinHandle<Result<(), Error>>,
+) -> Option<Result<(), Error>> {
+	let waker_borrow = &(*waker);
+	let mut ctx = std::task::Context::from_waker(&waker_borrow);
+	match task.poll(&mut ctx) {
+		Poll::Ready(Ok(tokio_task_completed_result)) => {
+			return Some(tokio_task_completed_result);
+		}
+		Poll::Ready(Err(tokio_error)) => {
+			return Some(Err(Error::Internal(format!(
+				"scan task failed to complete: {:?}",
+				tokio_error
+			))));
+		}
+		Poll::Pending => None,
 	}
 }
