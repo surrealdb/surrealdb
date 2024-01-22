@@ -79,7 +79,7 @@ impl RemoveTokenStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
-				match run.get_sc_token(opt.ns(), opt.db(), &sc, &self.name).await {
+				match run.get_sc_token(opt.ns(), opt.db(), sc, &self.name).await {
 					Ok(st) => {
 						// Delete the definition
 						let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &st.name);
