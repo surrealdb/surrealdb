@@ -595,6 +595,7 @@ fn statements() -> Vec<Statement> {
 				Part::Index(Number::Int(10)),
 			]),
 			what: Ident("bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Update(UpdateStatement {
 			only: true,
