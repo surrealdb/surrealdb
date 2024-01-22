@@ -45,7 +45,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug)]
@@ -86,7 +85,7 @@ pub struct Transaction {
 	pub(super) cache: Cache,
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
-	pub(super) clock: Arc<RwLock<SizedClock>>,
+	pub(super) clock: Arc<SizedClock>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1066,10 +1065,10 @@ impl Transaction {
 	/// But also allows for lexicographical ordering.
 	///
 	/// Public for tests, but not required for usage from a user perspective.
-	pub async fn clock(&mut self) -> Timestamp {
+	pub async fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		// Match, because we cannot have sized traits or async traits
-		self.clock.write().await.now().await
+		self.clock.now().await
 	}
 
 	// Set heartbeat
