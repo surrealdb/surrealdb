@@ -4,7 +4,7 @@ use crate::kvs::LqValue;
 #[serial]
 async fn write_scan_ndlq() {
 	let nd = uuid::Uuid::parse_str("7a17446f-721f-4855-8fc7-81086752ca44").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(nd, clock).await.unwrap();
 
 	// Write some data

@@ -3,7 +3,7 @@
 async fn multiwriter_same_keys_conflict() {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("96ebbb5c-8040-497a-9459-838e4931aca7").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds(node_id, clock).await;
 	// Insert an initial key
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
