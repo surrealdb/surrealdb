@@ -47,7 +47,6 @@ impl RemoveFunctionStatement {
 				}
 			}
 		}
-
 	}
 }
 

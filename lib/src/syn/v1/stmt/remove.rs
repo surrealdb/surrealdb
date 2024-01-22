@@ -306,7 +306,6 @@ mod tests {
 		});
 		let enc: Vec<u8> = stm.try_into().unwrap();
 		assert_eq!(9, enc.len());
-
 	}
 
 	/// REMOVE ANALYZER tests

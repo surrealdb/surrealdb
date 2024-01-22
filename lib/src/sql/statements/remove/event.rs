@@ -42,7 +42,7 @@ impl RemoveEventStatement {
 				run.clr(key).await?;
 				// Ok all good
 				Ok(Value::None)
-			},
+			}
 			Err(err) => {
 				if matches!(err, Error::EvNotFound { .. }) && self.if_exists {
 					Ok(Value::None)

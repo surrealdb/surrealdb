@@ -41,7 +41,7 @@ impl RemoveDatabaseStatement {
 				run.delp(key, u32::MAX).await?;
 				// Ok all good
 				Ok(Value::None)
-			},
+			}
 			Err(err) => {
 				if matches!(err, Error::DbNotFound { .. }) && self.if_exists {
 					Ok(Value::None)
@@ -50,8 +50,6 @@ impl RemoveDatabaseStatement {
 				}
 			}
 		}
-
-
 	}
 }
 
@@ -61,5 +59,6 @@ impl Display for RemoveDatabaseStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		Ok(())	}
+		Ok(())
+	}
 }
