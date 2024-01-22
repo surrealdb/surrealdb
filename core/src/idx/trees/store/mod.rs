@@ -240,7 +240,7 @@ impl IndexStores {
 		TreeStore::new(keys, cache, tt).await
 	}
 
-	pub(in crate::idx) async fn get_index_hnsw(
+	pub(crate) async fn get_index_hnsw(
 		&self,
 		opt: &Options,
 		ix: &DefineIndexStatement,

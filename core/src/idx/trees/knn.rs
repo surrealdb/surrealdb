@@ -281,6 +281,11 @@ impl KnnResultBuilder {
 			if let Some((_, d)) = self.priority_list.last_key_value() {
 				if docs_len - d.len() >= self.knn {
 					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
+						#[cfg(debug_assertions)]
+						println!(
+							"Add docs: {docs:?} - Evicted: {evicted_docs:?} - self.knn: {} - docs_len: {docs_len}",
+							self.knn
+						);
 						evicted_docs.remove_to(&mut self.docs);
 					}
 				}
@@ -294,7 +299,7 @@ impl KnnResultBuilder {
 	) -> KnnResult {
 		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
 		#[cfg(debug_assertions)]
-		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
+		println!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
 		let mut left = self.knn;
 		for (pr, docs) in self.priority_list {
 			let dl = docs.len();

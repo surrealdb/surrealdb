@@ -4,7 +4,6 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
-use crate::idx::trees::hnsw::HnswIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
@@ -55,7 +54,7 @@ impl<'a> Document<'a> {
 					Index::Idx => ic.index_non_unique(txn).await?,
 					Index::Search(p) => ic.index_full_text(ctx, txn, p).await?,
 					Index::MTree(p) => ic.index_mtree(ctx, txn, p).await?,
-					Index::Hnsw(p) => ic.index_hnsw(ctx, txn, p).await?,
+					Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 				};
 			}
 		}
@@ -378,24 +377,17 @@ impl<'a> IndexOperation<'a> {
 		mt.finish(&mut tx).await
 	}
 
-	async fn index_hnsw(
-		&mut self,
-		ctx: &Context<'_>,
-		txn: &Transaction,
-		p: &HnswParams,
-	) -> Result<(), Error> {
-		let mut tx = txn.lock().await;
-		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let mut hnsw: HnswIndex =
-			HnswIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, TransactionType::Write).await?;
+	async fn index_hnsw(&mut self, ctx: &Context<'_>, p: &HnswParams) -> Result<(), Error> {
+		let hnsw = ctx.get_index_stores().get_index_hnsw(self.opt, self.ix, p).await;
+		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(&mut tx, self.rid, o).await?;
+			hnsw.remove_document(self.rid, o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(&mut tx, self.rid, n).await?;
+			hnsw.index_document(self.rid, n).await?;
 		}
-		hnsw.finish(&mut tx).await
+		Ok(())
 	}
 }

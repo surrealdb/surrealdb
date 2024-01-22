@@ -18,7 +18,7 @@ impl Default for HnswIndexes {
 }
 
 impl HnswIndexes {
-	pub(super) async fn get(&mut self, ikb: &IndexKeyBase, p: &HnswParams) -> SharedHnswIndex {
+	pub(super) async fn get(&self, ikb: &IndexKeyBase, p: &HnswParams) -> SharedHnswIndex {
 		let key = ikb.new_vm_key(None);
 		let r = self.0.read().await;
 		if let Some(h) = r.get(&key).cloned() {
@@ -39,5 +39,9 @@ impl HnswIndexes {
 		let key = ikb.new_vm_key(None);
 		let mut w = self.0.write().await;
 		w.remove(&key);
+	}
+
+	pub(super) async fn is_empty(&self) -> bool {
+		self.0.read().await.is_empty()
 	}
 }

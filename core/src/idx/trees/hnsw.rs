@@ -1,13 +1,11 @@
 use crate::err::Error;
-use crate::idx::docids::{DocId, DocIds};
+use crate::idx::docids::DocId;
 use crate::idx::trees::knn::{Docs, KnnResult, KnnResultBuilder, PriorityNode};
-use crate::idx::trees::store::IndexStores;
 use crate::idx::trees::vector::{SharedVector, TreeVector};
-use crate::idx::IndexKeyBase;
-use crate::kvs::{Key, Transaction, TransactionType};
+use crate::kvs::Key;
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::{Array, Thing, Value};
-use radix_trie::{Trie, TrieCommon};
+use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::Entry;
@@ -21,11 +19,13 @@ pub(crate) struct HnswIndex {
 	hnsw: Hnsw,
 	vec_docs: HashMap<SharedVector, Docs>,
 	doc_ids: Trie<Key, DocId>,
+	ids_doc: Vec<Thing>,
 }
 
 impl HnswIndex {
 	pub(crate) fn new(p: &HnswParams) -> Self {
 		let doc_ids = Trie::default();
+		let ids_doc = Vec::default();
 		let dim = p.dimension as usize;
 		let vector_type = p.vector_type;
 		let hnsw = Hnsw::new(p);
@@ -36,12 +36,12 @@ impl HnswIndex {
 			hnsw,
 			vec_docs,
 			doc_ids,
+			ids_doc,
 		}
 	}
 
 	pub(crate) async fn index_document(
 		&mut self,
-		tx: &mut Transaction,
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
@@ -50,7 +50,8 @@ impl HnswIndex {
 		let doc_id = if let Some(doc_id) = self.doc_ids.get(&doc_key) {
 			*doc_id
 		} else {
-			let doc_id = self.doc_ids.len() as u64;
+			let doc_id = self.ids_doc.len() as DocId;
+			self.ids_doc.push(rid.clone());
 			self.doc_ids.insert(doc_key, doc_id);
 			doc_id
 		};
@@ -81,7 +82,6 @@ impl HnswIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		_tx: &mut Transaction,
 		_rid: &Thing,
 		_content: Vec<Value>,
 	) -> Result<(), Error> {
@@ -98,30 +98,50 @@ impl HnswIndex {
 		let vector = Arc::new(TreeVector::try_from_array(self.vector_type, a)?);
 		vector.check_dimension(self.dim)?;
 		// Do the search
-		let _res = self.search(&vector, n, ef).await;
-		todo!()
+		let res = self.search(&vector, n, ef).await;
+		Ok(self.result(res))
+	}
+
+	fn result(&self, res: KnnResult) -> VecDeque<(Thing, f64)> {
+		res.docs
+			.into_iter()
+			.map(|(doc_id, dist)| (self.ids_doc[doc_id as usize].clone(), dist))
+			.collect()
 	}
 
 	async fn search(&self, o: &SharedVector, n: usize, ef: usize) -> KnnResult {
 		let neighbors = self.hnsw.knn_search(o, n, ef).await;
+		#[cfg(debug_assertions)]
+		let n_len = neighbors.len();
+		#[cfg(debug_assertions)]
+		let v = format!("{neighbors:?}");
+
 		let mut builder = KnnResultBuilder::new(n);
 		for pn in neighbors {
 			if builder.check_add(pn.0) {
 				let v = &self.hnsw.elements[pn.1 as usize];
 				if let Some(docs) = self.vec_docs.get(v) {
 					builder.add(pn.0, docs);
+				} else {
+					#[cfg(debug_assertions)]
+					println!("No doc: {pn:?}");
 				}
+			} else {
+				#[cfg(debug_assertions)]
+				println!("check_add false: {pn:?}");
 			}
 		}
 
-		builder.build(
+		let res = builder.build(
 			#[cfg(debug_assertions)]
 			HashMap::new(),
-		)
-	}
+		);
 
-	pub(crate) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		todo!()
+		#[cfg(debug_assertions)]
+		if n_len != res.docs.len() {
+			println!("{n_len} - {v} - {}", res.docs.len())
+		}
+		res
 	}
 }
 
@@ -141,6 +161,7 @@ struct Layer(HashMap<ElementId, Vec<ElementId>>);
 
 impl Layer {
 	fn new() -> Self {
+		// We set a capacity of 1, because we create a layer because we are adding one element
 		Self(HashMap::with_capacity(1))
 	}
 }
@@ -376,14 +397,15 @@ impl Hnsw {
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
-	use crate::idx::trees::hnsw::Hnsw;
+	use crate::idx::docids::DocId;
+	use crate::idx::trees::hnsw::{Hnsw, HnswIndex};
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::vector::SharedVector;
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use std::collections::HashSet;
 	use test_log::test;
 
-	async fn insert_collection_one_by_one(
+	async fn insert_collection_hnsw(
 		h: &mut Hnsw,
 		collection: &TestCollection,
 	) -> HashSet<SharedVector> {
@@ -394,8 +416,7 @@ mod tests {
 		}
 		set
 	}
-
-	async fn find_collection(h: &mut Hnsw, collection: &TestCollection) -> Result<(), Error> {
+	async fn find_collection_hnsw(h: &mut Hnsw, collection: &TestCollection) -> Result<(), Error> {
 		let max_knn = 20.max(collection.as_ref().len());
 		for (_, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
@@ -438,8 +459,8 @@ mod tests {
 		collection: &TestCollection,
 	) -> Result<(), Error> {
 		let mut h = Hnsw::new(p);
-		insert_collection_one_by_one(&mut h, collection).await;
-		find_collection(&mut h, &collection).await?;
+		insert_collection_hnsw(&mut h, collection).await;
+		find_collection_hnsw(&mut h, &collection).await?;
 		Ok(())
 	}
 
@@ -497,11 +518,11 @@ mod tests {
 				Distance::Minkowski(2.into()),
 				Distance::Pearson,
 			] {
-				let for_jaccard = distance == Distance::Jaccard;
 				let dimension = 2;
+				let collection =
+					TestCollection::new_random(10, vt, dimension, distance == Distance::Jaccard);
 				let params = new_params(dimension, vt, distance);
-				test_hnsw_collection(&params, &TestCollection::new_random(10, vt, 2, for_jaccard))
-					.await?;
+				test_hnsw_collection(&params, &collection).await?;
 			}
 		}
 		Ok(())
@@ -509,10 +530,94 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_hnsw_unique_coll_20_dim_1536() -> Result<(), Error> {
-		for vt in [VectorType::F32, VectorType::I32] {
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
 			let dimension = 1536;
+			let collection = TestCollection::new_unique(20, vt, dimension, false);
 			let params = new_params(dimension, vt, Distance::Hamming);
-			test_hnsw_collection(&params, &TestCollection::new_unique(20, vt, 1536, false)).await?;
+			test_hnsw_collection(&params, &collection).await?;
+		}
+		Ok(())
+	}
+
+	async fn insert_collection_hnsw_index(
+		h: &mut HnswIndex,
+		collection: &TestCollection,
+	) -> HashSet<SharedVector> {
+		let mut set = HashSet::with_capacity(collection.as_ref().len());
+		for (doc_id, obj) in collection.as_ref() {
+			h.insert(obj.clone(), *doc_id).await;
+			set.insert(obj.clone());
+		}
+		set
+	}
+
+	async fn find_collection_hnsw_index(
+		h: &mut HnswIndex,
+		collection: &TestCollection,
+	) -> Result<(), Error> {
+		let max_knn = 20.max(collection.as_ref().len());
+		for (doc_id, obj) in collection.as_ref() {
+			for knn in 1..max_knn {
+				let res = h.search(obj, knn, 500).await;
+				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
+				if collection.is_unique() {
+					assert!(
+						docs.contains(doc_id),
+						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
+						obj,
+						knn,
+						doc_id,
+						res.docs
+					);
+				}
+				let expected_len = collection.as_ref().len().min(knn);
+				assert_eq!(
+					expected_len,
+					res.docs.len(),
+					"Wrong knn count - Expected: {} - Got: {} - - Docs: {:?} - Collection: {}",
+					expected_len,
+					res.docs.len(),
+					res.docs,
+					collection.as_ref().len(),
+				)
+			}
+		}
+		Ok(())
+	}
+
+	async fn test_hnsw_index_collection(
+		p: &HnswParams,
+		collection: &TestCollection,
+	) -> Result<(), Error> {
+		let mut h = HnswIndex::new(p);
+		insert_collection_hnsw_index(&mut h, collection).await;
+		find_collection_hnsw_index(&mut h, &collection).await?;
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn test_hnsw_index_random_col_10_dim_2() -> Result<(), Error> {
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			for distance in [
+				Distance::Chebyshev,
+				Distance::Cosine,
+				Distance::Euclidean,
+				Distance::Hamming,
+				Distance::Jaccard,
+				Distance::Manhattan,
+				Distance::Minkowski(2.into()),
+				Distance::Pearson,
+			] {
+				let dimension = 2;
+				let collection =
+					TestCollection::new_random(10, vt, dimension, distance == Distance::Jaccard);
+				let params = new_params(dimension, vt, distance);
+				test_hnsw_index_collection(&params, &collection).await?;
+			}
 		}
 		Ok(())
 	}
