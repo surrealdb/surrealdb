@@ -929,7 +929,7 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 		DEFINE FIELD custom.* ON user FLEXIBLE TYPE any;
 		CREATE user:one CONTENT { custom: ['sometext'] };
 		CREATE user:two CONTENT { custom: [ ['sometext'] ] };
-		CREATE user:three CONTENT { custom: [ { key: 'sometext' } };
+		CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
