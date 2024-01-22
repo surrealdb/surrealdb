@@ -96,8 +96,14 @@ jobs:
       - name: Install cargo-audit
         run: cargo install --debug --locked cargo-audit
 
-      - name: Check dependencies 
+      - name: Check dependencies
         run: cargo audit
+
+      - name: Install cargo-deny
+        run: cargo install --debug --locked cargo-deny
+
+      - name: Check dependencies
+        run: cargo deny check
 
   check-wasm:
     name: Check Wasm
