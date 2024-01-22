@@ -484,7 +484,7 @@ async fn should_not_error_when_remove_token_if_exists() -> Result<(), Error> {
 #[tokio::test]
 async fn should_error_when_remove_and_user_does_not_exist() -> Result<(), Error> {
 	let sql = "
-		REMOVE USER foo;
+		REMOVE USER foo ON ROOT;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -500,7 +500,7 @@ async fn should_error_when_remove_and_user_does_not_exist() -> Result<(), Error>
 #[tokio::test]
 async fn should_not_error_when_remove_user_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE USER foo IF EXISTS;
+		REMOVE USER foo ON ROOT IF EXISTS;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

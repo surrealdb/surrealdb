@@ -44,7 +44,7 @@ impl RemoveNamespaceStatement {
 				Ok(Value::None)
 			}
 			Err(err) => {
-				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
+				if matches!(err, Error::NsNotFound { .. }) && self.if_exists {
 					Ok(Value::None)
 				} else {
 					Err(err)
