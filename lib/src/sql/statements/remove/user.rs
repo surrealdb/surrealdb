@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveUserStatement {
 	pub name: Ident,
 	pub base: Base,
+	#[revision(start = 2)]
+	pub if_exists: bool,
 }
 
 impl RemoveUserStatement {
@@ -33,33 +35,66 @@ impl RemoveUserStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
-				// Process the statement
-				let key = crate::key::root::us::new(&self.name);
-				run.del(key).await?;
-				// Ok all good
-				Ok(Value::None)
+				match run.get_root_user(&self.name).await {
+					Ok(us) => {
+						// Process the statement
+						let key = crate::key::root::us::new(&us.name);
+						run.del(key).await?;
+						// Ok all good
+						Ok(Value::None)
+					}
+					Err(err) => {
+						if matches!(err, Error::UserRootNotFound { .. }) && self.if_exists {
+							Ok(Value::None)
+						} else {
+							Err(err)
+						}
+					}
+				}
 			}
 			Base::Ns => {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
-				// Delete the definition
-				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
-				run.del(key).await?;
-				// Ok all good
-				Ok(Value::None)
+				match run.get_ns_user(opt.ns(), &self.name).await {
+					Ok(us) => {
+						// Delete the definition
+						let key = crate::key::namespace::us::new(opt.ns(), &us.name);
+						run.del(key).await?;
+						// Ok all good
+						Ok(Value::None)
+					}
+					Err(err) => {
+						if matches!(err, Error::UserNsNotFound { .. }) && self.if_exists {
+							Ok(Value::None)
+						} else {
+							Err(err)
+						}
+					}
+				}
 			}
 			Base::Db => {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
-				// Delete the definition
-				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
-				run.del(key).await?;
-				// Ok all good
-				Ok(Value::None)
+				match run.get_db_user(opt.ns(), opt.db(), &self.name).await {
+					Ok(us) => {
+						// Delete the definition
+						let key = crate::key::database::us::new(opt.ns(), opt.db(), &us.name);
+						run.del(key).await?;
+						// Ok all good
+						Ok(Value::None)
+					}
+					Err(err) => {
+						if matches!(err, Error::UserDbNotFound { .. }) && self.if_exists {
+							Ok(Value::None)
+						} else {
+							Err(err)
+						}
+					}
+				}
 			}
 			_ => Err(Error::InvalidLevel(self.base.to_string())),
 		}
@@ -68,6 +103,10 @@ impl RemoveUserStatement {
 
 impl Display for RemoveUserStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE USER {} ON {}", self.name, self.base)
+		write!(f, "REMOVE USER {} ON {}", self.name, self.base)?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		Ok(())
 	}
 }

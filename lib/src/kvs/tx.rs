@@ -1800,6 +1800,34 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific function definition from a database.
+	pub async fn get_db_function(
+		&mut self,
+		ns: &str,
+		db: &str,
+		fc: &str,
+	) -> Result<DefineFunctionStatement, Error> {
+		let key = crate::key::database::fc::new(ns, db, fc);
+		let val = self.get(key).await?.ok_or(Error::FcNotFound {
+			value: fc.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific function definition from a database.
+	pub async fn get_db_param(
+		&mut self,
+		ns: &str,
+		db: &str,
+		pa: &str,
+	) -> Result<DefineParamStatement, Error> {
+		let key = crate::key::database::pa::new(ns, db, pa);
+		let val = self.get(key).await?.ok_or(Error::PaNotFound {
+			value: pa.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific scope definition.
 	pub async fn get_sc(
 		&mut self,
@@ -1871,6 +1899,57 @@ impl Transaction {
 		trace!("Getting lv ({:?}) {:?}", lv, crate::key::debug::sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
 			value: lv.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	pub async fn get_tb_event(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ev: &str,
+	) -> Result<DefineEventStatement, Error> {
+		let key = crate::key::table::ev::new(ns, db, tb, ev);
+		let key_enc = crate::key::table::ev::Ev::encode(&key)?;
+		trace!("Getting ev ({:?}) {:?}", ev, crate::key::debug::sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::EvNotFound {
+			value: ev.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	pub async fn get_tb_field(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		fd: &str,
+	) -> Result<DefineFieldStatement, Error> {
+		let key = crate::key::table::fd::new(ns, db, tb, fd);
+		let key_enc = crate::key::table::fd::Fd::encode(&key)?;
+		trace!("Getting fd ({:?}) {:?}", fd, crate::key::debug::sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::FdNotFound {
+			value: fd.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	pub async fn get_tb_index(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<DefineFieldStatement, Error> {
+		let key = crate::key::table::ix::new(ns, db, tb, ix);
+		let key_enc = crate::key::table::ix::Ix::encode(&key)?;
+		trace!("Getting ix ({:?}) {:?}", ix, crate::key::debug::sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::IxNotFound {
+			value: ix.to_string(),
 		})?;
 		Ok(val.into())
 	}

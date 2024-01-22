@@ -10,9 +10,11 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct RemoveDatabaseStatement {
 	pub name: Ident,
+	#[revision(start = 2)]
+	pub if_exists: bool,
 }
 
 impl RemoveDatabaseStatement {
@@ -29,19 +31,35 @@ impl RemoveDatabaseStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Delete the definition
-		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
-		run.del(key).await?;
-		// Delete the resource data
-		let key = crate::key::database::all::new(opt.ns(), &self.name);
-		run.delp(key, u32::MAX).await?;
-		// Ok all good
-		Ok(Value::None)
+		match run.get_db(opt.ns(), &self.name).await {
+			Ok(db) => {
+				// Delete the definition
+				let key = crate::key::namespace::db::new(opt.ns(), &db.name);
+				run.del(key).await?;
+				// Delete the resource data
+				let key = crate::key::database::all::new(opt.ns(), &db.name);
+				run.delp(key, u32::MAX).await?;
+				// Ok all good
+				Ok(Value::None)
+			},
+			Err(err) => {
+				if matches!(err, Error::DbNotFound { .. }) && self.if_exists {
+					Ok(Value::None)
+				} else {
+					Err(err)
+				}
+			}
+		}
+
+
 	}
 }
 
 impl Display for RemoveDatabaseStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE DATABASE {}", self.name)
-	}
+		write!(f, "REMOVE DATABASE {}", self.name)?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		Ok(())	}
 }

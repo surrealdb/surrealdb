@@ -22,14 +22,30 @@ impl Parser<'_> {
 		let res = match self.next().kind {
 			t!("NAMESPACE") => {
 				let name = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Namespace(RemoveNamespaceStatement {
 					name,
+					if_exists,
 				})
 			}
 			t!("DATABASE") => {
 				let name = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Database(RemoveDatabaseStatement {
 					name,
+					if_exists,
 				})
 			}
 			t!("FUNCTION") => {
@@ -38,29 +54,61 @@ impl Parser<'_> {
 				if self.eat(t!("(")) {
 					self.expect_closing_delimiter(t!(")"), next.span)?;
 				}
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Function(RemoveFunctionStatement {
 					name,
+					if_exists,
 				})
 			}
 			t!("TOKEN") => {
 				let name = self.next_token_value()?;
 				expected!(self, t!("ON"));
 				let base = self.parse_base(true)?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Token(crate::sql::statements::RemoveTokenStatement {
 					name,
 					base,
+					if_exists,
 				})
 			}
 			t!("SCOPE") => {
 				let name = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Scope(RemoveScopeStatement {
 					name,
+					if_exists,
 				})
 			}
 			t!("PARAM") => {
 				let name = self.next_token_value::<Param>()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Param(RemoveParamStatement {
 					name: name.0,
+					if_exists,
 				})
 			}
 			t!("TABLE") => {
@@ -75,6 +123,7 @@ impl Parser<'_> {
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
 					if_exists,
+					if_exists,
 				})
 			}
 			t!("EVENT") => {
@@ -82,9 +131,17 @@ impl Parser<'_> {
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let table = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Event(RemoveEventStatement {
 					name,
 					what: table,
+					if_exists,
 				})
 			}
 			t!("FIELD") => {
@@ -92,9 +149,17 @@ impl Parser<'_> {
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let table = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Field(RemoveFieldStatement {
 					name: idiom,
 					what: table,
+					if_exists,
 				})
 			}
 			t!("INDEX") => {
@@ -102,24 +167,48 @@ impl Parser<'_> {
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let what = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Index(RemoveIndexStatement {
 					name,
 					what,
+					if_exists,
 				})
 			}
 			t!("ANALYZER") => {
 				let name = self.next_token_value()?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::Analyzer(RemoveAnalyzerStatement {
 					name,
+					if_exists,
 				})
 			}
 			t!("USER") => {
 				let name = self.next_token_value()?;
 				expected!(self, t!("ON"));
 				let base = self.parse_base(false)?;
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
 				RemoveStatement::User(RemoveUserStatement {
 					name,
 					base,
+					if_exists,
 				})
 			}
 			x => unexpected!(self, x, "a remove statement keyword"),

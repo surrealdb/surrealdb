@@ -1051,6 +1051,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident("ns".to_owned())
+			if_exists: false,
 		}))
 	);
 
@@ -1059,6 +1060,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Database(RemoveDatabaseStatement {
 			name: Ident("database".to_owned())
+			if_exists: false,
 		}))
 	);
 
@@ -1067,6 +1069,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
 			name: Ident("foo::bar".to_owned())
+			if_exists: false,
 		}))
 	);
 	let res = test_parse!(parse_stmt, r#"REMOVE FUNCTION fn::foo::bar();"#).unwrap();
@@ -1074,6 +1077,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
 			name: Ident("foo::bar".to_owned())
+			if_exists: false,
 		}))
 	);
 
@@ -1083,6 +1087,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Token(RemoveTokenStatement {
 			name: Ident("foo".to_owned()),
 			base: Base::Sc(Ident("bar".to_owned()))
+			if_exists: false,
 		}))
 	);
 
@@ -1091,6 +1096,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Scope(RemoveScopeStatement {
 			name: Ident("foo".to_owned()),
+			if_exists: false,
 		}))
 	);
 
@@ -1099,6 +1105,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Param(RemoveParamStatement {
 			name: Ident("foo".to_owned()),
+			if_exists: false,
 		}))
 	);
 
@@ -1117,6 +1124,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Event(RemoveEventStatement {
 			name: Ident("foo".to_owned()),
 			what: Ident("bar".to_owned()),
+			if_exists: false,
 		}))
 	);
 
@@ -1130,6 +1138,7 @@ fn parse_remove() {
 				Part::Index(Number::Int(10))
 			]),
 			what: Ident("bar".to_owned()),
+			if_exists: false,
 		}))
 	);
 
@@ -1139,6 +1148,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::Index(RemoveIndexStatement {
 			name: Ident("foo".to_owned()),
 			what: Ident("bar".to_owned()),
+			if_exists: false,
 		}))
 	);
 
@@ -1147,6 +1157,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Analyzer(RemoveAnalyzerStatement {
 			name: Ident("foo".to_owned()),
+			if_exists: false,
 		}))
 	);
 
@@ -1156,6 +1167,7 @@ fn parse_remove() {
 		Statement::Remove(RemoveStatement::User(RemoveUserStatement {
 			name: Ident("foo".to_owned()),
 			base: Base::Db,
+			if_exists: false,
 		}))
 	);
 }

@@ -10,10 +10,12 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
+	#[revision(start = 2)]
+	pub if_exists: bool,
 }
 
 impl RemoveEventStatement {
@@ -30,19 +32,34 @@ impl RemoveEventStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Delete the definition
-		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.del(key).await?;
-		// Clear the cache
-		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
-		run.clr(key).await?;
-		// Ok all good
-		Ok(Value::None)
+		match run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await {
+			Ok(ev) => {
+				// Delete the definition
+				let key = crate::key::table::ev::new(opt.ns(), opt.db(), &ev.what, &ev.name);
+				run.del(key).await?;
+				// Clear the cache
+				let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &ev.what);
+				run.clr(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			},
+			Err(err) => {
+				if matches!(err, Error::EvNotFound { .. }) && self.if_exists {
+					Ok(Value::None)
+				} else {
+					Err(err)
+				}
+			}
+		}
 	}
 }
 
 impl Display for RemoveEventStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)
+		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		Ok(())
 	}
 }

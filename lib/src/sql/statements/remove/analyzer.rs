@@ -10,9 +10,11 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
+	#[revision(start = 2)]
+	pub if_exists: bool,
 }
 
 impl RemoveAnalyzerStatement {
@@ -28,17 +30,32 @@ impl RemoveAnalyzerStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Delete the definition
-		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
-		run.del(key).await?;
-		// TODO Check that the analyzer is not used in any schema
-		// Ok all good
-		Ok(Value::None)
+		match run.get_db_analyzer(opt.ns(), opt.db(), self.name.as_str()).await {
+			Ok(az) => {
+				// Delete the definition
+				let key = crate::key::database::az::new(opt.ns(), opt.db(), &az.name);
+				run.del(key).await?;
+				// TODO Check that the analyzer is not used in any schema
+				// Ok all good
+				Ok(Value::None)
+			}
+			Err(err) => {
+				if matches!(err, Error::AzNotFound { .. }) && self.if_exists {
+					Ok(Value::None)
+				} else {
+					Err(err)
+				}
+			}
+		}
 	}
 }
 
 impl Display for RemoveAnalyzerStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE ANALYZER {}", self.name)
+		write!(f, "REMOVE ANALYZER {}", self.name)?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		Ok(())
 	}
 }

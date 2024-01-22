@@ -10,9 +10,11 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
+	#[revision(start = 2)]
+	pub if_exists: bool,
 }
 
 impl RemoveNamespaceStatement {
@@ -30,19 +32,34 @@ impl RemoveNamespaceStatement {
 		ctx.get_index_stores().namespace_removed(opt, &mut run).await?;
 		// Clear the cache
 		run.clear_cache();
-		// Delete the definition
-		let key = crate::key::root::ns::new(&self.name);
-		run.del(key).await?;
-		// Delete the resource data
-		let key = crate::key::namespace::all::new(&self.name);
-		run.delp(key, u32::MAX).await?;
-		// Ok all good
-		Ok(Value::None)
+		match run.get_ns(&self.name).await {
+			Ok(ns) => {
+				// Delete the definition
+				let key = crate::key::root::ns::new(&ns.name);
+				run.del(key).await?;
+				// Delete the resource data
+				let key = crate::key::namespace::all::new(&ns.name);
+				run.delp(key, u32::MAX).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Err(err) => {
+				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
+					Ok(Value::None)
+				} else {
+					Err(err)
+				}
+			}
+		}
 	}
 }
 
 impl Display for RemoveNamespaceStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE NAMESPACE {}", self.name)
+		write!(f, "REMOVE NAMESPACE {}", self.name)?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		Ok(())
 	}
 }

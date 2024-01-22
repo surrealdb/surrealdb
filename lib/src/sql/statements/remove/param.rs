@@ -9,10 +9,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveParamStatement {
 	pub name: Ident,
+	#[revision(start = 2)]
+	pub if_exists: bool,
 }
 
 impl RemoveParamStatement {
@@ -29,16 +31,31 @@ impl RemoveParamStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Delete the definition
-		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
-		run.del(key).await?;
-		// Ok all good
-		Ok(Value::None)
+		match run.get_db_param(opt.ns(), opt.db(), &self.name).await {
+			Ok(pa) => {
+				// Delete the definition
+				let key = crate::key::database::pa::new(opt.ns(), opt.db(), &pa.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Err(err) => {
+				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
+					Ok(Value::None)
+				} else {
+					Err(err)
+				}
+			}
+		}
 	}
 }
 
 impl Display for RemoveParamStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE PARAM {}", self.name)
+		write!(f, "REMOVE PARAM {}", self.name)?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		Ok(())
 	}
 }
