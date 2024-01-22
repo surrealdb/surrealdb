@@ -24,7 +24,8 @@ async fn info_for_root() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let output_regex =
-		Regex::new(r"\{ namespaces: \{ NS: .* \}, users: \{ user: .* \} \}").unwrap();
+		Regex::new(r"\{ members: \[.*\], namespaces: \{ NS: .* \}, users: \{ user: .* \} \}")
+			.unwrap();
 	let out_str = out.unwrap().to_string();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -235,8 +236,10 @@ async fn permissions_checks_info_root() {
 		HashMap::from([("prepare", ""), ("test", "INFO FOR ROOT"), ("check", "INFO FOR ROOT")]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results =
-		[vec!["{ namespaces: {  }, users: {  } }"], vec!["{ namespaces: {  }, users: {  } }"]];
+	let check_results = [
+		vec!["{ members: [], namespaces: {  }, users: {  } }"],
+		vec!["{ members: [], namespaces: {  }, users: {  } }"],
+	];
 
 	let test_cases = [
 		// Root level
