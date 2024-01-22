@@ -762,7 +762,7 @@ impl FromIterator<Value> for Value {
 
 impl FromIterator<(String, Value)> for Value {
 	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
-		Value::Object(Object(iter.into_iter().collect(), vec![]))
+		Value::Object(Object(iter.into_iter().collect()))
 	}
 }
 

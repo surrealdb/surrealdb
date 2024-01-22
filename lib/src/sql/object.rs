@@ -15,6 +15,8 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use super::Array;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
 /// Invariant: Keys never contain NUL bytes.
@@ -22,32 +24,29 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 #[serde(rename = "$surrealdb::private::sql::Object")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Object(
-	#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>,
-	pub Vec<Value>,
-);
+pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
-		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect(), vec![])
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
 	}
 }
 
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Self(v, vec![])
+		Self(v)
 	}
 }
 
 impl From<HashMap<&str, Value>> for Object {
 	fn from(v: HashMap<&str, Value>) -> Self {
-		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect(), vec![])
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
 	}
 }
 
 impl From<HashMap<String, Value>> for Object {
 	fn from(v: HashMap<String, Value>) -> Self {
-		Self(v.into_iter().collect(), vec![])
+		Self(v.into_iter().collect())
 	}
 }
 
@@ -116,7 +115,6 @@ impl From<Operation> for Object {
 					String::from("value") => value
 				},
 			},
-			vec![],
 		)
 	}
 }
@@ -227,26 +225,34 @@ impl Object {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
-		for v in &self.1 {
-			match v.compute(ctx, opt, txn, doc).await {
-				Ok(v) => match v {
-					Value::Object(v) => {
-						for (k, v) in v.iter() {
-							x.insert(k.clone(), v.clone());
-						}
-					}
-					_ => return Err(Error::Thrown("Spread is not an object".into())),
-				},
-				Err(e) => return Err(e),
-			};
+
+		match self.0.get("".into()) {
+			Some(Value::Array(Array(spreads))) => {
+				for v in spreads {
+					match v.compute(ctx, opt, txn, doc).await {
+						Ok(v) => match v {
+							Value::Object(v) => {
+								for (k, v) in v.iter() {
+									x.insert(k.clone(), v.clone());
+								}
+							}
+							_ => return Err(Error::Thrown("Spread is not an object".into())),
+						},
+						Err(e) => return Err(e),
+					};
+				}
+			},
+			Some(_) => return Err(Error::SpreadInvalid),
+			_ => {}
 		}
+
 		for (k, v) in self.iter() {
 			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};
 		}
-		Ok(Value::Object(Object(x, vec![])))
+		Ok(Value::Object(Object(x)))
 	}
 
 	pub(crate) fn is_static(&self) -> bool {

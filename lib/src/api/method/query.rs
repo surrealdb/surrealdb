@@ -218,7 +218,7 @@ where
 						}
 					}
 					match &mut bindings {
-						Value::Object(Object(map, _)) => current.append(map),
+						Value::Object(Object(map)) => current.append(map),
 						_ => {
 							self.bindings = Err(Error::InvalidBindings(bindings).into());
 						}

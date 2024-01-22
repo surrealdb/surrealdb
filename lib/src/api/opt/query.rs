@@ -264,7 +264,7 @@ impl QueryResult<Value> for (usize, &str) {
 		};
 
 		let value = match value {
-			Value::Object(Object(object, _)) => object.remove(key).unwrap_or_default(),
+			Value::Object(Object(object)) => object.remove(key).unwrap_or_default(),
 			_ => Value::None,
 		};
 
@@ -318,7 +318,7 @@ where
 				response.results.remove(&index);
 				Ok(None)
 			}
-			Value::Object(Object(object, _)) => {
+			Value::Object(Object(object)) => {
 				if object.is_empty() {
 					response.results.remove(&index);
 					return Ok(None);
@@ -386,7 +386,7 @@ where
 		};
 		let mut vec = Vec::with_capacity(response.len());
 		for value in response.iter_mut() {
-			if let Value::Object(Object(object, _)) = value {
+			if let Value::Object(Object(object)) = value {
 				if let Some(value) = object.remove(key) {
 					vec.push(value);
 				}

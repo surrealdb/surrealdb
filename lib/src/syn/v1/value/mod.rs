@@ -229,7 +229,7 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		let (i, _) = opt(char(','))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char('}')(i)?;
-		Ok((i, Object(v.into_iter().collect(), vec![])))
+		Ok((i, Object(v.into_iter().collect())))
 	}
 	// Use a specific parser for JSON arrays
 	fn array(i: &str) -> IResult<&str, Array> {
@@ -313,7 +313,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 		Ok(x) => x,
 		Err(Err::Error(_)) => {
 			let (i, _) = closebraces(i)?;
-			return Ok((i, Object(BTreeMap::new(), vec![])));
+			return Ok((i, Object(BTreeMap::new())));
 		}
 		Err(Err::Failure(x)) => return Err(Err::Failure(x)),
 		Err(Err::Incomplete(x)) => return Err(Err::Incomplete(x)),
@@ -321,33 +321,42 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 
 	let mut tree = BTreeMap::new();
 	let mut spreads = Vec::<Value>::new();
+
 	match first {
+		ObjectEntry::Spread(v) => {
+			spreads.push(Value::Spread(Box::new(v)));
+		},
 		ObjectEntry::Kv((k, v)) => {
 			tree.insert(k, v);
-		}
-		ObjectEntry::Spread(v) => {
-			spreads.push(v);
-		}
+		},
 	}
 
 	let mut input = i;
 	while let (i, Some(_)) = opt(commas)(input)? {
 		if let (i, Some(_)) = opt(closebraces)(i)? {
-			return Ok((i, Object(tree, spreads)));
+			if spreads.len() > 0 {
+				tree.insert("".into(), spreads.into());
+			}
+
+			return Ok((i, Object(tree)));
 		}
 		let (i, v) = cut(entry)(i)?;
 		match v {
+			ObjectEntry::Spread(v) => {
+				spreads.push(Value::Spread(Box::new(v)));
+			},
 			ObjectEntry::Kv((k, v)) => {
 				tree.insert(k, v);
-			}
-			ObjectEntry::Spread(v) => {
-				spreads.push(v);
-			}
+			},
 		}
 		input = i
 	}
 	let (i, _) = expect_terminator(start, closebraces)(input)?;
-	Ok((i, Object(tree, spreads)))
+	if spreads.len() > 0 {
+		tree.insert("".into(), spreads.into());
+	}
+
+	Ok((i, Object(tree)))
 }
 
 pub fn key(i: &str) -> IResult<&str, &str> {

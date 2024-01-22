@@ -779,6 +779,10 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	/// An invalid spread value was provided
+	#[error("The provided Spread value is invalid")]
+	SpreadInvalid,
 }
 
 impl From<Error> for String {

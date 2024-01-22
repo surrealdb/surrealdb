@@ -55,7 +55,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value, Error> {
 		}
 	}
 
-	Ok(Value::Object(Object(obj, vec![])))
+	Ok(Value::Object(Object(obj)))
 }
 
 pub fn len((object,): (Object,)) -> Result<Value, Error> {
