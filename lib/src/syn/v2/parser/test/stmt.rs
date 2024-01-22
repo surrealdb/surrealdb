@@ -1050,7 +1050,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Statement::Remove(RemoveStatement::Namespace(RemoveNamespaceStatement {
-			name: Ident("ns".to_owned())
+			name: Ident("ns".to_owned()),
 			if_exists: false,
 		}))
 	);
@@ -1059,7 +1059,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Statement::Remove(RemoveStatement::Database(RemoveDatabaseStatement {
-			name: Ident("database".to_owned())
+			name: Ident("database".to_owned()),
 			if_exists: false,
 		}))
 	);
@@ -1068,7 +1068,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
-			name: Ident("foo::bar".to_owned())
+			name: Ident("foo::bar".to_owned()),
 			if_exists: false,
 		}))
 	);
@@ -1076,7 +1076,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
-			name: Ident("foo::bar".to_owned())
+			name: Ident("foo::bar".to_owned()),
 			if_exists: false,
 		}))
 	);
@@ -1086,7 +1086,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Token(RemoveTokenStatement {
 			name: Ident("foo".to_owned()),
-			base: Base::Sc(Ident("bar".to_owned()))
+			base: Base::Sc(Ident("bar".to_owned())),
 			if_exists: false,
 		}))
 	);

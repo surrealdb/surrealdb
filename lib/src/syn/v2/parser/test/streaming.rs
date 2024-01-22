@@ -586,6 +586,7 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
 			name: Ident("foo::bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Remove(RemoveStatement::Field(RemoveFieldStatement {
 			name: Idiom(vec![

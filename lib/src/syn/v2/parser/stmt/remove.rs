@@ -123,7 +123,6 @@ impl Parser<'_> {
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
 					if_exists,
-					if_exists,
 				})
 			}
 			t!("EVENT") => {
