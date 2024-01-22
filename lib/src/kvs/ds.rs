@@ -1,20 +1,19 @@
-use std::cell::OnceCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Poll, Wake, Waker};
+use std::task::{Poll, Wake};
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
+#[cfg(not(target_arch = "wasm32"))]
 use futures_lite::future::FutureExt;
-use once_cell::sync::Lazy;
 use tokio::sync::{mpsc, oneshot, RwLock};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
 use tracing::instrument;
 use tracing::trace;
@@ -90,8 +89,6 @@ impl Wake for DummyWaker {
 
 	fn wake_by_ref(self: &Arc<Self>) {}
 }
-
-const waker: Lazy<Waker> = Lazy::new(|| std::task::Waker::from(Arc::new(DummyWaker {})));
 
 #[derive(Debug)]
 pub(crate) enum LqType {
@@ -578,7 +575,8 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 
-		let mut scan_task = bootstrap::scan_node_live_queries(
+		#[allow(unused_mut)]
+		let mut scan_fut = bootstrap::scan_node_live_queries(
 			tx_req_send.clone(),
 			dead_nodes,
 			scan_send,
@@ -587,9 +585,9 @@ impl Datastore {
 
 		// Wasm doesnt have multithreading
 		#[cfg(not(target_arch = "wasm32"))]
-		let mut scan_task = tokio::spawn(scan_task);
-		// #[cfg(target_arch = "wasm32")]
-		let mut scan_task = Box::pin(scan_task);
+		let mut scan_task = tokio::spawn(scan_fut);
+		#[cfg(target_arch = "wasm32")]
+		let mut scan_task = Box::pin(scan_fut);
 
 		// In several new transactions, archive removed node live queries
 		let (archive_send, archive_recv): (
@@ -597,7 +595,8 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned archive task");
-		let mut archive_task = bootstrap::archive_live_queries(
+		#[allow(unused_mut)]
+		let mut archive_fut = bootstrap::archive_live_queries(
 			tx_req_send.clone(),
 			self.id,
 			scan_recv,
@@ -608,9 +607,9 @@ impl Datastore {
 
 		// Wasm doesnt have multithreading
 		#[cfg(not(target_arch = "wasm32"))]
-		let mut archive_task = tokio::spawn(archive_task);
+		let mut archive_task = tokio::spawn(archive_fut);
 		#[cfg(target_arch = "wasm32")]
-		let mut archive_task = Box::pin(archive_task);
+		let mut archive_task = Box::pin(archive_fut);
 
 		// In several new transactions, delete archived node live queries
 		let (delete_send, delete_recv): (
@@ -618,6 +617,7 @@ impl Datastore {
 			mpsc::Receiver<BootstrapOperationResult>,
 		) = mpsc::channel(BOOTSTRAP_BATCH_SIZE);
 		trace!("Spawned delete live query task");
+		#[allow(unused_mut)]
 		let mut delete_fut = bootstrap::delete_live_queries(
 			tx_req_send,
 			archive_recv,
@@ -633,6 +633,7 @@ impl Datastore {
 		// We then need to collect and log the errors
 		// It's also important to consume from the channel otherwise things will block
 		trace!("Spawned delete handler task");
+		#[allow(unused_mut)]
 		let mut delete_handler_fut = create_delete_handler_future(delete_recv);
 
 		// Wasm doesnt have multithreading
@@ -701,13 +702,13 @@ impl Datastore {
 		// Now run everything together and return any errors that arent captured per record
 		trace!("Joining bootstrap tasks");
 		// Throw errors from join tasks
-		let _scan_err = match scan_state {
+		match scan_state {
 			None => Err(Error::Internal("scan task did not complete".to_string())),
 			Some(Err(e)) => Err(Error::Internal(format!("scan task failed to complete: {:?}", e))),
 			Some(Ok(r)) => Ok(r),
 		}?;
 
-		let _arch_err = match archive_state {
+		match archive_state {
 			None => Err(Error::Internal("archive task did not complete".to_string())),
 			Some(Err(ref e)) => {
 				Err(Error::Internal(format!("archive task failed to complete: {:?}", e)))
@@ -715,13 +716,13 @@ impl Datastore {
 			Some(Ok(ref r)) => Ok(r),
 		}?;
 
-		let _del_err = match delete_state {
+		match delete_state {
 			Some(Ok(ref r)) => Ok(r),
 			None => Err(Error::Internal("delete task did not complete".to_string())),
 			Some(Err(ref e)) => Err(Error::Internal(format!("delete task failed: {}", e))),
 		}?;
 
-		let _del_handler_err = match delete_handler_state {
+		match delete_handler_state {
 			Some(Ok(ref r)) => Ok(r),
 			None => Err(Error::Internal("delete handler task did not complete".to_string())),
 			Some(Err(ref e)) => Err(Error::Internal(format!("delete handler task failed: {}", e))),
@@ -1444,31 +1445,26 @@ async fn create_delete_handler_future(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn poll_future_wasm32_safe(
-	mut task: &mut JoinHandle<Result<(), Error>>,
-) -> Option<Result<(), Error>> {
-	let waker_borrow = &(*waker);
-	let mut ctx = std::task::Context::from_waker(&waker_borrow);
+fn poll_future_wasm32_safe(task: &mut JoinHandle<Result<(), Error>>) -> Option<Result<(), Error>> {
+	let waker = std::task::Waker::from(Arc::new(DummyWaker {}));
+	let waker_borrow = &waker;
+	let mut ctx = std::task::Context::from_waker(waker_borrow);
 	match task.poll(&mut ctx) {
-		Poll::Ready(Ok(tokio_task_completed_result)) => {
-			return Some(tokio_task_completed_result);
-		}
+		Poll::Ready(Ok(tokio_task_completed_result)) => Some(tokio_task_completed_result),
 		Poll::Ready(Err(tokio_error)) => {
-			return Some(Err(Error::Internal(format!(
-				"scan task failed to complete: {:?}",
-				tokio_error
-			))));
+			Some(Err(Error::Internal(format!("scan task failed to complete: {:?}", tokio_error))))
 		}
 		Poll::Pending => None,
 	}
 }
 #[cfg(target_arch = "wasm32")]
-fn poll_future_wasm32_safe<A>(mut task: &mut Pin<Box<A>>) -> Option<Result<(), Error>>
+fn poll_future_wasm32_safe<A>(task: &mut Pin<Box<A>>) -> Option<Result<(), Error>>
 where
 	A: Future<Output = Result<(), Error>>,
 {
-	let waker_borrow = &(*waker);
-	let mut ctx = std::task::Context::from_waker(&waker_borrow);
+	let waker = std::task::Waker::from(Arc::new(DummyWaker {}));
+	let waker_borrow = &waker;
+	let mut ctx = std::task::Context::from_waker(waker_borrow);
 	match task.as_mut().poll(&mut ctx) {
 		Poll::Ready(r) => Some(r),
 		Poll::Pending => None,
