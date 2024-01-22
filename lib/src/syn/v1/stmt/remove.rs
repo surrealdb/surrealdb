@@ -305,7 +305,7 @@ mod tests {
 			if_exists: false,
 		});
 		let enc: Vec<u8> = stm.try_into().unwrap();
-		assert_eq!(9, enc.len());
+		assert_eq!(10, enc.len());
 	}
 
 	/// REMOVE ANALYZER tests
@@ -570,23 +570,23 @@ mod tests {
 
 	#[test]
 	fn remove_token() {
-		let sql = "REMOVE TOKEN test ON NAMESPACE test";
+		let sql = "REMOVE TOKEN test ON NAMESPACE";
 		let res = remove(sql);
 		let out = res.unwrap().1;
-		assert_eq!("REMOVE TOKEN test ON NAMESPACE test", format!("{}", out))
+		assert_eq!("REMOVE TOKEN test ON NAMESPACE", format!("{}", out))
 	}
 
 	#[test]
 	fn remove_token_if_exists() {
-		let sql = "REMOVE TOKEN test ON NAMESPACE test IF EXISTS";
+		let sql = "REMOVE TOKEN test ON NAMESPACE IF EXISTS";
 		let res = remove(sql);
 		let out = res.unwrap().1;
-		assert_eq!("REMOVE TOKEN test ON NAMESPACE test IF EXISTS", format!("{}", out))
+		assert_eq!("REMOVE TOKEN test ON NAMESPACE IF EXISTS", format!("{}", out))
 	}
 
 	#[test]
 	fn remove_token_if() {
-		let sql = "REMOVE TOKEN test ON NAMESPACE test IF";
+		let sql = "REMOVE TOKEN test ON NAMESPACE IF";
 		let res = remove(sql);
 		assert!(res.is_err());
 	}
@@ -595,23 +595,23 @@ mod tests {
 
 	#[test]
 	fn remove_user() {
-		let sql = "REMOVE USER test";
+		let sql = "REMOVE USER test ON ROOT";
 		let res = remove(sql);
 		let out = res.unwrap().1;
-		assert_eq!("REMOVE USER test", format!("{}", out))
+		assert_eq!("REMOVE USER test ON ROOT", format!("{}", out))
 	}
 
 	#[test]
 	fn remove_user_if_exists() {
-		let sql = "REMOVE USER test IF EXISTS";
+		let sql = "REMOVE USER test ON ROOT IF EXISTS";
 		let res = remove(sql);
 		let out = res.unwrap().1;
-		assert_eq!("REMOVE USER test IF EXISTS", format!("{}", out))
+		assert_eq!("REMOVE USER test ON ROOT IF EXISTS", format!("{}", out))
 	}
 
 	#[test]
 	fn remove_user_if() {
-		let sql = "REMOVE USER test IF";
+		let sql = "REMOVE USER test ON ROOT IF";
 		let res = remove(sql);
 		assert!(res.is_err());
 	}

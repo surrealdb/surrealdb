@@ -452,7 +452,7 @@ async fn should_not_error_when_remove_scope_if_exists() -> Result<(), Error> {
 #[tokio::test]
 async fn should_error_when_remove_and_token_does_not_exist() -> Result<(), Error> {
 	let sql = "
-		REMOVE TOKEN foo ON NAMESPACE bar;
+		REMOVE TOKEN foo ON NAMESPACE;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -468,7 +468,7 @@ async fn should_error_when_remove_and_token_does_not_exist() -> Result<(), Error
 #[tokio::test]
 async fn should_not_error_when_remove_token_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE TOKEN foo ON NAMESPACE bar IF EXISTS;
+		REMOVE TOKEN foo ON NAMESPACE IF EXISTS;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
