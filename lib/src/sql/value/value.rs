@@ -2639,6 +2639,7 @@ impl Value {
 			Value::Model(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Spread(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

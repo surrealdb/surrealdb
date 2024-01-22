@@ -58,64 +58,62 @@ impl From<Option<Self>> for Object {
 
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
-		Self(
-			match v {
-				Operation::Add {
-					path,
-					value,
-				} => map! {
-					String::from("op") => Value::from("add"),
-					String::from("path") => path.to_path().into(),
-					String::from("value") => value
-				},
-				Operation::Remove {
-					path,
-				} => map! {
-					String::from("op") => Value::from("remove"),
-					String::from("path") => path.to_path().into()
-				},
-				Operation::Replace {
-					path,
-					value,
-				} => map! {
-					String::from("op") => Value::from("replace"),
-					String::from("path") => path.to_path().into(),
-					String::from("value") => value
-				},
-				Operation::Change {
-					path,
-					value,
-				} => map! {
-					String::from("op") => Value::from("change"),
-					String::from("path") => path.to_path().into(),
-					String::from("value") => value
-				},
-				Operation::Copy {
-					path,
-					from,
-				} => map! {
-					String::from("op") => Value::from("copy"),
-					String::from("path") => path.to_path().into(),
-					String::from("from") => from.to_path().into()
-				},
-				Operation::Move {
-					path,
-					from,
-				} => map! {
-					String::from("op") => Value::from("move"),
-					String::from("path") => path.to_path().into(),
-					String::from("from") => from.to_path().into()
-				},
-				Operation::Test {
-					path,
-					value,
-				} => map! {
-					String::from("op") => Value::from("test"),
-					String::from("path") => path.to_path().into(),
-					String::from("value") => value
-				},
+		Self(match v {
+			Operation::Add {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("add"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
 			},
-		)
+			Operation::Remove {
+				path,
+			} => map! {
+				String::from("op") => Value::from("remove"),
+				String::from("path") => path.to_path().into()
+			},
+			Operation::Replace {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("replace"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
+			},
+			Operation::Change {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("change"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
+			},
+			Operation::Copy {
+				path,
+				from,
+			} => map! {
+				String::from("op") => Value::from("copy"),
+				String::from("path") => path.to_path().into(),
+				String::from("from") => from.to_path().into()
+			},
+			Operation::Move {
+				path,
+				from,
+			} => map! {
+				String::from("op") => Value::from("move"),
+				String::from("path") => path.to_path().into(),
+				String::from("from") => from.to_path().into()
+			},
+			Operation::Test {
+				path,
+				value,
+			} => map! {
+				String::from("op") => Value::from("test"),
+				String::from("path") => path.to_path().into(),
+				String::from("value") => value
+			},
+		})
 	}
 }
 
@@ -229,24 +227,33 @@ impl Object {
 		match self.0.get("".into()) {
 			Some(Value::Array(Array(spreads))) => {
 				for v in spreads {
-					match v.compute(ctx, opt, txn, doc).await {
-						Ok(v) => match v {
-							Value::Object(v) => {
+					match v {
+						Value::Spread(v) => match v.deref().compute(ctx, opt, txn, doc).await {
+							Ok(Value::Object(v)) => {
 								for (k, v) in v.iter() {
 									x.insert(k.clone(), v.clone());
 								}
 							}
-							_ => return Err(Error::Thrown("Spread is not an object".into())),
+							Ok(_) => {
+								return Err(Error::Thrown(
+									format!("Spread is not an object").into(),
+								))
+							}
+							Err(e) => return Err(e),
 						},
-						Err(e) => return Err(e),
-					};
+						_ => return Err(Error::SpreadInvalid),
+					}
 				}
-			},
+			}
 			Some(_) => return Err(Error::SpreadInvalid),
 			_ => {}
 		}
 
 		for (k, v) in self.iter() {
+			if k == "" {
+				continue;
+			}
+
 			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),

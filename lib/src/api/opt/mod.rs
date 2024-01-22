@@ -622,7 +622,7 @@ mod tests {
 		fn object() {
 			for map in [BTreeMap::new(), map!("done".to_owned() => true)] {
 				let value = Value::Object(sql::Object(
-					map.iter().map(|(key, value)| (key.clone(), Value::from(*value))).collect()
+					map.iter().map(|(key, value)| (key.clone(), Value::from(*value))).collect(),
 				));
 
 				let simple_json = into_json(value.clone(), true);

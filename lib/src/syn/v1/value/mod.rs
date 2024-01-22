@@ -325,10 +325,10 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	match first {
 		ObjectEntry::Spread(v) => {
 			spreads.push(Value::Spread(Box::new(v)));
-		},
+		}
 		ObjectEntry::Kv((k, v)) => {
 			tree.insert(k, v);
-		},
+		}
 	}
 
 	let mut input = i;
@@ -344,10 +344,10 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 		match v {
 			ObjectEntry::Spread(v) => {
 				spreads.push(Value::Spread(Box::new(v)));
-			},
+			}
 			ObjectEntry::Kv((k, v)) => {
 				tree.insert(k, v);
-			},
+			}
 		}
 		input = i
 	}
