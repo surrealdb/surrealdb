@@ -98,6 +98,27 @@ async fn spread_operator_object_complex_values() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn spread_operator_object_only_objects() -> Result<(), Error> {
+	let sql = "
+		{
+			...123
+		};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let _tmp = res.remove(0).result;
+	let expected: Result<Value, Error> = Err(Error::InvalidSpreadValue {
+		expected: "an Object".into(),
+	});
+	assert!(matches!(expected, _tmp));
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn spread_operator_array() -> Result<(), Error> {
 	let sql = "
 		[ 1, ...[2], 3, ...[4], 5 ];
@@ -131,6 +152,27 @@ async fn spread_operator_array_complex_values() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[ 'three records follow', a:1, a:2, a:3 ]");
 	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn spread_operator_array_only_arrays() -> Result<(), Error> {
+	let sql = "
+		[
+			...123
+		];
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let _tmp = res.remove(0).result;
+	let expected: Result<Value, Error> = Err(Error::InvalidSpreadValue {
+		expected: "an Array".into(),
+	});
+	assert!(matches!(expected, _tmp));
 	//
 	Ok(())
 }
