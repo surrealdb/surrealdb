@@ -224,6 +224,11 @@ impl Object {
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 
+		// Since we can't change the object struct as it would be a breaking change,
+		// we decided to store spreads on the empty key, which you cannot access within SurrealQL.
+		// This does mean that we need to manually validate that all spreads are valid values, which is what happens down below
+		// At last if we went through all that, we possibly also need to fetch the document for a Thing
+
 		match self.0.get("") {
 			Some(Value::Array(Array(spreads))) => {
 				for v in spreads {
