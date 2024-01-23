@@ -111,10 +111,6 @@ impl HnswIndex {
 
 	async fn search(&self, o: &SharedVector, n: usize, ef: usize) -> KnnResult {
 		let neighbors = self.hnsw.knn_search(o, n, ef).await;
-		#[cfg(debug_assertions)]
-		let n_len = neighbors.len();
-		#[cfg(debug_assertions)]
-		let v = format!("{neighbors:?}");
 
 		let mut builder = KnnResultBuilder::new(n);
 		for pn in neighbors {
@@ -122,26 +118,14 @@ impl HnswIndex {
 				let v = &self.hnsw.elements[pn.1 as usize];
 				if let Some(docs) = self.vec_docs.get(v) {
 					builder.add(pn.0, docs);
-				} else {
-					#[cfg(debug_assertions)]
-					println!("No doc: {pn:?}");
 				}
-			} else {
-				#[cfg(debug_assertions)]
-				println!("check_add false: {pn:?}");
 			}
 		}
 
-		let res = builder.build(
+		builder.build(
 			#[cfg(debug_assertions)]
 			HashMap::new(),
-		);
-
-		#[cfg(debug_assertions)]
-		if n_len != res.docs.len() {
-			println!("{n_len} - {v} - {}", res.docs.len())
-		}
-		res
+		)
 	}
 }
 

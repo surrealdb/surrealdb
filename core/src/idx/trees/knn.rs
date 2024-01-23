@@ -138,8 +138,11 @@ impl Docs {
 	{
 		let mut new_doc: Option<Self> = None;
 		for &doc in docs {
-			if let Some(mut nd) = new_doc {
-				new_doc = nd.insert(doc);
+			if let Some(ref mut nd) = new_doc {
+				let nd = nd.insert(doc);
+				if nd.is_some() {
+					new_doc = nd;
+				};
 			} else {
 				new_doc = self.insert(doc);
 			}
@@ -281,16 +284,24 @@ impl KnnResultBuilder {
 			if let Some((_, d)) = self.priority_list.last_key_value() {
 				if docs_len - d.len() >= self.knn {
 					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
-						#[cfg(debug_assertions)]
-						println!(
-							"Add docs: {docs:?} - Evicted: {evicted_docs:?} - self.knn: {} - docs_len: {docs_len}",
-							self.knn
-						);
 						evicted_docs.remove_to(&mut self.docs);
 					}
 				}
 			}
 		}
+
+		// #[cfg(debug_assertions)]
+		// {
+		// 	let mut doc_len_priority_list = 0;
+		// 	for docs in self.priority_list.values() {
+		// 		doc_len_priority_list += docs.len();
+		// 	}
+		// 	assert!(
+		// 		doc_len_priority_list >=
+		// 		self.docs.len(),
+		// 		"Add failed - Dist: {dist} - Docs: {docs:?} - self.docs: {:?} - self.priority_list: {:?}", self.docs, self.priority_list
+		// 	);
+		// }
 	}
 
 	pub(super) fn build(
@@ -298,8 +309,6 @@ impl KnnResultBuilder {
 		#[cfg(debug_assertions)] visited_nodes: HashMap<NodeId, usize>,
 	) -> KnnResult {
 		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
-		#[cfg(debug_assertions)]
-		println!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
 		let mut left = self.knn;
 		for (pr, docs) in self.priority_list {
 			let dl = docs.len();
@@ -337,13 +346,14 @@ pub struct KnnResult {
 #[cfg(test)]
 pub(super) mod tests {
 	use crate::idx::docids::DocId;
+	use crate::idx::trees::knn::{Docs, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, TreeVector};
 	use crate::sql::index::VectorType;
 	use crate::sql::Number;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
 	use rust_decimal::prelude::Zero;
-	use std::collections::HashSet;
+	use std::collections::{HashMap, HashSet, VecDeque};
 	use std::sync::Arc;
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {
@@ -459,5 +469,19 @@ pub(super) mod tests {
 		pub(in crate::idx::trees) fn is_unique(&self) -> bool {
 			matches!(self, TestCollection::Unique(_))
 		}
+	}
+
+	#[test]
+	fn knn_result_builder_test() {
+		let mut b = KnnResultBuilder::new(7);
+		b.add(0.0, &Docs::One(5));
+		b.add(0.2, &Docs::Vec3([0, 1, 2]));
+		b.add(0.2, &Docs::One(3));
+		b.add(0.2, &Docs::Vec2([6, 8]));
+		let res = b.build(HashMap::new());
+		assert_eq!(
+			res.docs,
+			VecDeque::from([(5, 0.0), (0, 0.2), (1, 0.2), (2, 0.2), (3, 0.2), (6, 0.2), (8, 0.2)])
+		);
 	}
 }
