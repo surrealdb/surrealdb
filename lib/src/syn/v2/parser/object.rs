@@ -22,6 +22,10 @@ impl Parser<'_> {
 			return Ok(Value::Object(Object::default()));
 		}
 
+		if self.peek_kind() == t!("...") {
+			return self.parse_object(start).map(Value::Object);
+		}
+
 		// Check first if it can be an object.
 		if self.peek_token_at(1).kind == t!(":") {
 			return self.parse_object_or_geometry(start);
@@ -36,23 +40,6 @@ impl Parser<'_> {
 	/// This function tries to match an object to an geometry like object and if it is unable
 	/// fallsback to parsing normal objects.
 	fn parse_object_or_geometry(&mut self, start: Span) -> ParseResult<Value> {
-		if self.eat(t!("...")) {
-			let mut map = BTreeMap::<String, Value>::new();
-			let value = self.parse_value_field()?;
-			let mut spreads = match map.get("") {
-				Some(Value::Array(v)) => v.0.clone(),
-				_ => vec![],
-			};
-
-			spreads.push(Value::Spread(Box::new(value)));
-			map.insert("".into(), spreads.into());
-			if !self.eat(t!(",")) {
-				self.expect_closing_delimiter(t!("}"), start)?;
-				return Ok(Value::Object(Object(map)));
-			}
-			return Ok(Value::Object(self.parse_object_from_map(map, start)?));
-		}
-
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
 		expected!(self, t!(":"));
@@ -568,11 +555,11 @@ impl Parser<'_> {
 
 				spreads.push(Value::Spread(Box::new(value)));
 				map.insert("".into(), spreads.into());
+			} else {
+				let (key, value) = self.parse_object_entry()?;
+				// TODO: Error on duplicate key?
+				map.insert(key, value);
 			}
-
-			let (key, value) = self.parse_object_entry()?;
-			// TODO: Error on duplicate key?
-			map.insert(key, value);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
