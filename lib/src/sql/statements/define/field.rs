@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::Part;
 use crate::sql::{
 	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,
 };
@@ -50,8 +51,50 @@ impl DefineFieldStatement {
 		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+    
 		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
-		run.set(key, self).await?;
+
+		// Process possible recursive_definitions.
+		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
+			let mut name = self.name.clone();
+			// find existing field definitions.
+			let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
+			loop {
+				let new_kind = cur_kind.inner_kind();
+				name.0.push(Part::All);
+
+				let fd = name.to_string();
+				let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+
+				// merge the new definition with possible existing definitions.
+				let statement = if let Some(existing) =
+					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
+				{
+					DefineFieldStatement {
+						kind: Some(cur_kind),
+						..existing.clone()
+					}
+				} else {
+					DefineFieldStatement {
+						name: name.clone(),
+						what: self.what.clone(),
+						flex: self.flex,
+						kind: Some(cur_kind),
+						..Default::default()
+					}
+				};
+
+				run.set(key, statement).await?;
+
+				if let Some(new_kind) = new_kind {
+					cur_kind = new_kind;
+				} else {
+					break;
+				}
+			}
+		}
 
 		let new_tb =
 			match (self.name.to_string().as_str(), tb.table_type.clone(), self.kind.clone()) {
