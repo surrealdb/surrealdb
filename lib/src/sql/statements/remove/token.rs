@@ -36,8 +36,10 @@ impl RemoveTokenStatement {
 					let mut run = txn.lock().await;
 					// Clear the cache
 					run.clear_cache();
+					// Get the definition
+					let tk = run.get_ns_token(opt.ns(), &self.name).await?;
 					// Delete the definition
-					let key = crate::key::namespace::tk::new(opt.ns(), &self.name);
+					let key = crate::key::namespace::tk::new(opt.ns(), &tk.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -47,8 +49,10 @@ impl RemoveTokenStatement {
 					let mut run = txn.lock().await;
 					// Clear the cache
 					run.clear_cache();
+					// Get the definition
+					let tk = run.get_db_token(opt.ns(), opt.db(), &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::tk::new(opt.ns(), opt.db(), &self.name);
+					let key = crate::key::database::tk::new(opt.ns(), opt.db(), &tk.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -58,8 +62,10 @@ impl RemoveTokenStatement {
 					let mut run = txn.lock().await;
 					// Clear the cache
 					run.clear_cache();
+					// Get the definition
+					let tk = run.get_sc_token(opt.ns(), opt.db(), sc, &self.name).await?;
 					// Delete the definition
-					let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &self.name);
+					let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &tk.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)

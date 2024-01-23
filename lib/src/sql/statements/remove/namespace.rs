@@ -33,11 +33,13 @@ impl RemoveNamespaceStatement {
 			ctx.get_index_stores().namespace_removed(opt, &mut run).await?;
 			// Clear the cache
 			run.clear_cache();
+			// Get the definition
+			let ns = run.get_ns(&self.name).await?;
 			// Delete the definition
-			let key = crate::key::root::ns::new(&self.name);
+			let key = crate::key::root::ns::new(&ns.name);
 			run.del(key).await?;
 			// Delete the resource data
-			let key = crate::key::namespace::all::new(&self.name);
+			let key = crate::key::namespace::all::new(&ns.name);
 			run.delp(key, u32::MAX).await?;
 			// Ok all good
 			Ok(Value::None)

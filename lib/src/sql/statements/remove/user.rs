@@ -36,8 +36,10 @@ impl RemoveUserStatement {
 					let mut run = txn.lock().await;
 					// Clear the cache
 					run.clear_cache();
+					// Get the definition
+					let us = run.get_root_user(&self.name).await?;
 					// Process the statement
-					let key = crate::key::root::us::new(&self.name);
+					let key = crate::key::root::us::new(&us.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -47,8 +49,10 @@ impl RemoveUserStatement {
 					let mut run = txn.lock().await;
 					// Clear the cache
 					run.clear_cache();
+					// Get the definition
+					let us = run.get_ns_user(opt.ns(), &self.name).await?;
 					// Delete the definition
-					let key = crate::key::namespace::us::new(opt.ns(), &self.name);
+					let key = crate::key::namespace::us::new(opt.ns(), &us.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -58,8 +62,10 @@ impl RemoveUserStatement {
 					let mut run = txn.lock().await;
 					// Clear the cache
 					run.clear_cache();
+					// Get the definition
+					let us = run.get_db_user(opt.ns(), opt.db(), &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
+					let key = crate::key::database::us::new(opt.ns(), opt.db(), &us.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)

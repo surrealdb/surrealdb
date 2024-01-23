@@ -31,8 +31,10 @@ impl RemoveAnalyzerStatement {
 			let mut run = txn.lock().await;
 			// Clear the cache
 			run.clear_cache();
+			// Get the definition
+			let az = run.get_db_analyzer(opt.ns(), opt.db(), &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
+			let key = crate::key::database::az::new(opt.ns(), opt.db(), &az.name);
 			run.del(key).await?;
 			// TODO Check that the analyzer is not used in any schema
 			// Ok all good

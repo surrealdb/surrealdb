@@ -32,8 +32,10 @@ impl RemoveParamStatement {
 			let mut run = txn.lock().await;
 			// Clear the cache
 			run.clear_cache();
+			// Get the definition
+			let pa = run.get_db_param(opt.ns(), opt.db(), &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
+			let key = crate::key::database::pa::new(opt.ns(), opt.db(), &pa.name);
 			run.del(key).await?;
 			// Ok all good
 			Ok(Value::None)

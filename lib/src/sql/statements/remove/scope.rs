@@ -32,11 +32,13 @@ impl RemoveScopeStatement {
 			let mut run = txn.lock().await;
 			// Clear the cache
 			run.clear_cache();
+			// Get the definition
+			let sc = run.get_sc(opt.ns(), opt.db(), &self.name).await?;
 			// Delete the definition
-			let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
+			let key = crate::key::database::sc::new(opt.ns(), opt.db(), &sc.name);
 			run.del(key).await?;
 			// Remove the resource data
-			let key = crate::key::scope::all::new(opt.ns(), opt.db(), &self.name);
+			let key = crate::key::scope::all::new(opt.ns(), opt.db(), &sc.name);
 			run.delp(key, u32::MAX).await?;
 			// Ok all good
 			Ok(Value::None)
