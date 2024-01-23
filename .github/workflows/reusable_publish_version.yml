@@ -578,8 +578,8 @@ jobs:
 
       - name: Install release-plz
         run: |
-          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /usr/bin
-          chmod +x /usr/bin/release-plz
+          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          sudo chmod +x /usr/bin/release-plz
 
       - name: Install a TOML parser
         if: ${{ inputs.environment == 'beta' }}
