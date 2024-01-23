@@ -26,77 +26,62 @@ impl RemoveTokenStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
-		match &self.base {
-			Base::Ns => {
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Clear the cache
-				run.clear_cache();
-				match run.get_ns_token(opt.ns(), &self.name).await {
-					Ok(nt) => {
-						// Delete the definition
-						let key = crate::key::namespace::tk::new(opt.ns(), &nt.name);
-						run.del(key).await?;
-						// Ok all good
-						Ok(Value::None)
-					}
-					Err(err) => {
-						if matches!(err, Error::NtNotFound { .. }) && self.if_exists {
-							Ok(Value::None)
-						} else {
-							Err(err)
-						}
-					}
+			match &self.base {
+				Base::Ns => {
+					// Claim transaction
+					let mut run = txn.lock().await;
+					// Clear the cache
+					run.clear_cache();
+					// Delete the definition
+					let key = crate::key::namespace::tk::new(opt.ns(), &self.name);
+					run.del(key).await?;
+					// Ok all good
+					Ok(Value::None)
 				}
-			}
-			Base::Db => {
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Clear the cache
-				run.clear_cache();
-				match run.get_db_token(opt.ns(), opt.db(), &self.name).await {
-					Ok(dt) => {
-						// Delete the definition
-						let key = crate::key::database::tk::new(opt.ns(), opt.db(), &dt.name);
-						run.del(key).await?;
-						// Ok all good
-						Ok(Value::None)
-					}
-					Err(err) => {
-						if matches!(err, Error::DtNotFound { .. }) && self.if_exists {
-							Ok(Value::None)
-						} else {
-							Err(err)
-						}
-					}
+				Base::Db => {
+					// Claim transaction
+					let mut run = txn.lock().await;
+					// Clear the cache
+					run.clear_cache();
+					// Delete the definition
+					let key = crate::key::database::tk::new(opt.ns(), opt.db(), &self.name);
+					run.del(key).await?;
+					// Ok all good
+					Ok(Value::None)
 				}
-			}
-			Base::Sc(sc) => {
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Clear the cache
-				run.clear_cache();
-				match run.get_sc_token(opt.ns(), opt.db(), sc, &self.name).await {
-					Ok(st) => {
-						// Delete the definition
-						let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &st.name);
-						run.del(key).await?;
-						// Ok all good
-						Ok(Value::None)
-					}
-					Err(err) => {
-						if matches!(err, Error::StNotFound { .. }) && self.if_exists {
-							Ok(Value::None)
-						} else {
-							Err(err)
-						}
-					}
+				Base::Sc(sc) => {
+					// Claim transaction
+					let mut run = txn.lock().await;
+					// Clear the cache
+					run.clear_cache();
+					// Delete the definition
+					let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &self.name);
+					run.del(key).await?;
+					// Ok all good
+					Ok(Value::None)
 				}
+				_ => Err(Error::InvalidLevel(self.base.to_string())),
 			}
-			_ => Err(Error::InvalidLevel(self.base.to_string())),
+		}
+		.await
+		{
+			Err(e) if self.if_exists => match e {
+				Error::NtNotFound {
+					..
+				} => Ok(Value::None),
+				Error::DtNotFound {
+					..
+				} => Ok(Value::None),
+				Error::StNotFound {
+					..
+				} => Ok(Value::None),
+				e => Err(e),
+			},
+			v => v,
 		}
 	}
 }

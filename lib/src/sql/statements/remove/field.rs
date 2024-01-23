@@ -26,31 +26,29 @@ impl RemoveFieldStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_tb_field(opt.ns(), opt.db(), &self.what, &self.name.to_string()).await {
-			Ok(fd) => {
-				// Delete the definition
-				let fd_name = fd.name.to_string();
-				let key = crate::key::table::fd::new(opt.ns(), opt.db(), &fd.what, &fd_name);
-				run.del(key).await?;
-				// Clear the cache
-				let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &fd.what);
-				run.clr(key).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::FdNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let fd = self.name.to_string();
+			let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+			run.del(key).await?;
+			// Clear the cache
+			let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
+			run.clr(key).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::FdNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }

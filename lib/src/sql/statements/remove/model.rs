@@ -26,29 +26,27 @@ impl RemoveModelStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_db_model(opt.ns(), opt.db(), &self.name, &self.version).await {
-			Ok(ml) => {
-				// Delete the definition
-				let key = crate::key::database::ml::new(opt.ns(), opt.db(), &ml.name, &ml.version);
-				run.del(key).await?;
-				// Remove the model file
-				// TODO
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let key = crate::key::database::ml::new(opt.ns(), opt.db(), &self.name, &self.version);
+			run.del(key).await?;
+			// Remove the model file
+			// TODO
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::MlNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }

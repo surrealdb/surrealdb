@@ -26,77 +26,62 @@ impl RemoveUserStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
-		match self.base {
-			Base::Root => {
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Clear the cache
-				run.clear_cache();
-				match run.get_root_user(&self.name).await {
-					Ok(us) => {
-						// Process the statement
-						let key = crate::key::root::us::new(&us.name);
-						run.del(key).await?;
-						// Ok all good
-						Ok(Value::None)
-					}
-					Err(err) => {
-						if matches!(err, Error::UserRootNotFound { .. }) && self.if_exists {
-							Ok(Value::None)
-						} else {
-							Err(err)
-						}
-					}
+			match self.base {
+				Base::Root => {
+					// Claim transaction
+					let mut run = txn.lock().await;
+					// Clear the cache
+					run.clear_cache();
+					// Process the statement
+					let key = crate::key::root::us::new(&self.name);
+					run.del(key).await?;
+					// Ok all good
+					Ok(Value::None)
 				}
-			}
-			Base::Ns => {
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Clear the cache
-				run.clear_cache();
-				match run.get_ns_user(opt.ns(), &self.name).await {
-					Ok(us) => {
-						// Delete the definition
-						let key = crate::key::namespace::us::new(opt.ns(), &us.name);
-						run.del(key).await?;
-						// Ok all good
-						Ok(Value::None)
-					}
-					Err(err) => {
-						if matches!(err, Error::UserNsNotFound { .. }) && self.if_exists {
-							Ok(Value::None)
-						} else {
-							Err(err)
-						}
-					}
+				Base::Ns => {
+					// Claim transaction
+					let mut run = txn.lock().await;
+					// Clear the cache
+					run.clear_cache();
+					// Delete the definition
+					let key = crate::key::namespace::us::new(opt.ns(), &self.name);
+					run.del(key).await?;
+					// Ok all good
+					Ok(Value::None)
 				}
-			}
-			Base::Db => {
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Clear the cache
-				run.clear_cache();
-				match run.get_db_user(opt.ns(), opt.db(), &self.name).await {
-					Ok(us) => {
-						// Delete the definition
-						let key = crate::key::database::us::new(opt.ns(), opt.db(), &us.name);
-						run.del(key).await?;
-						// Ok all good
-						Ok(Value::None)
-					}
-					Err(err) => {
-						if matches!(err, Error::UserDbNotFound { .. }) && self.if_exists {
-							Ok(Value::None)
-						} else {
-							Err(err)
-						}
-					}
+				Base::Db => {
+					// Claim transaction
+					let mut run = txn.lock().await;
+					// Clear the cache
+					run.clear_cache();
+					// Delete the definition
+					let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
+					run.del(key).await?;
+					// Ok all good
+					Ok(Value::None)
 				}
+				_ => Err(Error::InvalidLevel(self.base.to_string())),
 			}
-			_ => Err(Error::InvalidLevel(self.base.to_string())),
+		}
+		.await
+		{
+			Err(e) if self.if_exists => match e {
+				Error::UserRootNotFound {
+					..
+				} => Ok(Value::None),
+				Error::UserNsNotFound {
+					..
+				} => Ok(Value::None),
+				Error::UserDbNotFound {
+					..
+				} => Ok(Value::None),
+				e => Err(e),
+			},
+			v => v,
 		}
 	}
 }

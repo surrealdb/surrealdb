@@ -25,31 +25,29 @@ impl RemoveNamespaceStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		ctx.get_index_stores().namespace_removed(opt, &mut run).await?;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_ns(&self.name).await {
-			Ok(ns) => {
-				// Delete the definition
-				let key = crate::key::root::ns::new(&ns.name);
-				run.del(key).await?;
-				// Delete the resource data
-				let key = crate::key::namespace::all::new(&ns.name);
-				run.delp(key, u32::MAX).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::NsNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			ctx.get_index_stores().namespace_removed(opt, &mut run).await?;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let key = crate::key::root::ns::new(&self.name);
+			run.del(key).await?;
+			// Delete the resource data
+			let key = crate::key::namespace::all::new(&self.name);
+			run.delp(key, u32::MAX).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::NsNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }

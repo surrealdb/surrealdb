@@ -25,27 +25,25 @@ impl RemoveParamStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_db_param(opt.ns(), opt.db(), &self.name).await {
-			Ok(pa) => {
-				// Delete the definition
-				let key = crate::key::database::pa::new(opt.ns(), opt.db(), &pa.name);
-				run.del(key).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
+			run.del(key).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::PaNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }

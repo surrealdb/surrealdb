@@ -26,30 +26,28 @@ impl RemoveEventStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await {
-			Ok(ev) => {
-				// Delete the definition
-				let key = crate::key::table::ev::new(opt.ns(), opt.db(), &ev.what, &ev.name);
-				run.del(key).await?;
-				// Clear the cache
-				let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &ev.what);
-				run.clr(key).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::EvNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
+			run.del(key).await?;
+			// Clear the cache
+			let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
+			run.clr(key).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::EvNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }

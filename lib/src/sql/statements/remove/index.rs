@@ -26,36 +26,33 @@ impl RemoveIndexStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the index store cache
-		ctx.get_index_stores().index_removed(opt, &mut run, &self.what, &self.name).await?;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_tb_index(opt.ns(), opt.db(), &self.what, &self.name).await {
-			Ok(ix) => {
-				let ix_name = ix.name.to_string();
-				// Delete the definition
-				let key = crate::key::table::ix::new(opt.ns(), opt.db(), &ix.what, &ix_name);
-				run.del(key).await?;
-				// Remove the index data
-				let key = crate::key::index::all::new(opt.ns(), opt.db(), &ix.what, &ix_name);
-				run.delp(key, u32::MAX).await?;
-				// Clear the cache
-				let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &ix.what);
-				run.clr(key).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::IxNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the index store cache
+			ctx.get_index_stores().index_removed(opt, &mut run, &self.what, &self.name).await?;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
+			run.del(key).await?;
+			// Remove the index data
+			let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
+			run.delp(key, u32::MAX).await?;
+			// Clear the cache
+			let key = crate::key::table::ix::prefix(opt.ns(), opt.db(), &self.what);
+			run.clr(key).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::IxNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }

@@ -25,27 +25,25 @@ impl RemoveFunctionStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_db_function(opt.ns(), opt.db(), &self.name).await {
-			Ok(fc) => {
-				// Delete the definition
-				let key = crate::key::database::fc::new(opt.ns(), opt.db(), &fc.name);
-				run.del(key).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::FcNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
+			run.del(key).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::FcNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }

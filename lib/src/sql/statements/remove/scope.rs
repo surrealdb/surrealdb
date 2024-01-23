@@ -25,31 +25,28 @@ impl RemoveScopeStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Scope, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the cache
-		run.clear_cache();
-		match run.get_sc(opt.ns(), opt.db(), &self.name).await {
-			Ok(sc) => {
-				let sc_name = sc.name.to_string();
-				// Delete the definition
-				let key = crate::key::database::sc::new(opt.ns(), opt.db(), &sc_name);
-				run.del(key).await?;
-				// Remove the resource data
-				let key = crate::key::scope::all::new(opt.ns(), opt.db(), &sc_name);
-				run.delp(key, u32::MAX).await?;
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
-				}
-			}
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Scope, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the cache
+			run.clear_cache();
+			// Delete the definition
+			let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
+			run.del(key).await?;
+			// Remove the resource data
+			let key = crate::key::scope::all::new(opt.ns(), opt.db(), &self.name);
+			run.delp(key, u32::MAX).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::ScNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }
