@@ -781,8 +781,10 @@ pub enum Error {
 	MissingStorageEngine,
 
 	/// An invalid spread value was provided
-	#[error("The provided Spread value is invalid")]
-	SpreadInvalid,
+	#[error("The provided Spread value is invalid, expected {expected}")]
+	InvalidSpreadValue {
+		expected: String,
+	},
 }
 
 impl From<Error> for String {

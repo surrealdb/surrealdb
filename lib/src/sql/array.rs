@@ -143,7 +143,11 @@ impl Array {
 				Value::Spread(v) => match (*v).compute(ctx, opt, txn, doc).await {
 					Ok(v) => match &v {
 						Value::Array(v) => v.iter().for_each(|v| x.push(v.clone())),
-						_ => return Err(Error::Thrown("Spread value not an array".into())),
+						_ => {
+							return Err(Error::InvalidSpreadValue {
+								expected: "an Array".into(),
+							})
+						}
 					},
 					Err(e) => return Err(e),
 				},

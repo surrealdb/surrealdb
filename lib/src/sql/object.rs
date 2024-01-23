@@ -239,14 +239,16 @@ impl Object {
 										{
 											Ok(Value::Object(v)) => v,
 											_ => {
-												return Err(Error::Thrown(
-													"Spread is not an object".into(),
-												))
+												return Err(Error::InvalidSpreadValue {
+													expected: "an Object".into(),
+												});
 											}
 										}
 									}
 									_ => {
-										return Err(Error::Thrown("Spread is not an object".into()))
+										return Err(Error::InvalidSpreadValue {
+											expected: "an Object".into(),
+										});
 									}
 								};
 
@@ -256,11 +258,19 @@ impl Object {
 							}
 							Err(e) => return Err(e),
 						},
-						_ => return Err(Error::SpreadInvalid),
+						_ => {
+							return Err(Error::InvalidSpreadValue {
+								expected: "a Spread".into(),
+							})
+						}
 					}
 				}
 			}
-			Some(_) => return Err(Error::SpreadInvalid),
+			Some(_) => {
+				return Err(Error::InvalidSpreadValue {
+					expected: "a Spread".into(),
+				})
+			}
 			_ => {}
 		}
 
