@@ -106,7 +106,8 @@ pub enum Value {
 	Expression(Box<Expression>),
 	Query(Query),
 	Model(Box<Model>),
-	Spread(Box<Value>), // Add new variants here
+	Spread(Box<Value>),
+	// Add new variants here
 }
 
 impl Eq for Value {}
