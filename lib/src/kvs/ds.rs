@@ -1,5 +1,5 @@
 use super::tx::Transaction;
-use crate::cf;
+use crate::{cf, dbs};
 use crate::ctx::Context;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
@@ -16,9 +16,11 @@ use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::opt::auth::Root;
 #[cfg(feature = "jwks")]
 use crate::opt::capabilities::NetTarget;
+use crate::sql::statements::show::ShowSince;
+use crate::sql::statements::LiveStatement;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
-use crate::vs::Oracle;
+use crate::vs::{Oracle, Versionstamp};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
@@ -28,10 +30,12 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+use crate::cf::TableMutation;
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -86,6 +90,25 @@ impl Ord for LqType {
 	}
 }
 
+/// This is an internal-only helper struct for organising the keys of how live queries are accessed
+/// Because we want immutable keys, we cannot put mutable things in such as ts and vs
+#[derive(Copy, Clone)]
+struct LqIndexKey {
+	ns: String,
+	db: String,
+	tb: String,
+	lq: Uuid,
+}
+
+/// Internal only struct
+/// This can be assumed to have a mutable reference
+#[derive(Copy, Clone)]
+struct LqIndexValue {
+	query: LiveStatement,
+	vs: Versionstamp,
+	ts: Timestamp,
+}
+
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
@@ -111,6 +134,8 @@ pub struct Datastore {
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	// Map of Live Query ID to Live Query query
+	local_live_queries: RwLock<BTreeMap<LqIndexKey, LqIndexValue>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -821,7 +846,8 @@ impl Datastore {
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
-		self.save_timestamp_for_versionstamp(ts).await?;
+		let vs = self.save_timestamp_for_versionstamp(ts).await?;
+		self.process_lq_notifications(ts, vs).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
 		// TODO Add LQ GC
 		// TODO Add Node GC?
@@ -829,17 +855,108 @@ impl Datastore {
 	}
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
-	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
+	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<Versionstamp, Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
-		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
-			return match tx.cancel().await {
-				Ok(_) => {
-					Err(e)
-				}
-				Err(txe) => {
-					Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
-				}
+		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
+			Ok(vs) => Ok(vs),
+			Err(e) => {
+				return match tx.cancel().await {
+					Ok(_) => {
+						Err(e)
+					}
+					Err(txe) => {
+						Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+					}
+				};
+			}
+		}
+	}
+
+	pub async fn process_lq_notifications(&self, ts: u64, vs: Versionstamp) -> Result<(), Error> {
+		// Return if there are no live queries
+		if self.notification_channel.is_none() {
+			return Ok(());
+		}
+		if self.local_live_queries.read().await.is_empty() {
+			return Ok(());
+		}
+
+		// Find live queries that need to catch up
+		let mut lqs_to_update = vec![];
+		for (k, v) in self.local_live_queries.read().await.iter() {
+			// Skip if no need to update
+			if v.ts.value >= ts {
+				// This shouldn't be possible and/or may mean clock skew
+				continue;
 			};
+			if v.vs >= vs {
+				// This means that there hasn't been a change
+				continue;
+			};
+			// We know we need to process events, so we do so now
+			lqs_to_update.push((k, v))
+		}
+		if lqs_to_update.is_empty() {
+			return Ok(());
+		}
+
+		// Catch up the necessary live queries
+		for (k, v) in lqs_to_update {
+			// Process notifications
+			let mut tx = self.transaction(Read, Optimistic).await?;
+			let changes =
+				cf::read(&mut tx, &k.ns, &k.db, Some(&k.tb), ShowSince::Versionstamp(), Some(1000))
+					.await?;
+			for database_change in changes {
+				for table_changes in database_change.1.0 {
+					for table_change in table_changes.1 {
+						// TODO enforce security
+						let not_type = match table_change {
+							TableMutation::Set(thing, value) => {
+								// Atm all sets are UPDATE
+								Some((dbs::Action::Update, Some(value)))
+							},
+							TableMutation::Del(thing) => {
+								Some((dbs::Action::Delete, None))
+							},
+							TableMutation::Def(stm) => {
+								None
+							},
+						},
+						if let
+						let _ = self
+							.notification_channel
+							.as_ref()
+							.unwrap()
+							.0
+							.send(Notification {
+								id: k.lq,
+								action: dbs::Action::Update,
+								result: table_change.,
+							})
+							.await;
+					}
+				}
+			}
+
+			// Update the live query that notifications were processed
+			let mut write_ref = self.local_live_queries.write().await;
+			if let None = write_ref.insert(
+				LqIndexKey {
+					ns: k.ns.to_string(),
+					db: k.db.to_string(),
+					tb: k.tb.to_string(),
+					lq: k.lq,
+				},
+				LqIndexValue {
+					query: *v.query,
+					vs,
+					ts: *v.ts,
+				},
+			) {
+				// This shouldn't be possible
+				error!("Error updating local live query index, the previous value of an updated key was not found");
+			}
 		}
 		Ok(())
 	}
@@ -848,7 +965,8 @@ impl Datastore {
 		&self,
 		ts: u64,
 		tx: &mut Transaction,
-	) -> Result<(), Error> {
+	) -> Result<Versionstamp, Error> {
+		let mut vs: Option<Versionstamp> = None;
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -857,11 +975,12 @@ impl Datastore {
 			let dbs = dbs.as_ref();
 			for db in dbs {
 				let db = db.name.as_str();
-				tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?;
+				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?);
 			}
 		}
 		tx.commit().await?;
-		Ok(())
+		let vs = vs.expect("No versionstamp was set");
+		Ok(vs)
 	}
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
