@@ -146,11 +146,11 @@ impl Array {
 						_ => return Err(Error::Thrown("Spread value not an array".into())),
 					},
 					Err(e) => return Err(e),
-				}
+				},
 				v => match v.compute(ctx, opt, txn, doc).await {
 					Ok(v) => x.push(v),
 					Err(e) => return Err(e),
-				}
+				},
 			}
 		}
 		Ok(Value::Array(x))

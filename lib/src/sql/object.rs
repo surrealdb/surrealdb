@@ -224,7 +224,7 @@ impl Object {
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 
-		match self.0.get("".into()) {
+		match self.0.get("") {
 			Some(Value::Array(Array(spreads))) => {
 				for v in spreads {
 					match v {
@@ -232,19 +232,27 @@ impl Object {
 							Ok(v) => {
 								let v = match v {
 									Value::Object(v) => v,
-									Value::Thing(v) => match Value::Thing(v).get(ctx, opt, txn, doc, &[Part::All]).await {
-										Ok(v) => match v {
-											Value::Object(v) => v,
-											_ => return Err(Error::Thrown("Spread is not an object".into()))
+									Value::Thing(v) => {
+										match Value::Thing(v)
+											.get(ctx, opt, txn, doc, &[Part::All])
+											.await
+										{
+											Ok(Value::Object(v)) => v,
+											_ => {
+												return Err(Error::Thrown(
+													"Spread is not an object".into(),
+												))
+											}
 										}
-										_ => return Err(Error::Thrown("Spread is not an object".into()))
 									}
-									_ => return Err(Error::Thrown("Spread is not an object".into()))
+									_ => {
+										return Err(Error::Thrown("Spread is not an object".into()))
+									}
 								};
 
 								for (k, v) in v.iter() {
 									x.insert(k.clone(), v.clone());
-								};
+								}
 							}
 							Err(e) => return Err(e),
 						},
@@ -257,7 +265,8 @@ impl Object {
 		}
 
 		for (k, v) in self.iter() {
-			if k == "" {
+			// Key "" contains spreads, and they are processed above
+			if k.is_empty() {
 				continue;
 			}
 
