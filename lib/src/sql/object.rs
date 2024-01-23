@@ -15,7 +15,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use super::Array;
+use super::{Array, Part};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
@@ -228,16 +228,23 @@ impl Object {
 			Some(Value::Array(Array(spreads))) => {
 				for v in spreads {
 					match v {
-						Value::Spread(v) => match v.deref().compute(ctx, opt, txn, doc).await {
-							Ok(Value::Object(v)) => {
+						Value::Spread(v) => match (*v).compute(ctx, opt, txn, doc).await {
+							Ok(v) => {
+								let v = match v {
+									Value::Object(v) => v,
+									Value::Thing(v) => match Value::Thing(v).get(ctx, opt, txn, doc, &[Part::All]).await {
+										Ok(v) => match v {
+											Value::Object(v) => v,
+											_ => return Err(Error::Thrown("Spread is not an object".into()))
+										}
+										_ => return Err(Error::Thrown("Spread is not an object".into()))
+									}
+									_ => return Err(Error::Thrown("Spread is not an object".into()))
+								};
+
 								for (k, v) in v.iter() {
 									x.insert(k.clone(), v.clone());
-								}
-							}
-							Ok(_) => {
-								return Err(Error::Thrown(
-									format!("Spread is not an object").into(),
-								))
+								};
 							}
 							Err(e) => return Err(e),
 						},
