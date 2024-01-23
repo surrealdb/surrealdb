@@ -18,7 +18,7 @@ no-default-features = true
 # The graph highlighting used when creating dotgraphs for crates.
 highlight = "all"
 # The lint level for when a crate version requirement is set to `*`.
-wildcards = "allow"
+wildcards = "deny"
 # Lint level for when multiple versions of the same crate are detected.
 multiple-versions = "allow"
 # The default lint level for `default` features for workspace crates.
