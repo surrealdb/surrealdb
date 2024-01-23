@@ -93,11 +93,11 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install cargo-audit
-        run: cargo install --debug --locked cargo-audit
+      - name: Install cargo-deny
+        run: cargo install --debug --locked cargo-deny
 
-      - name: Check dependencies 
-        run: cargo audit
+      - name: Check dependencies
+        run: cargo deny check
 
   check-wasm:
     name: Check Wasm
@@ -218,7 +218,7 @@ jobs:
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
-  
+
   ml-support:
     name: ML integration tests
     runs-on: ubuntu-latest
