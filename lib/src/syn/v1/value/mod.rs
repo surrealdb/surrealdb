@@ -334,7 +334,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	let mut input = i;
 	while let (i, Some(_)) = opt(commas)(input)? {
 		if let (i, Some(_)) = opt(closebraces)(i)? {
-			if spreads.is_empty() {
+			if !spreads.is_empty() {
 				tree.insert("".into(), spreads.into());
 			}
 
@@ -352,7 +352,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 		input = i
 	}
 	let (i, _) = expect_terminator(start, closebraces)(input)?;
-	if spreads.is_empty() {
+	if !spreads.is_empty() {
 		tree.insert("".into(), spreads.into());
 	}
 
