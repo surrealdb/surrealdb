@@ -290,6 +290,7 @@ impl Parser<'_> {
 				break;
 			}
 
+			// If this is a spread value, store it as such.
 			if self.eat(t!("...")) {
 				values.push(Value::Spread(Box::new(self.parse_value_field()?)));
 			} else {

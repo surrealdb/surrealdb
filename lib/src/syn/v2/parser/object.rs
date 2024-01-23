@@ -22,6 +22,7 @@ impl Parser<'_> {
 			return Ok(Value::Object(Object::default()));
 		}
 
+		// In case the next token is a spread operator, we can safely continue to parse this as an object
 		if self.peek_kind() == t!("...") {
 			return self.parse_object(start).map(Value::Object);
 		}
