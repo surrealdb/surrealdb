@@ -108,9 +108,7 @@ async fn spread_operator_array() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[ 1, 2, 3, 4, 5 ]",
-	);
+	let val = Value::parse("[ 1, 2, 3, 4, 5 ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -131,9 +129,7 @@ async fn spread_operator_array_complex_values() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[ 'three records follow', a:1, a:2, a:3 ]",
-	);
+	let val = Value::parse("[ 'three records follow', a:1, a:2, a:3 ]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
