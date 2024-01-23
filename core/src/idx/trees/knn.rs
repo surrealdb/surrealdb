@@ -58,6 +58,7 @@ impl Ord for PriorityResult {
 
 #[derive(Debug, Clone)]
 pub(super) enum Docs {
+	Empty,
 	One(DocId),
 	Vec2([DocId; 2]),
 	Vec3([DocId; 3]),
@@ -68,35 +69,44 @@ pub(super) enum Docs {
 impl Docs {
 	fn len(&self) -> u64 {
 		match self {
-			Docs::One(_) => 1,
-			Docs::Vec2(_) => 2,
-			Docs::Vec3(_) => 3,
-			Docs::Vec4(_) => 4,
-			Docs::Bits(b) => b.len(),
+			Self::Empty => 0,
+			Self::One(_) => 1,
+			Self::Vec2(_) => 2,
+			Self::Vec3(_) => 3,
+			Self::Vec4(_) => 4,
+			Self::Bits(b) => b.len(),
+		}
+	}
+
+	pub(super) fn is_empty(&self) -> bool {
+		match self {
+			Self::Empty => true,
+			_ => false,
 		}
 	}
 
 	fn append_to(&self, to: &mut RoaringTreemap) {
 		match &self {
-			Docs::One(d) => {
+			Self::Empty => {}
+			Self::One(d) => {
 				to.insert(*d);
 			}
-			Docs::Vec2(a) => {
+			Self::Vec2(a) => {
 				for d in a {
 					to.insert(*d);
 				}
 			}
-			Docs::Vec3(a) => {
+			Self::Vec3(a) => {
 				for d in a {
 					to.insert(*d);
 				}
 			}
-			Docs::Vec4(a) => {
+			Self::Vec4(a) => {
 				for d in a {
 					to.insert(*d);
 				}
 			}
-			Docs::Bits(b) => {
+			Self::Bits(b) => {
 				for d in b {
 					to.insert(d);
 				}
@@ -106,25 +116,26 @@ impl Docs {
 
 	fn remove_to(&self, to: &mut RoaringTreemap) {
 		match &self {
-			Docs::One(d) => {
+			Self::Empty => {}
+			Self::One(d) => {
 				to.remove(*d);
 			}
-			Docs::Vec2(a) => {
+			Self::Vec2(a) => {
 				for &d in a {
 					to.remove(d);
 				}
 			}
-			Docs::Vec3(a) => {
+			Self::Vec3(a) => {
 				for &d in a {
 					to.remove(d);
 				}
 			}
-			Docs::Vec4(a) => {
+			Self::Vec4(a) => {
 				for &d in a {
 					to.remove(d);
 				}
 			}
-			Docs::Bits(b) => {
+			Self::Bits(b) => {
 				for d in b {
 					to.remove(d);
 				}
@@ -166,44 +177,48 @@ impl Docs {
 	}
 	fn append_from(&mut self, from: &Docs) -> Option<Self> {
 		match from {
-			Docs::One(d) => self.insert(*d),
-			Docs::Vec2(a) => self.append_iter_ref(a.iter()),
-			Docs::Vec3(a) => self.append_iter_ref(a.iter()),
-			Docs::Vec4(a) => self.append_iter_ref(a.iter()),
-			Docs::Bits(a) => self.append_iter(a.iter()),
+			Self::Empty => None,
+			Self::One(d) => self.insert(*d),
+			Self::Vec2(a) => self.append_iter_ref(a.iter()),
+			Self::Vec3(a) => self.append_iter_ref(a.iter()),
+			Self::Vec4(a) => self.append_iter_ref(a.iter()),
+			Self::Bits(a) => self.append_iter(a.iter()),
 		}
 	}
 
 	fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
 		match &self {
-			Docs::One(d) => Box::new(OneDocIterator(Some(*d))),
-			Docs::Vec2(a) => Box::new(SliceDocIterator(a.iter())),
-			Docs::Vec3(a) => Box::new(SliceDocIterator(a.iter())),
-			Docs::Vec4(a) => Box::new(SliceDocIterator(a.iter())),
-			Docs::Bits(a) => Box::new(a.iter()),
+			Self::Empty => Box::new(EmptyIterator {}),
+			Self::One(d) => Box::new(OneDocIterator(Some(*d))),
+			Self::Vec2(a) => Box::new(SliceDocIterator(a.iter())),
+			Self::Vec3(a) => Box::new(SliceDocIterator(a.iter())),
+			Self::Vec4(a) => Box::new(SliceDocIterator(a.iter())),
+			Self::Bits(a) => Box::new(a.iter()),
 		}
 	}
 
 	fn contains(&self, d: DocId) -> bool {
 		match self {
-			Docs::One(o) => *o == d,
-			Docs::Vec2(a) => a.contains(&d),
-			Docs::Vec3(a) => a.contains(&d),
-			Docs::Vec4(a) => a.contains(&d),
-			Docs::Bits(b) => b.contains(d),
+			Self::Empty => false,
+			Self::One(o) => *o == d,
+			Self::Vec2(a) => a.contains(&d),
+			Self::Vec3(a) => a.contains(&d),
+			Self::Vec4(a) => a.contains(&d),
+			Self::Bits(b) => b.contains(d),
 		}
 	}
 
 	pub(super) fn insert(&mut self, d: DocId) -> Option<Self> {
 		if !self.contains(d) {
 			match self {
-				Docs::One(o) => Some(Docs::Vec2([*o, d])),
-				Docs::Vec2(a) => Some(Docs::Vec3([a[0], a[1], d])),
-				Docs::Vec3(a) => Some(Docs::Vec4([a[0], a[1], a[2], d])),
-				Docs::Vec4(a) => {
-					Some(Docs::Bits(RoaringTreemap::from([a[0], a[1], a[2], a[3], d])))
+				Self::Empty => Some(Self::One(d)),
+				Self::One(o) => Some(Self::Vec2([*o, d])),
+				Self::Vec2(a) => Some(Self::Vec3([a[0], a[1], d])),
+				Self::Vec3(a) => Some(Self::Vec4([a[0], a[1], a[2], d])),
+				Self::Vec4(a) => {
+					Some(Self::Bits(RoaringTreemap::from([a[0], a[1], a[2], a[3], d])))
 				}
-				Docs::Bits(b) => {
+				Self::Bits(b) => {
 					b.insert(d);
 					None
 				}
@@ -211,6 +226,54 @@ impl Docs {
 		} else {
 			None
 		}
+	}
+
+	pub(super) fn remove(&mut self, d: DocId) -> Option<Self> {
+		match self {
+			Docs::Empty => None,
+			Docs::One(i) => {
+				if d == *i {
+					Some(Self::Empty)
+				} else {
+					None
+				}
+			}
+			Docs::Vec2(a) => a.iter().find(|&&i| i != d).map(|&i| Self::One(i)),
+			Docs::Vec3(a) => {
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				if v.len() == 2 {
+					Some(Self::Vec2([v[0], v[1]]))
+				} else {
+					None
+				}
+			}
+			Docs::Vec4(a) => {
+				let v: Vec<DocId> = a.iter().filter(|&&i| i != d).cloned().collect();
+				if v.len() == 3 {
+					Some(Self::Vec3([v[0], v[1], v[2]]))
+				} else {
+					None
+				}
+			}
+			Docs::Bits(b) => {
+				if !b.remove(d) || b.len() != 4 {
+					None
+				} else {
+					let v: Vec<DocId> = b.iter().collect();
+					Some(Self::Vec4([v[0], v[1], v[2], v[3]]))
+				}
+			}
+		}
+	}
+}
+
+struct EmptyIterator;
+
+impl Iterator for EmptyIterator {
+	type Item = DocId;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		None
 	}
 }
 
