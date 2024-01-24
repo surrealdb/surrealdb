@@ -96,8 +96,22 @@ jobs:
       - name: Install cargo-deny
         run: cargo install --debug --locked cargo-deny
 
-      - name: Check dependencies
+      - name: Install cargo-vet
+        run: cargo install --debug --locked cargo-vet
+
+      - name: Install cargo-acl
+        run: |
+          cargo install --debug --locked cargo-acl
+          apt install -y bubblewrap
+
+      - name: Check dependencies for known issues
         run: cargo deny check
+
+      - name: Check dependencies for untrusted sources
+        run: cargo vet
+
+      - name: Check dependencies for unauthorized access
+        run: cargo acl
 
   check-wasm:
     name: Check Wasm
