@@ -48,17 +48,19 @@ impl DefineFieldStatement {
 		run.clear_cache();
 		// Process the statement
 		let fd = self.name.to_string();
-		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 
 		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+		run.set(key, self).await?;
+
+		// find existing field definitions.
+		let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = self.name.clone();
-			// find existing field definitions.
-			let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
 			loop {
 				let new_kind = cur_kind.inner_kind();
 				name.0.push(Part::All);
