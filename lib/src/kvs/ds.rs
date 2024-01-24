@@ -19,9 +19,9 @@ use crate::opt::capabilities::NetTarget;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::LiveStatement;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
-use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
 use crate::{cf, dbs};
+use crate::{syn, FFlag, FFlagEnabledStatus, FFLAGS};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
@@ -848,7 +848,9 @@ impl Datastore {
 	// without depending on a system clock.
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
 		let vs = self.save_timestamp_for_versionstamp(ts).await?;
-		self.process_lq_notifications(ts, vs).await?;
+		if FFLAGS.get(&FFlag::ChangeFeedLiveQueries).unwrap().enabled() {
+			self.process_lq_notifications(ts, vs).await?;
+		}
 		self.garbage_collect_stale_change_feeds(ts).await?;
 		// TODO Add LQ GC
 		// TODO Add Node GC?
