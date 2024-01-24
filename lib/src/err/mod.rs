@@ -779,6 +779,12 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	/// The requested analyzer does not exist
+	#[error("The analyzer '{value}' already exists")]
+	AzAlreadyExists {
+		value: String,
+	},
 }
 
 impl From<Error> for String {

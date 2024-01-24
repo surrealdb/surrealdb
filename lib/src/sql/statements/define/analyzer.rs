@@ -11,7 +11,7 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 pub struct DefineAnalyzerStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -19,6 +19,8 @@ pub struct DefineAnalyzerStatement {
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
+	#[revision(start = 3)]
+	pub if_not_exists: bool,
 }
 
 impl DefineAnalyzerStatement {
@@ -35,6 +37,12 @@ impl DefineAnalyzerStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Check if analyzer already exists
+		if self.if_not_exists && run.get_db_analyzer(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			return Err(Error::AzAlreadyExists {
+				value: self.name.to_string()
+			});
+		}
 		// Process the statement
 		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
