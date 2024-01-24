@@ -688,7 +688,7 @@ impl Parser<'_> {
 
 	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
 		let mut names = vec![self.next_token_value()?];
-		while self.eat(t!("|")){
+		while self.eat(t!("|")) {
 			names.push(self.next_token_value()?);
 		}
 		Ok(Kind::Record(names))
