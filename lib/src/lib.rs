@@ -222,7 +222,8 @@ pub enum Error {
 	Api(#[from] crate::error::Api),
 }
 
-pub(crate) const FFLAGS: Lazy<BTreeMap<FFlag, &'static FFlagEnabledStatus>> = Lazy::new(|| {
+#[allow(dead_code)]
+pub(crate) static FFLAGS: Lazy<BTreeMap<FFlag, &'static FFlagEnabledStatus>> = Lazy::new(|| {
 	map!(
 		FFlag::ChangeFeedLiveQueries=> &FFlagEnabledStatus{
 			enabled_release: false,
@@ -239,12 +240,15 @@ pub(crate) const FFLAGS: Lazy<BTreeMap<FFlag, &'static FFlagEnabledStatus>> = La
 });
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+#[allow(dead_code)]
 pub(crate) enum FFlag {
 	ChangeFeedLiveQueries,
 }
 
 /// This struct is not used in the implementation;
 /// All the fields are here as information for people investigating the feature flag.
+#[allow(dead_code)]
 pub(crate) struct FFlagEnabledStatus {
 	pub(crate) enabled_release: bool,
 	pub(crate) enabled_debug: bool,
@@ -258,22 +262,25 @@ pub(crate) struct FFlagEnabledStatus {
 }
 
 impl FFlagEnabledStatus {
+	#[allow(dead_code)]
 	pub(crate) fn enabled(&self) -> bool {
+		let mut enabled = false;
+
 		// Test check
-		if true {
-			#[cfg(test)]
-			return self.enabled_test;
+		#[cfg(test)]
+		{
+			enabled = enabled || self.enabled_test;
 		}
 		// Debug build check
-		if true {
-			#[cfg(debug_assertions)]
-			return self.enabled_debug;
+		#[cfg(debug_assertions)]
+		{
+			enabled = enabled || self.enabled_debug;
 		}
 		// Release build check
-		if true {
-			#[cfg(not(debug_assertions))]
-			self.enabled_release;
+		#[cfg(not(debug_assertions))]
+		{
+			enabled = enabled || self.enabled_release;
 		}
-		return false;
+		enabled
 	}
 }
