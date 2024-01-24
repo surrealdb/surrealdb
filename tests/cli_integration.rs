@@ -19,13 +19,33 @@ mod cli_integration {
 	const TWO_SECS: time::Duration = time::Duration::new(2, 0);
 
 	#[test]
-	fn version() {
+	fn version_command() {
 		assert!(common::run("version").output().is_ok());
 	}
 
 	#[test]
-	fn help() {
+	fn version_flag_short() {
+		assert!(common::run("-V").output().is_ok());
+	}
+
+	#[test]
+	fn version_flag_long() {
+		assert!(common::run("--version").output().is_ok());
+	}
+
+	#[test]
+	fn help_command() {
 		assert!(common::run("help").output().is_ok());
+	}
+
+	#[test]
+	fn help_flag_short() {
+		assert!(common::run("-h").output().is_ok());
+	}
+
+	#[test]
+	fn help_flag_long() {
+		assert!(common::run("--help").output().is_ok());
 	}
 
 	#[test]

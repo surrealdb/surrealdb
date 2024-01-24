@@ -10,7 +10,7 @@ async fn write_scan_tblq() {
 	];
 
 	for live_id in live_ids {
-		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		let test = init(node_id, clock).await.unwrap();
 
 		// Write some data

@@ -8,6 +8,7 @@ fn main() {
 	println!("cargo:rerun-if-env-changed={BUILD_METADATA}");
 	println!("cargo:rerun-if-changed=lib");
 	println!("cargo:rerun-if-changed=src");
+	println!("cargo:rerun-if-changed=build.rs");
 	println!("cargo:rerun-if-changed=Cargo.toml");
 	println!("cargo:rerun-if-changed=Cargo.lock");
 	if let Some(metadata) = build_metadata() {

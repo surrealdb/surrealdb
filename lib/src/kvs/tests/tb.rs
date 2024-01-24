@@ -8,7 +8,7 @@ use crate::sql::statements::DefineTableStatement;
 async fn table_definitions_can_be_scanned() {
 	// Setup
 	let node_id = Uuid::parse_str("f7b2ba17-90ed-45f9-9aa2-906c6ba0c289").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 
@@ -52,7 +52,7 @@ async fn table_definitions_can_be_scanned() {
 async fn table_definitions_can_be_deleted() {
 	// Setup
 	let node_id = Uuid::parse_str("13c0e650-1710-489e-bb80-f882bce50b56").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 

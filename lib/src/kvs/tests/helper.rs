@@ -22,10 +22,7 @@ impl TestContext {
 
 /// Initialise logging and prepare a useable datastore
 /// In the future it would be nice to handle multiple datastores
-pub(crate) async fn init(
-	node_id: Uuid,
-	clock: Arc<RwLock<SizedClock>>,
-) -> Result<TestContext, Error> {
+pub(crate) async fn init(node_id: Uuid, clock: Arc<SizedClock>) -> Result<TestContext, Error> {
 	let (db, kvs) = new_ds(node_id, clock).await;
 	Ok(TestContext {
 		db,
