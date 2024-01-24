@@ -111,7 +111,7 @@ jobs:
         run: cargo vet
 
       - name: Check dependencies for unauthorized access
-        run: cargo acl
+        run: cargo acl -n
 
   check-wasm:
     name: Check Wasm
