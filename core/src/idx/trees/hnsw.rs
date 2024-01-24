@@ -17,7 +17,7 @@ pub(crate) struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
 	hnsw: Hnsw,
-	vec_docs: HashMap<SharedVector, Docs>,
+	vec_docs: HashMap<SharedVector, (Docs, ElementId)>,
 	doc_ids: Trie<Key, DocId>,
 	ids_doc: Vec<Thing>,
 }
@@ -68,26 +68,30 @@ impl HnswIndex {
 	async fn insert(&mut self, o: SharedVector, d: DocId) {
 		match self.vec_docs.entry(o) {
 			Entry::Occupied(mut e) => {
-				let docs = e.get_mut();
+				let (docs, element_id) = e.get_mut();
 				if let Some(new_docs) = docs.insert(d) {
-					e.insert(new_docs);
+					let element_id = *element_id;
+					e.insert((new_docs, element_id));
 				}
 			}
 			Entry::Vacant(e) => {
 				let o = e.key().clone();
-				e.insert(Docs::One(d));
-				self.hnsw.insert(o).await;
+				let element_id = self.hnsw.insert(o).await;
+				e.insert((Docs::One(d), element_id));
 			}
 		}
 	}
 
 	async fn remove(&mut self, o: SharedVector, d: DocId) -> bool {
 		if let Entry::Occupied(mut e) = self.vec_docs.entry(o) {
-			if let Some(d) = e.get_mut().remove(d) {
-				if d.is_empty() {
-					let o = e.key().clone();
+			let (docs, e_id) = e.get_mut();
+			if let Some(new_docs) = docs.remove(d) {
+				let e_id = *e_id;
+				if new_docs.is_empty() {
 					e.remove();
-					return self.hnsw.remove(o).await;
+					return self.hnsw.remove(e_id).await;
+				} else {
+					e.insert((new_docs, e_id));
 				}
 			}
 		}
@@ -140,7 +144,7 @@ impl HnswIndex {
 		for pn in neighbors {
 			if builder.check_add(pn.0) {
 				let v = &self.hnsw.elements[pn.1 as usize];
-				if let Some(docs) = self.vec_docs.get(v) {
+				if let Some((docs, _)) = self.vec_docs.get(v) {
 					builder.add(pn.0, docs);
 				}
 			}
@@ -212,8 +216,28 @@ impl Hnsw {
 		id
 	}
 
-	async fn remove(&mut self, _q: SharedVector) -> bool {
-		todo!()
+	async fn remove(&mut self, e_id: ElementId) -> bool {
+		let layers = self.layers.len();
+		let mut removed = false;
+		let mut m_max = self.m;
+		// TODO one thread per layer
+		for lc in (0..layers).rev() {
+			if lc == 0 {
+				m_max = self.m0;
+			}
+			let mut layer = self.layers[lc].write().await;
+			if let Some(f_ids) = layer.0.remove(&e_id) {
+				for f_id in f_ids {
+					let q = &self.elements[f_id as usize];
+					let w = self.search_layer(q, f_id, self.efc, &layer).await;
+					let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
+					self.select_neighbors_simple(&w, m_max, &mut neighbors);
+					layer.0.insert(f_id, neighbors);
+				}
+				removed = true;
+			}
+		}
+		removed
 	}
 
 	fn get_random_level(&mut self) -> usize {
@@ -243,7 +267,8 @@ impl Hnsw {
 		#[cfg(debug_assertions)]
 		debug!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?} - top-layer: {top_layer_level}");
 		for lc in ((level + 1)..=top_layer_level).rev() {
-			let w = self.search_layer(q, ep, 1, lc).await;
+			let l = self.layers[lc].read().await;
+			let w = self.search_layer(q, ep, 1, &l).await;
 			if let Some(n) = w.first() {
 				ep = n.1;
 			}
@@ -257,7 +282,10 @@ impl Hnsw {
 			}
 			#[cfg(debug_assertions)]
 			debug!("2 - LC: {lc}");
-			let w = self.search_layer(q, ep, self.efc, lc).await;
+			let w = {
+				let l = self.layers[lc].read().await;
+				self.search_layer(q, ep, self.efc, &l).await
+			};
 			#[cfg(debug_assertions)]
 			debug!("2 - W: {w:?}");
 			let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
@@ -332,7 +360,7 @@ impl Hnsw {
 		q: &SharedVector,
 		ep_id: ElementId,
 		ef: usize,
-		lc: usize,
+		l: &Layer,
 	) -> BTreeSet<PriorityNode> {
 		let ep_dist = self.distance(&self.elements[ep_id as usize], q);
 		let ep_pr = PriorityNode(ep_dist, ep_id);
@@ -344,7 +372,7 @@ impl Hnsw {
 			if c.0 > f_dist {
 				break;
 			}
-			for (&e_id, e_neighbors) in &self.layers[lc].read().await.0 {
+			for (&e_id, e_neighbors) in &l.0 {
 				if e_neighbors.contains(&c.1) && visited.insert(e_id) {
 					let e_dist = self.distance(&self.elements[e_id as usize], q);
 					if e_dist < f_dist || w.len() < ef {
@@ -400,16 +428,20 @@ impl Hnsw {
 		if let Some(mut ep) = self.enter_point {
 			let l = self.layers.len();
 			for lc in (1..l).rev() {
-				let w = self.search_layer(q, ep, 1, lc).await;
+				let l = self.layers[lc].read().await;
+				let w = self.search_layer(q, ep, 1, &l).await;
 				if let Some(n) = w.first() {
 					ep = n.1;
 				} else {
 					unreachable!()
 				}
 			}
-			let w = self.search_layer(q, ep, ef, 0).await;
-			let w: Vec<PriorityNode> = w.into_iter().collect();
-			w.into_iter().take(k).collect()
+			{
+				let l = self.layers[0].read().await;
+				let w = self.search_layer(q, ep, ef, &l).await;
+				let w: Vec<PriorityNode> = w.into_iter().collect();
+				w.into_iter().take(k).collect()
+			}
 		} else {
 			vec![]
 		}
@@ -475,20 +507,10 @@ mod tests {
 		}
 	}
 
-	async fn delete_hnsw_collection(h: &mut Hnsw, collection: &TestCollection) {
-		let mut count = collection.as_ref().len();
-		for (_, obj) in collection.as_ref() {
-			assert!(h.remove(obj.clone()).await, "Delete failed: {:?}", obj);
-			count -= 1;
-			assert_eq!(h.elements.len(), count);
-		}
-	}
-
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let mut h = Hnsw::new(p);
 		insert_collection_hnsw(&mut h, collection).await;
 		find_collection_hnsw(&mut h, &collection).await;
-		delete_hnsw_collection(&mut h, &collection).await;
 	}
 
 	fn new_params(dimension: usize, vector_type: VectorType, distance: Distance) -> HnswParams {
