@@ -1,3 +1,4 @@
+use crate::vs::Versionstamp;
 use std::fmt;
 use thiserror::Error;
 
@@ -74,6 +75,17 @@ pub fn try_u128_to_versionstamp(v: u128) -> Result<[u8; 10], Error> {
 	Ok(buf)
 }
 
+pub fn versionstamp_to_u64(vs: &Versionstamp) -> u64 {
+	(vs[0] as u64).wrapping_shl(8 * 8)
+		| (vs[1] as u64).wrapping_shl(7 * 8)
+		| (vs[2] as u64).wrapping_shl(6 * 8)
+		| (vs[3] as u64).wrapping_shl(5 * 8)
+		| (vs[4] as u64).wrapping_shl(4 * 8)
+		| (vs[5] as u64).wrapping_shl(3 * 8)
+		| (vs[6] as u64).wrapping_shl(2 * 8)
+		| (vs[7] as u64).wrapping_shl(1 * 8)
+		| (vs[8] as u64).wrapping_shl(0 * 8)
+}
 // to_u128_be converts a 10-byte versionstamp to a u128 assuming big-endian.
 // This is handy for human comparing versionstamps.
 #[allow(unused)]

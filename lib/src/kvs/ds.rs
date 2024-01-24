@@ -1,5 +1,5 @@
 use super::tx::Transaction;
-use crate::{cf, dbs};
+use crate::cf::TableMutation;
 use crate::ctx::Context;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
@@ -20,7 +20,8 @@ use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::LiveStatement;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
-use crate::vs::{Oracle, Versionstamp};
+use crate::vs::{conv, Oracle, Versionstamp};
+use crate::{cf, dbs};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
@@ -35,7 +36,6 @@ use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
-use crate::cf::TableMutation;
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -92,7 +92,7 @@ impl Ord for LqType {
 
 /// This is an internal-only helper struct for organising the keys of how live queries are accessed
 /// Because we want immutable keys, we cannot put mutable things in such as ts and vs
-#[derive(Copy, Clone)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
 struct LqIndexKey {
 	ns: String,
 	db: String,
@@ -102,7 +102,7 @@ struct LqIndexKey {
 
 /// Internal only struct
 /// This can be assumed to have a mutable reference
-#[derive(Copy, Clone)]
+#[derive(Eq, PartialEq, Clone)]
 struct LqIndexValue {
 	query: LiveStatement,
 	vs: Versionstamp,
@@ -388,6 +388,7 @@ impl Datastore {
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
 			index_stores: IndexStores::default(),
+			local_live_queries: RwLock::new(BTreeMap::new()),
 		})
 	}
 
@@ -855,7 +856,10 @@ impl Datastore {
 	}
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
-	pub async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<Versionstamp, Error> {
+	pub async fn save_timestamp_for_versionstamp(
+		&self,
+		ts: u64,
+	) -> Result<Option<Versionstamp>, Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
 			Ok(vs) => Ok(vs),
@@ -872,7 +876,11 @@ impl Datastore {
 		}
 	}
 
-	pub async fn process_lq_notifications(&self, ts: u64, vs: Versionstamp) -> Result<(), Error> {
+	pub async fn process_lq_notifications(
+		&self,
+		ts: u64,
+		vs: Option<Versionstamp>,
+	) -> Result<(), Error> {
 		// Return if there are no live queries
 		if self.notification_channel.is_none() {
 			return Ok(());
@@ -883,13 +891,14 @@ impl Datastore {
 
 		// Find live queries that need to catch up
 		let mut lqs_to_update = vec![];
-		for (k, v) in self.local_live_queries.read().await.iter() {
+		let lock = self.local_live_queries.read().await;
+		for (k, v) in lock.iter() {
 			// Skip if no need to update
 			if v.ts.value >= ts {
 				// This shouldn't be possible and/or may mean clock skew
 				continue;
 			};
-			if v.vs >= vs {
+			if vs.is_some() && v.vs >= vs.unwrap() {
 				// This means that there hasn't been a change
 				continue;
 			};
@@ -904,37 +913,42 @@ impl Datastore {
 		for (k, v) in lqs_to_update {
 			// Process notifications
 			let mut tx = self.transaction(Read, Optimistic).await?;
-			let changes =
-				cf::read(&mut tx, &k.ns, &k.db, Some(&k.tb), ShowSince::Versionstamp(), Some(1000))
-					.await?;
+			let changes = cf::read(
+				&mut tx,
+				&k.ns,
+				&k.db,
+				Some(&k.tb),
+				ShowSince::Versionstamp(conv::versionstamp_to_u64(&v.vs)),
+				Some(1000),
+			)
+			.await?;
 			for database_change in changes {
-				for table_changes in database_change.1.0 {
+				for table_changes in database_change.1 .0 {
 					for table_change in table_changes.1 {
 						// TODO enforce security
 						let not_type = match table_change {
-							TableMutation::Set(thing, value) => {
+							TableMutation::Set(_thing, value) => {
 								// Atm all sets are UPDATE
 								Some((dbs::Action::Update, Some(value)))
-							},
-							TableMutation::Del(thing) => {
-								Some((dbs::Action::Delete, None))
-							},
-							TableMutation::Def(stm) => {
-								None
-							},
-						},
-						if let
-						let _ = self
-							.notification_channel
-							.as_ref()
-							.unwrap()
-							.0
-							.send(Notification {
-								id: k.lq,
-								action: dbs::Action::Update,
-								result: table_change.,
-							})
-							.await;
+							}
+							TableMutation::Del(_thing) => Some((dbs::Action::Delete, None)),
+							TableMutation::Def(_stm) => None,
+						};
+						// We don't want to handle definition statements; Probably can be refactored better
+						if let Some((action, value)) = not_type {
+							let val = value.unwrap_or(Value::None);
+							self.notification_channel
+								.as_ref()
+								.unwrap()
+								.0
+								.send(Notification {
+									id: k.lq,
+									action,
+									result: val,
+								})
+								.await
+								.unwrap();
+						}
 					}
 				}
 			}
@@ -949,9 +963,9 @@ impl Datastore {
 					lq: k.lq,
 				},
 				LqIndexValue {
-					query: *v.query,
-					vs,
-					ts: *v.ts,
+					query: v.query.clone(),
+					vs: vs.expect("Can only track progress on live queries with a versionstamp from a change feed"),
+					ts: v.ts.clone(),
 				},
 			) {
 				// This shouldn't be possible
@@ -965,7 +979,7 @@ impl Datastore {
 		&self,
 		ts: u64,
 		tx: &mut Transaction,
-	) -> Result<Versionstamp, Error> {
+	) -> Result<Option<Versionstamp>, Error> {
 		let mut vs: Option<Versionstamp> = None;
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
@@ -979,7 +993,6 @@ impl Datastore {
 			}
 		}
 		tx.commit().await?;
-		let vs = vs.expect("No versionstamp was set");
 		Ok(vs)
 	}
 
