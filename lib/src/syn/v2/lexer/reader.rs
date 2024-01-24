@@ -72,7 +72,7 @@ impl<'a> BytesReader<'a> {
 
 	#[inline]
 	pub fn peek(&self) -> Option<u8> {
-		self.remaining().get(0).copied()
+		self.remaining().first().copied()
 	}
 	#[inline]
 	pub fn span(&self, span: Span) -> &[u8] {

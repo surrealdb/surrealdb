@@ -223,7 +223,7 @@ pub enum Error {
 }
 
 #[allow(dead_code)]
-pub(crate) const FFLAGS: Lazy<BTreeMap<FFlag, &'static FFlagEnabledStatus>> = Lazy::new(|| {
+pub(crate) static FFLAGS: Lazy<BTreeMap<FFlag, &'static FFlagEnabledStatus>> = Lazy::new(|| {
 	map!(
 		FFlag::ChangeFeedLiveQueries=> &FFlagEnabledStatus{
 			enabled_release: false,
