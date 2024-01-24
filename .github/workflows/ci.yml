@@ -102,7 +102,7 @@ jobs:
       - name: Install cargo-acl
         run: |
           cargo install --debug --locked cargo-acl
-          apt-get install -y bubblewrap
+          sudo apt-get install -y bubblewrap
 
       - name: Check dependencies for known issues
         run: cargo deny check
