@@ -39,6 +39,21 @@ on:
         type: boolean
         default: true
         description: "Enable ML support in binaries"
+      rust_version:
+        required: false
+        type: string
+        default: "1.75.0"
+        description: "The Rust version to use for building binaries"
+      onnx_version:
+        required: false
+        type: string
+        default: "1.16.3"
+        description: "The ONNX library version"
+    secrets:
+      AWS_CI_ACCESS_KEY_ID:
+        description: "AWS access key ID"
+      AWS_CI_SECRET_ACCESS_KEY:
+        description: "AWS secret access key"
 
 defaults:
   run:
@@ -56,7 +71,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.74.1
+          toolchain: ${{ inputs.rust_version }}
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -64,7 +79,10 @@ jobs:
           ref: ${{ inputs.git-ref }}
 
       - name: Install a TOML parser
-        run: cargo install --force --locked --version 0.8.1 taplo-cli
+        run: |
+          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
+          chmod +x taplo
+          sudo mv taplo /usr/bin/taplo
 
       - name: Configure git
         run: |
@@ -77,7 +95,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
             git push origin --delete releases/stable || true
@@ -107,7 +125,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
             if [[ "${{ inputs.bump-version }}" == "true" ]]; then
@@ -152,7 +170,7 @@ jobs:
         run: |
           set -x
 
-          version=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          version=$(taplo get -f lib/Cargo.toml "package.version")
 
           if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
@@ -179,7 +197,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: ${{ inputs.rust_version }}
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -221,7 +239,6 @@ jobs:
     needs: [prepare-vars]
     runs-on: ubuntu-latest
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
@@ -230,7 +247,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: ${{ inputs.rust_version }}
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -249,27 +266,69 @@ jobs:
       - name: Check clippy
         run: cargo make ci-clippy
 
-  docker-build:
-    name: Build Docker images
+  docker-builder:
+    name: Prepare docker builder
+    runs-on: ubuntu-latest
     needs: [prepare-vars]
-    uses: ./.github/workflows/reusable_docker.yml
-    with:
-      git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
-      tag-prefix: ${{ needs.prepare-vars.outputs.name }}
-      build: true
-      push: false
-    secrets: inherit
+    outputs:
+      name: ${{ steps.image.outputs.name }}
+      tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Prepare docker image name
+        id: image
+        run: |
+          set -x
+
+          # Use the github branch name so we can use modified builders on custom branches
+          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+
+          echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push builder image
+        uses: docker/build-push-action@v5
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          file: ./docker/Dockerfile
+          target: builder
+          cache-from: |
+            type=registry,ref=${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+            type=registry,ref=${{ steps.image.outputs.name }}:main
+          cache-to: type=inline
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          build-args: |
+            RUST_VERSION=${{ inputs.rust_version }}
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [prepare-vars]
+    needs: [prepare-vars, docker-builder]
     strategy:
       fail-fast: false
       matrix:
         include:
           # MacOS amd64
           - arch: x86_64-apple-darwin
-            runner: macos-latest-xl
+            runner: macos-latest-large
             file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
             build-step: |
               set -x
@@ -282,21 +341,28 @@ jobs:
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
+
               if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
+
+                # Download libonnxruntime's static library and tell ORT crate to use it
+                mkdir /tmp/onnxruntime
+                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-x86_64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                  tar -xz -C /tmp/onnxruntime/
+                export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
               fi
+
               cargo build --features $features --release --locked --target x86_64-apple-darwin
 
               # Package
               cp target/x86_64-apple-darwin/release/surreal surreal
-              chmod +x surreal
               ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64.txt
 
           # MacOS arm64
           - arch: aarch64-apple-darwin
-            runner: macos-latest-xl
+            runner: macos-latest-xlarge
             file: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
             build-step: |
               set -x
@@ -309,14 +375,21 @@ jobs:
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
+
               if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
+
+                # Download libonnxruntime's static library and tell ORT crate to use it
+                mkdir /tmp/onnxruntime
+                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-arm64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                  tar -xz -C /tmp/onnxruntime/
+                export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
               fi
               cargo build --features $features --release --locked --target aarch64-apple-darwin
 
               # Package
               cp target/aarch64-apple-darwin/release/surreal surreal
-              chmod +x surreal
+              ./surreal version
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64.txt
 
@@ -325,31 +398,42 @@ jobs:
             runner: ["self-hosted", "amd64", "builder"]
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
-              set -x
-
               # Build
               features=storage-tikv
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
+
               if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
+
+                # Download libonnxruntime's static library and tell ORT crate to use it
+                tmpdir=$(mktemp -d)
+                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-x64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                  tar -xz -C $tmpdir
+                export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
               fi
-              docker build \
-                --platform linux/amd64 \
-                --build-arg="CARGO_EXTRA_FEATURES=${features}" \
-                --build-arg="SURREAL_BUILD_METADATA=${SURREAL_BUILD_METADATA}" \
-                -t binary \
-                -f docker/Dockerfile.binary \
-                .
-              docker create --name binary binary
-              docker cp binary:/surrealdb/target/release/surreal surreal
-              
+
+              docker run \
+                --rm -t \
+                --pull always \
+                -v $(pwd):/surrealdb \
+                -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e ORT_STRATEGY=$ORT_STRATEGY \
+                -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
+                -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                  --target x86_64-unknown-linux-gnu --features ${features} --release --locked
+
               # Package
-              chmod +x surreal
-              ./surreal version
+              cp target/x86_64-unknown-linux-gnu/release/surreal surreal
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64.txt
+
+              # Verify the binary is compatible with various Linux distributions
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
@@ -363,24 +447,37 @@ jobs:
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
+
               if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
+
+                # Download libonnxruntime's static library and tell ORT crate to use it
+                tmpdir=$(mktemp -d)
+                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-aarch64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                  tar -xz -C $tmpdir
+                export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
               fi
-              docker build \
-                --platform linux/arm64 \
-                --build-arg="CARGO_EXTRA_FEATURES=${features}" \
-                --build-arg="SURREAL_BUILD_METADATA=${SURREAL_BUILD_METADATA}" \
-                -t binary \
-                -f docker/Dockerfile.binary \
-                .
-              docker create --name binary binary
-              docker cp binary:/surrealdb/target/release/surreal surreal
+
+              docker run \
+                --rm -t \
+                --pull always \
+                -v $(pwd):/surrealdb \
+                -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e ORT_STRATEGY=$ORT_STRATEGY \
+                -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
+                -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                  --target aarch64-unknown-linux-gnu --features ${features} --release --locked
 
               # Package
-              chmod +x surreal
-              ./surreal version
+              cp target/aarch64-unknown-linux-gnu/release/surreal surreal
               tar -zcvf surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz surreal
               echo $(shasum -a 256 surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ needs.prepare-vars.outputs.name }}.linux-arm64.txt
+
+              # Verify the binary is compatible with various Linux distributions
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
 
           # Windows amd64
           - arch: x86_64-pc-windows-msvc
@@ -397,9 +494,17 @@ jobs:
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
+
               if [[ "${{ inputs.ml }}" == "true" ]]; then
                 features=${features},ml
+
+                # Download libonnxruntime's static library and tell ORT crate to use it
+                tmp_dir=$(mktemp -d)
+                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx_version }}.zip -o $tmp_dir/onnxruntime.zip
+                unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
+                export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
               fi
+
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
               # Package
@@ -414,27 +519,24 @@ jobs:
         with:
           ref: ${{ needs.prepare-vars.outputs.git-ref }}
 
-      - name: Checkout docker
-        uses: actions/checkout@v4
-        with:
-          path: _docker
-  
-      # Replace docker files. It allows us to test new Dockerfiles with workflow_dispatch and a custom git ref.
-      # When triggered by a push or a schedule, this git ref will be the same as 'inputs.git-ref'
-      - name: Replace docker files
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          rm -rf docker .dockerignore
-          mv _docker/docker .
-          mv _docker/.dockerignore .
-          rm -rf _docker
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.74.1
+          toolchain: ${{ inputs.rust_version }}
           targets: ${{ matrix.arch }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        with:
+          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Output package versions
         run: |
@@ -459,7 +561,7 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    needs: [prepare-vars, test, lint, build, docker-build]
+    needs: [prepare-vars, test, lint, build]
     if: ${{ inputs.publish }}
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
@@ -472,14 +574,19 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.74.1
+          toolchain: ${{ inputs.rust_version }}
 
       - name: Install release-plz
-        run: cargo install --force --locked --version 0.3.30 release-plz
+        run: |
+          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          sudo chmod +x /usr/bin/release-plz
 
       - name: Install a TOML parser
         if: ${{ inputs.environment == 'beta' }}
-        run: cargo install --force --locked --version 0.8.1 taplo-cli
+        run: |
+          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
+          chmod +x taplo
+          sudo mv taplo /usr/bin/taplo
 
       - name: Create a temporary branch
         run: git checkout -b crate
@@ -500,7 +607,7 @@ jobs:
           set -x
 
           # Derive crate version
-          currentVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
@@ -509,7 +616,7 @@ jobs:
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
 
-      - name:  Patch nightly crate version
+      - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
         run: |
           # Get the date and time of the last commit
@@ -541,7 +648,7 @@ jobs:
       - name: Publish the crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: /home/runner/.cargo/bin/release-plz release --config /tmp/release-plz.toml
+        run: release-plz release --config /tmp/release-plz.toml
 
       - name: Download artifacts
         uses: actions/download-artifact@v3
@@ -586,15 +693,15 @@ jobs:
             aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
           done
 
-  docker-publish:
-    name: Publish Docker images
+  docker:
+    name: Docker images
     needs: [prepare-vars, publish]
     uses: ./.github/workflows/reusable_docker.yml
     with:
       git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
       tag-prefix: ${{ needs.prepare-vars.outputs.name }}
       latest: ${{ inputs.latest }}
-      build: false
+      build: true
       push: true
     secrets: inherit
 
