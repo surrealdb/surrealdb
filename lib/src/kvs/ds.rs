@@ -848,7 +848,7 @@ impl Datastore {
 	// without depending on a system clock.
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
 		let vs = self.save_timestamp_for_versionstamp(ts).await?;
-		if FFLAGS.get(&FFlag::ChangeFeedLiveQueries).unwrap().enabled() {
+		if FFLAGS.change_feed_live_queries.enabled() {
 			self.process_lq_notifications(ts, vs).await?;
 		}
 		self.garbage_collect_stale_change_feeds(ts).await?;
