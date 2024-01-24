@@ -158,6 +158,8 @@ pub use api::Response;
 pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
+use once_cell::sync::Lazy;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 #[doc(hidden)]
@@ -218,4 +220,60 @@ pub enum Error {
 	/// An error with a remote database instance
 	#[error("{0}")]
 	Api(#[from] crate::error::Api),
+}
+
+pub(crate) const FFLAGS: Lazy<BTreeMap<FFlag, &'static FFlagEnabledStatus>> = Lazy::new(|| {
+	map!(
+		FFlag::ChangeFeedLiveQueries=> &FFlagEnabledStatus{
+			enabled_release: false,
+			enabled_debug: false,
+			enabled_test: false,
+			owner: "Hugh Kaznowski",
+			description: "Disables live queries as a separate feature and moves to using change feeds as the underlying mechanism",
+			date_enabled_test: None,
+			date_enabled_debug: None,
+			date_enabled_release: None,
+			release_version: None,
+		}
+	)
+});
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub(crate) enum FFlag {
+	ChangeFeedLiveQueries,
+}
+
+/// This struct is not used in the implementation;
+/// All the fields are here as information for people investigating the feature flag.
+pub(crate) struct FFlagEnabledStatus {
+	pub(crate) enabled_release: bool,
+	pub(crate) enabled_debug: bool,
+	pub(crate) enabled_test: bool,
+	pub(crate) owner: &'static str,
+	pub(crate) description: &'static str,
+	pub(crate) date_enabled_test: Option<&'static str>,
+	pub(crate) date_enabled_debug: Option<&'static str>,
+	pub(crate) date_enabled_release: Option<&'static str>,
+	pub(crate) release_version: Option<&'static str>,
+}
+
+impl FFlagEnabledStatus {
+	pub(crate) fn enabled(&self) -> bool {
+		// Test check
+		if true {
+			#[cfg(test)]
+			return self.enabled_test;
+		}
+		// Debug build check
+		if true {
+			#[cfg(debug_assertions)]
+			return self.enabled_debug;
+		}
+		// Release build check
+		if true {
+			#[cfg(not(debug_assertions))]
+			self.enabled_release;
+		}
+		return false;
+	}
 }
