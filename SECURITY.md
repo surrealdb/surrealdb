@@ -54,7 +54,8 @@ possible workarounds.
 Vulnerabilities in third-party dependencies may only be independently published by SurrealDB when they affect a
 SurrealDB binary or platform. In those cases, the original CVE identifier will be referenced. Vulnerabilities affecting
 SurrealDB libraries will not be published again by SurrealDB when an advisory already exists for the original dependency
-as security tooling (e.g. `cargo audit` or Dependabot) will already be able to track it up the dependency tree.
+as security tooling (e.g. `cargo audit`, or `cargo deny check` or Dependabot) will already be able to track it up the 
+dependency tree.
 
 ## Security Updates
 
@@ -79,7 +80,7 @@ changes will only be included in major and minor releases; never in patch releas
 ### Dependencies
 
 Dependencies used by SurrealDB are [checked for known vulnerabilities in
-CI](https://github.com/surrealdb/surrealdb/pull/3123) using `cargo audit`. Developers are required to either update,
+CI](https://github.com/surrealdb/surrealdb/pull/3386) using `cargo deny check`. Developers are required to either update,
 replace or acknowledge vulnerable dependencies found during the approval process of every pull request. Additionally,
 SurrealDB makes use of Github's [Dependabot
 alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) to continuously

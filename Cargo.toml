@@ -43,7 +43,12 @@ axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
 ciborium = "0.2.1"
-clap = { version = "4.4.11", features = ["env", "derive", "wrap_help", "unicode"] }
+clap = { version = "4.4.11", features = [
+	"env",
+	"derive",
+	"wrap_help",
+	"unicode",
+] }
 futures = "0.3.29"
 futures-util = "0.3.29"
 glob = "0.3.1"
@@ -57,21 +62,39 @@ opentelemetry = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
 pin-project-lite = "0.2.13"
 rand = "0.8.5"
-reqwest = { version = "0.11.22", default-features = false, features = ["blocking", "gzip"] }
+reqwest = { version = "0.11.22", default-features = false, features = [
+	"blocking",
+	"gzip",
+] }
 rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }
-serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
-surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
-surrealml-core = { version = "0.0.3", optional = true}
+surrealdb = { version = "1", path = "lib", features = [
+	"protocol-http",
+	"protocol-ws",
+	"rustls",
+] }
+surrealml-core = { version = "0.0.7", optional = true }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.10", features = ["io"] }
 tower = "0.4.13"
-tower-http = { version = "0.4.4", features = ["trace", "sensitive-headers", "auth", "request-id", "util", "catch-panic", "cors", "set-header", "limit", "add-extension", "compression-full"] }
+tower-http = { version = "0.4.4", features = [
+	"trace",
+	"sensitive-headers",
+	"auth",
+	"request-id",
+	"util",
+	"catch-panic",
+	"cors",
+	"set-header",
+	"limit",
+	"add-extension",
+	"compression-full",
+] }
 tracing = "0.1"
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
@@ -93,7 +116,12 @@ jemallocator = "0.5.4"
 [dev-dependencies]
 assert_fs = "1.0.13"
 env_logger = "0.10.1"
-opentelemetry-proto = { version = "0.2.0", features = ["gen-tonic", "traces", "metrics", "logs"] }
+opentelemetry-proto = { version = "0.2.0", features = [
+	"gen-tonic",
+	"traces",
+	"metrics",
+	"logs",
+] }
 rcgen = "0.11.3"
 serial_test = "2.0.0"
 temp-env = { version = "0.3.6", features = ["async_closure"] }
@@ -116,8 +144,16 @@ depends = "$auto"
 section = "utility"
 priority = "optional"
 assets = [
-    ["target/release/surreal", "usr/share/surrealdb/surreal", "755"],
-    ["pkg/deb/README", "usr/share/surrealdb/README", "644"],
+	[
+		"target/release/surreal",
+		"usr/share/surrealdb/surreal",
+		"755",
+	],
+	[
+		"pkg/deb/README",
+		"usr/share/surrealdb/README",
+		"644",
+	],
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]

@@ -1,9 +1,0 @@
-#
-# Dockerfile that builds SurrealDB docker images for multiple architectures.
-#
-
-ARG TAG IMAGE_REPO
-
-FROM ${IMAGE_REPO}:${TARGETARCH}-${TAG}
-
-ARG TARGETARCH
