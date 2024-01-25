@@ -41,21 +41,38 @@ impl Parser<'_> {
 
 	pub fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
 		let name = self.next_token_value()?;
-		let comment = self.eat(t!("COMMENT")).then(|| self.next_token_value()).transpose()?;
-		Ok(DefineNamespaceStatement {
+		let mut res = DefineNamespaceStatement {
 			id: None,
 			name,
-			comment,
-		})
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = Some(self.next_token_value()?);
+				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
+				}
+				_ => break,
+			}
+		}
+
+		let comment = self.eat(t!("COMMENT")).then(|| self.next_token_value()).transpose()?;
+
+		Ok()
 	}
 
 	pub fn parse_define_database(&mut self) -> ParseResult<DefineDatabaseStatement> {
 		let name = self.next_token_value()?;
 		let mut res = DefineDatabaseStatement {
-			id: None,
 			name,
-			comment: None,
-			changefeed: None,
+			..Default::default()
 		};
 		loop {
 			match self.peek_kind() {
@@ -66,6 +83,12 @@ impl Parser<'_> {
 				t!("CHANGEFEED") => {
 					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
+				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
 				}
 				_ => break,
 			}
@@ -115,6 +138,12 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.permissions = self.parse_permission_value()?;
 				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
+				}
 				_ => break,
 			}
 		}
@@ -154,6 +183,12 @@ impl Parser<'_> {
 						res.roles.push(self.next_token_value()?);
 					}
 				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
+				}
 				_ => break,
 			}
 		}
@@ -191,6 +226,12 @@ impl Parser<'_> {
 						x => unexpected!(self, x, "a token algorithm"),
 					}
 				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
+				}
 				_ => break,
 			}
 		}
@@ -224,6 +265,12 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.signin = Some(self.parse_value()?);
 				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
+				}
 				_ => break,
 			}
 		}
@@ -252,6 +299,12 @@ impl Parser<'_> {
 				t!("PERMISSIONS") => {
 					self.pop_peek();
 					res.permissions = self.parse_permission_value()?;
+				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
 				}
 				_ => break,
 			}
@@ -307,6 +360,12 @@ impl Parser<'_> {
 						x => unexpected!(self, x, "`SELECT`"),
 					}
 				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
+				}
 				_ => break,
 			}
 		}
@@ -342,6 +401,12 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
+				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
 				}
 				_ => break,
 			}
@@ -395,6 +460,12 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
+				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
 				}
 				_ => break,
 			}
@@ -554,6 +625,12 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
+				}
 				_ => break,
 			}
 		}
@@ -565,10 +642,7 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
-			function: None,
-			tokenizers: None,
-			filters: None,
-			comment: None,
+			..Default::default()
 		};
 		loop {
 			match self.peek_kind() {
@@ -650,6 +724,12 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
+				}
+				t!("IF") => {
+					self.pop_peek();
+					expected!(self, t!("NOT"));
+					expected!(self, t!("EXISTS"));
+					res.if_not_exists = true;
 				}
 				_ => break,
 			}
