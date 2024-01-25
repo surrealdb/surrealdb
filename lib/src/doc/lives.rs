@@ -6,13 +6,13 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::fflags::FFLAGS;
 use crate::sql::paths::META;
 use crate::sql::paths::SC;
 use crate::sql::paths::SD;
 use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::Value;
-use crate::FFLAGS;
 use std::ops::Deref;
 use std::sync::Arc;
 
