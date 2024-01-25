@@ -2,7 +2,7 @@
 
 ## Goal
 
-Our main goal with supply chain security is to mitigate the impact of attackers introducing malicious code into dependencies that SurrealDB relies on. At this stage, our aim is to introduce a basic mechanism by which dependency source and access is at least considered as part of the CI process, to reduce the attack surface of SurrealDB by limiting the number of dependencies completely exposed to supply chain attacks and to raise the bar for the effort needed to perform a successful supply chain attack against many of the current SurrealDB dependencies.
+Our main goal with supply chain security is to mitigate the impact of attackers introducing malicious code into third-party dependencies that SurrealDB relies on. At this stage, our aim is to introduce a basic mechanism by which dependency source and access is at least considered as part of the CI process, to reduce the attack surface of SurrealDB by limiting the number of dependencies completely exposed to supply chain attacks and to raise the bar for the effort needed to perform a successful supply chain attack against many of the current SurrealDB dependencies.
 
 ## Mechanism
 
