@@ -128,6 +128,25 @@ build.allow_build_instructions = [
     "cargo:rustc-link-search=native=*",
 ]
 
+[pkg.librocksdb-sys]
+allow_unsafe = true
+build.sandbox.allow_network = true
+build.sandbox.make_writable = [
+    "target",
+]
+build.allow_apis = [
+    "fs",
+    "process",
+]
+build.allow_build_instructions = [
+    "cargo:rustc-link-lib=static=rocksdb",
+    "cargo:rustc-link-search=native=*",
+    "cargo:rustc-link-lib=stdc++",
+    "cargo:rustc-link-lib=static=snappy",
+    "cargo:cargo_manifest_dir=*",
+    "cargo:out_dir=*",
+]
+
 #
 # Other (e.g. Unsafe, Filesystem, Network, Procedural Macros...)
 #
@@ -818,16 +837,6 @@ allow_unsafe = true
 
 [pkg.stacker]
 allow_unsafe = true
-
-[pkg.librocksdb-sys]
-build.allow_apis = [
-    "fs",
-    "process",
-]
-allow_unsafe = true
-
-[pkg.librocksdb-sys.build.sandbox]
-allow_network = true
 
 [pkg.brotli]
 allow_unsafe = true
