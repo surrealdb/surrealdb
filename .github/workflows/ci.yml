@@ -114,6 +114,7 @@ jobs:
         run: cargo acl -n
 
       - name: Dependency check failure
+        if: failure()
         run: |
           echo "Dependency check failed. See instructions in the [supply chain security process](./supply-chain/README.md#Process)."
           echo "##[set-output name=failure_message]::Dependency check failed. See instructions in the [supply chain security process](./supply-chain/README.md#Process)."
