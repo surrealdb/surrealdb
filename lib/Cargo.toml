@@ -63,6 +63,7 @@ arbitrary = [
 experimental-parser = ["dep:phf", "dep:unicase"]
 # Private features
 kv-fdb = ["foundationdb", "tokio/time"]
+__feat_lq_on_cf = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
