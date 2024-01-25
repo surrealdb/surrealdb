@@ -43,10 +43,11 @@ impl FFlagEnabledStatus {
 	pub(crate) fn enabled(&self) -> bool {
 		let mut enabled = false;
 		if let Ok(env_var) = std::env::var(self.env_override) {
-			if env_var == "0" || env_var == "false" {
-				return false;
+			let env_var = env_var.to_lowercase().trim();
+			if env_var == "1" || env_var == "true" {
+				return true;
 			}
-			return true;
+			return false;
 		}
 		// Test check
 		#[cfg(test)]
