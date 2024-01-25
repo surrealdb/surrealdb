@@ -97,7 +97,7 @@ impl DefineTokenStatement {
 				run.clear_cache();
 				// Check if token already exists
 				if self.if_not_exists
-					&& run.get_sc_token(opt.ns(), opt.db(), &sc, &self.name).await.is_ok()
+					&& run.get_sc_token(opt.ns(), opt.db(), sc, &self.name).await.is_ok()
 				{
 					return Err(Error::StAlreadyExists {
 						value: self.name.to_string(),

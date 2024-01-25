@@ -63,9 +63,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let comment = self.eat(t!("COMMENT")).then(|| self.next_token_value()).transpose()?;
-
-		Ok()
+		Ok(res)
 	}
 
 	pub fn parse_define_database(&mut self) -> ParseResult<DefineDatabaseStatement> {
