@@ -2561,8 +2561,8 @@ async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(
 #[tokio::test]
 async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER;
-		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2581,8 +2581,8 @@ async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 #[tokio::test]
 async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
-		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2593,7 +2593,7 @@ async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<()
 	assert_eq!(tmp, Value::None);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::StAlreadyExists { .. }),);
+	assert!(matches!(tmp, Error::UserRootAlreadyExists { .. }),);
 	//
 	Ok(())
 }
