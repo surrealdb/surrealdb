@@ -18,7 +18,7 @@ pub(crate) static FFLAGS: FFlags = FFlags {
 #[non_exhaustive]
 #[allow(dead_code)]
 pub(crate) struct FFlags {
-	change_feed_live_queries: FFlagEnabledStatus,
+	pub(crate) change_feed_live_queries: FFlagEnabledStatus,
 }
 
 /// This struct is not used in the implementation;
