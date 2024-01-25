@@ -53,6 +53,9 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 			DefineUserOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			DefineUserOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Return the statement
@@ -64,10 +67,11 @@ enum DefineUserOption {
 	Passhash(String),
 	Roles(Vec<Ident>),
 	Comment(Strand),
+	IfNotExists(bool),
 }
 
 fn user_opts(i: &str) -> IResult<&str, Vec<DefineUserOption>> {
-	many0(alt((user_pass, user_hash, user_roles, user_comment)))(i)
+	many0(alt((user_pass, user_hash, user_roles, user_comment, user_if_not_exists)))(i)
 }
 
 fn user_pass(i: &str) -> IResult<&str, DefineUserOption> {
@@ -107,4 +111,14 @@ fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
 	})(i)?;
 
 	Ok((i, DefineUserOption::Roles(roles)))
+}
+
+fn user_if_not_exists(i: &str) -> IResult<&str, DefineUserOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineUserOption::IfNotExists(true)))
 }

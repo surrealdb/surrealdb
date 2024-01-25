@@ -36,6 +36,9 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 			DefineScopeOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			DefineScopeOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Return the statement
@@ -47,10 +50,11 @@ enum DefineScopeOption {
 	Signup(Value),
 	Signin(Value),
 	Comment(Strand),
+	IfNotExists(bool),
 }
 
 fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
-	alt((scope_session, scope_signup, scope_signin, scope_comment))(i)
+	alt((scope_session, scope_signup, scope_signin, scope_comment, scope_if_not_exists))(i)
 }
 
 fn scope_session(i: &str) -> IResult<&str, DefineScopeOption> {
@@ -83,4 +87,14 @@ fn scope_comment(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineScopeOption::Comment(v)))
+}
+
+fn scope_if_not_exists(i: &str) -> IResult<&str, DefineScopeOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineScopeOption::IfNotExists(true)))
 }

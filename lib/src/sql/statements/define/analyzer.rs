@@ -20,6 +20,7 @@ pub struct DefineAnalyzerStatement {
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
 	#[revision(start = 3)]
+	#[serde(skip_serializing_if = "std::ops::Not::not")]
 	pub if_not_exists: bool,
 }
 
@@ -47,7 +48,12 @@ impl DefineAnalyzerStatement {
 		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
+		// Persist the definition
+		run.set(key, DefineAnalyzerStatement {
+			// Don't persist the "IF NOT EXISTS" clause to schema
+			if_not_exists: false,
+			..self.clone()
+		}).await?;
 		// Release the transaction
 		drop(run); // Do we really need this?
 		   // Ok all good
@@ -71,6 +77,9 @@ impl Display for DefineAnalyzerStatement {
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
+		}
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
 		}
 		Ok(())
 	}

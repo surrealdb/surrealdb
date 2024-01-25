@@ -11,13 +11,16 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub when: Value,
 	pub then: Values,
 	pub comment: Option<Strand>,
+	#[revision(start = 2)]
+	#[serde(skip_serializing_if = "std::ops::Not::not")]
+	pub if_not_exists: bool,
 }
 
 impl DefineEventStatement {
@@ -35,12 +38,21 @@ impl DefineEventStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Check if event already exists
+		if self.if_not_exists && run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok() {
+			return Err(Error::EvAlreadyExists {
+				value: self.name.to_string()
+			});
+		}
 		// Process the statement
 		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
-		run.set(key, self).await?;
+		run.set(key, DefineEventStatement {
+			if_not_exists: false,
+			..self.clone()
+		}).await?;
 		// Clear the cache
 		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
@@ -58,6 +70,9 @@ impl Display for DefineEventStatement {
 		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
+		}
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
 		}
 		Ok(())
 	}

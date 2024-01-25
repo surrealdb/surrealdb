@@ -52,6 +52,9 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			DefineIndexOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			DefineIndexOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Check necessary options
@@ -70,10 +73,11 @@ enum DefineIndexOption {
 	Index(Index),
 	Columns(Idioms),
 	Comment(Strand),
+	IfNotExists(bool),
 }
 
 fn index_opts(i: &str) -> IResult<&str, DefineIndexOption> {
-	alt((index_kind, index_columns, index_comment))(i)
+	alt((index_kind, index_columns, index_comment, index_if_not_exists))(i)
 }
 
 fn index_kind(i: &str) -> IResult<&str, DefineIndexOption> {
@@ -96,6 +100,16 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = strand(i)?;
 	Ok((i, DefineIndexOption::Comment(v)))
+}
+
+fn index_if_not_exists(i: &str) -> IResult<&str, DefineIndexOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineIndexOption::IfNotExists(true)))
 }
 
 #[cfg(test)]
@@ -122,6 +136,7 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Idx,
 				comment: None,
+				if_not_exists: false,
 			}
 		);
 		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col");
@@ -139,6 +154,7 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Uniq,
 				comment: None,
+				if_not_exists: false,
 			}
 		);
 		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col UNIQUE");
@@ -173,6 +189,7 @@ mod tests {
 					terms_cache: 400,
 				}),
 				comment: None,
+				if_not_exists: false,
 			}
 		);
 		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) \
@@ -204,6 +221,7 @@ mod tests {
 					terms_cache: 100,
 				}),
 				comment: None,
+				if_not_exists: false,
 			}
 		);
 		assert_eq!(
@@ -232,6 +250,7 @@ mod tests {
 					mtree_cache: 100,
 				}),
 				comment: None,
+				if_not_exists: false,
 			}
 		);
 		assert_eq!(

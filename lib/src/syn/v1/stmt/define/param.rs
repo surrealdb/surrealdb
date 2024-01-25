@@ -40,6 +40,9 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 			DefineParamOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			DefineParamOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Check necessary options
@@ -58,10 +61,11 @@ enum DefineParamOption {
 	Value(Value),
 	Comment(Strand),
 	Permissions(Permission),
+	IfNotExists(bool),
 }
 
 fn param_opts(i: &str) -> IResult<&str, DefineParamOption> {
-	alt((param_value, param_comment, param_permissions))(i)
+	alt((param_value, param_comment, param_permissions, param_if_not_exists))(i)
 }
 
 fn param_value(i: &str) -> IResult<&str, DefineParamOption> {
@@ -86,6 +90,16 @@ fn param_permissions(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(permission)(i)?;
 	Ok((i, DefineParamOption::Permissions(v)))
+}
+
+fn param_if_not_exists(i: &str) -> IResult<&str, DefineParamOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineParamOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

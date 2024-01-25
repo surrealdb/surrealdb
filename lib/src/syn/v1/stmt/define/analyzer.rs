@@ -36,6 +36,9 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 			DefineAnalyzerOption::Tokenizers(v) => {
 				res.tokenizers = Some(v);
 			}
+			DefineAnalyzerOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Return the statement
@@ -47,10 +50,11 @@ enum DefineAnalyzerOption {
 	Comment(Strand),
 	Filters(Vec<Filter>),
 	Tokenizers(Vec<Tokenizer>),
+	IfNotExists(bool),
 }
 
 fn analyzer_opts(i: &str) -> IResult<&str, DefineAnalyzerOption> {
-	alt((analyzer_function, analyzer_comment, analyzer_filters, analyzer_tokenizers))(i)
+	alt((analyzer_function, analyzer_comment, analyzer_filters, analyzer_tokenizers, analyzer_if_not_exists))(i)
 }
 
 fn analyzer_function(i: &str) -> IResult<&str, DefineAnalyzerOption> {
@@ -84,4 +88,14 @@ fn analyzer_tokenizers(i: &str) -> IResult<&str, DefineAnalyzerOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(tokenizers)(i)?;
 	Ok((i, DefineAnalyzerOption::Tokenizers(v)))
+}
+
+fn analyzer_if_not_exists(i: &str) -> IResult<&str, DefineAnalyzerOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineAnalyzerOption::IfNotExists(true)))
 }

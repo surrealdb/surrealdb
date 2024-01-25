@@ -780,9 +780,126 @@ pub enum Error {
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
 
-	/// The requested analyzer does not exist
+	/// The requested analyzer already exists
 	#[error("The analyzer '{value}' already exists")]
 	AzAlreadyExists {
+		value: String,
+	},
+
+	/// The requested database already exists
+	#[error("The database '{value}' already exists")]
+	DbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested event already exists
+	#[error("The event '{value}' already exists")]
+	EvAlreadyExists {
+		value: String,
+	},
+
+	/// The requested field already exists
+	#[error("The field '{value}' already exists")]
+	FdAlreadyExists {
+		value: String,
+	},
+
+	/// The requested function already exists
+	#[error("The function '{value}' already exists")]
+	FcAlreadyExists {
+		value: String,
+	},
+
+	/// The requested index already exists
+	#[error("The index '{value}' already exists")]
+	IxAlreadyExists {
+		value: String,
+	},
+
+	/// The requested model already exists
+	#[error("The model '{value}' already exists")]
+	MlAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace already exists
+	#[error("The namespace '{value}' already exists")]
+	NsAlreadyExists {
+		value: String,
+	},
+
+	/// The requested param already exists
+	#[error("The param '{value}' already exists")]
+	PaAlreadyExists {
+		value: String,
+	},
+
+	/// The requested field already exists
+	#[error("The field '{value}' already exists")]
+	ScAlreadyExists {
+		value: String,
+	},
+
+	/// The requested table already exists
+	#[error("The table '{value}' already exists")]
+	TbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace token already exists
+	#[error("The token '{value}' already exists in the namespace '{ns}'")]
+	NtAlreadyExists {
+		value: String,
+		ns: String,
+	},
+
+	/// The requested database token already exists
+	#[error("The token '{value}' already exists in the database '{db}'")]
+	DtAlreadyExists {
+		value: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested scope token already exists
+	#[error("The token '{value}' already exists in the scope '{sc}'")]
+	StAlreadyExists {
+		value: String,
+		ns: String,
+		db: String,
+		sc: String,
+	},
+
+	/// The requested user already exists
+	#[error("The user '{value}' already exists")]
+	UserRootAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace user already exists
+	#[error("The user '{value}' already exists in the namespace '{ns}'")]
+	UserNsAlreadyExists {
+		value: String,
+		ns: String,
+	},
+
+	/// The requested database user already exists
+	#[error("The user '{value}' already exists in the database '{db}'")]
+	UserDbAlreadyExists {
+		value: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The requested field does not exist
+	#[error("The field '{value}' does not exist")]
+	FdNotFound {
+		value: String,
+	},
+
+	/// The requested event does not exist
+	#[error("The event '{value}' does not exist")]
+	EvNotFound {
 		value: String,
 	},
 }

@@ -53,6 +53,9 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 			DefineTokenOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			DefineTokenOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Check necessary options
@@ -71,10 +74,11 @@ enum DefineTokenOption {
 	Type(Algorithm),
 	Value(String),
 	Comment(Strand),
+	IfNotExists(bool),
 }
 
 fn token_opts(i: &str) -> IResult<&str, DefineTokenOption> {
-	alt((token_type, token_value, token_comment))(i)
+	alt((token_type, token_value, token_comment, token_if_not_exists))(i)
 }
 
 fn token_type(i: &str) -> IResult<&str, DefineTokenOption> {
@@ -99,6 +103,16 @@ fn token_comment(i: &str) -> IResult<&str, DefineTokenOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineTokenOption::Comment(v)))
+}
+
+fn token_if_not_exists(i: &str) -> IResult<&str, DefineTokenOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineTokenOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

@@ -11,13 +11,16 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
 	pub kind: Algorithm,
 	pub code: String,
 	pub comment: Option<Strand>,
+	#[revision(start = 2)]
+	#[serde(skip_serializing_if = "std::ops::Not::not")]
+	pub if_not_exists: bool,
 }
 
 impl DefineTokenStatement {
@@ -37,10 +40,20 @@ impl DefineTokenStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
+				// Check if token already exists
+				if self.if_not_exists && run.get_ns_token(opt.ns(), &self.name).await.is_ok() {
+					return Err(Error::NtAlreadyExists {
+						value: self.name.to_string(),
+						ns: opt.ns().into(),
+					});
+				}
 				// Process the statement
 				let key = crate::key::namespace::tk::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
-				run.set(key, self).await?;
+				run.set(key, DefineTokenStatement {
+					if_not_exists: false,
+					..self.clone()
+				}).await?;
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -49,12 +62,22 @@ impl DefineTokenStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
+				// Check if token already exists
+				if self.if_not_exists && run.get_db_token(opt.ns(), opt.db(), &self.name).await.is_ok() {
+					return Err(Error::DtAlreadyExists {
+						value: self.name.to_string(),
+						ns: opt.ns().into(),
+						db: opt.db().into(),
+					});
+				}
 				// Process the statement
 				let key = crate::key::database::tk::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.set(key, self).await?;
-				// Ok all good
+				run.set(key, DefineTokenStatement {
+					if_not_exists: false,
+					..self.clone()
+				}).await?;				// Ok all good
 				Ok(Value::None)
 			}
 			Base::Sc(sc) => {
@@ -62,13 +85,24 @@ impl DefineTokenStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
+				// Check if token already exists
+				if self.if_not_exists && run.get_sc_token(opt.ns(), opt.db(), &sc, &self.name).await.is_ok() {
+					return Err(Error::StAlreadyExists {
+						value: self.name.to_string(),
+						ns: opt.ns().into(),
+						db: opt.db().into(),
+						sc: sc.to_string(),
+					});
+				}
 				// Process the statement
 				let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.add_sc(opt.ns(), opt.db(), sc, opt.strict).await?;
-				run.set(key, self).await?;
-				// Ok all good
+				run.set(key, DefineTokenStatement {
+					if_not_exists: false,
+					..self.clone()
+				}).await?;				// Ok all good
 				Ok(Value::None)
 			}
 			// Other levels are not supported

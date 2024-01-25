@@ -30,6 +30,9 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 			DefineDatabaseOption::ChangeFeed(v) => {
 				res.changefeed = Some(v);
 			}
+			DefineDatabaseOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Return the statement
@@ -39,10 +42,11 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 enum DefineDatabaseOption {
 	Comment(Strand),
 	ChangeFeed(ChangeFeed),
+	IfNotExists(bool),
 }
 
 fn database_opts(i: &str) -> IResult<&str, DefineDatabaseOption> {
-	alt((database_comment, database_changefeed))(i)
+	alt((database_comment, database_changefeed, database_if_not_exists))(i)
 }
 
 fn database_comment(i: &str) -> IResult<&str, DefineDatabaseOption> {
@@ -58,6 +62,17 @@ fn database_changefeed(i: &str) -> IResult<&str, DefineDatabaseOption> {
 	let (i, v) = changefeed(i)?;
 	Ok((i, DefineDatabaseOption::ChangeFeed(v)))
 }
+
+fn database_if_not_exists(i: &str) -> IResult<&str, DefineDatabaseOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineDatabaseOption::IfNotExists(true)))
+}
+
 #[cfg(test)]
 mod tests {
 

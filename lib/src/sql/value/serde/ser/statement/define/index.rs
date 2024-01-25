@@ -43,6 +43,7 @@ pub struct SerializeDefineIndexStatement {
 	cols: Idioms,
 	index: Index,
 	comment: Option<Strand>,
+	if_not_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineIndexStatement {
@@ -69,6 +70,9 @@ impl serde::ser::SerializeStruct for SerializeDefineIndexStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
+			"if_not_exists" => {
+				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineIndexStatement::{key}`"
@@ -85,6 +89,7 @@ impl serde::ser::SerializeStruct for SerializeDefineIndexStatement {
 			cols: self.cols,
 			index: self.index,
 			comment: self.comment,
+			if_not_exists: self.if_not_exists,
 		})
 	}
 }

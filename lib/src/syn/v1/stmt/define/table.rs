@@ -50,6 +50,9 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			DefineTableOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Return the statement
@@ -65,6 +68,7 @@ enum DefineTableOption {
 	Comment(Strand),
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
+	IfNotExists(bool),
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
@@ -76,6 +80,7 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_schemafull,
 		table_permissions,
 		table_changefeed,
+		table_if_not_exists,
 	))(i)
 }
 
@@ -121,6 +126,16 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i, Permission::None)?;
 	Ok((i, DefineTableOption::Permissions(v)))
+}
+
+fn table_if_not_exists(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineTableOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

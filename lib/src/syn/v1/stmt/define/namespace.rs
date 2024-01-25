@@ -25,6 +25,9 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 			DefineNamespaceOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			DefineNamespaceOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Return the statement
@@ -33,10 +36,11 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 
 enum DefineNamespaceOption {
 	Comment(Strand),
+	IfNotExists(bool),
 }
 
 fn namespace_opts(i: &str) -> IResult<&str, DefineNamespaceOption> {
-	namespace_comment(i)
+	alt((namespace_comment, namespace_if_not_exists))(i)
 }
 
 fn namespace_comment(i: &str) -> IResult<&str, DefineNamespaceOption> {
@@ -45,4 +49,14 @@ fn namespace_comment(i: &str) -> IResult<&str, DefineNamespaceOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineNamespaceOption::Comment(v)))
+}
+
+fn namespace_if_not_exists(i: &str) -> IResult<&str, DefineNamespaceOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineNamespaceOption::IfNotExists(true)))
 }

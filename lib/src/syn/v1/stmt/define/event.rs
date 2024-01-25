@@ -49,6 +49,9 @@ pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 			DefineEventOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			DefineEventOption::IfNotExists(v) => {
+				res.if_not_exists = v;
+			}
 		}
 	}
 	// Check necessary options
@@ -67,10 +70,11 @@ enum DefineEventOption {
 	When(Value),
 	Then(Values),
 	Comment(Strand),
+	IfNotExists(bool),
 }
 
 fn event_opts(i: &str) -> IResult<&str, DefineEventOption> {
-	alt((event_when, event_then, event_comment))(i)
+	alt((event_when, event_then, event_comment, event_if_not_exists))(i)
 }
 
 fn event_when(i: &str) -> IResult<&str, DefineEventOption> {
@@ -95,6 +99,16 @@ fn event_comment(i: &str) -> IResult<&str, DefineEventOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineEventOption::Comment(v)))
+}
+
+fn event_if_not_exists(i: &str) -> IResult<&str, DefineEventOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("IF")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("EXISTS")(i)?;
+	Ok((i, DefineEventOption::IfNotExists(true)))
 }
 
 #[cfg(test)]
