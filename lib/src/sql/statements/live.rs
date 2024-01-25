@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::Auth;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
+use crate::FFLAGS;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -90,6 +91,10 @@ impl LiveStatement {
 		// Process the live query table
 		match stm.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
+				if FFLAGS.change_feed_live_queries.enabled() {
+					// We no longer need to write, as LQs are only computed locally from CF
+					return Ok(id.into());
+				}
 				// Store the current Node ID
 				stm.node = nid.into();
 				// Insert the node live query
