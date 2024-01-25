@@ -116,8 +116,8 @@ jobs:
       - name: Dependency check failure
         if: failure()
         run: |
-          echo "Dependency check failed. See instructions in the [supply chain security process](./supply-chain/README.md#Process)."
-          echo "##[set-output name=failure_message]::Dependency check failed. See instructions in the [supply chain security process](./supply-chain/README.md#Process)."
+          echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
+          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
 
   check-wasm:
     name: Check Wasm
