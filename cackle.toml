@@ -828,7 +828,6 @@ allow_unsafe = true
 
 [pkg.librocksdb-sys.build.sandbox]
 allow_network = true
-kind = "Disabled"
 
 [pkg.brotli]
 allow_unsafe = true
