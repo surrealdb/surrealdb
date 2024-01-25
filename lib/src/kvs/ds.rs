@@ -6,6 +6,7 @@ use crate::dbs::{
 	Variables,
 };
 use crate::err::Error;
+use crate::fflags::FFLAGS;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
@@ -19,9 +20,9 @@ use crate::opt::capabilities::NetTarget;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::LiveStatement;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
 use crate::{cf, dbs};
-use crate::{syn, FFLAGS};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
