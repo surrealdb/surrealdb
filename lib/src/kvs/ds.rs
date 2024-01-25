@@ -21,7 +21,7 @@ use crate::sql::statements::LiveStatement;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::vs::{conv, Oracle, Versionstamp};
 use crate::{cf, dbs};
-use crate::{syn, FFlag, FFlagEnabledStatus, FFLAGS};
+use crate::{syn, FFLAGS};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
