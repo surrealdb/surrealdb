@@ -2,11 +2,11 @@
 
 ## Goal
 
-The goal of supply chain security is to mitigate the impact of attackers introducing malicious code into dependencies that SurrealDB relies on. At this stage, our aim is to introduce a basic mechanism by which dependency source and access is at least considered as part of the CI process, to reduce the attack surface of SurrealDB by limiting the number of dependencies completely exposed to supply chain attacks and to raise the bar for the effort needed to perform a successful supply chain attack against many of the current SurrealDB dependencies.
+Our main goal with supply chain security is to mitigate the impact of attackers introducing malicious code into dependencies that SurrealDB relies on. At this stage, our aim is to introduce a basic mechanism by which dependency source and access is at least considered as part of the CI process, to reduce the attack surface of SurrealDB by limiting the number of dependencies completely exposed to supply chain attacks and to raise the bar for the effort needed to perform a successful supply chain attack against many of the current SurrealDB dependencies.
 
 ## Mechanism
 
-Currently, supply chain security is implemented through a basic configuration of [`cargo-vet`](https://mozilla.github.io/cargo-vet/index.html) and [`cargo-acl` (i.e. Cackle)](https://github.com/cackle-rs/cackle) for the main SurrealDB repository. These tools are executed as part of the CI process. Ownership of the configuration files for these tools is assigned to @surrealdb/security group in the [`.github/CODEOWNERS`](https://github.com/surrealdb/surrealdb/blob/main/.github/CODEOWNERS) file.
+Currently, supply chain security is implemented through a basic configuration of [`cargo-vet`](https://mozilla.github.io/cargo-vet/index.html) and [`cargo-acl` (i.e. Cackle)](https://github.com/cackle-rs/cackle) for the main SurrealDB repository. These tools are executed as part of the CI process. Ownership of the configuration files for these tools is assigned to **@surrealdb/security** group in the [`.github/CODEOWNERS`](https://github.com/surrealdb/surrealdb/blob/main/.github/CODEOWNERS) file.
 
 ### Security Compromises
 
@@ -54,7 +54,7 @@ The following process can be followed whenever the dependency checking action fa
       - Add an [exception to the `deny.toml`](https://github.com/surrealdb/surrealdb/blob/main/deny.toml#L64) file.
       - Add a comment to the exception with its rationale and the conditions for it to be removed.
   - Request the changes on a separate PR. Paste the vulnerability details provided by `cargo-deny`.
-  - The PR containing the dependency update will be approved by @surrealdb/security.
+  - The PR containing the dependency update will be approved by **@surrealdb/security**.
   - Rebase your original branch so that the dependency is updated.
 - If the action fails due to `cargo-vet`:
   - This means that the dependency has not yet been trusted, audited nor exempted.
@@ -65,7 +65,7 @@ The following process can be followed whenever the dependency checking action fa
       - `cargo vet trust <PACKAGE>`
     - Otherwise, it can be (for now) exempted from the vetting process.
       - `cargo vet add-exemption <PACKAGE>`
-  - The changes will be approved by @surrealdb/security.
+  - The changes will be approved by **@surrealdb/security**.
 - If the action fails due to `cargo-acl`:
   - The newly required access (e.g. `unsafe`, `fs`, `net`...) should be understood by the author of the PR.
   - If an audit is present in [`supply-chain/audits.toml`](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/audit.toml), you may review it to understand the required access.
@@ -75,4 +75,4 @@ The following process can be followed whenever the dependency checking action fa
     - Select the minimum access that you believe the dependency should be granted.
     - Commit and push the changes to the config files to your PR.
     - In your PR add a brief explanation of the granted access.
-    - The changes will be approved by @surrealdb/security.
+    - The changes will be approved by **@surrealdb/security**.
