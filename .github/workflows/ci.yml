@@ -113,6 +113,11 @@ jobs:
       - name: Check dependencies for unauthorized access
         run: cargo acl -n
 
+      - name: Dependency check failure
+        run: |
+          echo "Dependency check failed. See instructions in the [supply chain security process](./supply-chain/README.md#Process)."
+          echo "##[set-output name=failure_message]::Dependency check failed. See instructions in the [supply chain security process](./supply-chain/README.md#Process)."
+
   check-wasm:
     name: Check Wasm
     runs-on: ubuntu-latest
