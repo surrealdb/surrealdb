@@ -226,6 +226,7 @@ pub(crate) static FFLAGS: FFlags = FFlags {
         enabled_release: false,
         enabled_debug: false,
         enabled_test: false,
+		env_override: "SURREALDB_CHANGE_FEED_LIVE_QUERIES",
         owner: "Hugh Kaznowski",
         description: "Disables live queries as a separate feature and moves to using change feeds as the underlying mechanism",
         date_enabled_test: None,
@@ -252,6 +253,7 @@ pub(crate) struct FFlagEnabledStatus {
 	pub(crate) enabled_test: bool,
 	pub(crate) owner: &'static str,
 	pub(crate) description: &'static str,
+	pub(crate) env_override: &'static str,
 	pub(crate) date_enabled_test: Option<&'static str>,
 	pub(crate) date_enabled_debug: Option<&'static str>,
 	pub(crate) date_enabled_release: Option<&'static str>,
@@ -262,7 +264,12 @@ impl FFlagEnabledStatus {
 	#[allow(dead_code)]
 	pub(crate) fn enabled(&self) -> bool {
 		let mut enabled = false;
-
+		if let Ok(env_var) = std::env::var(self.env_override) {
+			if env_var == "0" || env_var == "false" {
+				return false;
+			}
+			return true;
+		}
 		// Test check
 		#[cfg(test)]
 		{
