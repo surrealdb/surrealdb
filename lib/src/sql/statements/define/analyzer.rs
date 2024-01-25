@@ -41,7 +41,7 @@ impl DefineAnalyzerStatement {
 		// Check if analyzer already exists
 		if self.if_not_exists && run.get_db_analyzer(opt.ns(), opt.db(), &self.name).await.is_ok() {
 			return Err(Error::AzAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		// Process the statement
@@ -49,11 +49,15 @@ impl DefineAnalyzerStatement {
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		// Persist the definition
-		run.set(key, DefineAnalyzerStatement {
-			// Don't persist the "IF NOT EXISTS" clause to schema
-			if_not_exists: false,
-			..self.clone()
-		}).await?;
+		run.set(
+			key,
+			DefineAnalyzerStatement {
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Release the transaction
 		drop(run); // Do we really need this?
 		   // Ok all good

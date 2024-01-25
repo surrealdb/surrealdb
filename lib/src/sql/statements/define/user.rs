@@ -45,7 +45,7 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 				.collect::<String>(),
 			roles: vec!["owner".into()],
 			comment: None,
-			if_not_exists: false
+			if_not_exists: false,
 		}
 	}
 }
@@ -96,16 +96,20 @@ impl DefineUserStatement {
 				// Check if user already exists
 				if self.if_not_exists && run.get_root_user(&self.name).await.is_ok() {
 					return Err(Error::UserRootAlreadyExists {
-						value: self.name.to_string()
+						value: self.name.to_string(),
 					});
 				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
-				run.set(key, DefineUserStatement {
-					// Don't persist the "IF NOT EXISTS" clause to schema
-					if_not_exists: false,
-					..self.clone()
-				}).await?;
+				run.set(
+					key,
+					DefineUserStatement {
+						// Don't persist the "IF NOT EXISTS" clause to schema
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -124,11 +128,15 @@ impl DefineUserStatement {
 				// Process the statement
 				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
-				run.set(key, DefineUserStatement {
-					// Don't persist the "IF NOT EXISTS" clause to schema
-					if_not_exists: false,
-					..self.clone()
-				}).await?;
+				run.set(
+					key,
+					DefineUserStatement {
+						// Don't persist the "IF NOT EXISTS" clause to schema
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -138,7 +146,9 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists && run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok() {
+				if self.if_not_exists
+					&& run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok()
+				{
 					return Err(Error::UserDbAlreadyExists {
 						value: self.name.to_string(),
 						ns: opt.ns().into(),
@@ -149,11 +159,15 @@ impl DefineUserStatement {
 				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.set(key, DefineUserStatement {
-					// Don't persist the "IF NOT EXISTS" clause to schema
-					if_not_exists: false,
-					..self.clone()
-				}).await?;
+				run.set(
+					key,
+					DefineUserStatement {
+						// Don't persist the "IF NOT EXISTS" clause to schema
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
 				// Ok all good
 				Ok(Value::None)
 			}

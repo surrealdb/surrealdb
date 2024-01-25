@@ -62,20 +62,26 @@ impl DefineModelStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if index already exists
-		if self.if_not_exists && run.get_db_model(opt.ns(), opt.db(), &self.name, &self.version).await.is_ok() {
+		if self.if_not_exists
+			&& run.get_db_model(opt.ns(), opt.db(), &self.name, &self.version).await.is_ok()
+		{
 			return Err(Error::MlAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		// Process the statement
 		let key = crate::key::database::ml::new(opt.ns(), opt.db(), &self.name, &self.version);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, DefineModelStatement {
-			// Don't persist the "IF NOT EXISTS" clause to schema
-			if_not_exists: false,
-			..self.clone()
-		}).await?;
+		run.set(
+			key,
+			DefineModelStatement {
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Store the model file
 		// TODO
 		// Ok all good

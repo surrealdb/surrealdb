@@ -39,9 +39,11 @@ impl DefineIndexStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if index already exists
-		if self.if_not_exists && run.get_tb_index(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok() {
+		if self.if_not_exists
+			&& run.get_tb_index(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok()
+		{
 			return Err(Error::IxAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		// Process the statement
@@ -49,11 +51,15 @@ impl DefineIndexStatement {
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
-		run.set(key, DefineIndexStatement {
-			// Don't persist the "IF NOT EXISTS" clause to schema
-			if_not_exists: false,
-			..self.clone()
-		}).await?;
+		run.set(
+			key,
+			DefineIndexStatement {
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Remove the index data
 		let key = crate::key::index::all::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.delp(key, u32::MAX).await?;

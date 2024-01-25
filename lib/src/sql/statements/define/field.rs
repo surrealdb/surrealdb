@@ -49,9 +49,10 @@ impl DefineFieldStatement {
 		run.clear_cache();
 		// Check if field already exists
 		let fd = self.name.to_string();
-		if self.if_not_exists && run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok() {
+		if self.if_not_exists && run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok()
+		{
 			return Err(Error::FdAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		// Process the statement
@@ -103,10 +104,14 @@ impl DefineFieldStatement {
 			}
 		}
 
-		run.set(key, DefineFieldStatement {
-			if_not_exists: false,
-			..self.clone()
-		}).await?;
+		run.set(
+			key,
+			DefineFieldStatement {
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Clear the cache
 		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;

@@ -54,7 +54,13 @@ enum DefineAnalyzerOption {
 }
 
 fn analyzer_opts(i: &str) -> IResult<&str, DefineAnalyzerOption> {
-	alt((analyzer_function, analyzer_comment, analyzer_filters, analyzer_tokenizers, analyzer_if_not_exists))(i)
+	alt((
+		analyzer_function,
+		analyzer_comment,
+		analyzer_filters,
+		analyzer_tokenizers,
+		analyzer_if_not_exists,
+	))(i)
 }
 
 fn analyzer_function(i: &str) -> IResult<&str, DefineAnalyzerOption> {

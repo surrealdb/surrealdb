@@ -48,7 +48,7 @@ impl DefineTableStatement {
 		// Check if table already exists
 		if self.if_not_exists && run.get_tb(opt.ns(), opt.db(), &self.name).await.is_ok() {
 			return Err(Error::TbAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		// Process the statement

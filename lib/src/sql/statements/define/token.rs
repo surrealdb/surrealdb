@@ -50,10 +50,14 @@ impl DefineTokenStatement {
 				// Process the statement
 				let key = crate::key::namespace::tk::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
-				run.set(key, DefineTokenStatement {
-					if_not_exists: false,
-					..self.clone()
-				}).await?;
+				run.set(
+					key,
+					DefineTokenStatement {
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -63,7 +67,9 @@ impl DefineTokenStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if token already exists
-				if self.if_not_exists && run.get_db_token(opt.ns(), opt.db(), &self.name).await.is_ok() {
+				if self.if_not_exists
+					&& run.get_db_token(opt.ns(), opt.db(), &self.name).await.is_ok()
+				{
 					return Err(Error::DtAlreadyExists {
 						value: self.name.to_string(),
 						ns: opt.ns().into(),
@@ -74,10 +80,14 @@ impl DefineTokenStatement {
 				let key = crate::key::database::tk::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.set(key, DefineTokenStatement {
-					if_not_exists: false,
-					..self.clone()
-				}).await?;				// Ok all good
+				run.set(
+					key,
+					DefineTokenStatement {
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?; // Ok all good
 				Ok(Value::None)
 			}
 			Base::Sc(sc) => {
@@ -86,7 +96,9 @@ impl DefineTokenStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if token already exists
-				if self.if_not_exists && run.get_sc_token(opt.ns(), opt.db(), &sc, &self.name).await.is_ok() {
+				if self.if_not_exists
+					&& run.get_sc_token(opt.ns(), opt.db(), &sc, &self.name).await.is_ok()
+				{
 					return Err(Error::StAlreadyExists {
 						value: self.name.to_string(),
 						ns: opt.ns().into(),
@@ -99,10 +111,14 @@ impl DefineTokenStatement {
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.add_sc(opt.ns(), opt.db(), sc, opt.strict).await?;
-				run.set(key, DefineTokenStatement {
-					if_not_exists: false,
-					..self.clone()
-				}).await?;				// Ok all good
+				run.set(
+					key,
+					DefineTokenStatement {
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?; // Ok all good
 				Ok(Value::None)
 			}
 			// Other levels are not supported

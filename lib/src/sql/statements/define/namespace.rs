@@ -41,7 +41,7 @@ impl DefineNamespaceStatement {
 		// Check if namespace already exists
 		if self.if_not_exists && run.get_ns(&self.name).await.is_ok() {
 			return Err(Error::NsAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		if self.id.is_none() {
@@ -53,10 +53,14 @@ impl DefineNamespaceStatement {
 			};
 			run.set(key, ns).await?;
 		} else {
-			run.set(key, DefineNamespaceStatement {
-				if_not_exists: false,
-				..self.clone()
-			}).await?;
+			run.set(
+				key,
+				DefineNamespaceStatement {
+					if_not_exists: false,
+					..self.clone()
+				},
+			)
+			.await?;
 		}
 		// Ok all good
 		Ok(Value::None)

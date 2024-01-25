@@ -40,7 +40,7 @@ impl DefineDatabaseStatement {
 		// Check if database already exists
 		if self.if_not_exists && run.get_db(opt.ns(), &self.name).await.is_ok() {
 			return Err(Error::DbAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		// Process the statement
@@ -57,10 +57,14 @@ impl DefineDatabaseStatement {
 
 			run.set(key, db).await?;
 		} else {
-			run.set(key, DefineDatabaseStatement {
-				if_not_exists: false,
-				..self.clone()
-			}).await?;
+			run.set(
+				key,
+				DefineDatabaseStatement {
+					if_not_exists: false,
+					..self.clone()
+				},
+			)
+			.await?;
 		}
 		// Ok all good
 		Ok(Value::None)

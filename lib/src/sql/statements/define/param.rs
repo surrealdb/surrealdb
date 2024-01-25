@@ -41,20 +41,24 @@ impl DefineParamStatement {
 		// Check if param already exists
 		if self.if_not_exists && run.get_db_param(opt.ns(), opt.db(), &self.name).await.is_ok() {
 			return Err(Error::PaAlreadyExists {
-				value: self.name.to_string()
+				value: self.name.to_string(),
 			});
 		}
 		// Process the statement
 		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, DefineParamStatement {
-			// Compute the param
-			value: self.value.compute(ctx, opt, txn, doc).await?,
-			// Don't persist the "IF NOT EXISTS" clause to schema
-			if_not_exists: false,
-			..self.clone()
-		}).await?;
+		run.set(
+			key,
+			DefineParamStatement {
+				// Compute the param
+				value: self.value.compute(ctx, opt, txn, doc).await?,
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Ok all good
 		Ok(Value::None)
 	}
