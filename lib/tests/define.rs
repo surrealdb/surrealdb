@@ -2117,3 +2117,483 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn redefining_existing_analyzer_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE ANALYZER example_blank TOKENIZERS blank;
+		DEFINE ANALYZER example_blank TOKENIZERS blank;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_analyzer_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE ANALYZER example TOKENIZERS blank IF NOT EXISTS;
+		DEFINE ANALYZER example TOKENIZERS blank IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::AzAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_database_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE DATABASE example;
+		DEFINE DATABASE example;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_database_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE DATABASE example IF NOT EXISTS;
+		DEFINE DATABASE example IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::DbAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_event_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT example ON example THEN {};
+		DEFINE EVENT example ON example THEN {};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_event_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE EVENT example ON example THEN {} IF NOT EXISTS;
+		DEFINE EVENT example ON example THEN {} IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::EvAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_field_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE FIELD example ON example;
+		DEFINE FIELD example ON example;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_field_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE FIELD example ON example IF NOT EXISTS;
+		DEFINE FIELD example ON example IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::FdAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_function_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE FUNCTION fn::example() {};
+		DEFINE FUNCTION fn::example() {};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_function_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE FUNCTION fn::example() {} IF NOT EXISTS;
+		DEFINE FUNCTION fn::example() {} IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::FcAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_index_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX example ON example FIELDS example;
+		DEFINE INDEX example ON example FIELDS example;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_index_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE INDEX example ON example FIELDS example IF NOT EXISTS;
+		DEFINE INDEX example ON example FIELDS example IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::IxAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_namespace_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE NAMESPACE example;
+		DEFINE NAMESPACE example;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_namespace_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE NAMESPACE example IF NOT EXISTS;
+		DEFINE NAMESPACE example IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::NsAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_param_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE PARAM $example VALUE 123;
+		DEFINE PARAM $example VALUE 123;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_param_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE PARAM $example VALUE 123 IF NOT EXISTS;
+		DEFINE PARAM $example VALUE 123 IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::PaAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_scope_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE SCOPE example;
+		DEFINE SCOPE example;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_scope_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE SCOPE example IF NOT EXISTS;
+		DEFINE SCOPE example IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::ScAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_table_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE example;
+		DEFINE TABLE example;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE example IF NOT EXISTS;
+		DEFINE TABLE example IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::TbAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\";
+		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\";
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\" IF NOT EXISTS;
+		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\" IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::StAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER;
+		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
+	let sql = "
+		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
+		DEFINE TOKEN example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::StAlreadyExists { .. }),);
+	//
+	Ok(())
+}
