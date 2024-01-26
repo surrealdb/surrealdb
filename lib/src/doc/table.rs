@@ -20,6 +20,8 @@ use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use futures::future::try_join_all;
 
+use super::CursorDoc;
+
 type Ops = Vec<(Idiom, Operator, Value)>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -61,6 +63,13 @@ impl<'a> Document<'a> {
 		for ft in self.ft(opt, txn).await?.iter() {
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
+
+			let initial = tb.expr.compute(ctx, opt, txn, Some(&self.initial), false).await?;
+			let current = tb.expr.compute(ctx, opt, txn, Some(&self.current), false).await?;
+
+			let initial = CursorDoc::new(None, None, None, &initial);
+			let current = CursorDoc::new(None, None, None, &current);
+
 			// Check if there is a GROUP BY clause
 			match &tb.group {
 				// There is a GROUP BY clause specified
@@ -69,7 +78,7 @@ impl<'a> Document<'a> {
 					let old = Thing {
 						tb: ft.name.to_raw(),
 						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.initial))),
+							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&initial))),
 						)
 						.await?
 						.into_iter()
@@ -80,7 +89,7 @@ impl<'a> Document<'a> {
 					let rid = Thing {
 						tb: ft.name.to_raw(),
 						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.current))),
+							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&current))),
 						)
 						.await?
 						.into_iter()
@@ -91,7 +100,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
+							match cond.compute(ctx, opt, txn, Some(&current)).await? {
 								v if v.is_truthy() => {
 									if !opt.force && act != Action::Create {
 										// Delete the old value
@@ -180,7 +189,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
+							match cond.compute(ctx, opt, txn, Some(&current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
