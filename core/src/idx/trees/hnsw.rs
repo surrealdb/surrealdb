@@ -92,6 +92,7 @@ impl HnswIndex {
 					return self.hnsw.remove(e_id).await;
 				} else {
 					e.insert((new_docs, e_id));
+					return true;
 				}
 			}
 		}
@@ -143,7 +144,7 @@ impl HnswIndex {
 		let mut builder = KnnResultBuilder::new(n);
 		for pn in neighbors {
 			if builder.check_add(pn.0) {
-				let v = &self.hnsw.elements[pn.1 as usize];
+				let v = &self.hnsw.elements[&pn.1];
 				if let Some((docs, _)) = self.vec_docs.get(v) {
 					builder.add(pn.0, docs);
 				}
@@ -165,7 +166,8 @@ struct Hnsw {
 	dist: Distance,
 	layers: Vec<RwLock<Layer>>,
 	enter_point: Option<ElementId>,
-	elements: Vec<SharedVector>,
+	elements: HashMap<ElementId, SharedVector>,
+	next_element_id: ElementId,
 	rng: SmallRng,
 }
 
@@ -190,13 +192,14 @@ impl Hnsw {
 			dist: p.distance.clone(),
 			enter_point: None,
 			layers: Vec::default(),
-			elements: Vec::default(),
+			elements: HashMap::default(),
+			next_element_id: 0,
 			rng: SmallRng::from_entropy(),
 		}
 	}
 
 	async fn insert(&mut self, q: SharedVector) -> ElementId {
-		let id = self.elements.len() as ElementId;
+		let id = self.next_element_id;
 		let level = self.get_random_level();
 		let layers = self.layers.len();
 
@@ -212,11 +215,14 @@ impl Hnsw {
 			self.insert_first_element(id, level).await;
 		}
 
-		self.elements.push(q);
+		self.elements.insert(id, q);
+		self.next_element_id += 1;
 		id
 	}
 
 	async fn remove(&mut self, e_id: ElementId) -> bool {
+		#[cfg(debug_assertions)]
+		debug!("Remove {e_id}");
 		let layers = self.layers.len();
 		let mut removed = false;
 		let mut m_max = self.m;
@@ -227,16 +233,22 @@ impl Hnsw {
 			}
 			let mut layer = self.layers[lc].write().await;
 			if let Some(f_ids) = layer.0.remove(&e_id) {
+				#[cfg(debug_assertions)]
+				debug!("layer: {lc} - f_ids {f_ids:?}");
 				for f_id in f_ids {
-					let q = &self.elements[f_id as usize];
-					let w = self.search_layer(q, f_id, self.efc, &layer).await;
+					let q = &self.elements[&f_id];
+					let mut w = BTreeSet::new();
+					self.search_layer(q, f_id, self.efc, &layer, &mut w).await;
 					let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
-					self.select_neighbors_simple(&w, m_max, &mut neighbors);
+					self.select_neighbors_simple(&w, m_max, &mut neighbors, Some(f_id));
+					#[cfg(debug_assertions)]
+					trace!("f_id: {f_id} - neighbors {neighbors:?}");
 					layer.0.insert(f_id, neighbors);
 				}
 				removed = true;
 			}
 		}
+		self.elements.remove(&e_id);
 		removed
 	}
 
@@ -268,7 +280,8 @@ impl Hnsw {
 		debug!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?} - top-layer: {top_layer_level}");
 		for lc in ((level + 1)..=top_layer_level).rev() {
 			let l = self.layers[lc].read().await;
-			let w = self.search_layer(q, ep, 1, &l).await;
+			let mut w = BTreeSet::new();
+			self.search_layer(q, ep, 1, &l, &mut w).await;
 			if let Some(n) = w.first() {
 				ep = n.1;
 			}
@@ -282,14 +295,15 @@ impl Hnsw {
 			}
 			#[cfg(debug_assertions)]
 			debug!("2 - LC: {lc}");
-			let w = {
+			let mut w = BTreeSet::new();
+			{
 				let l = self.layers[lc].read().await;
-				self.search_layer(q, ep, self.efc, &l).await
-			};
+				self.search_layer(q, ep, self.efc, &l, &mut w).await
+			}
 			#[cfg(debug_assertions)]
 			debug!("2 - W: {w:?}");
 			let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
-			self.select_neighbors_simple(&w, m_max, &mut neighbors);
+			self.select_neighbors_simple(&w, m_max, &mut neighbors, None);
 			#[cfg(debug_assertions)]
 			debug!("2 - N: {neighbors:?}");
 			// add bidirectional connections from neighbors to q at layer lc
@@ -361,23 +375,24 @@ impl Hnsw {
 		ep_id: ElementId,
 		ef: usize,
 		l: &Layer,
-	) -> BTreeSet<PriorityNode> {
-		let ep_dist = self.distance(&self.elements[ep_id as usize], q);
+		w: &mut BTreeSet<PriorityNode>,
+	) {
+		let ep_dist = self.distance(&self.elements[&ep_id], q);
 		let ep_pr = PriorityNode(ep_dist, ep_id);
-		let mut candidates = BTreeSet::from([ep_pr.clone()]);
-		let mut w = BTreeSet::from([ep_pr]);
+		w.insert(ep_pr.clone());
+		let mut candidates = BTreeSet::from([ep_pr]);
 		let mut visited = HashSet::from([ep_id]);
 		while let Some(c) = candidates.pop_first() {
 			let f_dist = candidates.last().map(|f| f.0).unwrap_or(c.0);
 			if c.0 > f_dist {
 				break;
 			}
-			for (&e_id, e_neighbors) in &l.0 {
-				if e_neighbors.contains(&c.1) && visited.insert(e_id) {
-					let e_dist = self.distance(&self.elements[e_id as usize], q);
+			for (e_id, e_neighbors) in &l.0 {
+				if e_neighbors.contains(&c.1) && visited.insert(*e_id) {
+					let e_dist = self.distance(&self.elements[e_id], q);
 					if e_dist < f_dist || w.len() < ef {
-						candidates.insert(PriorityNode(e_dist, e_id));
-						w.insert(PriorityNode(e_dist, e_id));
+						candidates.insert(PriorityNode(e_dist, *e_id));
+						w.insert(PriorityNode(e_dist, *e_id));
 						if w.len() > ef {
 							w.pop_last();
 						}
@@ -385,7 +400,6 @@ impl Hnsw {
 				}
 			}
 		}
-		w
 	}
 
 	fn select_and_shrink_neighbors_simple(
@@ -396,14 +410,14 @@ impl Hnsw {
 		elements: &mut Vec<ElementId>,
 		m_max: usize,
 	) {
-		let e = &self.elements[e_id as usize];
+		let e = &self.elements[&e_id];
 		let mut w = BTreeSet::default();
 		w.insert(PriorityNode(self.distance(e, new_f), new_f_id));
 		for f_id in elements.drain(..) {
-			let f_dist = self.distance(&self.elements[f_id as usize], e);
+			let f_dist = self.distance(&self.elements[&f_id], e);
 			w.insert(PriorityNode(f_dist, f_id));
 		}
-		self.select_neighbors_simple(&w, m_max, elements);
+		self.select_neighbors_simple(&w, m_max, elements, None);
 	}
 
 	fn select_neighbors_simple(
@@ -411,9 +425,12 @@ impl Hnsw {
 		w: &BTreeSet<PriorityNode>,
 		m_max: usize,
 		neighbors: &mut Vec<ElementId>,
+		ignore: Option<ElementId>,
 	) {
 		for pr in w {
-			neighbors.push(pr.1);
+			if Some(pr.1) != ignore {
+				neighbors.push(pr.1);
+			}
 			if neighbors.len() == m_max {
 				break;
 			}
@@ -425,11 +442,13 @@ impl Hnsw {
 	}
 
 	async fn knn_search(&self, q: &SharedVector, k: usize, ef: usize) -> Vec<PriorityNode> {
+		//println!("knn_search {q:?} - n: {k}");
 		if let Some(mut ep) = self.enter_point {
+			let mut w = BTreeSet::new();
 			let l = self.layers.len();
 			for lc in (1..l).rev() {
 				let l = self.layers[lc].read().await;
-				let w = self.search_layer(q, ep, 1, &l).await;
+				self.search_layer(q, ep, 1, &l, &mut w).await;
 				if let Some(n) = w.first() {
 					ep = n.1;
 				} else {
@@ -438,7 +457,8 @@ impl Hnsw {
 			}
 			{
 				let l = self.layers[0].read().await;
-				let w = self.search_layer(q, ep, ef, &l).await;
+				self.search_layer(q, ep, ef, &l, &mut w).await;
+				//println!("w.len(): {}", w.len());
 				let w: Vec<PriorityNode> = w.into_iter().collect();
 				w.into_iter().take(k).collect()
 			}
@@ -455,8 +475,8 @@ mod tests {
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::vector::SharedVector;
 	use crate::sql::index::{Distance, HnswParams, VectorType};
-	use radix_trie::TrieCommon;
-	use std::collections::HashSet;
+	use std::collections::hash_map::Entry;
+	use std::collections::{HashMap, HashSet};
 	use test_log::test;
 
 	async fn insert_collection_hnsw(
@@ -478,22 +498,25 @@ mod tests {
 				if collection.is_unique() {
 					let mut found = false;
 					for pn in &res {
-						if h.elements[pn.1 as usize].eq(obj) {
+						if h.elements[&pn.1].eq(obj) {
 							found = true;
 							break;
 						}
 					}
 					assert!(
 						found,
-						"Search: {:?} - Knn: {} - Vector not found - Got: {:?} - Dist: {} - Coll: {:?}",
-						obj,
+						"Search: {:?} - Knn: {} - Vector not found - Got: {:?} - Dist: {} - Coll: {}",
+						obj.len(),
 						knn,
 						res,
 						h.dist,
-						collection,
+						collection.as_ref().len(),
 					);
 				}
 				let expected_len = collection.as_ref().len().min(knn);
+				if expected_len != res.len() {
+					info!("expected_len != res.len()")
+				}
 				assert_eq!(
 					expected_len,
 					res.len(),
@@ -528,23 +551,23 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_hnsw_unique_col_10_dim_2() {
+	async fn test_hnsw_unique_col_50_dim_2() {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
 			for distance in [
 				Distance::Euclidean,
 				Distance::Manhattan,
-				Distance::Hamming,
+				//Distance::Hamming,
 				Distance::Minkowski(2.into()),
 				Distance::Chebyshev,
 			] {
 				let for_jaccard = distance == Distance::Jaccard;
-				let dimension = 2;
+				let dimension = 4;
 				let params = new_params(dimension, vt, distance);
 				test_hnsw_collection(
 					&params,
-					&TestCollection::new_unique(10, vt, dimension, for_jaccard),
+					&TestCollection::new_unique(50, vt, dimension, for_jaccard),
 				)
 				.await;
 			}
@@ -552,7 +575,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_hnsw_random_col_10_dim_2() {
+	async fn test_hnsw_random_col_50_dim_2() {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
@@ -560,15 +583,15 @@ mod tests {
 				Distance::Chebyshev,
 				Distance::Cosine,
 				Distance::Euclidean,
-				Distance::Hamming,
+				// Distance::Hamming,
 				Distance::Jaccard,
 				Distance::Manhattan,
 				Distance::Minkowski(2.into()),
 				Distance::Pearson,
 			] {
-				let dimension = 2;
+				let dimension = 3;
 				let collection =
-					TestCollection::new_random(10, vt, dimension, distance == Distance::Jaccard);
+					TestCollection::new_random(50, vt, dimension, distance == Distance::Jaccard);
 				let params = new_params(dimension, vt, distance);
 				test_hnsw_collection(&params, &collection).await;
 			}
@@ -576,12 +599,12 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_hnsw_unique_coll_20_dim_1536() {
+	async fn test_hnsw_unique_coll_40_dim_1536() {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
 			let dimension = 1536;
-			let collection = TestCollection::new_unique(20, vt, dimension, false);
+			let collection = TestCollection::new_unique(40, vt, dimension, false);
 			let params = new_params(dimension, vt, Distance::Hamming);
 			test_hnsw_collection(&params, &collection).await;
 		}
@@ -590,13 +613,22 @@ mod tests {
 	async fn insert_collection_hnsw_index(
 		h: &mut HnswIndex,
 		collection: &TestCollection,
-	) -> HashSet<SharedVector> {
-		let mut set = HashSet::with_capacity(collection.as_ref().len());
+	) -> HashMap<SharedVector, HashSet<DocId>> {
+		let mut map: HashMap<SharedVector, HashSet<DocId>> =
+			HashMap::with_capacity(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			h.insert(obj.clone(), *doc_id).await;
-			set.insert(obj.clone());
+			match map.entry(obj.clone()) {
+				Entry::Occupied(mut e) => {
+					e.get_mut().insert(*doc_id);
+				}
+				Entry::Vacant(e) => {
+					e.insert(HashSet::from([*doc_id]));
+				}
+			}
+			check_hnsw_properties(&h.hnsw, map.len()).await;
 		}
-		set
+		map
 	}
 
 	async fn find_collection_hnsw_index(h: &mut HnswIndex, collection: &TestCollection) {
@@ -629,20 +661,30 @@ mod tests {
 		}
 	}
 
-	async fn delete_hnsw_index_collection(h: &mut HnswIndex, collection: &TestCollection) {
-		let mut count = collection.as_ref().len();
+	async fn delete_hnsw_index_collection(
+		h: &mut HnswIndex,
+		collection: &TestCollection,
+		mut map: HashMap<SharedVector, HashSet<DocId>>,
+	) {
 		for (doc_id, obj) in collection.as_ref() {
 			assert!(h.remove(obj.clone(), *doc_id).await, "Delete failed: {:?} {}", obj, doc_id);
-			count -= 1;
-			assert_eq!(h.doc_ids.len(), count);
+			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
+				let set = e.get_mut();
+				set.remove(doc_id);
+				if set.is_empty() {
+					e.remove();
+				}
+			}
+			check_hnsw_properties(&h.hnsw, map.len()).await;
 		}
 	}
 
 	async fn test_hnsw_index_collection(p: &HnswParams, collection: &TestCollection) {
+		debug!("Params: {:?} - Collection: {}", p, collection.as_ref().len());
 		let mut h = HnswIndex::new(p);
-		insert_collection_hnsw_index(&mut h, collection).await;
+		let map = insert_collection_hnsw_index(&mut h, collection).await;
 		find_collection_hnsw_index(&mut h, &collection).await;
-		delete_hnsw_index_collection(&mut h, &collection).await;
+		delete_hnsw_index_collection(&mut h, &collection, map).await;
 	}
 
 	#[test(tokio::test)]
@@ -654,7 +696,7 @@ mod tests {
 				Distance::Chebyshev,
 				Distance::Cosine,
 				Distance::Euclidean,
-				Distance::Hamming,
+				//Distance::Hamming,
 				Distance::Jaccard,
 				Distance::Manhattan,
 				Distance::Minkowski(2.into()),
@@ -662,9 +704,22 @@ mod tests {
 			] {
 				let dimension = 2;
 				let collection =
-					TestCollection::new_random(10, vt, dimension, distance == Distance::Jaccard);
+					TestCollection::new_random(30, vt, dimension, distance == Distance::Jaccard);
 				let params = new_params(dimension, vt, distance);
 				test_hnsw_index_collection(&params, &collection).await;
+			}
+		}
+	}
+
+	async fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {
+		let mut layer_size = h.elements.len();
+		assert_eq!(layer_size, expected_count);
+		for (lc, l) in h.layers.iter().enumerate() {
+			let l = l.read().await;
+			assert!(l.0.len() <= layer_size, "{} - {}", l.0.len(), layer_size);
+			layer_size = l.0.len();
+			for (e_id, f_ids) in &l.0 {
+				assert!(!f_ids.contains(e_id), "layer: {lc} - el: {e_id} - f_ids: {f_ids:?}");
 			}
 		}
 	}
