@@ -2,3 +2,5 @@ target
 corpus
 artifacts
 coverage
+utils/surreal-reproduce/test_cases
+utils/surreal-reproduce/target

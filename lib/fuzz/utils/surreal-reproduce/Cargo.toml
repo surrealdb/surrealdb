@@ -1,0 +1,19 @@
+[package]
+name = "surreal-reproduce"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.193", features = ["derive"] }
+tokio = { version = "1.34.0", features = ["macros", "rt-multi-thread"] }
+arbitrary = { version = "1.3.2" }
+tokio-tungstenite = { version = "0.21.0" }
+tokio-util = { version = "0.7.10" }
+futures-util = { version = "0.3.30" }
+
+[dependencies.surrealdb]
+path = "../../.."
+features = ["kv-mem", "arbitrary"]
+
+[workspace]
+members = ["."]
