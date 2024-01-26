@@ -859,7 +859,7 @@ impl Datastore {
 	}
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
-	pub async fn save_timestamp_for_versionstamp(
+	pub(crate) async fn save_timestamp_for_versionstamp(
 		&self,
 		ts: u64,
 	) -> Result<Option<Versionstamp>, Error> {
@@ -956,7 +956,7 @@ impl Datastore {
 	}
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
-	pub async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
+	pub(crate) async fn garbage_collect_stale_change_feeds(&self, ts: u64) -> Result<(), Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
 			return match tx.cancel().await {
