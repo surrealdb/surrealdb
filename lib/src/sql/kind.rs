@@ -39,6 +39,47 @@ impl Kind {
 	fn is_any(&self) -> bool {
 		matches!(self, Kind::Any)
 	}
+
+	// return the kind of the contained value.
+	//
+	// For example: for `array<number>` or `set<number>` this returns `number`.
+	// For `array<number> | set<float>` this returns `number | float`.
+	pub(crate) fn inner_kind(&self) -> Option<Kind> {
+		let mut this = self;
+		loop {
+			match &this {
+				Kind::Any
+				| Kind::Null
+				| Kind::Bool
+				| Kind::Bytes
+				| Kind::Datetime
+				| Kind::Decimal
+				| Kind::Duration
+				| Kind::Float
+				| Kind::Int
+				| Kind::Number
+				| Kind::Object
+				| Kind::Point
+				| Kind::String
+				| Kind::Uuid
+				| Kind::Record(_)
+				| Kind::Geometry(_) => return None,
+				Kind::Option(x) => {
+					this = x;
+				}
+				Kind::Array(x, _) | Kind::Set(x, _) => return Some(x.as_ref().clone()),
+				Kind::Either(x) => {
+					// a either shouldn't be able to contain a either itself so recursing here
+					// should be fine.
+					let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
+					if kinds.is_empty() {
+						return None;
+					}
+					return Some(Kind::Either(kinds));
+				}
+			}
+		}
+	}
 }
 
 impl From<&Kind> for Box<Kind> {

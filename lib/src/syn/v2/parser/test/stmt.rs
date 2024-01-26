@@ -359,6 +359,7 @@ fn parse_define_field() {
 				Kind::Number,
 				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
 			])))),
+			readonly: false,
 			value: Some(Value::Null),
 			assert: Some(Value::Bool(true)),
 			default: Some(Value::Bool(false)),
@@ -1106,6 +1107,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Table(RemoveTableStatement {
 			name: Ident("foo".to_owned()),
+			if_exists: false,
 		}))
 	);
 

@@ -93,11 +93,31 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install cargo-audit
-        run: cargo install --debug --locked cargo-audit
+      - name: Install cargo-deny
+        run: cargo install --debug --locked cargo-deny
 
-      - name: Check dependencies 
-        run: cargo audit
+      - name: Install cargo-vet
+        run: cargo install --debug --locked cargo-vet
+
+      - name: Install cargo-acl
+        run: |
+          cargo install --debug --locked cargo-acl
+          sudo apt-get install -y bubblewrap
+
+      - name: Check dependencies for known issues
+        run: cargo deny check
+
+      - name: Check dependencies for untrusted sources
+        run: cargo vet
+
+      - name: Check dependencies for unauthorized access
+        run: cargo acl -n
+
+      - name: Dependency check failure
+        if: failure()
+        run: |
+          echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
+          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
 
   check-wasm:
     name: Check Wasm
@@ -218,7 +238,7 @@ jobs:
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
-  
+
   ml-support:
     name: ML integration tests
     runs-on: ubuntu-latest

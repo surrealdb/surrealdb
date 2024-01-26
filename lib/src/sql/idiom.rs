@@ -130,6 +130,12 @@ impl Idiom {
 	pub(crate) fn split_multi_yield(v: &Part) -> bool {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
+	/// Check if the path part is a yield in a multi-yield expression
+	pub(crate) fn remove_trailing_all(&mut self) {
+		if self.ends_with(&[Part::All]) {
+			self.0.truncate(self.len() - 1);
+		}
+	}
 }
 
 impl Idiom {

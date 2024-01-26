@@ -100,8 +100,8 @@ impl Param {
 									}
 								}
 							}
-							// Return the value
-							Ok(val.value.to_owned())
+							// Return the computed value
+							val.value.compute(ctx, opt, txn, doc).await
 						}
 						// The param has not been set globally
 						Err(_) => Ok(Value::None),

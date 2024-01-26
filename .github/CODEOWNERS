@@ -19,6 +19,8 @@ Makefile.* @surrealdb/ci
 Cargo.lock @surrealdb/security
 Cargo.toml @surrealdb/security
 lib/Cargo.toml @surrealdb/security
+cackle.toml @surrealdb/security
+supply-chain/* @surrealdb/security
 
 # General owners for the database
 /doc/ @surrealdb/db

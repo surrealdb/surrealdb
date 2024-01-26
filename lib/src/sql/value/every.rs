@@ -9,39 +9,49 @@ impl Value {
 			None => self._every(steps, arrays, Idiom::default()),
 		}
 	}
-	fn _every(&self, steps: bool, arrays: bool, prev: Idiom) -> Vec<Idiom> {
+	fn _every(&self, steps: bool, arrays: bool, mut prev: Idiom) -> Vec<Idiom> {
 		match self {
 			// Current path part is an object and is not empty
-			Value::Object(v) if !v.is_empty() => match steps {
-				// Let's log all intermediary nodes
-				true if !prev.is_empty() => Some(prev.clone())
-					.into_iter()
-					.chain(v.iter().flat_map(|(k, v)| {
-						let p = Part::from(k.to_owned());
-						v._every(steps, arrays, prev.clone().push(p))
-					}))
-					.collect::<Vec<_>>(),
-				// Let's not log intermediary nodes
-				_ => v
-					.iter()
-					.flat_map(|(k, v)| {
-						let p = Part::from(k.to_owned());
-						v._every(steps, arrays, prev.clone().push(p))
-					})
-					.collect::<Vec<_>>(),
-			},
+			Value::Object(v) if !v.is_empty() => {
+				// Remove any trailing * path parts
+				prev.remove_trailing_all();
+				// Check if we should log intermediary nodes
+				match steps {
+					// Let's log all intermediary nodes
+					true if !prev.is_empty() => Some(prev.clone())
+						.into_iter()
+						.chain(v.iter().flat_map(|(k, v)| {
+							let p = Part::from(k.to_owned());
+							v._every(steps, arrays, prev.clone().push(p))
+						}))
+						.collect::<Vec<_>>(),
+					// Let's not log intermediary nodes
+					_ => v
+						.iter()
+						.flat_map(|(k, v)| {
+							let p = Part::from(k.to_owned());
+							v._every(steps, arrays, prev.clone().push(p))
+						})
+						.collect::<Vec<_>>(),
+				}
+			}
 			// Current path part is an array and is not empty
-			Value::Array(v) if !v.is_empty() => match arrays {
-				// Let's log all individual array items
-				true => std::iter::once(prev.clone())
-					.chain(v.iter().enumerate().rev().flat_map(|(i, v)| {
-						let p = Part::from(i.to_owned());
-						v._every(steps, arrays, prev.clone().push(p))
-					}))
-					.collect::<Vec<_>>(),
-				// Let's not log individual array items
-				false => vec![prev],
-			},
+			Value::Array(v) if !v.is_empty() => {
+				// Remove any trailing * path parts
+				prev.remove_trailing_all();
+				// Check if we should log individual array items
+				match arrays {
+					// Let's log all individual array items
+					true => std::iter::once(prev.clone())
+						.chain(v.iter().enumerate().rev().flat_map(|(i, v)| {
+							let p = Part::from(i.to_owned());
+							v._every(steps, arrays, prev.clone().push(p))
+						}))
+						.collect::<Vec<_>>(),
+					// Let's not log individual array items
+					false => vec![prev],
+				}
+			}
 			// Process everything else
 			_ => vec![prev],
 		}
@@ -116,5 +126,24 @@ mod tests {
 			Idiom::parse("test.something[0].tags[0]"),
 		];
 		assert_eq!(res, val.every(None, true, true));
+	}
+
+	#[test]
+	fn every_including_intermediary_nodes_including_array_indexes_ending_all() {
+		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let res = vec![
+			Idiom::parse("test.something"),
+			Idiom::parse("test.something[1]"),
+			Idiom::parse("test.something[1].age"),
+			Idiom::parse("test.something[1].tags"),
+			Idiom::parse("test.something[1].tags[1]"),
+			Idiom::parse("test.something[1].tags[0]"),
+			Idiom::parse("test.something[0]"),
+			Idiom::parse("test.something[0].age"),
+			Idiom::parse("test.something[0].tags"),
+			Idiom::parse("test.something[0].tags[1]"),
+			Idiom::parse("test.something[0].tags[0]"),
+		];
+		assert_eq!(res, val.every(Some(&Idiom::parse("test.something.*")), true, true));
 	}
 }
