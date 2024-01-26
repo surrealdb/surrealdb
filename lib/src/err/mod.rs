@@ -805,7 +805,7 @@ pub enum Error {
 	},
 
 	/// The requested function already exists
-	#[error("The function '{value}' already exists")]
+	#[error("The function 'fn::{value}' already exists")]
 	FcAlreadyExists {
 		value: String,
 	},
@@ -829,7 +829,7 @@ pub enum Error {
 	},
 
 	/// The requested param already exists
-	#[error("The param '{value}' already exists")]
+	#[error("The param '${value}' already exists")]
 	PaAlreadyExists {
 		value: String,
 	},
