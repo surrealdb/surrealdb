@@ -289,7 +289,13 @@ impl Parser<'_> {
 			if self.eat(t!("]")) {
 				break;
 			}
-			values.push(self.parse_value_field()?);
+
+			// If this is a spread value, store it as such.
+			if self.eat(t!("...")) {
+				values.push(Value::Spread(Box::new(self.parse_value_field()?)));
+			} else {
+				values.push(self.parse_value_field()?);
+			}
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!("]"), start)?;

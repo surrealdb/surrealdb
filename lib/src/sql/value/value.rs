@@ -106,6 +106,7 @@ pub enum Value {
 	Expression(Box<Expression>),
 	Query(Query),
 	Model(Box<Model>),
+	Spread(Box<Value>),
 	// Add new variants here
 }
 
@@ -2589,6 +2590,7 @@ impl fmt::Display for Value {
 			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
+			Value::Spread(v) => write!(f, "...{v}"),
 		}
 	}
 }
@@ -2638,6 +2640,7 @@ impl Value {
 			Value::Model(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Spread(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

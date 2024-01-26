@@ -15,6 +15,8 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use super::{Array, Part};
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
 /// Invariant: Keys never contain NUL bytes.
@@ -221,7 +223,68 @@ impl Object {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
+
+		// Since we can't change the object struct as it would be a breaking change,
+		// we decided to store spreads on the empty key, which you cannot access within SurrealQL.
+		// This does mean that we need to manually validate that all spreads are valid values, which is what happens down below
+		// At last if we went through all that, we possibly also need to fetch the document for a Thing
+
+		match self.0.get("") {
+			Some(Value::Array(Array(spreads))) => {
+				for v in spreads {
+					match v {
+						Value::Spread(v) => match (*v).compute(ctx, opt, txn, doc).await {
+							Ok(v) => {
+								let v = match v {
+									Value::Object(v) => v,
+									Value::Thing(v) => {
+										match Value::Thing(v)
+											.get(ctx, opt, txn, doc, &[Part::All])
+											.await
+										{
+											Ok(Value::Object(v)) => v,
+											_ => {
+												return Err(Error::InvalidSpreadValue {
+													expected: "an Object".into(),
+												});
+											}
+										}
+									}
+									_ => {
+										return Err(Error::InvalidSpreadValue {
+											expected: "an Object".into(),
+										});
+									}
+								};
+
+								for (k, v) in v.iter() {
+									x.insert(k.clone(), v.clone());
+								}
+							}
+							Err(e) => return Err(e),
+						},
+						_ => {
+							return Err(Error::InvalidSpreadValue {
+								expected: "a Spread".into(),
+							})
+						}
+					}
+				}
+			}
+			Some(_) => {
+				return Err(Error::InvalidSpreadValue {
+					expected: "a Spread".into(),
+				})
+			}
+			_ => {}
+		}
+
 		for (k, v) in self.iter() {
+			// Key "" contains spreads, and they are processed above
+			if k.is_empty() {
+				continue;
+			}
+
 			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),

@@ -25,7 +25,7 @@ use super::{
 use crate::sql::{Array, Expression, Idiom, Object, Table, Value, Values};
 use nom::{
 	branch::alt,
-	bytes::complete::{is_not, tag_no_case, take_while1},
+	bytes::complete::{is_not, tag, tag_no_case, take_while1},
 	character::complete::char,
 	combinator::{self, cut, into, opt},
 	multi::{separated_list0, separated_list1},
@@ -259,19 +259,52 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 }
 
 pub fn array(i: &str) -> IResult<&str, Array> {
+	fn entry_value(i: &str) -> IResult<&str, Value> {
+		let (i, v) = cut(value)(i)?;
+		Ok((i, v))
+	}
+
+	fn entry_spread(i: &str) -> IResult<&str, Value> {
+		let (i, _) = tag("...")(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = cut(value)(i)?;
+		Ok((i, Value::Spread(Box::new(v))))
+	}
+
+	fn entry(i: &str) -> IResult<&str, Value> {
+		alt((entry_spread, entry_value))(i)
+	}
+
 	let (i, v) =
-		delimited_list0(openbracket, commas, terminated(value, mightbespace), char(']'))(i)?;
+		delimited_list0(openbracket, commas, terminated(entry, mightbespace), char(']'))(i)?;
+
 	Ok((i, Array(v)))
 }
 
+enum ObjectEntry {
+	Kv((String, Value)),
+	Spread(Value),
+}
+
 pub fn object(i: &str) -> IResult<&str, Object> {
-	fn entry(i: &str) -> IResult<&str, (String, Value)> {
+	fn entry_kv(i: &str) -> IResult<&str, ObjectEntry> {
 		let (i, k) = key(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = expected("`:`", char(':'))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = cut(value)(i)?;
-		Ok((i, (String::from(k), v)))
+		Ok((i, ObjectEntry::Kv((String::from(k), v))))
+	}
+
+	fn entry_spread(i: &str) -> IResult<&str, ObjectEntry> {
+		let (i, _) = tag("...")(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = cut(value)(i)?;
+		Ok((i, ObjectEntry::Spread(v)))
+	}
+
+	fn entry(i: &str) -> IResult<&str, ObjectEntry> {
+		alt((entry_kv, entry_spread))(i)
 	}
 
 	let start = i;
@@ -287,18 +320,42 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	};
 
 	let mut tree = BTreeMap::new();
-	tree.insert(first.0, first.1);
+	let mut spreads = Vec::<Value>::new();
+
+	match first {
+		ObjectEntry::Spread(v) => {
+			spreads.push(Value::Spread(Box::new(v)));
+		}
+		ObjectEntry::Kv((k, v)) => {
+			tree.insert(k, v);
+		}
+	}
 
 	let mut input = i;
 	while let (i, Some(_)) = opt(commas)(input)? {
 		if let (i, Some(_)) = opt(closebraces)(i)? {
+			if !spreads.is_empty() {
+				tree.insert("".into(), spreads.into());
+			}
+
 			return Ok((i, Object(tree)));
 		}
 		let (i, v) = cut(entry)(i)?;
-		tree.insert(v.0, v.1);
+		match v {
+			ObjectEntry::Spread(v) => {
+				spreads.push(Value::Spread(Box::new(v)));
+			}
+			ObjectEntry::Kv((k, v)) => {
+				tree.insert(k, v);
+			}
+		}
 		input = i
 	}
 	let (i, _) = expect_terminator(start, closebraces)(input)?;
+	if !spreads.is_empty() {
+		tree.insert("".into(), spreads.into());
+	}
+
 	Ok((i, Object(tree)))
 }
 
