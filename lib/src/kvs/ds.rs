@@ -917,13 +917,17 @@ impl Datastore {
 				.transaction(Read, Optimistic)
 				.await
 				.expect("Error creating transaction for lq catchup");
-			tokio::task::spawn_local(catchup_live_queries(
+			let fut = catchup_live_queries(
 				tx,
 				self.local_live_queries.clone(),
 				self.notification_channel.clone().expect("Notification channel not set").0,
 				lqs_to_update,
 				vs,
-			));
+			);
+			#[cfg(not(target_arch = "wasm32"))]
+			tokio::task::spawn_local(fut);
+			#[cfg(target_arch = "wasm32")]
+			wasm_bindgen_futures::spawn_local(fut);
 		}
 
 		// Catch up the necessary live queries
