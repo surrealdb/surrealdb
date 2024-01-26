@@ -83,8 +83,8 @@ pub fn versionstamp_to_u64(vs: &Versionstamp) -> u64 {
 		| (vs[4] as u64).wrapping_shl(4 * 8)
 		| (vs[5] as u64).wrapping_shl(3 * 8)
 		| (vs[6] as u64).wrapping_shl(2 * 8)
-		| (vs[7] as u64).wrapping_shl(1 * 8)
-		| (vs[8] as u64).wrapping_shl(0 * 8)
+		| (vs[7] as u64).wrapping_shl(8)
+		| (vs[8] as u64).wrapping_shl(0)
 }
 // to_u128_be converts a 10-byte versionstamp to a u128 assuming big-endian.
 // This is handy for human comparing versionstamps.

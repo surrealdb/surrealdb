@@ -867,14 +867,14 @@ impl Datastore {
 		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
 			Ok(vs) => Ok(vs),
 			Err(e) => {
-				return match tx.cancel().await {
+				match tx.cancel().await {
 					Ok(_) => {
 						Err(e)
 					}
 					Err(txe) => {
 						Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
 					}
-				};
+				}
 			}
 		}
 	}
@@ -1433,19 +1433,22 @@ async fn catchup_live_queries(
 
 		// Update the live query that notifications were processed
 		let mut write_ref = local_live_queries.write().await;
-		if let None = write_ref.insert(
-			LqIndexKey {
-				ns: k.ns.to_string(),
-				db: k.db.to_string(),
-				tb: k.tb.to_string(),
-				lq: k.lq,
-			},
-			LqIndexValue {
-				query: v.query.clone(),
-				vs,
-				ts: v.ts.clone(),
-			},
-		) {
+		if write_ref
+			.insert(
+				LqIndexKey {
+					ns: k.ns.to_string(),
+					db: k.db.to_string(),
+					tb: k.tb.to_string(),
+					lq: k.lq,
+				},
+				LqIndexValue {
+					query: v.query.clone(),
+					vs,
+					ts: v.ts,
+				},
+			)
+			.is_none()
+		{
 			// This shouldn't be possible
 			error!("Error updating local live query index, the previous value of an updated key was not found");
 		}
