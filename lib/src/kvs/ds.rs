@@ -136,7 +136,7 @@ pub struct Datastore {
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Map of Live Query ID to Live Query query
-	local_live_queries: RwLock<BTreeMap<LqIndexKey, LqIndexValue>>,
+	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, LqIndexValue>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -389,7 +389,7 @@ impl Datastore {
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
 			index_stores: IndexStores::default(),
-			local_live_queries: RwLock::new(BTreeMap::new()),
+			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
 		})
 	}
 
@@ -893,9 +893,10 @@ impl Datastore {
 		}
 
 		// Find live queries that need to catch up
-		let mut lqs_to_update = vec![];
-		let lock = self.local_live_queries.read().await;
-		for (k, v) in lock.iter() {
+		let lock_local_lqs = self.local_live_queries.read().await;
+		let mut lqs_to_update: Vec<(LqIndexKey, LqIndexValue)> =
+			Vec::with_capacity(lock_local_lqs.len());
+		for (k, v) in lock_local_lqs.iter() {
 			// Skip if no need to update
 			if v.ts.value >= ts {
 				// This shouldn't be possible and/or may mean clock skew
@@ -906,75 +907,26 @@ impl Datastore {
 				continue;
 			};
 			// We know we need to process events, so we do so now
-			lqs_to_update.push((k, v))
+			lqs_to_update.push((k.clone(), v.clone()))
 		}
-		if lqs_to_update.is_empty() {
-			return Ok(());
+		if !lqs_to_update.is_empty() {
+			let vs = vs.expect(
+				"Can only track progress on live queries with a versionstamp from a change feed",
+			);
+			let tx = self
+				.transaction(Read, Optimistic)
+				.await
+				.expect("Error creating transaction for lq catchup");
+			tokio::task::spawn_local(catchup_live_queries(
+				tx,
+				self.local_live_queries.clone(),
+				self.notification_channel.clone().expect("Notification channel not set").0,
+				lqs_to_update,
+				vs,
+			));
 		}
 
 		// Catch up the necessary live queries
-		for (k, v) in lqs_to_update {
-			// Process notifications
-			let mut tx = self.transaction(Read, Optimistic).await?;
-			let changes = cf::read(
-				&mut tx,
-				&k.ns,
-				&k.db,
-				Some(&k.tb),
-				ShowSince::Versionstamp(conv::versionstamp_to_u64(&v.vs)),
-				Some(1000),
-			)
-			.await?;
-			for database_change in changes {
-				for table_changes in database_change.1 .0 {
-					for table_change in table_changes.1 {
-						// TODO enforce security
-						let not_type = match table_change {
-							TableMutation::Set(_thing, value) => {
-								// Atm all sets are UPDATE
-								Some((dbs::Action::Update, Some(value)))
-							}
-							TableMutation::Del(_thing) => Some((dbs::Action::Delete, None)),
-							TableMutation::Def(_stm) => None,
-						};
-						// We don't want to handle definition statements; Probably can be refactored better
-						if let Some((action, value)) = not_type {
-							let val = value.unwrap_or(Value::None);
-							self.notification_channel
-								.as_ref()
-								.unwrap()
-								.0
-								.send(Notification {
-									id: k.lq,
-									action,
-									result: val,
-								})
-								.await
-								.unwrap();
-						}
-					}
-				}
-			}
-
-			// Update the live query that notifications were processed
-			let mut write_ref = self.local_live_queries.write().await;
-			if let None = write_ref.insert(
-				LqIndexKey {
-					ns: k.ns.to_string(),
-					db: k.db.to_string(),
-					tb: k.tb.to_string(),
-					lq: k.lq,
-				},
-				LqIndexValue {
-					query: v.query.clone(),
-					vs: vs.expect("Can only track progress on live queries with a versionstamp from a change feed"),
-					ts: v.ts.clone(),
-				},
-			) {
-				// This shouldn't be possible
-				error!("Error updating local live query index, the previous value of an updated key was not found");
-			}
-		}
 		Ok(())
 	}
 
@@ -1425,5 +1377,77 @@ impl Datastore {
 		}
 		// All ok
 		Ok(())
+	}
+}
+
+async fn catchup_live_queries(
+	mut tx: Transaction,
+	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, LqIndexValue>>>,
+	notification_channel_sender: Sender<Notification>,
+	lqs_to_update: Vec<(LqIndexKey, LqIndexValue)>,
+	vs: Versionstamp,
+) {
+	for (k, v) in lqs_to_update {
+		// Process notifications
+		let changes = {
+			let changes = cf::read(
+				&mut tx,
+				&k.ns,
+				&k.db,
+				Some(&k.tb),
+				ShowSince::Versionstamp(conv::versionstamp_to_u64(&v.vs)),
+				Some(1000),
+			)
+			.await;
+			tx.cancel().await.expect("Error cancelling transaction for lq catchup");
+			changes.expect("Error reading change feed")
+		};
+
+		for database_change in changes {
+			for table_changes in database_change.1 .0 {
+				for table_change in table_changes.1 {
+					// TODO enforce security
+					let not_type = match table_change {
+						TableMutation::Set(_thing, value) => {
+							// Atm all sets are UPDATE
+							Some((dbs::Action::Update, Some(value)))
+						}
+						TableMutation::Del(_thing) => Some((dbs::Action::Delete, None)),
+						TableMutation::Def(_stm) => None,
+					};
+					// We don't want to handle definition statements; Probably can be refactored better
+					if let Some((action, value)) = not_type {
+						let val = value.unwrap_or(Value::None);
+						notification_channel_sender
+							.send(Notification {
+								id: k.lq,
+								action,
+								result: val,
+							})
+							.await
+							.unwrap();
+					}
+				}
+			}
+		}
+
+		// Update the live query that notifications were processed
+		let mut write_ref = local_live_queries.write().await;
+		if let None = write_ref.insert(
+			LqIndexKey {
+				ns: k.ns.to_string(),
+				db: k.db.to_string(),
+				tb: k.tb.to_string(),
+				lq: k.lq,
+			},
+			LqIndexValue {
+				query: v.query.clone(),
+				vs,
+				ts: v.ts.clone(),
+			},
+		) {
+			// This shouldn't be possible
+			error!("Error updating local live query index, the previous value of an updated key was not found");
+		}
 	}
 }
