@@ -925,7 +925,7 @@ impl Datastore {
 				vs,
 			);
 			#[cfg(not(target_arch = "wasm32"))]
-			tokio::task::spawn_local(fut);
+			tokio::task::spawn(fut);
 			#[cfg(target_arch = "wasm32")]
 			wasm_bindgen_futures::spawn_local(fut);
 		}
