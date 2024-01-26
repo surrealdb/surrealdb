@@ -910,17 +910,21 @@ impl Datastore {
 			lqs_to_update.push((k.clone(), v.clone()))
 		}
 		if !lqs_to_update.is_empty() {
-			let vs = vs.expect(
-				"Can only track progress on live queries with a versionstamp from a change feed",
-			);
+			let vs = vs.ok_or(
+				// TODO(phughk): This is actually unimplemented
+				Error::Unimplemented( "Can only track progress on live queries with a versionstamp from a change feed".to_string()),
+			)?;
 			let tx = self
 				.transaction(Read, Optimistic)
 				.await
-				.expect("Error creating transaction for lq catchup");
+				.map_err(|e| Error::Tx(format!("Error creating transaction: {:?}", e)))?;
 			let fut = catchup_live_queries(
 				tx,
 				self.local_live_queries.clone(),
-				self.notification_channel.clone().expect("Notification channel not set").0,
+				self.notification_channel
+					.clone()
+					.ok_or(Error::Unreachable("Notification channel not set"))?
+					.0,
 				lqs_to_update,
 				vs,
 			);
@@ -1393,19 +1397,20 @@ async fn catchup_live_queries(
 ) {
 	for (k, v) in lqs_to_update {
 		// Process notifications
-		let changes = {
-			let changes = cf::read(
-				&mut tx,
-				&k.ns,
-				&k.db,
-				Some(&k.tb),
-				ShowSince::Versionstamp(conv::versionstamp_to_u64(&v.vs)),
-				Some(1000),
-			)
-			.await;
-			tx.cancel().await.expect("Error cancelling transaction for lq catchup");
-			changes.expect("Error reading change feed")
-		};
+		let changes = cf::read(
+			&mut tx,
+			&k.ns,
+			&k.db,
+			Some(&k.tb),
+			ShowSince::Versionstamp(conv::versionstamp_to_u64(&v.vs)),
+			Some(1000),
+		)
+		.await;
+		if let Err(e) = changes {
+			error!("Error reading changes for live query: {:?}", e);
+			continue;
+		}
+		let changes = changes.unwrap();
 
 		for database_change in changes {
 			for table_changes in database_change.1 .0 {
@@ -1456,5 +1461,9 @@ async fn catchup_live_queries(
 			// This shouldn't be possible
 			error!("Error updating local live query index, the previous value of an updated key was not found");
 		}
+	}
+
+	if let Err(e) = tx.cancel().await {
+		error!("Error cancelling transaction: {:?}", e);
 	}
 }
