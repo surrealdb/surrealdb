@@ -12,11 +12,11 @@ use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
 	// we do include it in the first field for convenience.
-	Set(Thing, Value),
+	Set(Thing, Option<Value>, Value),
 	Del(Thing),
 	Def(DefineTableStatement),
 }
@@ -66,8 +66,10 @@ pub struct ChangeSet(pub [u8; 10], pub DatabaseMutation);
 impl TableMutation {
 	pub fn into_value(self) -> Value {
 		let (k, v) = match self {
-			TableMutation::Set(_t, v) => ("update".to_string(), v),
+			TableMutation::Set(_t, None, v) => ("create".to_string(), v),
+			TableMutation::Set(_t, Some(_previous), v) => ("update".to_string(), v),
 			TableMutation::Del(t) => {
+				// TODO(phughk): Future PR for lq on cf feature, store update in delete for diff and notification
 				let mut h = BTreeMap::<String, Value>::new();
 				h.insert("id".to_string(), Value::Thing(t));
 				let o = Object::from(h);
@@ -109,7 +111,7 @@ impl ChangeSet {
 impl Display for TableMutation {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
+			TableMutation::Set(id, _previous, v) => write!(f, "SET {} {}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::Def(t) => write!(f, "{}", t),
 		}

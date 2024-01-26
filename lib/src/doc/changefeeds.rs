@@ -31,7 +31,14 @@ impl<'a> Document<'a> {
 			let tb = tb.name.as_str();
 			let id = self.id.as_ref().unwrap();
 			// Create the changefeed entry
-			run.record_change(opt.ns(), opt.db(), tb, id, self.current.doc.clone());
+			run.record_change(
+				opt.ns(),
+				opt.db(),
+				tb,
+				id,
+				Some(self.initial.doc.clone()),
+				self.current.doc.clone(),
+			);
 		}
 		// Carry on
 		Ok(())

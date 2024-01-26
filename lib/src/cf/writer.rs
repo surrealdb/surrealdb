@@ -59,13 +59,21 @@ impl Writer {
 		}
 	}
 
-	pub(crate) fn update(&mut self, ns: &str, db: &str, tb: &str, id: Thing, v: Cow<'_, Value>) {
+	pub(crate) fn update(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		id: Thing,
+		p: Cow<'_, Value>,
+		v: Cow<'_, Value>,
+	) {
 		if v.is_some() {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
 				tb.to_string(),
-				TableMutation::Set(id, v.into_owned()),
+				TableMutation::Set(id, Some(p.into_owned()), v.into_owned()),
 			);
 		} else {
 			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
