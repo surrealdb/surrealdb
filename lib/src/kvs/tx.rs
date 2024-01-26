@@ -1944,7 +1944,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		ix: &str,
-	) -> Result<DefineFieldStatement, Error> {
+	) -> Result<DefineIndexStatement, Error> {
 		let key = crate::key::table::ix::new(ns, db, tb, ix);
 		let key_enc = crate::key::table::ix::Ix::encode(&key)?;
 		trace!("Getting ix ({:?}) {:?}", ix, crate::key::debug::sprint_key(&key_enc));
