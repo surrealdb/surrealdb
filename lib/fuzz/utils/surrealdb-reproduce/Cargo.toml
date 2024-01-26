@@ -1,5 +1,5 @@
 [package]
-name = "surreal-reproduce"
+name = "surrealdb-reproduce"
 version = "0.1.0"
 edition = "2021"
 

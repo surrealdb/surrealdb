@@ -21,7 +21,7 @@ default-features = false
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
-exclude = ["reproducer"]
+exclude = ["surrealdb-reproduce"]
 
 [profile.release]
 debug = 1
