@@ -658,6 +658,42 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_field_with_recursive_types() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE bar;
+		// defining a type for the parent type should overwrite permissions for the child.
+		DEFINE FIELD foo.*.* ON bar TYPE number PERMISSIONS FOR UPDATE NONE;
+		// this should recursively define types for foo, foo.*, and foo.*.*
+		DEFINE FIELD foo ON bar TYPE array<float | array<bool>> | set<number>;
+		INFO FOR TABLE bar;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"{
+			events: {},
+			fields: {
+				"foo": "DEFINE FIELD foo ON bar TYPE array<float | array<bool>> | set<number> PERMISSIONS FULL",
+				"foo[*]": "DEFINE FIELD foo[*] ON bar TYPE float | array<bool> | number PERMISSIONS FULL",
+				"foo[*][*]": "DEFINE FIELD foo[*][*] ON bar TYPE bool PERMISSIONS FOR select, create, delete FULL, FOR update NONE"
+			},
+			indexes: {},
+			lives: {},
+			tables: {}
+		}"#,
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_single_simple() -> Result<(), Error> {
 	let sql = "
 		CREATE user:1 SET age = 23;

@@ -87,7 +87,6 @@ fn disallowed_subquery_statements(i: &str) -> IResult<&str, ()> {
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
 
 	#[test]

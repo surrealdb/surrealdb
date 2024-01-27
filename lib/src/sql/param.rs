@@ -14,6 +14,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Param")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct Param(pub Ident);
 
@@ -66,6 +67,8 @@ impl Param {
 				Some(v) => v.compute(ctx, opt, txn, doc).await,
 				// The param has not been set locally
 				None => {
+					// Check that a database is set to prevent a panic
+					opt.valid_for_db()?;
 					let val = {
 						// Claim transaction
 						let mut run = txn.lock().await;
@@ -97,8 +100,8 @@ impl Param {
 									}
 								}
 							}
-							// Return the value
-							Ok(val.value.to_owned())
+							// Return the computed value
+							val.value.compute(ctx, opt, txn, doc).await
 						}
 						// The param has not been set globally
 						Err(_) => Ok(Value::None),

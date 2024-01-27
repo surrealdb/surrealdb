@@ -177,7 +177,8 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 /// # Examples
 ///
 /// Create a new instance, and allow all capabilities
-/// ```no_run
+#[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
+#[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
@@ -192,7 +193,8 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 /// ```
 ///
 /// Create a new instance, and allow certain functions
-/// ```no_run
+#[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
+#[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
 /// # use std::str::FromStr;
 /// # use surrealdb::engine::local::File;
 /// # use surrealdb::opt::capabilities::Capabilities;

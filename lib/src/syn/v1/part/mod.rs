@@ -6,7 +6,6 @@ use super::{
 	literal::{datetime, duration, ident, table, tables},
 	operator::dir,
 	thing::thing,
-	// TODO: go through and check every import for alias.
 	value::value,
 	IResult,
 };
@@ -34,7 +33,7 @@ pub mod view;
 pub mod with;
 
 pub use data::data;
-pub use field::{field, fields};
+pub use field::fields;
 pub use split::split;
 pub use start::start;
 pub use timeout::timeout;
@@ -238,7 +237,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::{Datetime, Idiom, Value};
-	use crate::syn::test::Parse;
+	use crate::syn::Parse;
 	use std::time;
 
 	#[test]

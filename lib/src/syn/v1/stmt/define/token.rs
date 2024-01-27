@@ -1,3 +1,5 @@
+#[cfg(not(feature = "jwks"))]
+use super::super::super::error::ParseError::Expected;
 use super::super::super::{
 	comment::shouldbespace,
 	ending,
@@ -6,7 +8,11 @@ use super::super::super::{
 	part::base_or_scope,
 	IResult,
 };
-use crate::sql::{statements::DefineTokenStatement, Algorithm, Strand};
+use crate::{
+	sql::{statements::DefineTokenStatement, Algorithm, Strand},
+	syn::v1::ParseError,
+};
+use nom::Err;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
@@ -32,6 +38,13 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	for opt in opts {
 		match opt {
 			DefineTokenOption::Type(v) => {
+				#[cfg(not(feature = "jwks"))]
+				if matches!(v, Algorithm::Jwks) {
+					return Err(Err::Error(Expected {
+						tried: i,
+						expected: "the 'jwks' feature to be enabled",
+					}));
+				}
 				res.kind = v;
 			}
 			DefineTokenOption::Value(v) => {
@@ -44,7 +57,11 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	}
 	// Check necessary options
 	if res.code.is_empty() {
-		// TODO throw error
+		return Err(Err::Failure(ParseError::ExplainedExpected {
+			tried: i,
+			expected: "a VALUE clause",
+			explained: "A token requires a VALUE clause to be defined.",
+		}));
 	}
 	// Return the statement
 	Ok((i, res))
@@ -82,4 +99,18 @@ fn token_comment(i: &str) -> IResult<&str, DefineTokenOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineTokenOption::Comment(v)))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn define_token_without_value_clause() {
+		let sql = "TOKEN test ON test";
+		let res = token(sql);
+
+		assert_eq!(res.is_err(), true)
+	}
 }

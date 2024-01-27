@@ -11,8 +11,11 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct IfelseStatement {
+	/// The first if condition followed by a body, followed by any number of else if's
 	pub exprs: Vec<(Value, Value)>,
+	/// the final else body, if there is one
 	pub close: Option<Value>,
 }
 

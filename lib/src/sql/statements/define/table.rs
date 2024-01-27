@@ -10,12 +10,14 @@ use crate::sql::{
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
 use crate::sql::{Kind, TableType};
+use crate::sql::{Kind, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
@@ -111,24 +113,15 @@ impl DefineTableStatement {
 
 impl DefineTableStatement {
 	pub fn is_relation(&self) -> bool {
-		match self.table_type {
-			TableType::Relation(_) => true,
-			_ => false,
-		}
+		matches!(self.table_type, TableType::Relation(_))
 	}
+
 	pub fn allows_relation(&self) -> bool {
-		match self.table_type {
-			TableType::Relation(_) => true,
-			TableType::Any => true,
-			_ => false,
-		}
+		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
 	}
+
 	pub fn allows_normal(&self) -> bool {
-		match self.table_type {
-			TableType::Normal => true,
-			TableType::Any => true,
-			_ => false,
-		}
+		matches!(self.table_type, TableType::Normal | TableType::Any)
 	}
 }
 
@@ -136,7 +129,7 @@ fn get_tables_from_kind(kind: &Kind) -> String {
 	let Kind::Record(tables) = kind else {
 		panic!()
 	};
-	tables.into_iter().map(ToString::to_string).collect::<Vec<_>>().join(" | ")
+	tables.iter().map(ToString::to_string).collect::<Vec<_>>().join(" | ")
 }
 
 impl Display for DefineTableStatement {
@@ -148,10 +141,10 @@ impl Display for DefineTableStatement {
 		if let TableType::Relation(rel) = &self.table_type {
 			f.write_str(" RELATION")?;
 			if let Some(kind) = &rel.from {
-				write!(f, " FROM {}", get_tables_from_kind(&kind))?;
+				write!(f, " IN {}", get_tables_from_kind(kind))?;
 			}
 			if let Some(kind) = &rel.to {
-				write!(f, " TO {}", get_tables_from_kind(&kind))?;
+				write!(f, " OUT {}", get_tables_from_kind(kind))?;
 			}
 		}
 		f.write_str(if self.full {

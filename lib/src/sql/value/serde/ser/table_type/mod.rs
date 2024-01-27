@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use crate::sql::TableType;
-use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;

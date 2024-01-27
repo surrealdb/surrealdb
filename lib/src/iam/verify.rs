@@ -1,17 +1,43 @@
 use crate::dbs::Session;
 use crate::err::Error;
+#[cfg(feature = "jwks")]
+use crate::iam::jwks;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, DecodingKey, Header, Validation};
 use once_cell::sync::Lazy;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 
-fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
+async fn config(
+	_kvs: &Datastore,
+	de_kind: Algorithm,
+	de_code: String,
+	_token_header: Header,
+) -> Result<(DecodingKey, Validation), Error> {
+	if de_kind == Algorithm::Jwks {
+		#[cfg(not(feature = "jwks"))]
+		{
+			warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
+			Err(Error::InvalidAuth)
+		}
+		#[cfg(feature = "jwks")]
+		// The key identifier header must be present
+		if let Some(kid) = _token_header.kid {
+			jwks::config(_kvs, &kid, &de_code).await
+		} else {
+			Err(Error::MissingTokenHeader("kid".to_string()))
+		}
+	} else {
+		config_alg(de_kind, de_code)
+	}
+}
+
+fn config_alg(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {
 		Algorithm::Hs256 => Ok((
 			DecodingKey::from_secret(code.as_ref()),
@@ -65,6 +91,7 @@ fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Er
 			DecodingKey::from_rsa_pem(code.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
+		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here
 	}
 }
 
@@ -196,7 +223,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
-			let cf = config(de.kind, de.code)?;
+			// Obtain the configuration with which to verify the token
+			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -230,7 +258,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let id = syn::thing(&id)?;
 			// Get the scope
 			let de = tx.get_sc(&ns, &db, &sc).await?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -261,7 +289,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the database token
 			let de = tx.get_db_token(&ns, &db, &tk).await?;
-			let cf = config(de.kind, de.code)?;
+			// Obtain the configuration with which to verify the token
+			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -305,7 +334,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -333,7 +362,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace token
 			let de = tx.get_ns_token(&ns, &tk).await?;
-			let cf = config(de.kind, de.code)?;
+			// Obtain the configuration with which to verify the token
+			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -372,7 +402,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -401,7 +431,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config(Algorithm::Hs512, de.code)?;
+			let cf = config_alg(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -532,7 +562,7 @@ pub async fn verify_creds_legacy(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{iam::token::HEADER, kvs::Datastore};
+	use crate::{iam::token::Claims, iam::token::HEADER, iam::verify::token, kvs::Datastore};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};
@@ -1107,7 +1137,7 @@ mod tests {
 		// Test with generic user identifier
 		//
 		{
-			let resource_id = "user:2k9qnabxuxh8k4d5gfto".to_string();
+			let resource_id = "user:`2k9qnabxuxh8k4d5gfto`".to_string();
 			// Prepare the claims object
 			let mut claims = claims.clone();
 			claims.id = Some(resource_id.clone());
@@ -1233,6 +1263,241 @@ mod tests {
 			assert!(sess.au.is_scope());
 			let user_id = syn::thing(&resource_id).unwrap();
 			assert_eq!(sess.sd, Some(Value::from(user_id)));
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_scope_custom_claims() {
+		use std::collections::HashMap;
+
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON SCOPE test TYPE HS512 VALUE '{secret}';").as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		//
+		// Token with valid custom claims of different types
+		//
+		let now = Utc::now().timestamp();
+		let later = (Utc::now() + Duration::hours(1)).timestamp();
+		{
+			let claims_json = format!(
+				r#"
+				{{
+					"iss": "surrealdb-test",
+					"iat": {now},
+					"nbf": {now},
+					"exp": {later},
+					"tk": "token",
+					"ns": "test",
+					"db": "test",
+					"sc": "test",
+
+					"string_claim": "test",
+					"bool_claim": true,
+					"int_claim": 123456,
+					"float_claim": 123.456,
+					"array_claim": [
+						"test_1",
+						"test_2"
+					],
+					"object_claim": {{
+						"test_1": "value_1",
+						"test_2": {{
+							"test_2_1": "value_2_1",
+							"test_2_2": "value_2_2"
+						}}
+					}}
+				}}
+				"#
+			);
+			let claims = serde_json::from_str::<Claims>(&claims_json).unwrap();
+			// Create the token
+			let enc = match encode(&HEADER, &claims, &key) {
+				Ok(enc) => enc,
+				Err(err) => panic!("Failed to decode token: {:?}", err),
+			};
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			let tk = match sess.tk {
+				Some(Value::Object(tk)) => tk,
+				_ => panic!("Session token is not an object"),
+			};
+			let string_claim = tk.get("string_claim").unwrap();
+			assert_eq!(*string_claim, Value::Strand("test".into()));
+			let bool_claim = tk.get("bool_claim").unwrap();
+			assert_eq!(*bool_claim, Value::Bool(true.into()));
+			let int_claim = tk.get("int_claim").unwrap();
+			assert_eq!(*int_claim, Value::Number(123456.into()));
+			let float_claim = tk.get("float_claim").unwrap();
+			assert_eq!(*float_claim, Value::Number(123.456.into()));
+			let array_claim = tk.get("array_claim").unwrap();
+			assert_eq!(*array_claim, Value::Array(vec!["test_1", "test_2"].into()));
+			let object_claim = tk.get("object_claim").unwrap();
+			let mut test_object: HashMap<String, Value> = HashMap::new();
+			test_object.insert("test_1".to_string(), Value::Strand("value_1".into()));
+			let mut test_object_child = HashMap::new();
+			test_object_child.insert("test_2_1".to_string(), Value::Strand("value_2_1".into()));
+			test_object_child.insert("test_2_2".to_string(), Value::Strand("value_2_2".into()));
+			test_object.insert("test_2".to_string(), Value::Object(test_object_child.into()));
+			assert_eq!(*object_claim, Value::Object(test_object.into()));
+		}
+	}
+
+	#[cfg(feature = "jwks")]
+	#[tokio::test]
+	async fn test_token_scope_jwks() {
+		use crate::opt::capabilities::{Capabilities, NetTarget, Targets};
+		use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+		use jsonwebtoken::jwk::{Jwk, JwkSet};
+		use rand::{distributions::Alphanumeric, Rng};
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		// Use unique path to prevent accidental cache reuse
+		fn random_path() -> String {
+			let rng = rand::thread_rng();
+			rng.sample_iter(&Alphanumeric).take(8).map(char::from).collect()
+		}
+
+		// Key identifier used in both JWT and JWT
+		let kid = "test_kid";
+		// Secret used to both sign and verify with HMAC
+		let secret = "jwt_secret";
+
+		// JWKS object with single JWK object providing the HS512 secret used to verify
+		let jwks = JwkSet {
+			keys: vec![Jwk {
+				common: jsonwebtoken::jwk::CommonParameters {
+					public_key_use: None,
+					key_operations: None,
+					algorithm: Some(jsonwebtoken::Algorithm::HS512),
+					key_id: Some(kid.to_string()),
+					x509_url: None,
+					x509_chain: None,
+					x509_sha1_fingerprint: None,
+					x509_sha256_fingerprint: None,
+				},
+				algorithm: jsonwebtoken::jwk::AlgorithmParameters::OctetKey(
+					jsonwebtoken::jwk::OctetKeyParameters {
+						key_type: jsonwebtoken::jwk::OctetKeyType::Octet,
+						value: STANDARD_NO_PAD.encode(&secret),
+					},
+				),
+			}],
+		};
+
+		let jwks_path = format!("{}/jwks.json", random_path());
+		let mock_server = MockServer::start().await;
+		let response = ResponseTemplate::new(200).set_body_json(jwks);
+		Mock::given(method("GET"))
+			.and(path(&jwks_path))
+			.respond_with(response)
+			.expect(1)
+			.mount(&mock_server)
+			.await;
+		let server_url = mock_server.uri();
+
+		// We allow requests to the local server serving the JWKS object
+		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
+			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
+				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			)),
+		);
+
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON SCOPE test TYPE JWKS VALUE '{server_url}/{jwks_path}';")
+				.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Use custom JWT header that includes the key identifier
+		let header_with_kid = jsonwebtoken::Header {
+			kid: Some(kid.to_string()),
+			alg: jsonwebtoken::Algorithm::HS512,
+			..jsonwebtoken::Header::default()
+		};
+
+		// Sign the JWT with the same secret specified in the JWK
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			tk: Some("token".to_string()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			sc: Some("test".to_string()),
+			..Claims::default()
+		};
+
+		//
+		// Test without roles defined
+		// Roles should be ignored in scope authentication
+		//
+		{
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.roles = None;
+			// Create the token
+			let enc = encode(&header_with_kid, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+		}
+
+		//
+		// Test with invalid signature
+		//
+		{
+			// Prepare the claims object
+			let claims = claims.clone();
+			// Create the token
+			let key = EncodingKey::from_secret("invalid".as_ref());
+			let enc = encode(&header_with_kid, &claims, &key).unwrap();
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_err(), "Unexpected success signing in with token: {:?}", res);
 		}
 	}
 

@@ -383,6 +383,7 @@ impl Surreal<Db> {
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			router: self.router.clone(),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -402,11 +403,14 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 			Err(error) => map.insert(index, (stats, Err(error.into()))),
 		};
 	}
-	QueryResponse(map)
+	QueryResponse {
+		results: map,
+		..QueryResponse::new()
+	}
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
-	if let Some((_stats, result)) = process(responses).0.remove(&0) {
+	if let Some((_stats, result)) = process(responses).results.remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
@@ -765,7 +769,11 @@ async fn router(
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			match kvs.compute(value, &*session, Some(vars.clone())).await? {
+			let var = Some(map! {
+				key.clone() => Value::None,
+				=> vars
+			});
+			match kvs.compute(value, &*session, var).await? {
 				Value::None => vars.remove(&key),
 				v => vars.insert(key, v),
 			};

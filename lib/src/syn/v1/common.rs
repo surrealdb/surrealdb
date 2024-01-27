@@ -285,8 +285,27 @@ where
 {
 	move |i| {
 		let (i, s) = prefix.parse(i)?;
-		let mut res = Vec::new();
 		let mut input = i;
+		let (i, v) = value.parse(input)?;
+		let mut res = vec![v];
+
+		match separator.parse(i.clone()) {
+			Ok((i, _)) => {
+				input = i;
+			}
+			Err(Err::Error(_)) => match terminator.parse(i.clone()) {
+				Ok((i, _)) => return Ok((i, res)),
+				Result::Err(Err::Error(_)) => {
+					return Err(Err::Failure(ParseError::MissingDelimiter {
+						opened: s,
+						tried: i,
+					}))
+				}
+				Result::Err(e) => return Err(e),
+			},
+			Err(e) => return Err(e),
+		}
+
 		loop {
 			match terminator.parse(input.clone()) {
 				Err(Err::Error(_)) => {}
@@ -296,8 +315,8 @@ where
 					break;
 				}
 			}
-			let (i, value) = value.parse(input)?;
-			res.push(value);
+			let (i, v) = value.parse(input)?;
+			res.push(v);
 			match separator.parse(i.clone()) {
 				Ok((i, _)) => {
 					input = i;

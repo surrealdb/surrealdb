@@ -10,7 +10,7 @@ async fn write_scan_tblq() {
 	];
 
 	for live_id in live_ids {
-		let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		let test = init(node_id, clock).await.unwrap();
 
 		// Write some data
@@ -35,11 +35,11 @@ async fn write_scan_tblq() {
 
 		// Verify scan
 		let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-		let res = tx.scan_tblq(ns, db, tb, 100).await.unwrap();
-		let no_limit = tx.scan_tblq(ns, db, tb, NO_LIMIT).await.unwrap();
+		let res_many_batches = tx.scan_tblq(ns, db, tb, 1).await.unwrap();
+		let res_single_batch = tx.scan_tblq(ns, db, tb, 100_000).await.unwrap();
 		tx.commit().await.unwrap();
 		assert_eq!(
-			res,
+			res_many_batches,
 			vec![LqValue {
 				nd: sql::Uuid::from(node_id),
 				ns: ns.to_string(),
@@ -48,6 +48,6 @@ async fn write_scan_tblq() {
 				lq: live_id
 			}]
 		);
-		assert_eq!(res, no_limit);
+		assert_eq!(res_many_batches, res_single_batch);
 	}
 }

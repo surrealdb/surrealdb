@@ -4,7 +4,7 @@ use super::super::super::{
 	error::{expect_tag_no_case, expected},
 	literal::{ident, strand},
 	value::{value, values},
-	IResult,
+	IResult, ParseError,
 };
 use crate::sql::{statements::DefineEventStatement, Strand, Value, Values};
 use nom::{
@@ -13,6 +13,7 @@ use nom::{
 	combinator::{cut, opt},
 	multi::many0,
 	sequence::tuple,
+	Err,
 };
 
 pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
@@ -52,7 +53,11 @@ pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 	}
 	// Check necessary options
 	if res.then.is_empty() {
-		// TODO throw error
+		return Err(Err::Failure(ParseError::ExplainedExpected {
+			tried: i,
+			expected: "a THEN clause",
+			explained: "An event requires a THEN clause to be defined.",
+		}));
 	}
 	// Return the statement
 	Ok((i, res))
@@ -90,4 +95,18 @@ fn event_comment(i: &str) -> IResult<&str, DefineEventOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineEventOption::Comment(v)))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn define_event_without_then_clause() {
+		let sql = "EVENT test ON test";
+		let res = event(sql);
+
+		assert_eq!(res.is_err(), true)
+	}
 }

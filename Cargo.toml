@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.0.1"
+version = "1.1.1"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -18,6 +18,8 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
+experimental-parser = ["surrealdb/experimental-parser"]
+jwks = ["surrealdb/jwks"]
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
@@ -40,6 +42,7 @@ axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
+ciborium = "0.2.1"
 clap = { version = "4.4.11", features = [
     "env",
     "derive",
@@ -63,9 +66,9 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "blocking",
     "gzip",
 ] }
+rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }
-serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
 surrealdb = { path = "lib", features = [
@@ -73,7 +76,7 @@ surrealdb = { path = "lib", features = [
     "protocol-ws",
     "rustls",
 ] }
-surrealml-core = { version = "0.0.3", optional = true }
+surrealml-core = { version = "0.0.7", optional = true }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "signal"] }
@@ -128,6 +131,9 @@ tokio-tungstenite = { version = "0.20.1" }
 tonic = "0.8.3"
 ulid = "1.1.0"
 wiremock = "0.5.22"
+
+[build-dependencies]
+semver = "1.0.20"
 
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"

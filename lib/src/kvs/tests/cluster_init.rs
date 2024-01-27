@@ -12,7 +12,6 @@ use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
 use crate::sql::{Fields, Value};
 use test_log::test;
-use tokio::sync::RwLock;
 use uuid;
 
 #[tokio::test]
@@ -24,7 +23,7 @@ async fn expired_nodes_are_garbage_collected() {
 		value: 123000,
 	};
 	let fake_clock = FakeClock::new(old_time);
-	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let fake_clock = Arc::new(SizedClock::Fake(fake_clock));
 	let mut test = init(new_node, fake_clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
@@ -73,7 +72,7 @@ async fn expired_nodes_get_live_queries_archived() {
 		value: 123000,
 	};
 	let fake_clock = FakeClock::new(old_time);
-	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let fake_clock = Arc::new(SizedClock::Fake(fake_clock));
 	let mut test = init(old_node, fake_clock.clone()).await.unwrap();
 
 	// Set up the first node at an early timestamp
@@ -144,7 +143,7 @@ async fn single_live_queries_are_garbage_collected() {
 		value: 123000,
 	};
 	let fake_clock = FakeClock::new(time);
-	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let fake_clock = Arc::new(SizedClock::Fake(fake_clock));
 	let mut test = init(node_id, fake_clock).await.unwrap();
 	let namespace = "test_namespace";
 	let database = "test_db";
@@ -231,7 +230,7 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		value: 456_000,
 	};
 	let fake_clock = FakeClock::new(t1);
-	let fake_clock = Arc::new(RwLock::new(SizedClock::Fake(fake_clock)));
+	let fake_clock = Arc::new(SizedClock::Fake(fake_clock));
 	let test = init(old_node_id, fake_clock.clone()).await.unwrap();
 	let namespace = "test_namespace_0A8BD08BE4F2457BB9F145557EF19605";
 	let database_owned = format!("test_db_{:?}", test.kvs);
@@ -377,11 +376,10 @@ async fn test_asymmetric_difference() {
 	assert_ne!(count, 0);
 }
 
-async fn set_fake_clock(fake_clock: Arc<RwLock<SizedClock>>, time: Timestamp) {
-	match &mut *fake_clock.write().await {
-		SizedClock::Fake(f) => f.set(time).await,
-		_ => {
-			panic!("Clock is not fake")
-		}
-	}
+async fn set_fake_clock(fake_clock: Arc<SizedClock>, time: Timestamp) {
+	let clock = match &*fake_clock {
+		SizedClock::Fake(f) => f,
+		_ => panic!("Clock is not fake"),
+	};
+	clock.set(time).await;
 }

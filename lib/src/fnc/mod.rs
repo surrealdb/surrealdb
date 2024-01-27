@@ -266,6 +266,16 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
 		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
+		"string::semver::compare" => string::semver::compare,
+		"string::semver::major" => string::semver::major,
+		"string::semver::minor" => string::semver::minor,
+		"string::semver::patch" => string::semver::patch,
+		"string::semver::inc::major" => string::semver::inc::major,
+		"string::semver::inc::minor" => string::semver::inc::minor,
+		"string::semver::inc::patch" => string::semver::inc::patch,
+		"string::semver::set::major" => string::semver::set::major,
+		"string::semver::set::minor" => string::semver::set::minor,
+		"string::semver::set::patch" => string::semver::set::patch,
 		//
 		"time::ceil" => time::ceil,
 		"time::day" => time::day,
@@ -413,6 +423,7 @@ pub async fn asynchronous(
 mod tests {
 	#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 	use crate::dbs::Capabilities;
+	use crate::sql::{statements::OutputStatement, Function, Query, Statement, Value};
 
 	#[tokio::test]
 	async fn implementations_are_present() {
@@ -432,8 +443,28 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let builtin_name = crate::syn::test::builtin_name(name);
-			if builtin_name.is_err() {
+			let res = crate::syn::parse(&format!("RETURN {}()", name));
+			if let Ok(Query(mut x)) = res {
+				match x.0.pop() {
+					Some(Statement::Output(OutputStatement {
+						what: Value::Function(x),
+						..
+					})) => match *x {
+						Function::Normal(parsed_name, _) => {
+							if parsed_name != name {
+								problems
+									.push(format!("function `{name}` parsed as `{parsed_name}`"));
+							}
+						}
+						_ => {
+							problems.push(format!("couldn't parse {name} function"));
+						}
+					},
+					_ => {
+						problems.push(format!("couldn't parse {name} function"));
+					}
+				}
+			} else {
 				problems.push(format!("couldn't parse {name} function"));
 			}
 

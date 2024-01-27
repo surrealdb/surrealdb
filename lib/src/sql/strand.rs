@@ -12,6 +12,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Strand")]
 #[revisioned(revision = 1)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Strand {
@@ -129,7 +130,7 @@ pub(crate) mod no_nul_bytes {
 #[cfg(test)]
 mod test {
 
-	#[cfg(not(feature = "experimental_parser"))]
+	#[cfg(not(feature = "experimental-parser"))]
 	#[test]
 	fn ensure_strands_are_prefixed() {
 		use super::Strand;

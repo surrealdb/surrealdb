@@ -24,12 +24,12 @@ async fn future_function_simple() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val =
-		Value::parse("[{ id: person:test, birthday: '2007-06-22T00:00:00Z', can_drive: false }]");
+		Value::parse("[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val =
-		Value::parse("[{ id: person:test, birthday: '2001-06-22T00:00:00Z', can_drive: true }]");
+		Value::parse("[{ id: person:test, birthday: d'2001-06-22T00:00:00Z', can_drive: true }]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -56,7 +56,7 @@ async fn future_function_arguments() -> Result<(), Error> {
 			{
 				a: 'test@surrealdb.com',
 				b: 'test@surrealdb.com',
-				id: 'future:test',
+				id: future:test,
 				x: 'a-test',
 				y: 'b-test',
 			}

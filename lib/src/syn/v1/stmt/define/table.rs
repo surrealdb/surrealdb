@@ -168,7 +168,7 @@ fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
 
 fn relation_from(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("FROM")(i)?;
+	let (i, _) = alt((tag_no_case("FROM"), tag_no_case("IN")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, idents) = separated_list1(verbar, ident)(i)?;
 	Ok((i, RelationDir::From(Kind::Record(idents.into_iter().map(Into::into).collect()))))
@@ -176,7 +176,7 @@ fn relation_from(i: &str) -> IResult<&str, RelationDir> {
 
 fn relation_to(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("TO")(i)?;
+	let (i, _) = alt((tag_no_case("TO"), tag_no_case("OUT")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, idents) = separated_list1(verbar, ident)(i)?;
 

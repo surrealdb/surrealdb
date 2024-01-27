@@ -1,10 +1,10 @@
-use crate::kvs::{LqValue, NO_LIMIT};
+use crate::kvs::LqValue;
 
 #[tokio::test]
 #[serial]
 async fn write_scan_ndlq() {
 	let nd = uuid::Uuid::parse_str("7a17446f-721f-4855-8fc7-81086752ca44").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(nd, clock).await.unwrap();
 
 	// Write some data
@@ -19,11 +19,11 @@ async fn write_scan_ndlq() {
 
 	// Verify scan
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
-	let res_lim = tx.scan_ndlq(&nd, 100).await.unwrap();
-	let res_no_lim = tx.scan_ndlq(&nd, NO_LIMIT).await.unwrap();
+	let res_many_batches = tx.scan_ndlq(&nd, 1).await.unwrap();
+	let res_single_batch = tx.scan_ndlq(&nd, 100_000).await.unwrap();
 	tx.commit().await.unwrap();
 	assert_eq!(
-		res_lim,
+		res_many_batches,
 		vec![LqValue {
 			nd: sql::Uuid::from(nd),
 			ns: ns.to_string(),
@@ -32,5 +32,5 @@ async fn write_scan_ndlq() {
 			lq
 		}]
 	);
-	assert_eq!(res_lim, res_no_lim);
+	assert_eq!(res_many_batches, res_single_batch);
 }

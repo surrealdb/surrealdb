@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
@@ -20,6 +21,12 @@ pub struct DefineScopeStatement {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub comment: Option<Strand>,
+}
+
+impl DefineScopeStatement {
+	pub(crate) fn random_code() -> String {
+		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+	}
 }
 
 impl DefineScopeStatement {
@@ -44,10 +51,6 @@ impl DefineScopeStatement {
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
-	}
-
-	pub fn random_code() -> String {
-		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
 	}
 }
 

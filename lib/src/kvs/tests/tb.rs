@@ -1,5 +1,6 @@
 use crate::key::database::tb;
 use crate::key::database::tb::Tb;
+use crate::kvs::ScanPage;
 use crate::sql::statements::DefineTableStatement;
 
 #[tokio::test]
@@ -7,7 +8,7 @@ use crate::sql::statements::DefineTableStatement;
 async fn table_definitions_can_be_scanned() {
 	// Setup
 	let node_id = Uuid::parse_str("f7b2ba17-90ed-45f9-9aa2-906c6ba0c289").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 
@@ -25,15 +26,21 @@ async fn table_definitions_can_be_scanned() {
 		permissions: Default::default(),
 		changefeed: None,
 		comment: None,
-		relation: None,
+		table_type: Default::default(),
 	};
 	tx.set(&key, &value).await.unwrap();
 
 	// Validate with scan
-	match tx.scan(tb::prefix(namespace, database)..tb::suffix(namespace, database), 1000).await {
+	match tx
+		.scan_paged(
+			ScanPage::from(tb::prefix(namespace, database)..tb::suffix(namespace, database)),
+			1000,
+		)
+		.await
+	{
 		Ok(scan) => {
-			assert_eq!(scan.len(), 1);
-			let read = DefineTableStatement::from(&scan[0].1);
+			assert_eq!(scan.values.len(), 1);
+			let read = DefineTableStatement::from(&scan.values[0].1);
 			assert_eq!(&read, &value);
 		}
 		Err(e) => panic!("{:?}", e),
@@ -46,7 +53,7 @@ async fn table_definitions_can_be_scanned() {
 async fn table_definitions_can_be_deleted() {
 	// Setup
 	let node_id = Uuid::parse_str("13c0e650-1710-489e-bb80-f882bce50b56").unwrap();
-	let clock = Arc::new(RwLock::new(SizedClock::Fake(FakeClock::new(Timestamp::default()))));
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(node_id, clock).await.unwrap();
 	let mut tx = test.db.transaction(Write, Optimistic).await.unwrap();
 
@@ -64,8 +71,7 @@ async fn table_definitions_can_be_deleted() {
 		permissions: Default::default(),
 		changefeed: None,
 		comment: None,
-		relation: None,
-		..Default::default()
+		table_type: Default::default(),
 	};
 	tx.set(&key, &value).await.unwrap();
 

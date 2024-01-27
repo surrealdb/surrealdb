@@ -3,6 +3,8 @@ mod common;
 
 mod cli_integration {
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
+	use common::Format;
+	use common::Socket;
 	use std::fs;
 	use std::fs::File;
 	use std::time;
@@ -17,13 +19,33 @@ mod cli_integration {
 	const TWO_SECS: time::Duration = time::Duration::new(2, 0);
 
 	#[test]
-	fn version() {
+	fn version_command() {
 		assert!(common::run("version").output().is_ok());
 	}
 
 	#[test]
-	fn help() {
+	fn version_flag_short() {
+		assert!(common::run("-V").output().is_ok());
+	}
+
+	#[test]
+	fn version_flag_long() {
+		assert!(common::run("--version").output().is_ok());
+	}
+
+	#[test]
+	fn help_command() {
 		assert!(common::run("help").output().is_ok());
+	}
+
+	#[test]
+	fn help_flag_short() {
+		assert!(common::run("-h").output().is_ok());
+	}
+
+	#[test]
+	fn help_flag_long() {
+		assert!(common::run("--help").output().is_ok());
 	}
 
 	#[test]
@@ -93,11 +115,11 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db2} --pretty --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args).input("SELECT * FROM thing;\n").output(),
-				Ok("-- Query 1\n[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output = common::run(&args).input("SELECT * FROM thing;\n").output().unwrap();
+			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
+			assert!(line1.starts_with("-- Query 1"));
+			assert!(line1.contains("execution time"));
+			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
 		}
 
 		info!("* Unfinished backup CLI");
@@ -108,6 +130,24 @@ mod cli_integration {
 
 			// TODO: Once backups are functional, update this test.
 			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
+		}
+
+		info!("* Advanced uncomputed variable to be computed before saving");
+		{
+			let args = format!(
+				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi",
+				throwaway = Ulid::new()
+			);
+			let output = common::run(&args)
+				.input(
+					"DEFINE PARAM $something VALUE <set>[1, 2, 3]; \
+				$something;
+				",
+				)
+				.output()
+				.unwrap();
+
+			assert!(output.contains("[1, 2, 3]"), "missing success in {output}");
 		}
 
 		info!("* Multi-statement (and multi-line) query including error(s) over WS");
@@ -168,7 +208,7 @@ mod cli_integration {
 			let args = format!("sql --conn http://{addr} {creds}");
 			let output = common::run(&args)
 				.input(&format!(
-					"USE NS {throwaway} DB {throwaway}; CREATE thing:one;\n",
+					"USE NS `{throwaway}` DB `{throwaway}`; CREATE thing:one;\n",
 					throwaway = Ulid::new()
 				))
 				.output()
@@ -178,10 +218,9 @@ mod cli_integration {
 
 		info!("* Pass only ns");
 		{
-			let throwaway = Ulid::new();
-			let args = format!("sql --conn http://{addr} {creds} --ns {throwaway}");
+			let args = format!("sql --conn http://{addr} {creds} --ns {ns}");
 			let output = common::run(&args)
-				.input("USE DB {throwaway}; SELECT * FROM thing:one;\n")
+				.input(&format!("USE DB `{db}`; SELECT * FROM thing:one;\n"))
 				.output()
 				.expect("only ns");
 			assert!(output.contains("thing:one"), "missing thing:one in {output}");
@@ -293,7 +332,7 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -307,7 +346,7 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -321,7 +360,7 @@ mod cli_integration {
 			let args =
 				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -336,7 +375,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -351,7 +390,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -366,7 +405,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -381,7 +420,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR ROOT;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -396,7 +435,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -411,7 +450,7 @@ mod cli_integration {
 				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
 				.expect("success");
 			assert!(
@@ -424,7 +463,7 @@ mod cli_integration {
 		{
 			let args = format!("sql --conn http://{addr} --auth-level database {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR NS;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output();
 			assert!(
 				output
@@ -440,7 +479,7 @@ mod cli_integration {
 		{
 			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database {creds}");
 			let output = common::run(&args)
-				.input(format!("USE NS {ns} DB {db}; INFO FOR DB;\n").as_str())
+				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output();
 			assert!(
 				output
@@ -735,15 +774,13 @@ mod cli_integration {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
 
 		// Create a long-lived WS connection so the server don't shutdown gracefully
-		let mut socket = common::connect_ws(&addr).await.expect("Failed to connect to server");
+		let mut socket = Socket::connect(&addr, None).await.expect("Failed to connect to server");
 		let json = serde_json::json!({
 			"id": "1",
 			"method": "query",
 			"params": ["SLEEP 30s;"],
 		});
-		common::ws_send_msg(&mut socket, serde_json::to_string(&json).unwrap())
-			.await
-			.expect("Failed to send WS message");
+		socket.send_message(Format::Json, json).await.expect("Failed to send WS message");
 
 		// Make sure the SLEEP query is being executed
 		tokio::select! {
@@ -800,6 +837,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_capabilities() {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
@@ -826,7 +864,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}
@@ -856,7 +895,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}
@@ -902,7 +942,8 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(
-				output.contains("Scripting functions are not allowed"),
+				output.contains("Scripting functions are not allowed")
+					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
 		}

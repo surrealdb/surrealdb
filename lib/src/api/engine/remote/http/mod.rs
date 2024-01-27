@@ -100,6 +100,7 @@ impl Surreal<Client> {
 	) -> Connect<Client, ()> {
 		Connect {
 			router: self.router.clone(),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -210,11 +211,14 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 		}
 	}
 
-	Ok(QueryResponse(map))
+	Ok(QueryResponse {
+		results: map,
+		..QueryResponse::new()
+	})
 }
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
-	if let Some((_stats, result)) = query(request).await?.0.remove(&0) {
+	if let Some((_stats, result)) = query(request).await?.results.remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {

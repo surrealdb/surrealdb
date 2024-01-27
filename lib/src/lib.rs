@@ -98,7 +98,6 @@
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(test, deny(warnings))]
 
 #[macro_use]
 extern crate tracing;
@@ -114,8 +113,8 @@ mod exe;
 mod fnc;
 mod vs;
 
-pub mod sql;
 pub mod gql;
+pub mod sql;
 
 #[doc(hidden)]
 pub mod cnf;
@@ -135,8 +134,7 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;
 #[doc(hidden)]
@@ -161,20 +159,21 @@ pub use api::Response;
 pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
+use uuid::Uuid;
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-    pub use channel::bounded;
-    pub use channel::unbounded;
-    pub use channel::Receiver;
-    pub use channel::Sender;
+	pub use channel::bounded;
+	pub use channel::unbounded;
+	pub use channel::Receiver;
+	pub use channel::Sender;
 }
 
 /// Different error types for embedded and remote databases
 pub mod error {
-    pub use crate::api::err::Error as Api;
-    pub use crate::err::Error as Db;
+	pub use crate::api::err::Error as Api;
+	pub use crate::err::Error as Db;
 }
 
 /// The action performed on a record
@@ -183,19 +182,19 @@ pub mod error {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum Action {
-    Create,
-    Update,
-    Delete,
+	Create,
+	Update,
+	Delete,
 }
 
 impl From<dbs::Action> for Action {
-    fn from(action: dbs::Action) -> Self {
-        match action {
-            dbs::Action::Create => Self::Create,
-            dbs::Action::Update => Self::Update,
-            dbs::Action::Delete => Self::Delete,
-        }
-    }
+	fn from(action: dbs::Action) -> Self {
+		match action {
+			dbs::Action::Create => Self::Create,
+			dbs::Action::Update => Self::Update,
+			dbs::Action::Delete => Self::Delete,
+		}
+	}
 }
 
 /// A live query notification
@@ -206,17 +205,18 @@ impl From<dbs::Action> for Action {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub struct Notification<R> {
-    pub action: Action,
-    pub data: R,
+	pub query_id: Uuid,
+	pub action: Action,
+	pub data: R,
 }
 
 /// An error originating from the SurrealDB client library
 #[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum Error {
-    /// An error with an embedded storage engine
-    #[error("{0}")]
-    Db(#[from] crate::error::Db),
-    /// An error with a remote database instance
-    #[error("{0}")]
-    Api(#[from] crate::error::Api),
+	/// An error with an embedded storage engine
+	#[error("{0}")]
+	Db(#[from] crate::error::Db),
+	/// An error with a remote database instance
+	#[error("{0}")]
+	Api(#[from] crate::error::Api),
 }

@@ -22,10 +22,7 @@ impl TestContext {
 
 /// Initialise logging and prepare a useable datastore
 /// In the future it would be nice to handle multiple datastores
-pub(crate) async fn init(
-	node_id: Uuid,
-	clock: Arc<RwLock<SizedClock>>,
-) -> Result<TestContext, Error> {
+pub(crate) async fn init(node_id: Uuid, clock: Arc<SizedClock>) -> Result<TestContext, Error> {
 	let (db, kvs) = new_ds(node_id, clock).await;
 	Ok(TestContext {
 		db,
@@ -37,7 +34,8 @@ pub(crate) async fn init(
 /// Scan the entire storage layer displaying keys
 /// Useful to debug scans ;)
 async fn _debug_scan(tx: &mut Transaction, message: &str) {
-	let r = tx.scan(vec![0]..vec![u8::MAX], 100000).await.unwrap();
+	let r = tx.scan_paged(ScanPage::from(vec![0]..vec![u8::MAX]), u32::MAX).await.unwrap();
+	let r = r.values;
 	println!("START OF RANGE SCAN - {}", message);
 	for (k, _v) in r.iter() {
 		println!("{}", crate::key::debug::sprint_key(k));

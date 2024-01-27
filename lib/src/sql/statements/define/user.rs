@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct DefineUserStatement {
 	pub name: Ident,
@@ -46,6 +47,31 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 }
 
 impl DefineUserStatement {
+	pub(crate) fn from_parsed_values(name: Ident, base: Base, roles: Vec<Ident>) -> Self {
+		DefineUserStatement {
+			name,
+			base,
+			roles, // New users get the viewer role by default
+			code: rand::thread_rng()
+				.sample_iter(&Alphanumeric)
+				.take(128)
+				.map(char::from)
+				.collect::<String>(),
+			..Default::default()
+		}
+	}
+
+	pub(crate) fn set_password(&mut self, password: &str) {
+		self.hash = Argon2::default()
+			.hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+			.unwrap()
+			.to_string()
+	}
+
+	pub(crate) fn set_passhash(&mut self, passhash: String) {
+		self.hash = passhash;
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

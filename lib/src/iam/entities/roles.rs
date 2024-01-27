@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 // In the future, we will allow for custom roles. For now, provide predefined roles.
 #[derive(Hash, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub enum Role {
 	#[default]
@@ -34,18 +35,6 @@ impl FromStr for Role {
 			"owner" => Ok(Self::Owner),
 			_ => Err(Error::InvalidRole(s.to_string())),
 		}
-	}
-}
-
-impl std::convert::From<&str> for Role {
-	fn from(s: &str) -> Self {
-		Self::from_str(s).unwrap()
-	}
-}
-
-impl std::convert::From<String> for Role {
-	fn from(s: String) -> Self {
-		Self::from_str(&s).unwrap()
 	}
 }
 

@@ -19,9 +19,15 @@ async fn export_import() {
 	}
 	drop(permit);
 	let file = format!("{db_name}.sql");
-	db.export(&file).await.unwrap();
-	db.import(&file).await.unwrap();
+
+	let res = async {
+		db.export(&file).await?;
+		db.import(&file).await?;
+		Result::<(), Error>::Ok(())
+	}
+	.await;
 	remove_file(file).await.unwrap();
+	res.unwrap();
 }
 
 #[test_log::test(tokio::test)]
