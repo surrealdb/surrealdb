@@ -1,10 +1,13 @@
 use super::tx::Transaction;
+use crate::cf;
 use crate::ctx::Context;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
 	Variables,
 };
 use crate::err::Error;
+#[cfg(feature = "experimental-graphql")]
+use crate::gql;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
@@ -18,7 +21,6 @@ use crate::opt::capabilities::NetTarget;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::Oracle;
-use crate::{cf, gql};
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
 use std::cmp::Ordering;
@@ -1039,6 +1041,7 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", skip_all)]
+	#[cfg(feature = "experimental-graphql")]
 	pub async fn execute_gql(
 		&self,
 		txt: &str,

@@ -20,6 +20,7 @@ http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
 experimental-parser = ["surrealdb/experimental-parser"]
 jwks = ["surrealdb/jwks"]
+experimental-graphql = ["surrealdb/experimental-graphql"]
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]

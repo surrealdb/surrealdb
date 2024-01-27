@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::statements::DefineTableStatement;
 use crate::sql::Part;
 use crate::sql::{
 	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,

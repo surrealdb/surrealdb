@@ -10,7 +10,6 @@ use crate::sql::{
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
 use crate::sql::{Kind, TableType};
-use crate::sql::{Kind, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
