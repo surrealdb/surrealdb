@@ -522,7 +522,7 @@ impl Connection {
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, None).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, None).await?;
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
@@ -616,7 +616,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -644,7 +644,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -676,7 +676,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -708,7 +708,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -740,7 +740,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -771,7 +771,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -798,7 +798,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute_sql(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -820,7 +820,7 @@ impl Connection {
 		// Execute the query on the database
 		let res = match sql {
 			Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
-			Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
+			Value::Strand(sql) => kvs.execute_sql(&sql, &self.session, var).await?,
 			_ => unreachable!(),
 		};
 
@@ -840,7 +840,7 @@ impl Connection {
 		// Execute the query on the database
 		let res = match sql {
 			Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
-			Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
+			Value::Strand(sql) => kvs.execute_sql(&sql, &self.session, var).await?,
 			_ => unreachable!(),
 		};
 		// Post-process hooks for web layer

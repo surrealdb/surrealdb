@@ -1,6 +1,8 @@
 mod auth;
 pub mod client_ip;
 mod export;
+#[cfg(feature = "experimental-graphql")]
+mod gql;
 mod headers;
 mod health;
 mod import;
@@ -165,6 +167,9 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(signin::router())
 		.merge(signup::router())
 		.merge(key::router());
+
+	#[cfg(feature = "experimental-graphql")]
+	let axum_app = axum_app.merge(gql::router());
 
 	#[cfg(feature = "ml")]
 	let axum_app = axum_app.merge(ml::router());

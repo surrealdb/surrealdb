@@ -32,7 +32,7 @@ async fn create_with_id() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 14);
 	//
 	let tmp = res.remove(0).result?;
@@ -180,7 +180,7 @@ async fn create_with_custom_function() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result;
@@ -217,7 +217,7 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -237,7 +237,7 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 		INSERT INTO demo (id) VALUES (demo:two);
 	";
 	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "test")).into());
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -275,7 +275,7 @@ async fn create_on_none_values_with_unique_index() -> Result<(), Error> {
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	for _ in 0..3 {
@@ -296,7 +296,7 @@ async fn create_with_unique_index_with_two_flattened_fields() -> Result<(), Erro
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	for _ in 0..3 {
@@ -329,7 +329,7 @@ async fn create_with_unique_index_with_one_flattened_field() -> Result<(), Error
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	for _ in 0..2 {
@@ -355,7 +355,7 @@ async fn create_with_unique_index_on_one_field_with_flattened_sub_values() -> Re
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	for _ in 0..2 {
@@ -381,7 +381,7 @@ async fn create_with_unique_index_on_two_fields() -> Result<(), Error> {
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	for _ in 0..2 {
@@ -436,7 +436,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute_sql(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			if should_succeed {
@@ -462,7 +462,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)
+				.execute_sql("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -472,7 +472,11 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("OTHER_NS").with_db("DB"), None)
+				.execute_sql(
+					"CREATE person",
+					&Session::owner().with_ns("OTHER_NS").with_db("DB"),
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -482,7 +486,11 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("OTHER_DB"), None)
+				.execute_sql(
+					"CREATE person",
+					&Session::owner().with_ns("NS").with_db("OTHER_DB"),
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -492,7 +500,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			// Run the test
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute_sql(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			if should_succeed {
@@ -532,7 +540,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -550,7 +558,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS NONE",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -561,7 +569,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -574,7 +582,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS FULL",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -585,7 +593,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -611,7 +619,7 @@ async fn check_permissions_auth_disabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -628,7 +636,7 @@ async fn check_permissions_auth_disabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS NONE",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -639,7 +647,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -652,7 +660,7 @@ async fn check_permissions_auth_disabled() {
 
 		// When the table exists and grants full permissions
 		let mut resp = ds
-			.execute(
+			.execute_sql(
 				"DEFINE TABLE person PERMISSIONS FULL",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
@@ -663,7 +671,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute_sql("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();

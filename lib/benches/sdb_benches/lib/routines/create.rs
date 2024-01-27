@@ -23,7 +23,7 @@ impl super::Routine for Create {
 		self.runtime.block_on(async {
 			// Create table
 			let mut res = ds
-				.execute(format!("DEFINE TABLE {}", &self.table_name).as_str(), &session, None)
+				.execute_sql(format!("DEFINE TABLE {}", &self.table_name).as_str(), &session, None)
 				.await
 				.expect("[setup] define table failed");
 			let _ = res.remove(0).output().expect("[setup] the create operation returned no value");
@@ -42,7 +42,7 @@ impl super::Routine for Create {
 				tasks.spawn_on(
 					async move {
 						let mut res = criterion::black_box(
-							ds.execute(
+							ds.execute_sql(
 								format!("CREATE {} SET field = '{}'", &table_name, Id::rand())
 									.as_str(),
 								&session,
@@ -72,7 +72,7 @@ impl super::Routine for Create {
 	fn cleanup(&self, ds: Arc<Datastore>, session: Session, _num_ops: usize) {
 		self.runtime.block_on(async {
 			let mut res = ds
-				.execute(format!("REMOVE TABLE {}", self.table_name).as_str(), &session, None)
+				.execute_sql(format!("REMOVE TABLE {}", self.table_name).as_str(), &session, None)
 				.await
 				.expect("[cleanup] remove table failed");
 			let _ =

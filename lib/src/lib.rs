@@ -113,6 +113,8 @@ mod exe;
 mod fnc;
 mod vs;
 
+#[cfg(feature = "experimental-graphql")]
+pub mod gql;
 pub mod sql;
 
 #[doc(hidden)]

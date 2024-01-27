@@ -150,7 +150,7 @@ async fn execute_test(
 	expected_result: usize,
 ) -> Result<Vec<Response>, Error> {
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = dbs.execute(sql, &ses, None).await?;
+	let res = dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
 }
@@ -396,7 +396,7 @@ async fn select_with_no_index_unary_operator() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs
-		.execute("SELECT * FROM table WITH NOINDEX WHERE !param.subparam EXPLAIN", &ses, None)
+		.execute_sql("SELECT * FROM table WITH NOINDEX WHERE !param.subparam EXPLAIN", &ses, None)
 		.await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
@@ -425,7 +425,7 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res =
-		dbs.execute("SELECT * FROM table WHERE !param.subparam EXPLAIN", &ses, None).await?;
+		dbs.execute_sql("SELECT * FROM table WHERE !param.subparam EXPLAIN", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -887,7 +887,7 @@ async fn select_with_idiom_param_value() -> Result<(), Error> {
 		LET $nameObj = {{name:'Tobie'}};
 		SELECT name FROM person WHERE name = $nameObj.name EXPLAIN;"
 		.to_owned();
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute_sql(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	skip_ok(&mut res, 5)?;
 	let tmp = res.remove(0).result?;

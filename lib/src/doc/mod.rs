@@ -37,3 +37,5 @@ mod purge; // Deletes this document, and any edges or indexes
 mod reset; // Resets internal fields which were set for this document
 mod store; // Writes the document content to the storage engine
 mod table; // Processes any foreign tables relevant for this document
+
+mod relation;

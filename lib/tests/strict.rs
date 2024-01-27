@@ -18,7 +18,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -76,7 +76,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -129,7 +129,7 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -177,7 +177,7 @@ async fn strict_mode_all_ok() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
@@ -216,7 +216,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute_sql(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -291,6 +291,6 @@ async fn strict_define_in_transaction() -> Result<(), Error> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await?;
+	dbs.execute_sql(sql, &ses, None).await?;
 	Ok(())
 }

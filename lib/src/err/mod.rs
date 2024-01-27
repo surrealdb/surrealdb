@@ -513,6 +513,13 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The specified table is not configured for the type of record being added
+	#[error("Table is {}a relation, but record {thing} is {}a relation", if *relation { "not " } else { "" }, if *relation { "" } else { "not " })]
+	TableCheck {
+		thing: String,
+		relation: bool,
+	},
+
 	/// The specified field did not conform to the field type check
 	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check}")]
 	FieldCheck {

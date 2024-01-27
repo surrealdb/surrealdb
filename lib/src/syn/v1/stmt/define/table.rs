@@ -6,10 +6,17 @@ use super::super::super::{
 	part::{changefeed, permission::permissions, view},
 	IResult,
 };
-use crate::sql::{
-	statements::DefineTableStatement, ChangeFeed, Permission, Permissions, Strand, View,
+use crate::{
+	sql::{
+		statements::DefineTableStatement, ChangeFeed, Kind, Permission, Permissions, Relation,
+		Strand, TableType, View,
+	},
+	syn::v1::common::verbar,
 };
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0,
+	multi::separated_list1,
+};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
@@ -17,13 +24,14 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(table_opts)(i)?;
 	let (i, _) = expected(
-		"DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
+		"RELATION, DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
 		ending::query,
 	)(i)?;
 	// Create the base statement
 	let mut res = DefineTableStatement {
 		name,
 		permissions: Permissions::none(),
+		table_type: TableType::Normal,
 		..Default::default()
 	};
 	// Assign any defined options
@@ -50,6 +58,9 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			DefineTableOption::Relation(r) => {
+				res.table_type = TableType::Relation(r);
+			}
 		}
 	}
 	// Return the statement
@@ -65,6 +76,22 @@ enum DefineTableOption {
 	Comment(Strand),
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
+	Relation(Relation),
+}
+
+enum RelationDir {
+	From(Kind),
+	To(Kind),
+}
+
+impl Relation {
+	fn merge(&mut self, other: RelationDir) {
+		//TODO: error if both self and other are some
+		match other {
+			RelationDir::From(i) => self.from = Some(i),
+			RelationDir::To(i) => self.to = Some(i),
+		}
+	}
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
@@ -76,6 +103,7 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_schemafull,
 		table_permissions,
 		table_changefeed,
+		table_relation,
 	))(i)
 }
 
@@ -121,6 +149,38 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i, Permission::None)?;
 	Ok((i, DefineTableOption::Permissions(v)))
+}
+
+fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("RELATION")(i)?;
+
+	let (i, dirs) = many0(alt((relation_from, relation_to)))(i)?;
+
+	let mut relation: Relation = Default::default();
+
+	for dir in dirs {
+		relation.merge(dir);
+	}
+
+	Ok((i, DefineTableOption::Relation(relation)))
+}
+
+fn relation_from(i: &str) -> IResult<&str, RelationDir> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = alt((tag_no_case("FROM"), tag_no_case("IN")))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, idents) = separated_list1(verbar, ident)(i)?;
+	Ok((i, RelationDir::From(Kind::Record(idents.into_iter().map(Into::into).collect()))))
+}
+
+fn relation_to(i: &str) -> IResult<&str, RelationDir> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = alt((tag_no_case("TO"), tag_no_case("OUT")))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, idents) = separated_list1(verbar, ident)(i)?;
+
+	Ok((i, RelationDir::To(Kind::Record(idents.into_iter().map(Into::into).collect()))))
 }
 
 #[cfg(test)]

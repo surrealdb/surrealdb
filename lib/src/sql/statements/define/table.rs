@@ -9,6 +9,7 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
+use crate::sql::{Kind, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,7 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -26,6 +27,10 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
+	// #[revision(start = 2)]
+	// pub relation: Option<(Option<Kind>, Option<Kind>)>,
+	#[revision(start = 2)]
+	pub table_type: TableType,
 }
 
 impl DefineTableStatement {
@@ -55,6 +60,14 @@ impl DefineTableStatement {
 			run.set(key, self).await?;
 			self.to_owned()
 		};
+		if let TableType::Relation(rel) = &self.table_type {
+			run.define_in_out_fd_from_relation(opt.ns(), opt.db(), &self.name, rel).await?
+		}
+
+		// TODO: define id field here
+
+		let tb_key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.name);
+		run.clr(tb_key).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
@@ -91,9 +104,31 @@ impl DefineTableStatement {
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
 		}
+
 		// Ok all good
 		Ok(Value::None)
 	}
+}
+
+impl DefineTableStatement {
+	pub fn is_relation(&self) -> bool {
+		matches!(self.table_type, TableType::Relation(_))
+	}
+
+	pub fn allows_relation(&self) -> bool {
+		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
+	}
+
+	pub fn allows_normal(&self) -> bool {
+		matches!(self.table_type, TableType::Normal | TableType::Any)
+	}
+}
+
+fn get_tables_from_kind(kind: &Kind) -> String {
+	let Kind::Record(tables) = kind else {
+		panic!()
+	};
+	tables.iter().map(ToString::to_string).collect::<Vec<_>>().join(" | ")
 }
 
 impl Display for DefineTableStatement {
@@ -101,6 +136,15 @@ impl Display for DefineTableStatement {
 		write!(f, "DEFINE TABLE {}", self.name)?;
 		if self.drop {
 			f.write_str(" DROP")?;
+		}
+		if let TableType::Relation(rel) = &self.table_type {
+			f.write_str(" RELATION")?;
+			if let Some(kind) = &rel.from {
+				write!(f, " IN {}", get_tables_from_kind(kind))?;
+			}
+			if let Some(kind) = &rel.to {
+				write!(f, " OUT {}", get_tables_from_kind(kind))?;
+			}
 		}
 		f.write_str(if self.full {
 			" SCHEMAFULL"

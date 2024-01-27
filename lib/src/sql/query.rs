@@ -17,6 +17,12 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Query(pub Statements);
 
+impl From<Vec<Statement>> for Query {
+	fn from(s: Vec<Statement>) -> Self {
+		Query(Statements(s))
+	}
+}
+
 impl From<DefineStatement> for Query {
 	fn from(s: DefineStatement) -> Self {
 		Query(Statements(vec![Statement::Define(s)]))
