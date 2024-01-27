@@ -115,7 +115,7 @@ impl<'a> Lexer<'a> {
 	/// otherwise.
 	pub fn lex_hex(&mut self, amount: u8) -> bool {
 		for _ in 0..amount {
-			if !self.eat_when(|x| matches!(x,b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')) {
+			if !self.eat_when(|x| x.is_ascii_hexdigit()) {
 				return false;
 			}
 		}
