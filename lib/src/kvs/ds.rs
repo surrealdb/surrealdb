@@ -1461,7 +1461,7 @@ async fn catchup_live_queries(
 			.is_none()
 		{
 			// This shouldn't be possible
-			error!("Error updating local live query index, the previous value of an updated key was not found");
+			unreachable!("Error updating local live query index, the previous value of an updated key was not found");
 		}
 	}
 
