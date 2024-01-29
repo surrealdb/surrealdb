@@ -87,10 +87,7 @@ impl Ids64 {
 	}
 
 	pub(super) fn is_empty(&self) -> bool {
-		match self {
-			Self::Empty => true,
-			_ => false,
-		}
+		matches!(self, Self::Empty)
 	}
 
 	fn append_to(&self, to: &mut RoaringTreemap) {
