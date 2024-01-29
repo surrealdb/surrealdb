@@ -19,8 +19,8 @@ pub enum ShowSince {
 }
 
 impl ShowSince {
-	pub fn versionstamp(vs: Versionstamp) -> ShowSince {
-		ShowSince::Versionstamp(conv::versionstamp_to_u64(&vs))
+	pub fn versionstamp(vs: &Versionstamp) -> ShowSince {
+		ShowSince::Versionstamp(conv::versionstamp_to_u64(vs))
 	}
 
 	pub fn as_versionstamp(&self) -> Option<Versionstamp> {
