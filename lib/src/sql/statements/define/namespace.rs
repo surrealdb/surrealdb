@@ -17,7 +17,6 @@ pub struct DefineNamespaceStatement {
 	pub name: Ident,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
-	#[serde(skip_serializing_if = "std::ops::Not::not")]
 	pub if_not_exists: bool,
 }
 

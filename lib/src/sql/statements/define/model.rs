@@ -22,7 +22,6 @@ pub struct DefineModelStatement {
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
 	#[revision(start = 2)]
-	#[serde(skip_serializing_if = "std::ops::Not::not")]
 	pub if_not_exists: bool,
 }
 

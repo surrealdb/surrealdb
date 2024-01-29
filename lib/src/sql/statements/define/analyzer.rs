@@ -20,7 +20,6 @@ pub struct DefineAnalyzerStatement {
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
 	#[revision(start = 3)]
-	#[serde(skip_serializing_if = "std::ops::Not::not")]
 	pub if_not_exists: bool,
 }
 
