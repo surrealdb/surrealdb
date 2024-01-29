@@ -847,27 +847,21 @@ pub enum Error {
 	},
 
 	/// The requested namespace token already exists
-	#[error("The token '{value}' already exists in the namespace '{ns}'")]
+	#[error("The namespace token '{value}' already exists")]
 	NtAlreadyExists {
 		value: String,
-		ns: String,
 	},
 
 	/// The requested database token already exists
-	#[error("The token '{value}' already exists in the database '{db}'")]
+	#[error("The database token '{value}' already exists")]
 	DtAlreadyExists {
 		value: String,
-		ns: String,
-		db: String,
 	},
 
 	/// The requested scope token already exists
-	#[error("The token '{value}' already exists in the scope '{sc}'")]
+	#[error("The scope token '{value}' already exists")]
 	StAlreadyExists {
 		value: String,
-		ns: String,
-		db: String,
-		sc: String,
 	},
 
 	/// The requested user already exists

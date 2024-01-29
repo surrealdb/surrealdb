@@ -43,7 +43,6 @@ impl DefineTokenStatement {
 				if self.if_not_exists && run.get_ns_token(opt.ns(), &self.name).await.is_ok() {
 					return Err(Error::NtAlreadyExists {
 						value: self.name.to_string(),
-						ns: opt.ns().into(),
 					});
 				}
 				// Process the statement
@@ -71,8 +70,6 @@ impl DefineTokenStatement {
 				{
 					return Err(Error::DtAlreadyExists {
 						value: self.name.to_string(),
-						ns: opt.ns().into(),
-						db: opt.db().into(),
 					});
 				}
 				// Process the statement
@@ -100,9 +97,6 @@ impl DefineTokenStatement {
 				{
 					return Err(Error::StAlreadyExists {
 						value: self.name.to_string(),
-						ns: opt.ns().into(),
-						db: opt.db().into(),
-						sc: sc.to_string(),
 					});
 				}
 				// Process the statement
