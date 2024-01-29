@@ -914,10 +914,7 @@ impl Datastore {
 				// TODO(phughk): This is actually unimplemented
 				Error::Unimplemented( "Can only track progress on live queries with a versionstamp from a change feed".to_string()),
 			)?;
-			let tx = self
-				.transaction(Read, Optimistic)
-				.await
-				.map_err(|e| Error::Tx(format!("Error creating transaction: {:?}", e)))?;
+			let tx = self.transaction(Read, Optimistic).await?;
 			let fut = catchup_live_queries(
 				tx,
 				self.local_live_queries.clone(),
