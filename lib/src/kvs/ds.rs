@@ -44,6 +44,8 @@ const LQ_CHANNEL_SIZE: usize = 100;
 
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
+// In the future we will have proper pagination
+const TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION: u32 = 1000;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
@@ -903,9 +905,9 @@ impl Datastore {
 				continue;
 			};
 			if let Some(vs) = vs {
-			    if v.vs >= vs {
-				    // This means that there hasn't been a change
-				    continue;
+				if v.vs >= vs {
+					// This means that there hasn't been a change
+					continue;
 				}
 			}
 			// We know we need to process events, so we do so now
@@ -1402,7 +1404,7 @@ async fn catchup_live_queries(
 			&k.db,
 			Some(&k.tb),
 			ShowSince::Versionstamp(conv::versionstamp_to_u64(&v.vs)),
-			Some(1000),
+			Some(TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION),
 		)
 		.await;
 		if let Err(e) = changes {
@@ -1414,7 +1416,7 @@ async fn catchup_live_queries(
 		for database_change in changes {
 			for table_changes in database_change.1 .0 {
 				for table_change in table_changes.1 {
-					// TODO enforce security
+					// TODO(SUR-291): enforce security
 					let not_type = match table_change {
 						TableMutation::Set(_thing, value) => {
 							// Atm all sets are UPDATE
@@ -1426,14 +1428,16 @@ async fn catchup_live_queries(
 					// We don't want to handle definition statements; Probably can be refactored better
 					if let Some((action, value)) = not_type {
 						let val = value.unwrap_or(Value::None);
-						notification_channel_sender
+						if let Err(e) = notification_channel_sender
 							.send(Notification {
 								id: k.lq,
 								action,
 								result: val,
 							})
 							.await
-							.unwrap();
+						{
+							error!("Error sending notification: {:?}", e);
+						}
 					}
 				}
 			}

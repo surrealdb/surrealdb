@@ -96,3 +96,32 @@ impl fmt::Display for ShowStatement {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod test {
+	#[test]
+	fn timestamps_are_not_versionstamps() {
+		// given
+		let datetime = chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00Z").unwrap();
+		let sql_dt = super::Datetime::from(datetime);
+
+		// when
+		let since = super::ShowSince::Timestamp(sql_dt);
+
+		// then
+		assert_eq!(since.as_versionstamp(), None);
+	}
+
+	#[test]
+	fn versionstamp_can_be_converted() {
+		// given
+		let versionstamp = crate::vs::conv::u64_to_versionstamp(1234567890);
+		let since = super::ShowSince::Versionstamp(1234567890);
+
+		// when
+		let converted = since.as_versionstamp().unwrap();
+
+		// then
+		assert_eq!(converted, versionstamp);
+	}
+}
