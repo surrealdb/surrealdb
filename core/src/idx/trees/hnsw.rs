@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
-use crate::idx::trees::knn::{Docs, KnnResult, KnnResultBuilder, PriorityNode};
+use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::vector::{SharedVector, TreeVector};
 use crate::kvs::Key;
 use crate::sql::index::{Distance, HnswParams, VectorType};
@@ -17,7 +17,7 @@ pub(crate) struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
 	hnsw: Hnsw,
-	vec_docs: HashMap<SharedVector, (Docs, ElementId)>,
+	vec_docs: HashMap<SharedVector, (Ids64, ElementId)>,
 	doc_ids: Trie<Key, DocId>,
 	ids_doc: Vec<Thing>,
 }
@@ -77,7 +77,7 @@ impl HnswIndex {
 			Entry::Vacant(e) => {
 				let o = e.key().clone();
 				let element_id = self.hnsw.insert(o).await;
-				e.insert((Docs::One(d), element_id));
+				e.insert((Ids64::One(d), element_id));
 			}
 		}
 	}
@@ -236,14 +236,15 @@ impl Hnsw {
 				#[cfg(debug_assertions)]
 				debug!("layer: {lc} - f_ids {f_ids:?}");
 				for f_id in f_ids {
-					let q = &self.elements[&f_id];
-					let mut w = BTreeSet::new();
-					self.search_layer(q, f_id, self.efc, &layer, &mut w).await;
-					let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
-					self.select_neighbors_simple(&w, m_max, &mut neighbors, Some(f_id));
-					#[cfg(debug_assertions)]
-					trace!("f_id: {f_id} - neighbors {neighbors:?}");
-					layer.0.insert(f_id, neighbors);
+					if let Some(q) = self.elements.get(&f_id) {
+						let mut w = BTreeSet::new();
+						self.search_layer(q, f_id, self.efc, &layer, &mut w).await;
+						let mut neighbors = Vec::with_capacity(m_max.min(w.len()));
+						self.select_neighbors_simple(&w, m_max, &mut neighbors, Some(f_id));
+						#[cfg(debug_assertions)]
+						trace!("f_id: {f_id} - neighbors {neighbors:?}");
+						layer.0.insert(f_id, neighbors);
+					}
 				}
 				removed = true;
 			}
@@ -477,7 +478,7 @@ mod tests {
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use std::collections::hash_map::Entry;
 	use std::collections::{HashMap, HashSet};
-	use test_log::test;
+	use test_case::test_matrix;
 
 	async fn insert_collection_hnsw(
 		h: &mut Hnsw,
@@ -550,64 +551,54 @@ mod tests {
 		}
 	}
 
-	#[test(tokio::test)]
-	async fn test_hnsw_unique_col_50_dim_2() {
-		for vt in
-			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
-		{
-			for distance in [
-				Distance::Euclidean,
-				Distance::Manhattan,
-				//Distance::Hamming,
-				Distance::Minkowski(2.into()),
-				Distance::Chebyshev,
-			] {
-				let for_jaccard = distance == Distance::Jaccard;
-				let dimension = 4;
-				let params = new_params(dimension, vt, distance);
-				test_hnsw_collection(
-					&params,
-					&TestCollection::new_unique(50, vt, dimension, for_jaccard),
-				)
-				.await;
-			}
-		}
+	async fn test_hnsw(
+		distance: Distance,
+		vt: VectorType,
+		collection_size: usize,
+		dimension: usize,
+		unique: bool,
+	) {
+		let for_jaccard = distance == Distance::Jaccard;
+		let collection = TestCollection::new(unique, collection_size, vt, dimension, for_jaccard);
+		let params = new_params(dimension, vt, distance);
+		test_hnsw_collection(&params, &collection).await;
 	}
 
-	#[test(tokio::test)]
-	async fn test_hnsw_random_col_50_dim_2() {
-		for vt in
-			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
-		{
-			for distance in [
-				Distance::Chebyshev,
-				Distance::Cosine,
-				Distance::Euclidean,
-				// Distance::Hamming,
-				Distance::Jaccard,
-				Distance::Manhattan,
-				Distance::Minkowski(2.into()),
-				Distance::Pearson,
-			] {
-				let dimension = 3;
-				let collection =
-					TestCollection::new_random(50, vt, dimension, distance == Distance::Jaccard);
-				let params = new_params(dimension, vt, distance);
-				test_hnsw_collection(&params, &collection).await;
-			}
-		}
+	#[test_matrix(
+	[Distance::Chebyshev, Distance::Cosine, Distance::Euclidean, Distance::Hamming,
+	Distance::Jaccard, Distance::Manhattan, Distance::Minkowski(2.into()), Distance::Pearson],
+	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
+	30,
+	2,
+	[false, true]
+	)]
+	#[test_log::test(tokio::test)]
+	async fn test_hnsw_small(
+		distance: Distance,
+		vt: VectorType,
+		collection_size: usize,
+		dimension: usize,
+		unique: bool,
+	) {
+		test_hnsw(distance, vt, collection_size, dimension, unique).await
 	}
 
-	#[test(tokio::test)]
-	async fn test_hnsw_unique_coll_40_dim_1536() {
-		for vt in
-			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
-		{
-			let dimension = 1536;
-			let collection = TestCollection::new_unique(40, vt, dimension, false);
-			let params = new_params(dimension, vt, Distance::Hamming);
-			test_hnsw_collection(&params, &collection).await;
-		}
+	#[test_matrix(
+	[Distance::Hamming],
+	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
+	40,
+	1536,
+	[false, true]
+	)]
+	#[test_log::test(tokio::test)]
+	async fn test_hnsw_large(
+		distance: Distance,
+		vt: VectorType,
+		collection_size: usize,
+		dimension: usize,
+		unique: bool,
+	) {
+		test_hnsw(distance, vt, collection_size, dimension, unique).await
 	}
 
 	async fn insert_collection_hnsw_index(
@@ -679,39 +670,34 @@ mod tests {
 		}
 	}
 
-	async fn test_hnsw_index_collection(p: &HnswParams, collection: &TestCollection) {
-		debug!("Params: {:?} - Collection: {}", p, collection.as_ref().len());
-		let mut h = HnswIndex::new(p);
-		let map = insert_collection_hnsw_index(&mut h, collection).await;
+	#[test_matrix(
+	[Distance::Chebyshev, Distance::Cosine, Distance::Euclidean, Distance::Hamming,
+	Distance::Jaccard, Distance::Manhattan, Distance::Minkowski(2.into()), Distance::Pearson],
+	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
+	30,
+	2,
+	[false, true]
+	)]
+	#[test_log::test(tokio::test)]
+	async fn test_hnsw_index_small(
+		distance: Distance,
+		vt: VectorType,
+		collection_size: usize,
+		dimension: usize,
+		unique: bool,
+	) {
+		let for_jaccard = distance == Distance::Jaccard;
+		let collection = TestCollection::new(unique, collection_size, vt, dimension, for_jaccard);
+		let p = new_params(dimension, vt, distance);
+		let mut h = HnswIndex::new(&p);
+		let map = insert_collection_hnsw_index(&mut h, &collection).await;
 		find_collection_hnsw_index(&mut h, &collection).await;
 		delete_hnsw_index_collection(&mut h, &collection, map).await;
 	}
 
-	#[test(tokio::test)]
-	async fn test_hnsw_index_random_col_10_dim_2() {
-		for vt in
-			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
-		{
-			for distance in [
-				Distance::Chebyshev,
-				Distance::Cosine,
-				Distance::Euclidean,
-				//Distance::Hamming,
-				Distance::Jaccard,
-				Distance::Manhattan,
-				Distance::Minkowski(2.into()),
-				Distance::Pearson,
-			] {
-				let dimension = 2;
-				let collection =
-					TestCollection::new_random(30, vt, dimension, distance == Distance::Jaccard);
-				let params = new_params(dimension, vt, distance);
-				test_hnsw_index_collection(&params, &collection).await;
-			}
-		}
-	}
-
 	async fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {
+		let mut missed_foreign_elements = 0;
+		let mut foreign_elements = 0;
 		let mut layer_size = h.elements.len();
 		assert_eq!(layer_size, expected_count);
 		for (lc, l) in h.layers.iter().enumerate() {
@@ -719,8 +705,25 @@ mod tests {
 			assert!(l.0.len() <= layer_size, "{} - {}", l.0.len(), layer_size);
 			layer_size = l.0.len();
 			for (e_id, f_ids) in &l.0 {
-				assert!(!f_ids.contains(e_id), "layer: {lc} - el: {e_id} - f_ids: {f_ids:?}");
+				assert!(
+					!f_ids.contains(e_id),
+					"!f_ids.contains(e_id) = layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"
+				);
+				assert!(
+					h.elements.contains_key(e_id),
+					"h.elements.contains_key(e_id) - layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"
+				);
+				for f_id in f_ids {
+					if !h.elements.contains_key(f_id) {
+						missed_foreign_elements += 1;
+					}
+				}
+				foreign_elements += f_ids.len();
 			}
+		}
+		if missed_foreign_elements > 0 && foreign_elements > 0 {
+			let miss_rate = missed_foreign_elements as f64 / foreign_elements as f64;
+			assert!(miss_rate < 0.05, "Miss rate: {miss_rate}");
 		}
 	}
 }

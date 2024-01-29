@@ -14,7 +14,7 @@ use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
-use crate::idx::trees::knn::{Docs, KnnResult, KnnResultBuilder, PriorityNode};
+use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{
 	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
@@ -197,7 +197,7 @@ impl MTree {
 						if res.check_add(d) {
 							#[cfg(debug_assertions)]
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
-							res.add(d, &Docs::Bits(p.docs.clone()));
+							res.add(d, &Ids64::Bits(p.docs.clone()));
 						}
 					}
 				}
@@ -2014,7 +2014,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_unique(i, vt, 2, false),
+					TestCollection::new(true, i, vt, 2, false),
 					true,
 					true,
 					true,
@@ -2036,7 +2036,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_unique(i, vt, 2, false),
+					TestCollection::new(true, i, vt, 2, false),
 					true,
 					true,
 					true,
@@ -2054,7 +2054,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new_unique(100, vt, 3, false),
+				TestCollection::new(true, 100, vt, 3, false),
 				true,
 				true,
 				true,
@@ -2071,7 +2071,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20, false),
+				TestCollection::new(true, 1000, vt, 20, false),
 				false,
 				true,
 				false,
@@ -2088,7 +2088,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20, false),
+				TestCollection::new(true, 1000, vt, 20, false),
 				false,
 				true,
 				false,
@@ -2105,7 +2105,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20, false),
+				TestCollection::new(true, 1000, vt, 20, false),
 				false,
 				true,
 				false,
@@ -2127,7 +2127,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_random(i, vt, 1, false),
+					TestCollection::new(false, i, vt, 1, false),
 					true,
 					true,
 					true,
@@ -2145,7 +2145,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new_random(100, vt, 3, false),
+				TestCollection::new(false, 100, vt, 3, false),
 				true,
 				true,
 				true,
@@ -2162,7 +2162,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_random(1000, vt, 20, false),
+				TestCollection::new(false, 1000, vt, 20, false),
 				false,
 				true,
 				true,
