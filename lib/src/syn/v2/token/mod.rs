@@ -316,11 +316,30 @@ impl TokenKind {
 		)
 	}
 
+	fn algorithm_as_str(algo: Algorithm) -> &'static str {
+		match algo {
+			Algorithm::EdDSA => "EDDSA",
+			Algorithm::Es256 => "ES256",
+			Algorithm::Es384 => "ES384",
+			Algorithm::Es512 => "ES512",
+			Algorithm::Hs256 => "HS256",
+			Algorithm::Hs384 => "HS384",
+			Algorithm::Hs512 => "HS512",
+			Algorithm::Ps256 => "PS256",
+			Algorithm::Ps384 => "PS384",
+			Algorithm::Ps512 => "PS512",
+			Algorithm::Rs256 => "RS256",
+			Algorithm::Rs384 => "RS384",
+			Algorithm::Rs512 => "RS512",
+			Algorithm::Jwks => "JWKS",
+		}
+	}
+
 	pub fn as_str(&self) -> &'static str {
 		match *self {
 			TokenKind::Keyword(x) => x.as_str(),
 			TokenKind::Operator(x) => x.as_str(),
-			TokenKind::Algorithm(_) => todo!(),
+			TokenKind::Algorithm(x) => Self::algorithm_as_str(x),
 			TokenKind::Language(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
