@@ -16,6 +16,7 @@ mod sql;
 mod sync;
 mod tracer;
 mod version;
+mod relate;
 
 #[cfg(feature = "ml")]
 mod ml;
@@ -164,7 +165,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router());
+		.merge(key::router())
+		.merge(relate::router());
 
 	#[cfg(feature = "ml")]
 	let axum_app = axum_app.merge(ml::router());
