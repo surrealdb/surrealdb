@@ -902,10 +902,12 @@ impl Datastore {
 				// This shouldn't be possible and/or may mean clock skew
 				continue;
 			};
-			if vs.is_some() && v.vs >= vs.unwrap() {
-				// This means that there hasn't been a change
-				continue;
-			};
+			if let Some(vs) = vs {
+			    if v.vs >= vs {
+				    // This means that there hasn't been a change
+				    continue;
+				}
+			}
 			// We know we need to process events, so we do so now
 			lqs_to_update.push((k.clone(), v.clone()))
 		}
