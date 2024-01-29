@@ -1227,7 +1227,8 @@ impl Value {
 	}
 
 	/// Try to coerce this value to an `i64`
-	pub(crate) fn coerce_to_i64(self) -> Result<i64, Error> {
+	#[doc(hidden)]
+	pub fn coerce_to_i64(self) -> Result<i64, Error> {
 		match self {
 			// Allow any int number
 			Value::Number(Number::Int(v)) => Ok(v),
@@ -1956,7 +1957,8 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `String`
-	pub(crate) fn convert_to_string(self) -> Result<String, Error> {
+	#[doc(hidden)]
+	pub fn convert_to_string(self) -> Result<String, Error> {
 		match self {
 			// Bytes can't convert to strings
 			Value::Bytes(_) => Err(Error::ConvertTo {

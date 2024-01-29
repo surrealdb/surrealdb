@@ -47,7 +47,8 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 
 impl DefineUserStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
+	#[doc(hidden)]
+	pub async fn compute(
 		&self,
 		_ctx: &Context<'_>,
 		opt: &Options,

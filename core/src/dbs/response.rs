@@ -40,7 +40,8 @@ impl Response {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-pub(crate) enum Status {
+#[doc(hidden)]
+pub enum Status {
 	Ok,
 	Err,
 }

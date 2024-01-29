@@ -20,7 +20,7 @@ http-compression = []
 ml = ["surrealdb/ml", "surrealml-core"]
 
 [workspace]
-members = ["lib", "lib/examples/actix", "lib/examples/axum"]
+members = ["core", "lib", "lib/examples/actix", "lib/examples/axum"]
 
 [profile.release]
 lto = true

@@ -40,7 +40,8 @@ impl Default for Expression {
 
 impl Expression {
 	/// Create a new binary expression
-	pub(crate) fn new(l: Value, o: Operator, r: Value) -> Self {
+	#[doc(hidden)]
+	pub fn new(l: Value, o: Operator, r: Value) -> Self {
 		Self::Binary {
 			l,
 			o,

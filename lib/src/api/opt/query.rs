@@ -1,5 +1,6 @@
-use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
+use crate::api::{err::Error, Response as QueryResponse, Result};
 use crate::method::Stats;
+use crate::sql::from_value;
 use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
 use crate::syn;
 use serde::de::DeserializeOwned;

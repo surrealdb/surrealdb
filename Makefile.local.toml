@@ -17,7 +17,7 @@ dependencies = ["cargo-upgrade", "cargo-update"]
 [tasks.docs]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-indxdb,kv-speedb,kv-rocksdb,kv-tikv,http,scripting"]
+args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-speedb,kv-rocksdb,kv-tikv,http,scripting"]
 
 # Test
 [tasks.test]
@@ -42,7 +42,7 @@ category = "LOCAL USAGE"
 script = """
 	set -e
 	cd ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/
-	cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+	cargo fmt --all --check -- ./lib/tests/**/*.rs ./core/src/kvs/tests/*.rs
 """
 
 [tasks.cargo-clippy]

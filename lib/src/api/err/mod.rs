@@ -240,3 +240,13 @@ impl Serialize for Error {
 		serializer.serialize_str(self.to_string().as_str())
 	}
 }
+
+use surrealdb_core::sql::FromValueError;
+impl From<FromValueError> for crate::Error {
+	fn from(error: FromValueError) -> Self {
+		Self::Api(Error::FromValue {
+			value: error.value,
+			error: error.error,
+		})
+	}
+}

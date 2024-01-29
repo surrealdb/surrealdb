@@ -765,7 +765,7 @@ async fn router(
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			let var = Some(map! {
+			let var = Some(surrealdb_core::map! {
 				key.clone() => Value::None,
 				=> vars
 			});

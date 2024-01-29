@@ -40,7 +40,8 @@ pub struct LiveStatement {
 
 impl LiveStatement {
 	/// Creates a live statement from parts that can be set during a query.
-	pub(crate) fn from_source_parts(
+	#[doc(hidden)]
+	pub fn from_source_parts(
 		expr: Fields,
 		what: Value,
 		cond: Option<Cond>,

@@ -255,7 +255,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::opt::auth::Root;
 	use crate::sql::Value;
-	use crate::syn::test::Parse;
+	use surrealdb_core::sql;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {
@@ -280,7 +280,7 @@ mod tests {
 		let mut res = db.query("INFO FOR ROOT").await.unwrap();
 		let users: Value = res.take("users").unwrap();
 
-		assert_eq!(users, Value::parse("{}"), "there should be no users in the system");
+		assert_eq!(users, sql::value("{}").unwrap(), "there should be no users in the system");
 	}
 
 	#[tokio::test]
