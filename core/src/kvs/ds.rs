@@ -1,6 +1,8 @@
 use super::tx::Transaction;
 use crate::cf;
 use crate::ctx::Context;
+#[cfg(feature = "jwks")]
+use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
 	Variables,
@@ -13,9 +15,6 @@ use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::opt::auth::Root;
-#[cfg(feature = "jwks")]
-use crate::opt::capabilities::NetTarget;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::Oracle;
@@ -165,8 +164,8 @@ impl Datastore {
 	/// # Examples
 	///
 	/// ```rust,no_run
-	/// # use surrealdb::kvs::Datastore;
-	/// # use surrealdb::err::Error;
+	/// # use surrealdb_core::kvs::Datastore;
+	/// # use surrealdb_core::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
 	/// let ds = Datastore::new("memory").await?;
@@ -177,8 +176,8 @@ impl Datastore {
 	/// Or to create a file-backed store:
 	///
 	/// ```rust,no_run
-	/// # use surrealdb::kvs::Datastore;
-	/// # use surrealdb::err::Error;
+	/// # use surrealdb_core::kvs::Datastore;
+	/// # use surrealdb_core::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
 	/// let ds = Datastore::new("file://temp.db").await?;
@@ -189,8 +188,8 @@ impl Datastore {
 	/// Or to connect to a tikv-backed distributed store:
 	///
 	/// ```rust,no_run
-	/// # use surrealdb::kvs::Datastore;
-	/// # use surrealdb::err::Error;
+	/// # use surrealdb_core::kvs::Datastore;
+	/// # use surrealdb_core::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
 	/// let ds = Datastore::new("tikv://127.0.0.1:2379").await?;
@@ -440,7 +439,7 @@ impl Datastore {
 	/// Trigger the `unreachable definition` compilation error, probably due to this issue:
 	/// https://github.com/rust-lang/rust/issues/111370
 	#[allow(unreachable_code, unused_variables)]
-	pub async fn setup_initial_creds(&self, creds: Root<'_>) -> Result<(), Error> {
+	pub async fn setup_initial_creds(&self, username: &str, password: &str) -> Result<(), Error> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.rollback_with_panic().enclose();
 		// Fetch the root users from the storage
@@ -449,9 +448,9 @@ impl Datastore {
 		match users {
 			Ok(v) if v.is_empty() => {
 				// Display information in the logs
-				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", creds.username);
+				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
 				// Create and save a new root users
-				let stm = DefineUserStatement::from((Base::Root, creds.username, creds.password));
+				let stm = DefineUserStatement::from((Base::Root, username, password));
 				let ctx = Context::default();
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
@@ -462,7 +461,7 @@ impl Datastore {
 			}
 			Ok(_) => {
 				// Display warnings in the logs
-				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", creds.username);
+				warn!("Credentials were provided, but existing root users were found. The root user '{}' will not be created", username);
 				warn!("Consider removing the --user and --pass arguments from the server start command");
 				// We didn't write anything, so just rollback
 				txn.lock().await.cancel().await?;
@@ -921,8 +920,8 @@ impl Datastore {
 	/// Create a new transaction on this datastore
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::{Datastore, TransactionType::*, LockType::*};
-	/// use surrealdb::err::Error;
+	/// use surrealdb_core::kvs::{Datastore, TransactionType::*, LockType::*};
+	/// use surrealdb_core::err::Error;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
@@ -996,9 +995,9 @@ impl Datastore {
 	/// Parse and execute an SQL query
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::Datastore;
-	/// use surrealdb::err::Error;
-	/// use surrealdb::dbs::Session;
+	/// use surrealdb_core::kvs::Datastore;
+	/// use surrealdb_core::err::Error;
+	/// use surrealdb_core::dbs::Session;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
@@ -1025,10 +1024,10 @@ impl Datastore {
 	/// Execute a pre-parsed SQL query
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::Datastore;
-	/// use surrealdb::err::Error;
-	/// use surrealdb::dbs::Session;
-	/// use surrealdb::sql::parse;
+	/// use surrealdb_core::kvs::Datastore;
+	/// use surrealdb_core::err::Error;
+	/// use surrealdb_core::dbs::Session;
+	/// use surrealdb_core::sql::parse;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
@@ -1088,11 +1087,11 @@ impl Datastore {
 	/// Ensure a SQL [`Value`] is fully computed
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::Datastore;
-	/// use surrealdb::err::Error;
-	/// use surrealdb::dbs::Session;
-	/// use surrealdb::sql::Future;
-	/// use surrealdb::sql::Value;
+	/// use surrealdb_core::kvs::Datastore;
+	/// use surrealdb_core::err::Error;
+	/// use surrealdb_core::dbs::Session;
+	/// use surrealdb_core::sql::Future;
+	/// use surrealdb_core::sql::Value;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
@@ -1167,11 +1166,11 @@ impl Datastore {
 	/// SIGNIN clause, which still needs to work without guest access.
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::Datastore;
-	/// use surrealdb::err::Error;
-	/// use surrealdb::dbs::Session;
-	/// use surrealdb::sql::Future;
-	/// use surrealdb::sql::Value;
+	/// use surrealdb_core::kvs::Datastore;
+	/// use surrealdb_core::err::Error;
+	/// use surrealdb_core::dbs::Session;
+	/// use surrealdb_core::sql::Future;
+	/// use surrealdb_core::sql::Value;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
@@ -1232,9 +1231,9 @@ impl Datastore {
 	/// Subscribe to live notifications
 	///
 	/// ```rust,no_run
-	/// use surrealdb::kvs::Datastore;
-	/// use surrealdb::err::Error;
-	/// use surrealdb::dbs::Session;
+	/// use surrealdb_core::kvs::Datastore;
+	/// use surrealdb_core::err::Error;
+	/// use surrealdb_core::dbs::Session;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {

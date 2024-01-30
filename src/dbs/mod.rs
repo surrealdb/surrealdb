@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
-use surrealdb::opt::auth::Root;
 
 pub static DB: OnceLock<Datastore> = OnceLock::new();
 
@@ -258,11 +257,7 @@ pub async fn init(
 	dbs.bootstrap().await?;
 
 	if let Some(user) = opt.user.as_ref() {
-		dbs.setup_initial_creds(Root {
-			username: user,
-			password: opt.pass.as_ref().unwrap(),
-		})
-		.await?;
+		dbs.setup_initial_creds(user, opt.pass.as_ref().unwrap()).await?;
 	}
 
 	// Store database instance
@@ -283,6 +278,7 @@ mod tests {
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 	use super::*;
+	use surrealdb::opt::auth::Root;
 
 	#[test(tokio::test)]
 	async fn test_setup_superuser() {
@@ -297,7 +293,7 @@ mod tests {
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			0
 		);
-		ds.setup_initial_creds(creds).await.unwrap();
+		ds.setup_initial_creds(creds.username, creds.password).await.unwrap();
 		assert_eq!(
 			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
 			1
@@ -318,7 +314,7 @@ mod tests {
 			.unwrap()
 			.hash;
 
-		ds.setup_initial_creds(creds).await.unwrap();
+		ds.setup_initial_creds(creds.username, creds.password).await.unwrap();
 		assert_eq!(
 			pass_hash,
 			ds.transaction(Read, Optimistic)

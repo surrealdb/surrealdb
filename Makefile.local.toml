@@ -42,7 +42,7 @@ category = "LOCAL USAGE"
 script = """
 	set -e
 	cd ${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/
-	cargo fmt --all --check -- ./lib/tests/**/*.rs ./lib/src/kvs/tests/*.rs
+	cargo fmt --all --check -- ./lib/tests/**/*.rs ./core/src/kvs/tests/*.rs
 """
 
 [tasks.cargo-clippy]

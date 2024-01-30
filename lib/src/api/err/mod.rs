@@ -7,6 +7,7 @@ use crate::sql::Value;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
+use surrealdb_core::sql::FromValueError;
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database
@@ -250,5 +251,14 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+
+impl From<FromValueError> for crate::Error {
+	fn from(error: FromValueError) -> Self {
+		Self::Api(Error::FromValue {
+			value: error.value,
+			error: error.error,
+		})
 	}
 }

@@ -1,4 +1,6 @@
 /// Converts some text into a new line byte string
+#[macro_export]
+#[doc(hidden)]
 macro_rules! bytes {
 	($expression:expr) => {
 		format!("{}\n", $expression).into_bytes()
@@ -6,6 +8,8 @@ macro_rules! bytes {
 }
 
 /// Creates a new b-tree map of key-value pairs
+#[macro_export]
+#[doc(hidden)]
 macro_rules! map {
     ($($k:expr => $v:expr),* $(,)? $( => $x:expr )?) => {{
         let mut m = ::std::collections::BTreeMap::new();
@@ -16,6 +20,8 @@ macro_rules! map {
 }
 
 /// Matches on a specific config environment
+#[macro_export]
+#[doc(hidden)]
 macro_rules! get_cfg {
 	($i:ident : $($s:expr),+) => (
 		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};

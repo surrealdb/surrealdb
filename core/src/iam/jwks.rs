@@ -1,6 +1,6 @@
+use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
-use crate::opt::capabilities::NetTarget;
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::jwk::{Jwk, JwkSet, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{DecodingKey, Validation};
@@ -42,6 +42,7 @@ static CACHE_COOLDOWN: Lazy<chrono::Duration> =
 		}
 	});
 
+#[cfg(not(target_arch = "wasm32"))]
 static REMOTE_TIMEOUT: Lazy<chrono::Duration> =
 	Lazy::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
 		Ok(milliseconds_str) => {
@@ -650,6 +651,7 @@ mod tests {
 	}
 
 	#[tokio::test]
+	#[cfg(not(target_arch = "wasm32"))]
 	async fn test_remote_timeout() {
 		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
 			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
