@@ -135,13 +135,22 @@ impl Display for DefineTableStatement {
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
-		if let TableType::Relation(rel) = &self.table_type {
-			f.write_str(" RELATION")?;
-			if let Some(kind) = &rel.from {
-				write!(f, " IN {}", get_tables_from_kind(kind))?;
+		write!(f, " TYPE")?;
+		match &self.table_type {
+			TableType::Normal => {
+				f.write_str(" NORMAL")?;
 			}
-			if let Some(kind) = &rel.to {
-				write!(f, " OUT {}", get_tables_from_kind(kind))?;
+			TableType::Relation(rel) => {
+				f.write_str(" RELATION")?;
+				if let Some(kind) = &rel.from {
+					write!(f, " IN {}", get_tables_from_kind(kind))?;
+				}
+				if let Some(kind) = &rel.to {
+					write!(f, " OUT {}", get_tables_from_kind(kind))?;
+				}
+			}
+			TableType::Any => {
+				f.write_str(" ANY")?;
 			}
 		}
 		f.write_str(if self.full {

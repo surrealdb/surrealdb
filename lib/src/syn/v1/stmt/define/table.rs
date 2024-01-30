@@ -24,14 +24,15 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(table_opts)(i)?;
 	let (i, _) = expected(
-		"RELATION, DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
+		"TYPE, RELATION, DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
 		ending::query,
 	)(i)?;
 	// Create the base statement
 	let mut res = DefineTableStatement {
 		name,
 		permissions: Permissions::none(),
-		table_type: TableType::Normal,
+		// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
+		table_type: TableType::Any,
 		..Default::default()
 	};
 	// Assign any defined options
@@ -58,8 +59,8 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
-			DefineTableOption::Relation(r) => {
-				res.table_type = TableType::Relation(r);
+			DefineTableOption::TableType(t) => {
+				res.table_type = t;
 			}
 		}
 	}
@@ -76,7 +77,7 @@ enum DefineTableOption {
 	Comment(Strand),
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
-	Relation(Relation),
+	TableType(TableType),
 }
 
 enum RelationDir {
@@ -103,6 +104,7 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_schemafull,
 		table_permissions,
 		table_changefeed,
+		table_type,
 		table_relation,
 	))(i)
 }
@@ -151,6 +153,24 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	Ok((i, DefineTableOption::Permissions(v)))
 }
 
+fn table_type(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("TYPE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	alt((table_normal, table_any, table_relation))(i)
+}
+
+fn table_normal(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("NORMAL")(i)?;
+	Ok((i, DefineTableOption::TableType(TableType::Normal)))
+}
+fn table_any(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANY")(i)?;
+	Ok((i, DefineTableOption::TableType(TableType::Any)))
+}
+
 fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("RELATION")(i)?;
@@ -163,7 +183,7 @@ fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
 		relation.merge(dir);
 	}
 
-	Ok((i, DefineTableOption::Relation(relation)))
+	Ok((i, DefineTableOption::TableType(TableType::Relation(relation))))
 }
 
 fn relation_from(i: &str) -> IResult<&str, RelationDir> {
