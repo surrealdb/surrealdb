@@ -237,7 +237,8 @@ fn statements() -> Vec<Statement> {
 				expiry: std::time::Duration::from_secs(1),
 			}),
 			comment: None,
-			table_type: TableType::Normal,
+			// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
+			table_type: TableType::Any,
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
