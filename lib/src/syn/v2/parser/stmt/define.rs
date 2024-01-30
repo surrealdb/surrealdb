@@ -265,7 +265,8 @@ impl Parser<'_> {
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
-			table_type: TableType::Normal,
+			// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
+			table_type: TableType::Any,
 			..Default::default()
 		};
 
