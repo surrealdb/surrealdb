@@ -99,11 +99,12 @@ impl fmt::Display for ShowStatement {
 
 #[cfg(test)]
 mod test {
+	use crate::sql::Datetime;
+
 	#[test]
 	fn timestamps_are_not_versionstamps() {
 		// given
-		let datetime = chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00Z").unwrap();
-		let sql_dt = super::Datetime::from(datetime);
+		let sql_dt = Datetime::try_from("2020-01-01T00:00:00Z").unwrap();
 
 		// when
 		let since = super::ShowSince::Timestamp(sql_dt);
