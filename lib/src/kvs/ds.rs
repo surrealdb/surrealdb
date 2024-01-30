@@ -920,29 +920,12 @@ impl Datastore {
 				ShowSince::versionstamp(vs),
 				Some(TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION),
 			)
-			.await;
-			let changes = res.map(|change_sets| {
-				let new_watermark = change_sets.last().map(|change_set| {
-					conv::versionstamp_to_u64({
-						let v: &Versionstamp = &change_set.0;
-						v
-					})
-				});
-
-				// Confirm we do need to change watermark - this is technically already handled by the cf range scan
-				match new_watermark {
-					Some(latest_vs) => {
-						if latest_vs > conv::versionstamp_to_u64(vs) {
-							Some(change_sets)
-						} else {
-							None
-						}
-					}
-					None => None,
+			.await?;
+			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
+			if let Some(change_set) = res.last() {
+				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
+					change_map.insert(selector.clone(), res);
 				}
-			})?;
-			if let Some(changes) = changes {
-				change_map.insert(selector.clone(), changes);
 			}
 		}
 		tx.cancel().await?;
