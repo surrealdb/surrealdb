@@ -62,8 +62,6 @@ impl DefineTableStatement {
 			run.define_in_out_fd_from_relation(opt.ns(), opt.db(), &self.name, rel).await?
 		}
 
-		// TODO: define id field here
-
 		let tb_key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.name);
 		run.clr(tb_key).await?;
 		// Check if table is a view
