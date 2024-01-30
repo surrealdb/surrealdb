@@ -48,7 +48,6 @@ pub struct SerializeDefineTableStatement {
 	permissions: Permissions,
 	changefeed: Option<ChangeFeed>,
 	comment: Option<Strand>,
-	// relation: Option<(Option<Kind>, Option<Kind>)>,
 	table_type: TableType,
 }
 

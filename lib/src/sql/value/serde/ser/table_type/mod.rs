@@ -19,7 +19,7 @@ impl ser::Serializer for Serializer {
 	type SerializeStruct = Impossible<TableType, Error>;
 	type SerializeStructVariant = Impossible<TableType, Error>;
 
-	const EXPECTED: &'static str = "an `TableType`";
+	const EXPECTED: &'static str = "a `TableType`";
 
 	fn serialize_newtype_variant<T>(
 		self,
