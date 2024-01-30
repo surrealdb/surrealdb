@@ -12,10 +12,12 @@ use crate::{
 		Strand, TableType, View,
 	},
 	syn::v1::common::verbar,
+	syn::v1::ParseError,
 };
+
 use nom::{
 	branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0,
-	multi::separated_list1,
+	multi::separated_list1, Err,
 };
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
@@ -86,11 +88,31 @@ enum RelationDir {
 }
 
 impl Relation {
-	fn merge(&mut self, other: RelationDir) {
+	fn merge<'a>(&mut self, i: &'a str, other: RelationDir) -> IResult<&'a str, ()> {
 		//TODO: error if both self and other are some
 		match other {
-			RelationDir::From(i) => self.from = Some(i),
-			RelationDir::To(i) => self.to = Some(i),
+			RelationDir::From(f) => {
+				if self.from.is_some() {
+					Err(Err::Failure(ParseError::Expected {
+						tried: i,
+						expected: "only one IN clause",
+					}))
+				} else {
+					self.from = Some(f);
+					Ok((i, ()))
+				}
+			}
+			RelationDir::To(t) => {
+				if self.to.is_some() {
+					Err(Err::Failure(ParseError::Expected {
+						tried: i,
+						expected: "only one OUT clause",
+					}))
+				} else {
+					self.to = Some(t);
+					Ok((i, ()))
+				}
+			}
 		}
 	}
 }
@@ -179,7 +201,7 @@ fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
 	let mut relation: Relation = Default::default();
 
 	for dir in dirs {
-		relation.merge(dir);
+		relation.merge(i, dir)?;
 	}
 
 	Ok((i, DefineTableOption::TableType(TableType::Relation(relation))))
