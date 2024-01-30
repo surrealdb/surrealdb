@@ -283,6 +283,24 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.table_type = TableType::Relation(self.parse_relation_schema()?);
 				}
+				t!("TYPE") => {
+					self.pop_peek();
+					match self.peek_kind() {
+						t!("NORMAL") => {
+							self.pop_peek();
+							res.table_type = TableType::Normal;
+						}
+						t!("RELATION") => {
+							self.pop_peek();
+							res.table_type = TableType::Relation(self.parse_relation_schema()?);
+						}
+						t!("ANY") => {
+							self.pop_peek();
+							res.table_type = TableType::Any;
+						}
+						x => unexpected!(self, x, "`NORMAL`, `RELATION`, or `ANY`"),
+					}
+				}
 				t!("SCHEMALESS") => {
 					self.pop_peek();
 					res.full = false;
