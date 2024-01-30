@@ -18,12 +18,12 @@ Here are the suggested steps to reproduce crashes locally using `surrealdb-repro
 
 1. Download the relevant test case [from OSS-Fuzz](https://oss-fuzz.com/testcases?open=yes&project=surrealdb).
 2. Identify if the test case contains binary data (i.e. produced by `fuzz_structured_executor`) or a plain-text query.
-3. Run this tool using `cargo run` and provide the path to the test case. This will use the locally checked out version of SurrealDB.
+3. Run this tool using `cargo run` and provide the path to the test case. This will use the current local branch of SurrealDB.
    - If the test case contains a plain-text query string, provide the `-s` flag to perform parsing.
 4. The crash should trigger and print relevant information that should help you identify cause of the crash.
    - If the output does not contain sufficient information, provide the `-b` flag to get a full backtrace.
    - If you want to identify if the crash can be triggered remotely, provide the `-r` flag to spawn a server.
-5. Amend the code to resolve (or pinpoint) the bug and run the tool again to attempt to reproduce the crash with the new changes.
+5. Amend the code to resolve (or pinpoint) the bug and run the tool again to try to reproduce the crash after the changes.
 
 ## Alternatives
 
