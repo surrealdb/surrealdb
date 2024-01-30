@@ -3,8 +3,8 @@ use geo::Point;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{
-		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Strand, Subquery,
-		Table, Value,
+		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Part, Script, Strand, Subquery, Table,
+		Value,
 	},
 	syn::v2::{
 		lexer::Lexer,
@@ -12,7 +12,7 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, Span, TokenKind},
+		token::{t, NumberKind, Span, TokenKind},
 	},
 };
 
@@ -376,36 +376,45 @@ impl Parser<'_> {
 				let stmt = self.parse_remove_stmt()?;
 				Subquery::Remove(stmt)
 			}
+			TokenKind::Number(kind) => {
+				// take the value so we don't overwrite it if the next token happens to be an
+				// strand or an ident, both of which are invalid syntax.
+				let number_value = self.lexer.string.take().unwrap();
+				if self.peek_token_at(1).kind == t!(",") {
+					match kind {
+						NumberKind::Decimal | NumberKind::NaN => {
+							return Err(ParseError::new(
+								ParseErrorKind::UnexpectedExplain {
+									found: TokenKind::Number(kind),
+									expected: "a non-decimal, non-nan number",
+									explain: "coordinate numbers can't be NaN or a decimal",
+								},
+								next.span,
+							));
+						}
+						_ => {}
+					}
+					self.pop_peek();
+					// was a semicolon, put the strand back for code reuse.
+					self.lexer.string = Some(number_value);
+					let a = self.token_value::<f64>(next)?;
+					// eat the semicolon.
+					self.next();
+					let b = self.next_token_value::<f64>()?;
+					self.expect_closing_delimiter(t!(")"), start)?;
+					return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
+				} else {
+					let value = self.parse_value_field()?;
+					Subquery::Value(value)
+				}
+			}
 			_ => {
 				let value = self.parse_value_field()?;
 				Subquery::Value(value)
 			}
 		};
-		match res {
-			Subquery::Value(Value::Number(x)) => {
-				if self.eat(t!(",")) {
-					// TODO: Fix number parsing.
-					let b = self.next_token_value::<Number>()?;
-
-					let a: f64 = x
-						.try_into()
-						.map_err(|_| ParseError::new(ParseErrorKind::Todo, next.span))?;
-					let b: f64 = b
-						.try_into()
-						.map_err(|_| ParseError::new(ParseErrorKind::Todo, next.span))?;
-
-					self.expect_closing_delimiter(t!(")"), start)?;
-					Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))))
-				} else {
-					self.expect_closing_delimiter(t!(")"), start)?;
-					Ok(Value::Subquery(Box::new(Subquery::Value(Value::Number(x)))))
-				}
-			}
-			x => {
-				self.expect_closing_delimiter(t!(")"), start)?;
-				Ok(Value::Subquery(Box::new(x)))
-			}
-		}
+		self.expect_closing_delimiter(t!(")"), start)?;
+		Ok(Value::Subquery(Box::new(res)))
 	}
 
 	pub fn parse_inner_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {
