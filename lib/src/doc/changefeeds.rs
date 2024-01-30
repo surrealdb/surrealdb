@@ -36,7 +36,7 @@ impl<'a> Document<'a> {
 				opt.db(),
 				tb,
 				id,
-				Some(self.initial.doc.clone()),
+				self.initial.doc.clone(),
 				self.current.doc.clone(),
 			);
 		}
