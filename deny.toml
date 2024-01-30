@@ -112,6 +112,11 @@ version = "*"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-core"
+version = "*"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealml-core"
 version = "*"
 allow = ["Apache-2.0"]
