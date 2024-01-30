@@ -156,7 +156,6 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 fn table_type(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TYPE")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	alt((table_normal, table_any, table_relation))(i)
 }
 
