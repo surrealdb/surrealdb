@@ -187,6 +187,8 @@ keyword! {
 	ContainsNot => "CONTAINSNOT",
 	Contains => "CONTAINS",
 	In => "IN",
+	Out => "OUT",
+	Normal => "NORMAL",
 
 	Any => "ANY",
 	Array => "ARRAY",
