@@ -1356,7 +1356,7 @@ mod tests {
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
-		use crate::opt::capabilities::{Capabilities, NetTarget, Targets};
+		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 		use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
 		use rand::{distributions::Alphanumeric, Rng};

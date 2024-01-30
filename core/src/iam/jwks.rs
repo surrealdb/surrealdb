@@ -279,7 +279,7 @@ fn cache_path_from_url(url: &str) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::opt::capabilities::{Capabilities, NetTarget, Targets};
+	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 	use rand::{distributions::Alphanumeric, Rng};
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
