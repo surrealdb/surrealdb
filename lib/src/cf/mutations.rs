@@ -20,7 +20,8 @@ pub enum TableMutation {
 	Del(Thing),
 	Def(DefineTableStatement),
 	#[revision(start = 2)]
-	SetPrevious(Thing, Option<Value>, Value),
+	// Includes the previous value that may be None
+	SetPrevious(Thing, Value, Value),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -69,8 +70,8 @@ impl TableMutation {
 	pub fn into_value(self) -> Value {
 		let (k, v) = match self {
 			TableMutation::Set(_t, v) => ("update".to_string(), v),
-			TableMutation::SetPrevious(_t, None, v) => ("create".to_string(), v),
-			TableMutation::SetPrevious(_t, Some(_previous), v) => ("update".to_string(), v),
+			TableMutation::SetPrevious(_t, Value::None, v) => ("create".to_string(), v),
+			TableMutation::SetPrevious(_t, _previous, v) => ("update".to_string(), v),
 			TableMutation::Del(t) => {
 				// TODO(phughk): Future PR for lq on cf feature, store update in delete for diff and notification
 				let mut h = BTreeMap::<String, Value>::new();
