@@ -167,6 +167,8 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
+	use crate::sql::Strand;
+
 	#[test]
 	fn serialization() {
 		use super::*;
@@ -199,6 +201,56 @@ mod tests {
 		assert_eq!(
 			s,
 			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
+		);
+	}
+
+	#[test]
+	fn serialization_rev2() {
+		use super::*;
+		use std::collections::HashMap;
+		let cs = ChangeSet(
+			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			DatabaseMutation(vec![TableMutations(
+				"mytb".to_string(),
+				vec![
+					TableMutation::SetPrevious(
+						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						Value::None,
+						Value::Object(Object::from(HashMap::from([
+							(
+								"id",
+								Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+							),
+							("note", Value::from("surreal")),
+						]))),
+					),
+					TableMutation::SetPrevious(
+						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						Value::Strand(Strand::from("this would normally be an object")),
+						Value::Object(Object::from(HashMap::from([
+							(
+								"id",
+								Value::from(Thing::from((
+									"mytb".to_string(),
+									"tobie2".to_string(),
+								))),
+							),
+							("note", Value::from("surreal")),
+						]))),
+					),
+					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+					TableMutation::Def(DefineTableStatement {
+						name: "mytb".into(),
+						..DefineTableStatement::default()
+					}),
+				],
+			)]),
+		);
+		let v = cs.into_value().into_json();
+		let s = serde_json::to_string(&v).unwrap();
+		assert_eq!(
+			s,
+			r#"{"changes":[{"create":{"id":"mytb:tobie","note":"surreal"}},{"update":{"id":"mytb:tobie2","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
 		);
 	}
 }
