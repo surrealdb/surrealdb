@@ -13,39 +13,6 @@ use tokio::time::Duration;
 
 const SURREAL_ADDRESS: &str = "127.0.0.1:8000";
 
-async fn run_server(ready: Arc<Notify>) {
-	loop {
-		let binary_name = "surreal";
-		let args = ["start", "--bind", SURREAL_ADDRESS, "--log", "none", "--no-banner"];
-
-		let mut cmd = Command::new(&binary_name);
-		cmd.args(&args);
-
-		let mut child = match TokioCommand::from(cmd).spawn() {
-			Ok(child) => child,
-			Err(err) => {
-				eprintln!("Failed to start process: {:?}", err);
-				continue;
-			}
-		};
-
-		ready.notify_one();
-		let status = child.wait().await;
-		match status {
-			Ok(exit_status) => {
-				if !exit_status.success() {
-					eprintln!("Child process exited with an error: {:?}", exit_status);
-				}
-			}
-			Err(err) => {
-				eprintln!("Failed to wait for child process: {:?}", err);
-			}
-		}
-
-		tokio::time::sleep(Duration::from_millis(200)).await;
-	}
-}
-
 #[tokio::main]
 async fn main() {
 	let args: Vec<String> = env::args().collect();
@@ -55,16 +22,13 @@ async fn main() {
 		eprintln!("  <path>  Local path to a test case provided by OSS-Fuzz.");
 		eprintln!("  -s      The test case is a query string instead of a pre-parsed query.");
 		eprintln!("  -b      Print a full backtrace after crashes. Includes stack overflows.");
+		eprintln!("  -r      Spawn a local SurrealDB server to attempt to reproduce remotely.");
 		std::process::exit(1);
 	}
 
-	let ready = Arc::new(Notify::new());
-	let ready_clone = ready.clone();
-	tokio::spawn(async move { run_server(ready_clone).await });
-	ready.notified().await;
-
 	let flag_string = args.iter().any(|arg| arg == "-s");
 	let flag_backtrace = args.iter().any(|arg| arg == "-b");
+	let flag_remote = args.iter().any(|arg| arg == "-r");
 	let test_case_path = args.iter().skip(1).find(|arg| !arg.starts_with("--")).unwrap();
 	let mut test_case = File::open(test_case_path).unwrap();
 
@@ -90,28 +54,33 @@ async fn main() {
 	let query_string = format!("{}", query);
 	println!("Original query string: {}", query_string);
 
-	// Connect to server to reproduce remotely
-	let db = Surreal::new::<Ws>(SURREAL_ADDRESS).await.unwrap();
-	db.use_ns("test").use_db("test").await.unwrap();
+	if flag_remote {
+		let ready = Arc::new(Notify::new());
+		let ready_clone = ready.clone();
+		tokio::spawn(async move { run_server(ready_clone).await });
+		ready.notified().await;
 
-	// Attempt to crash the parser
-	println!("Attempting to remotely parse query string...");
-	match db.query(&query_string).await {
-		Err(err) => println!("Failed to remotely parse query string: {}", err),
-		_ => (),
-	};
+		let db = Surreal::new::<Ws>(SURREAL_ADDRESS).await.unwrap();
+		db.use_ns("test").use_db("test").await.unwrap();
+
+		println!("Attempting to remotely parse query string...");
+		match db.query(&query_string).await {
+			Err(err) => println!("Failed to remotely parse query string: {}", err),
+			_ => (),
+		};
+		println!("Attempting to remotely execute query object...");
+		match db.query(query.clone()).await {
+			Err(err) => println!("Failed to remotely execute query object: {}", err),
+			_ => (),
+		};
+	}
+
 	println!("Attempting to locally parse query string...");
 	match surrealdb::sql::parse(&query_string) {
 		Ok(ast) => println!("Parsed query string: {}", ast),
 		Err(err) => println!("Failed to locally parse query string: {}", err),
 	};
 
-	// Attempt to crash the executor
-	println!("Attempting to remotely execute query object...");
-	match db.query(query.clone()).await {
-		Err(err) => println!("Failed to remotely execute query object: {}", err),
-		_ => (),
-	};
 	println!("Attempting to locally execute query object...");
 	let ds = Datastore::new("memory").await.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -119,4 +88,33 @@ async fn main() {
 		Err(err) => println!("Failed to locally execute query object: {}", err),
 		_ => (),
 	};
+}
+
+async fn run_server(ready: Arc<Notify>) {
+	loop {
+		let binary_name = "surreal";
+		let args = ["start", "--bind", SURREAL_ADDRESS, "--log", "none", "--no-banner"];
+		let mut cmd = Command::new(&binary_name);
+		cmd.args(&args);
+
+		let mut child = match TokioCommand::from(cmd).spawn() {
+			Ok(child) => child,
+			Err(err) => {
+				eprintln!("Failed to start process: {:?}", err);
+				continue;
+			}
+		};
+		ready.notify_one();
+
+		let status = child.wait().await;
+		match status {
+			Ok(exit_status) => {
+				if !exit_status.success() {
+					eprintln!("Child process exited with an error: {:?}", exit_status);
+				}
+			}
+			Err(err) => eprintln!("Failed to wait for child process: {:?}", err),
+		}
+		tokio::time::sleep(Duration::from_millis(200)).await;
+	}
 }
