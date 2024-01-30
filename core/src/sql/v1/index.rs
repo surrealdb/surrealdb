@@ -76,8 +76,6 @@ pub struct HnswParams {
 	pub m0: u16,
 	pub ef_construction: u16,
 	pub ml: Number,
-	pub doc_ids_order: u32,
-	pub doc_ids_cache: u32,
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -184,8 +182,8 @@ impl Display for Index {
 			Self::Hnsw(p) => {
 				write!(
 					f,
-					"HNSW DIMENSION {} DIST {} TYPE {}",
-					p.dimension, p.distance, p.vector_type,
+					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} ML {}",
+					p.dimension, p.distance, p.vector_type, p.ef_construction, p.m, p.m0, p.ml
 				)
 			}
 		}

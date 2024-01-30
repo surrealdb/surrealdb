@@ -546,8 +546,6 @@ mod tests {
 			m0: 24,
 			ef_construction: 500,
 			ml: (1.0 / 12.0_f64.ln()).into(),
-			doc_ids_order: 0,
-			doc_ids_cache: 0,
 		}
 	}
 

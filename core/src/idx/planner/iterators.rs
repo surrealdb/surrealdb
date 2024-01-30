@@ -449,6 +449,7 @@ impl ThingsIterator {
 		}
 	}
 	fn next_batch(&mut self, limit: u32) -> Vec<(Thing, Option<DocId>)> {
-		self.res.drain(0..(limit as usize)).map(|thg| (thg, None)).collect()
+		let limit = self.res.len().min(limit as usize);
+		self.res.drain(0..limit).map(|thg| (thg, None)).collect()
 	}
 }

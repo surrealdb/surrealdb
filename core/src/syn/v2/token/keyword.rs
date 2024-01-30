@@ -82,6 +82,7 @@ keyword! {
 	Function => "FUNCTION",
 	Group => "GROUP",
 	Highlights => "HIGHLIGHTS",
+	Hnsw => "HNSW",
 	Ignore => "IGNORE",
 	Index => "INDEX",
 	Info => "INFO",

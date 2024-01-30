@@ -59,9 +59,9 @@ pub enum Operator {
 	Outside,
 	Intersects,
 	//
-	Knn(u32, Option<Distance>), // <{k}[,{dist}]>
+	Knn(u32, Option<Distance>), // <|{k}[,{dist}]|>
 	#[revision(start = 2)]
-	Ann(u32, u32), // <{k},{ef}>
+	Ann(u32, u32), // <|{k},{ef}|>
 	//
 	Rem, // %
 }

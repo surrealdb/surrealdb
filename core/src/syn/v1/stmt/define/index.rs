@@ -102,13 +102,13 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 mod tests {
 
 	use super::*;
-	use crate::sql::index::{Distance, MTreeParams, SearchParams, VectorType};
-	use crate::sql::Ident;
+	use crate::sql::index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType};
 	use crate::sql::Idiom;
 	use crate::sql::Idioms;
 	use crate::sql::Index;
 	use crate::sql::Part;
 	use crate::sql::Scoring;
+	use crate::sql::{Ident, Number};
 
 	#[test]
 	fn check_create_non_unique_index() {
@@ -237,6 +237,34 @@ mod tests {
 		assert_eq!(
 			idx.to_string(),
 			"DEFINE INDEX my_index ON my_table FIELDS my_col MTREE DIMENSION 4 DIST EUCLIDEAN TYPE F64 CAPACITY 40 DOC_IDS_ORDER 100 DOC_IDS_CACHE 100 MTREE_CACHE 100"
+		);
+	}
+
+	#[test]
+	fn check_create_hnsw_index() {
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col HNSW DIMENSION 4";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Hnsw(HnswParams {
+					dimension: 4,
+					vector_type: VectorType::F64,
+					distance: Distance::Euclidean,
+					ef_construction: 150,
+					m: 12,
+					m0: 24,
+					ml: Number::Float(0.40242960438184466)
+				}),
+				comment: None,
+			}
+		);
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F64 EFC 150 M 12 M0 24 ML 0.40242960438184466f"
 		);
 	}
 

@@ -213,14 +213,10 @@ pub fn hnsw(i: &str) -> IResult<&str, Index> {
 		let (i, m) = opt(m)(i)?;
 		let (i, m0) = opt(m0)(i)?;
 		let (i, ml) = opt(ml)(i)?;
-		let (i, doc_ids_order) = opt(doc_ids_order)(i)?;
-		let (i, doc_ids_cache) = opt(doc_ids_cache)(i)?;
 		let ef_construction = ef_construction.unwrap_or(150);
 		let m = m.unwrap_or(12);
 		let m0 = m0.unwrap_or(m * 2);
 		let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
-		let doc_ids_order = doc_ids_order.unwrap_or(100);
-		let doc_ids_cache = doc_ids_cache.unwrap_or(100);
 		Ok((
 			i,
 			Index::Hnsw(HnswParams {
@@ -231,8 +227,6 @@ pub fn hnsw(i: &str) -> IResult<&str, Index> {
 				m0,
 				ef_construction,
 				ml,
-				doc_ids_order,
-				doc_ids_cache,
 			}),
 		))
 	})(i)
