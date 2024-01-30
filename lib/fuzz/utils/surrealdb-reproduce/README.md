@@ -25,6 +25,8 @@ Here are the suggested steps to reproduce crashes locally using `surrealdb-repro
    - If you want to identify if the crash can be triggered remotely, provide the `-r` flag to spawn a server.
 5. Amend the code to resolve (or pinpoint) the bug and run the tool again to try to reproduce the crash after the changes.
 
+Keep in mind that reproducing against a server will use the first version of the `surreal` binary in your `$PATH` to run it.
+
 ## Alternatives
 
 If the crash does not reproduce with the method described above, it may be because of differences between your local enviromnent and OSS-Fuzz. These differences can be minimized by following the [process to reproduce described by OSS-Fuzz](https://google.github.io/oss-fuzz/advanced-topics/reproducing/) instead of using this tool.

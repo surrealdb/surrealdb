@@ -18,7 +18,7 @@ async fn main() {
 	let args: Vec<String> = env::args().collect();
 
 	if args.len() < 2 {
-		eprintln!("Usage: {} [-s] [-b] <path>", args[0]);
+		eprintln!("Usage: {} [-s] [-b] [-r] <path>", args[0]);
 		eprintln!("  <path>  Local path to a test case provided by OSS-Fuzz.");
 		eprintln!("  -s      The test case is a query string instead of a pre-parsed query.");
 		eprintln!("  -b      Print a full backtrace after crashes. Includes stack overflows.");
@@ -45,8 +45,7 @@ async fn main() {
 	} else {
 		let mut buffer = Vec::new();
 		test_case.read_to_end(&mut buffer).unwrap();
-		let raw_data: &[u8] = &buffer;
-		let unstructured: &mut Unstructured = &mut Unstructured::new(raw_data);
+		let unstructured: &mut Unstructured = &mut Unstructured::new(&buffer);
 		<Query as Arbitrary>::arbitrary(unstructured).unwrap()
 	};
 
@@ -64,14 +63,12 @@ async fn main() {
 		db.use_ns("test").use_db("test").await.unwrap();
 
 		println!("Attempting to remotely parse query string...");
-		match db.query(&query_string).await {
-			Err(err) => println!("Failed to remotely parse query string: {}", err),
-			_ => (),
+		if let Err(err) = db.query(&query_string).await {
+			println!("Failed to remotely parse query string: {}", err);
 		};
 		println!("Attempting to remotely execute query object...");
-		match db.query(query.clone()).await {
-			Err(err) => println!("Failed to remotely execute query object: {}", err),
-			_ => (),
+		if let Err(err) = db.query(query.clone()).await {
+			println!("Failed to remotely execute query object: {}", err);
 		};
 	}
 
@@ -84,9 +81,8 @@ async fn main() {
 	println!("Attempting to locally execute query object...");
 	let ds = Datastore::new("memory").await.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
-	match ds.process(query, &ses, None).await {
-		Err(err) => println!("Failed to locally execute query object: {}", err),
-		_ => (),
+	if let Err(err) = ds.process(query, &ses, None).await {
+		println!("Failed to locally execute query object: {}", err);
 	};
 }
 
