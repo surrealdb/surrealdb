@@ -222,6 +222,10 @@ impl<'a> Parser<'a> {
 		// eat possible empty statements.
 		while self.eat(t!(";")) {}
 
+		if self.eat(t!("eof")) {
+			return Ok(sql::Query(sql::Statements(Vec::new())));
+		}
+
 		let mut statements = vec![self.parse_stmt()?];
 
 		while self.eat(t!(";")) {
@@ -235,7 +239,7 @@ impl<'a> Parser<'a> {
 			statements.push(self.parse_stmt()?);
 		}
 
-		expected!(self, TokenKind::Eof);
+		expected!(self, t!("eof"));
 		Ok(sql::Query(sql::Statements(statements)))
 	}
 
