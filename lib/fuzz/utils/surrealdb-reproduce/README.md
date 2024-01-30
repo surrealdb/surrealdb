@@ -17,13 +17,13 @@ Issues found by OSS-Fuzz in SurrealDB are initially privately reported and only 
 Here are the suggested steps to reproduce crashes locally using `surrealdb-reproduce`.
 
 1. Download the relevant test case [from OSS-Fuzz](https://oss-fuzz.com/testcases?open=yes&project=surrealdb).
-2. Identify if the test case contains binary data (i.e. it was produced by the `fuzz_structured_executor` target) or a plain-text query.
-3. Run this tool using `cargo run` and provide the path to the test case. This will run the test case against the locally checked out version of SurrealDB.
-   - If the test case contains a plain-text query string, provide the `-s` flag (e.g. `cargo run test_cases/example_1 -- -s`) to perform parsing.
-4. The crash should trigger and some relevant information will be printed that should help you identify the input query and the location of the crash.
-   - If the output does not contain sufficient information, provide the `-b` flag (e.g. `cargo run test_cases/example_1 -- -b`) to get a full backtrace.
-   - If you want to identify if the crash can be triggered remotely, provide the `-r` flag (e.g. `cargo run test_cases/example_1 -- -r`) to spawn a server.
-5. Amend the code to resolve the bug (or add any log traces necesary to debug it) and run the tool again to attempt to reproduce the crash with the new changes.
+2. Identify if the test case contains binary data (i.e. produced by `fuzz_structured_executor`) or a plain-text query.
+3. Run this tool using `cargo run` and provide the path to the test case. This will use the locally checked out version of SurrealDB.
+   - If the test case contains a plain-text query string, provide the `-s` flag to perform parsing.
+4. The crash should trigger and print relevant information that should help you identify cause of the crash.
+   - If the output does not contain sufficient information, provide the `-b` flag to get a full backtrace.
+   - If you want to identify if the crash can be triggered remotely, provide the `-r` flag to spawn a server.
+5. Amend the code to resolve (or pinpoint) the bug and run the tool again to attempt to reproduce the crash with the new changes.
 
 ## Alternatives
 
