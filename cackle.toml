@@ -1151,6 +1151,11 @@ allow_apis = [
 ]
 
 [pkg.surrealdb]
+allow_apis = [
+    "fs",
+]
+
+[pkg.surrealdb-core]
 allow_unsafe = true
 allow_apis = [
     "fs",
