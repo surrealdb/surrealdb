@@ -60,8 +60,9 @@ args = [
 [tasks.test-experimental-parser]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
+env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = [
-	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,experimental-parser", "--workspace", "--",
+	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
 	"--skip", "api_integration",
 	"--skip", "cli_integration",
 	"--skip", "http_integration",
