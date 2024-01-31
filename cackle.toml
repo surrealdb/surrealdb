@@ -83,6 +83,9 @@ allow_unsafe = true
 
 [pkg.lru]
 allow_unsafe = true
+allow_apis = [
+    "net",
+]
 
 [pkg.bzip2-sys]
 build.allow_apis = [
