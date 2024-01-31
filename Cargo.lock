@@ -3027,6 +3027,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "lru"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db2c024b41519440580066ba82aab04092b333e09066a5eb86c7c4890df31f22"
+dependencies = [
+ "hashbrown 0.14.3",
+]
+
+[[package]]
 name = "lz4-sys"
 version = "1.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5338,7 +5347,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "surrealdb-core",
+ "surrealdb-core 1.1.4",
+ "surrealdb-core 2.0.0-alpha.1",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5355,6 +5365,82 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasmtimer",
  "wiremock",
+ "ws_stream_wasm",
+]
+
+[[package]]
+name = "surrealdb-core"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a43fc289c2ef20e23b121311f04e269514b2acd9c91e136f4e2519488db567d3"
+dependencies = [
+ "addr",
+ "any_ascii",
+ "argon2",
+ "async-channel",
+ "async-executor",
+ "async-recursion 1.0.5",
+ "base64 0.21.7",
+ "bcrypt",
+ "bincode",
+ "bytes",
+ "cedar-policy",
+ "chrono",
+ "deunicode",
+ "dmp",
+ "echodb",
+ "foundationdb",
+ "fst",
+ "futures",
+ "fuzzy-matcher",
+ "geo 0.27.0",
+ "hex",
+ "indxdb",
+ "ipnet",
+ "lexicmp",
+ "lru",
+ "md-5",
+ "nanoid",
+ "ndarray",
+ "nom",
+ "num_cpus",
+ "object_store",
+ "once_cell",
+ "pbkdf2",
+ "pharos",
+ "pin-project-lite",
+ "radix_trie",
+ "rand 0.8.5",
+ "regex",
+ "reqwest",
+ "revision",
+ "roaring",
+ "rocksdb",
+ "rquickjs",
+ "rust-stemmers",
+ "rust_decimal",
+ "scrypt",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "snap",
+ "speedb",
+ "storekey",
+ "surrealdb-derive",
+ "surrealdb-jsonwebtoken",
+ "surrealdb-tikv-client",
+ "surrealml-core 0.0.3",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "trice",
+ "ulid",
+ "url",
+ "uuid",
+ "wasm-bindgen-futures",
+ "wasmtimer",
  "ws_stream_wasm",
 ]
 
@@ -5428,7 +5514,7 @@ dependencies = [
  "surrealdb-derive",
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
- "surrealml-core",
+ "surrealml-core 0.0.7",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5502,6 +5588,21 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic 0.9.2",
+]
+
+[[package]]
+name = "surrealml-core"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cde4ceed0b05a8f512afe7fa1a260e4a67cfbba439eccb858e189f826fc3fff"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "ndarray",
+ "once_cell",
+ "ort",
+ "regex",
 ]
 
 [[package]]

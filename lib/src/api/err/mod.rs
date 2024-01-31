@@ -1,13 +1,13 @@
 use crate::api::Response;
 use crate::sql::Array;
 use crate::sql::Edges;
+use crate::sql::FromValueError;
 use crate::sql::Object;
 use crate::sql::Thing;
 use crate::sql::Value;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
-use surrealdb_core::sql::FromValueError;
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database

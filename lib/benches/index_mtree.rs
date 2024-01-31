@@ -5,15 +5,15 @@ use rand::prelude::ThreadRng;
 use rand::{thread_rng, Rng};
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::idx::docids::DocId;
-use surrealdb::idx::trees::mtree::{MState, MTree};
-use surrealdb::idx::trees::store::cache::TreeCache;
-use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
-use surrealdb::idx::trees::vector::Vector;
-use surrealdb::kvs::Datastore;
-use surrealdb::kvs::LockType::Optimistic;
-use surrealdb::kvs::TransactionType::{Read, Write};
-use surrealdb::sql::index::Distance;
+use surrealdb_core2::idx::docids::DocId;
+use surrealdb_core2::idx::trees::mtree::{MState, MTree};
+use surrealdb_core2::idx::trees::store::cache::TreeCache;
+use surrealdb_core2::idx::trees::store::{TreeNodeProvider, TreeStore};
+use surrealdb_core2::idx::trees::vector::Vector;
+use surrealdb_core2::kvs::Datastore;
+use surrealdb_core2::kvs::LockType::Optimistic;
+use surrealdb_core2::kvs::TransactionType::{Read, Write};
+use surrealdb_core2::sql::index::Distance;
 use tokio::runtime::Runtime;
 
 fn bench_index_mtree_dim_3(c: &mut Criterion) {
