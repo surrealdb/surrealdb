@@ -12,6 +12,7 @@ homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb-core/"
 keywords = ["database", "embedded-database", "key-value", "key-value-store", "kv-store"]
 categories = ["database-implementations", "data-structures", "embedded"]
+license = "BUSL-1.1"
 license-file = "../LICENSE"
 resolver = "2"
 
