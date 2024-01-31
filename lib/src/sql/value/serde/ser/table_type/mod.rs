@@ -35,11 +35,22 @@ impl ser::Serializer for Serializer {
 			"Relation" => {
 				Ok(TableType::Relation(value.serialize(ser::relation::Serializer.wrap())?))
 			}
-			"Normal" => Ok(TableType::Normal),
-			"Any" => Ok(TableType::Any),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
+		}
+	}
+
+	fn serialize_unit_variant(
+		self,
+		name: &'static str,
+		_variant_index: u32,
+		variant: &'static str,
+	) -> Result<Self::Ok, Error> {
+		match variant {
+			"Normal" => Ok(TableType::Normal),
+			"Any" => Ok(TableType::Any),
+			variant => Err(Error::custom(format!("unknown variant `{name}::{variant}`"))),
 		}
 	}
 }
