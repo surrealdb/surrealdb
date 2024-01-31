@@ -289,7 +289,7 @@ impl TreeVector {
 		T: ToFloat + Copy,
 	{
 		let mag = Self::magnitude(v);
-		if mag == 0.0 {
+		if mag == 0.0 || mag.is_nan() {
 			vec![0.0; v.len()] // Return a zero vector if magnitude is zero
 		} else {
 			v.iter().map(|&x| x.to_float() / mag).collect()

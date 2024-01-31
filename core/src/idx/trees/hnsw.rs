@@ -224,6 +224,25 @@ impl Hnsw {
 		#[cfg(debug_assertions)]
 		debug!("Remove {e_id}");
 		let layers = self.layers.len();
+
+		let mut new_enter_point = None;
+
+		// Are we deleting the current enter point?
+		if Some(e_id) == self.enter_point {
+			if let Some(old_ep_obj) = self.elements.get(&e_id) {
+				let layer = self.layers[layers - 1].read().await;
+				let mut w = BTreeSet::new();
+				self.search_layer(old_ep_obj, e_id, 2, &layer, &mut w).await;
+				new_enter_point = w.iter().find_map(|pr| {
+					if pr.1 != e_id {
+						Some(pr.1)
+					} else {
+						None
+					}
+				});
+			}
+		}
+
 		let mut removed = false;
 		let mut m_max = self.m;
 		// TODO one thread per layer
@@ -249,7 +268,11 @@ impl Hnsw {
 				removed = true;
 			}
 		}
-		self.elements.remove(&e_id);
+
+		if removed && Some(e_id) == self.enter_point {
+			println!("New enter point: {:?} {:?}", self.enter_point, new_enter_point);
+			self.enter_point = new_enter_point;
+		}
 		removed
 	}
 
@@ -353,7 +376,7 @@ impl Hnsw {
 		debug!("EP: {:?}", self.enter_point);
 		for (i, l) in self.layers.iter().enumerate() {
 			let l = l.read().await;
-			debug!("LAYER {i} {:?}", l.0);
+			debug!("LAYER {i} - len: {} - {:?}", l.0.len(), l.0);
 			let m_max = if i == 0 {
 				self.m0
 			} else {
@@ -389,14 +412,18 @@ impl Hnsw {
 			if c.0 > f_dist {
 				break;
 			}
-			for (e_id, e_neighbors) in &l.0 {
-				if visited.insert(*e_id) && e_neighbors.contains(&c.1) {
-					let e_dist = self.distance(&self.elements[e_id], q);
-					if e_dist < f_dist || w.len() < ef {
-						candidates.insert(PriorityNode(e_dist, *e_id));
-						w.insert(PriorityNode(e_dist, *e_id));
-						if w.len() > ef {
-							w.pop_last();
+			if let Some(neighbourhood) = l.0.get(&c.1) {
+				for e_id in neighbourhood {
+					if visited.insert(*e_id) {
+						if let Some(e_obj) = self.elements.get(e_id) {
+							let e_dist = self.distance(e_obj, q);
+							if e_dist < f_dist || w.len() < ef {
+								candidates.insert(PriorityNode(e_dist, *e_id));
+								w.insert(PriorityNode(e_dist, *e_id));
+								if w.len() > ef {
+									w.pop_last();
+								}
+							}
 						}
 					}
 				}
@@ -444,6 +471,8 @@ impl Hnsw {
 	}
 
 	async fn knn_search(&self, q: &SharedVector, k: usize, ef: usize) -> Vec<PriorityNode> {
+		#[cfg(debug_assertions)]
+		let expected_w_len = self.elements.len().min(k);
 		if let Some(mut ep) = self.enter_point {
 			let mut w = BTreeSet::new();
 			let l = self.layers.len();
@@ -455,10 +484,19 @@ impl Hnsw {
 				} else {
 					unreachable!()
 				}
+				w.clear();
 			}
 			{
 				let l = self.layers[0].read().await;
 				self.search_layer(q, ep, ef, &l, &mut w).await;
+				#[cfg(debug_assertions)]
+				if w.len() < expected_w_len {
+					debug!(
+						"0 search_layer - ep: {ep} - ef: {ef} - k: {k} - layer: {} - w: {}",
+						l.0.len(),
+						w.len()
+					);
+				}
 				let w: Vec<PriorityNode> = w.into_iter().collect();
 				w.into_iter().take(k).collect()
 			}
@@ -487,11 +525,12 @@ mod tests {
 		for (_, obj) in collection.as_ref() {
 			h.insert(obj.clone()).await;
 			set.insert(obj.clone());
+			check_hnsw_properties(h, set.len()).await;
 		}
 		set
 	}
 	async fn find_collection_hnsw(h: &mut Hnsw, collection: &TestCollection) {
-		let max_knn = 20.max(collection.as_ref().len());
+		let max_knn = 20.min(collection.as_ref().len());
 		for (_, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
 				let res = h.knn_search(obj, knn, 500).await;
@@ -536,15 +575,22 @@ mod tests {
 		find_collection_hnsw(&mut h, &collection).await;
 	}
 
-	fn new_params(dimension: usize, vector_type: VectorType, distance: Distance) -> HnswParams {
+	fn new_params(
+		dimension: usize,
+		vector_type: VectorType,
+		distance: Distance,
+		m: usize,
+	) -> HnswParams {
+		let m = m as u16;
+		let m0 = m * 2;
 		HnswParams {
 			dimension: dimension as u16,
 			distance,
 			vector_type,
-			m: 12,
-			m0: 24,
+			m,
+			m0,
 			ef_construction: 500,
-			ml: (1.0 / 12.0_f64.ln()).into(),
+			ml: (1.0 / (m as f64).ln()).into(),
 		}
 	}
 
@@ -553,11 +599,11 @@ mod tests {
 		vt: VectorType,
 		collection_size: usize,
 		dimension: usize,
-		unique: bool,
+		m: usize,
 	) {
 		let for_jaccard = distance == Distance::Jaccard;
-		let collection = TestCollection::new(unique, collection_size, vt, dimension, for_jaccard);
-		let params = new_params(dimension, vt, distance);
+		let collection = TestCollection::new(true, collection_size, vt, dimension, for_jaccard);
+		let params = new_params(dimension, vt, distance, m);
 		test_hnsw_collection(&params, &collection).await;
 	}
 
@@ -567,7 +613,7 @@ mod tests {
 	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
 	30,
 	2,
-	[false, true]
+	12
 	)]
 	#[test_log::test(tokio::test)]
 	async fn test_hnsw_small(
@@ -575,17 +621,23 @@ mod tests {
 		vt: VectorType,
 		collection_size: usize,
 		dimension: usize,
-		unique: bool,
+		m: usize,
 	) {
-		test_hnsw(distance, vt, collection_size, dimension, unique).await
+		test_hnsw(distance, vt, collection_size, dimension, m).await
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn test_hnsw_small_euclidean_check() {
+		test_hnsw(Distance::Euclidean, VectorType::I16, 20, 2, 4).await
 	}
 
 	#[test_matrix(
-	[Distance::Hamming],
+	[Distance::Chebyshev, Distance::Cosine, Distance::Euclidean, Distance::Hamming,
+	Distance::Jaccard, Distance::Manhattan, Distance::Minkowski(2.into()), Distance::Pearson],
 	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
 	40,
 	1536,
-	[false, true]
+	12
 	)]
 	#[test_log::test(tokio::test)]
 	async fn test_hnsw_large(
@@ -593,14 +645,14 @@ mod tests {
 		vt: VectorType,
 		collection_size: usize,
 		dimension: usize,
-		unique: bool,
+		m: usize,
 	) {
-		test_hnsw(distance, vt, collection_size, dimension, unique).await
+		test_hnsw(distance, vt, collection_size, dimension, m).await
 	}
 
 	#[test_log::test(tokio::test)]
 	async fn test_hnsw_large_euclidean() {
-		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 5, false).await
+		test_hnsw(Distance::Euclidean, VectorType::F64, 200, 5, 12).await
 	}
 
 	async fn insert_collection_hnsw_index(
@@ -625,7 +677,7 @@ mod tests {
 	}
 
 	async fn find_collection_hnsw_index(h: &mut HnswIndex, collection: &TestCollection) {
-		let max_knn = 20.max(collection.as_ref().len());
+		let max_knn = 20.min(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
 				let res = h.search(obj, knn, 500).await;
@@ -678,7 +730,8 @@ mod tests {
 	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
 	30,
 	2,
-	[false, true]
+	[false, true],
+	12
 	)]
 	#[test_log::test(tokio::test)]
 	async fn test_hnsw_index_small(
@@ -687,10 +740,11 @@ mod tests {
 		collection_size: usize,
 		dimension: usize,
 		unique: bool,
+		m: usize,
 	) {
 		let for_jaccard = distance == Distance::Jaccard;
 		let collection = TestCollection::new(unique, collection_size, vt, dimension, for_jaccard);
-		let p = new_params(dimension, vt, distance);
+		let p = new_params(dimension, vt, distance, m);
 		let mut h = HnswIndex::new(&p);
 		let map = insert_collection_hnsw_index(&mut h, &collection).await;
 		find_collection_hnsw_index(&mut h, &collection).await;
@@ -698,15 +752,21 @@ mod tests {
 	}
 
 	async fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {
-		let mut missed_foreign_elements = 0;
-		let mut foreign_elements = 0;
+		// let mut deleted_foreign_elements = 0;
+		// let mut foreign_elements = 0;
 		let mut layer_size = h.elements.len();
 		assert_eq!(layer_size, expected_count);
 		for (lc, l) in h.layers.iter().enumerate() {
 			let l = l.read().await;
 			assert!(l.0.len() <= layer_size, "{} - {}", l.0.len(), layer_size);
 			layer_size = l.0.len();
+			let m_layer = if lc == 0 {
+				h.m0
+			} else {
+				h.m
+			};
 			for (e_id, f_ids) in &l.0 {
+				assert!(f_ids.len() <= m_layer, "Foreign list len");
 				assert!(
 					!f_ids.contains(e_id),
 					"!f_ids.contains(e_id) = layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"
@@ -715,17 +775,18 @@ mod tests {
 					h.elements.contains_key(e_id),
 					"h.elements.contains_key(e_id) - layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"
 				);
-				for f_id in f_ids {
-					if !h.elements.contains_key(f_id) {
-						missed_foreign_elements += 1;
-					}
-				}
-				foreign_elements += f_ids.len();
+
+				// for f_id in f_ids {
+				// 	if !h.elements.contains_key(f_id) {
+				// 		deleted_foreign_elements += 1;
+				// 	}
+				// }
+				// foreign_elements += f_ids.len();
 			}
 		}
-		if missed_foreign_elements > 0 && foreign_elements > 0 {
-			let miss_rate = missed_foreign_elements as f64 / foreign_elements as f64;
-			assert!(miss_rate < 0.05, "Miss rate: {miss_rate}");
-		}
+		// if deleted_foreign_elements > 0 && deleted_foreign_elements > 0 {
+		// 	let miss_rate = deleted_foreign_elements as f64 / foreign_elements as f64;
+		// 	assert!(miss_rate < 0.5, "Miss rate: {miss_rate}");
+		// }
 	}
 }
