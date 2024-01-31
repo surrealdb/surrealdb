@@ -55,7 +55,7 @@ ml = ["surrealdb-core1/ml", "surrealdb-core2/ml"]
 jwks = ["surrealdb-core2/jwks", "sql2"]
 arbitrary = ["surrealdb-core2/arbitrary", "sql2"]
 sql2 = []
-parser2 = ["surrealdb-core2/experimental-parser"]
+parser2 = ["surrealdb-core2/experimental-parser", "sql2"]
 # Private features
 kv-fdb = ["tokio/time"]
 
