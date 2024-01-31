@@ -59,12 +59,7 @@ macro_rules! into_future {
 				if !router.features.contains(&ExtraFeatures::LiveQueries) {
 					return Err(Error::LiveQueriesNotSupported.into());
 				}
-				let mut stmt = LiveStatement::from_source_parts(
-					Fields(vec![Field::All], false),
-					Default::default(),
-					Default::default(),
-					Default::default(),
-				);
+				let mut stmt = LiveStatement::new(Fields(vec![Field::All], false));
 				match range {
 					Some(range) => {
 						let range = resource?.with_range(range)?;
