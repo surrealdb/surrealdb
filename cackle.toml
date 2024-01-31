@@ -81,6 +81,9 @@ build.allow_build_instructions = [
 ]
 allow_unsafe = true
 
+[pkg.lru]
+allow_unsafe = true
+
 [pkg.bzip2-sys]
 build.allow_apis = [
     "fs",
