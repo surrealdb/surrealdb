@@ -66,7 +66,7 @@ end = "2025-01-24"
 [[trusted.surrealdb-core]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2023-01-30"
+start = "2024-01-30"
 end = "2025-01-24"
 
 [[trusted.surrealdb-derive]]
