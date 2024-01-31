@@ -5348,7 +5348,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb-core 1.1.4",
- "surrealdb-core 2.0.0-alpha.1",
+ "surrealdb-core 2.0.0-alpha.2",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5446,7 +5446,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "addr",
  "any_ascii",
