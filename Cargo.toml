@@ -17,7 +17,7 @@ storage-fdb = ["surrealdb/kv-fdb-7_1"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
-ml = ["surrealdb/ml", "surrealml-core"]
+ml = ["surrealdb/ml"]
 experimental-parser = ["surrealdb/experimental-parser"]
 jwks = ["surrealdb/jwks"]
 
@@ -73,7 +73,6 @@ surrealdb = { version = "1", path = "lib", features = [
 	"protocol-ws",
 	"rustls",
 ] }
-surrealml-core = { version = "0.0.7", optional = true }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "signal"] }

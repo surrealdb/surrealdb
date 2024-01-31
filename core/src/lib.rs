@@ -46,3 +46,8 @@ pub mod channel {
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }
+
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use surrealml_core as ml;

@@ -90,7 +90,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
-use surrealml_core::storage::surml_file::SurMlFile;
+use surrealdb_core::ml::storage::surml_file::SurMlFile;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
