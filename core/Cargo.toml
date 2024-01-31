@@ -18,6 +18,7 @@ keywords = [
     "kv-store",
 ]
 categories = ["database-implementations", "data-structures", "embedded"]
+license = "BUSL-1.1"
 license-file = "../LICENSE"
 resolver = "2"
 
