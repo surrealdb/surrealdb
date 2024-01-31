@@ -203,9 +203,9 @@ impl Hnsw {
 		let level = self.get_random_level();
 		let layers = self.layers.len();
 
-		for l in layers..=level {
+		for _l in layers..=level {
 			#[cfg(debug_assertions)]
-			debug!("Create Layer {l}");
+			debug!("Create Layer {_l}");
 			self.layers.push(RwLock::new(Layer::new()));
 		}
 
@@ -344,6 +344,7 @@ impl Hnsw {
 			#[cfg(debug_assertions)]
 			debug!("E - EP: {id}");
 		}
+		#[cfg(debug_assertions)]
 		self.debug_print_check().await;
 	}
 
@@ -389,7 +390,7 @@ impl Hnsw {
 				break;
 			}
 			for (e_id, e_neighbors) in &l.0 {
-				if e_neighbors.contains(&c.1) && visited.insert(*e_id) {
+				if visited.insert(*e_id) && e_neighbors.contains(&c.1) {
 					let e_dist = self.distance(&self.elements[e_id], q);
 					if e_dist < f_dist || w.len() < ef {
 						candidates.insert(PriorityNode(e_dist, *e_id));
@@ -443,7 +444,6 @@ impl Hnsw {
 	}
 
 	async fn knn_search(&self, q: &SharedVector, k: usize, ef: usize) -> Vec<PriorityNode> {
-		//println!("knn_search {q:?} - n: {k}");
 		if let Some(mut ep) = self.enter_point {
 			let mut w = BTreeSet::new();
 			let l = self.layers.len();
@@ -459,7 +459,6 @@ impl Hnsw {
 			{
 				let l = self.layers[0].read().await;
 				self.search_layer(q, ep, ef, &l, &mut w).await;
-				//println!("w.len(): {}", w.len());
 				let w: Vec<PriorityNode> = w.into_iter().collect();
 				w.into_iter().take(k).collect()
 			}
@@ -597,6 +596,11 @@ mod tests {
 		unique: bool,
 	) {
 		test_hnsw(distance, vt, collection_size, dimension, unique).await
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn test_hnsw_large_euclidean() {
+		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 5, false).await
 	}
 
 	async fn insert_collection_hnsw_index(

@@ -544,6 +544,7 @@ pub(super) mod tests {
 			n += 1;
 			vec.add(Number::Int(n));
 		}
+		vec.compute_hash();
 		Arc::new(vec)
 	}
 
@@ -562,6 +563,7 @@ pub(super) mod tests {
 		for _ in 0..dim {
 			vec.add(generator(rng));
 		}
+		vec.compute_hash();
 		if vec.is_null() {
 			// Some similarities (cosine) is undefined for null vector.
 			new_random_vec(rng, t, dim, for_jaccard)
@@ -573,11 +575,11 @@ pub(super) mod tests {
 	impl TreeVector {
 		pub(super) fn is_null(&self) -> bool {
 			match self {
-				TreeVector::F64(a) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::F32(a) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::I64(a) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::I32(a) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::I16(a) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::F64(a, _) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::F32(a, _) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::I64(a, _) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::I32(a, _) => !a.iter().any(|a| !a.is_zero()),
+				TreeVector::I16(a, _) => !a.iter().any(|a| !a.is_zero()),
 			}
 		}
 	}
