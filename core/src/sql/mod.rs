@@ -151,4 +151,4 @@ mod parser {
 	pub use crate::syn::*;
 }
 
-pub use self::parser::{error::ParseError, idiom, json, parse, subquery, thing, value};
+pub use self::parser::{idiom, json, parse, subquery, thing, value};
