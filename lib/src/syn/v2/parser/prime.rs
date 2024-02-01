@@ -405,6 +405,7 @@ impl Parser<'_> {
 					self.expect_closing_delimiter(t!(")"), start)?;
 					return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
 				} else {
+					self.lexer.string = Some(number_value);
 					let value = self.parse_value_field()?;
 					Subquery::Value(value)
 				}
