@@ -3,8 +3,8 @@
 use crate::{
 	sql::{
 		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Field,
-		Fields, Group, Groups, Ident, Idiom, Operator, Output, Permission, Permissions, Tables,
-		Timeout, Value, View,
+		Fields, Group, Groups, Ident, Idiom, Output, Permission, Permissions, Tables, Timeout,
+		Value, View,
 	},
 	syn::v2::{
 		parser::{
@@ -26,13 +26,7 @@ impl Parser<'_> {
 				let mut set_list = Vec::new();
 				loop {
 					let idiom = self.parse_plain_idiom()?;
-					let operator = match self.next().kind {
-						t!("=") => Operator::Equal,
-						t!("+=") => Operator::Inc,
-						t!("-=") => Operator::Dec,
-						t!("+?=") => Operator::Ext,
-						x => unexpected!(self, x, "a assign operator"),
-					};
+					let operator = self.parse_assigner()?;
 					let value = self.parse_value()?;
 					set_list.push((idiom, operator, value));
 					if !self.eat(t!(",")) {

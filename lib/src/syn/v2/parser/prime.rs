@@ -322,6 +322,7 @@ impl Parser<'_> {
 		match peek.kind {
 			t!("(") => {
 				self.pop_peek();
+				dbg!("called");
 				self.parse_inner_subquery(Some(peek.span))
 			}
 			t!("IF") => {
@@ -334,8 +335,8 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_inner_subquery_or_coordinate(&mut self, start: Span) -> ParseResult<Value> {
-		let next = self.peek();
-		let res = match next.kind {
+		let peek = self.peek();
+		let res = match peek.kind {
 			t!("RETURN") => {
 				self.pop_peek();
 				let stmt = self.parse_return_stmt()?;
@@ -389,7 +390,7 @@ impl Parser<'_> {
 									expected: "a non-decimal, non-nan number",
 									explain: "coordinate numbers can't be NaN or a decimal",
 								},
-								next.span,
+								peek.span,
 							));
 						}
 						_ => {}
@@ -397,7 +398,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					// was a semicolon, put the strand back for code reuse.
 					self.lexer.string = Some(number_value);
-					let a = self.token_value::<f64>(next)?;
+					let a = self.token_value::<f64>(peek)?;
 					// eat the semicolon.
 					self.next();
 					let b = self.next_token_value::<f64>()?;
@@ -413,12 +414,29 @@ impl Parser<'_> {
 				Subquery::Value(value)
 			}
 		};
+		if self.peek_kind() != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
+			if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
+				if idiom.len() == 1 {
+					// we parsed a single idiom and the next token was a dissallowed statement so
+					// it is likely that the used meant to use an invalid statement.
+					return Err(ParseError::new(
+						ParseErrorKind::DisallowedStatement {
+							found: self.peek_kind(),
+							expected: t!(")"),
+							disallowed: peek.span,
+						},
+						self.recent_span(),
+					));
+				}
+			}
+		}
 		self.expect_closing_delimiter(t!(")"), start)?;
 		Ok(Value::Subquery(Box::new(res)))
 	}
 
 	pub fn parse_inner_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {
-		let res = match self.peek().kind {
+		let peek = self.peek();
+		let res = match peek.kind {
 			t!("RETURN") => {
 				self.pop_peek();
 				let stmt = self.parse_return_stmt()?;
@@ -465,9 +483,43 @@ impl Parser<'_> {
 			}
 		};
 		if let Some(start) = start {
+			if self.peek_kind() != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind)
+			{
+				if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
+					if idiom.len() == 1 {
+						// we parsed a single idiom and the next token was a dissallowed statement so
+						// it is likely that the used meant to use an invalid statement.
+						return Err(ParseError::new(
+							ParseErrorKind::DisallowedStatement {
+								found: self.peek_kind(),
+								expected: t!(")"),
+								disallowed: peek.span,
+							},
+							self.recent_span(),
+						));
+					}
+				}
+			}
+
 			self.expect_closing_delimiter(t!(")"), start)?;
 		}
 		Ok(res)
+	}
+
+	fn starts_disallowed_subquery_statement(kind: TokenKind) -> bool {
+		matches!(
+			kind,
+			t!("ANALYZE")
+				| t!("BEGIN") | t!("BREAK")
+				| t!("CANCEL") | t!("COMMIT")
+				| t!("CONTINUE") | t!("FOR")
+				| t!("INFO") | t!("INSERT")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION") | t!("RELATE")
+				| t!("LET") | t!("SHOW")
+				| t!("SLEEP") | t!("THROW")
+				| t!("USE")
+		)
 	}
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
