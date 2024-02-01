@@ -63,7 +63,7 @@ args = [
 [tasks.test-experimental-parser]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS="--cfg surrealdb_unstable" }
 args = [
 	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
 	"--skip", "api_integration",
@@ -116,7 +116,7 @@ run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-ws]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws" }
+env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws,sql2", RUSTFLAGS = "--cfg surrealdb_unstable" }
 run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-any]
