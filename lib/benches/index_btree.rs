@@ -3,11 +3,11 @@ use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use std::fmt::Debug;
 use std::time::Duration;
-use surrealdb_core2::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-use surrealdb_core2::idx::trees::btree::{BState, BTree, Payload};
-use surrealdb_core2::idx::trees::store::cache::TreeCache;
-use surrealdb_core2::idx::trees::store::{TreeNodeProvider, TreeStore};
-use surrealdb_core2::kvs::{Datastore, Key, LockType::*, TransactionType::*};
+use surrealdb::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
+use surrealdb::idx::trees::btree::{BState, BTree, Payload};
+use surrealdb::idx::trees::store::cache::TreeCache;
+use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
+use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
 use tokio::runtime::Runtime;
 macro_rules! get_key_value {
 	($idx:expr) => {{

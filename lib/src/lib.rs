@@ -133,12 +133,8 @@ pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
 
-#[cfg(not(any(feature = "sql2", feature = "sql3")))]
 #[doc(inline)]
-pub use surrealdb_core1::*;
-#[cfg(any(feature = "sql2", feature = "sql3"))]
-#[doc(inline)]
-pub use surrealdb_core2::*;
+pub use surrealdb_core::*;
 
 use uuid::Uuid;
 

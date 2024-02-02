@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.0.0-alpha.2"
+version = "1.1.1"
 rust-version = "1.70.0"
 readme = "../lib/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -18,12 +18,12 @@ keywords = [
     "kv-store",
 ]
 categories = ["database-implementations", "data-structures", "embedded"]
-license = "BUSL-1.1"
 license-file = "../LICENSE"
 resolver = "2"
 
 [features]
 # Public features
+default = ["kv-mem"]
 kv-mem = ["dep:echodb", "tokio/time"]
 kv-indxdb = ["dep:indxdb"]
 kv-speedb = ["dep:speedb", "tokio/time"]
@@ -49,6 +49,7 @@ arbitrary = [
     "uuid/arbitrary",
 ]
 experimental-parser = ["dep:phf", "dep:unicase"]
+sql2 = []
 # Private features
 kv-fdb = ["tokio/time"]
 
