@@ -75,6 +75,8 @@ pub struct HnswParams {
 	pub m: u16,
 	pub m0: u16,
 	pub ef_construction: u16,
+	pub extend_candidates: bool,
+	pub keep_pruned_connections: bool,
 	pub ml: Number,
 }
 
@@ -184,7 +186,14 @@ impl Display for Index {
 					f,
 					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} ML {}",
 					p.dimension, p.distance, p.vector_type, p.ef_construction, p.m, p.m0, p.ml
-				)
+				)?;
+				if p.extend_candidates {
+					f.write_str(" EXTEND_CANDIDATES")?
+				}
+				if p.keep_pruned_connections {
+					f.write_str(" KEEP_PRUNED_CONNECTIONS")?
+				}
+				Ok(())
 			}
 		}
 	}

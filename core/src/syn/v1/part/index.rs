@@ -9,6 +9,7 @@ use crate::sql::{
 };
 
 use crate::sql::index::HnswParams;
+use nom::sequence::preceded;
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
@@ -213,10 +214,15 @@ pub fn hnsw(i: &str) -> IResult<&str, Index> {
 		let (i, m) = opt(m)(i)?;
 		let (i, m0) = opt(m0)(i)?;
 		let (i, ml) = opt(ml)(i)?;
-		let ef_construction = ef_construction.unwrap_or(150);
+		let (i, extend_candidates) =
+			opt(preceded(shouldbespace, tag_no_case("EXTEND_CANDIDATES")))(i)?;
+		let (i, keep_pruned_connections) =
+			opt(preceded(shouldbespace, tag_no_case("KEEP_PRUNED_CONNECTIONS")))(i)?;
+
 		let m = m.unwrap_or(12);
 		let m0 = m0.unwrap_or(m * 2);
 		let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
+
 		Ok((
 			i,
 			Index::Hnsw(HnswParams {
@@ -224,8 +230,10 @@ pub fn hnsw(i: &str) -> IResult<&str, Index> {
 				distance: distance.unwrap_or(Distance::Euclidean),
 				vector_type: vector_type.unwrap_or(VectorType::F64),
 				m,
+				extend_candidates: extend_candidates.is_some(),
+				keep_pruned_connections: keep_pruned_connections.is_some(),
 				m0,
-				ef_construction,
+				ef_construction: ef_construction.unwrap_or(150),
 				ml,
 			}),
 		))

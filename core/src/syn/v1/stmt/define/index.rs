@@ -242,7 +242,7 @@ mod tests {
 
 	#[test]
 	fn check_create_hnsw_index() {
-		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col HNSW DIMENSION 4";
+		let sql = "INDEX my_index ON TABLE my_table COLUMNS my_col HNSW DIMENSION 4 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -257,14 +257,16 @@ mod tests {
 					ef_construction: 150,
 					m: 12,
 					m0: 24,
-					ml: Number::Float(0.40242960438184466)
+					ml: Number::Float(0.40242960438184466),
+					extend_candidates: true,
+					keep_pruned_connections: true
 				}),
 				comment: None,
 			}
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F64 EFC 150 M 12 M0 24 ML 0.40242960438184466f"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F64 EFC 150 M 12 M0 24 ML 0.40242960438184466f EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"
 		);
 	}
 

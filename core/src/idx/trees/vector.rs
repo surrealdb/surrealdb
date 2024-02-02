@@ -467,7 +467,7 @@ impl TreeVector {
 	}
 }
 impl Distance {
-	pub(super) fn dist(&self, a: &TreeVector, b: &TreeVector) -> f64 {
+	pub(super) fn calculate(&self, a: &TreeVector, b: &TreeVector) -> f64 {
 		match self {
 			Distance::Chebyshev => a.chebyshev_distance(b),
 			Distance::Cosine => a.cosine_distance(b),
@@ -505,7 +505,7 @@ mod tests {
 			}
 			let mut num_zero = 0;
 			for (i, (v1, v2)) in coll.iter().enumerate() {
-				let d = dist.dist(v1, v2);
+				let d = dist.calculate(v1, v2);
 				assert!(
 					d.is_finite() && !d.is_nan(),
 					"i: {i} - vt: {vt} - v1: {v1:?} - v2: {v2:?}"
