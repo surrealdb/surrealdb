@@ -5,7 +5,6 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::{Number, Value};
-use test_log::test;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	let db = new_ds().await?;
@@ -3379,7 +3378,8 @@ async fn function_string_ends_with() -> Result<(), Error> {
 	Ok(())
 }
 
-#[test(tokio::test)]
+#[test_log::test(tokio::test)]
+#[cfg(feature = "sql2")]
 async fn function_search_analyzer() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::stripHtml($html: string) {
@@ -3404,7 +3404,8 @@ async fn function_search_analyzer() -> Result<(), Error> {
 	Ok(())
 }
 
-#[test(tokio::test)]
+#[test_log::test(tokio::test)]
+#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::unsupportedFunction() {
@@ -3436,7 +3437,8 @@ async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 	Ok(())
 }
 
-#[test(tokio::test)]
+#[test_log::test(tokio::test)]
+#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::unsupportedReturnedType($html: string) {
@@ -3468,7 +3470,8 @@ async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 	Ok(())
 }
 
-#[test(tokio::test)]
+#[test_log::test(tokio::test)]
+#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 	let sql = r#"
         DEFINE ANALYZER htmlAnalyzer FUNCTION fn::doesNotExist TOKENIZERS blank,class;
