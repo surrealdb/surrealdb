@@ -28,6 +28,9 @@ url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/
 [policy.surrealdb]
 audit-as-crates-io = true
 
+[policy.surrealdb-core]
+audit-as-crates-io = true
+
 [[exemptions.actix-codec]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
@@ -902,6 +905,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lock_api]]
 version = "0.4.11"
+criteria = "safe-to-deploy"
+
+[[exemptions.lru]]
+version = "0.12.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.lz4-sys]]

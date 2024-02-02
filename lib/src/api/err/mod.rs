@@ -1,6 +1,7 @@
 use crate::api::Response;
 use crate::sql::Array;
 use crate::sql::Edges;
+use crate::sql::FromValueError;
 use crate::sql::Object;
 use crate::sql::Thing;
 use crate::sql::Value;
@@ -250,5 +251,14 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+
+impl From<FromValueError> for crate::Error {
+	fn from(error: FromValueError) -> Self {
+		Self::Api(Error::FromValue {
+			value: error.value,
+			error: error.error,
+		})
 	}
 }
