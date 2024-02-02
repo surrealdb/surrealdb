@@ -377,7 +377,40 @@ impl Parser<'_> {
 				let stmt = self.parse_remove_stmt()?;
 				Subquery::Remove(stmt)
 			}
+			t!("+") | t!("-") => {
+				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
+				if let TokenKind::Number(kind) = self.peek_token_at(1).kind {
+					// take the value so we don't overwrite it if the next token happens to be an
+					// strand or an ident, both of which are invalid syntax.
+					let number_value = self.lexer.string.take().unwrap();
+					if self.peek_token_at(2).kind == t!(",") {
+						match kind {
+							NumberKind::Decimal | NumberKind::NaN => {
+								return Err(ParseError::new(
+									ParseErrorKind::UnexpectedExplain {
+										found: TokenKind::Number(kind),
+										expected: "a non-decimal, non-nan number",
+										explain: "coordinate numbers can't be NaN or a decimal",
+									},
+									peek.span,
+								));
+							}
+							_ => {}
+						}
+
+						self.lexer.string = Some(number_value);
+						let a = self.parse_signed_float()?;
+						self.next();
+						let b = self.parse_signed_float()?;
+						self.expect_closing_delimiter(t!(")"), start)?;
+						return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
+					}
+					self.lexer.string = Some(number_value);
+				}
+				Subquery::Value(self.parse_value_field()?)
+			}
 			TokenKind::Number(kind) => {
+				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
 				// take the value so we don't overwrite it if the next token happens to be an
 				// strand or an ident, both of which are invalid syntax.
 				let number_value = self.lexer.string.take().unwrap();
@@ -401,14 +434,12 @@ impl Parser<'_> {
 					let a = self.token_value::<f64>(peek)?;
 					// eat the semicolon.
 					self.next();
-					let b = self.next_token_value::<f64>()?;
+					let b = self.parse_signed_float()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
 					return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
-				} else {
-					self.lexer.string = Some(number_value);
-					let value = self.parse_value_field()?;
-					Subquery::Value(value)
 				}
+				self.lexer.string = Some(number_value);
+				Subquery::Value(self.parse_value_field()?)
 			}
 			_ => {
 				let value = self.parse_value_field()?;

@@ -308,6 +308,19 @@ impl Parser<'_> {
 		res
 	}
 
+	pub fn parse_signed_float(&mut self) -> ParseResult<f64> {
+		let neg = self.eat(t!("-"));
+		if !neg {
+			self.eat(t!("+"));
+		}
+		let res: f64 = self.next_token_value()?;
+		if neg {
+			Ok(-res)
+		} else {
+			Ok(res)
+		}
+	}
+
 	/// Parse a token value from the given token.
 	pub fn token_value<V: TokenValue>(&mut self, token: Token) -> ParseResult<V> {
 		V::from_token(self, token)
