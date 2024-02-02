@@ -75,9 +75,6 @@ pub enum ParseErrorKind {
 		kind: MissingKind,
 	},
 	NoWhitespace,
-	/// A path in the parser which was not yet finished.
-	/// Should eventually be removed.
-	Todo,
 }
 
 /// A parsing error.
@@ -172,7 +169,7 @@ impl ParseError {
 				let dissallowed_snippet = Snippet::from_source_location_range(
 					source,
 					locations,
-					Some("this statement is not allowed in this position"),
+					Some("this keyword is not allowed to start a statement in this position"),
 				);
 				RenderedError {
 					text,
@@ -181,15 +178,6 @@ impl ParseError {
 			}
 			ParseErrorKind::InvalidToken(e) => {
 				let text = e.to_string();
-				let locations = Location::range_of_span(source, at);
-				let snippet = Snippet::from_source_location_range(source, locations, None);
-				RenderedError {
-					text,
-					snippets: vec![snippet],
-				}
-			}
-			ParseErrorKind::Todo => {
-				let text = "Parser hit not yet implemented path".to_string();
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {
