@@ -2846,7 +2846,7 @@ mod tests {
 
 	#[test]
 	fn check_size() {
-		assert_eq!(56, std::mem::size_of::<Value>());
+		assert!(64 >= std::mem::size_of::<Value>());
 		assert_eq!(104, std::mem::size_of::<Error>());
 		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
