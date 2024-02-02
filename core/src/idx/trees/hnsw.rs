@@ -200,27 +200,27 @@ impl Hnsw {
 		}
 	}
 
-	async fn insert(&mut self, q: SharedVector) -> ElementId {
-		let id = self.next_element_id;
-		let level = self.get_random_level();
+	async fn insert(&mut self, q_pt: SharedVector) -> ElementId {
+		let q_id = self.next_element_id;
+		let q_level = self.get_random_level();
 		let layers = self.layers.len();
 
-		for _l in layers..=level {
+		for _l in layers..=q_level {
 			#[cfg(debug_assertions)]
 			debug!("Create Layer {_l}");
 			self.layers.push(RwLock::new(Layer::new()));
 		}
 
-		self.elements.insert(id, q.clone());
+		self.elements.insert(q_id, q_pt.clone());
 
-		if let Some(ep) = self.enter_point {
-			self.insert_element(&q, ep, id, level, layers - 1).await;
+		if let Some(ep_id) = self.enter_point {
+			self.insert_element(q_id, &q_pt, q_level, ep_id, layers - 1).await;
 		} else {
-			self.insert_first_element(id, level).await;
+			self.insert_first_element(q_id, q_level).await;
 		}
 
 		self.next_element_id += 1;
-		id
+		q_id
 	}
 
 	async fn remove(&mut self, e_id: ElementId) -> bool {
@@ -257,14 +257,14 @@ impl Hnsw {
 			if let Some(f_ids) = layer.0.remove(&e_id) {
 				#[cfg(debug_assertions)]
 				debug!("layer: {lc} - f_ids {f_ids:?}");
-				for f_id in f_ids {
-					if let Some(q) = self.elements.get(&f_id) {
+				for q_id in f_ids {
+					if let Some(q_pt) = self.elements.get(&q_id) {
 						let mut c = BTreeSet::new();
-						self.search_layer(q, f_id, self.efc, &layer, &mut c).await;
-						let neighbors = self.neighbors.select(self, &layer, q, c, m_max);
+						self.search_layer(q_pt, q_id, self.efc, &layer, &mut c).await;
+						let neighbors = self.neighbors.select(self, &layer, q_id, q_pt, c, m_max);
 						#[cfg(debug_assertions)]
-						trace!("f_id: {f_id} - neighbors {neighbors:?}");
-						layer.0.insert(f_id, neighbors);
+						trace!("q_id: {q_id} - neighbors {neighbors:?}");
+						layer.0.insert(q_id, neighbors);
 					}
 				}
 				removed = true;
@@ -296,70 +296,69 @@ impl Hnsw {
 
 	async fn insert_element(
 		&mut self,
-		q: &SharedVector,
-		mut ep: ElementId,
-		id: ElementId,
-		level: usize,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		q_level: usize,
+		mut ep_id: ElementId,
 		top_layer_level: usize,
 	) {
 		#[cfg(debug_assertions)]
-		debug!("insert_element q: {q:?} - id: {id} - level: {level} -  ep: {ep:?} - top-layer: {top_layer_level}");
-		for lc in ((level + 1)..=top_layer_level).rev() {
+		debug!("insert_element q_pt: {q_pt:?} - q_id: {q_id} - level: {q_level} -  ep_id: {ep_id:?} - top-layer: {top_layer_level}");
+		for lc in ((q_level + 1)..=top_layer_level).rev() {
 			let l = self.layers[lc].read().await;
 			let mut w = BTreeSet::new();
-			self.search_layer(q, ep, 1, &l, &mut w).await;
+			self.search_layer(q_pt, ep_id, 1, &l, &mut w).await;
 			if let Some(n) = w.first() {
-				ep = n.1;
+				ep_id = n.1;
 			}
 		}
 
 		// TODO: One thread per level
 		let mut m_max = self.m;
-		for lc in (0..=top_layer_level.min(level)).rev() {
+		for lc in (0..=top_layer_level.min(q_level)).rev() {
 			if lc == 0 {
 				m_max = self.m0;
 			}
 			let mut w = BTreeSet::new();
 			{
 				let l = self.layers[lc].read().await;
-				self.search_layer(q, ep, self.efc, &l, &mut w).await;
+				self.search_layer(q_pt, ep_id, self.efc, &l, &mut w).await;
 
 				// Extract ep for the next iteration (next layer)
 				if let Some(n) = w.first() {
-					ep = n.1;
+					ep_id = n.1;
 				} else {
 					unreachable!("W is empty")
 				}
 			}
 			let mut layer = self.layers[lc].write().await;
-			let neighbors = self.neighbors.select(self, &layer, q, w, m_max);
-			layer.0.insert(id, neighbors.clone());
+			let neighbors = self.neighbors.select(self, &layer, q_id, q_pt, w, m_max);
+			layer.0.insert(q_id, neighbors.clone());
 			for n_id in neighbors {
-				if let Some(e_conn) = layer.0.get_mut(&n_id) {
-					e_conn.push(id);
-					if e_conn.len() >= m_max {
-						let n_q = &self.elements[&n_id];
-						let n_c = self.build_priority_list(n_id, e_conn);
-						let conn_neighbors = self.neighbors.select(self, &layer, &n_q, n_c, m_max);
-						layer.0.insert(n_id, conn_neighbors);
-					}
-				} else {
-					unreachable!("Element: {}", n_id)
+				let e_conn =
+					layer.0.get_mut(&n_id).unwrap_or_else(|| unreachable!("Element: {}", n_id));
+				e_conn.push(q_id);
+				if e_conn.len() >= m_max {
+					let n_pt = &self.elements[&n_id];
+					let n_c = self.build_priority_list(n_id, e_conn);
+					let conn_neighbors =
+						self.neighbors.select(self, &layer, n_id, n_pt, n_c, m_max);
+					layer.0.insert(n_id, conn_neighbors);
 				}
 			}
 		}
 
-		for lc in (top_layer_level + 1)..=level {
+		for lc in (top_layer_level + 1)..=q_level {
 			let mut layer = self.layers[lc].write().await;
-			if layer.0.insert(id, vec![]).is_some() {
-				unreachable!("Already there {id}");
+			if layer.0.insert(q_id, vec![]).is_some() {
+				unreachable!("Already there {q_id}");
 			}
 		}
 
-		if level > top_layer_level {
-			self.enter_point = Some(id);
+		if q_level > top_layer_level {
+			self.enter_point = Some(q_id);
 			#[cfg(debug_assertions)]
-			debug!("E - EP: {id}");
+			debug!("E - ep_id: {q_id}");
 		}
 		#[cfg(debug_assertions)]
 		self.debug_print_check().await;
@@ -509,14 +508,16 @@ impl SelectNeighbors {
 		&self,
 		h: &Hnsw,
 		lc: &Layer,
-		q: &SharedVector,
+		q_id: ElementId,
+		q_pt: &SharedVector,
 		c: BTreeSet<PriorityNode>,
 		m_max: usize,
 	) -> Vec<ElementId> {
 		match self {
 			Self::Heuristic => Self::heuristic(c, m_max),
-			Self::HeuristicExt => Self::heuristic_ext(h, lc, q, c, m_max),
-			_ => todo!(),
+			Self::HeuristicExt => Self::heuristic_ext(h, lc, q_id, q_pt, c, m_max),
+			Self::HeuristicKeep => Self::heuristic_keep(c, m_max),
+			Self::HeuristicExtKeep => Self::heuristic_ext_keep(h, lc, q_id, q_pt, c, m_max),
 		}
 	}
 	fn heuristic(mut c: BTreeSet<PriorityNode>, m_max: usize) -> Vec<ElementId> {
@@ -534,26 +535,73 @@ impl SelectNeighbors {
 		r
 	}
 
-	fn heuristic_ext(
+	fn heuristic_keep(mut c: BTreeSet<PriorityNode>, m_max: usize) -> Vec<ElementId> {
+		let mut r = Vec::with_capacity(m_max.min(c.len()));
+		let mut closest_neighbors_distance = f64::INFINITY;
+		let mut wd = Vec::new();
+		while let Some(e) = c.pop_first() {
+			if e.0 <= closest_neighbors_distance {
+				r.push(e.1);
+				closest_neighbors_distance = e.0;
+				if r.len() >= m_max {
+					break;
+				}
+			} else {
+				wd.push(e);
+			}
+		}
+		let d = (m_max - r.len()).min(wd.len());
+		if d > 0 {
+			wd.drain(0..d).for_each(|e| r.push(e.1));
+		}
+		r
+	}
+
+	fn extand(
 		h: &Hnsw,
 		lc: &Layer,
-		q: &SharedVector,
-		mut c: BTreeSet<PriorityNode>,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		c: &mut BTreeSet<PriorityNode>,
 		m_max: usize,
-	) -> Vec<ElementId> {
+	) {
 		let mut ex: HashSet<ElementId> = c.iter().map(|pn| pn.1).collect();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
-		for e in &c {
-			for &e_adj in &lc.0[&e.1] {
-				if ex.insert(e_adj) {
-					ext.push(PriorityNode(h.dist.calculate(q, &h.elements[&e_adj]), e_adj));
+		for e in c.iter() {
+			for &e_adj in lc.0.get(&e.1).unwrap_or_else(|| unreachable!("Missing element {}", e.1))
+			{
+				if e_adj != q_id && ex.insert(e_adj) {
+					ext.push(PriorityNode(h.dist.calculate(q_pt, &h.elements[&e_adj]), e_adj));
 				}
 			}
 		}
 		for pn in ext {
 			c.insert(pn);
 		}
+	}
+
+	fn heuristic_ext(
+		h: &Hnsw,
+		lc: &Layer,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		mut c: BTreeSet<PriorityNode>,
+		m_max: usize,
+	) -> Vec<ElementId> {
+		Self::extand(h, lc, q_id, q_pt, &mut c, m_max);
 		Self::heuristic(c, m_max)
+	}
+
+	fn heuristic_ext_keep(
+		h: &Hnsw,
+		lc: &Layer,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		mut c: BTreeSet<PriorityNode>,
+		m_max: usize,
+	) -> Vec<ElementId> {
+		Self::extand(h, lc, q_id, q_pt, &mut c, m_max);
+		Self::heuristic_keep(c, m_max)
 	}
 }
 
@@ -610,11 +658,12 @@ mod tests {
 				assert_eq!(
 					expected_len,
 					res.len(),
-					"Wrong knn count - Expected: {} - Got: {:?} - Dist: {} - Collection: {}",
+					"Wrong knn count - Expected: {} - Got: {} - Collection: {} - Dist: {} - Res: {:?}",
 					expected_len,
-					res,
-					h.dist,
+					res.len(),
 					collection.as_ref().len(),
+					h.dist,
+					res,
 				)
 			}
 		}
@@ -694,7 +743,7 @@ mod tests {
 
 	#[test_log::test(tokio::test)]
 	async fn test_hnsw_small_euclidean_check() {
-		test_hnsw(Distance::Euclidean, VectorType::I16, 20, 2, 4, true, false).await
+		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 2, 4, true, true).await
 	}
 
 	#[test_matrix(
