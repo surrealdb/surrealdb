@@ -131,6 +131,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE TABLE foo;
@@ -147,6 +148,7 @@ async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE TABLE foo IF EXISTS;
