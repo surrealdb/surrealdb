@@ -178,10 +178,18 @@ pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	Ok((
 		i,
 		RemoveTableStatement {
 			name,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
@@ -249,5 +257,22 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE TABLE test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_table_if_exists() {
+		let sql = "REMOVE TABLE test IF EXISTS";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE TABLE test IF EXISTS", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_table_if() {
+		let sql = "REMOVE TABLE test IF";
+		let res = remove(sql);
+		assert!(res.is_err());
 	}
 }
