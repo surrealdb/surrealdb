@@ -18,8 +18,8 @@ use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::{Edit, View};
 use surrealdb::iam::ResourceKind::Model;
 use surrealdb::kvs::{LockType::Optimistic, TransactionType::Read};
+use surrealdb::ml::storage::surml_file::SurMlFile;
 use surrealdb::sql::statements::{DefineModelStatement, DefineStatement};
-use surrealml_core::storage::surml_file::SurMlFile;
 use tower_http::limit::RequestBodyLimitLayer;
 
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB

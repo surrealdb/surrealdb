@@ -6,7 +6,7 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Notification;
-use crate::opt::from_value;
+use crate::sql::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
 use flume::Receiver;

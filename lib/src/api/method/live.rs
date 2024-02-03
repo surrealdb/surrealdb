@@ -11,21 +11,20 @@ use crate::method::Live;
 use crate::method::OnceLockExt;
 use crate::method::Query;
 use crate::method::Select;
-use crate::opt::from_value;
 use crate::opt::Resource;
-use crate::sql::cond::Cond;
-use crate::sql::expression::Expression;
-use crate::sql::field::Field;
-use crate::sql::field::Fields;
-use crate::sql::ident::Ident;
-use crate::sql::idiom::Idiom;
-use crate::sql::operator::Operator;
-use crate::sql::part::Part;
-use crate::sql::statement::Statement;
-use crate::sql::statements::live::LiveStatement;
+use crate::sql::from_value;
+use crate::sql::statements::LiveStatement;
+use crate::sql::Cond;
+use crate::sql::Expression;
+use crate::sql::Field;
+use crate::sql::Fields;
+use crate::sql::Ident;
+use crate::sql::Idiom;
+use crate::sql::Operator;
+use crate::sql::Part;
+use crate::sql::Statement;
 use crate::sql::Table;
 use crate::sql::Thing;
-use crate::sql::Uuid;
 use crate::sql::Value;
 use crate::Notification;
 use crate::Surreal;
@@ -61,12 +60,7 @@ macro_rules! into_future {
 				if !router.features.contains(&ExtraFeatures::LiveQueries) {
 					return Err(Error::LiveQueriesNotSupported.into());
 				}
-				let mut stmt = LiveStatement {
-					id: Uuid::new_v4(),
-					node: Uuid::new_v4(),
-					expr: Fields(vec![Field::All], false),
-					..Default::default()
-				};
+				let mut stmt = LiveStatement::new(Fields(vec![Field::All], false));
 				match range {
 					Some(range) => {
 						let range = resource?.with_range(range)?;
