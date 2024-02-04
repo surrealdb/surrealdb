@@ -107,6 +107,7 @@ jobs:
             # Bump the crate version
             sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
             sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
 
             # Update Cargo.lock without updating dependency versions
             cargo check --no-default-features --features storage-mem
@@ -147,6 +148,7 @@ jobs:
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" core/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -615,6 +617,7 @@ jobs:
 
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
@@ -627,6 +630,7 @@ jobs:
           # This sets the nightly version to something like `1.20231117.1130416`
           # The 1 at the beginning of the patch number is just so it never starts with zero
           sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" lib/Cargo.toml
+          sed -i "s#^version = \"\([[:digit:]]*\)\..*\"#version = \"\1.${date}.1${time}\"#" core/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
@@ -635,9 +639,11 @@ jobs:
 
           # Patch crate name
           sed -i "0,/surrealdb/s//surrealdb-${{ inputs.environment }}/" lib/Cargo.toml
+          sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" core/Cargo.toml
 
           # Patch the description
           sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml
+          sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb-core crate\"#" core/Cargo.toml
 
           # Temporarily commit patches
           # These should not be pushed back to the repo
