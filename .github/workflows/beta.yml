@@ -60,7 +60,7 @@ jobs:
 
   bump-version:
     name: Bump main version
-    if: ${{ inputs.publish && needs.checks.outputs.branch == 'main' }}
+    if: ${{ inputs.publish }}
     needs: [checks, release]
     runs-on: ubuntu-latest
     steps:
@@ -80,7 +80,7 @@ jobs:
           chmod +x taplo
           sudo mv taplo /usr/bin/taplo
 
-      - name: Create version bump branch
+      - name: Get version info
         id: bump
         run: |
           set -x
@@ -89,25 +89,33 @@ jobs:
           betaVersion=$(taplo get -f lib/Cargo.toml "package.version")
           major=$(echo $betaVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $betaVersion | tr "." "\n" | sed -n 2p)
+          betaNum=$(echo $betaVersion | tr "." "\n" | sed -n 4p)
           nightlyVersion=${major}.$(($minor + 1)).0
           echo "version=${nightlyVersion}" >> $GITHUB_OUTPUT
+          echo "beta-num=${betaNum}"  >> $GITHUB_OUTPUT
+
+      - name: Create version bump branch
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
+        run: |
+          set -x
 
           # Checkout the main branch
           git fetch origin main
           git checkout main
 
           # Switch to version bump branch
-          git checkout -b version-bump/v${nightlyVersion}
+          git checkout -b version-bump/v${{ steps.bump.outputs.version }}
 
           # Bump the crate version
-          sed -i "s#^version = \".*\"#version = \"${nightlyVersion}\"#" Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${nightlyVersion}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${nightlyVersion}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" core/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
 
       - name: Push the branch
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
         run: |
           # Configure git
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -119,6 +127,7 @@ jobs:
           git push
 
       - name: Create a PR
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
         id: pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -128,6 +137,7 @@ jobs:
           echo "url=${url}" >> $GITHUB_OUTPUT
 
       - name: Merge the PR
+        if: ${{ steps.bump.outputs.beta-num == '1' }}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
         run: |
