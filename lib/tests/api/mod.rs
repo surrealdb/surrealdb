@@ -958,7 +958,7 @@ async fn changefeed() {
 		surrealdb::sql::value(
 			"[
 		{
-			update: {
+			create: {
 				id: user:amos,
 				name: 'Amos'
 			}
@@ -982,7 +982,7 @@ async fn changefeed() {
 		surrealdb::sql::value(
 			"[
 		{
-			update: {
+			create: {
 				id: user:jane,
 				name: 'Jane'
 			}
