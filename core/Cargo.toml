@@ -40,7 +40,7 @@ kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core", "dep:ndarray"]
-jwks = ["dep:reqwest"]
+jwks = ["dep:reqwest", "sql2"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
