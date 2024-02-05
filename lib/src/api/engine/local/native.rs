@@ -121,7 +121,8 @@ pub(crate) fn router(
 				}
 				// If a root user is specified, setup the initial datastore credentials
 				if let Some(root) = configured_root {
-					if let Err(error) = kvs.setup_initial_creds(root).await {
+					if let Err(error) = kvs.setup_initial_creds(root.username, root.password).await
+					{
 						let _ = conn_tx.into_send_async(Err(error.into())).await;
 						return;
 					}

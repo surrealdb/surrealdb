@@ -653,17 +653,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axum-client-ip"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f5ffe4637708b326c621d5494ab6c91dcf62ee440fa6ee967d289315a9c6f81"
-dependencies = [
- "axum 0.7.4",
- "forwarded-header-value",
- "serde",
-]
-
-[[package]]
 name = "axum-core"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1915,16 +1904,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "forwarded-header-value"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8835f84f38484cc86f110a805655697908257fb9a7af005234060891557198e9"
-dependencies = [
- "nonempty",
- "thiserror",
 ]
 
 [[package]]
@@ -3277,12 +3256,6 @@ dependencies = [
  "memchr",
  "minimal-lexical",
 ]
-
-[[package]]
-name = "nonempty"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
 
 [[package]]
 name = "nu-ansi-term"
@@ -5283,7 +5256,6 @@ dependencies = [
  "argon2",
  "assert_fs",
  "axum 0.6.20",
- "axum-client-ip",
  "axum-extra",
  "axum-server",
  "base64 0.21.7",
@@ -5297,10 +5269,8 @@ dependencies = [
  "http 0.2.11",
  "http-body 0.4.6",
  "hyper 0.14.28",
- "ipnet",
  "jemallocator",
  "mimalloc",
- "ndarray",
  "nix 0.27.1",
  "once_cell",
  "opentelemetry",
@@ -5318,7 +5288,6 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb",
- "surrealml-core",
  "temp-env",
  "tempfile",
  "test-log",
@@ -5343,6 +5312,56 @@ dependencies = [
 name = "surrealdb"
 version = "1.1.1"
 dependencies = [
+ "async-channel",
+ "bincode",
+ "chrono",
+ "criterion",
+ "dmp",
+ "env_logger",
+ "flume",
+ "futures",
+ "futures-concurrency",
+ "geo 0.27.0",
+ "indexmap 2.1.0",
+ "native-tls",
+ "once_cell",
+ "path-clean",
+ "pharos",
+ "pprof",
+ "rand 0.8.5",
+ "regex",
+ "reqwest",
+ "ring 0.17.7",
+ "rust_decimal",
+ "rustls",
+ "semver",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "surrealdb-core",
+ "temp-dir",
+ "test-log",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "trice",
+ "ulid",
+ "url",
+ "uuid",
+ "wasm-bindgen-futures",
+ "wasmtimer",
+ "wiremock",
+ "ws_stream_wasm",
+]
+
+[[package]]
+name = "surrealdb-core"
+version = "1.1.1"
+dependencies = [
  "addr",
  "any_ascii",
  "arbitrary",
@@ -5361,28 +5380,23 @@ dependencies = [
  "dmp",
  "echodb",
  "env_logger",
- "flume",
  "foundationdb",
  "fst",
  "futures",
- "futures-concurrency",
  "fuzzy-matcher",
  "geo 0.27.0",
  "geo-types",
  "hex",
- "indexmap 2.1.0",
  "indxdb",
  "ipnet",
  "lexicmp",
  "md-5",
  "nanoid",
- "native-tls",
  "ndarray",
  "nom",
  "num_cpus",
  "object_store",
  "once_cell",
- "path-clean",
  "pbkdf2",
  "pharos",
  "phf",
@@ -5401,7 +5415,6 @@ dependencies = [
  "rquickjs",
  "rust-stemmers",
  "rust_decimal",
- "rustls",
  "scrypt",
  "semver",
  "serde",
@@ -5422,7 +5435,6 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite",
- "tokio-util",
  "tracing",
  "tracing-subscriber",
  "trice",

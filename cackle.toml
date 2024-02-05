@@ -29,6 +29,7 @@ include = [
     "mio::net",
     "surreal::net",
     "surrealdb",
+    "surrealdb_core",
     "tokio::net",
     "tracing",
     "tracing_core",
@@ -79,6 +80,12 @@ build.allow_build_instructions = [
     "cargo:rustc-link-search=native=*",
 ]
 allow_unsafe = true
+
+[pkg.lru]
+allow_unsafe = true
+allow_apis = [
+    "net",
+]
 
 [pkg.bzip2-sys]
 build.allow_apis = [
@@ -1151,9 +1158,14 @@ allow_apis = [
 ]
 
 [pkg.surrealdb]
-allow_unsafe = true
 allow_apis = [
     "fs",
+]
+
+[pkg.surrealdb-core]
+allow_unsafe = true
+allow_apis = [
+    "net",
 ]
 
 [pkg.assert_fs]
