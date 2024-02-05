@@ -3,7 +3,9 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub, Value};
+#[cfg(feature = "sql2")]
+use crate::sql::value::TryRem;
+use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
 use crate::sql::{Expression, Thing};
 
 pub fn neg(a: Value) -> Result<Value, Error> {
@@ -58,6 +60,7 @@ pub fn div(a: Value, b: Value) -> Result<Value, Error> {
 	a.try_div(b)
 }
 
+#[cfg(feature = "sql2")]
 pub fn rem(a: Value, b: Value) -> Result<Value, Error> {
 	a.try_rem(b)
 }

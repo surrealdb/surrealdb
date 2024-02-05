@@ -40,7 +40,7 @@ kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core", "dep:ndarray"]
-jwks = ["dep:reqwest"]
+jwks = ["dep:reqwest", "sql2"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -92,7 +92,7 @@ geo = { version = "0.27.0", features = ["use-serde"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "0.4.2", package = "rquickjs", features = [
+js = { version = "0.4.3", package = "rquickjs", features = [
     "array-buffer",
     "bindgen",
     "classes",

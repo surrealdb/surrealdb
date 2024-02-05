@@ -29,10 +29,11 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 		let (i, _) = shouldbespace(i)?;
 		let (i, what) = ident(i)?;
 		let (i, opts) = many0(field_opts)(i)?;
-		let (i, _) = expected(
-			"one of FLEX(IBLE), TYPE, READONLY, VALUE, ASSERT, DEFAULT, or COMMENT",
-			cut(ending::query),
-		)(i)?;
+		#[cfg(feature = "sql2")]
+		let one_of = "one of FLEX(IBLE), TYPE, READONLY, VALUE, ASSERT, DEFAULT, or COMMENT";
+		#[cfg(not(feature = "sql2"))]
+		let one_of = "one of FLEX(IBLE), TYPE, VALUE, ASSERT, DEFAULT, or COMMENT";
+		let (i, _) = expected(one_of, cut(ending::query))(i)?;
 		Ok((i, (name, what, opts)))
 	})(i)?;
 	// Create the base statement
@@ -50,6 +51,7 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 			DefineFieldOption::Kind(v) => {
 				res.kind = Some(v);
 			}
+			#[cfg(feature = "sql2")]
 			DefineFieldOption::ReadOnly => {
 				res.readonly = true;
 			}
@@ -77,6 +79,7 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 enum DefineFieldOption {
 	Flex,
 	Kind(Kind),
+	#[cfg(feature = "sql2")]
 	ReadOnly,
 	Value(Value),
 	Assert(Value),
@@ -89,6 +92,7 @@ fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
 	alt((
 		field_flex,
 		field_kind,
+		#[cfg(feature = "sql2")]
 		field_readonly,
 		field_value,
 		field_assert,
@@ -112,6 +116,7 @@ fn field_kind(i: &str) -> IResult<&str, DefineFieldOption> {
 	Ok((i, DefineFieldOption::Kind(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn field_readonly(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("READONLY")(i)?;

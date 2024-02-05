@@ -24,7 +24,7 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
-	pub(crate) fn random_code() -> String {
+	pub fn random_code() -> String {
 		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
 	}
 }

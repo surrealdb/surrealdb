@@ -372,6 +372,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.kind = Some(self.parse_inner_kind()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("READONLY") => {
 					self.pop_peek();
 					res.readonly = true;
@@ -565,6 +566,7 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			function: None,
 			tokenizers: None,
 			filters: None,
@@ -635,6 +637,7 @@ impl Parser<'_> {
 					}
 					res.tokenizers = Some(tokenizers);
 				}
+				#[cfg(feature = "sql2")]
 				t!("FUNCTION") => {
 					self.pop_peek();
 					expected!(self, t!("fn"));
