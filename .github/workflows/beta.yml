@@ -60,7 +60,7 @@ jobs:
 
   bump-version:
     name: Bump main version
-    if: ${{ needs.checks.outputs.branch == 'main' }}
+    if: ${{ inputs.publish && needs.checks.outputs.branch == 'main' }}
     needs: [checks, release]
     runs-on: ubuntu-latest
     steps:
@@ -108,7 +108,6 @@ jobs:
           cargo check --no-default-features --features storage-mem
 
       - name: Push the branch
-        if: ${{ inputs.publish }}
         run: |
           # Configure git
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -121,7 +120,6 @@ jobs:
 
       - name: Create a PR
         id: pr
-        if: ${{ inputs.publish }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -130,7 +128,6 @@ jobs:
           echo "url=${url}" >> $GITHUB_OUTPUT
 
       - name: Merge the PR
-        if: ${{ inputs.publish }}
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
         run: |
