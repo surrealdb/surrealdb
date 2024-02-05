@@ -23,7 +23,6 @@ sql2 = ["surrealdb/sql2"]
 parser2 = ["surrealdb/parser2"]
 performance-profiler = ["dep:pprof"]
 
-
 [workspace]
 members = ["core", "lib", "lib/examples/actix", "lib/examples/axum"]
 
