@@ -75,7 +75,10 @@ jobs:
           toolchain: stable
 
       - name: Install a TOML parser
-        run: cargo install --force --locked --version 0.8.1 taplo-cli
+        run: |
+          curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
+          chmod +x taplo
+          sudo mv taplo /usr/bin/taplo
 
       - name: Create version bump branch
         id: bump
@@ -83,7 +86,7 @@ jobs:
           set -x
 
           # Retrieve just released version
-          betaVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          betaVersion=$(taplo get -f lib/Cargo.toml "package.version")
           major=$(echo $betaVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $betaVersion | tr "." "\n" | sed -n 2p)
           nightlyVersion=${major}.$(($minor + 1)).0
