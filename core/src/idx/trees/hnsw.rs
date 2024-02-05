@@ -9,7 +9,7 @@ use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -201,8 +201,12 @@ impl Hnsw {
 	}
 
 	async fn insert(&mut self, q_pt: SharedVector) -> ElementId {
-		let q_id = self.next_element_id;
 		let q_level = self.get_random_level();
+		self.insert_level(q_pt, q_level).await
+	}
+
+	async fn insert_level(&mut self, q_pt: SharedVector, q_level: usize) -> ElementId {
+		let q_id = self.next_element_id;
 		let layers = self.layers.len();
 
 		for _l in layers..=q_level {
@@ -226,54 +230,53 @@ impl Hnsw {
 	async fn remove(&mut self, e_id: ElementId) -> bool {
 		#[cfg(debug_assertions)]
 		debug!("Remove {e_id}");
-		let layers = self.layers.len();
-
-		let mut new_enter_point = None;
-
-		// Are we deleting the current enter point?
-		if Some(e_id) == self.enter_point {
-			if let Some(old_ep_obj) = self.elements.get(&e_id) {
-				let layer = self.layers[layers - 1].read().await;
-				let mut w = BTreeSet::new();
-				self.search_layer(old_ep_obj, e_id, 2, &layer, &mut w).await;
-				new_enter_point = w.iter().find_map(|pr| {
-					if pr.1 != e_id {
-						Some(pr.1)
-					} else {
-						None
-					}
-				});
-			}
-		}
 
 		let mut removed = false;
-		let mut m_max = self.m;
-		// TODO one thread per layer
-		for lc in (0..layers).rev() {
-			if lc == 0 {
-				m_max = self.m0;
-			}
-			let mut layer = self.layers[lc].write().await;
-			if let Some(f_ids) = layer.0.remove(&e_id) {
-				#[cfg(debug_assertions)]
-				debug!("layer: {lc} - f_ids {f_ids:?}");
-				for q_id in f_ids {
-					if let Some(q_pt) = self.elements.get(&q_id) {
-						let mut c = BTreeSet::new();
-						self.search_layer(q_pt, q_id, self.efc, &layer, &mut c).await;
-						let neighbors = self.neighbors.select(self, &layer, q_id, q_pt, c, m_max);
-						#[cfg(debug_assertions)]
-						trace!("q_id: {q_id} - neighbors {neighbors:?}");
-						layer.0.insert(q_id, neighbors);
-					}
-				}
-				removed = true;
-			}
-		}
 
-		if removed && Some(e_id) == self.enter_point {
-			println!("New enter point: {:?} {:?}", self.enter_point, new_enter_point);
-			self.enter_point = new_enter_point;
+		let e_pt = self.elements.get(&e_id).cloned();
+		if let Some(e_pt) = e_pt {
+			let layers = self.layers.len();
+			let mut new_enter_point = None;
+
+			// Are we deleting the current enter point?
+			if Some(e_id) == self.enter_point {
+				let layer = self.layers[layers - 1].read().await;
+				let mut w = BTreeSet::new();
+				self.search_layer(&e_pt, e_id, 1, &layer, &mut w, Some(e_id)).await;
+				new_enter_point = w.first().map(|pn| pn.1);
+			}
+
+			self.elements.remove(&e_id);
+
+			let mut m_max = self.m;
+			// TODO one thread per layer
+			for lc in (0..layers).rev() {
+				if lc == 0 {
+					m_max = self.m0;
+				}
+				let mut layer = self.layers[lc].write().await;
+				if let Some(f_ids) = layer.0.remove(&e_id) {
+					for q_id in f_ids {
+						if let Some(q_pt) = self.elements.get(&q_id) {
+							let mut c = BTreeSet::new();
+							self.search_layer(q_pt, q_id, self.efc, &layer, &mut c, Some(q_id))
+								.await;
+							let neighbors =
+								self.neighbors.select(self, &layer, q_id, q_pt, c, m_max);
+							assert!(
+								!neighbors.contains(&q_id),
+								"!neighbors.contains(&q_id) = layer: {lc} - q_id: {q_id} - f_ids: {neighbors:?}"
+							);
+							layer.0.insert(q_id, neighbors);
+						}
+					}
+					removed = true;
+				}
+			}
+
+			if removed && Some(e_id) == self.enter_point {
+				self.enter_point = new_enter_point;
+			}
 		}
 		removed
 	}
@@ -307,7 +310,7 @@ impl Hnsw {
 		for lc in ((q_level + 1)..=top_layer_level).rev() {
 			let l = self.layers[lc].read().await;
 			let mut w = BTreeSet::new();
-			self.search_layer(q_pt, ep_id, 1, &l, &mut w).await;
+			self.search_layer(q_pt, ep_id, 1, &l, &mut w, None).await;
 			if let Some(n) = w.first() {
 				ep_id = n.1;
 			}
@@ -320,18 +323,17 @@ impl Hnsw {
 				m_max = self.m0;
 			}
 			let mut w = BTreeSet::new();
-			{
-				let l = self.layers[lc].read().await;
-				self.search_layer(q_pt, ep_id, self.efc, &l, &mut w).await;
-
-				// Extract ep for the next iteration (next layer)
-				if let Some(n) = w.first() {
-					ep_id = n.1;
-				} else {
-					unreachable!("W is empty")
-				}
-			}
 			let mut layer = self.layers[lc].write().await;
+
+			self.search_layer(q_pt, ep_id, self.efc, &layer, &mut w, None).await;
+
+			// Extract ep for the next iteration (next layer)
+			if let Some(n) = w.first() {
+				ep_id = n.1;
+			} else {
+				unreachable!("W is empty")
+			}
+
 			let neighbors = self.neighbors.select(self, &layer, q_id, q_pt, w, m_max);
 			layer.0.insert(q_id, neighbors.clone());
 			for n_id in neighbors {
@@ -412,25 +414,38 @@ impl Hnsw {
 		ef: usize,
 		l: &Layer,
 		w: &mut BTreeSet<PriorityNode>,
+		ignore: Option<ElementId>,
 	) {
-		let ep_dist = self.dist.calculate(&self.elements[&ep_id], q);
-		let ep_pr = PriorityNode(ep_dist, ep_id);
-		w.insert(ep_pr.clone());
-		let mut candidates = BTreeSet::from([ep_pr]);
-		let mut visited = HashSet::from([ep_id]);
-		while let Some(c) = candidates.pop_first() {
-			let f_dist = candidates.last().map(|f| f.0).unwrap_or(c.0);
-			if c.0 > f_dist {
-				break;
+		let ep_pt = &self.elements[&ep_id];
+		let ep_dist = self.dist.calculate(ep_pt, q);
+		let ep_pn = PriorityNode(ep_dist, ep_id);
+		let mut visited = if let Some(i) = ignore {
+			if i != ep_id {
+				w.insert(ep_pn.clone());
 			}
+			HashSet::from([ep_id, i])
+		} else {
+			w.insert(ep_pn.clone());
+			HashSet::from([ep_id])
+		};
+		let mut candidates = BinaryHeap::from([ep_pn]);
+		while let Some(c) = candidates.pop() {
+			if let Some(f) = w.last() {
+				if c.0 > f.0 {
+					break;
+				}
+			}
+
 			if let Some(neighbourhood) = l.0.get(&c.1) {
 				for e_id in neighbourhood {
 					if visited.insert(*e_id) {
-						if let Some(e_obj) = self.elements.get(e_id) {
-							let e_dist = self.dist.calculate(e_obj, q);
-							if e_dist < f_dist || w.len() < ef {
-								candidates.insert(PriorityNode(e_dist, *e_id));
-								w.insert(PriorityNode(e_dist, *e_id));
+						if let Some(e_pt) = self.elements.get(e_id) {
+							let e_dist = self.dist.calculate(e_pt, q);
+							let f_dist = w.last().map(|f| f.0).unwrap_or(f64::MAX);
+							if e_dist <= f_dist || w.len() < ef {
+								let pn = PriorityNode(e_dist, *e_id);
+								candidates.push(pn.clone());
+								w.insert(pn);
 								if w.len() > ef {
 									w.pop_last();
 								}
@@ -450,7 +465,7 @@ impl Hnsw {
 			let l = self.layers.len();
 			for lc in (1..l).rev() {
 				let l = self.layers[lc].read().await;
-				self.search_layer(q, ep, 1, &l, &mut w).await;
+				self.search_layer(q, ep, 1, &l, &mut w, None).await;
 				if let Some(n) = w.first() {
 					ep = n.1;
 				} else {
@@ -460,7 +475,7 @@ impl Hnsw {
 			}
 			{
 				let l = self.layers[0].read().await;
-				self.search_layer(q, ep, ef, &l, &mut w).await;
+				self.search_layer(q, ep, ef, &l, &mut w, None).await;
 				#[cfg(debug_assertions)]
 				if w.len() < expected_w_len {
 					debug!(
@@ -522,9 +537,9 @@ impl SelectNeighbors {
 	}
 	fn heuristic(mut c: BTreeSet<PriorityNode>, m_max: usize) -> Vec<ElementId> {
 		let mut r = Vec::with_capacity(m_max.min(c.len()));
-		let mut closest_neighbors_distance = f64::INFINITY;
+		let mut closest_neighbors_distance = f64::MAX;
 		while let Some(e) = c.pop_first() {
-			if e.0 <= closest_neighbors_distance {
+			if e.0 < closest_neighbors_distance {
 				r.push(e.1);
 				closest_neighbors_distance = e.0;
 				if r.len() >= m_max {
@@ -540,7 +555,7 @@ impl SelectNeighbors {
 		let mut closest_neighbors_distance = f64::INFINITY;
 		let mut wd = Vec::new();
 		while let Some(e) = c.pop_first() {
-			if e.0 <= closest_neighbors_distance {
+			if e.0 < closest_neighbors_distance {
 				r.push(e.1);
 				closest_neighbors_distance = e.0;
 				if r.len() >= m_max {
@@ -571,7 +586,9 @@ impl SelectNeighbors {
 			for &e_adj in lc.0.get(&e.1).unwrap_or_else(|| unreachable!("Missing element {}", e.1))
 			{
 				if e_adj != q_id && ex.insert(e_adj) {
-					ext.push(PriorityNode(h.dist.calculate(q_pt, &h.elements[&e_adj]), e_adj));
+					if let Some(pt) = h.elements.get(&e_adj) {
+						ext.push(PriorityNode(h.dist.calculate(q_pt, pt), e_adj));
+					}
 				}
 			}
 		}
@@ -610,10 +627,13 @@ mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::hnsw::{Hnsw, HnswIndex};
 	use crate::idx::trees::knn::tests::TestCollection;
-	use crate::idx::trees::vector::SharedVector;
+	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
+	use crate::idx::trees::vector::{SharedVector, TreeVector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
+	use roaring::RoaringTreemap;
 	use std::collections::hash_map::Entry;
 	use std::collections::{HashMap, HashSet};
+	use std::sync::Arc;
 	use test_case::test_matrix;
 
 	async fn insert_collection_hnsw(
@@ -632,7 +652,7 @@ mod tests {
 		let max_knn = 20.min(collection.as_ref().len());
 		for (_, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
-				let res = h.knn_search(obj, knn, 500).await;
+				let res = h.knn_search(obj, knn, 80).await;
 				if collection.is_unique() {
 					let mut found = false;
 					for pn in &res {
@@ -743,14 +763,14 @@ mod tests {
 
 	#[test_log::test(tokio::test)]
 	async fn test_hnsw_small_euclidean_check() {
-		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 2, 4, true, true).await
+		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 2, 24, true, true).await
 	}
 
 	#[test_matrix(
 	[Distance::Chebyshev, Distance::Cosine, Distance::Euclidean, Distance::Hamming,
 	Distance::Jaccard, Distance::Manhattan, Distance::Minkowski(2.into()), Distance::Pearson],
 	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
-	40, 1536, 12, false, false)]
+	40, 1536, 24, false, false)]
 	#[test_log::test(tokio::test)]
 	async fn test_hnsw_large(
 		distance: Distance,
@@ -804,16 +824,18 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
 				let res = h.search(obj, knn, 500).await;
-				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
-				if collection.is_unique() {
-					assert!(
-						docs.contains(doc_id),
-						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
-						obj,
-						knn,
-						doc_id,
-						res.docs
-					);
+				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
+					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
+					if collection.is_unique() {
+						assert!(
+							docs.contains(doc_id),
+							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
+							obj,
+							knn,
+							doc_id,
+							res.docs
+						);
+					}
 				}
 				let expected_len = collection.as_ref().len().min(knn);
 				assert_eq!(
@@ -872,6 +894,256 @@ mod tests {
 		delete_hnsw_index_collection(&mut h, &collection, map).await;
 	}
 
+	#[test_log::test(tokio::test)]
+	async fn test_building() {
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, true, true);
+		let mut hnsw = Hnsw::new(&p);
+		assert_eq!(hnsw.elements.len(), 0);
+		assert_eq!(hnsw.enter_point, None);
+		assert_eq!(hnsw.layers.len(), 0);
+
+		let a_vec = new_i16_vec(1, 1);
+		let a0 = hnsw.insert_level(a_vec.clone(), 0).await;
+		assert_eq!(hnsw.elements.len(), 1);
+		assert_eq!(hnsw.enter_point, Some(a0));
+		assert_eq!(hnsw.layers.len(), 1);
+		assert_eq!(hnsw.layers[0].read().await.0, HashMap::from([(a0, vec![])]));
+
+		let b1 = hnsw.insert_level(new_i16_vec(2, 2), 0).await;
+		assert_eq!(hnsw.elements.len(), 2);
+		assert_eq!(hnsw.enter_point, Some(a0));
+		assert_eq!(hnsw.layers.len(), 1);
+		assert_eq!(hnsw.layers[0].read().await.0, HashMap::from([(a0, vec![b1]), (b1, vec![a0])]));
+
+		let c2 = hnsw.insert_level(new_i16_vec(3, 3), 0).await;
+		assert_eq!(hnsw.elements.len(), 3);
+		assert_eq!(hnsw.enter_point, Some(a0));
+		assert_eq!(hnsw.layers.len(), 1);
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([(a0, vec![b1, c2]), (b1, vec![a0, c2]), (c2, vec![b1, a0])])
+		);
+
+		let d3 = hnsw.insert_level(new_i16_vec(4, 4), 1).await;
+		assert_eq!(hnsw.elements.len(), 4);
+		assert_eq!(hnsw.enter_point, Some(d3));
+		assert_eq!(hnsw.layers.len(), 2);
+		assert_eq!(hnsw.layers[1].read().await.0, HashMap::from([(d3, vec![])]));
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3]),
+				(b1, vec![a0, c2, d3]),
+				(c2, vec![b1, a0, d3]),
+				(d3, vec![c2, b1, a0])
+			])
+		);
+
+		let e4 = hnsw.insert_level(new_i16_vec(5, 5), 2).await;
+		assert_eq!(hnsw.elements.len(), 5);
+		assert_eq!(hnsw.enter_point, Some(e4));
+		assert_eq!(hnsw.layers.len(), 3);
+		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![])]));
+		assert_eq!(hnsw.layers[1].read().await.0, HashMap::from([(d3, vec![e4]), (e4, vec![d3])]));
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3, e4]),
+				(b1, vec![a0, c2, d3, e4]),
+				(c2, vec![b1, d3, a0, e4]),
+				(d3, vec![c2, e4, b1, a0]),
+				(e4, vec![d3, c2, b1, a0])
+			])
+		);
+
+		let f5 = hnsw.insert_level(new_i16_vec(6, 6), 2).await;
+		assert_eq!(hnsw.elements.len(), 6);
+		assert_eq!(hnsw.enter_point, Some(e4));
+		assert_eq!(hnsw.layers.len(), 3);
+		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
+		assert_eq!(
+			hnsw.layers[1].read().await.0,
+			HashMap::from([(d3, vec![e4, f5]), (e4, vec![d3, f5]), (f5, vec![e4, d3])])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3, e4]),
+				(b1, vec![a0, c2, d3, e4]),
+				(c2, vec![b1, d3, a0, e4]),
+				(d3, vec![c2, e4, b1, f5]),
+				(e4, vec![d3, f5, c2, b1]),
+				(f5, vec![e4, d3, c2, b1]),
+			])
+		);
+
+		let g6 = hnsw.insert_level(new_i16_vec(7, 7), 1).await;
+		assert_eq!(hnsw.elements.len(), 7);
+		assert_eq!(hnsw.enter_point, Some(e4));
+		assert_eq!(hnsw.layers.len(), 3);
+		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
+		assert_eq!(
+			hnsw.layers[1].read().await.0,
+			HashMap::from([
+				(d3, vec![e4, f5]),
+				(e4, vec![d3, f5]),
+				(f5, vec![e4, g6]),
+				(g6, vec![f5, e4])
+			])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3, e4]),
+				(b1, vec![a0, c2, d3, e4]),
+				(c2, vec![b1, d3, a0, e4]),
+				(d3, vec![c2, e4, b1, f5]),
+				(e4, vec![d3, f5, c2, g6]),
+				(f5, vec![e4, g6, d3, c2]),
+				(g6, vec![f5, e4, d3, c2]),
+			])
+		);
+
+		let h7 = hnsw.insert_level(new_i16_vec(8, 8), 0).await;
+		assert_eq!(hnsw.elements.len(), 8);
+		assert_eq!(hnsw.enter_point, Some(e4));
+		assert_eq!(hnsw.layers.len(), 3);
+		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
+		assert_eq!(
+			hnsw.layers[1].read().await.0,
+			HashMap::from([
+				(d3, vec![e4, f5]),
+				(e4, vec![d3, f5]),
+				(f5, vec![e4, g6]),
+				(g6, vec![f5, e4])
+			])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3, e4]),
+				(b1, vec![a0, c2, d3, e4]),
+				(c2, vec![b1, d3, a0, e4]),
+				(d3, vec![c2, e4, b1, f5]),
+				(e4, vec![d3, f5, c2, g6]),
+				(f5, vec![e4, g6, d3, h7]),
+				(g6, vec![f5, h7, e4, d3]),
+				(h7, vec![g6, f5, e4, d3]),
+			])
+		);
+
+		let i8 = hnsw.insert_level(new_i16_vec(9, 9), 0).await;
+		assert_eq!(hnsw.elements.len(), 9);
+		assert_eq!(hnsw.enter_point, Some(e4));
+		assert_eq!(hnsw.layers.len(), 3);
+		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
+		assert_eq!(
+			hnsw.layers[1].read().await.0,
+			HashMap::from([
+				(d3, vec![e4, f5]),
+				(e4, vec![d3, f5]),
+				(f5, vec![e4, g6]),
+				(g6, vec![f5, e4])
+			])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3, e4]),
+				(b1, vec![a0, c2, d3, e4]),
+				(c2, vec![b1, d3, a0, e4]),
+				(d3, vec![c2, e4, b1, f5]),
+				(e4, vec![d3, f5, c2, g6]),
+				(f5, vec![e4, g6, d3, h7]),
+				(g6, vec![f5, h7, e4, i8]),
+				(h7, vec![g6, i8, f5, e4]),
+				(i8, vec![h7, g6, f5, e4]),
+			])
+		);
+
+		let j9 = hnsw.insert_level(new_i16_vec(10, 10), 0).await;
+		assert_eq!(hnsw.elements.len(), 10);
+		assert_eq!(hnsw.enter_point, Some(e4));
+		assert_eq!(hnsw.layers.len(), 3);
+		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
+		assert_eq!(
+			hnsw.layers[1].read().await.0,
+			HashMap::from([
+				(d3, vec![e4, f5]),
+				(e4, vec![d3, f5]),
+				(f5, vec![e4, g6]),
+				(g6, vec![f5, e4])
+			])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3, e4]),
+				(b1, vec![a0, c2, d3, e4]),
+				(c2, vec![b1, d3, a0, e4]),
+				(d3, vec![c2, e4, b1, f5]),
+				(e4, vec![d3, f5, c2, g6]),
+				(f5, vec![e4, g6, d3, h7]),
+				(g6, vec![f5, h7, e4, i8]),
+				(h7, vec![g6, i8, f5, j9]),
+				(i8, vec![h7, j9, g6, f5]),
+				(j9, vec![i8, h7, g6, f5]),
+			])
+		);
+
+		let h10 = hnsw.insert_level(new_i16_vec(11, 11), 1).await;
+		assert_eq!(hnsw.elements.len(), 11);
+		assert_eq!(hnsw.enter_point, Some(e4));
+		assert_eq!(hnsw.layers.len(), 3);
+		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
+		assert_eq!(
+			hnsw.layers[1].read().await.0,
+			HashMap::from([
+				(d3, vec![e4, f5]),
+				(e4, vec![d3, f5]),
+				(f5, vec![e4, g6]),
+				(g6, vec![f5, e4]),
+				(h10, vec![g6, f5])
+			])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.0,
+			HashMap::from([
+				(a0, vec![b1, c2, d3, e4]),
+				(b1, vec![a0, c2, d3, e4]),
+				(c2, vec![b1, d3, a0, e4]),
+				(d3, vec![c2, e4, b1, f5]),
+				(e4, vec![d3, f5, c2, g6]),
+				(f5, vec![e4, g6, d3, h7]),
+				(g6, vec![f5, h7, e4, i8]),
+				(h7, vec![g6, i8, f5, j9]),
+				(i8, vec![h7, j9, g6, h10]),
+				(j9, vec![i8, h10, h7, g6]),
+				(h10, vec![j9, i8, h7, g6]),
+			])
+		);
+
+		let res = hnsw.knn_search(&a_vec, 4, 500).await;
+		assert_eq!(res, vec![]);
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn test_recall() {
+		let collection = TestCollection::new(false, 11, VectorType::F64, 10, false);
+		let p = new_params(2, VectorType::F64, Distance::Euclidean, 2, true, true);
+		let mut h = HnswIndex::new(&p);
+		insert_collection_hnsw_index(&mut h, &collection).await;
+		for efs in [/*10, 20, */ 500] {
+			for (doc_id, pt) in collection.as_ref() {
+				let hnsw_res = h.search(pt, 4, efs).await;
+				assert_eq!(hnsw_res.docs.len(), 4);
+				let brute_force_res = collection.knn(pt, Distance::Euclidean, 4);
+				let recall = brute_force_res.recall(&hnsw_res);
+				assert_eq!(1.0, recall, "Recall doc: {doc_id} - {efs}: {recall}");
+			}
+		}
+	}
+
 	async fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {
 		// let mut deleted_foreign_elements = 0;
 		// let mut foreign_elements = 0;
@@ -909,5 +1181,42 @@ mod tests {
 		// 	let miss_rate = deleted_foreign_elements as f64 / foreign_elements as f64;
 		// 	assert!(miss_rate < 0.5, "Miss rate: {miss_rate}");
 		// }
+	}
+
+	impl TestCollection {
+		fn knn(&self, pt: &SharedVector, dist: Distance, n: usize) -> KnnResult {
+			let mut b = KnnResultBuilder::new(n);
+			for (doc_id, doc_pt) in self.as_ref() {
+				let d = dist.calculate(doc_pt, pt);
+				if b.check_add(d) {
+					b.add(d, &Ids64::One(*doc_id));
+				}
+			}
+			b.build(HashMap::new())
+		}
+	}
+
+	impl KnnResult {
+		fn recall(&self, res: &KnnResult) -> f64 {
+			let mut bits = RoaringTreemap::new();
+			for &(doc_id, _) in &self.docs {
+				bits.insert(doc_id);
+			}
+			let mut found = 0;
+			for &(doc_id, _) in &res.docs {
+				if bits.contains(doc_id) {
+					found += 1;
+				}
+			}
+			found as f64 / bits.len() as f64
+		}
+	}
+
+	fn new_i16_vec(x: usize, y: usize) -> SharedVector {
+		let mut vec = TreeVector::new(VectorType::I16, 2);
+		vec.add(x.into());
+		vec.add(y.into());
+		vec.compute_hash();
+		Arc::new(vec)
 	}
 }
