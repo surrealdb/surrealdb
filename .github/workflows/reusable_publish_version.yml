@@ -149,7 +149,10 @@ jobs:
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"1\"#surrealdb-core = { version = \"${betaVersion}\"#" lib/Cargo.toml
+
+          # Update dependency versions
+          sed -i "s#surrealdb = { version = \"1\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"1\"#surrealdb-core = { version = \"=${betaVersion}\"#" lib/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -619,6 +622,8 @@ jobs:
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb = { version = \".*\"#surrealdb = { version = \"1\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \".*\"#surrealdb-core = { version = \"1\"#" lib/Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
