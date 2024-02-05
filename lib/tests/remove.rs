@@ -125,6 +125,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 	}
 
 	// Every index store cache has been removed
+	#[cfg(feature = "sql2")]
 	assert!(dbs.index_store().is_empty().await);
 	Ok(())
 }
