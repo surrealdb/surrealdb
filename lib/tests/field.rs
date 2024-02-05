@@ -866,6 +866,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn field_definition_readonly() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
@@ -917,6 +918,76 @@ async fn field_definition_readonly() -> Result<(), Error> {
 		"{}",
 		tmp.unwrap_err().to_string()
 	);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn field_definition_flexible_array_any() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE user SCHEMAFULL;
+		DEFINE FIELD custom ON user TYPE option<array>;
+		DEFINE FIELD custom.* ON user FLEXIBLE TYPE any;
+		CREATE user:one CONTENT { custom: ['sometext'] };
+		CREATE user:two CONTENT { custom: [ ['sometext'] ] };
+		CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };
+	";
+	let dbs = new_ds().await?.with_auth_enabled(true);
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				custom: [
+					'sometext'
+				],
+				id: user:one
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				custom: [
+					[
+						'sometext'
+					]
+				],
+				id: user:two
+			},
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				custom: [
+					{
+						key: 'sometext'
+					}
+				],
+				id: user:three
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }

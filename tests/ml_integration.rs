@@ -10,7 +10,7 @@ mod ml_integration {
 	use serde::{Deserialize, Serialize};
 	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::time::Duration;
-	use surrealml_core::storage::stream_adapter::StreamAdapter;
+	use surrealdb::ml::storage::stream_adapter::StreamAdapter;
 	use test_log::test;
 	use ulid::Ulid;
 

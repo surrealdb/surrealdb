@@ -1,6 +1,7 @@
-use crate::api::{err::Error, opt::from_value, Response as QueryResponse, Result};
+use crate::api::{err::Error, Response as QueryResponse, Result};
 use crate::method;
 use crate::method::{Stats, Stream};
+use crate::sql::from_value;
 use crate::sql::{self, statements::*, Array, Object, Statement, Statements, Value};
 use crate::{syn, Notification};
 use futures::future::Either;
