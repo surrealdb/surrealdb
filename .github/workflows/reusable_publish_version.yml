@@ -555,7 +555,7 @@ jobs:
       - name: Build step
         env:
           SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
-          RUSTFLAGS: "--cfg surrealdb_unstable"
+          RUSTFLAGS: '"--cfg surrealdb_unstable"'
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
