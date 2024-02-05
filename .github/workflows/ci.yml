@@ -383,6 +383,8 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test workspace for experimental_parser
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo make test-experimental-parser
 
   ws-engine:

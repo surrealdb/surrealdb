@@ -60,6 +60,9 @@ use crate::kvs::Datastore;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ml::storage::surml_file::SurMlFile;
 use crate::opt::IntoEndpoint;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,9 +91,6 @@ use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use surrealml_core::storage::surml_file::SurMlFile;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -769,7 +769,7 @@ async fn router(
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			let var = Some(map! {
+			let var = Some(crate::map! {
 				key.clone() => Value::None,
 				=> vars
 			});
