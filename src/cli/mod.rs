@@ -78,38 +78,9 @@ enum Commands {
 	Validate(ValidateCommandArguments),
 }
 
-#[cfg(not(feature = "performance-profiler"))]
 pub async fn init() -> ExitCode {
-	// Parse the CLI arguments
-	let args = Cli::parse();
-	// Run the respective command
-	let output = match args.command {
-		Commands::Start(args) => start::init(args).await,
-		Commands::Backup(args) => backup::init(args).await,
-		Commands::Import(args) => import::init(args).await,
-		Commands::Export(args) => export::init(args).await,
-		Commands::Version(args) => version::init(args).await,
-		Commands::Upgrade(args) => upgrade::init(args).await,
-		Commands::Sql(args) => sql::init(args).await,
-		Commands::Ml(args) => ml::init(args).await,
-		Commands::IsReady(args) => isready::init(args).await,
-		Commands::Validate(args) => validate::init(args).await,
-	};
-	// Error and exit the programme
-	if let Err(e) = output {
-		error!("{}", e);
-		ExitCode::FAILURE
-	} else {
-		ExitCode::SUCCESS
-	}
-}
-
-#[cfg(feature = "performance-profiler")]
-pub async fn init() -> ExitCode {
-	// Import necessary traits
-	use pprof::protos::Message;
-	use std::io::Write;
 	// Start a new CPU profiler
+	#[cfg(feature = "performance-profiler")]
 	let guard = pprof::ProfilerGuardBuilder::default()
 		.frequency(1000)
 		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
@@ -131,7 +102,11 @@ pub async fn init() -> ExitCode {
 		Commands::Validate(args) => validate::init(args).await,
 	};
 	// Save the flamegraph and profile
+	#[cfg(feature = "performance-profiler")]
 	if let Ok(report) = guard.report().build() {
+		// Import necessary traits
+		use pprof::protos::Message;
+		use std::io::Write;
 		// Output a flamegraph
 		let file = std::fs::File::create("flamegraph.svg").unwrap();
 		report.flamegraph(file).unwrap();
