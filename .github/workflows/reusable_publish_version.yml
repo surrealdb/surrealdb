@@ -625,8 +625,7 @@ jobs:
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb = { version = \".*\"#surrealdb = { version = \"1\"#" Cargo.toml
-          sed -i "s#surrealdb-core = { version = \".*\"#surrealdb-core = { version = \"1\"#" lib/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"1\"#" lib/Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
