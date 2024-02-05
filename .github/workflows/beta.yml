@@ -57,3 +57,80 @@ jobs:
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
     secrets: inherit
+
+  bump-version:
+    name: Bump main version
+    if: ${{ needs.checks.outputs.branch == 'main' }}
+    needs: [checks, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: releases/beta
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install a TOML parser
+        run: cargo install --force --locked --version 0.8.1 taplo-cli
+
+      - name: Create version bump branch
+        id: bump
+        run: |
+          set -x
+
+          # Retrieve just released version
+          betaVersion=$(/home/runner/.cargo/bin/taplo get -f lib/Cargo.toml "package.version")
+          major=$(echo $betaVersion | tr "." "\n" | sed -n 1p)
+          minor=$(echo $betaVersion | tr "." "\n" | sed -n 2p)
+          nightlyVersion=${major}.$(($minor + 1)).0
+          echo "version=${nightlyVersion}" >> $GITHUB_OUTPUT
+
+          # Checkout the main branch
+          git fetch origin main
+          git checkout main
+
+          # Switch to version bump branch
+          git checkout -b version-bump/v${nightlyVersion}
+
+          # Bump the crate version
+          sed -i "s#^version = \".*\"#version = \"${nightlyVersion}\"#" Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${nightlyVersion}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"${nightlyVersion}\"#" core/Cargo.toml
+
+          # Update Cargo.lock without updating dependency versions
+          cargo check --no-default-features --features storage-mem
+
+      - name: Push the branch
+        if: ${{ inputs.publish }}
+        run: |
+          # Configure git
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config --add --bool push.autoSetupRemote true
+
+          # Commit changes
+          git commit -am "Bump version to v${{ steps.bump.outputs.version }}"
+          git push
+
+      - name: Create a PR
+        id: pr
+        if: ${{ inputs.publish }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
+          echo "url=${url}" >> $GITHUB_OUTPUT
+
+      - name: Merge the PR
+        if: ${{ inputs.publish }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
+        run: |
+          set -x
+          gh pr review ${{ steps.pr.outputs.url }} --approve
+          gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash
