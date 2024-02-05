@@ -26,6 +26,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use self::opt::EndpointKind;
+
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
@@ -91,8 +93,12 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let client = Client::connect(self.address?, self.capacity).await?;
-			client.check_server_version().await?;
+			let endpoint = self.address?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
+			let client = Client::connect(endpoint, self.capacity).await?;
+			if endpoint_kind.is_remote() {
+				client.check_server_version().await?;
+			}
 			Ok(client)
 		})
 	}
@@ -111,7 +117,9 @@ where
 			if self.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}
-			let arc = Client::connect(self.address?, self.capacity).await?.router;
+			let endpoint = self.address?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
+			let arc = Client::connect(endpoint, self.capacity).await?.router;
 			let cell = Arc::into_inner(arc).expect("new connection to have no references");
 			let router = cell.into_inner().expect("router to be set");
 			self.router.set(router).map_err(|_| Error::AlreadyConnected)?;
@@ -119,7 +127,9 @@ where
 				router: self.router,
 				engine: PhantomData::<Client>,
 			};
-			client.check_server_version().await?;
+			if endpoint_kind.is_remote() {
+				client.check_server_version().await?;
+			}
 			Ok(())
 		})
 	}
