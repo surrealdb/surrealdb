@@ -1,4 +1,5 @@
 use crate::cf::{TableMutation, TableMutations};
+use crate::fflags::FFLAGS;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
@@ -73,10 +74,11 @@ impl Writer {
 				ns.to_string(),
 				db.to_string(),
 				tb.to_string(),
-				TableMutation::SetPrevious(id, p.into_owned(), v.into_owned()),
+				match FFLAGS.change_feed_live_queries.enabled() {
+					true => TableMutation::SetPrevious(id, p.into_owned(), v.into_owned()),
+					false => TableMutation::Set(id, v.into_owned()),
+				},
 			);
-		} else {
-			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
 	}
 
