@@ -101,6 +101,36 @@ mod cli_integration {
 			exported
 		};
 
+		info!("Export namespace users");
+		{
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --pretty",
+			);
+
+			// Create DATABASE and NAMESPACE users
+			common::run(&args)
+				.input(
+					"BEGIN; \
+				DEFINE USER user_db ON DATABASE PASSWORD 'user_db' ROLES VIEWER COMMENT 'db user'; \
+				DEFINE USER user_ns ON NAMESPACE PASSWORD 'user_ns' ROLES VIEWER COMMENT 'ns user'; \
+				COMMIT;
+				",
+				)
+				.output()
+				.unwrap();
+
+			let args = format!(
+				"export --conn http://{addr} {creds} --ns {ns} --db {db}",
+			);
+
+			let output = common::run(&args)
+				.output()
+				.unwrap();
+
+			assert!(output.contains("DEFINE USER user_ns ON NAMESPACE"), "namespace users were not exported");
+			assert!(output.contains("DEFINE USER user_db ON DATABASE"), "database users were not exported");
+		}
+
 		let db2 = Ulid::new();
 
 		info!("* Import the exported file");

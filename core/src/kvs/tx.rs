@@ -2814,51 +2814,6 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_export() {
-		let ds = Datastore::new("memory").await.unwrap();
-		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
-
-		// Retrieve non-existent NS user
-		let res = txn.get_ns_user("ns", "nonexistent").await;
-		assert_eq!(
-			res.err().unwrap().to_string(),
-			"The user 'nonexistent' does not exist in the namespace 'ns'"
-		);
-
-		// Create NS user and retrieve it
-		let data = DefineUserStatement {
-			name: "user".into(),
-			base: Base::Ns,
-			..Default::default()
-		};
-
-		let key = crate::key::namespace::us::new("ns", "user");
-		txn.set(key, data.to_owned()).await.unwrap();
-
-		let (snd, rcv) = channel::bounded(1);
-
-		let _ = txn.export("ns", "db", snd);
-
-		// Process all chunk values
-		tokio::spawn(async move {
-			let expected = String::from("-- NS USERS");
-
-			let mut result = String::new();
-
-			while let Ok(v) = rcv.recv().await {
-				// let _ = chn.send_data(Bytes::from(v)).await;
-				result.push_str(&String::from_utf8(v).unwrap());
-			}
-
-			assert_eq!(result.to_string().contains(&expected), true);
-		})
-		.await
-		.unwrap();
-
-		txn.commit().await.unwrap();
-	}
-
-	#[tokio::test]
 	async fn test_get_ns_user() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();

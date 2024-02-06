@@ -627,6 +627,27 @@ mod http_integration {
 			assert!(body.contains("DEFINE TABLE foo"), "body: {}", body);
 		}
 
+		// Create some data
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("DEFINE USER user_db ON DATABASE PASSWORD 'user_db' ROLES VIEWER COMMENT 'db user';
+				DEFINE USER user_ns ON NAMESPACE PASSWORD 'user_ns' ROLES VIEWER COMMENT 'ns user';")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		// Namespace user export
+		{
+			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let body = res.text().await?;
+			assert!(body.contains("DEFINE USER user_db ON DATABASE"), "body: {}", body);
+			assert!(body.contains("DEFINE USER user_ns ON NAMESPACE"), "body: {}", body);
+		}
+
 		Ok(())
 	}
 
