@@ -100,7 +100,7 @@ mod ml_integration {
 			let res = client
 				.post(format!("http://{addr}/sql"))
 				.basic_auth(common::USER, Some(common::PASS))
-				.body(r#"ml::Prediction<0.0.1>([1.0, 1.0]);"#)
+				.body(r#"ml::linear<0.0.1>([1.0, 1.0]);"#)
 				.send()
 				.await?;
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
@@ -136,7 +136,7 @@ mod ml_integration {
 			let res = client
 				.post(format!("http://{addr}/sql"))
 				.basic_auth(common::USER, Some(common::PASS))
-				.body(r#"ml::Prediction<0.0.1>({squarefoot: 500.0, num_floors: 1.0});"#)
+				.body(r#"ml::linear<0.0.1>({squarefoot: 500.0, num_floors: 1.0});"#)
 				.send()
 				.await?;
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
