@@ -2284,12 +2284,26 @@ impl Transaction {
 			chn.send(bytes!("OPTION IMPORT;")).await?;
 			chn.send(bytes!("")).await?;
 		}
-		// Output USERS
+		// Output DB USERS
 		{
 			let dus = self.all_db_users(ns, db).await?;
 			if !dus.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("-- USERS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for us in dus.iter() {
+					chn.send(bytes!(format!("{us};"))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output NS USERS
+		{
+			let dus = self.all_ns_users(ns).await?;
+			if !dus.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- NS USERS")).await?;
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for us in dus.iter() {
@@ -2797,6 +2811,52 @@ mod tests {
 		let res = txn.get_root_user("user").await.unwrap();
 		assert_eq!(res, data);
 		txn.commit().await.unwrap()
+	}
+
+	#[tokio::test]
+	async fn test_export() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(Write, Optimistic).await.unwrap();
+
+		// Retrieve non-existent NS user
+		let res = txn.get_ns_user("ns", "nonexistent").await;
+		assert_eq!(
+			res.err().unwrap().to_string(),
+			"The user 'nonexistent' does not exist in the namespace 'ns'"
+		);
+
+		// Create NS user and retrieve it
+		let data = DefineUserStatement {
+			name: "user".into(),
+			base: Base::Ns,
+			..Default::default()
+		};
+
+		let key = crate::key::namespace::us::new("ns", "user");
+		txn.set(key, data.to_owned()).await.unwrap();
+
+		let (snd, rcv) = channel::bounded(1);
+
+		let _ = txn.export("ns", "db", snd);
+
+		// Process all chunk values
+		tokio::spawn(async move {
+			let mut expected = String::from("-- ------------------------------");
+			expected.push_str("-- NS USERS");
+			expected.push_str("-- ------------------------------");
+
+			let mut result = String::new();
+
+			while let Ok(v) = rcv.recv().await {
+				// let _ = chn.send_data(Bytes::from(v)).await;
+				result.push_str(&String::from_utf8(v).unwrap());
+			}
+
+			assert_eq!(result.to_string().contains(&expected), true);
+		}).await.unwrap();
+
+
+		txn.commit().await.unwrap();
 	}
 
 	#[tokio::test]
