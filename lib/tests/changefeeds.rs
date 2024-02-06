@@ -70,7 +70,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				versionstamp: 65536,
 				changes: [
 					{
-						update: {
+						create: {
 							id: person:test,
 							name: 'Name: Tobie'
 						}
@@ -218,7 +218,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				versionstamp: 131072,
 				changes: [
 					{
-						update: {
+						create: {
 							id: person:test,
 							name: 'Name: Tobie'
 						}
@@ -261,7 +261,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				versionstamp: 393216,
 				changes: [
 					{
-						update: {
+						create: {
 							id: person:1000,
 							name: 'Name: Yusuke'
 						}
@@ -375,7 +375,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		surrealdb::sql::value(
 			"[
 		{
-			update: {
+			create: {
 				id: user:amos,
 				name: 'Amos'
 			}
@@ -399,7 +399,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		surrealdb::sql::value(
 			"[
 		{
-			update: {
+			create: {
 				id: user:jane,
 				name: 'Jane'
 			}
@@ -490,7 +490,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		surrealdb::sql::value(
 			"[
 		{
-			update: {
+			create: {
 				id: user:amos,
 				name: 'Amos'
 			}
