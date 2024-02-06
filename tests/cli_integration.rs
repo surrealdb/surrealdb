@@ -103,9 +103,8 @@ mod cli_integration {
 
 		info!("Export namespace users");
 		{
-			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --pretty",
-			);
+			let args =
+				format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --pretty",);
 
 			// Create DATABASE and NAMESPACE users
 			common::run(&args)
@@ -119,16 +118,18 @@ mod cli_integration {
 				.output()
 				.unwrap();
 
-			let args = format!(
-				"export --conn http://{addr} {creds} --ns {ns} --db {db}",
+			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db}",);
+
+			let output = common::run(&args).output().unwrap();
+
+			assert!(
+				output.contains("DEFINE USER user_ns ON NAMESPACE"),
+				"namespace users were not exported"
 			);
-
-			let output = common::run(&args)
-				.output()
-				.unwrap();
-
-			assert!(output.contains("DEFINE USER user_ns ON NAMESPACE"), "namespace users were not exported");
-			assert!(output.contains("DEFINE USER user_db ON DATABASE"), "database users were not exported");
+			assert!(
+				output.contains("DEFINE USER user_db ON DATABASE"),
+				"database users were not exported"
+			);
 		}
 
 		let db2 = Ulid::new();
