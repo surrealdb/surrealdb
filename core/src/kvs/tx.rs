@@ -2688,7 +2688,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		lock: bool,
-	) -> Result<(), Error> {
+	) -> Result<Versionstamp, Error> {
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
@@ -2710,7 +2710,7 @@ impl Transaction {
 			}
 		}
 		self.set(ts_key, vs).await?;
-		Ok(())
+		Ok(vs)
 	}
 
 	pub(crate) async fn get_versionstamp_from_timestamp(
