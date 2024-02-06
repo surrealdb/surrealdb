@@ -518,7 +518,7 @@ pub(super) mod tests {
 			.unwrap_or_else(|_| rand::random::<u64>().to_string())
 			.parse()
 			.expect("Failed to parse seed");
-		debug!("Seed: {}", seed);
+		info!("Seed: {}", seed);
 		// Create a seeded RNG
 		SmallRng::seed_from_u64(seed)
 	}
@@ -599,6 +599,14 @@ pub(super) mod tests {
 			}
 		}
 
+		fn add(&mut self, doc: DocId, pt: SharedVector) {
+			match self {
+				TestCollection::Unique(vec) => vec,
+				TestCollection::NonUnique(vec) => vec,
+			}
+			.push((doc, pt));
+		}
+
 		fn new_unique(
 			collection_size: usize,
 			vector_type: VectorType,
@@ -615,9 +623,11 @@ pub(super) mod tests {
 					panic!("Fail generating a unique random collection");
 				}
 			}
-			let collection =
-				vector_set.into_iter().enumerate().map(|(i, v)| (i as DocId, v)).collect();
-			TestCollection::Unique(collection)
+			let mut coll = TestCollection::Unique(Vec::with_capacity(vector_set.len()));
+			for (i, v) in vector_set.into_iter().enumerate() {
+				coll.add(i as DocId, v);
+			}
+			coll
 		}
 
 		fn new_random(
@@ -627,16 +637,15 @@ pub(super) mod tests {
 			for_jaccard: bool,
 		) -> Self {
 			let mut rng = get_seed_rnd();
-			let mut collection = vec![];
-
+			let mut coll = TestCollection::NonUnique(Vec::with_capacity(collection_size));
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				collection.push((
+				coll.add(
 					doc_id as DocId,
 					new_random_vec(&mut rng, vector_type, dimension, for_jaccard),
-				));
+				);
 			}
-			TestCollection::NonUnique(collection)
+			coll
 		}
 
 		pub(in crate::idx::trees) fn is_unique(&self) -> bool {

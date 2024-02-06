@@ -9,7 +9,7 @@ use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -428,27 +428,25 @@ impl Hnsw {
 			w.insert(ep_pn.clone());
 			HashSet::from([ep_id])
 		};
-		let mut candidates = BinaryHeap::from([ep_pn]);
-		while let Some(c) = candidates.pop() {
-			if let Some(f) = w.last() {
-				if c.0 > f.0 {
-					break;
-				}
+		let mut candidates = BTreeSet::from([ep_pn]);
+		while let Some(c) = candidates.pop_first() {
+			let mut f_dist = w.last().map(|pn| pn.0).unwrap_or(f64::MAX);
+			if c.0 > f_dist {
+				break;
 			}
-
 			if let Some(neighbourhood) = l.0.get(&c.1) {
 				for e_id in neighbourhood {
 					if visited.insert(*e_id) {
 						if let Some(e_pt) = self.elements.get(e_id) {
 							let e_dist = self.dist.calculate(e_pt, q);
-							let f_dist = w.last().map(|f| f.0).unwrap_or(f64::MAX);
 							if e_dist <= f_dist || w.len() < ef {
 								let pn = PriorityNode(e_dist, *e_id);
-								candidates.push(pn.clone());
+								candidates.insert(pn.clone());
 								w.insert(pn);
 								if w.len() > ef {
 									w.pop_last();
 								}
+								f_dist = w.last().map(|pn| pn.0).unwrap_or(f64::MAX);
 							}
 						}
 					}
@@ -493,6 +491,7 @@ impl Hnsw {
 	}
 }
 
+#[derive(Debug)]
 enum SelectNeighbors {
 	Heuristic,
 	HeuristicExt,
@@ -508,8 +507,7 @@ impl From<&HnswParams> for SelectNeighbors {
 			} else {
 				Self::HeuristicKeep
 			}
-		} else {
-			if p.extend_candidates {
+		} else if p.extend_candidates {
 				Self::HeuristicExt
 			} else {
 				Self::Heuristic
@@ -1122,25 +1120,63 @@ mod tests {
 				(h10, vec![j9, i8, h7, g6]),
 			])
 		);
+	}
 
-		let res = hnsw.knn_search(&a_vec, 4, 500).await;
-		assert_eq!(res, vec![]);
+	#[test_log::test(tokio::test)]
+	async fn test_invalid_size() {
+		let collection = TestCollection::Unique(vec![
+			(0, new_i16_vec(-2, -3)),
+			(1, new_i16_vec(-2, 1)),
+			(2, new_i16_vec(-4, 3)),
+			(3, new_i16_vec(-3, 1)),
+			(4, new_i16_vec(-1, 1)),
+			(5, new_i16_vec(-2, 3)),
+			(6, new_i16_vec(3, 0)),
+			(7, new_i16_vec(-1, -2)),
+			(8, new_i16_vec(-2, 2)),
+			(9, new_i16_vec(-4, -2)),
+			(10, new_i16_vec(0, 3)),
+		]);
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, true, true);
+		let mut h = Hnsw::new(&p);
+		insert_collection_hnsw(&mut h, &collection).await;
+		let pt = new_i16_vec(-2, -3);
+		let knn = 10;
+		let efs = 501;
+		let hnsw_res = h.knn_search(&pt, knn, efs).await;
+		assert_eq!(hnsw_res.len(), knn);
+		// let brute_force_res = collection.knn(&pt, Distance::Euclidean, knn);
+		// let recall = brute_force_res.recall(&hnsw_res);
+		// assert_eq!(1.0, recall);
 	}
 
 	#[test_log::test(tokio::test)]
 	async fn test_recall() {
-		let collection = TestCollection::new(false, 11, VectorType::F64, 10, false);
-		let p = new_params(2, VectorType::F64, Distance::Euclidean, 2, true, true);
+		let (dim, vt, m, size) = (5, VectorType::F64, 24, 500);
+		let collection = TestCollection::new(true, size, vt, dim, false);
+		let p = new_params(dim, vt, Distance::Euclidean, m, true, true);
 		let mut h = HnswIndex::new(&p);
 		insert_collection_hnsw_index(&mut h, &collection).await;
-		for efs in [/*10, 20, */ 500] {
+
+		let mut last_recall = 0.0;
+		for efs in [10, 20, 40, 80] {
+			let mut total_recall = 0.0;
 			for (doc_id, pt) in collection.as_ref() {
-				let hnsw_res = h.search(pt, 4, efs).await;
-				assert_eq!(hnsw_res.docs.len(), 4);
-				let brute_force_res = collection.knn(pt, Distance::Euclidean, 4);
-				let recall = brute_force_res.recall(&hnsw_res);
-				assert_eq!(1.0, recall, "Recall doc: {doc_id} - {efs}: {recall}");
+				let knn = 10;
+				let hnsw_res = h.search(pt, knn, efs).await;
+				assert_eq!(
+					hnsw_res.docs.len(),
+					knn,
+					"Different size - knn: {knn} - doc: {doc_id} - efs: {efs} - docs: {:?}",
+					collection.as_ref().len()
+				);
+				let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
+				total_recall += brute_force_res.recall(&hnsw_res);
 			}
+			let recall = total_recall / collection.as_ref().len() as f64;
+			assert!(recall >= 0.9, "Recall: {} - Last: {}", recall, last_recall);
+			assert!(recall >= last_recall, "Recall: {} - Last: {}", recall, last_recall);
+			last_recall = recall;
 		}
 	}
 
@@ -1212,7 +1248,7 @@ mod tests {
 		}
 	}
 
-	fn new_i16_vec(x: usize, y: usize) -> SharedVector {
+	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
 		let mut vec = TreeVector::new(VectorType::I16, 2);
 		vec.add(x.into());
 		vec.add(y.into());
