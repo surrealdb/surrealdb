@@ -142,13 +142,17 @@ jobs:
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            betaVersion=${major}.$(($minor + 1)).0-beta.1
+            betaVersion=${major}.${minor}.0-beta.1
           fi
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" core/Cargo.toml
+
+          # Update dependency versions
+          sed -i "s#surrealdb = { version = \"1\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"1\"#surrealdb-core = { version = \"=${betaVersion}\"#" lib/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -339,7 +343,7 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv
+              features=storage-tikv,sql2,jwks
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
@@ -373,7 +377,7 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv
+              features=storage-tikv,sql2,jwks
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
@@ -401,7 +405,7 @@ jobs:
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
-              features=storage-tikv
+              features=storage-tikv,sql2,jwks
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
@@ -421,6 +425,7 @@ jobs:
                 --pull always \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e RUSTFLAGS="${RUSTFLAGS}" \
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
@@ -445,7 +450,7 @@ jobs:
               set -x
 
               # Build
-              features=storage-tikv
+              features=storage-tikv,sql2,jwks
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
@@ -465,6 +470,7 @@ jobs:
                 --pull always \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+                -e RUSTFLAGS="${RUSTFLAGS}" \
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
@@ -492,7 +498,7 @@ jobs:
               vcpkg integrate install
 
               # Build
-              features=storage-tikv
+              features=storage-tikv,sql2,jwks
               if [[ "${{ inputs.http-compression }}" == "true" ]]; then
                 features=${features},http-compression
               fi
@@ -549,6 +555,7 @@ jobs:
       - name: Build step
         env:
           SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
@@ -584,7 +591,7 @@ jobs:
           sudo chmod +x /usr/bin/release-plz
 
       - name: Install a TOML parser
-        if: ${{ inputs.environment == 'beta' }}
+        if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
         run: |
           curl -L https://github.com/tamasfe/taplo/releases/download/0.8.1/taplo-full-linux-x86_64.gz | gunzip - > taplo
           chmod +x taplo
@@ -618,6 +625,7 @@ jobs:
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" lib/Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
@@ -635,6 +643,7 @@ jobs:
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"1\"#surrealdb-core = { version = \"=${version}\"#" lib/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}

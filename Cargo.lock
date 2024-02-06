@@ -4520,9 +4520,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0db265d331ae1b1a9fdb68466a8359bc9dcc5e78a9c323f790322f8442e005ac"
+checksum = "511ee02660e19cf451ebcbda6151a4023044293066e9ccd2b0498047203f6ab1"
 dependencies = [
  "rquickjs-core",
  "rquickjs-macro",
@@ -4530,9 +4530,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-core"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48e51f2fc99917699385bfa290b776e712e414b222d7c2a9b2cd67b8e93585f3"
+checksum = "c10ce0bc11e249e738aadb8119e9a7619125cb866208236d88d2ee3dcdb7a67d"
 dependencies = [
  "async-lock 2.8.0",
  "relative-path",
@@ -4541,9 +4541,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-macro"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c508ce83e3f9daaa91e63ffcd0e2df71cbf46c52246cb45ce410a2d8fdc04df"
+checksum = "a8a2a2ec2c5e739f05187a4c02d0f3e12cb604ec9974cc78e97147106beb247b"
 dependencies = [
  "convert_case 0.6.0",
  "fnv",
@@ -4559,9 +4559,9 @@ dependencies = [
 
 [[package]]
 name = "rquickjs-sys"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86b6865056bc4154c49bc8b2babd9232a8ba55dee4860fc74c789633aecad3ca"
+checksum = "86030d52fc20e68115f93738c2cb960d6f900f64d99e1013ea0e170381eb0a72"
 dependencies = [
  "bindgen 0.66.1",
  "cc",
@@ -5251,7 +5251,7 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surreal"
-version = "1.1.1"
+version = "1.3.0"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5310,7 +5310,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.1.1"
+version = "1.3.0"
 dependencies = [
  "async-channel",
  "bincode",
@@ -5360,7 +5360,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "1.1.1"
+version = "1.3.0"
 dependencies = [
  "addr",
  "any_ascii",
