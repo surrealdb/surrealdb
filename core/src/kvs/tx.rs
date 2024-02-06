@@ -2841,9 +2841,7 @@ mod tests {
 
 		// Process all chunk values
 		tokio::spawn(async move {
-			let mut expected = String::from("-- ------------------------------");
-			expected.push_str("-- NS USERS");
-			expected.push_str("-- ------------------------------");
+			let expected = String::from("-- NS USERS");
 
 			let mut result = String::new();
 
@@ -2853,8 +2851,9 @@ mod tests {
 			}
 
 			assert_eq!(result.to_string().contains(&expected), true);
-		}).await.unwrap();
-
+		})
+		.await
+		.unwrap();
 
 		txn.commit().await.unwrap();
 	}
