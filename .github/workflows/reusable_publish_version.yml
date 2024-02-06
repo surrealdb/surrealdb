@@ -142,7 +142,7 @@ jobs:
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
             minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
-            betaVersion=${major}.$(($minor + 1)).0-beta.1
+            betaVersion=${major}.${minor}.0-beta.1
           fi
 
           # Bump the crate version
