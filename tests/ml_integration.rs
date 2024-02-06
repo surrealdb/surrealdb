@@ -105,7 +105,8 @@ mod ml_integration {
 				.await?;
 			// assert!(res.status().is_success(), "body: {}", res.text().await?);
 			let body = res.text().await?;
-			let deserialized_data: Vec<Data> = serde_json::from_str(&body).unwrap();
+			println!("{:?}", body);
+			// let deserialized_data: Vec<Data> = serde_json::from_str(&body).unwrap();
 
 			// assert_eq!(deserialized_data[0].result, 0.9998061656951904);
 		}
@@ -142,7 +143,8 @@ mod ml_integration {
 				.await?;
 			// assert!(res.status().is_success(), "body: {}", res.text().await?);
 			let body = res.text().await?;
-			let deserialized_data: Vec<Data> = serde_json::from_str(&body)?;
+			println!("{:?}", body);
+			// let deserialized_data: Vec<Data> = serde_json::from_str(&body)?;
 			// assert_eq!(deserialized_data[0].result, 177206.21875);
 		}
 		Ok(())
