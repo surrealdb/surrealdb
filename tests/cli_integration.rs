@@ -8,6 +8,7 @@ mod cli_integration {
 	use std::fs;
 	use std::fs::File;
 	use std::time;
+	use surrealdb::fflags::FFLAGS;
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::info;
@@ -671,16 +672,24 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args)
-					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-					.output(),
-				// TODO(fflag-lqcf): Ok("[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ create: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
-				Ok("[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
-					.to_owned()),
-				"failed to send sql: {args}"
-			);
-		}
+			if FFLAGS.change_feed_live_queries.enabled() {
+				assert_eq!(
+						common::run(&args)
+							.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+							.output(),
+						Ok("[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ create: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
+							.to_owned()),
+						"failed to send sql: {args}");
+			} else {
+				assert_eq!(
+						common::run(&args)
+							.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+							.output(),
+						Ok("[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
+							.to_owned()),
+						"failed to send sql: {args}" );
+			}
+		};
 
 		sleep(TWO_SECS).await;
 

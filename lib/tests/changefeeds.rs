@@ -6,6 +6,7 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb_core::fflags::FFLAGS;
 
 #[tokio::test]
 async fn database_change_feeds() -> Result<(), Error> {
@@ -64,8 +65,9 @@ async fn database_change_feeds() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	// SHOW CHANGES
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+	let val = match FFLAGS.change_feed_live_queries.enabled() {
+		true => Value::parse(
+			"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -88,7 +90,33 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+		),
+		false => Value::parse(
+			"[
+			{
+				versionstamp: 65536,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+		),
+	};
 	assert_eq!(tmp, val);
 	// Retain for 1h
 	let sql = "
