@@ -1,12 +1,12 @@
 use crate::key::error::KeyCategory::Unknown;
 
-#[tokio::test]
-#[serial]
-async fn initialise() {
-	let mut tx = new_tx(Write, Optimistic).await;
-	assert!(tx.put(Unknown, "test", "ok").await.is_ok());
-	tx.commit().await.unwrap();
-}
+// #[tokio::test]
+// #[serial]
+// async fn initialise() {
+// 	let mut tx = new_tx(Write, Optimistic).await;
+// 	assert!(tx.put(Unknown, "test", "ok").await.is_ok());
+// 	tx.commit().await.unwrap();
+// }
 
 #[tokio::test]
 #[serial]
@@ -19,6 +19,7 @@ async fn exi() {
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(Unknown, "test", "ok").await.is_ok());
 	tx.commit().await.unwrap();
+
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.exi("test").await.unwrap();

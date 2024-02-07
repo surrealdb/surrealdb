@@ -102,6 +102,8 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Datastore),
+	#[cfg(feature = "kv-surrealkv")]
+	SurrealKV(super::surrealkv::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -120,6 +122,8 @@ impl fmt::Display for Datastore {
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
 			Inner::FoundationDB(_) => write!(f, "fdb"),
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -192,7 +196,8 @@ impl Datastore {
 			feature = "kv-speedb",
 			feature = "kv-indxdb",
 			feature = "kv-tikv",
-			feature = "kv-fdb"
+			feature = "kv-fdb",
+			feature = "kv-surrealkv"
 		)))]
 		let _ = (clock_override, default_clock);
 
@@ -306,6 +311,22 @@ impl Datastore {
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Parse and initiate a SurrelKV database
+			s if s.starts_with("surrealkv:") => {
+				#[cfg(feature = "kv-surrealkv")]
+				{
+					info!("Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealkv://");
+					let s = s.trim_start_matches("surrealkv:");
+					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
+					info!("Started to kvs store at {}", path);
+					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
+				}
+				#[cfg(not(feature = "kv-surrealkv"))]
+                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
@@ -1032,6 +1053,11 @@ impl Datastore {
 			Inner::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::FoundationDB(tx)
+			}
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tx::Inner::SurrealKV(tx)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
