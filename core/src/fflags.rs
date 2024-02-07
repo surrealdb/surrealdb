@@ -1,5 +1,12 @@
+//! Feature flags for SurrealDB
+//! This is a public scope module that is not for external use
+//! It is public for API access
+///
+
+/// FeatureFlags set for the project
+/// Use this while implementing features
 #[allow(dead_code)]
-pub(crate) static FFLAGS: FFlags = FFlags {
+pub static FFLAGS: FFlags = FFlags {
     change_feed_live_queries: FFlagEnabledStatus {
         enabled_release: false,
         enabled_debug: false,
@@ -17,15 +24,15 @@ pub(crate) static FFLAGS: FFlags = FFlags {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 #[allow(dead_code)]
-pub(crate) struct FFlags {
-	pub(crate) change_feed_live_queries: FFlagEnabledStatus,
+pub struct FFlags {
+	pub change_feed_live_queries: FFlagEnabledStatus,
 }
 
 /// This struct is not used in the implementation;
 /// All the fields are here as information for people investigating the feature flag.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub(crate) struct FFlagEnabledStatus {
+pub struct FFlagEnabledStatus {
 	pub(crate) enabled_release: bool,
 	pub(crate) enabled_debug: bool,
 	pub(crate) enabled_test: bool,
@@ -40,7 +47,7 @@ pub(crate) struct FFlagEnabledStatus {
 
 impl FFlagEnabledStatus {
 	#[allow(dead_code)]
-	pub(crate) fn enabled(&self) -> bool {
+	pub fn enabled(&self) -> bool {
 		let mut enabled = false;
 		if let Ok(env_var) = std::env::var(self.env_override) {
 			if env_var.trim() == "true" {
