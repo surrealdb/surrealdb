@@ -504,7 +504,7 @@ pub(super) mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, TreeVector};
-	use crate::sql::index::VectorType;
+	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::Number;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
@@ -552,22 +552,17 @@ pub(super) mod tests {
 		rng: &mut SmallRng,
 		t: VectorType,
 		dim: usize,
-		for_jaccard: bool,
+		gen: &RandomItemGenerator,
 	) -> SharedVector {
 		let mut vec = TreeVector::new(t, dim);
-		let generator: fn(&mut SmallRng) -> Number = if for_jaccard {
-			|rng| Number::Int(rng.gen_range(-1..=1))
-		} else {
-			|rng| Number::Float(rng.gen_range(-5.0..=5.0))
-		};
 		for _ in 0..dim {
-			vec.add(generator(rng));
+			vec.add(gen.generate(rng));
 		}
-		vec.compute_hash();
 		if vec.is_null() {
 			// Some similarities (cosine) is undefined for null vector.
-			new_random_vec(rng, t, dim, for_jaccard)
+			new_random_vec(rng, t, dim, gen)
 		} else {
+			vec.compute_hash();
 			Arc::new(vec)
 		}
 	}
@@ -590,12 +585,13 @@ pub(super) mod tests {
 			collection_size: usize,
 			vt: VectorType,
 			dimension: usize,
-			for_jaccard: bool,
+			distance: &Distance,
 		) -> Self {
+			let gen = RandomItemGenerator::new(&distance, dimension);
 			if unique {
-				TestCollection::new_unique(collection_size, vt, dimension, for_jaccard)
+				TestCollection::new_unique(collection_size, vt, dimension, &gen)
 			} else {
-				TestCollection::new_random(collection_size, vt, dimension, for_jaccard)
+				TestCollection::new_random(collection_size, vt, dimension, &gen)
 			}
 		}
 
@@ -611,13 +607,13 @@ pub(super) mod tests {
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
-			for_jaccard: bool,
+			gen: &RandomItemGenerator,
 		) -> Self {
 			let mut rng = get_seed_rnd();
 			let mut vector_set = HashSet::with_capacity(collection_size);
 			let mut attempts = collection_size * 2;
 			while vector_set.len() < collection_size {
-				vector_set.insert(new_random_vec(&mut rng, vector_type, dimension, for_jaccard));
+				vector_set.insert(new_random_vec(&mut rng, vector_type, dimension, gen));
 				attempts -= 1;
 				if attempts == 0 {
 					panic!("Fail generating a unique random collection");
@@ -634,22 +630,40 @@ pub(super) mod tests {
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
-			for_jaccard: bool,
+			gen: &RandomItemGenerator,
 		) -> Self {
 			let mut rng = get_seed_rnd();
 			let mut coll = TestCollection::NonUnique(Vec::with_capacity(collection_size));
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				coll.add(
-					doc_id as DocId,
-					new_random_vec(&mut rng, vector_type, dimension, for_jaccard),
-				);
+				coll.add(doc_id as DocId, new_random_vec(&mut rng, vector_type, dimension, gen));
 			}
 			coll
 		}
 
 		pub(in crate::idx::trees) fn is_unique(&self) -> bool {
 			matches!(self, TestCollection::Unique(_))
+		}
+	}
+
+	pub(in crate::idx::trees) enum RandomItemGenerator {
+		Int(i64, i64),
+		Float(f64, f64),
+	}
+
+	impl RandomItemGenerator {
+		pub(in crate::idx::trees) fn new(dist: &Distance, dim: usize) -> Self {
+			match dist {
+				Distance::Jaccard => Self::Int(0, (dim * 3) as i64),
+				Distance::Hamming => Self::Int(0, 1),
+				_ => Self::Float(-20.0, 20.0),
+			}
+		}
+		fn generate(&self, rng: &mut SmallRng) -> Number {
+			match self {
+				RandomItemGenerator::Int(from, to) => Number::Int(rng.gen_range(*from..*to)),
+				RandomItemGenerator::Float(from, to) => Number::Float(rng.gen_range(*from..=*to)),
+			}
 		}
 	}
 

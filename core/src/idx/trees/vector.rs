@@ -483,7 +483,7 @@ impl Distance {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec};
+	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
 	use crate::idx::trees::vector::TreeVector;
 	use crate::sql::index::{Distance, VectorType};
 	use std::collections::HashSet;
@@ -497,10 +497,10 @@ mod tests {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
-			let integer = dist == Distance::Jaccard;
+			let gen = RandomItemGenerator::new(&dist, dim);
 			for _ in 0..size {
-				let v1 = new_random_vec(&mut rng, vt, dim, integer);
-				let v2 = new_random_vec(&mut rng, vt, dim, integer);
+				let v1 = new_random_vec(&mut rng, vt, dim, &gen);
+				let v2 = new_random_vec(&mut rng, vt, dim, &gen);
 				coll.push((v1, v2));
 			}
 			let mut num_zero = 0;
@@ -567,8 +567,9 @@ mod tests {
 		let mut collection_hash_vec: Vec<Arc<VectorComputedHash>> = Vec::with_capacity(capacity);
 
 		// Build collections
+		let gen = RandomItemGenerator::new(&Distance::Euclidean, 1000);
 		for _ in 0..capacity {
-			let vec = new_random_vec(&mut rng, VectorType::F64, 1000, false);
+			let vec = new_random_vec(&mut rng, VectorType::F64, 1000, &gen);
 			collection_hash_vec.push(Arc::new(vec.as_ref().into()));
 			collection_vec.push(vec);
 		}

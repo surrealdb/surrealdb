@@ -2014,7 +2014,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new(true, i, vt, 2, false),
+					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 					true,
 					true,
 					true,
@@ -2036,7 +2036,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new(true, i, vt, 2, false),
+					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 					true,
 					true,
 					true,
@@ -2054,7 +2054,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new(true, 100, vt, 3, false),
+				TestCollection::new(true, 100, vt, 3, &Distance::Euclidean),
 				true,
 				true,
 				true,
@@ -2071,7 +2071,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new(true, 1000, vt, 20, false),
+				TestCollection::new(true, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				false,
@@ -2088,7 +2088,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new(true, 1000, vt, 20, false),
+				TestCollection::new(true, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				false,
@@ -2105,7 +2105,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new(true, 1000, vt, 20, false),
+				TestCollection::new(true, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				false,
@@ -2127,7 +2127,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new(false, i, vt, 1, false),
+					TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
 					true,
 					true,
 					true,
@@ -2145,7 +2145,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new(false, 100, vt, 3, false),
+				TestCollection::new(false, 100, vt, 3, &Distance::Euclidean),
 				true,
 				true,
 				true,
@@ -2162,7 +2162,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new(false, 1000, vt, 20, false),
+				TestCollection::new(false, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				true,

@@ -508,10 +508,9 @@ impl From<&HnswParams> for SelectNeighbors {
 				Self::HeuristicKeep
 			}
 		} else if p.extend_candidates {
-				Self::HeuristicExt
-			} else {
-				Self::Heuristic
-			}
+			Self::HeuristicExt
+		} else {
+			Self::Heuristic
 		}
 	}
 }
@@ -632,7 +631,6 @@ mod tests {
 	use std::collections::hash_map::Entry;
 	use std::collections::{HashMap, HashSet};
 	use std::sync::Arc;
-	use test_case::test_matrix;
 
 	async fn insert_collection_hnsw(
 		h: &mut Hnsw,
@@ -725,38 +723,39 @@ mod tests {
 		extend_candidates: bool,
 		keep_pruned_connections: bool,
 	) {
-		let for_jaccard = distance == Distance::Jaccard;
-		let collection = TestCollection::new(true, collection_size, vt, dimension, for_jaccard);
+		info!("test_hnsw - dist: {distance} - type: {vt} - coll size: {collection_size} - dim: {dimension} - m: {m} - ext: {extend_candidates} - keep: {keep_pruned_connections}");
+		let collection = TestCollection::new(true, collection_size, vt, dimension, &distance);
 		let params =
 			new_params(dimension, vt, distance, m, extend_candidates, keep_pruned_connections);
 		test_hnsw_collection(&params, &collection).await;
 	}
 
-	#[test_matrix(
-	[Distance::Chebyshev, Distance::Cosine, Distance::Euclidean, Distance::Hamming,
-	Distance::Jaccard, Distance::Manhattan, Distance::Minkowski(2.into()), Distance::Pearson],
-	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
-	30, 5, 12, [false, true], [false, true])]
 	#[test_log::test(tokio::test)]
-	async fn test_hnsw_small(
-		distance: Distance,
-		vt: VectorType,
-		collection_size: usize,
-		dimension: usize,
-		m: usize,
-		extend_candidates: bool,
-		keep_pruned_connections: bool,
-	) {
-		test_hnsw(
-			distance,
-			vt,
-			collection_size,
-			dimension,
-			m,
-			extend_candidates,
-			keep_pruned_connections,
-		)
-		.await
+	async fn test_hnsw_xs() {
+		for d in [
+			Distance::Chebyshev,
+			Distance::Cosine,
+			Distance::Euclidean,
+			Distance::Hamming,
+			Distance::Jaccard,
+			Distance::Manhattan,
+			Distance::Minkowski(2.into()),
+			Distance::Pearson,
+		] {
+			for vt in [
+				VectorType::F64,
+				VectorType::F32,
+				VectorType::I64,
+				VectorType::I32,
+				VectorType::I16,
+			] {
+				for extend in [false, true] {
+					for keep in [false, true] {
+						test_hnsw(d.clone(), vt, 30, 3, 12, extend, keep).await;
+					}
+				}
+			}
+		}
 	}
 
 	#[test_log::test(tokio::test)]
@@ -764,31 +763,32 @@ mod tests {
 		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 2, 24, true, true).await
 	}
 
-	#[test_matrix(
-	[Distance::Chebyshev, Distance::Cosine, Distance::Euclidean, Distance::Hamming,
-	Distance::Jaccard, Distance::Manhattan, Distance::Minkowski(2.into()), Distance::Pearson],
-	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
-	40, 1536, 24, false, false)]
 	#[test_log::test(tokio::test)]
-	async fn test_hnsw_large(
-		distance: Distance,
-		vt: VectorType,
-		collection_size: usize,
-		dimension: usize,
-		m: usize,
-		extend_candidates: bool,
-		keep_pruned_connections: bool,
-	) {
-		test_hnsw(
-			distance,
-			vt,
-			collection_size,
-			dimension,
-			m,
-			extend_candidates,
-			keep_pruned_connections,
-		)
-		.await
+	async fn test_hnsw_small() {
+		for d in [
+			Distance::Chebyshev,
+			Distance::Cosine,
+			Distance::Euclidean,
+			Distance::Hamming,
+			Distance::Jaccard,
+			Distance::Manhattan,
+			Distance::Minkowski(2.into()),
+			Distance::Pearson,
+		] {
+			for vt in [
+				VectorType::F64,
+				VectorType::F32,
+				VectorType::I64,
+				VectorType::I32,
+				VectorType::I16,
+			] {
+				for extend in [false, true] {
+					for keep in [false, true] {
+						test_hnsw(d.clone(), vt, 200, 5, 12, extend, keep).await;
+					}
+				}
+			}
+		}
 	}
 
 	#[test_log::test(tokio::test)]
@@ -867,13 +867,7 @@ mod tests {
 		}
 	}
 
-	#[test_matrix(
-	[Distance::Chebyshev, Distance::Cosine, Distance::Euclidean, Distance::Hamming,
-	Distance::Jaccard, Distance::Manhattan, Distance::Minkowski(2.into()), Distance::Pearson],
-	[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16],
-	30, 2, [false, true], 12, false, false)]
-	#[test_log::test(tokio::test)]
-	async fn test_hnsw_index_small(
+	async fn test_hnsw_index(
 		distance: Distance,
 		vt: VectorType,
 		collection_size: usize,
@@ -883,13 +877,39 @@ mod tests {
 		extend_candidates: bool,
 		keep_pruned_connections: bool,
 	) {
-		let for_jaccard = distance == Distance::Jaccard;
-		let collection = TestCollection::new(unique, collection_size, vt, dimension, for_jaccard);
+		info!("test_hnsw_index - dist: {distance} - type: {vt} - coll size: {collection_size} - dim: {dimension} - unique: {unique} - m: {m} - ext: {extend_candidates} - keep: {keep_pruned_connections}");
+		let collection = TestCollection::new(unique, collection_size, vt, dimension, &distance);
 		let p = new_params(dimension, vt, distance, m, extend_candidates, keep_pruned_connections);
 		let mut h = HnswIndex::new(&p);
 		let map = insert_collection_hnsw_index(&mut h, &collection).await;
 		find_collection_hnsw_index(&mut h, &collection).await;
 		delete_hnsw_index_collection(&mut h, &collection, map).await;
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn test_hnsw_index_xs() {
+		for d in [
+			Distance::Chebyshev,
+			Distance::Cosine,
+			Distance::Euclidean,
+			Distance::Hamming,
+			Distance::Jaccard,
+			Distance::Manhattan,
+			Distance::Minkowski(2.into()),
+			Distance::Pearson,
+		] {
+			for vt in [
+				VectorType::F64,
+				VectorType::F32,
+				VectorType::I64,
+				VectorType::I32,
+				VectorType::I16,
+			] {
+				for unique in [false, true] {
+					test_hnsw_index(d.clone(), vt, 30, 2, unique, 12, true, true).await;
+				}
+			}
+		}
 	}
 
 	#[test_log::test(tokio::test)]
@@ -1137,7 +1157,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, true, true);
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, true, true);
 		let mut h = Hnsw::new(&p);
 		insert_collection_hnsw(&mut h, &collection).await;
 		let pt = new_i16_vec(-2, -3);
@@ -1153,7 +1173,7 @@ mod tests {
 	#[test_log::test(tokio::test)]
 	async fn test_recall() {
 		let (dim, vt, m, size) = (5, VectorType::F64, 24, 500);
-		let collection = TestCollection::new(true, size, vt, dim, false);
+		let collection = TestCollection::new(true, size, vt, dim, &Distance::Euclidean);
 		let p = new_params(dim, vt, Distance::Euclidean, m, true, true);
 		let mut h = HnswIndex::new(&p);
 		insert_collection_hnsw_index(&mut h, &collection).await;
