@@ -79,6 +79,8 @@ impl Writer {
 					false => TableMutation::Set(id, v.into_owned()),
 				},
 			);
+		} else {
+			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
 	}
 
@@ -120,8 +122,8 @@ mod tests {
 	use std::borrow::Cow;
 	use std::time::Duration;
 
-	use crate::cf::TableMutation::Set;
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
+	use crate::fflags::FFLAGS;
 	use crate::key::key_req::KeyRequirements;
 	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 	use crate::sql::changefeed::ChangeFeed;
@@ -240,40 +242,64 @@ mod tests {
 				vs::u64_to_versionstamp(2),
 				DatabaseMutation(vec![TableMutations(
 					"mytb".to_string(),
-					vec![TableMutation::SetPrevious(
-						Thing::from(("mytb".to_string(), "A".to_string())),
-						Value::None,
-						Value::from("a"),
-					)],
+					match FFLAGS.change_feed_live_queries.enabled() {
+						true => vec![TableMutation::SetPrevious(
+							Thing::from(("mytb".to_string(), "A".to_string())),
+							Value::None,
+							Value::from("a"),
+						)],
+						false => vec![TableMutation::Set(
+							Thing::from(("mytb".to_string(), "A".to_string())),
+							Value::from("a"),
+						)],
+					},
 				)]),
 			),
 			ChangeSet(
 				vs::u64_to_versionstamp(3),
 				DatabaseMutation(vec![TableMutations(
 					"mytb".to_string(),
-					vec![TableMutation::SetPrevious(
-						Thing::from(("mytb".to_string(), "C".to_string())),
-						Value::None,
-						Value::from("c"),
-					)],
+					match FFLAGS.change_feed_live_queries.enabled() {
+						true => vec![TableMutation::SetPrevious(
+							Thing::from(("mytb".to_string(), "C".to_string())),
+							Value::None,
+							Value::from("c"),
+						)],
+						false => vec![TableMutation::Set(
+							Thing::from(("mytb".to_string(), "C".to_string())),
+							Value::from("c"),
+						)],
+					},
 				)]),
 			),
 			ChangeSet(
 				vs::u64_to_versionstamp(4),
 				DatabaseMutation(vec![TableMutations(
 					"mytb".to_string(),
-					vec![
-						TableMutation::SetPrevious(
-							Thing::from(("mytb".to_string(), "B".to_string())),
-							Value::None,
-							Value::from("b"),
-						),
-						TableMutation::SetPrevious(
-							Thing::from(("mytb".to_string(), "C".to_string())),
-							Value::None,
-							Value::from("c2"),
-						),
-					],
+					match FFLAGS.change_feed_live_queries.enabled() {
+						true => vec![
+							TableMutation::SetPrevious(
+								Thing::from(("mytb".to_string(), "B".to_string())),
+								Value::None,
+								Value::from("b"),
+							),
+							TableMutation::SetPrevious(
+								Thing::from(("mytb".to_string(), "C".to_string())),
+								Value::None,
+								Value::from("c2"),
+							),
+						],
+						false => vec![
+							TableMutation::Set(
+								Thing::from(("mytb".to_string(), "B".to_string())),
+								Value::from("b"),
+							),
+							TableMutation::Set(
+								Thing::from(("mytb".to_string(), "C".to_string())),
+								Value::from("c2"),
+							),
+						],
+					},
 				)]),
 			),
 		];
@@ -298,18 +324,30 @@ mod tests {
 			vs::u64_to_versionstamp(4),
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
-				vec![
-					TableMutation::SetPrevious(
-						Thing::from(("mytb".to_string(), "B".to_string())),
-						Value::None,
-						Value::from("b"),
-					),
-					TableMutation::SetPrevious(
-						Thing::from(("mytb".to_string(), "C".to_string())),
-						Value::None,
-						Value::from("c2"),
-					),
-				],
+				match FFLAGS.change_feed_live_queries.enabled() {
+					true => vec![
+						TableMutation::SetPrevious(
+							Thing::from(("mytb".to_string(), "B".to_string())),
+							Value::None,
+							Value::from("b"),
+						),
+						TableMutation::SetPrevious(
+							Thing::from(("mytb".to_string(), "C".to_string())),
+							Value::None,
+							Value::from("c2"),
+						),
+					],
+					false => vec![
+						TableMutation::Set(
+							Thing::from(("mytb".to_string(), "B".to_string())),
+							Value::from("b"),
+						),
+						TableMutation::Set(
+							Thing::from(("mytb".to_string(), "C".to_string())),
+							Value::from("c2"),
+						),
+					],
+				},
 			)]),
 		)];
 		assert_eq!(r, want);

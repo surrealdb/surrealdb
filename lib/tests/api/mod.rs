@@ -979,10 +979,21 @@ async fn changefeed() {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
+		// TODO(fflag-lqcf)
+		// 	surrealdb::sql::value(
+		// 		"[
+		// 	{
+		// 		create: {
+		// 			id: user:jane,
+		// 			name: 'Jane'
+		// 		}
+		// 	}
+		// ]"
+		// 	)
 		surrealdb::sql::value(
 			"[
 		{
-			create: {
+			update: {
 				id: user:jane,
 				name: 'Jane'
 			}
