@@ -6,6 +6,7 @@ use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::fflags::FFLAGS;
 use crate::sql::paths::META;
 use crate::sql::paths::SC;
 use crate::sql::paths::SD;
@@ -25,6 +26,11 @@ impl<'a> Document<'a> {
 	) -> Result<(), Error> {
 		// Check if forced
 		if !opt.force && !self.changed() {
+			return Ok(());
+		}
+		// Under the new mechanism, live query notifications only come from polling the change feed
+		// This check can be moved up the call stack, as this entire method will become unnecessary
+		if FFLAGS.change_feed_live_queries.enabled() {
 			return Ok(());
 		}
 		// Check if we can send notifications

@@ -152,3 +152,6 @@ mod parser {
 }
 
 pub use self::parser::{idiom, json, parse, subquery, thing, value};
+
+#[deprecated(since = "1.2.0")]
+pub use self::parser::error::ParseError;

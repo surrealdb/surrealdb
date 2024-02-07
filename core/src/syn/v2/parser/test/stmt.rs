@@ -359,6 +359,7 @@ fn parse_define_field() {
 				Kind::Number,
 				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
 			])))),
+			#[cfg(feature = "sql2")]
 			readonly: false,
 			value: Some(Value::Null),
 			assert: Some(Value::Bool(true)),
@@ -483,6 +484,7 @@ fn parse_define_analyzer() {
 				Filter::Uppercase,
 			]),
 			comment: None,
+			#[cfg(feature = "sql2")]
 			function: Some(Ident("foo::bar".to_string())),
 		})),
 	)
@@ -1107,6 +1109,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Table(RemoveTableStatement {
 			name: Ident("foo".to_owned()),
+			#[cfg(feature = "sql2")]
 			if_exists: false,
 		}))
 	);

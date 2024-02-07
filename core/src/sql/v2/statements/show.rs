@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Datetime, Table, Value};
+use crate::vs::{conv, Versionstamp};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,19 @@ use std::fmt;
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
+}
+
+impl ShowSince {
+	pub fn versionstamp(vs: &Versionstamp) -> ShowSince {
+		ShowSince::Versionstamp(conv::versionstamp_to_u64(vs))
+	}
+
+	pub fn as_versionstamp(&self) -> Option<Versionstamp> {
+		match self {
+			ShowSince::Timestamp(_) => None,
+			ShowSince::Versionstamp(v) => Some(conv::u64_to_versionstamp(*v)),
+		}
+	}
 }
 
 // ShowStatement is used to show changes in a table or database via

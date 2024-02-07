@@ -11,11 +11,9 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 pub struct DefineAnalyzerStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
-	pub function: Option<Ident>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
@@ -50,9 +48,6 @@ impl DefineAnalyzerStatement {
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ANALYZER {}", self.name)?;
-		if let Some(ref i) = self.function {
-			write!(f, " FUNCTION fn::{i}")?
-		}
 		if let Some(v) = &self.tokenizers {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
 			write!(f, " TOKENIZERS {}", tokens.join(","))?;

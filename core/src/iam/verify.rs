@@ -19,7 +19,11 @@ async fn config(
 	de_code: String,
 	_token_header: Header,
 ) -> Result<(DecodingKey, Validation), Error> {
-	if de_kind == Algorithm::Jwks {
+	#[cfg(feature = "sql2")]
+	let is_jwks = de_kind == Algorithm::Jwks;
+	#[cfg(not(feature = "sql2"))]
+	let is_jwks = false;
+	if is_jwks {
 		#[cfg(not(feature = "jwks"))]
 		{
 			warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
@@ -91,6 +95,7 @@ fn config_alg(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation)
 			DecodingKey::from_rsa_pem(code.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
+		#[cfg(feature = "sql2")]
 		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here
 	}
 }
