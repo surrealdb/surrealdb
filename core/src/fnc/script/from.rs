@@ -24,7 +24,7 @@ fn check_nul(s: &str) -> Result<(), Error> {
 
 impl<'js> FromJs<'js> for Value {
 	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
-		match val.type_of() {
+		match dbg!(val.type_of()) {
 			js::Type::Undefined => Ok(Value::None),
 			js::Type::Null => Ok(Value::Null),
 			js::Type::Bool => Ok(Value::from(val.as_bool().unwrap())),
@@ -41,11 +41,11 @@ impl<'js> FromJs<'js> for Value {
 				Ok(x.into())
 			}
 			js::Type::BigInt => {
-				let big_int = val.into_big_int().unwrap();
-				if let Ok(i) = big_int.clone().to_i64() {
+				// TODO: Optimize this if rquickjs ever supports better conversion methods.
+				let str = Coerced::<String>::from_js(ctx, val)?;
+				if let Ok(i) = str.parse::<i64>() {
 					return Ok(Value::from(i));
 				}
-				let str = Coerced::<String>::from_js(ctx, big_int.into())?;
 				match str.parse::<Decimal>() {
 					Ok(x) => Ok(Value::from(x)),
 					Err(e) => Err(Exception::from_message(ctx.clone(), &e.to_string())?.throw()),
