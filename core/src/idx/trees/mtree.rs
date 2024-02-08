@@ -392,6 +392,7 @@ impl MTree {
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
+		let obj = obj.into();
 		// First we check if we already have the object. In this case we just append the doc.
 		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
@@ -843,7 +844,7 @@ impl MTree {
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(tx, store, root_node, &None, object, doc_id, &mut deleted)
+				.delete_at_node(tx, store, root_node, &None, object.into(), doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
@@ -2684,5 +2685,11 @@ mod tests {
 		debug!("Seed: {}", seed);
 		// Create a seeded RNG
 		StdRng::seed_from_u64(seed)
+	}
+
+	impl Vector {
+		fn clone_vector(&self) -> Vector {
+			self.clone()
+		}
 	}
 }
