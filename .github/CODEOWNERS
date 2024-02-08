@@ -28,6 +28,7 @@ supply-chain/* @surrealdb/security
 /doc/ @surrealdb/db
 /lib/ @surrealdb/db
 /src/ @surrealdb/db
+/tests/ @surrealdb/db
 
 # Code for fuzzing configuration
 /lib/fuzz/ @surrealdb/security
