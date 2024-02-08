@@ -101,14 +101,12 @@ impl RequestContext {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotificationContext {
 	pub live_id: String,
-	pub notification_id: String,
 }
 
 impl Default for NotificationContext {
 	fn default() -> Self {
 		Self {
 			live_id: "unknown".to_string(),
-			notification_id: "unknown".to_string(),
 		}
 	}
 }
@@ -117,13 +115,6 @@ impl NotificationContext {
 	pub fn with_live_id(self, live_id: String) -> Self {
 		Self {
 			live_id,
-			..self
-		}
-	}
-
-	pub fn with_notification_id(self, notification_id: String) -> Self {
-		Self {
-			notification_id,
 			..self
 		}
 	}
@@ -151,9 +142,6 @@ pub fn record_rpc(cx: &TelemetryContext, res_size: usize, is_error: bool) {
 		]);
 	} else {
 		// If a bug causes the RequestContent to be empty, we still want to record the metrics to avoid a silent failure.
-		if true {
-			panic!("lasagna!");
-		}
 		warn!("record_rpc: no request context found, resulting metrics will be invalid");
 		attrs.extend_from_slice(&[
 			KeyValue::new("rpc.method", "unknown"),

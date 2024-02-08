@@ -311,11 +311,14 @@ impl Connection {
 					let res =
 						Connection::process_message(rpc.clone(), &req.method, req.params).await;
 					// Process the response
-					res.into_response(req.id).send(&otel_cx, fmt, &chn).with_context(otel_cx).await
+					res.into_response(req.id)
+						.send(otel_cx.clone(), fmt, &chn)
+						.with_context(otel_cx)
+						.await
 				}
 				Err(err) => {
 					// Process the response
-					failure(None, err).send(&otel_cx, fmt, &chn).with_context(otel_cx).await
+					failure(None, err).send(otel_cx.clone(), fmt, &chn).with_context(otel_cx).await
 				}
 			}
 		}

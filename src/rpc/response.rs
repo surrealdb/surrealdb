@@ -90,7 +90,7 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	pub async fn send(self, cx: &TelemetryContext, fmt: Format, chn: &Sender<Message>) {
+	pub async fn send(self, cx: TelemetryContext, fmt: Format, chn: &Sender<Message>) {
 		// Create a new tracing span
 		let span = Span::current();
 		// Log the rpc response call
@@ -110,7 +110,7 @@ impl Response {
 		let (len, msg) = fmt.res(self).unwrap();
 		// Send the message to the write channel
 		if chn.send(msg).await.is_ok() {
-			record_rpc(cx, len, is_error);
+			record_rpc(&cx, len, is_error);
 		};
 	}
 }
