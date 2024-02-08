@@ -54,7 +54,7 @@ pub(crate) async fn notifications(canceller: CancellationToken) {
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()
 								  .with_live_id(id.to_string());
-							let cx = cx.with_value(not_ctx);
+							let cx = Arc::new(cx.with_value(not_ctx));
 							// Get the WebSocket output format
 							let format = rpc.read().await.format;
 							// get the WebSocket sending channel
