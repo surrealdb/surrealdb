@@ -5426,7 +5426,8 @@ dependencies = [
  "surrealdb-derive",
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
- "surrealml-core",
+ "surrealml-core 0.0.7",
+ "surrealml-core 0.0.8",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5507,6 +5508,21 @@ name = "surrealml-core"
 version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3614a87a606d39a6152a82452a1aa8946d985465c425972a2ef13e078c6df59a"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "ndarray",
+ "once_cell",
+ "ort",
+ "regex",
+]
+
+[[package]]
+name = "surrealml-core"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12c54e2e688e15c48e3bd26824311c5143b17028391733f88862f162f70dd4ca"
 dependencies = [
  "bytes",
  "futures-core",
