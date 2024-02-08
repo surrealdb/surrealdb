@@ -161,6 +161,12 @@ run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel 
 category = "CI - INTEGRATION TESTS"
 run_task = { name = ["start-tikv", "ci-api-integration-tikv-tests", "stop-tikv"], fork = true }
 
+[tasks.ci-api-integration-surrealkv]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
+run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
+
+
 #
 # Services
 #
