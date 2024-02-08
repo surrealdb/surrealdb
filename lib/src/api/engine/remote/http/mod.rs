@@ -218,7 +218,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 }
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
-	if let Some((_stats, result)) = query(request).await?.results.remove(&0) {
+	if let Some((_stats, result)) = query(request).await?.results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
@@ -585,7 +585,7 @@ async fn router(
 		}
 		Method::Unset => {
 			if let [Value::Strand(Strand(key))] = &params[..1] {
-				vars.remove(key);
+				vars.swap_remove(key);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}

@@ -207,7 +207,7 @@ pub(crate) fn router(
 							}
 							Method::Unset => {
 								if let [Value::Strand(Strand(key))] = &params[..1] {
-									vars.remove(key);
+									vars.swap_remove(key);
 								}
 							}
 							Method::Live => {
@@ -300,7 +300,7 @@ pub(crate) fn router(
 												if let Some((method, sender)) = routes.remove(&id) {
 													if matches!(method, Method::Set) {
 														if let Some((key, value)) =
-															var_stash.remove(&id)
+															var_stash.swap_remove(&id)
 														{
 															vars.insert(key, value);
 														}

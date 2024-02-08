@@ -410,7 +410,7 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
-	if let Some((_stats, result)) = process(responses).results.remove(&0) {
+	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
