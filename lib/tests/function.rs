@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::{Number, Value};
+use surrealdb_core::sql::{self, Number, Value};
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	let db = new_ds().await?;
@@ -13,7 +13,7 @@ async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error
 	for (i, r) in response.into_iter().map(|r| r.result).enumerate() {
 		let v = r?;
 		if let Some(desired_response) = desired_responses.get(i) {
-			let desired_value = Value::parse(desired_response);
+			let desired_value = sql::Value::parse(desired_response);
 			// If both values are NaN, they are equal from a test PoV
 			if !desired_value.is_nan() || !v.is_nan() {
 				assert_eq!(
@@ -55,6 +55,24 @@ async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), 
 		} else {
 			panic!("Response index {i} out of bounds of expected responses.");
 		}
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn error_on_invalid_function() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let query = sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Function(
+		Box::new(sql::Function::Normal("this is an invalid function name".to_string(), Vec::new())),
+	))]));
+	let session = Session::owner().with_ns("test").with_db("test");
+	let mut resp = dbs.process(query, &session, None).await.unwrap();
+	assert_eq!(resp.len(), 1);
+	match resp.pop().unwrap().result {
+		Err(Error::InvalidFunction {
+			..
+		}) => {}
+		x => panic!("returned wrong result {:#?}", x),
 	}
 	Ok(())
 }
