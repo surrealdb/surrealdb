@@ -5328,6 +5328,7 @@ dependencies = [
  "path-clean",
  "pharos",
  "pprof",
+ "radix_trie",
  "rand 0.8.5",
  "regex",
  "reqwest",

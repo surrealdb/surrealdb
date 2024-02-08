@@ -110,6 +110,7 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 rand = "0.8.5"
+radix_trie = "0.2.1"
 regex = "1.10.2"
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
@@ -158,6 +159,10 @@ harness = false
 
 [[bench]]
 name = "processor"
+harness = false
+
+[[bench]]
+name = "hash_trie_btree"
 harness = false
 
 [[bench]]
