@@ -1011,10 +1011,6 @@ criteria = "safe-to-deploy"
 version = "0.4.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.lru]]
-version = "0.12.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.lz4-sys]]
 version = "1.9.4"
 criteria = "safe-to-deploy"
