@@ -71,7 +71,12 @@ macro_rules! dispatch {
 					#[allow(clippy::redundant_closure_call)]
 					$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
 				},)+
-				_ => unreachable!()
+				_ => {
+					return Err($crate::err::Error::InvalidFunction{
+						name: String::from($name),
+						message: "no such builtin function".to_string()
+					})
+				}
 			}
 		}
 	};
