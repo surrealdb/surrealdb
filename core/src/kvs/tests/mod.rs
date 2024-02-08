@@ -294,7 +294,7 @@ mod surrealkv {
 	include!("tb.rs");
 	include!("multireader.rs");
 	include!("multiwriter_different_keys.rs");
-	// include!("multiwriter_same_keys_conflict.rs");
+	include!("multiwriter_same_keys_allow.rs");
 	include!("timestamp_to_versionstamp.rs");
 	include!("nd.rs");
 	include!("ndlq.rs");

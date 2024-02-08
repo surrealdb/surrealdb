@@ -1,12 +1,12 @@
 use crate::key::error::KeyCategory::Unknown;
 
-// #[tokio::test]
-// #[serial]
-// async fn initialise() {
-// 	let mut tx = new_tx(Write, Optimistic).await;
-// 	assert!(tx.put(Unknown, "test", "ok").await.is_ok());
-// 	tx.commit().await.unwrap();
-// }
+#[tokio::test]
+#[serial]
+async fn initialise() {
+	let mut tx = new_tx(Write, Optimistic).await;
+	assert!(tx.put(Unknown, "test", "ok").await.is_ok());
+	tx.commit().await.unwrap();
+}
 
 #[tokio::test]
 #[serial]
