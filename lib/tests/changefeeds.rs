@@ -512,20 +512,40 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	};
 	assert!(versionstamp2 < versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
-		{
-			create: {
-				id: user:jane,
-				name: 'Jane'
-			}
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
+						{
+							 create: {
+								 id: user:jane,
+								 name: 'Jane'
+							 }
+						}
+					]"
+				)
+				.unwrap()
+			);
 		}
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
+					{
+						 update: {
+							 id: user:jane,
+							 name: 'Jane'
+						 }
+					}
 	]"
-		)
-		.unwrap()
-	);
+				)
+				.unwrap()
+			);
+		}
+	}
 	// UPDATE user:amos
 	let a = array.get(3).unwrap();
 	let Value::Object(a) = a else {
