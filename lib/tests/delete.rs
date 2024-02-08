@@ -9,6 +9,7 @@ use surrealdb::iam::Role;
 use surrealdb::sql::Value;
 
 #[tokio::test]
+#[ntest::timeout(1000)]
 async fn delete() -> Result<(), Error> {
 	let sql = "
 		CREATE person:test SET name = 'Tester';

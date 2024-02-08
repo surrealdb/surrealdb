@@ -3,6 +3,7 @@
 static PERMITS: Semaphore = Semaphore::const_new(1);
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn connect() {
 	let (permit, db) = new_db().await;
 	drop(permit);
@@ -10,6 +11,7 @@ async fn connect() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn yuse() {
 	let (permit, db) = new_db().await;
 	let item = Ulid::new().to_string();
@@ -34,6 +36,7 @@ async fn yuse() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn invalidate() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -48,6 +51,7 @@ async fn invalidate() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn signup_scope() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
@@ -77,6 +81,7 @@ async fn signup_scope() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn signin_ns() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -96,6 +101,7 @@ async fn signin_ns() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn signin_db() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
@@ -117,6 +123,7 @@ async fn signin_db() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn signin_scope() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
@@ -159,6 +166,7 @@ async fn signin_scope() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn scope_throws_error() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
@@ -221,6 +229,7 @@ async fn scope_throws_error() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn scope_invalid_query() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
@@ -287,6 +296,7 @@ async fn scope_invalid_query() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn authenticate() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -308,6 +318,7 @@ async fn authenticate() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn query() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -331,6 +342,7 @@ async fn query() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn query_decimals() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -344,6 +356,7 @@ async fn query_decimals() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn query_binds() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -377,6 +390,7 @@ async fn query_binds() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn query_with_stats() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -394,6 +408,7 @@ async fn query_with_stats() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn query_chaining() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -411,6 +426,7 @@ async fn query_chaining() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn mixed_results_query() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -422,6 +438,7 @@ async fn mixed_results_query() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn create_record_no_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -431,6 +448,7 @@ async fn create_record_no_id() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn create_record_with_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -441,6 +459,7 @@ async fn create_record_with_id() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn create_record_no_id_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -462,6 +481,7 @@ async fn create_record_no_id_with_content() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn create_record_with_id_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -485,6 +505,7 @@ async fn create_record_with_id_with_content() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn select_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -498,6 +519,7 @@ async fn select_table() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn select_record_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -513,6 +535,7 @@ async fn select_record_id() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn select_record_ranges() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -549,6 +572,7 @@ async fn select_record_ranges() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn update_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -562,6 +586,7 @@ async fn update_table() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn update_record_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -574,6 +599,7 @@ async fn update_record_id() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn update_table_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -618,6 +644,7 @@ async fn update_table_with_content() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn update_record_range_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -677,6 +704,7 @@ async fn update_record_range_with_content() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn update_record_id_with_content() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -718,6 +746,7 @@ struct Person {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn merge_record_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -755,6 +784,7 @@ async fn merge_record_id() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn patch_record_id() {
 	#[derive(Debug, Deserialize, Eq, PartialEq)]
 	struct Record {
@@ -794,6 +824,7 @@ async fn patch_record_id() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn delete_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -811,6 +842,7 @@ async fn delete_table() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn delete_record_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -830,6 +862,7 @@ async fn delete_record_id() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn delete_record_range() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -874,6 +907,7 @@ async fn delete_record_range() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn changefeed() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1048,6 +1082,7 @@ async fn changefeed() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn version() {
 	let (permit, db) = new_db().await;
 	drop(permit);
@@ -1055,6 +1090,7 @@ async fn version() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn set_unset() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1078,6 +1114,7 @@ async fn set_unset() {
 }
 
 #[test_log::test(tokio::test)]
+#[ntest::timeout(1000)]
 async fn return_bool() {
 	let (permit, db) = new_db().await;
 	let mut response = db.query("RETURN true").await.unwrap();
