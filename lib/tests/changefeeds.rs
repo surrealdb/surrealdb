@@ -6,7 +6,7 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
-use surrealdb_core::fflags::FFLAGS;
+use surrealdb_core::fflags::{FFlags, FFLAGS};
 
 #[tokio::test]
 async fn database_change_feeds() -> Result<(), Error> {
@@ -230,8 +230,9 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let _tmp = res.remove(0).result?;
 	// SHOW CHANGES
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+	let val = match FFLAGS.change_feed_live_queries.enabled() {
+		true => Value::parse(
+			"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -297,7 +298,76 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+		),
+		false => Value::parse(
+			"[
+			{
+				versionstamp: 65536,
+				changes: [
+					{
+						define_table: {
+							name: 'person'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Jaime'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 262144,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 327680,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 393216,
+				changes: [
+					{
+						update: {
+							id: person:1000,
+							name: 'Name: Yusuke'
+						}
+					}
+				]
+			}
+		]",
+		),
+	};
 	assert_eq!(tmp, val);
 	// Retain for 1h
 	let sql = "
@@ -398,10 +468,12 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
 		{
 			create: {
 				id: user:amos,
@@ -409,9 +481,27 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 			}
 		}
 	]"
-		)
-		.unwrap()
-	);
+				)
+				.unwrap()
+			);
+		}
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
+		{
+			update: {
+				id: user:amos,
+				name: 'Amos'
+			}
+		}
+	]"
+				)
+				.unwrap()
+			);
+		}
+	}
 	// UPDATE user:jane
 	let a = array.get(2).unwrap();
 	let Value::Object(a) = a else {
