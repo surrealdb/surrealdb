@@ -85,6 +85,11 @@ macro_rules! impl_builtins {
 			)*
 
 			$(
+				match $name($i){
+					Ok((i,x)) => return Ok((i,x)),
+					Err(Err::Failure(x)) => return Err(Err::Failure(x)),
+					_ => {}
+				}
 				if let Ok((i, x)) = $name($i){
 					return Ok((i,x))
 				}
