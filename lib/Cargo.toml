@@ -65,13 +65,11 @@ features = [
     "protocol-ws",
     "protocol-http",
     "kv-mem",
-    "kv-indxdb",
     "kv-rocksdb",
     "rustls",
     "native-tls",
     "http",
     "scripting",
-    "jwks",
 ]
 targets = []
 
