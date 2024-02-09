@@ -1,5 +1,7 @@
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
+#[cfg(debug_assertions)]
+use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -252,7 +254,7 @@ impl MTree {
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
-		let obj = Arc::new(obj);
+		let obj = obj.into();
 		// First we check if we already have the object. In this case we just append the doc.
 		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
@@ -301,10 +303,10 @@ impl MTree {
 			"New internal root - node: {} - e1.node: {} - e1.obj: {:?} - e1.radius: {} - e2.node: {} - e2.obj: {:?} - e2.radius: {}",
 			new_root_id,
 			p1.node,
-			o1.as_ref(),
+			o1,
 			p1.radius,
 			p2.node,
-			o2.as_ref(),
+			o2,
 			p2.radius
 		);
 		let mut entries = InternalMap::new();
@@ -416,7 +418,7 @@ impl MTree {
 				// Remove ObestSubtree from N;
 				node.remove(&best_entry_obj);
 				// if (N U P will fit into N)
-				let mut nup: HashSet<SharedVector> = HashSet::from_iter(node.keys().cloned());
+				let mut nup: BTreeSet<SharedVector> = BTreeSet::from_iter(node.keys().cloned());
 				nup.insert(o1.clone());
 				nup.insert(o2.clone());
 				if nup.len() <= self.state.capacity as usize {
@@ -454,10 +456,7 @@ impl MTree {
 					#[cfg(debug_assertions)]
 					debug!(
 						"NODE: {} - BE_OBJ: {:?} - BE_RADIUS: {} -> {}",
-						node_id,
-						best_entry_obj.as_ref(),
-						best_entry.radius,
-						covering_radius
+						node_id, best_entry_obj, best_entry.radius, covering_radius
 					);
 					best_entry.radius = covering_radius;
 					node.insert(best_entry_obj, best_entry);
@@ -616,7 +615,7 @@ impl MTree {
 		let mut promo = None;
 		let mut max_dist = 0f64;
 		let n = objects.len();
-		let mut dist_cache = HashMap::with_capacity(n * 2);
+		let mut dist_cache = BTreeMap::new();
 		for (i, o1) in objects.iter().enumerate() {
 			for o2 in objects.iter().take(n).skip(i + 1) {
 				let distance = self.calculate_distance(o1, o2)?;
@@ -707,7 +706,7 @@ impl MTree {
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(tx, store, root_node, &None, Arc::new(object), doc_id, &mut deleted)
+				.delete_at_node(tx, store, root_node, &None, object.into(), doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
@@ -809,7 +808,7 @@ impl MTree {
 		for (on_obj, on_entry) in &n_node {
 			let on_od_dist = self.calculate_distance(on_obj, &od)?;
 			#[cfg(debug_assertions)]
-			debug!("on_od_dist: {:?} / {} / {}", on_obj.as_ref(), on_od_dist, on_entry.radius);
+			debug!("on_od_dist: {:?} / {} / {}", on_obj, on_od_dist, on_entry.radius);
 			// If (d(Od, On) <= r(On))
 			if on_od_dist <= on_entry.radius {
 				on_objs.push((on_obj.clone(), on_entry.clone()));
@@ -819,7 +818,7 @@ impl MTree {
 		debug!("on_objs: {:?}", on_objs);
 		for (on_obj, mut on_entry) in on_objs {
 			#[cfg(debug_assertions)]
-			debug!("on_obj: {:?}", on_obj.as_ref());
+			debug!("on_obj: {:?}", on_obj);
 			// Delete (Od, child(On))
 			let on_node = store.get_node_mut(tx, on_entry.node).await?;
 			#[cfg(debug_assertions)]
@@ -1118,7 +1117,7 @@ impl MTree {
 	}
 }
 
-struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
+struct DistanceCache(BTreeMap<(SharedVector, SharedVector), f64>);
 
 pub(in crate::idx) type MTreeStore = TreeStore<MTreeNode>;
 type MStoredNode = StoredNode<MTreeNode>;
@@ -1402,7 +1401,7 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
-	use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+	use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 	use crate::err::Error;
 	use test_log::test;
@@ -1418,6 +1417,7 @@ mod tests {
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
+	use serial_test::serial;
 
 	async fn new_operation(
 		ds: &Datastore,
@@ -1450,6 +1450,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	async fn test_mtree_insertions() -> Result<(), Error> {
 		const CACHE_SIZE: usize = 20;
 
@@ -1975,8 +1976,8 @@ mod tests {
 	) -> Result<(), Error> {
 		for distance in [Distance::Euclidean, Distance::Manhattan] {
 			for capacity in capacities {
-				debug!(
-					"Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
+				info!(
+					"test_mtree_collection - Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
 					distance,
 					capacity,
 					collection.as_ref().len(),
@@ -2005,7 +2006,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	#[ignore]
+	#[serial]
 	async fn test_mtree_unique_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
@@ -2027,6 +2028,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	#[ignore]
 	async fn test_mtree_unique_xs_full_cache() -> Result<(), Error> {
 		for vt in
@@ -2049,6 +2051,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	async fn test_mtree_unique_small() -> Result<(), Error> {
 		for vt in [VectorType::F64, VectorType::I64] {
 			test_mtree_collection(
@@ -2066,6 +2069,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	async fn test_mtree_unique_normal() -> Result<(), Error> {
 		for vt in [VectorType::F32, VectorType::I32] {
 			test_mtree_collection(
@@ -2083,6 +2087,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	async fn test_mtree_unique_normal_full_cache() -> Result<(), Error> {
 		for vt in [VectorType::F32, VectorType::I32] {
 			test_mtree_collection(
@@ -2100,6 +2105,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	async fn test_mtree_unique_normal_root_cache() -> Result<(), Error> {
 		for vt in [VectorType::F32, VectorType::I32] {
 			test_mtree_collection(
@@ -2117,6 +2123,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	#[ignore]
 	async fn test_mtree_random_xs() -> Result<(), Error> {
 		for vt in
@@ -2140,6 +2147,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	async fn test_mtree_random_small() -> Result<(), Error> {
 		for vt in [VectorType::F64, VectorType::I64] {
 			test_mtree_collection(
@@ -2157,6 +2165,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[serial]
 	async fn test_mtree_random_normal() -> Result<(), Error> {
 		for vt in [VectorType::F32, VectorType::I32] {
 			test_mtree_collection(
@@ -2334,7 +2343,7 @@ mod tests {
 		if let Some(root_id) = t.state.root {
 			nodes.push_back((root_id, 0.0, None, 1));
 		}
-		let mut leaf_objects = HashSet::new();
+		let mut leaf_objects = BTreeSet::new();
 		while let Some((node_id, radius, center, depth)) = nodes.pop_front() {
 			assert!(node_ids.insert(node_id), "Node already exist: {}", node_id);
 			checks.node_count += 1;
@@ -2410,6 +2419,12 @@ mod tests {
 			}
 		} else {
 			*max = Some(val);
+		}
+	}
+
+	impl TreeVector {
+		fn clone_vector(&self) -> Self {
+			self.clone()
 		}
 	}
 }

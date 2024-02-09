@@ -8,8 +8,8 @@ use crate::sql::{Array, Thing, Value};
 use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -17,7 +17,7 @@ pub(crate) struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
 	hnsw: Hnsw,
-	vec_docs: HashMap<SharedVector, (Ids64, ElementId)>,
+	vec_docs: BTreeMap<SharedVector, (Ids64, ElementId)>,
 	doc_ids: Trie<Key, DocId>,
 	ids_doc: Vec<Thing>,
 }
@@ -29,7 +29,7 @@ impl HnswIndex {
 		let dim = p.dimension as usize;
 		let vector_type = p.vector_type;
 		let hnsw = Hnsw::new(p);
-		let vec_docs = HashMap::new();
+		let vec_docs = BTreeMap::new();
 		HnswIndex {
 			dim,
 			vector_type,
@@ -628,15 +628,16 @@ mod tests {
 	use crate::idx::trees::vector::{SharedVector, TreeVector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use roaring::RoaringTreemap;
-	use std::collections::hash_map::Entry;
-	use std::collections::{HashMap, HashSet};
+	use serial_test::serial;
+	use std::collections::btree_map::Entry;
+	use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 	use std::sync::Arc;
 
 	async fn insert_collection_hnsw(
 		h: &mut Hnsw,
 		collection: &TestCollection,
-	) -> HashSet<SharedVector> {
-		let mut set = HashSet::with_capacity(collection.as_ref().len());
+	) -> BTreeSet<SharedVector> {
+		let mut set = BTreeSet::new();
 		for (_, obj) in collection.as_ref() {
 			h.insert(obj.clone()).await;
 			set.insert(obj.clone());
@@ -731,6 +732,7 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_hnsw_xs() {
 		for d in [
 			Distance::Chebyshev,
@@ -759,11 +761,13 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_hnsw_small_euclidean_check() {
 		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 2, 24, true, true).await
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_hnsw_small() {
 		for d in [
 			Distance::Chebyshev,
@@ -792,6 +796,7 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_hnsw_large_euclidean() {
 		test_hnsw(Distance::Euclidean, VectorType::F64, 200, 5, 12, false, false).await
 	}
@@ -799,9 +804,8 @@ mod tests {
 	async fn insert_collection_hnsw_index(
 		h: &mut HnswIndex,
 		collection: &TestCollection,
-	) -> HashMap<SharedVector, HashSet<DocId>> {
-		let mut map: HashMap<SharedVector, HashSet<DocId>> =
-			HashMap::with_capacity(collection.as_ref().len());
+	) -> BTreeMap<SharedVector, HashSet<DocId>> {
+		let mut map: BTreeMap<SharedVector, HashSet<DocId>> = BTreeMap::new();
 		for (doc_id, obj) in collection.as_ref() {
 			h.insert(obj.clone(), *doc_id).await;
 			match map.entry(obj.clone()) {
@@ -852,7 +856,7 @@ mod tests {
 	async fn delete_hnsw_index_collection(
 		h: &mut HnswIndex,
 		collection: &TestCollection,
-		mut map: HashMap<SharedVector, HashSet<DocId>>,
+		mut map: BTreeMap<SharedVector, HashSet<DocId>>,
 	) {
 		for (doc_id, obj) in collection.as_ref() {
 			assert!(h.remove(obj.clone(), *doc_id).await, "Delete failed: {:?} {}", obj, doc_id);
@@ -887,6 +891,7 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_hnsw_index_xs() {
 		for d in [
 			Distance::Chebyshev,
@@ -913,6 +918,7 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_building() {
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, true, true);
 		let mut hnsw = Hnsw::new(&p);
@@ -1143,6 +1149,7 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_invalid_size() {
 		let collection = TestCollection::Unique(vec![
 			(0, new_i16_vec(-2, -3)),
@@ -1171,6 +1178,7 @@ mod tests {
 	}
 
 	#[test_log::test(tokio::test)]
+	#[serial]
 	async fn test_recall() {
 		let (dim, vt, m, size) = (5, VectorType::F64, 24, 500);
 		let collection = TestCollection::new(true, size, vt, dim, &Distance::Euclidean);
@@ -1272,7 +1280,6 @@ mod tests {
 		let mut vec = TreeVector::new(VectorType::I16, 2);
 		vec.add(x.into());
 		vec.add(y.into());
-		vec.compute_hash();
 		Arc::new(vec)
 	}
 }

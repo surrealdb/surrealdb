@@ -510,7 +510,7 @@ pub(super) mod tests {
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
-	use std::collections::{HashMap, HashSet, VecDeque};
+	use std::collections::{BTreeSet, HashMap, VecDeque};
 	use std::sync::Arc;
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {
@@ -544,7 +544,6 @@ pub(super) mod tests {
 			n += 1;
 			vec.add(Number::Int(n));
 		}
-		vec.compute_hash();
 		Arc::new(vec)
 	}
 
@@ -562,7 +561,6 @@ pub(super) mod tests {
 			// Some similarities (cosine) is undefined for null vector.
 			new_random_vec(rng, t, dim, gen)
 		} else {
-			vec.compute_hash();
 			Arc::new(vec)
 		}
 	}
@@ -570,11 +568,11 @@ pub(super) mod tests {
 	impl TreeVector {
 		pub(super) fn is_null(&self) -> bool {
 			match self {
-				TreeVector::F64(a, _) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::F32(a, _) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::I64(a, _) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::I32(a, _) => !a.iter().any(|a| !a.is_zero()),
-				TreeVector::I16(a, _) => !a.iter().any(|a| !a.is_zero()),
+				Self::F64(a) => !a.iter().any(|a| !a.is_zero()),
+				Self::F32(a) => !a.iter().any(|a| !a.is_zero()),
+				Self::I64(a) => !a.iter().any(|a| !a.is_zero()),
+				Self::I32(a) => !a.iter().any(|a| !a.is_zero()),
+				Self::I16(a) => !a.iter().any(|a| !a.is_zero()),
 			}
 		}
 	}
@@ -610,7 +608,7 @@ pub(super) mod tests {
 			gen: &RandomItemGenerator,
 		) -> Self {
 			let mut rng = get_seed_rnd();
-			let mut vector_set = HashSet::with_capacity(collection_size);
+			let mut vector_set = BTreeSet::new();
 			let mut attempts = collection_size * 2;
 			while vector_set.len() < collection_size {
 				vector_set.insert(new_random_vec(&mut rng, vector_type, dimension, gen));
