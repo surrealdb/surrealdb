@@ -34,6 +34,7 @@ struct SigninParams<'a> {
 }
 
 pub struct Socket {
+	pub pending_messages: Vec<serde_json::Value>,
 	pub stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
 
@@ -54,6 +55,7 @@ impl Socket {
 		}
 		let (stream, _) = connect_async(req).await?;
 		Ok(Self {
+			pending_messages: Vec::new(),
 			stream,
 		})
 	}
@@ -62,10 +64,20 @@ impl Socket {
 	pub async fn send_message(
 		&mut self,
 		format: Format,
-		message: serde_json::Value,
+		id: serde_json::Value,
+		method: serde_json::Value,
+		params: serde_json::Value,
 	) -> Result<(), Box<dyn Error>> {
 		let now = time::Instant::now();
+
+		let message = json!({
+			"id": id,
+			"message": method,
+			"params": params,
+		});
+
 		debug!("Sending message: {message}");
+
 		// Format the message
 		let msg = match format {
 			Format::Json => Message::Text(serde_json::to_string(&message)?),
@@ -127,83 +139,103 @@ impl Socket {
 	pub async fn receive_message(
 		&mut self,
 		format: Format,
+		id: Option<serde_json::Value>,
 	) -> Result<serde_json::Value, Box<dyn Error>> {
 		let now = time::Instant::now();
 		debug!("Receiving response...");
+
+		for i in 0..self.pending_messages.len() {
+			if self.pending_messages[i].get("id") == id.as_ref() {
+				return Ok(self.pending_messages.swap_remove(i));
+			}
+		}
+
 		loop {
-			tokio::select! {
-				_ = time::sleep(time::Duration::from_millis(5000)) => {
-					return Err(Box::new(TestError::NetworkError {message: "timeout after 5s waiting for the response".to_string()}))
-				}
-				res = self.stream.try_next() => {
-					match res {
-						Ok(res) => match res {
-							Some(Message::Text(msg)) => {
-								debug!("Response {msg:?} received in {:?}", now.elapsed());
-								match format {
-									Format::Json => {
-										let msg = serde_json::from_str(&msg)?;
-										debug!("Received message: {msg}");
-										return Ok(msg);
-									},
-									_ => {
-										return Err("Expected to receive a binary message".to_string().into());
+			let msg = loop {
+				tokio::select! {
+					_ = time::sleep(time::Duration::from_millis(5000)) => {
+						return Err(Box::new(TestError::NetworkError {message: "timeout after 5s waiting for the response".to_string()}))
+					}
+					res = self.stream.try_next() => {
+						match res {
+							Ok(res) => match res {
+								Some(Message::Text(msg)) => {
+									debug!("Response {msg:?} received in {:?}", now.elapsed());
+									match format {
+										Format::Json => {
+											let msg = serde_json::from_str(&msg)?;
+											debug!("Received message: {msg}");
+											break msg;
+										},
+										_ => {
+											return Err("Expected to receive a binary message".to_string().into());
+										}
 									}
+								},
+								Some(Message::Binary(msg)) => {
+									debug!("Response {msg:?} received in {:?}", now.elapsed());
+									match format {
+										Format::Cbor => {
+											pub mod try_from_impls {
+												include!("../../src/rpc/format/cbor/convert.rs");
+											}
+											// For tests we need to convert the binary data to
+											// a serde_json::Value so that test assertions work.
+											// First of all we deserialize the CBOR data.
+											let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
+											// Then we convert it to a SurrealQL Value.
+											let msg: Value = try_from_impls::Cbor(msg).try_into()?;
+											// Then we convert the SurrealQL to JSON.
+											let msg = msg.into_json();
+											// Then output the response.
+											debug!("Received message: {msg:?}");
+											return Ok(msg);
+										},
+										Format::Pack => {
+											pub mod try_from_impls {
+												include!("../../src/rpc/format/msgpack/convert.rs");
+											}
+											// For tests we need to convert the binary data to
+											// a serde_json::Value so that test assertions work.
+											// First of all we deserialize the MessagePack data.
+											let msg: rmpv::Value = rmpv::decode::read_value(&mut msg.as_slice())?;
+											// Then we convert it to a SurrealQL Value.
+											let msg: Value = try_from_impls::Pack(msg).try_into()?;
+											// Then we convert the SurrealQL to JSON.
+											let msg = msg.into_json();
+											// Then output the response.
+											debug!("Received message: {msg:?}");
+											break msg;
+										},
+										_ => {
+											return Err("Expected to receive a text message".to_string().into());
+										}
+									}
+								},
+								Some(_) => {
+									continue;
+								}
+								None => {
+									return Err("Expected to receive a message".to_string().into());
 								}
 							},
-							Some(Message::Binary(msg)) => {
-								debug!("Response {msg:?} received in {:?}", now.elapsed());
-								match format {
-									Format::Cbor => {
-										pub mod try_from_impls {
-											include!("../../src/rpc/format/cbor/convert.rs");
-										}
-										// For tests we need to convert the binary data to
-										// a serde_json::Value so that test assertions work.
-										// First of all we deserialize the CBOR data.
-										let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
-										// Then we convert it to a SurrealQL Value.
-										let msg: Value = try_from_impls::Cbor(msg).try_into()?;
-										// Then we convert the SurrealQL to JSON.
-										let msg = msg.into_json();
-										// Then output the response.
-										debug!("Received message: {msg:?}");
-										return Ok(msg);
-									},
-									Format::Pack => {
-										pub mod try_from_impls {
-											include!("../../src/rpc/format/msgpack/convert.rs");
-										}
-										// For tests we need to convert the binary data to
-										// a serde_json::Value so that test assertions work.
-										// First of all we deserialize the MessagePack data.
-										let msg: rmpv::Value = rmpv::decode::read_value(&mut msg.as_slice())?;
-										// Then we convert it to a SurrealQL Value.
-										let msg: Value = try_from_impls::Pack(msg).try_into()?;
-										// Then we convert the SurrealQL to JSON.
-										let msg = msg.into_json();
-										// Then output the response.
-										debug!("Received message: {msg:?}");
-										return Ok(msg);
-									},
-									_ => {
-										return Err("Expected to receive a text message".to_string().into());
-									}
-								}
-							},
-							Some(_) => {
-								continue;
+							Err(err) => {
+								return Err(format!("Error receiving the message: {}", err).into());
 							}
-							None => {
-								return Err("Expected to receive a message".to_string().into());
-							}
-						},
-						Err(err) => {
-							return Err(format!("Error receiving the message: {}", err).into());
 						}
 					}
 				}
+			};
+
+			if let Some(id) = id.as_ref() {
+				if msg.get("id") == Some(id) {
+					return Ok(msg);
+				}
+			} else {
+				return Ok(msg);
 			}
+
+			self.pending_messages.push(msg);
 		}
 	}
 
@@ -211,10 +243,12 @@ impl Socket {
 	pub async fn send_and_receive_message(
 		&mut self,
 		format: Format,
-		message: serde_json::Value,
+		id: serde_json::Value,
+		method: serde_json::Value,
+		params: serde_json::Value,
 	) -> Result<serde_json::Value, Box<dyn Error>> {
-		self.send_message(format, message).await?;
-		self.receive_message(format).await
+		self.send_message(format, id.clone(), method, params).await?;
+		self.receive_message(format, Some(id)).await
 	}
 
 	/// When testing Live Queries, we may receive multiple messages unordered.
@@ -227,6 +261,15 @@ impl Socket {
 	) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
 		let mut res = Vec::new();
 		let deadline = time::Instant::now() + timeout;
+
+		for m in self.pending_messages.drain(..expected.min(self.pending_messages.len())) {
+			res.push(m);
+		}
+
+		if res.len() == expected {
+			return Ok(res);
+		}
+
 		loop {
 			tokio::select! {
 				_ = time::sleep_until(deadline) => {
@@ -235,7 +278,7 @@ impl Socket {
 						return Err(format!("Expected {} messages but got {} after {:?}: {:?}", expected, res.len(), timeout, res).into());
 					}
 				}
-				msg = self.receive_message(format) => {
+				msg = self.receive_message(format,None) => {
 					res.push(msg?);
 				}
 			}
@@ -254,16 +297,9 @@ impl Socket {
 	) -> Result<serde_json::Value, Box<dyn Error>> {
 		// Generate an ID
 		let id = uuid::Uuid::new_v4().to_string();
-		// Construct message
-		let msg = json!({
-			"id": id,
-			"method": "use",
-			"params": [
-				ns, db
-			],
-		});
 		// Send message and receive response
-		let msg = self.send_and_receive_message(format, msg).await?;
+		let msg =
+			self.send_and_receive_message(format, json!(id), json!("use"), json!([ns, db])).await?;
 		// Check response message structure
 		match msg.as_object() {
 			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
@@ -293,14 +329,10 @@ impl Socket {
 	) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
 		// Generate an ID
 		let id = uuid::Uuid::new_v4().to_string();
-		// Construct message
-		let msg = json!({
-			"id": id,
-			"method": "query",
-			"params": [query],
-		});
 		// Send message and receive response
-		let msg = self.send_and_receive_message(format, msg).await?;
+		let msg = self
+			.send_and_receive_message(format, json!(id), json!("query"), json!([query]))
+			.await?;
 		// Check response message structure
 		match msg.as_object() {
 			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
@@ -335,16 +367,21 @@ impl Socket {
 	) -> Result<String, Box<dyn Error>> {
 		// Generate an ID
 		let id = uuid::Uuid::new_v4().to_string();
-		// Construct message
-		let msg = json!({
-			"id": id,
-			"method": "signin",
-			"params": [
-				SigninParams { user, pass, ns, db, sc }
-			],
-		});
 		// Send message and receive response
-		let msg = self.send_and_receive_message(format, msg).await?;
+		let msg = self
+			.send_and_receive_message(
+				format,
+				json!(id),
+				json!("signin"),
+				json!(SigninParams {
+					user,
+					pass,
+					ns,
+					db,
+					sc
+				}),
+			)
+			.await?;
 		// Check response message structure
 		match msg.as_object() {
 			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {

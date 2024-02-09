@@ -11,15 +11,8 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER).await?;
 	// Send INFO command
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "ping",
-			}),
-		)
-		.await;
+	let res =
+		socket.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("ping"), json!([])).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
@@ -69,13 +62,7 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_signin(FORMAT, "user", "pass", Some(NS), Some(DB), Some("scope")).await?;
 	// Send INFO command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "info",
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("info"), json!([]))
 		.await?;
 	assert!(res["result"].is_object(), "result: {:?}", res);
 	let res = res["result"].as_object().unwrap();
@@ -109,17 +96,15 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "signup",
-				"params": [{
-					"ns": NS,
-					"db": DB,
-					"sc": "scope",
-					"email": "email@email.com",
-					"pass": "pass",
-				}],
-			}),
+			json!(Ulid::new()),
+			json!("signup"),
+			json!([{
+				"ns": NS,
+				"db": DB,
+				"sc": "scope",
+				"email": "email@email.com",
+				"pass": "pass",
+			}]),
 		)
 		.await;
 	assert!(res.is_ok(), "result: {:?}", res);
@@ -161,17 +146,17 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "signup",
-				"params": [{
+			json!(Ulid::new()),
+			json!("signup"),
+			json!(
+				[{
 					"ns": NS,
 					"db": DB,
 					"sc": "scope",
 					"email": "email@email.com",
 					"pass": "pass",
-				}],
-			}),
+				}]
+			),
 		)
 		.await;
 	assert!(res.is_ok(), "result: {:?}", res);
@@ -188,17 +173,16 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "signin",
-				"params": [{
-					"ns": NS,
-					"db": DB,
-					"sc": "scope",
-					"email": "email@email.com",
-					"pass": "pass",
-				}],
-			}),
+			json!(Ulid::new()),
+			json!("signin"),
+			json!(
+			[{
+				"ns": NS,
+				"db": DB,
+				"sc": "scope",
+				"email": "email@email.com",
+				"pass": "pass",
+			}]),
 		)
 		.await;
 	assert!(res.is_ok(), "result: {:?}", res);
@@ -230,13 +214,7 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	// Send INVALIDATE command
 	socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "invalidate",
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("invalidate"), json!([]))
 		.await?;
 	// Verify we have an invalidated session
 	let res = socket.send_message_query(FORMAT, "DEFINE NAMESPACE test").await?;
@@ -266,13 +244,9 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "authenticate",
-				"params": [
-					token,
-				],
-			}),
+			json!(Ulid::new()),
+			json!("authenticate"),
+			json!([token,]),
 		)
 		.await?;
 	// Verify we have an authenticated session
@@ -296,26 +270,18 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "let",
-				"params": [
-					"let_var", "let_value",
-				],
-			}),
+			json!(Ulid::new()),
+			json!("let"),
+			json!(["let_var", "let_value",]),
 		)
 		.await?;
 	// Send SET command
 	socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "set",
-				"params": [
-					"set_var", "set_value",
-				],
-			}),
+			json!(Ulid::new()),
+			json!("set"),
+			json!(["set_var", "set_value",]),
 		)
 		.await?;
 	// Verify the variables are set
@@ -338,13 +304,9 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "let",
-				"params": [
-					"let_var", "let_value",
-				],
-			}),
+			json!(Ulid::new()),
+			json!("let"),
+			json!(["let_var", "let_value",]),
 		)
 		.await?;
 	// Verify the variable is set
@@ -352,16 +314,7 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["result"], json!(["let_value"]), "result: {:?}", res);
 	// Send UNSET command
 	socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "unset",
-				"params": [
-					"let_var",
-				],
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("unset"), json!(["let_var",]))
 		.await?;
 	// Verify the variable is unset
 	let res = socket.send_message_query(FORMAT, "SELECT * FROM $let_var").await?;
@@ -384,16 +337,7 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_query(FORMAT, "CREATE tester SET name = 'foo', value = 'bar'").await?;
 	// Send SELECT command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "select",
-				"params": [
-					"tester",
-				],
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("select"), json!(["tester",]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
@@ -419,17 +363,15 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "insert",
-				"params": [
-					"tester",
-					{
-						"name": "foo",
-						"value": "bar",
-					}
-				],
-			}),
+			json!(Ulid::new()),
+			json!("insert"),
+			json!([
+				"tester",
+				{
+					"name": "foo",
+					"value": "bar",
+				}
+			]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -463,16 +405,14 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "create",
-				"params": [
-					"tester",
-					{
-						"value": "bar",
-					}
-				],
-			}),
+			json!(Ulid::new()),
+			json!("create"),
+			json!([
+				"tester",
+				{
+					"value": "bar",
+				}
+			]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -506,16 +446,14 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "update",
-				"params": [
-					"tester",
-					{
-						"value": "bar",
-					}
-				],
-			}),
+			json!(Ulid::new()),
+			json!("update"),
+			json!([
+				"tester",
+				{
+					"value": "bar",
+				}
+			]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -550,16 +488,14 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "merge",
-				"params": [
-					"tester",
-					{
-						"value": "bar",
-					}
-				],
-			}),
+			json!(Ulid::new()),
+			json!("merge"),
+			json!([
+				"tester",
+				{
+					"value": "bar",
+				}
+			]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -595,24 +531,22 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "patch",
-				"params": [
-					"tester:id",
-					[
-						{
-							"op": "add",
-							"path": "value",
-							"value": "bar"
-						},
-						{
-							"op": "remove",
-							"path": "name",
-						}
-					]
+			json!(Ulid::new()),
+			json!("patch"),
+			json!([
+				"tester:id",
+				[
+					{
+						"op": "add",
+						"path": "value",
+						"value": "bar"
+					},
+					{
+						"op": "remove",
+						"path": "name",
+					}
 				]
-			}),
+			]),
 		)
 		.await?;
 	assert!(res["result"].is_object(), "result: {:?}", res);
@@ -643,16 +577,7 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_query(FORMAT, "CREATE tester:id").await?;
 	// Send DELETE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "delete",
-				"params": [
-					"tester"
-				]
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("delete"), json!(["tester"]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
@@ -663,16 +588,7 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_query(FORMAT, "CREATE tester:id").await?;
 	// Send DELETE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "delete",
-				"params": [
-					"tester:id"
-				]
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("delete"), json!(["tester:id"]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_object(), "result: {:?}", res);
@@ -701,13 +617,9 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": [
-					"CREATE tester; SELECT * FROM tester;",
-				]
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["CREATE tester; SELECT * FROM tester;",]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -731,13 +643,7 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	let mut socket = Socket::connect(&addr, SERVER).await?;
 	// Send version command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "version",
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("version"), json!([]))
 		.await?;
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
@@ -762,11 +668,9 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 		socket
 			.send_message(
 				FORMAT,
-				json!({
-					"id": Ulid::new(),
-					"method": "query",
-					"params": [format!("SLEEP 3s; RETURN {i};")],
-				}),
+				json!(Ulid::new()),
+				json!("query"),
+				json!([format!("SLEEP 3s; RETURN {i};")]),
 			)
 			.await?;
 	}
@@ -789,14 +693,7 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
 	// Send LIVE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "live",
-				"params": ["tester"],
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
@@ -805,11 +702,9 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["LIVE SELECT * FROM tester"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["LIVE SELECT * FROM tester"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -822,11 +717,9 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["CREATE tester:id SET name = 'foo'"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["CREATE tester:id SET name = 'foo'"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -877,14 +770,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
 	// Send LIVE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "live",
-				"params": ["tester"],
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
@@ -893,11 +779,9 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["LIVE SELECT * FROM tester"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["LIVE SELECT * FROM tester"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -910,11 +794,9 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["CREATE tester:one SET name = 'one'"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["CREATE tester:one SET name = 'one'"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -951,14 +833,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res["id"], "tester:one", "result: {:?}", res);
 	// Send KILL command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "kill",
-				"params": [live1],
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("kill"), json!([live1]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_null(), "result: {:?}", res);
@@ -966,11 +841,9 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["CREATE tester:two SET name = 'two'"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["CREATE tester:two SET name = 'two'"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -996,11 +869,9 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": [format!("KILL '{live2}'")],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!([format!("KILL '{live2}'")]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -1012,11 +883,9 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["CREATE tester:tre SET name = 'two'"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["CREATE tester:tre SET name = 'two'"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -1042,14 +911,7 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	socket1.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
 	// Send LIVE command
 	let res = socket1
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "live",
-				"params": ["tester"],
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
@@ -1064,11 +926,9 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket2
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["CREATE tester:id SET name = 'foo'"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["CREATE tester:id SET name = 'foo'"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -1120,17 +980,15 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "signup",
-				"params": [{
-					"ns": NS,
-					"db": DB,
-					"sc": "scope",
-					"email": "email@email.com",
-					"pass": "pass",
-				}],
-			}),
+			json!(Ulid::new()),
+			json!("signup"),
+			json!([{
+				"ns": NS,
+				"db": DB,
+				"sc": "scope",
+				"email": "email@email.com",
+				"pass": "pass",
+			}]),
 		)
 		.await;
 	assert!(res.is_ok(), "result: {:?}", res);
@@ -1141,14 +999,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
 	// Send LIVE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "live",
-				"params": ["tester"],
-			}),
-		)
+		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
@@ -1158,11 +1009,9 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket
 		.send_and_receive_message(
 			FORMAT,
-			json!({
-				"id": Ulid::new(),
-				"method": "query",
-				"params": ["CREATE tester:id SET name = 'foo'"],
-			}),
+			json!(Ulid::new()),
+			json!("query"),
+			json!(["CREATE tester:id SET name = 'foo'"]),
 		)
 		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
