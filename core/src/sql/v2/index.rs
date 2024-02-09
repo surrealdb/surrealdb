@@ -13,7 +13,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -24,6 +24,9 @@ pub enum Index {
 	Search(SearchParams),
 	/// M-Tree index for distance based metrics
 	MTree(MTreeParams),
+	/// HNSW index for distance based metrics
+	#[revision(start = 2)]
+	Hnsw(HnswParams),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -60,6 +63,21 @@ pub struct MTreeParams {
 	pub doc_ids_cache: u32,
 	#[revision(start = 2)]
 	pub mtree_cache: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[revisioned(revision = 1)]
+pub struct HnswParams {
+	pub dimension: u16,
+	pub distance: Distance,
+	pub vector_type: VectorType,
+	pub m: u16,
+	pub m0: u16,
+	pub ef_construction: u16,
+	pub extend_candidates: bool,
+	pub keep_pruned_connections: bool,
+	pub ml: Number,
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -162,6 +180,20 @@ impl Display for Index {
 					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
 					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order, p.doc_ids_cache, p.mtree_cache
 				)
+			}
+			Self::Hnsw(p) => {
+				write!(
+					f,
+					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} ML {}",
+					p.dimension, p.distance, p.vector_type, p.ef_construction, p.m, p.m0, p.ml
+				)?;
+				if p.extend_candidates {
+					f.write_str(" EXTEND_CANDIDATES")?
+				}
+				if p.keep_pruned_connections {
+					f.write_str(" KEEP_PRUNED_CONNECTIONS")?
+				}
+				Ok(())
 			}
 		}
 	}

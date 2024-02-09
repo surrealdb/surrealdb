@@ -1,5 +1,6 @@
 use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
+use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
 use revision::revisioned;
 use rust_decimal::prelude::*;
@@ -735,5 +736,11 @@ impl Sort for Vec<Number> {
 	fn sorted(&mut self) -> Sorted<&Vec<Number>> {
 		self.sort();
 		Sorted(self)
+	}
+}
+
+impl ToFloat for Number {
+	fn to_float(&self) -> f64 {
+		self.to_float()
 	}
 }
