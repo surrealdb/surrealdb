@@ -623,20 +623,40 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	};
 	assert!(versionstamp2 == versionstamp1b);
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
-		{
-			create: {
-				id: user:amos,
-				name: 'Amos'
-			}
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
+					{
+						 create: {
+							 id: user:amos,
+							 name: 'Amos'
+						 }
+					}
+				]"
+				)
+				.unwrap()
+			);
 		}
-	]"
-		)
-		.unwrap()
-	);
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
+					{
+						 update: {
+							 id: user:amos,
+							 name: 'Amos'
+						 }
+					}
+				]"
+				)
+				.unwrap()
+			);
+		}
+	}
 	// Save timestamp 3
 	let ts3_dt = "2023-08-01T00:00:10Z";
 	let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
