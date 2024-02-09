@@ -6,7 +6,7 @@
   features = with util.features; [ storage-mem ];
 
   buildSpec = with pkgs; {
-    nativeBuildInputs = with pkgsStatic; [ stdenv.cc openssl ];
+    nativeBuildInputs = with pkgsStatic; [ stdenv.cc openssl mimalloc ];
 
     CARGO_BUILD_TARGET = target;
 
