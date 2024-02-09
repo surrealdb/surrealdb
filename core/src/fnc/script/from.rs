@@ -28,7 +28,7 @@ impl<'js> FromJs<'js> for Value {
 			js::Type::Undefined => Ok(Value::None),
 			js::Type::Null => Ok(Value::Null),
 			js::Type::Bool => Ok(Value::from(val.as_bool().unwrap())),
-			js::Type::Int => Ok(Value::from(val.as_int().unwrap())),
+			js::Type::Int => Ok(Value::from(val.as_int().unwrap() as f64)),
 			js::Type::Float => Ok(Value::from(val.as_float().unwrap())),
 			js::Type::String => Ok(Value::from(val.as_string().unwrap().to_string()?)),
 			js::Type::Array => {
