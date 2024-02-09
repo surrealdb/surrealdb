@@ -58,7 +58,7 @@ fn bench_hash_trie_btree_value(c: &mut Criterion) {
 	const N: usize = 100_000;
 	let mut samples = Vec::with_capacity(N);
 	for i in 0..N {
-		let key = value(&format!("SELECT * FROM user WHERE id = {i}")).unwrap();
+		let key = value(&format!("{{ test: {{ something: [1, 'two', null, test:{i}, {{ trueee: false, noneee: nulll }}] }} }}")).unwrap();
 		samples.push((key, i));
 	}
 
