@@ -54,13 +54,12 @@ sql2 = []
 kv-fdb = ["tokio/time"]
 
 [package.metadata.docs.rs]
-rustdoc-args = ["--cfg", "docsrs,surrealdb_unstable"]
+rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "kv-mem",
     "kv-rocksdb",
     "http",
     "scripting",
-    "jwks",
 ]
 targets = []
 
