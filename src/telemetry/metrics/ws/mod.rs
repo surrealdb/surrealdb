@@ -115,7 +115,6 @@ impl NotificationContext {
 	pub fn with_live_id(self, live_id: String) -> Self {
 		Self {
 			live_id,
-			..self
 		}
 	}
 }

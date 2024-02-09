@@ -5,7 +5,6 @@ use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use serde::Serialize;
 use serde_json::Value as Json;
-use std::pin::Pin;
 use std::sync::Arc;
 use surrealdb::channel::Sender;
 use surrealdb::dbs;
