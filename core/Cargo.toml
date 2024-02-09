@@ -57,11 +57,9 @@ kv-fdb = ["tokio/time"]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "kv-mem",
-    "kv-indxdb",
     "kv-rocksdb",
     "http",
     "scripting",
-    "jwks",
 ]
 targets = []
 
