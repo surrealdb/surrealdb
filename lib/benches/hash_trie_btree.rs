@@ -12,7 +12,6 @@ fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {
 	const N: usize = 10_000;
 	let mut samples = Vec::with_capacity(N);
 	for i in 0..N {
-		//let key = ix::new("test", "test", "test", &format!("test{i}")).encode().unwrap();
 		let key = vec![i as u64; 1536];
 		samples.push((key, i));
 	}
