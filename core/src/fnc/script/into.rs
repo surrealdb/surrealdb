@@ -39,8 +39,8 @@ impl<'js> IntoJs<'js> for &Value {
 				}
 			}
 			Value::Number(Number::Float(v)) => Ok(js::Value::new_float(ctx.clone(), v)),
-			Value::Number(Number::Decimal(v)) => match v.is_integer() {
-				true => {
+			Value::Number(Number::Decimal(v)) => {
+				if v.is_integer() {
 					if let Some(v) = v.to_i64() {
 						if ((i32::MIN as i64)..=(i32::MAX as i64)).contains(&v) {
 							Ok(js::Value::new_int(ctx.clone(), v as i32))
@@ -56,19 +56,17 @@ impl<'js> IntoJs<'js> for &Value {
 						)?
 						.throw())
 					}
+				} else if let Ok(v) = v.try_into() {
+					Ok(js::Value::new_float(ctx.clone(), v))
+				} else {
+					// FIXME: Add support for larger numbers if rquickjs ever adds support.
+					Err(Exception::from_message(
+						ctx.clone(),
+						"Couldn't convert SurrealQL Decimal to a JavaScript number",
+					)?
+					.throw())
 				}
-				false => {
-					if let Ok(v) = v.try_into() {
-						Ok(js::Value::new_float(ctx.clone(), v))
-					} else {
-						Err(Exception::from_message(
-							ctx.clone(),
-							"Couldn't convert SurrealQL Decimal to a JavaScript number",
-						)?
-						.throw())
-					}
-				}
-			},
+			}
 			Value::Datetime(ref v) => {
 				let date: js::function::Constructor = ctx.globals().get("Date")?;
 				date.construct((v.0.timestamp_millis(),))

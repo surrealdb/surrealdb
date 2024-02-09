@@ -24,7 +24,7 @@ fn check_nul(s: &str) -> Result<(), Error> {
 
 impl<'js> FromJs<'js> for Value {
 	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
-		match dbg!(val.type_of()) {
+		match val.type_of() {
 			js::Type::Undefined => Ok(Value::None),
 			js::Type::Null => Ok(Value::Null),
 			js::Type::Bool => Ok(Value::from(val.as_bool().unwrap())),
