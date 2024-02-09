@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
+#[cfg(debug_assertions)]
+use std::collections::HashMap;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
