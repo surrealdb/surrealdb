@@ -90,9 +90,6 @@ macro_rules! impl_builtins {
 					Err(Err::Failure(x)) => return Err(Err::Failure(x)),
 					_ => {}
 				}
-				if let Ok((i, x)) = $name($i){
-					return Ok((i,x))
-				}
 			)*
 			($i,())
 		}
