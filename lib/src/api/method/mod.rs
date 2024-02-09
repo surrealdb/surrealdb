@@ -1,5 +1,6 @@
 //! Methods to use when interacting with a SurrealDB instance
 
+pub(crate) mod live;
 pub(crate) mod query;
 
 mod authenticate;
@@ -13,7 +14,6 @@ mod export;
 mod health;
 mod import;
 mod invalidate;
-mod live;
 mod merge;
 mod patch;
 mod select;
@@ -50,6 +50,7 @@ pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
 pub use query::Query;
+pub use query::QueryStream;
 pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
@@ -227,6 +228,7 @@ where
 	pub fn init() -> Self {
 		Self {
 			router: Arc::new(OnceLock::new()),
+			engine: PhantomData,
 		}
 	}
 
@@ -252,6 +254,7 @@ where
 	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<C, Self> {
 		Connect {
 			router: Arc::new(OnceLock::new()),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -638,6 +641,7 @@ where
 			client: Cow::Borrowed(self),
 			query: vec![query.into_query()],
 			bindings: Ok(Default::default()),
+			register_live_queries: true,
 		}
 	}
 

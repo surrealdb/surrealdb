@@ -13,6 +13,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
 use crate::engine::IntervalStream;
+use crate::fflags::FFLAGS;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
@@ -68,17 +69,17 @@ impl Connection for Db {
 			Ok(Surreal {
 				router: Arc::new(OnceLock::with_value(Router {
 					features,
-					conn: PhantomData,
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				engine: PhantomData,
 			})
 		})
 	}
 
 	fn send<'r>(
 		&'r mut self,
-		router: &'r Router<Self>,
+		router: &'r Router,
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
 		Box::pin(async move {
@@ -115,7 +116,8 @@ pub(crate) fn router(
 				}
 				// If a root user is specified, setup the initial datastore credentials
 				if let Some(root) = configured_root {
-					if let Err(error) = kvs.setup_initial_creds(root).await {
+					if let Err(error) = kvs.setup_initial_creds(root.username, root.password).await
+					{
 						let _ = conn_tx.into_send_async(Err(error.into())).await;
 						return;
 					}
@@ -201,6 +203,11 @@ pub(crate) fn router(
 }
 
 fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
+	// Some classic ownership shenanigans
+	let kvs_two = kvs.clone();
+	let stop_signal_two = stop_signal.clone();
+
+	// Spawn the ticker, which is used for tracking versionstamps and heartbeats across databases
 	spawn_local(async move {
 		let mut interval = time::interval(tick_interval);
 		// Don't bombard the database if we miss some ticks
@@ -221,4 +228,30 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 			}
 		}
 	});
+
+	if FFLAGS.change_feed_live_queries.enabled() {
+		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
+		spawn_local(async move {
+			let kvs = kvs_two;
+			let stop_signal = stop_signal_two;
+			let mut interval = time::interval(tick_interval);
+			// Don't bombard the database if we miss some ticks
+			interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+			// Delay sending the first tick
+			interval.tick().await;
+
+			let ticker = IntervalStream::new(interval);
+
+			let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
+
+			let mut stream = streams.merge();
+
+			while let Some(Some(_)) = stream.next().await {
+				match kvs.process_lq_notifications().await {
+					Ok(()) => trace!("Live Query poll ran successfully"),
+					Err(error) => error!("Error running live query poll: {error}"),
+				}
+			}
+		})
+	}
 }

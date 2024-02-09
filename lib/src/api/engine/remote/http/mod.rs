@@ -20,7 +20,6 @@ use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
-use crate::api::opt::from_value;
 use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
@@ -32,6 +31,7 @@ use crate::headers::DB_LEGACY;
 use crate::headers::NS_LEGACY;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
+use crate::sql::from_value;
 use crate::sql::serde::deserialize;
 use crate::sql::Array;
 use crate::sql::Strand;
@@ -100,6 +100,7 @@ impl Surreal<Client> {
 	) -> Connect<Client, ()> {
 		Connect {
 			router: self.router.clone(),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -210,11 +211,14 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 		}
 	}
 
-	Ok(QueryResponse(map))
+	Ok(QueryResponse {
+		results: map,
+		..QueryResponse::new()
+	})
 }
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
-	if let Some((_stats, result)) = query(request).await?.0.remove(&0) {
+	if let Some((_stats, result)) = query(request).await?.results.remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {

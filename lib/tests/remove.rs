@@ -125,7 +125,42 @@ async fn remove_statement_index() -> Result<(), Error> {
 	}
 
 	// Every index store cache has been removed
+	#[cfg(feature = "sql2")]
 	assert!(dbs.index_store().is_empty().await);
+	Ok(())
+}
+
+#[tokio::test]
+#[cfg(feature = "sql2")]
+async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error> {
+	let sql = "
+		REMOVE TABLE foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result.unwrap_err();
+	assert!(matches!(tmp, Error::TbNotFound { .. }),);
+
+	Ok(())
+}
+
+#[tokio::test]
+#[cfg(feature = "sql2")]
+async fn should_not_error_when_remove_if_exists() -> Result<(), Error> {
+	let sql = "
+		REMOVE TABLE foo IF EXISTS;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, Value::None);
+
 	Ok(())
 }
 

@@ -60,6 +60,9 @@ use crate::kvs::Datastore;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
+#[cfg(feature = "ml")]
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ml::storage::surml_file::SurMlFile;
 use crate::opt::IntoEndpoint;
 #[cfg(feature = "ml")]
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,9 +91,6 @@ use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-use surrealml_core::storage::surml_file::SurMlFile;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -383,6 +383,7 @@ impl Surreal<Db> {
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			router: self.router.clone(),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -402,11 +403,14 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 			Err(error) => map.insert(index, (stats, Err(error.into()))),
 		};
 	}
-	QueryResponse(map)
+	QueryResponse {
+		results: map,
+		..QueryResponse::new()
+	}
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
-	if let Some((_stats, result)) = process(responses).0.remove(&0) {
+	if let Some((_stats, result)) = process(responses).results.remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
@@ -765,7 +769,7 @@ async fn router(
 				[Value::Strand(Strand(key)), value] => (mem::take(key), mem::take(value)),
 				_ => unreachable!(),
 			};
-			let var = Some(map! {
+			let var = Some(crate::map! {
 				key.clone() => Value::None,
 				=> vars
 			});

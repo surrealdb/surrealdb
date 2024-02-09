@@ -17,6 +17,7 @@ use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use semver::BuildMetadata;
 use semver::VersionReq;
+use std::fmt;
 use std::fmt::Debug;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -24,6 +25,8 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
+
+use self::opt::EndpointKind;
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
@@ -37,7 +40,8 @@ pub trait Connection: conn::Connection {}
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Connect<C: Connection, Response> {
-	router: Arc<OnceLock<Router<C>>>,
+	router: Arc<OnceLock<Router>>,
+	engine: PhantomData<C>,
 	address: Result<Endpoint>,
 	capacity: usize,
 	client: PhantomData<C>,
@@ -89,8 +93,12 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let client = Client::connect(self.address?, self.capacity).await?;
-			client.check_server_version().await?;
+			let endpoint = self.address?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
+			let client = Client::connect(endpoint, self.capacity).await?;
+			if endpoint_kind.is_remote() {
+				client.check_server_version().await?;
+			}
 			Ok(client)
 		})
 	}
@@ -109,14 +117,19 @@ where
 			if self.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}
-			let arc = Client::connect(self.address?, self.capacity).await?.router;
+			let endpoint = self.address?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
+			let arc = Client::connect(endpoint, self.capacity).await?.router;
 			let cell = Arc::into_inner(arc).expect("new connection to have no references");
 			let router = cell.into_inner().expect("router to be set");
 			self.router.set(router).map_err(|_| Error::AlreadyConnected)?;
 			let client = Surreal {
 				router: self.router,
+				engine: PhantomData::<Client>,
 			};
-			client.check_server_version().await?;
+			if endpoint_kind.is_remote() {
+				client.check_server_version().await?;
+			}
 			Ok(())
 		})
 	}
@@ -129,9 +142,9 @@ pub(crate) enum ExtraFeatures {
 }
 
 /// A database client instance for embedded or remote databases
-#[derive(Debug)]
 pub struct Surreal<C: Connection> {
-	router: Arc<OnceLock<Router<C>>>,
+	router: Arc<OnceLock<Router>>,
+	engine: PhantomData<C>,
 }
 
 impl<C> Surreal<C>
@@ -171,15 +184,25 @@ where
 	fn clone(&self) -> Self {
 		Self {
 			router: self.router.clone(),
+			engine: self.engine,
 		}
 	}
 }
 
-trait OnceLockExt<C>
+impl<C> Debug for Surreal<C>
 where
 	C: Connection,
 {
-	fn with_value(value: Router<C>) -> OnceLock<Router<C>> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Surreal")
+			.field("router", &self.router)
+			.field("engine", &self.engine)
+			.finish()
+	}
+}
+
+trait OnceLockExt {
+	fn with_value(value: Router) -> OnceLock<Router> {
 		let cell = OnceLock::new();
 		match cell.set(value) {
 			Ok(()) => cell,
@@ -187,14 +210,11 @@ where
 		}
 	}
 
-	fn extract(&self) -> Result<&Router<C>>;
+	fn extract(&self) -> Result<&Router>;
 }
 
-impl<C> OnceLockExt<C> for OnceLock<Router<C>>
-where
-	C: Connection,
-{
-	fn extract(&self) -> Result<&Router<C>> {
+impl OnceLockExt for OnceLock<Router> {
+	fn extract(&self) -> Result<&Router> {
 		let router = self.get().ok_or(Error::ConnectionUninitialised)?;
 		Ok(router)
 	}

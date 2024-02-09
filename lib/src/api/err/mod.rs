@@ -1,6 +1,7 @@
 use crate::api::Response;
 use crate::sql::Array;
 use crate::sql::Edges;
+use crate::sql::FromValueError;
 use crate::sql::Object;
 use crate::sql::Thing;
 use crate::sql::Value;
@@ -181,6 +182,18 @@ pub enum Error {
 	/// Tried to use a range query on an edge or edges
 	#[error("Live queries on edges not supported: {0}")]
 	LiveOnEdges(Edges),
+
+	/// Tried to access a query statement as a live query when it isn't a live query
+	#[error("Query statement {0} is not a live query")]
+	NotLiveQuery(usize),
+
+	/// Tried to access a query statement falling outside the bounds of the statements supplied
+	#[error("Query statement {0} is out of bounds")]
+	QueryIndexOutOfBounds(usize),
+
+	/// Called `Response::take` or `Response::stream` on a query response more than once
+	#[error("Tried to take a query response that has already been taken")]
+	ResponseAlreadyTaken,
 }
 
 #[cfg(feature = "protocol-http")]
@@ -238,5 +251,14 @@ impl Serialize for Error {
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+
+impl From<FromValueError> for crate::Error {
+	fn from(error: FromValueError) -> Self {
+		Self::Api(Error::FromValue {
+			value: error.value,
+			error: error.error,
+		})
 	}
 }

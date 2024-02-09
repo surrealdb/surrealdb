@@ -193,6 +193,7 @@ impl Surreal<Any> {
 	pub fn connect(&self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
 			router: self.router.clone(),
+			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
@@ -242,6 +243,7 @@ impl Surreal<Any> {
 pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 	Connect {
 		router: Arc::new(OnceLock::new()),
+		engine: PhantomData,
 		address: address.into_endpoint(),
 		capacity: 0,
 		client: PhantomData,
@@ -254,8 +256,8 @@ mod tests {
 	use super::*;
 	use crate::dbs::Capabilities;
 	use crate::opt::auth::Root;
+	use crate::sql;
 	use crate::sql::Value;
-	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {
@@ -280,7 +282,7 @@ mod tests {
 		let mut res = db.query("INFO FOR ROOT").await.unwrap();
 		let users: Value = res.take("users").unwrap();
 
-		assert_eq!(users, Value::parse("{}"), "there should be no users in the system");
+		assert_eq!(users, sql::value("{}").unwrap(), "there should be no users in the system");
 	}
 
 	#[tokio::test]
