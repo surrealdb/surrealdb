@@ -23,6 +23,7 @@ use crate::sql::Value;
 use indexmap::IndexMap;
 use revision::revisioned;
 use revision::Revisioned;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use std::io::Read;
 use std::marker::PhantomData;
@@ -154,16 +155,24 @@ pub(crate) struct Response {
 	pub(crate) result: ServerResult,
 }
 
-fn serialize(value: &Value) -> Result<Vec<u8>> {
-	let mut buf = Vec::new();
-	value.serialize_revisioned(&mut buf).map_err(|x| crate::Error::Db(x.into()))?;
-	Ok(buf)
+fn serialize(value: &Value, revisioned: bool) -> Result<Vec<u8>> {
+	if revisioned {
+		let mut buf = Vec::new();
+		value.serialize_revisioned(&mut buf).map_err(|error| crate::Error::Db(error.into()))?;
+		return Ok(buf);
+	}
+	crate::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
 }
 
-fn deserialize<A, T>(bytes: &mut A) -> Result<T>
+fn deserialize<A, T>(bytes: &mut A, revisioned: bool) -> Result<T>
 where
 	A: Read,
-	T: Revisioned,
+	T: Revisioned + DeserializeOwned,
 {
-	T::deserialize_revisioned(bytes).map_err(|x| crate::Error::Db(x.into()))
+	if revisioned {
+		return T::deserialize_revisioned(bytes).map_err(|x| crate::Error::Db(x.into()));
+	}
+	let mut buf = Vec::new();
+	bytes.read_to_end(&mut buf).map_err(crate::err::Error::Io)?;
+	crate::sql::serde::deserialize(&buf).map_err(|error| crate::Error::Db(error.into()))
 }

@@ -134,11 +134,9 @@ impl IntoEndpoint for &str {
 				)
 			}
 		};
-		Ok(Endpoint {
-			url,
-			path,
-			config: Default::default(),
-		})
+		let mut endpoint = Endpoint::new(url);
+		endpoint.path = path;
+		Ok(endpoint)
 	}
 }
 
