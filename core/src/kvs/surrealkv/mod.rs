@@ -145,7 +145,7 @@ impl Transaction {
 		self.inner
 			.get(&key.into().as_slice())
 			.map(|opt| opt.is_some())
-			.map_err(|e| Error::Tx(format!("Unable to get kv from SurreaKV: {}", e)))
+			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)))
 	}
 	/// Fetch a key from the database
 	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
@@ -241,8 +241,9 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 
+		let key_slice = key.into();
 		// Set the key
-		self.inner.set(&key.into().as_slice(), &val.into())?;
+		self.inner.set(&key_slice.as_slice(), &val.into())?;
 		// Return result
 		Ok(())
 	}
@@ -331,7 +332,8 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.inner.delete(&key.into().as_slice())?;
+		let key_slice = key.into();
+		let res = self.inner.delete(&key_slice.as_slice())?;
 		// Return result
 		Ok(res)
 	}

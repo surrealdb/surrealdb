@@ -139,6 +139,7 @@ speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
 surrealml-core1 = { version = "0.0.7", optional = true, package = "surrealml-core" }
 surrealml-core2 = { version = "0.0.8", optional = true, package = "surrealml-core" }
+surrealkv = { version = "0.1.1", optional = true }
 thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tracing = "0.1.40"
@@ -150,7 +151,6 @@ unicase = { version = "2.7.0", optional = true }
 arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
 geo-types = { version = "0.7.12", features = ["arbitrary"] }
-surrealkv = { version = "0.1.0", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
