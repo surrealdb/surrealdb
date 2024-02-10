@@ -114,6 +114,7 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
+
 	/// Commit a transaction
 	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
@@ -132,6 +133,7 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
+
 	/// Check if a key exists
 	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
@@ -143,10 +145,11 @@ impl Transaction {
 		}
 		// Check the key
 		self.inner
-			.get(&key.into().as_slice())
+			.get(key.into().as_slice())
 			.map(|opt| opt.is_some())
 			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)))
 	}
+
 	/// Fetch a key from the database
 	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
@@ -157,11 +160,12 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.inner.get(&key.into().as_slice())?;
+		let res = self.inner.get(key.into().as_slice())?;
 
 		// Return result
 		Ok(res)
 	}
+
 	/// Obtain a new change timestamp for a key
 	/// which is replaced with the current timestamp when the transaction is committed.
 	/// NOTE: This should be called when composing the change feed entries for this transaction,
@@ -180,7 +184,7 @@ impl Transaction {
 		// to ensure that no other transactions can commit with older timestamps.
 		let key_vec = key.into();
 		let k = key_vec.as_slice();
-		let prev = self.inner.get(k.clone())?;
+		let prev = self.inner.get(k)?;
 
 		let ver = match prev {
 			Some(prev) => {
@@ -202,6 +206,7 @@ impl Transaction {
 		// Return the uint64 representation of the timestamp as the result
 		Ok(verbytes)
 	}
+
 	/// Obtain a new key that is suffixed with the change timestamp
 	pub(crate) async fn get_versionstamped_key<K>(
 		&mut self,
@@ -226,6 +231,7 @@ impl Transaction {
 		k.append(&mut suffix.into());
 		Ok(k)
 	}
+
 	/// Insert or update a key in the database
 	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
@@ -243,7 +249,7 @@ impl Transaction {
 
 		let key_slice = key.into();
 		// Set the key
-		self.inner.set(&key_slice.as_slice(), &val.into())?;
+		self.inner.set(key_slice.as_slice(), &val.into())?;
 		// Return result
 		Ok(())
 	}
@@ -276,11 +282,12 @@ impl Transaction {
 
 		// Set the key
 		let key: &[u8] = &key[..];
-		self.inner.set(&key, &val.into())?;
+		self.inner.set(key, &val.into())?;
 
 		// Return result
 		Ok(())
 	}
+
 	/// Insert a key if it doesn't exist in the database
 	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
@@ -305,19 +312,20 @@ impl Transaction {
 
 		let res = self
 			.inner
-			.get(&key_slice.as_slice())
+			.get(key_slice.as_slice())
 			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)));
 
 		match (res, chk) {
-			(Ok(Some(v)), Some(w)) if v == w => self.inner.set(&key_slice.as_slice(), &val_vec),
-			(Ok(None), None) => self.inner.set(&key_slice.as_slice(), &val_vec),
+			(Ok(Some(v)), Some(w)) if v == w => self.inner.set(key_slice.as_slice(), &val_vec),
+			(Ok(None), None) => self.inner.set(key_slice.as_slice(), &val_vec),
 			(Err(e), _) => return Err(e),
 			_ => return Err(Error::TxConditionNotMet),
-		};
+		}?;
 
 		// Return result
 		Ok(())
 	}
+
 	/// Delete a key
 	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
@@ -333,10 +341,11 @@ impl Transaction {
 		}
 		// Remove the key
 		let key_slice = key.into();
-		let res = self.inner.delete(&key_slice.as_slice())?;
+		self.inner.delete(key_slice.as_slice())?;
 		// Return result
-		Ok(res)
+		Ok(())
 	}
+
 	/// Delete a key
 	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
@@ -359,19 +368,20 @@ impl Transaction {
 		let key_slice = key.into();
 		let res = self
 			.inner
-			.get(&key_slice.as_slice())
+			.get(key_slice.as_slice())
 			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)));
 
 		match (res, chk) {
-			(Ok(Some(v)), Some(w)) if v == w => self.inner.delete(&key_slice.as_slice()),
-			(Ok(None), None) => self.inner.delete(&key_slice.as_slice()),
+			(Ok(Some(v)), Some(w)) if v == w => self.inner.delete(key_slice.as_slice()),
+			(Ok(None), None) => self.inner.delete(key_slice.as_slice()),
 			(Err(e), _) => return Err(e),
 			_ => return Err(Error::TxConditionNotMet),
-		};
+		}?;
 
 		// Return result
 		Ok(())
 	}
+
 	/// Retrieve a range of keys from the databases
 	pub(crate) async fn scan<K>(
 		&mut self,

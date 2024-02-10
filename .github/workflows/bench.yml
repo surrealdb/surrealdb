@@ -110,6 +110,8 @@ jobs:
             features: "kv-rocksdb"
           - target: "sdk-fdb"
             features: "kv-fdb-7_1"
+          - target: "sdk-surrealkv"
+            features: "kv-surrealkv"
           # This one fails because the server consumes too much memory and the kernel kills it. I tried with instances up to 16GB of RAM.
           # - target: "sdk-ws"
           #   features: "protocol-ws"

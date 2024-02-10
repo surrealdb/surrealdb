@@ -142,6 +142,13 @@ user-id = 3987
 user-login = "rushmorem"
 user-name = "Rushmore Mushambi"
 
+[[publisher.surrealkv]]
+version = "0.1.1"
+when = "2024-02-10"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.surrealml-core]]
 version = "0.0.7"
 when = "2024-01-22"
@@ -183,6 +190,13 @@ when = "2023-09-19"
 user-id = 1139
 user-login = "Manishearth"
 user-name = "Manish Goregaokar"
+
+[[publisher.vart]]
+version = "0.1.1"
+when = "2024-02-10"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
 
 [[audits.bytecode-alliance.wildcard-audits.arbitrary]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"

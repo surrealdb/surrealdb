@@ -697,7 +697,7 @@ jobs:
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
 
-      - name: Test fdb engine
+      - name: Test surrealkv engine
         run: cargo make ci-api-integration-surrealkv
 
       - name: Debug info

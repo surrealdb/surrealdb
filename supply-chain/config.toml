@@ -155,6 +155,10 @@ criteria = "safe-to-run"
 version = "1.9.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.async-channel]]
+version = "2.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.async-compression]]
 version = "0.4.6"
 criteria = "safe-to-deploy"
@@ -435,6 +439,10 @@ criteria = "safe-to-run"
 version = "1.1.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.crossbeam]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.crossbeam-channel]]
 version = "0.5.11"
 criteria = "safe-to-deploy"
@@ -445,6 +453,10 @@ criteria = "safe-to-run"
 
 [[exemptions.crossbeam-epoch]]
 version = "0.9.18"
+criteria = "safe-to-run"
+
+[[exemptions.crossbeam-queue]]
+version = "0.3.11"
 criteria = "safe-to-run"
 
 [[exemptions.crossbeam-utils]]
@@ -901,6 +913,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lock_api]]
 version = "0.4.11"
+criteria = "safe-to-deploy"
+
+[[exemptions.lru]]
+version = "0.12.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.lz4-sys]]
