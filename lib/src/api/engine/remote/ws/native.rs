@@ -1,4 +1,5 @@
 use super::PATH;
+use super::{deserialize, serialize};
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -19,7 +20,6 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
-use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -28,6 +28,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
+use revision::revisioned;
 use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
@@ -42,7 +43,10 @@ use std::sync::OnceLock;
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::error::Error as WsError;
+use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::Connector;
@@ -82,13 +86,21 @@ pub(crate) async fn connect(
 	config: Option<WebSocketConfig>,
 	#[allow(unused_variables)] maybe_connector: Option<Connector>,
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+	let mut request = url.into_client_request()?;
+	request
+		.headers_mut()
+		.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(super::REVISION_HEADER));
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
-	let (socket, _) =
-		tokio_tungstenite::connect_async_tls_with_config(url, config, NAGLE_ALG, maybe_connector)
-			.await?;
+	let (socket, _) = tokio_tungstenite::connect_async_tls_with_config(
+		request,
+		config,
+		NAGLE_ALG,
+		maybe_connector,
+	)
+	.await?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config, NAGLE_ALG).await?;
+	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG).await?;
 
 	Ok(socket)
 }
@@ -404,6 +416,7 @@ pub(crate) fn router(
 										}
 										Err(error) => {
 											#[derive(Deserialize)]
+											#[revisioned(revision = 1)]
 											struct Response {
 												id: Option<Value>,
 											}
@@ -412,7 +425,7 @@ pub(crate) fn router(
 											if let Message::Binary(binary) = message {
 												if let Ok(Response {
 													id,
-												}) = deserialize(&binary)
+												}) = deserialize(&mut &binary[..])
 												{
 													// Return an error if an ID was returned
 													if let Some(Ok(id)) =
@@ -520,10 +533,10 @@ impl Response {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => deserialize(binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => deserialize(&mut &binary[..]).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
 					binary: binary.clone(),
-					error,
+					error: bincode::ErrorKind::Custom(error.to_string()).into(),
 				}
 				.into()
 			}),

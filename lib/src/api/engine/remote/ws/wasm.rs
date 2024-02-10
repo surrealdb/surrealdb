@@ -1,4 +1,5 @@
 use super::PATH;
+use super::{deserialize, serialize};
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -17,7 +18,6 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
-use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -29,6 +29,7 @@ use indexmap::IndexMap;
 use pharos::Channel;
 use pharos::Observable;
 use pharos::ObserveConfig;
+use revision::revisioned;
 use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
@@ -123,13 +124,14 @@ pub(crate) fn router(
 	route_rx: Receiver<Option<Route>>,
 ) {
 	spawn_local(async move {
-		let (mut ws, mut socket) = match WsMeta::connect(&address.url, None).await {
-			Ok(pair) => pair,
-			Err(error) => {
-				let _ = conn_tx.into_send_async(Err(error.into())).await;
-				return;
-			}
-		};
+		let (mut ws, mut socket) =
+			match WsMeta::connect(&address.url, vec![super::REVISION_HEADER]).await {
+				Ok(pair) => pair,
+				Err(error) => {
+					let _ = conn_tx.into_send_async(Err(error.into())).await;
+					return;
+				}
+			};
 
 		let mut events = {
 			let result = match capacity {
@@ -357,6 +359,7 @@ pub(crate) fn router(
 							}
 							Err(error) => {
 								#[derive(Deserialize)]
+								#[revisioned(revision = 1)]
 								struct Response {
 									id: Option<Value>,
 								}
@@ -365,7 +368,7 @@ pub(crate) fn router(
 								if let Message::Binary(binary) = message {
 									if let Ok(Response {
 										id,
-									}) = deserialize(&binary)
+									}) = deserialize(&mut &binary[..])
 									{
 										// Return an error if an ID was returned
 										if let Some(Ok(id)) = id.map(Value::coerce_to_i64) {
@@ -479,10 +482,10 @@ impl Response {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => deserialize(binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => deserialize(&mut &binary[..]).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
 					binary: binary.clone(),
-					error,
+					error: bincode::ErrorKind::Custom(error.to_string()).into(),
 				}
 				.into()
 			}),
