@@ -3,6 +3,7 @@ use crate::rpc::format::Format;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
+use revision::revisioned;
 use serde::Serialize;
 use serde_json::Value as Json;
 use surrealdb::channel::Sender;
@@ -16,6 +17,7 @@ use tracing::Span;
 // The variants here should be in exactly the same order as `surrealdb::engine::remote::ws::Data`
 // In future, they will possibly be merged to avoid having to keep them in sync.
 #[derive(Debug, Serialize)]
+#[revisioned(revision = 1)]
 pub enum Data {
 	/// Generally methods return a `sql::Value`
 	Other(Value),
@@ -61,6 +63,7 @@ impl From<Data> for Value {
 }
 
 #[derive(Debug, Serialize)]
+#[revisioned(revision = 1)]
 pub struct Response {
 	id: Option<Value>,
 	result: Result<Data, Failure>,
