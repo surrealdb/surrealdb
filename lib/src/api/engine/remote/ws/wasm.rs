@@ -171,8 +171,6 @@ pub(crate) fn router(
 			let mut interval = time::interval(PING_INTERVAL);
 			// don't bombard the server with pings if we miss some ticks
 			interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-			// Delay sending the first ping
-			interval.tick().await;
 
 			let pinger = IntervalStream::new(interval);
 
@@ -207,7 +205,7 @@ pub(crate) fn router(
 							}
 							Method::Unset => {
 								if let [Value::Strand(Strand(key))] = &params[..1] {
-									vars.remove(key);
+									vars.swap_remove(key);
 								}
 							}
 							Method::Live => {
@@ -300,7 +298,7 @@ pub(crate) fn router(
 												if let Some((method, sender)) = routes.remove(&id) {
 													if matches!(method, Method::Set) {
 														if let Some((key, value)) =
-															var_stash.remove(&id)
+															var_stash.swap_remove(&id)
 														{
 															vars.insert(key, value);
 														}
