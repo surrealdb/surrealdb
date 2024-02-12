@@ -2294,29 +2294,6 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	#[serial]
-	async fn deletion_test() -> Result<(), Error> {
-		let test_collection = TestCollection::Unique(vec![
-			(0, Vector::F64(vec![-16.816376292553386, 5.6795846663936835]).into()),
-			(1, Vector::F64(vec![-14.899135190740012, 9.924435089592652]).into()),
-			(2, Vector::F64(vec![-14.220749477749795, -14.018128602068412]).into()),
-			(3, Vector::F64(vec![-13.963238036814108, -18.45568413304635]).into()),
-			(4, Vector::F64(vec![-11.617394396737966, 17.255102393830107]).into()),
-			(5, Vector::F64(vec![-9.69389955392497, -9.229744942132994]).into()),
-			(6, Vector::F64(vec![-8.966803607908405, -11.461478546882232]).into()),
-			(7, Vector::F64(vec![-7.986262567589504, 5.445242131324491]).into()),
-			(8, Vector::F64(vec![-6.0001549648343815, -13.363890707966178]).into()),
-			(9, Vector::F64(vec![-1.465237737901269, 12.82136788621726]).into()),
-			(10, Vector::F64(vec![-0.9659450610190099, -13.68243303993096]).into()),
-			(11, Vector::F64(vec![10.037378651796807, -11.28025173158252]).into()),
-			(12, Vector::F64(vec![10.721922025569782, -13.778005001052758]).into()),
-			(13, Vector::F64(vec![12.508043602926449, 2.6667018326849536]).into()),
-		]);
-		test_mtree_collection(&[3], VectorType::F64, test_collection, true, true, true, 100).await
-	}
-
-	#[test(tokio::test)]
-	#[serial]
 	async fn deletion_test() -> Result<(), Error> {
 		let test_collection = TestCollection::Unique(vec![
 			(0, Vector::F64(vec![-16.816376292553386, 5.6795846663936835]).into()),
@@ -2721,5 +2698,15 @@ mod tests {
 		} else {
 			*max = Some(val);
 		}
+	}
+
+	fn get_seed_rnd() -> StdRng {
+		let seed: u64 = std::env::var("TEST_SEED")
+			.unwrap_or_else(|_| rand::random::<u64>().to_string())
+			.parse()
+			.expect("Failed to parse seed");
+		debug!("Seed: {}", seed);
+		// Create a seeded RNG
+		StdRng::seed_from_u64(seed)
 	}
 }
