@@ -51,6 +51,7 @@ clap = { version = "4.4.11", features = [
 	"unicode",
 ] }
 futures = "0.3.29"
+futures-concurrency = "7.4.3"
 futures-util = "0.3.29"
 glob = "0.3.1"
 http = "0.2.11"
@@ -78,6 +79,7 @@ surrealdb = { version = "1", path = "lib", features = [
 tempfile = "3.8.1"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "signal"] }
+tokio-stream = "0.1.14"
 tokio-util = { version = "0.7.10", features = ["io"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.4", features = [

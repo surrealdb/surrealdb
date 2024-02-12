@@ -1,11 +1,9 @@
-use futures_util::FutureExt;
 use std::time::Duration;
-use surrealdb::fflags::FFLAGS;
+
 use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
-use tokio_stream::wrappers::IntervalStream;
-use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
+
+use surrealdb::fflags::FFLAGS;
 
 use crate::cli::CF;
 
@@ -53,24 +51,20 @@ pub fn live_query_change_feed(ct: CancellationToken) -> JoinHandle<()> {
 				let kvs = crate::dbs::DB.get().unwrap();
 				let stop_signal = ct.cancelled();
 				let tick_interval = Duration::from_secs(1);
-				let mut interval = tokio::time::interval(tick_interval);
-				// Don't bombard the database if we miss some ticks
-				interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-				// Delay sending the first tick
-				interval.tick().await;
 
-				let ticker = IntervalStream::new(interval);
-
-				let streams = (ticker.map(Some), futures::stream::once(stop_signal.map(|_| None)));
-
-				let mut stream = streams.merge();
-
-				while let Some(Some(_)) = stream.next().await {
-					match kvs.process_lq_notifications().await {
-						Ok(()) => trace!("Live Query poll ran successfully"),
-						Err(error) => error!("Error running live query poll: {error}"),
+				loop {
+					if let Err(e) = kvs.process_lq_notifications().await {
+						error!("Error running node agent live query tick: {}", e);
+					}
+					tokio::select! {
+						  _ = ct.cancelled() => {
+							   info!(target: LOG, "Gracefully stopping live query node agent");
+							   break;
+						  }
+						  _ = tokio::time::sleep(tick_interval) => {}
 					}
 				}
+				info!("Stopped live query node agent")
 			});
 		} else {
 			warn!("\n\nFEATURE DISABLED\n\n");
