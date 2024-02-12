@@ -65,7 +65,7 @@ mod ml_integration {
 		Ok(())
 	}
 
-	#[test(tokio::test)]
+	#[test_log::test(tokio::test)]
 	async fn upload_model() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
@@ -75,7 +75,7 @@ mod ml_integration {
 		Ok(())
 	}
 
-	#[test(tokio::test)]
+	#[test_log::test(tokio::test)]
 	async fn raw_compute() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
@@ -113,7 +113,7 @@ mod ml_integration {
 		Ok(())
 	}
 
-	#[test(tokio::test)]
+	#[test_log::test(tokio::test)]
 	async fn buffered_compute() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();

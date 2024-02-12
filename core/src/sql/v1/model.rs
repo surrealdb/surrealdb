@@ -56,11 +56,18 @@ impl Model {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
+
+use revision::implementations::primitives;
+use tracing_subscriber::field::debug;
+        println!("\n\n\n\nrunning a moel\n\n\n\n\n");
+		debug!("\n\n\n\nrunning a moel\n\n\n\n\n");
 		let opt = &opt.new_with_futures(true);
 		// Get the full name of this model
 		let name = format!("ml::{}", self.name);
 		// Check this function is allowed
+		println!("\n\n\n\n\nChecking the function is allowed\n\n\n\n\n");
 		ctx.check_allowed_function(name.as_str())?;
+		println!("\n\n\n\n\nFunction is allowed\n\n\n\n\n");
 		// Get the model definition
 		let val = {
 			// Claim transaction
@@ -139,17 +146,30 @@ impl Model {
 			// Perform raw compute
 			Value::Number(v) => {
 				// Compute the model function arguments
-				let args: f32 = v.try_into().map_err(|_| Error::InvalidArguments {
-					name: format!("ml::{}<{}>", self.name, self.version),
-					message: ARGUMENTS.into(),
+				let args: f32 = v.try_into().map_err(|e| {
+					debug!("\n\n\n\nThe error with the model args: {:?}\n\n\n\n", e);
+					Error::InvalidArguments {
+						name: format!("ml::{}<{}>", self.name, self.version),
+						message: ARGUMENTS.into(),
+					}
 				})?;
 				// Get the model file as bytes
+				debug!("\n\n\n\nGetting the model file as bytes\n\n\n\n");
 				let bytes = crate::obs::get(&path).await?;
 				// Convert the argument to a tensor
+				debug!("\n\n\n\nConverting the argument to a tensor\n\n\n\n");
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
+				debug!("\n\n\n\nRunning the compute in a blocking task\n\n\n\n");
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					debug!("bytes: {:?}", bytes);
+					debug!("\n\n\n\nCreating the surml file\n\n\n\n");
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|e| {
+						debug!("\n\n\n\nThe error with the surml file: {:?}\n\n\n\n", e);
+						Error::ModelComputation(e)
+					})?;
+					debug!("file: {:?}", file);
+					debug!("\n\n\n\nCreating the compute unit\n\n\n\n");
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
@@ -177,7 +197,9 @@ impl Model {
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
+					debug!("bytes: {:?}", bytes);
 					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					debug!("file: {:?}", file);
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
