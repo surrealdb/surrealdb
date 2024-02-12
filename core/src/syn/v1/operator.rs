@@ -76,6 +76,8 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::Mul, char('∙')),
 			value(Operator::Div, char('/')),
 			value(Operator::Div, char('÷')),
+			#[cfg(feature = "sql2")]
+			value(Operator::Rem, char('%')),
 		)),
 		alt((
 			value(Operator::Contain, char('∋')),

@@ -46,28 +46,28 @@ use crate::api::Surreal;
 use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::check::check_ns_db;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::Action;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ml::storage::surml_file::SurMlFile;
 use crate::opt::IntoEndpoint;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineModelStatement;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineStatement;
 use crate::sql::statements::KillStatement;
@@ -79,7 +79,7 @@ use crate::sql::Strand;
 use crate::sql::Uuid;
 use crate::sql::Value;
 use channel::Sender;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -410,7 +410,7 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
-	if let Some((_stats, result)) = process(responses).results.remove(&0) {
+	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
@@ -439,7 +439,7 @@ async fn export(
 	ml_config: Option<MlConfig>,
 ) -> Result<()> {
 	match ml_config {
-		#[cfg(feature = "ml")]
+		#[cfg(any(feature = "ml", feature = "ml2"))]
 		Some(MlConfig::Export {
 			name,
 			version,
@@ -701,7 +701,7 @@ async fn router(
 				}
 			};
 			let responses = match param.ml_config {
-				#[cfg(feature = "ml")]
+				#[cfg(any(feature = "ml", feature = "ml2"))]
 				Some(MlConfig::Import) => {
 					// Ensure a NS and DB are set
 					let (nsv, dbv) = check_ns_db(session)?;

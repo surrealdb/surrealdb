@@ -45,7 +45,7 @@ args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,
 category = "ML - INTEGRATION TESTS"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--features", "storage-mem,ml,sql2", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
+args = ["test", "--locked", "--features", "storage-mem,ml2,sql2", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
 
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"

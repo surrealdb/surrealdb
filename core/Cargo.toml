@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "1.1.1"
+version = "1.3.0"
 rust-version = "1.70.0"
 readme = "../lib/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -39,7 +39,8 @@ kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-ml = ["dep:surrealml-core", "dep:ndarray"]
+ml = ["dep:surrealml-core1", "dep:ndarray"]
+ml2 = ["dep:surrealml-core2", "dep:ndarray"]
 jwks = ["dep:reqwest", "sql2"]
 arbitrary = [
     "dep:arbitrary",
@@ -57,11 +58,9 @@ kv-fdb = ["tokio/time"]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "kv-mem",
-    "kv-indxdb",
     "kv-rocksdb",
     "http",
     "scripting",
-    "jwks",
 ]
 targets = []
 
@@ -92,7 +91,7 @@ geo = { version = "0.27.0", features = ["use-serde"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "0.4.2", package = "rquickjs", features = [
+js = { version = "0.4.3", package = "rquickjs", features = [
     "array-buffer",
     "bindgen",
     "classes",
@@ -137,7 +136,8 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
-surrealml-core = { version = "0.0.8", optional = true }
+surrealml-core1 = { version = "0.0.7", optional = true, package = "surrealml-core" }
+surrealml-core2 = { version = "0.0.8", optional = true, package = "surrealml-core" }
 thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
 tracing = "0.1.40"

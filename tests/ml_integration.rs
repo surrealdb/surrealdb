@@ -1,7 +1,7 @@
 // RUST_LOG=warn cargo make ci-ml-integration
 mod common;
 
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 mod ml_integration {
 
 	use super::*;
@@ -11,7 +11,6 @@ mod ml_integration {
 	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::time::Duration;
 	use surrealdb::ml::storage::stream_adapter::StreamAdapter;
-	use test_log::test;
 	use ulid::Ulid;
 
 	static LOCK: AtomicBool = AtomicBool::new(false);
@@ -103,12 +102,12 @@ mod ml_integration {
 				.body(r#"ml::linear<0.0.1>([1.0, 1.0]);"#)
 				.send()
 				.await?;
-			// assert!(res.status().is_success(), "body: {}", res.text().await?);
-			let body = res.text().await?;
-			println!("{:?}", body);
-			// let deserialized_data: Vec<Data> = serde_json::from_str(&body).unwrap();
 
-			// assert_eq!(deserialized_data[0].result, 0.9998061656951904);
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+			let body = res.text().await?;
+			let deserialized_data: Vec<Data> = serde_json::from_str(&body).unwrap();
+
+			assert_eq!(deserialized_data[0].result, 0.9998063445091248);
 		}
 		Ok(())
 	}
@@ -141,11 +140,11 @@ mod ml_integration {
 				.body(r#"ml::linear<0.0.1>({squarefoot: 500.0, num_floors: 1.0});"#)
 				.send()
 				.await?;
-			// assert!(res.status().is_success(), "body: {}", res.text().await?);
+
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
 			let body = res.text().await?;
-			println!("{:?}", body);
-			// let deserialized_data: Vec<Data> = serde_json::from_str(&body)?;
-			// assert_eq!(deserialized_data[0].result, 177206.21875);
+			let deserialized_data: Vec<Data> = serde_json::from_str(&body)?;
+			assert_eq!(deserialized_data[0].result, 492.7887268066406);
 		}
 		Ok(())
 	}
