@@ -2427,14 +2427,4 @@ mod tests {
 			*max = Some(val);
 		}
 	}
-
-	fn get_seed_rnd() -> StdRng {
-		let seed: u64 = std::env::var("TEST_SEED")
-			.unwrap_or_else(|_| rand::random::<u64>().to_string())
-			.parse()
-			.expect("Failed to parse seed");
-		debug!("Seed: {}", seed);
-		// Create a seeded RNG
-		StdRng::seed_from_u64(seed)
-	}
 }
