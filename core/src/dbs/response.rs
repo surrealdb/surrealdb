@@ -1,5 +1,7 @@
 use crate::err::Error;
 use crate::sql::value::Value;
+use revision::revisioned;
+use revision::Revisioned;
 use serde::ser::SerializeStruct;
 use serde::Deserialize;
 use serde::Serialize;
@@ -40,6 +42,7 @@ impl Response {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[revisioned(revision = 1)]
 #[doc(hidden)]
 pub enum Status {
 	Ok,
@@ -64,5 +67,51 @@ impl Serialize for Response {
 			}
 		}
 		val.end()
+	}
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
+#[doc(hidden)]
+pub struct QueryMethodResponse {
+	pub time: String,
+	pub status: Status,
+	pub result: Value,
+}
+
+impl From<&Response> for QueryMethodResponse {
+	fn from(res: &Response) -> Self {
+		let time = res.speed();
+		let (status, result) = match &res.result {
+			Ok(value) => (Status::Ok, value.clone()),
+			Err(error) => (Status::Err, Value::from(error.to_string())),
+		};
+		Self {
+			status,
+			result,
+			time,
+		}
+	}
+}
+
+#[doc(hidden)]
+impl Revisioned for Response {
+	#[inline]
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> std::result::Result<(), revision::Error> {
+		QueryMethodResponse::from(self).serialize_revisioned(writer)
+	}
+
+	#[inline]
+	fn deserialize_revisioned<R: std::io::Read>(
+		_reader: &mut R,
+	) -> std::result::Result<Self, revision::Error> {
+		unreachable!("deserialising `Response` directly is not supported")
+	}
+
+	fn revision() -> u16 {
+		1
 	}
 }
