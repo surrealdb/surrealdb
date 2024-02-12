@@ -82,9 +82,7 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = TreeVector::try_from_value(self.vector_type, self.dim, v)?.into();
-			vector.check_dimension(self.dim)?;
-			// Insert the vector in the index
+			let vector = self.extract_vector(v)?.into();
 			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
 		}
 		Ok(())
@@ -117,9 +115,7 @@ impl MTreeIndex {
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = TreeVector::try_from_value(self.vector_type, self.dim, v)?.into();
-				vector.check_dimension(self.dim)?;
-				// Remove the vector
+				let vector = self.extract_vector(v)?.into();
 				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
 			}
 		}
@@ -254,7 +250,6 @@ impl MTree {
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
-		let obj = obj.into();
 		// First we check if we already have the object. In this case we just append the doc.
 		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
@@ -706,7 +701,7 @@ impl MTree {
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(tx, store, root_node, &None, object.into(), doc_id, &mut deleted)
+				.delete_at_node(tx, store, root_node, &None, object, doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
@@ -2422,9 +2417,13 @@ mod tests {
 		}
 	}
 
-	impl TreeVector {
-		fn clone_vector(&self) -> Self {
-			self.clone()
-		}
+	fn get_seed_rnd() -> StdRng {
+		let seed: u64 = std::env::var("TEST_SEED")
+			.unwrap_or_else(|_| rand::random::<u64>().to_string())
+			.parse()
+			.expect("Failed to parse seed");
+		debug!("Seed: {}", seed);
+		// Create a seeded RNG
+		StdRng::seed_from_u64(seed)
 	}
 }
