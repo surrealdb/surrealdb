@@ -60,7 +60,7 @@ parser2 = ["surrealdb-core/experimental-parser"]
 kv-fdb = ["tokio/time"]
 
 [package.metadata.docs.rs]
-rustdoc-args = ["--cfg", "docsrs,surrealdb_unstable"]
+rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws",
     "protocol-http",
@@ -70,7 +70,6 @@ features = [
     "native-tls",
     "http",
     "scripting",
-    "jwks",
 ]
 targets = []
 
