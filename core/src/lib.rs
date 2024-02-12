@@ -51,9 +51,9 @@ pub mod channel {
 #[cfg(all(feature = "ml", not(feature = "ml2")))]
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
-pub use ml1 as ml;
+pub use surrealml_core1 as ml;
 
 #[cfg(feature = "ml2")]
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
-pub use ml2 as ml;
+pub use surrealml_core2 as ml;
