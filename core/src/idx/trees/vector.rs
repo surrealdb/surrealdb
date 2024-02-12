@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
-pub enum TreeVector {
+pub enum Vector {
 	F64(Vec<f64>),
 	F32(Vec<f32>),
 	I64(Vec<i64>),
@@ -27,11 +27,11 @@ pub enum TreeVector {
 /// So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-pub type SharedVector = Arc<TreeVector>;
+pub type SharedVector = Arc<Vector>;
 
-impl PartialEq for TreeVector {
+impl PartialEq for Vector {
 	fn eq(&self, other: &Self) -> bool {
-		use TreeVector::*;
+		use Vector::*;
 		match (self, other) {
 			(F64(v), F64(v_o)) => v == v_o,
 			(F32(v), F32(v_o)) => v == v_o,
@@ -43,17 +43,17 @@ impl PartialEq for TreeVector {
 	}
 }
 
-impl Eq for TreeVector {}
+impl Eq for Vector {}
 
-impl PartialOrd for TreeVector {
+impl PartialOrd for Vector {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Ord for TreeVector {
+impl Ord for Vector {
 	fn cmp(&self, other: &Self) -> Ordering {
-		use TreeVector::*;
+		use Vector::*;
 		match (self, other) {
 			(F64(v), F64(v_o)) => v.partial_cmp(v_o).unwrap_or(Ordering::Equal),
 			(F32(v), F32(v_o)) => v.partial_cmp(v_o).unwrap_or(Ordering::Equal),
@@ -72,7 +72,7 @@ impl Ord for TreeVector {
 	}
 }
 
-impl TreeVector {
+impl Vector {
 	pub(super) fn new(t: VectorType, d: usize) -> Self {
 		match t {
 			VectorType::F64 => Self::F64(Vec::with_capacity(d)),
@@ -84,7 +84,7 @@ impl TreeVector {
 	}
 
 	pub(super) fn try_from_value(t: VectorType, d: usize, v: Value) -> Result<Self, Error> {
-		let mut vec = TreeVector::new(t, d);
+		let mut vec = Vector::new(t, d);
 		vec.check_vector_value(v)?;
 		Ok(vec)
 	}
@@ -106,7 +106,7 @@ impl TreeVector {
 	}
 
 	pub(super) fn try_from_array(t: VectorType, a: Array) -> Result<Self, Error> {
-		let mut vec = TreeVector::new(t, a.len());
+		let mut vec = Vector::new(t, a.len());
 		for v in a.0 {
 			if let Value::Number(n) = v {
 				vec.add(n);
@@ -379,7 +379,7 @@ impl TreeVector {
 	}
 }
 impl Distance {
-	pub(super) fn calculate(&self, a: &TreeVector, b: &TreeVector) -> f64 {
+	pub(super) fn calculate(&self, a: &Vector, b: &Vector) -> f64 {
 		match self {
 			Distance::Chebyshev => a.chebyshev_distance(b),
 			Distance::Cosine => a.cosine_distance(b),

@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
-use crate::idx::trees::vector::{SharedVector, TreeVector};
+use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Key;
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::{Array, Thing, Value};
@@ -58,7 +58,7 @@ impl HnswIndex {
 		// Index the values
 		for v in content {
 			// Extract the vector
-			let vector = TreeVector::try_from_value(self.vector_type, self.dim, v)?;
+			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 			vector.check_dimension(self.dim)?;
 			self.insert(Arc::new(vector), doc_id).await;
 		}
@@ -108,7 +108,7 @@ impl HnswIndex {
 		if let Some(doc_id) = self.doc_ids.get(&doc_key).cloned() {
 			for v in content {
 				// Extract the vector
-				let vector = TreeVector::try_from_value(self.vector_type, self.dim, v)?;
+				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
 				// Remove the vector
 				self.remove(Arc::new(vector), doc_id).await;
@@ -124,7 +124,7 @@ impl HnswIndex {
 		ef: usize,
 	) -> Result<VecDeque<(Thing, f64)>, Error> {
 		// Extract the vector
-		let vector = Arc::new(TreeVector::try_from_array(self.vector_type, a)?);
+		let vector = Arc::new(Vector::try_from_array(self.vector_type, a)?);
 		vector.check_dimension(self.dim)?;
 		// Do the search
 		let res = self.search(&vector, n, ef).await;
@@ -625,7 +625,7 @@ mod tests {
 	use crate::idx::trees::hnsw::{Hnsw, HnswIndex};
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
-	use crate::idx::trees::vector::{SharedVector, TreeVector};
+	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use roaring::RoaringTreemap;
 	use serial_test::serial;
@@ -1277,7 +1277,7 @@ mod tests {
 	}
 
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
-		let mut vec = TreeVector::new(VectorType::I16, 2);
+		let mut vec = Vector::new(VectorType::I16, 2);
 		vec.add(x.into());
 		vec.add(y.into());
 		Arc::new(vec)

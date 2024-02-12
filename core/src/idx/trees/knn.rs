@@ -503,7 +503,7 @@ pub struct KnnResult {
 pub(super) mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{Ids64, KnnResultBuilder};
-	use crate::idx::trees::vector::{SharedVector, TreeVector};
+	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::Number;
 	use rand::prelude::SmallRng;
@@ -538,7 +538,7 @@ pub(super) mod tests {
 	}
 
 	pub(in crate::idx::trees) fn new_vec(mut n: i64, t: VectorType, dim: usize) -> SharedVector {
-		let mut vec = TreeVector::new(t, dim);
+		let mut vec = Vector::new(t, dim);
 		vec.add(Number::Int(n));
 		for _ in 1..dim {
 			n += 1;
@@ -553,7 +553,7 @@ pub(super) mod tests {
 		dim: usize,
 		gen: &RandomItemGenerator,
 	) -> SharedVector {
-		let mut vec = TreeVector::new(t, dim);
+		let mut vec = Vector::new(t, dim);
 		for _ in 0..dim {
 			vec.add(gen.generate(rng));
 		}
@@ -565,7 +565,7 @@ pub(super) mod tests {
 		}
 	}
 
-	impl TreeVector {
+	impl Vector {
 		pub(super) fn is_null(&self) -> bool {
 			match self {
 				Self::F64(a) => !a.iter().any(|a| !a.is_zero()),

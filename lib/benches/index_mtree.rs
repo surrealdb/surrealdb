@@ -8,7 +8,7 @@ use surrealdb::idx::docids::DocId;
 use surrealdb::idx::trees::mtree::{MState, MTree};
 use surrealdb::idx::trees::store::cache::TreeCache;
 use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
-use surrealdb::idx::trees::vector::TreeVector;
+use surrealdb::idx::trees::vector::Vector;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
@@ -105,12 +105,12 @@ fn get_group<'a>(
 	group.measurement_time(Duration::from_secs(measurement_secs));
 	group
 }
-fn random_object(rng: &mut ThreadRng, vector_size: usize) -> TreeVector {
+fn random_object(rng: &mut ThreadRng, vector_size: usize) -> Vector {
 	let mut vec = Vec::with_capacity(vector_size);
 	for _ in 0..vector_size {
 		vec.push(rng.gen_range(-1.0..=1.0));
 	}
-	TreeVector::F32(vec)
+	Vector::F32(vec)
 }
 
 fn mtree() -> MTree {

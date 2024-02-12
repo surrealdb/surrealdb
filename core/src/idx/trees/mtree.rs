@@ -82,8 +82,10 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = self.extract_vector(v)?.into();
-			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
+			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
+			vector.check_dimension(self.dim)?;
+			// Insert the vector in the index
+			mtree.insert(tx, &mut self.store, vector.into(), doc_id).await?;
 		}
 		Ok(())
 	}
@@ -95,7 +97,7 @@ impl MTreeIndex {
 		k: usize,
 	) -> Result<VecDeque<(DocId, f64)>, Error> {
 		// Extract the vector
-		let vector = Arc::new(TreeVector::try_from_array(self.vector_type, a)?);
+		let vector = Arc::new(Vector::try_from_array(self.vector_type, a)?);
 		vector.check_dimension(self.dim)?;
 		// Lock the index
 		let mtree = self.mtree.read().await;
@@ -115,8 +117,10 @@ impl MTreeIndex {
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = self.extract_vector(v)?.into();
-				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
+				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
+				vector.check_dimension(self.dim)?;
+				// Remove the vector
+				mtree.delete(tx, &mut self.store, vector.into(), doc_id).await?;
 			}
 		}
 		Ok(())
@@ -1407,7 +1411,7 @@ mod tests {
 		InternalMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
-	use crate::idx::trees::vector::{SharedVector, TreeVector};
+	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
@@ -1863,12 +1867,19 @@ mod tests {
 				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Write, cache_size).await;
-				assert!(
-					t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
-					"Delete failed: {} {:?}",
-					doc_id,
-					obj
-				);
+				if collection.as_ref().len() <= 30 {
+					assert!(
+						t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
+						"Delete failed - doc_id: {doc_id} - obj: {obj:?} - coll: {:?} ",
+						collection.as_ref()
+					);
+				} else {
+					assert!(
+						t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
+						"Delete failed - doc_id: {doc_id} - obj: {obj:?}",
+					);
+				};
+
 				finish_operation(t, tx, st, true).await?;
 			}
 			{
@@ -2179,7 +2190,7 @@ mod tests {
 
 	fn check_leaf_vec(
 		m: &BTreeMap<SharedVector, ObjectProperties>,
-		obj: &TreeVector,
+		obj: &Vector,
 		parent_dist: f64,
 		docs: &[DocId],
 	) {
@@ -2193,7 +2204,7 @@ mod tests {
 
 	fn check_routing_vec(
 		m: &InternalMap,
-		center: &TreeVector,
+		center: &Vector,
 		parent_dist: f64,
 		node_id: NodeId,
 		radius: f64,
