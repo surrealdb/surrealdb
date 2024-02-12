@@ -75,7 +75,7 @@ impl Socket {
 				channel: send,
 			})
 			.await?;
-		if let Err(_) = recv.await {
+		if (recv.await).is_err() {
 			return Err("Ws task stoped unexpectedly".to_string().into());
 		}
 		Ok(())
@@ -156,11 +156,9 @@ impl Socket {
 					Format::Json => {
 						let msg = serde_json::from_str(&msg)?;
 						debug!("Received message: {msg}");
-						return Ok(Some(msg));
+						Ok(Some(msg))
 					}
-					_ => {
-						return Err("Expected to receive a binary message".to_string().into());
-					}
+					_ => Err("Expected to receive a binary message".to_string().into()),
 				}
 			}
 			Message::Binary(msg) => {
@@ -180,7 +178,7 @@ impl Socket {
 						let msg = msg.into_json();
 						// Then output the response:three: any blockers/issues/question.
 						debug!("Received message: {msg:?}");
-						return Ok(Some(msg));
+						Ok(Some(msg))
 					}
 					Format::Pack => {
 						pub mod try_from_impls {
@@ -196,15 +194,13 @@ impl Socket {
 						let msg = msg.into_json();
 						// Then output the response.
 						debug!("Received message: {msg:?}");
-						return Ok(Some(msg));
+						Ok(Some(msg))
 					}
-					_ => {
-						return Err("Expected to receive a text message".to_string().into());
-					}
+					_ => Err("Expected to receive a text message".to_string().into()),
 				}
 			}
-			Message::Close(_) => return Err("Socket closed unexpectedly".to_string().into()),
-			_ => return Ok(None),
+			Message::Close(_) => Err("Socket closed unexpectedly".to_string().into()),
+			_ => Ok(None),
 		}
 	}
 
