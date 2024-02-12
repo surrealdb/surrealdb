@@ -146,8 +146,8 @@ pub struct Datastore {
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Map of Live Query ID to Live Query query
 	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, LqIndexValue>>>,
-	// Set of tracked change feeds
-	local_live_query_cfs: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
+	// Set of tracked change feeds with associated watermarks
+	live_query_tracked_cfs: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -401,7 +401,7 @@ impl Datastore {
 			clock,
 			index_stores: IndexStores::default(),
 			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
-			local_live_query_cfs: Arc::new(RwLock::new(BTreeMap::new())),
+			live_query_tracked_cfs: Arc::new(RwLock::new(BTreeMap::new())),
 		})
 	}
 
@@ -904,10 +904,11 @@ impl Datastore {
 			return Ok(());
 		}
 
-		// Find live queries that need to catch up
+		// Find live queries that need to catch up - watermark per query, find earliest watermark per table
 		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
+		println!("\n\nThere are {} live queries tracked\n\n", change_map.len());
 		let mut tx = self.transaction(Read, Optimistic).await?;
-		for (selector, vs) in self.local_live_query_cfs.read().await.iter() {
+		for (selector, vs) in self.live_query_tracked_cfs.read().await.iter() {
 			// Read the change feed for the selector
 			let res = cf::read(
 				&mut tx,

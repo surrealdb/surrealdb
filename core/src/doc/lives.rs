@@ -122,8 +122,6 @@ impl<'a> Document<'a> {
 							},
 						})
 						.await?;
-					} else {
-						// TODO: Send to storage
 					}
 				} else if self.is_new() {
 					// Send a CREATE notification
@@ -134,8 +132,6 @@ impl<'a> Document<'a> {
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
 						.await?;
-					} else {
-						// TODO: Send to storage
 					}
 				} else {
 					// Send a UPDATE notification
@@ -146,8 +142,6 @@ impl<'a> Document<'a> {
 							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
 						.await?;
-					} else {
-						// TODO: Send to storage
 					}
 				};
 			}

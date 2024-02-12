@@ -182,7 +182,9 @@ pub async fn init(
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
+	// This is equivalent to run_maintenance in native/wasm drivers
 	let nd = node::init(ct.clone());
+	let lq = node::
 	// Start the web server
 	net::init(ct).await?;
 	// Wait for the node agent to stop
