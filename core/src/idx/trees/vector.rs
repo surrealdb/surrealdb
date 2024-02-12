@@ -4,7 +4,6 @@ use crate::sql::Number;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
@@ -23,44 +22,6 @@ pub enum Vector {
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
 pub(crate) type SharedVector = Arc<Vector>;
-
-impl Hash for Vector {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		use Vector::*;
-		match self {
-			F64(v) => {
-				0.hash(state);
-				for item in v {
-					state.write_u64(item.to_bits());
-				}
-			}
-			F32(v) => {
-				1.hash(state);
-				for item in v {
-					state.write_u32(item.to_bits());
-				}
-			}
-			I64(v) => {
-				2.hash(state);
-				for item in v {
-					state.write_i64(*item);
-				}
-			}
-			I32(v) => {
-				3.hash(state);
-				for item in v {
-					state.write_i32(*item);
-				}
-			}
-			I16(v) => {
-				4.hash(state);
-				for item in v {
-					state.write_i16(*item);
-				}
-			}
-		}
-	}
-}
 
 impl PartialEq for Vector {
 	fn eq(&self, other: &Self) -> bool {
