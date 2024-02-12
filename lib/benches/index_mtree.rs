@@ -3,7 +3,6 @@ use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Thro
 use futures::executor::block_on;
 use rand::prelude::ThreadRng;
 use rand::{thread_rng, Rng};
-use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::idx::docids::DocId;
 use surrealdb::idx::trees::mtree::{MState, MTree};
