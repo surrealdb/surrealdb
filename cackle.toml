@@ -1282,3 +1282,6 @@ allow_unsafe = true
 
 [pkg.crossbeam-queue]
 allow_unsafe = true
+
+[pkg.lru]
+allow_unsafe = true
