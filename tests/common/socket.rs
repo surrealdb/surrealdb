@@ -1,17 +1,28 @@
 use super::format::Format;
 use crate::common::error::TestError;
+use futures::channel::oneshot::channel;
 use futures_util::{SinkExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use std::error::Error;
+use std::result::Result as StdResult;
 use std::time::Duration;
 use surrealdb::sql::Value;
 use tokio::net::TcpStream;
+use tokio::sync::{
+	mpsc::{self, Receiver, Sender},
+	oneshot,
+};
 use tokio::time;
+use tokio_stream::StreamExt;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error};
+
+type Result<T> = StdResult<T, Box<dyn Error>>;
+type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 #[derive(Serialize, Deserialize)]
 struct UseParams<'a> {
@@ -33,54 +44,69 @@ struct SigninParams<'a> {
 	sc: Option<&'a str>,
 }
 
+enum SocketMsg {
+	SendAwait {
+		method: String,
+		args: serde_json::Value,
+		channel: oneshot::Sender<serde_json::Value>,
+	},
+	Send {
+		method: String,
+		args: serde_json::Value,
+	},
+	Close {
+		channel: oneshot::Sender<()>,
+	},
+}
+
 pub struct Socket {
-	pub pending_messages: Vec<serde_json::Value>,
-	pub stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+	sender: mpsc::Sender<SocketMsg>,
+	other_messages: mpsc::Receiver<serde_json::Value>,
 }
 
 // pub struct Socket(pub WebSocketStream<MaybeTlsStream<TcpStream>>);
 
 impl Socket {
 	/// Close the connection with the WebSocket server
-	pub async fn close(&mut self) -> Result<(), Box<dyn Error>> {
-		Ok(self.stream.close(None).await?)
+	pub async fn close(&mut self) -> Result<()> {
+		let (send, recv) = oneshot::channel();
+		self.sender
+			.send(SocketMsg::Close {
+				channel: send,
+			})
+			.await?;
+		if let Err(_) = recv.await {
+			return Err("Ws task stoped unexpectedly".to_string().into());
+		}
+		Ok(())
 	}
 
 	/// Connect to a WebSocket server using a specific format
-	pub async fn connect(addr: &str, format: Option<Format>) -> Result<Self, Box<dyn Error>> {
+	pub async fn connect(addr: &str, format: Option<Format>, msg_format: Format) -> Result<Self> {
 		let url = format!("ws://{}/rpc", addr);
 		let mut req = url.into_client_request().unwrap();
 		if let Some(v) = format.map(|v| v.to_string()) {
 			req.headers_mut().insert("Sec-WebSocket-Protocol", v.parse().unwrap());
 		}
 		let (stream, _) = connect_async(req).await?;
+		let (send, recv) = mpsc::channel(16);
+		let (send_other, recv_other) = mpsc::channel(16);
+
+		tokio::spawn(async move {
+			if let Err(e) = Self::ws_task(recv, stream, send_other, msg_format).await {
+				eprintln!("error in websocket task: {e}")
+			}
+		});
+
 		Ok(Self {
-			pending_messages: Vec::new(),
-			stream,
+			sender: send,
+			other_messages: recv_other,
 		})
 	}
 
-	/// Send a text or binary message to the WebSocket server
-	pub async fn send_message(
-		&mut self,
-		format: Format,
-		id: serde_json::Value,
-		method: serde_json::Value,
-		params: serde_json::Value,
-	) -> Result<(), Box<dyn Error>> {
-		let now = time::Instant::now();
-
-		let message = json!({
-			"id": id,
-			"message": method,
-			"params": params,
-		});
-
-		debug!("Sending message: {message}");
-
-		// Format the message
-		let msg = match format {
-			Format::Json => Message::Text(serde_json::to_string(&message)?),
+	fn to_msg(format: Format, message: &serde_json::Value) -> Result<Message> {
+		match format {
+			Format::Json => Ok(Message::Text(serde_json::to_string(message)?)),
 			Format::Cbor => {
 				pub mod try_from_impls {
 					include!("../../src/rpc/format/cbor/convert.rs");
@@ -98,7 +124,7 @@ impl Socket {
 				let mut output = Vec::new();
 				ciborium::into_writer(&cbor.0, &mut output).unwrap();
 				// THen output the message.
-				Message::Binary(output)
+				Ok(Message::Binary(output))
 			}
 			Format::Pack => {
 				pub mod try_from_impls {
@@ -117,189 +143,206 @@ impl Socket {
 				let mut output = Vec::new();
 				rmpv::encode::write_value(&mut output, &pack.0).unwrap();
 				// THen output the message.
-				Message::Binary(output)
-			}
-		};
-		// Send the message
-		tokio::select! {
-			_ = time::sleep(time::Duration::from_millis(500)) => {
-				return Err("timeout after 500ms waiting for the request to be sent".into());
-			}
-			res = self.stream.send(msg) => {
-				debug!("Message sent in {:?}", now.elapsed());
-					if let Err(err) = res {
-						return Err(format!("Error sending the message: {}", err).into());
-					}
+				Ok(Message::Binary(output))
 			}
 		}
-		Ok(())
 	}
 
-	/// Receive a text or binary message from the WebSocket server
-	pub async fn receive_message(
-		&mut self,
-		format: Format,
-		id: Option<serde_json::Value>,
-	) -> Result<serde_json::Value, Box<dyn Error>> {
-		let now = time::Instant::now();
-		debug!("Receiving response...");
-
-		for i in 0..self.pending_messages.len() {
-			if self.pending_messages[i].get("id") == id.as_ref() {
-				return Ok(self.pending_messages.swap_remove(i));
+	fn from_msg(format: Format, msg: Message) -> Result<Option<serde_json::Value>> {
+		match msg {
+			Message::Text(msg) => {
+				debug!("Response {msg:?}");
+				match format {
+					Format::Json => {
+						let msg = serde_json::from_str(&msg)?;
+						debug!("Received message: {msg}");
+						return Ok(Some(msg));
+					}
+					_ => {
+						return Err("Expected to receive a binary message".to_string().into());
+					}
+				}
 			}
+			Message::Binary(msg) => {
+				debug!("Response {msg:?}");
+				match format {
+					Format::Cbor => {
+						pub mod try_from_impls {
+							include!("../../src/rpc/format/cbor/convert.rs");
+						}
+						// For tests we need to convert the binary data to
+						// a serde_json::Value so that test assertions work.
+						// First of all we deserialize the CBOR data.
+						let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
+						// Then we convert it to a SurrealQL Value.
+						let msg: Value = try_from_impls::Cbor(msg).try_into()?;
+						// Then we convert the SurrealQL to JSON.
+						let msg = msg.into_json();
+						// Then output the response:three: any blockers/issues/question.
+						debug!("Received message: {msg:?}");
+						return Ok(Some(msg));
+					}
+					Format::Pack => {
+						pub mod try_from_impls {
+							include!("../../src/rpc/format/msgpack/convert.rs");
+						}
+						// For tests we need to convert the binary data to
+						// a serde_json::Value so that test assertions work.
+						// First of all we deserialize the MessagePack data.
+						let msg: rmpv::Value = rmpv::decode::read_value(&mut msg.as_slice())?;
+						// Then we convert it to a SurrealQL Value.
+						let msg: Value = try_from_impls::Pack(msg).try_into()?;
+						// Then we convert the SurrealQL to JSON.
+						let msg = msg.into_json();
+						// Then output the response.
+						debug!("Received message: {msg:?}");
+						return Ok(Some(msg));
+					}
+					_ => {
+						return Err("Expected to receive a text message".to_string().into());
+					}
+				}
+			}
+			Message::Close(_) => return Err("Socket closed unexpectedly".to_string().into()),
+			_ => return Ok(None),
 		}
+	}
+
+	async fn send_msg(
+		stream: &mut WsStream,
+		id: u64,
+		format: Format,
+		method: &str,
+		args: serde_json::Value,
+	) -> Result<()> {
+		let msg = json!({
+			"id": id,
+			"method": method,
+			"params": args,
+		});
+
+		let msg = Self::to_msg(format, &msg)?;
+
+		match tokio::time::timeout(Duration::from_millis(500), stream.send(msg)).await {
+			Ok(Ok(_)) => Ok(()),
+			Ok(Err(e)) => Err(format!("error sending message: {e}").into()),
+			Err(_) => Err("sending message timed-out".to_string().into()),
+		}
+	}
+
+	async fn ws_task(
+		mut recv: Receiver<SocketMsg>,
+		mut stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+		other: Sender<serde_json::Value>,
+		format: Format,
+	) -> Result<()> {
+		let mut next_id: u64 = 0;
+
+		let mut awaiting = HashMap::new();
 
 		loop {
-			let msg = loop {
-				tokio::select! {
-					_ = time::sleep(time::Duration::from_millis(5000)) => {
-						return Err(Box::new(TestError::NetworkError {message: "timeout after 5s waiting for the response".to_string()}))
-					}
-					res = self.stream.try_next() => {
-						match res {
-							Ok(res) => match res {
-								Some(Message::Text(msg)) => {
-									debug!("Response {msg:?} received in {:?}", now.elapsed());
-									match format {
-										Format::Json => {
-											let msg = serde_json::from_str(&msg)?;
-											debug!("Received message: {msg}");
-											break msg;
-										},
-										_ => {
-											return Err("Expected to receive a binary message".to_string().into());
-										}
-									}
-								},
-								Some(Message::Binary(msg)) => {
-									debug!("Response {msg:?} received in {:?}", now.elapsed());
-									match format {
-										Format::Cbor => {
-											pub mod try_from_impls {
-												include!("../../src/rpc/format/cbor/convert.rs");
-											}
-											// For tests we need to convert the binary data to
-											// a serde_json::Value so that test assertions work.
-											// First of all we deserialize the CBOR data.
-											let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
-											// Then we convert it to a SurrealQL Value.
-											let msg: Value = try_from_impls::Cbor(msg).try_into()?;
-											// Then we convert the SurrealQL to JSON.
-											let msg = msg.into_json();
-											// Then output the response.
-											debug!("Received message: {msg:?}");
-											return Ok(msg);
-										},
-										Format::Pack => {
-											pub mod try_from_impls {
-												include!("../../src/rpc/format/msgpack/convert.rs");
-											}
-											// For tests we need to convert the binary data to
-											// a serde_json::Value so that test assertions work.
-											// First of all we deserialize the MessagePack data.
-											let msg: rmpv::Value = rmpv::decode::read_value(&mut msg.as_slice())?;
-											// Then we convert it to a SurrealQL Value.
-											let msg: Value = try_from_impls::Pack(msg).try_into()?;
-											// Then we convert the SurrealQL to JSON.
-											let msg = msg.into_json();
-											// Then output the response.
-											debug!("Received message: {msg:?}");
-											break msg;
-										},
-										_ => {
-											return Err("Expected to receive a text message".to_string().into());
-										}
-									}
-								},
-								Some(_) => {
-									continue;
-								}
-								None => {
-									return Err("Expected to receive a message".to_string().into());
-								}
-							},
-							Err(err) => {
-								return Err(format!("Error receiving the message: {}", err).into());
-							}
+			tokio::select! {
+				msg = recv.recv() => {
+					let Some(msg) = msg else {
+						return Ok(());
+					};
+					match msg{
+						SocketMsg::SendAwait { method, args, channel } => {
+							let id = next_id;
+							next_id += 1;
+							awaiting.insert(id,channel);
+							Self::send_msg(&mut stream,id,format,&method, args).await?;
+						},
+						SocketMsg::Send { method, args } => {
+							let id = next_id;
+							next_id += 1;
+							Self::send_msg(&mut stream,id,format,&method, args).await?;
+						},
+						SocketMsg::Close{ channel } => {
+							stream.close(None).await?;
+							let _ = channel.send(());
+							return Ok(());
 						}
 					}
 				}
-			};
+				res = stream.next() => {
+					let Some(res) = res else {
+						return Ok(());
+					};
+					let res = res?;
+					let Some(res) = Self::from_msg(format,res)? else {
+						continue;
+					};
 
-			if let Some(id) = id.as_ref() {
-				if msg.get("id") == Some(id) {
-					return Ok(msg);
+					// does the response have an id.
+					if let Some(sender) = res.get("id").and_then(|x| x.as_u64()).and_then(|x| awaiting.remove(&x)){
+						let _ = sender.send(res);
+					}else if (other.send(res).await).is_err(){
+						 return Err("main thread quit unexpectedly".to_string().into())
+					 }
 				}
-			} else {
-				return Ok(msg);
 			}
-
-			self.pending_messages.push(msg);
 		}
 	}
 
 	/// Send a text or binary message and receive a reponse from the WebSocket server
-	pub async fn send_and_receive_message(
-		&mut self,
-		format: Format,
-		id: serde_json::Value,
-		method: serde_json::Value,
+	pub async fn send_request(
+		&self,
+		method: &str,
 		params: serde_json::Value,
-	) -> Result<serde_json::Value, Box<dyn Error>> {
-		self.send_message(format, id.clone(), method, params).await?;
-		self.receive_message(format, Some(id)).await
+	) -> Result<serde_json::Value> {
+		let (send, recv) = oneshot::channel();
+		if (self
+			.sender
+			.send(SocketMsg::SendAwait {
+				method: method.to_string(),
+				args: params,
+				channel: send,
+			})
+			.await)
+			.is_err()
+		{
+			return Err("websocket task quit unexpectedly".to_string().into());
+		}
+
+		match recv.await {
+			Ok(x) => Ok(x),
+			Err(_) => Err("websocket task dropped request unexpectedly".to_string().into()),
+		}
 	}
 
 	/// When testing Live Queries, we may receive multiple messages unordered.
 	/// This method captures all the expected messages before the given timeout. The result can be inspected later on to find the desired message.
-	pub async fn receive_all_messages(
+	pub async fn receive_other_message(&mut self) -> Result<serde_json::Value> {
+		match self.other_messages.recv().await {
+			Some(x) => Ok(x),
+			None => Err("websocket task quit unexpectedly".to_string().into()),
+		}
+	}
+
+	pub async fn receive_all_other_messages(
 		&mut self,
-		format: Format,
-		expected: usize,
+		amount: usize,
 		timeout: Duration,
-	) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
-		let mut res = Vec::new();
-		let deadline = time::Instant::now() + timeout;
-
-		for m in self.pending_messages.drain(..expected.min(self.pending_messages.len())) {
-			res.push(m);
-		}
-
-		if res.len() == expected {
-			return Ok(res);
-		}
-
-		loop {
-			tokio::select! {
-				_ = time::sleep_until(deadline) => {
-					debug!("Waited for {:?} and received {} messages", timeout, res.len());
-					if res.len() != expected {
-						return Err(format!("Expected {} messages but got {} after {:?}: {:?}", expected, res.len(), timeout, res).into());
-					}
-				}
-				msg = self.receive_message(format,None) => {
-					res.push(msg?);
-				}
+	) -> Result<Vec<serde_json::Value>> {
+		tokio::time::timeout(timeout, async {
+			let mut res = Vec::with_capacity(amount);
+			for _ in 0..amount {
+				res.push(self.receive_other_message().await?)
 			}
-			if res.len() == expected {
-				return Ok(res);
-			}
-		}
+			Ok(res)
+		})
+		.await?
 	}
 
 	/// Send a USE message to the server and check the response
 	pub async fn send_message_use(
 		&mut self,
-		format: Format,
 		ns: Option<&str>,
 		db: Option<&str>,
-	) -> Result<serde_json::Value, Box<dyn Error>> {
-		// Generate an ID
-		let id = uuid::Uuid::new_v4().to_string();
+	) -> Result<serde_json::Value> {
 		// Send message and receive response
-		let msg =
-			self.send_and_receive_message(format, json!(id), json!("use"), json!([ns, db])).await?;
+		let msg = self.send_request("use", json!([ns, db])).await?;
 		// Check response message structure
 		match msg.as_object() {
 			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
@@ -322,17 +365,9 @@ impl Socket {
 	}
 
 	/// Send a generic query message to the server and check the response
-	pub async fn send_message_query(
-		&mut self,
-		format: Format,
-		query: &str,
-	) -> Result<Vec<serde_json::Value>, Box<dyn Error>> {
-		// Generate an ID
-		let id = uuid::Uuid::new_v4().to_string();
+	pub async fn send_message_query(&mut self, query: &str) -> Result<Vec<serde_json::Value>> {
 		// Send message and receive response
-		let msg = self
-			.send_and_receive_message(format, json!(id), json!("query"), json!([query]))
-			.await?;
+		let msg = self.send_request("query", json!([query])).await?;
 		// Check response message structure
 		match msg.as_object() {
 			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
@@ -358,28 +393,23 @@ impl Socket {
 	/// Send a signin authentication query message to the server and check the response
 	pub async fn send_message_signin(
 		&mut self,
-		format: Format,
 		user: &str,
 		pass: &str,
 		ns: Option<&str>,
 		db: Option<&str>,
 		sc: Option<&str>,
-	) -> Result<String, Box<dyn Error>> {
-		// Generate an ID
-		let id = uuid::Uuid::new_v4().to_string();
+	) -> Result<String> {
 		// Send message and receive response
 		let msg = self
-			.send_and_receive_message(
-				format,
-				json!(id),
-				json!("signin"),
-				json!(SigninParams {
+			.send_request(
+				"signin",
+				json!([SigninParams {
 					user,
 					pass,
 					ns,
 					db,
 					sc
-				}),
+				}]),
 			)
 			.await?;
 		// Check response message structure

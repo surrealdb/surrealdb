@@ -184,9 +184,6 @@ pub async fn start_server(
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
 
-	let port: u16 = rng.gen_range(13000..14000);
-	let addr = format!("127.0.0.1:{port}");
-
 	let mut extra_args = args.clone();
 	if tls {
 		// Test the crt/key args but the keys are self signed so don't actually connect.
@@ -213,30 +210,38 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
-	let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+	for _ in 0..3 {
+		let port: u16 = rng.gen_range(13000..14000);
+		let addr = format!("127.0.0.1:{port}");
 
-	info!("starting server with args: {start_args}");
+		let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
-	// Configure where the logs go when running the test
-	let server = run_internal::<String>(&start_args, None);
+		info!("starting server with args: {start_args}");
 
-	if !wait_is_ready {
-		return Ok((addr, server));
-	}
+		// Configure where the logs go when running the test
+		let server = run_internal::<String>(&start_args, None);
 
-	// Wait 5 seconds for the server to start
-	let mut interval = time::interval(time::Duration::from_millis(1000));
-	info!("Waiting for server to start...");
-	for _i in 0..10 {
-		interval.tick().await;
-
-		if run(&format!("isready --conn http://{addr}")).output().is_ok() {
-			info!("Server ready!");
+		if !wait_is_ready {
 			return Ok((addr, server));
 		}
-	}
 
-	let server_out = server.kill().output().err().unwrap();
-	error!("server output: {server_out}");
+		// Wait 5 seconds for the server to start
+		let mut interval = time::interval(time::Duration::from_millis(1000));
+		info!("Waiting for server to start...");
+		for _i in 0..10 {
+			interval.tick().await;
+
+			if run(&format!("isready --conn http://{addr}")).output().is_ok() {
+				info!("Server ready!");
+				return Ok((addr, server));
+			}
+		}
+
+		let server_out = server.kill().output().err().unwrap();
+		if !server_out.contains("Address already in use") {
+			error!("server output: {server_out}");
+			break;
+		}
+	}
 	Err("server failed to start".into())
 }

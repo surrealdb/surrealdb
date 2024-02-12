@@ -1,18 +1,18 @@
 use super::common::{self, Format, Socket, DB, NS, PASS, USER};
 use serde_json::json;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 use test_log::test;
-use ulid::Ulid;
 
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send INFO command
-	let res =
-		socket.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("ping"), json!([])).await;
+	let res = socket.send_request("ping", json!([])).await;
 	assert!(res.is_ok(), "result: {:?}", res);
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
@@ -27,17 +27,16 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Define a user table
-	socket.send_message_query(FORMAT, "DEFINE TABLE user PERMISSIONS FULL").await?;
+	socket.send_message_query("DEFINE TABLE user PERMISSIONS FULL").await?;
 	// Define a user scope
 	socket
 		.send_message_query(
-			FORMAT,
 			r#"
 			DEFINE SCOPE scope SESSION 24h
 				SIGNUP ( CREATE user SET user = $user, pass = crypto::argon2::generate($pass) )
@@ -49,7 +48,6 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	// Create a user record
 	socket
 		.send_message_query(
-			FORMAT,
 			r#"
 			CREATE user CONTENT {
 				user: 'user',
@@ -59,11 +57,9 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	// Sign in as scope user
-	socket.send_message_signin(FORMAT, "user", "pass", Some(NS), Some(DB), Some("scope")).await?;
+	socket.send_message_signin("user", "pass", Some(NS), Some(DB), Some("scope")).await?;
 	// Send INFO command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("info"), json!([]))
-		.await?;
+	let res = socket.send_request("info", json!([])).await?;
 	assert!(res["result"].is_object(), "result: {:?}", res);
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["user"], "user", "result: {:?}", res);
@@ -76,15 +72,14 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Setup the scope
 	socket
 		.send_message_query(
-			FORMAT,
 			r#"
 			DEFINE SCOPE scope SESSION 24h
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
@@ -94,10 +89,8 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 		.await?;
 	// Send SIGNUP command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("signup"),
+		.send_request(
+			"signup",
 			json!([{
 				"ns": NS,
 				"db": DB,
@@ -126,15 +119,14 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Setup the scope
 	socket
 		.send_message_query(
-			FORMAT,
 			r#"
 			DEFINE SCOPE scope SESSION 24h
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
@@ -144,10 +136,8 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 		.await?;
 	// Send SIGNUP command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("signup"),
+		.send_request(
+			"signup",
 			json!(
 				[{
 					"ns": NS,
@@ -171,10 +161,8 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 	// Send SIGNIN command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("signin"),
+		.send_request(
+			"signin",
 			json!(
 			[{
 				"ns": NS,
@@ -204,20 +192,18 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Verify we have an authenticated session
-	let res = socket.send_message_query(FORMAT, "DEFINE NAMESPACE test").await?;
+	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	// Send INVALIDATE command
-	socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("invalidate"), json!([]))
-		.await?;
+	socket.send_request("invalidate", json!([])).await?;
 	// Verify we have an invalidated session
-	let res = socket.send_message_query(FORMAT, "DEFINE NAMESPACE test").await?;
+	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
 	assert_eq!(res[0]["status"], "ERR", "result: {:?}", res);
 	assert_eq!(
 		res[0]["result"], "IAM error: Not enough permissions to perform this action",
@@ -233,24 +219,17 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	let token = socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	let token = socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Disconnect the connection
 	socket.close().await?;
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send AUTHENTICATE command
-	socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("authenticate"),
-			json!([token,]),
-		)
-		.await?;
+	socket.send_request("authenticate", json!([token,])).await?;
 	// Verify we have an authenticated session
-	let res = socket.send_message_query(FORMAT, "DEFINE NAMESPACE test").await?;
+	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	// Test passed
 	Ok(())
@@ -261,31 +240,17 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send LET command
-	socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("let"),
-			json!(["let_var", "let_value",]),
-		)
-		.await?;
+	socket.send_request("let", json!(["let_var", "let_value",])).await?;
 	// Send SET command
-	socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("set"),
-			json!(["set_var", "set_value",]),
-		)
-		.await?;
+	socket.send_request("set", json!(["set_var", "set_value",])).await?;
 	// Verify the variables are set
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM $let_var, $set_var").await?;
+	let res = socket.send_message_query("SELECT * FROM $let_var, $set_var").await?;
 	assert_eq!(res[0]["result"], json!(["let_value", "set_value"]), "result: {:?}", res);
 	Ok(())
 }
@@ -295,29 +260,20 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send LET command
-	socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("let"),
-			json!(["let_var", "let_value",]),
-		)
-		.await?;
+	socket.send_request("let", json!(["let_var", "let_value",])).await?;
 	// Verify the variable is set
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM $let_var").await?;
+	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
 	assert_eq!(res[0]["result"], json!(["let_value"]), "result: {:?}", res);
 	// Send UNSET command
-	socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("unset"), json!(["let_var",]))
-		.await?;
+	socket.send_request("unset", json!(["let_var",])).await?;
 	// Verify the variable is unset
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM $let_var").await?;
+	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
 	assert_eq!(res[0]["result"], json!([null]), "result: {:?}", res);
 	// Test passed
 	Ok(())
@@ -328,17 +284,15 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Create a test record
-	socket.send_message_query(FORMAT, "CREATE tester SET name = 'foo', value = 'bar'").await?;
+	socket.send_message_query("CREATE tester SET name = 'foo', value = 'bar'").await?;
 	// Send SELECT command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("select"), json!(["tester",]))
-		.await?;
+	let res = socket.send_request("select", json!(["tester",])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
@@ -354,17 +308,15 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send INSERT command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("insert"),
+		.send_request(
+			"insert",
 			json!([
 				"tester",
 				{
@@ -381,7 +333,7 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Verify the data was inserted and can be queried
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {:?}", res);
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
@@ -396,17 +348,15 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send CREATE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("create"),
+		.send_request(
+			"create",
 			json!([
 				"tester",
 				{
@@ -421,7 +371,7 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Verify the data was created
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {:?}", res);
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
@@ -435,19 +385,17 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Create a test record
-	socket.send_message_query(FORMAT, "CREATE tester SET name = 'foo'").await?;
+	socket.send_message_query("CREATE tester SET name = 'foo'").await?;
 	// Send UPDATE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("update"),
+		.send_request(
+			"update",
 			json!([
 				"tester",
 				{
@@ -462,7 +410,7 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Verify the data was updated
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {:?}", res);
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
@@ -477,19 +425,17 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Create a test record
-	socket.send_message_query(FORMAT, "CREATE tester SET name = 'foo'").await?;
+	socket.send_message_query("CREATE tester SET name = 'foo'").await?;
 	// Send UPDATE command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("merge"),
+		.send_request(
+			"merge",
 			json!([
 				"tester",
 				{
@@ -505,7 +451,7 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Verify the data was merged
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {:?}", res);
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
@@ -520,19 +466,17 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Create a test record
-	socket.send_message_query(FORMAT, "CREATE tester:id SET name = 'foo'").await?;
+	socket.send_message_query("CREATE tester:id SET name = 'foo'").await?;
 	// Send PATCH command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("patch"),
+		.send_request(
+			"patch",
 			json!([
 				"tester:id",
 				[
@@ -553,7 +497,7 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res.get("value"), Some(json!("bar")).as_ref(), "result: {:?}", res);
 	// Verify the data was patched
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {:?}", res);
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
@@ -568,34 +512,30 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Create a test record
-	socket.send_message_query(FORMAT, "CREATE tester:id").await?;
+	socket.send_message_query("CREATE tester:id").await?;
 	// Send DELETE command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("delete"), json!(["tester"]))
-		.await?;
+	let res = socket.send_request("delete", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	assert_eq!(res[0]["id"], "tester:id", "result: {:?}", res);
 	// Create a test record
-	socket.send_message_query(FORMAT, "CREATE tester:id").await?;
+	socket.send_message_query("CREATE tester:id").await?;
 	// Send DELETE command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("delete"), json!(["tester:id"]))
-		.await?;
+	let res = socket.send_request("delete", json!(["tester:id"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_object(), "result: {:?}", res);
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:id", "result: {:?}", res);
 	// Verify the data was merged
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {:?}", res);
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 0, "result: {:?}", res);
@@ -608,26 +548,20 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send QUERY command
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["CREATE tester; SELECT * FROM tester;",]),
-		)
-		.await?;
+	let res =
+		socket.send_request("query", json!(["CREATE tester; SELECT * FROM tester;",])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 2, "result: {:?}", res);
 	// Verify the data was created
-	let res = socket.send_message_query(FORMAT, "SELECT * FROM tester").await?;
+	let res = socket.send_message_query("SELECT * FROM tester").await?;
 	assert!(res[0]["result"].is_array(), "result: {:?}", res);
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
@@ -640,11 +574,9 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send version command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("version"), json!([]))
-		.await?;
+	let res = socket.send_request("version", json!([])).await?;
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("surrealdb-"), "result: {}", res);
@@ -658,24 +590,33 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send 5 long-running queries and verify they run concurrently
+
+	let mut futures = Vec::<Pin<Box<dyn Future<Output = _>>>>::new();
 	for i in 0..5 {
-		socket
-			.send_message(
-				FORMAT,
-				json!(Ulid::new()),
-				json!("query"),
-				json!([format!("SLEEP 3s; RETURN {i};")]),
-			)
-			.await?;
+		let future = socket.send_request("query", json!([format!("SLEEP 3s; RETURN {i};")]));
+		futures.push(Box::pin(future))
 	}
-	// Verify the queries all completed concurrently within 5 seconds
-	let res = socket.receive_all_messages(FORMAT, 5, Duration::from_secs(5)).await?;
+
+	let res =
+		tokio::time::timeout(Duration::from_secs(5), futures::future::join_all(futures)).await;
+	let Ok(res) = res else {
+		panic!("future timed-out");
+	};
+
+	let res = res.into_iter().try_fold(
+		Vec::new(),
+		|mut acc, x| -> Result<_, Box<dyn std::error::Error>> {
+			acc.push(x?);
+			Ok(acc)
+		},
+	)?;
+
 	assert!(res.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", res);
 	// Test passed
 	Ok(())
@@ -686,27 +627,18 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send LIVE command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
-		.await?;
+	let res = socket.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let live1 = res["result"].as_str().unwrap();
 	// Send QUERY command
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["LIVE SELECT * FROM tester"]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
@@ -714,20 +646,18 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res[0]["result"].is_string(), "result: {:?}", res);
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["CREATE tester:id SET name = 'foo'"]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_messages(FORMAT, 2, Duration::from_secs(1)).await?;
+	let msgs: Result<_, Box<dyn std::error::Error>> =
+		tokio::time::timeout(Duration::from_secs(1), async {
+			Ok(vec![socket.receive_other_message().await?, socket.receive_other_message().await?])
+		})
+		.await?;
+	let msgs = msgs?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Check for first live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
@@ -763,27 +693,18 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Send LIVE command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
-		.await?;
+	let res = socket.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let live1 = res["result"].as_str().unwrap();
 	// Send QUERY command
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["LIVE SELECT * FROM tester"]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
@@ -791,20 +712,13 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res[0]["result"].is_string(), "result: {:?}", res);
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["CREATE tester:one SET name = 'one'"]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!(["CREATE tester:one SET name = 'one'"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_messages(FORMAT, 2, Duration::from_secs(1)).await?;
+	let msgs = socket.receive_all_other_messages(2, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Check for first live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
@@ -832,26 +746,17 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:one", "result: {:?}", res);
 	// Send KILL command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("kill"), json!([live1]))
-		.await?;
+	let res = socket.send_request("kill", json!([live1])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_null(), "result: {:?}", res);
 	// Create a new test record
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["CREATE tester:two SET name = 'two'"]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!(["CREATE tester:two SET name = 'two'"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_messages(FORMAT, 1, Duration::from_secs(1)).await?;
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Check for second live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live2));
@@ -866,34 +771,20 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:two", "result: {:?}", res);
 	// Send QUERY command
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!([format!("KILL '{live2}'")]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!([format!("KILL '{live2}'")])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	assert!(res[0]["result"].is_null(), "result: {:?}", res);
 	// Create a new test record
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["CREATE tester:tre SET name = 'two'"]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!(["CREATE tester:tre SET name = 'two'"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_messages(FORMAT, 0, Duration::from_secs(1)).await?;
+	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Test passed
 	Ok(())
@@ -904,39 +795,30 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket1 = Socket::connect(&addr, SERVER).await?;
+	let mut socket1 = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket1.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket1.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket1.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket1.send_message_use(Some(NS), Some(DB)).await?;
 	// Send LIVE command
-	let res = socket1
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
-		.await?;
+	let res = socket1.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let liveid = res["result"].as_str().unwrap();
 	// Connect to WebSocket
-	let mut socket2 = Socket::connect(&addr, SERVER).await?;
+	let mut socket2 = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket2.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket2.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket2.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket2.send_message_use(Some(NS), Some(DB)).await?;
 	// Create a new test record
-	let res = socket2
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["CREATE tester:id SET name = 'foo'"]),
-		)
-		.await?;
+	let res = socket2.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket1.receive_all_messages(FORMAT, 1, Duration::from_secs(1)).await?;
+	let msgs = socket1.receive_all_other_messages(1, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Check for live query notifcation
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, liveid));
@@ -960,15 +842,14 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(FORMAT, USER, PASS, None, None, None).await?;
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(FORMAT, Some(NS), Some(DB)).await?;
+	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Setup the scope
 	socket
 		.send_message_query(
-			FORMAT,
 			r#"
 			DEFINE SCOPE scope SESSION 1s
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
@@ -978,10 +859,8 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 		.await?;
 	// Send SIGNUP command
 	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("signup"),
+		.send_request(
+			"signup",
 			json!([{
 				"ns": NS,
 				"db": DB,
@@ -998,28 +877,19 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Verify response contains no error
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
 	// Send LIVE command
-	let res = socket
-		.send_and_receive_message(FORMAT, json!(Ulid::new()), json!("live"), json!(["tester"]))
-		.await?;
+	let res = socket.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	// Wait 2 seconds for auth to expire
 	tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 	// Create a new test record
-	let res = socket
-		.send_and_receive_message(
-			FORMAT,
-			json!(Ulid::new()),
-			json!("query"),
-			json!(["CREATE tester:id SET name = 'foo'"]),
-		)
-		.await?;
+	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_messages(FORMAT, 0, Duration::from_secs(1)).await?;
+	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Test passed
 	Ok(())
