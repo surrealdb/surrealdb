@@ -57,8 +57,8 @@ impl Model {
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 
-use revision::implementations::primitives;
-use tracing_subscriber::field::debug;
+		use revision::implementations::primitives;
+		use tracing_subscriber::field::debug;
 		let opt = &opt.new_with_futures(true);
 		// Get the full name of this model
 		let name = format!("ml::{}", self.name);
@@ -142,11 +142,9 @@ use tracing_subscriber::field::debug;
 			// Perform raw compute
 			Value::Number(v) => {
 				// Compute the model function arguments
-				let args: f32 = v.try_into().map_err(|e| {
-					Error::InvalidArguments {
-						name: format!("ml::{}<{}>", self.name, self.version),
-						message: ARGUMENTS.into(),
-					}
+				let args: f32 = v.try_into().map_err(|e| Error::InvalidArguments {
+					name: format!("ml::{}<{}>", self.name, self.version),
+					message: ARGUMENTS.into(),
 				})?;
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
@@ -154,9 +152,8 @@ use tracing_subscriber::field::debug;
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).map_err(|e| {
-						Error::ModelComputation(e)
-					})?;
+					let mut file =
+						SurMlFile::from_bytes(bytes).map_err(|e| Error::ModelComputation(e))?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
