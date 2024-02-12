@@ -103,6 +103,7 @@ mod ml_integration {
 				.send()
 				.await?;
 
+			println!("res: {:?}", res.text().await?);
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
 			let body = res.text().await?;
 			let deserialized_data: Vec<Data> = serde_json::from_str(&body).unwrap();
@@ -141,6 +142,7 @@ mod ml_integration {
 				.send()
 				.await?;
 
+			println!("res: {:?}", res.text().await?);
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
 			let body = res.text().await?;
 			let deserialized_data: Vec<Data> = serde_json::from_str(&body)?;
