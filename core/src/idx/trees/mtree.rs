@@ -82,7 +82,7 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = self.extract_vector(v)?;
+			let vector = self.extract_vector(v)?.into();
 			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
 		}
 		Ok(())
@@ -160,7 +160,7 @@ impl MTreeIndex {
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = self.extract_vector(v)?;
+				let vector = self.extract_vector(v)?.into();
 				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
 			}
 		}
@@ -387,12 +387,11 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		obj: Vector,
+		obj: SharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
-		let obj = obj.into();
 		// First we check if we already have the object. In this case we just append the doc.
 		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
@@ -837,14 +836,14 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		object: Vector,
+		object: SharedVector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
 		let mut deleted = false;
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(tx, store, root_node, &None, object.into(), doc_id, &mut deleted)
+				.delete_at_node(tx, store, root_node, &None, object, doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
@@ -1689,7 +1688,7 @@ mod tests {
 		// Insert single element
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec1.as_ref().clone(), 1).await?;
+			t.insert(&mut tx, &mut &mut st, vec1.clone(), 1).await?;
 			assert_eq!(t.state.root, Some(0));
 			check_leaf_write(&mut tx, &mut &mut st, 0, |m| {
 				assert_eq!(m.len(), 1);
@@ -1712,7 +1711,7 @@ mod tests {
 		let vec2 = new_vec(2, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 2).await?;
+			t.insert(&mut tx, &mut &mut st, vec2.clone(), 2).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec1 knn
@@ -1743,7 +1742,7 @@ mod tests {
 		// insert new doc to existing vector
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 3).await?;
+			t.insert(&mut tx, &mut &mut st, vec2.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec2 knn
@@ -1767,7 +1766,7 @@ mod tests {
 		let vec3 = new_vec(3, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec3.as_ref().clone(), 3).await?;
+			t.insert(&mut tx, &mut &mut st, vec3.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec3 knn
@@ -1792,7 +1791,7 @@ mod tests {
 		let vec4 = new_vec(4, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec4.as_ref().clone(), 4).await?;
+			t.insert(&mut tx, &mut &mut st, vec4.clone(), 4).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec4 knn
@@ -1828,7 +1827,7 @@ mod tests {
 		let vec6 = new_vec(6, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec6.as_ref().clone(), 6).await?;
+			t.insert(&mut tx, &mut &mut st, vec6.clone(), 6).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec6 knn
@@ -1867,7 +1866,7 @@ mod tests {
 		let vec8 = new_vec(8, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec8.as_ref().clone(), 8).await?;
+			t.insert(&mut tx, &mut &mut st, vec8.clone(), 8).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1906,7 +1905,7 @@ mod tests {
 		let vec9 = new_vec(9, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec9.as_ref().clone(), 9).await?;
+			t.insert(&mut tx, &mut &mut st, vec9.clone(), 9).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1946,7 +1945,7 @@ mod tests {
 		let vec10 = new_vec(10, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec10.as_ref().clone(), 10).await?;
+			t.insert(&mut tx, &mut &mut st, vec10.clone(), 10).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -2040,7 +2039,7 @@ mod tests {
 			{
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
-				t.insert(&mut tx, &mut &mut st, obj.clone_vector(), *doc_id).await?;
+				t.insert(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?;
 				finish_operation(t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
@@ -2065,7 +2064,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 			for (doc_id, obj) in collection.as_ref() {
-				t.insert(&mut tx, &mut &mut st, obj.clone_vector(), *doc_id).await?;
+				t.insert(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			finish_operation(t, tx, st, true).await?;
@@ -2089,7 +2088,7 @@ mod tests {
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Write, cache_size).await;
 				assert!(
-					t.delete(&mut tx, &mut &mut st, obj.clone_vector(), *doc_id).await?,
+					t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
 					"Delete failed: {} {:?}",
 					doc_id,
 					obj
@@ -2685,11 +2684,5 @@ mod tests {
 		debug!("Seed: {}", seed);
 		// Create a seeded RNG
 		StdRng::seed_from_u64(seed)
-	}
-
-	impl Vector {
-		fn clone_vector(&self) -> Vector {
-			self.clone()
-		}
 	}
 }
