@@ -130,7 +130,7 @@ async fn insert_objects(
 	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
 	let mut s = TreeStore::new(TreeNodeProvider::Debug, c.clone(), Write).await;
 	for i in 0..samples_size {
-		let object = random_object(&mut rng, vector_size);
+		let object = random_object(&mut rng, vector_size).into();
 		// Insert the sample
 		t.insert(&mut tx, &mut s, object, i as DocId).await.unwrap();
 	}
@@ -151,7 +151,7 @@ async fn knn_lookup_objects(
 	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
 	let mut s = TreeStore::new(TreeNodeProvider::Debug, c, Read).await;
 	for _ in 0..samples_size {
-		let object = Arc::new(random_object(&mut rng, vector_size));
+		let object = random_object(&mut rng, vector_size).into();
 		// Insert the sample
 		t.knn_search(&mut tx, &mut s, &object, knn).await.unwrap();
 	}
