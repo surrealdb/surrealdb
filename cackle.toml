@@ -510,6 +510,9 @@ allow_unsafe = true
 
 [pkg.futures-util]
 allow_unsafe = true
+allow_apis = [
+    "net",
+]
 
 [pkg.indexmap]
 allow_unsafe = true
@@ -1160,6 +1163,7 @@ allow_apis = [
 allow_unsafe = true
 allow_apis = [
     "net",
+    "fs",
 ]
 
 [pkg.assert_fs]
@@ -1285,3 +1289,17 @@ allow_unsafe = true
 
 [pkg.lru]
 allow_unsafe = true
+allow_apis = [
+    "net",
+]
+
+[pkg.surrealkv]
+allow_apis = [
+    "fs",
+    "net",
+]
+
+[pkg.vart]
+allow_apis = [
+    "net",
+]
