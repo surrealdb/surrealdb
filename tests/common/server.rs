@@ -220,7 +220,7 @@ pub async fn start_server(
 	}
 
 	'retry: for _ in 0..3 {
-		let port: u16 = rng.gen_range(13000..14000);
+		let port: u16 = rng.gen_range(13000..24000);
 		let addr = format!("127.0.0.1:{port}");
 
 		let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
