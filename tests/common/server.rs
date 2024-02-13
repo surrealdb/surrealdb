@@ -84,6 +84,8 @@ impl Drop for Child {
 				std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file");
 			println!("Server STDERR: \n{}", stderr);
 		}
+		let _ = std::fs::remove_file(&self.stdout_path);
+		let _ = std::fs::remove_file(&self.stderr_path);
 	}
 }
 
