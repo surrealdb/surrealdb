@@ -804,7 +804,7 @@ mod cli_integration {
 				.send_signal(nix::sys::signal::Signal::SIGINT)
 				.expect("Failed to send SIGINT to server");
 
-			tokio::time::timeout(time::Duration::from_secs(1), async {
+			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
 						panic!(
