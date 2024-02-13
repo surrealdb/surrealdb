@@ -219,7 +219,7 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
-	for _ in 0..3 {
+	'retry: for _ in 0..3 {
 		let port: u16 = rng.gen_range(13000..14000);
 		let addr = format!("127.0.0.1:{port}");
 
@@ -239,6 +239,14 @@ pub async fn start_server(
 		info!("Waiting for server to start...");
 		for _i in 0..10 {
 			interval.tick().await;
+
+			let out = server.stderr();
+			if out.contains("Address already in use") {
+				continue 'retry;
+			}
+			if !out.contains("Started web server on") {
+				continue;
+			}
 
 			if run(&format!("isready --conn http://{addr}")).output().is_ok() {
 				info!("Server ready!");
