@@ -10,7 +10,7 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::ping")).await?;
+	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send INFO command
 	let res = socket.send_request("ping", json!([])).await;
 	assert!(res.is_ok(), "result: {:?}", res);
@@ -28,7 +28,7 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::info")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -74,7 +74,7 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::singup")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -122,7 +122,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::signin")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -196,8 +196,7 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket =
-		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::invalidate")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -225,15 +224,13 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket =
-		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::authenticate::1")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	let token = socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Disconnect the connection
 	socket.close().await?;
 	// Connect to WebSocket
-	let mut socket =
-		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::authenticate::2")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send AUTHENTICATE command
 	socket.send_request("authenticate", json!([token,])).await?;
 	// Verify we have an authenticated session
@@ -249,7 +246,7 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::letset")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -270,7 +267,7 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::unset")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -295,7 +292,7 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::select")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -320,7 +317,7 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::insert")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -361,7 +358,7 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::create")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -399,7 +396,7 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::update")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -440,7 +437,7 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::merge")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -482,7 +479,7 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::patch")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -529,7 +526,7 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::delete")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -566,7 +563,7 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::query")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -593,7 +590,7 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::version")).await?;
+	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send version command
 	let res = socket.send_request("version", json!([])).await?;
 	assert!(res["result"].is_string(), "result: {:?}", res);
@@ -610,8 +607,7 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket =
-		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::concurrency")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -649,7 +645,7 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::live")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -716,7 +712,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::kill")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -819,8 +815,7 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket1 =
-		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::live_second::1")).await?;
+	let mut socket1 = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket1.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -831,8 +826,7 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let liveid = res["result"].as_str().unwrap();
 	// Connect to WebSocket
-	let mut socket2 =
-		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::live_second::2")).await?;
+	let mut socket2 = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket2.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -869,8 +863,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket =
-		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::variable_auth")).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
