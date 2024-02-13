@@ -18,7 +18,7 @@
 //!
 //! The any engine allows you to use any engine as long as it was enabled when compiling. Unlike with the typed scheme,
 //! the choice of the engine is made at runtime depending on the endpoint that you provide as a string. If you use an
-//! environment variable to provide this endpoint string, you won't need to change your code in any way in order to
+//! environment variable to provide this endpoint string, you won't need to change your code  in order to
 //! switch engines. The downside to this is that you will get a runtime error if you forget to enable the engine you
 //! want to use when compiling your code. On the other hand, this totally decouples your application from the engine
 //! you are using and makes it possible to use virtually any engine SurrealDB supports by simply changing the Cargo
