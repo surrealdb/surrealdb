@@ -353,7 +353,7 @@ impl Hnsw {
 		for lc in (top_layer_level + 1)..=q_level {
 			let mut layer = self.layers[lc].write().await;
 			if layer.0.insert(q_id, vec![]).is_some() {
-				unreachable!("Already there {q_id}");
+				unreachable!("Already there {}", q_id);
 			}
 		}
 
@@ -377,8 +377,6 @@ impl Hnsw {
 			if let Some(n_pt) = self.elements.get(n_id) {
 				let dist = self.dist.calculate(e_pt, n_pt);
 				w.insert(PriorityNode(dist, *n_id));
-			} else {
-				unreachable!() // Todo remove once deletion is implemented
 			}
 		}
 		w
@@ -459,20 +457,20 @@ impl Hnsw {
 		#[cfg(debug_assertions)]
 		let expected_w_len = self.elements.len().min(k);
 		if let Some(mut ep) = self.enter_point {
-			let mut w = BTreeSet::new();
 			let l = self.layers.len();
 			for lc in (1..l).rev() {
 				let l = self.layers[lc].read().await;
+				let mut w = BTreeSet::new();
 				self.search_layer(q, ep, 1, &l, &mut w, None).await;
 				if let Some(n) = w.first() {
 					ep = n.1;
 				} else {
 					unreachable!()
 				}
-				w.clear();
 			}
 			{
 				let l = self.layers[0].read().await;
+				let mut w = BTreeSet::new();
 				self.search_layer(q, ep, ef, &l, &mut w, None).await;
 				#[cfg(debug_assertions)]
 				if w.len() < expected_w_len {
@@ -493,6 +491,7 @@ impl Hnsw {
 
 #[derive(Debug)]
 enum SelectNeighbors {
+	Simple,
 	Heuristic,
 	HeuristicExt,
 	HeuristicKeep,
@@ -501,16 +500,20 @@ enum SelectNeighbors {
 
 impl From<&HnswParams> for SelectNeighbors {
 	fn from(p: &HnswParams) -> Self {
-		if p.keep_pruned_connections {
-			if p.extend_candidates {
-				Self::HeuristicExtKeep
+		if p.heuristic {
+			if p.keep_pruned_connections {
+				if p.extend_candidates {
+					Self::HeuristicExtKeep
+				} else {
+					Self::HeuristicKeep
+				}
+			} else if p.extend_candidates {
+				Self::HeuristicExt
 			} else {
-				Self::HeuristicKeep
+				Self::Heuristic
 			}
-		} else if p.extend_candidates {
-			Self::HeuristicExt
 		} else {
-			Self::Heuristic
+			Self::Simple
 		}
 	}
 }
@@ -526,12 +529,18 @@ impl SelectNeighbors {
 		m_max: usize,
 	) -> Vec<ElementId> {
 		match self {
+			Self::Simple => Self::simple(c, m_max),
 			Self::Heuristic => Self::heuristic(c, m_max),
 			Self::HeuristicExt => Self::heuristic_ext(h, lc, q_id, q_pt, c, m_max),
 			Self::HeuristicKeep => Self::heuristic_keep(c, m_max),
 			Self::HeuristicExtKeep => Self::heuristic_ext_keep(h, lc, q_id, q_pt, c, m_max),
 		}
 	}
+
+	fn simple(w: BTreeSet<PriorityNode>, m_max: usize) -> Vec<ElementId> {
+		w.into_iter().take(m_max).map(|pn| pn.1).collect()
+	}
+
 	fn heuristic(mut c: BTreeSet<PriorityNode>, m_max: usize) -> Vec<ElementId> {
 		let mut r = Vec::with_capacity(m_max.min(c.len()));
 		let mut closest_neighbors_distance = f64::MAX;
@@ -697,6 +706,8 @@ mod tests {
 		vector_type: VectorType,
 		distance: Distance,
 		m: usize,
+		efc: usize,
+		heuristic: bool,
 		extend_candidates: bool,
 		keep_pruned_connections: bool,
 	) -> HnswParams {
@@ -708,8 +719,9 @@ mod tests {
 			vector_type,
 			m,
 			m0,
-			ef_construction: 500,
+			ef_construction: efc as u16,
 			ml: (1.0 / (m as f64).ln()).into(),
+			heuristic,
 			extend_candidates,
 			keep_pruned_connections,
 		}
@@ -726,8 +738,16 @@ mod tests {
 	) {
 		info!("test_hnsw - dist: {distance} - type: {vt} - coll size: {collection_size} - dim: {dimension} - m: {m} - ext: {extend_candidates} - keep: {keep_pruned_connections}");
 		let collection = TestCollection::new(true, collection_size, vt, dimension, &distance);
-		let params =
-			new_params(dimension, vt, distance, m, extend_candidates, keep_pruned_connections);
+		let params = new_params(
+			dimension,
+			vt,
+			distance,
+			m,
+			500,
+			true,
+			extend_candidates,
+			keep_pruned_connections,
+		);
 		test_hnsw_collection(&params, &collection).await;
 	}
 
@@ -878,12 +898,22 @@ mod tests {
 		dimension: usize,
 		unique: bool,
 		m: usize,
+		heuristic: bool,
 		extend_candidates: bool,
 		keep_pruned_connections: bool,
 	) {
 		info!("test_hnsw_index - dist: {distance} - type: {vt} - coll size: {collection_size} - dim: {dimension} - unique: {unique} - m: {m} - ext: {extend_candidates} - keep: {keep_pruned_connections}");
 		let collection = TestCollection::new(unique, collection_size, vt, dimension, &distance);
-		let p = new_params(dimension, vt, distance, m, extend_candidates, keep_pruned_connections);
+		let p = new_params(
+			dimension,
+			vt,
+			distance,
+			m,
+			500,
+			heuristic,
+			extend_candidates,
+			keep_pruned_connections,
+		);
 		let mut h = HnswIndex::new(&p);
 		let map = insert_collection_hnsw_index(&mut h, &collection).await;
 		find_collection_hnsw_index(&mut h, &collection).await;
@@ -911,7 +941,7 @@ mod tests {
 				VectorType::I16,
 			] {
 				for unique in [false, true] {
-					test_hnsw_index(d.clone(), vt, 30, 2, unique, 12, true, true).await;
+					test_hnsw_index(d.clone(), vt, 30, 2, unique, 12, true, true, true).await;
 				}
 			}
 		}
@@ -920,7 +950,7 @@ mod tests {
 	#[test_log::test(tokio::test)]
 	#[serial]
 	async fn test_building() {
-		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, true, true);
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, 500, true, true, true);
 		let mut hnsw = Hnsw::new(&p);
 		assert_eq!(hnsw.elements.len(), 0);
 		assert_eq!(hnsw.enter_point, None);
@@ -1164,7 +1194,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, true, true);
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
 		let mut h = Hnsw::new(&p);
 		insert_collection_hnsw(&mut h, &collection).await;
 		let pt = new_i16_vec(-2, -3);
@@ -1180,31 +1210,41 @@ mod tests {
 	#[test_log::test(tokio::test)]
 	#[serial]
 	async fn test_recall() {
-		let (dim, vt, m, size) = (5, VectorType::F64, 24, 500);
-		let collection = TestCollection::new(true, size, vt, dim, &Distance::Euclidean);
-		let p = new_params(dim, vt, Distance::Euclidean, m, true, true);
+		let (dim, vt, m, size) = (20, VectorType::F32, 24, 1000);
+		info!("Build test collection");
+		let collection = TestCollection::new(false, size, vt, dim, &Distance::Euclidean);
+		let p = new_params(dim, vt, Distance::Euclidean, m, 500, false, false, false);
 		let mut h = HnswIndex::new(&p);
-		insert_collection_hnsw_index(&mut h, &collection).await;
+		info!("Insert collection");
+		for (doc_id, obj) in collection.as_ref() {
+			h.insert(obj.clone(), *doc_id).await;
+		}
 
-		let mut last_recall = 0.0;
-		for efs in [10, 20, 40, 80] {
+		let queries = TestCollection::new(false, 50, vt, dim, &Distance::Euclidean);
+
+		info!("Check recall");
+		for (efs, expected_recall) in [(100, 1.0)] {
+			// [(10, 0.9), (20, 0.9), (40, 1.0), (80, 1.0)]
 			let mut total_recall = 0.0;
-			for (doc_id, pt) in collection.as_ref() {
+			for (_, pt) in queries.as_ref() {
 				let knn = 10;
 				let hnsw_res = h.search(pt, knn, efs).await;
 				assert_eq!(
 					hnsw_res.docs.len(),
 					knn,
-					"Different size - knn: {knn} - doc: {doc_id} - efs: {efs} - docs: {:?}",
+					"Different size - knn: {knn} - efs: {efs} - docs: {:?}",
 					collection.as_ref().len()
 				);
 				let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 				total_recall += brute_force_res.recall(&hnsw_res);
 			}
-			let recall = total_recall / collection.as_ref().len() as f64;
-			assert!(recall >= 0.9, "Recall: {} - Last: {}", recall, last_recall);
-			assert!(recall >= last_recall, "Recall: {} - Last: {}", recall, last_recall);
-			last_recall = recall;
+			let recall = total_recall / queries.as_ref().len() as f64;
+			assert!(
+				recall >= expected_recall,
+				"Recall: {} - Expected: {}",
+				recall,
+				expected_recall
+			);
 		}
 	}
 

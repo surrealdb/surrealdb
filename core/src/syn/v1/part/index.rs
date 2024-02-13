@@ -214,6 +214,7 @@ pub fn hnsw(i: &str) -> IResult<&str, Index> {
 		let (i, m) = opt(m)(i)?;
 		let (i, m0) = opt(m0)(i)?;
 		let (i, ml) = opt(ml)(i)?;
+		let (i, heuristic) = opt(preceded(shouldbespace, tag_no_case("HEURISTIC")))(i)?;
 		let (i, extend_candidates) =
 			opt(preceded(shouldbespace, tag_no_case("EXTEND_CANDIDATES")))(i)?;
 		let (i, keep_pruned_connections) =
@@ -230,6 +231,7 @@ pub fn hnsw(i: &str) -> IResult<&str, Index> {
 				distance: distance.unwrap_or(Distance::Euclidean),
 				vector_type: vector_type.unwrap_or(VectorType::F64),
 				m,
+				heuristic: heuristic.is_some(),
 				extend_candidates: extend_candidates.is_some(),
 				keep_pruned_connections: keep_pruned_connections.is_some(),
 				m0,

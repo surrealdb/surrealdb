@@ -585,11 +585,12 @@ pub(super) mod tests {
 			dimension: usize,
 			distance: &Distance,
 		) -> Self {
+			let mut rng = get_seed_rnd();
 			let gen = RandomItemGenerator::new(&distance, dimension);
 			if unique {
-				TestCollection::new_unique(collection_size, vt, dimension, &gen)
+				TestCollection::new_unique(collection_size, vt, dimension, &gen, &mut rng)
 			} else {
-				TestCollection::new_random(collection_size, vt, dimension, &gen)
+				TestCollection::new_random(collection_size, vt, dimension, &gen, &mut rng)
 			}
 		}
 
@@ -606,12 +607,12 @@ pub(super) mod tests {
 			vector_type: VectorType,
 			dimension: usize,
 			gen: &RandomItemGenerator,
+			rng: &mut SmallRng,
 		) -> Self {
-			let mut rng = get_seed_rnd();
 			let mut vector_set = BTreeSet::new();
 			let mut attempts = collection_size * 2;
 			while vector_set.len() < collection_size {
-				vector_set.insert(new_random_vec(&mut rng, vector_type, dimension, gen));
+				vector_set.insert(new_random_vec(rng, vector_type, dimension, gen));
 				attempts -= 1;
 				if attempts == 0 {
 					panic!("Fail generating a unique random collection");
@@ -629,12 +630,12 @@ pub(super) mod tests {
 			vector_type: VectorType,
 			dimension: usize,
 			gen: &RandomItemGenerator,
+			rng: &mut SmallRng,
 		) -> Self {
-			let mut rng = get_seed_rnd();
 			let mut coll = TestCollection::NonUnique(Vec::with_capacity(collection_size));
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				coll.add(doc_id as DocId, new_random_vec(&mut rng, vector_type, dimension, gen));
+				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen));
 			}
 			coll
 		}
