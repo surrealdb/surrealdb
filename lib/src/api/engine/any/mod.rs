@@ -14,9 +14,10 @@
 //! you want to use as a type parameter to `Surreal::new`. This allows you detect, at compile, whether the engine
 //! you are trying to use is enabled. If not, your code won't compile. This is awesome but it strongly couples your
 //! application to the engine you are using. In order to change an engine you would need to update your code to
-//! the new scheme and endpoint you need to use and recompile it. This is where the any engine comes in.
+//! the new scheme and endpoint you need to use and recompile it. This is where the `any` engine comes in. We will
+//! call it `Surreal<Any>` (the type it creates) to avoid confusion with the word any.
 //!
-//! The any engine allows you to use any engine as long as it was enabled when compiling. Unlike with the typed scheme,
+//! `Surreal<Any>` allows you to use any engine as long as it was enabled when compiling. Unlike with the typed scheme,
 //! the choice of the engine is made at runtime depending on the endpoint that you provide as a string. If you use an
 //! environment variable to provide this endpoint string, you won't need to change your code  in order to
 //! switch engines. The downside to this is that you will get a runtime error if you forget to enable the engine you
@@ -29,7 +30,7 @@
 //! of this approach is that RocksDB is not written in Rust so you will need to install some external dependencies
 //! on your development machine in order to successfully compile it. Some of our users have reported that
 //! this is not exactly straight-forward on Windows. Another issue is that RocksDB is very resource intensive to
-//! compile and it takes a long time. Both of these issues can be easily avoided by using the any engine. You can
+//! compile and it takes a long time. Both of these issues can be easily avoided by using `Surreal<Any>`. You can
 //! develop using an in-memory engine but deploy using RocksDB. If you develop on Windows but deploy to Linux then
 //! you completely avoid having to build RocksDB on Windows at all.
 //!
@@ -111,9 +112,9 @@
 //! ```
 //!
 //! The example above shows how you can avoid compiling RocksDB on your development machine, thereby avoiding dependency hell
-//! and paying the compilation cost during development. This is not the only benefit you can derive from using the any engine
+//! and paying the compilation cost during development. This is not the only benefit you can derive from using `Surreal<Any>`
 //! though. It's still useful even when your engine isn't expensive to compile. For example, the remote engines use pure Rust
-//! dependencies but you can still benefit from using the any engine by using the in-memory engine for development and deploy
+//! dependencies but you can still benefit from using `Surreal<Any>` by using the in-memory engine for development and deploy
 //! using a remote engine like the WebSocket engine. This way you avoid having to spin up a SurrealDB server first when
 //! developing and testing your application.
 //!
