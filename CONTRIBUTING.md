@@ -22,7 +22,7 @@ rustup component add rustfmt
 
 To set up a working **development environment**, you can either [use the Nix package manager](pkg/nix#readme) or you can [install dependencies manually](doc/BUILDING.md#building-surrealdb) and ensure that you have `rustup` installed, and fork the project git repository.
 
-> Please note that these instructions are for setting up a functional dev environment. If you just want to install SurrealDB for day-to-day usage and not as a code maintainer use this [installation guide](https://surrealdb.com/docs/install). If you want to get started integrating SurrealDB into your app, view the [integration tutorials](https://surrealdb.com/docs/integration).
+> Please note that these instructions are for setting up a functional dev environment. If you just want to install SurrealDB for day-to-day usage and not as a code maintainer use this [installation guide](https://docs.surrealdb.com/docs/installation/overview). If you want to get started integrating SurrealDB into your app, view the [integration tutorials](https://docs.surrealdb.com/docs/integration/overview/).
 
 ```bash
 # Use the default (stable) release channel if prompted
@@ -220,7 +220,7 @@ Sending feedback is a great way for us to understand your different use cases of
 
 ### Documentation improvements
 
-Submitting [documentation](https://surrealdb.com/docs) updates, enhancements, designs, or bug fixes, and fixing any spelling or grammar errors will be very much appreciated.
+Submitting [documentation](https://docs.surrealdb.com/docs/intro/) updates, enhancements, designs, or bug fixes, and fixing any spelling or grammar errors will be very much appreciated.
 
 ### Joining our community
 
