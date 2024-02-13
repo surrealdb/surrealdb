@@ -3,8 +3,10 @@ use crate::rpc::format::Format;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
+use revision::revisioned;
 use serde::Serialize;
 use serde_json::Value as Json;
+use std::sync::Arc;
 use surrealdb::channel::Sender;
 use surrealdb::dbs;
 use surrealdb::dbs::Notification;
@@ -16,6 +18,7 @@ use tracing::Span;
 // The variants here should be in exactly the same order as `surrealdb::engine::remote::ws::Data`
 // In future, they will possibly be merged to avoid having to keep them in sync.
 #[derive(Debug, Serialize)]
+#[revisioned(revision = 1)]
 pub enum Data {
 	/// Generally methods return a `sql::Value`
 	Other(Value),
@@ -61,6 +64,7 @@ impl From<Data> for Value {
 }
 
 #[derive(Debug, Serialize)]
+#[revisioned(revision = 1)]
 pub struct Response {
 	id: Option<Value>,
 	result: Result<Data, Failure>,
@@ -90,7 +94,7 @@ impl Response {
 	}
 
 	/// Send the response to the WebSocket channel
-	pub async fn send(self, fmt: Format, chn: &Sender<Message>) {
+	pub async fn send(self, cx: Arc<TelemetryContext>, fmt: Format, chn: &Sender<Message>) {
 		// Create a new tracing span
 		let span = Span::current();
 		// Log the rpc response call
@@ -110,7 +114,7 @@ impl Response {
 		let (len, msg) = fmt.res(self).unwrap();
 		// Send the message to the write channel
 		if chn.send(msg).await.is_ok() {
-			record_rpc(&TelemetryContext::current(), len, is_error);
+			record_rpc(cx.as_ref(), len, is_error);
 		};
 	}
 }
