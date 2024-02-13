@@ -24,7 +24,7 @@
 //! you are using and makes it possible to use whichever engine SurrealDB supports by simply changing the Cargo
 //! features you enable when compiling. This enables some cool workflows.
 //!
-//! One of the common use-cases we see is using SurrealDB as an embedded database using RocksDB as the local engine.
+//! One of the common use cases we see is using SurrealDB as an embedded database using RocksDB as the local engine.
 //! This is a nice way to boost the performance of your application when all you need is a single node. The downside
 //! of this approach is that RocksDB is not written in Rust so you will need to install some external dependencies
 //! on your development machine in order to successfully compile it. Some of our users have reported that
