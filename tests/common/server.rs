@@ -30,7 +30,7 @@ impl Child {
 	}
 
 	pub fn kill(mut self) -> Self {
-		self.inner.take().unwrap().kill().unwrap();
+		self.inner.as_mut().unwrap().kill().unwrap();
 		self
 	}
 
