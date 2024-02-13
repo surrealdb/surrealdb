@@ -27,13 +27,13 @@ args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,st
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting,jwks", "--workspace", "--test", "cli_integration", "--", "cli_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting,jwks", "--workspace", "--test", "cli_integration", "--", "cli_integration"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration"]
 
 [tasks.ci-ws-integration]
 category = "WS - INTEGRATION TESTS"
