@@ -82,7 +82,12 @@ impl Socket {
 	}
 
 	/// Connect to a WebSocket server using a specific format
-	pub async fn connect(addr: &str, format: Option<Format>, msg_format: Format) -> Result<Self> {
+	pub async fn connect(
+		addr: &str,
+		format: Option<Format>,
+		msg_format: Format,
+		_id: &str,
+	) -> Result<Self> {
 		let url = format!("ws://{}/rpc", addr);
 		let mut req = url.into_client_request().unwrap();
 		if let Some(v) = format.map(|v| v.to_string()) {

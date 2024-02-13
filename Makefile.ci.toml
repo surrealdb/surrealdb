@@ -39,7 +39,7 @@ args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,
 category = "WS - INTEGRATION TESTS"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,sql2", "--workspace", "--test", "ws_integration", "--", "ws_integration", "--nocapture"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,sql2", "--workspace", "--test", "ws_integration", "--", "ws_integration"]
 
 [tasks.ci-ml-integration]
 category = "ML - INTEGRATION TESTS"

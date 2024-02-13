@@ -29,8 +29,12 @@ impl Child {
 	}
 
 	pub fn kill(mut self) -> Self {
-		self.inner.as_mut().unwrap().kill().unwrap();
+		self.inner.take().unwrap().kill().unwrap();
 		self
+	}
+
+	pub fn finish(mut self) {
+		self.inner.take().unwrap().kill().unwrap();
 	}
 
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
@@ -60,10 +64,6 @@ impl Child {
 		let mut buf = self.stdout();
 		buf.push_str(&self.stderr());
 
-		// Cleanup files after reading them
-		std::fs::remove_file(self.stdout_path.as_str()).unwrap();
-		std::fs::remove_file(self.stderr_path.as_str()).unwrap();
-
 		if status.success() {
 			Ok(buf)
 		} else {
@@ -75,7 +75,14 @@ impl Child {
 impl Drop for Child {
 	fn drop(&mut self) {
 		if let Some(inner) = self.inner.as_mut() {
+			println!("Server process dropped! Assuming error happend");
 			let _ = inner.kill();
+			let stdout =
+				std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
+			println!("Server STDOUT: \n{}", stdout);
+			let stderr =
+				std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file");
+			println!("Server STDERR: \n{}", stderr);
 		}
 	}
 }

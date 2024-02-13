@@ -8,9 +8,9 @@ use test_log::test;
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::ping")).await?;
 	// Send INFO command
 	let res = socket.send_request("ping", json!([])).await;
 	assert!(res.is_ok(), "result: {:?}", res);
@@ -19,15 +19,16 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res.as_object().unwrap();
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::info")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -64,15 +65,16 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["user"], "user", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::singup")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -111,15 +113,16 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::signin")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -184,15 +187,17 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket =
+		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::invalidate")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -211,36 +216,40 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 		res
 	);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket =
+		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::authenticate::1")).await?;
 	// Authenticate the connection
 	let token = socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Disconnect the connection
 	socket.close().await?;
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket =
+		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::authenticate::2")).await?;
 	// Send AUTHENTICATE command
 	socket.send_request("authenticate", json!([token,])).await?;
 	// Verify we have an authenticated session
 	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::letset")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -252,15 +261,16 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	// Verify the variables are set
 	let res = socket.send_message_query("SELECT * FROM $let_var, $set_var").await?;
 	assert_eq!(res[0]["result"], json!(["let_value", "set_value"]), "result: {:?}", res);
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::unset")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -276,15 +286,16 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
 	assert_eq!(res[0]["result"], json!([null]), "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::select")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -300,15 +311,16 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::insert")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -340,15 +352,16 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::create")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -377,15 +390,16 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::update")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -417,15 +431,16 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], json!(null), "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::merge")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -458,15 +473,16 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::patch")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -504,15 +520,16 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], json!(null), "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::delete")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -540,15 +557,16 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 0, "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::query")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -566,21 +584,23 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::version")).await?;
 	// Send version command
 	let res = socket.send_request("version", json!([])).await?;
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("surrealdb-"), "result: {}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
@@ -588,9 +608,10 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket =
+		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::concurrency")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -619,15 +640,16 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 
 	assert!(res.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::live")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -685,15 +707,16 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:id", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::kill")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -787,15 +810,17 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket1 = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket1 =
+		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::live_second::1")).await?;
 	// Authenticate the connection
 	socket1.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -806,7 +831,8 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let liveid = res["result"].as_str().unwrap();
 	// Connect to WebSocket
-	let mut socket2 = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket2 =
+		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::live_second::2")).await?;
 	// Authenticate the connection
 	socket2.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -834,15 +860,17 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:id", "result: {:?}", res);
 	// Test passed
+	server.finish();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket =
+		Socket::connect(&addr, SERVER, FORMAT, &format!("{FORMAT:?}::variable_auth")).await?;
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
@@ -892,5 +920,6 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Test passed
+	server.finish();
 	Ok(())
 }
