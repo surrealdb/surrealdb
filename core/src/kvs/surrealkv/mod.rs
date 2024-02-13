@@ -313,14 +313,13 @@ impl Transaction {
 		let res = self
 			.inner
 			.get(key_slice.as_slice())
-			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)));
+			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)))?;
 
 		match (res, chk) {
-			(Ok(Some(v)), Some(w)) if v == w => self.inner.set(key_slice.as_slice(), &val_vec),
-			(Ok(None), None) => self.inner.set(key_slice.as_slice(), &val_vec),
-			(Err(e), _) => return Err(e),
+			(Some(v), Some(w)) if v == w => self.inner.set(key_slice.as_slice(), &val_vec)?,
+			(None, None) => self.inner.set(key_slice.as_slice(), &val_vec)?,
 			_ => return Err(Error::TxConditionNotMet),
-		}?;
+		};
 
 		// Return result
 		Ok(())
@@ -369,14 +368,13 @@ impl Transaction {
 		let res = self
 			.inner
 			.get(key_slice.as_slice())
-			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)));
+			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)))?;
 
 		match (res, chk) {
-			(Ok(Some(v)), Some(w)) if v == w => self.inner.delete(key_slice.as_slice()),
-			(Ok(None), None) => self.inner.delete(key_slice.as_slice()),
-			(Err(e), _) => return Err(e),
+			(Some(v), Some(w)) if v == w => self.inner.delete(key_slice.as_slice())?,
+			(None, None) => self.inner.delete(key_slice.as_slice())?,
 			_ => return Err(Error::TxConditionNotMet),
-		}?;
+		};
 
 		// Return result
 		Ok(())

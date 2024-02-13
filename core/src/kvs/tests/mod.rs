@@ -19,7 +19,7 @@ pub(crate) enum Kvs {
 
 // This type is unsused when no store is enabled.
 #[allow(dead_code)]
-pub type ClockType = Arc<SizedClock>;
+type ClockType = Arc<SizedClock>;
 
 #[cfg(feature = "kv-mem")]
 mod mem {
