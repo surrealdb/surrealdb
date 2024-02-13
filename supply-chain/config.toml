@@ -1019,18 +1019,6 @@ criteria = "safe-to-deploy"
 version = "0.4.4"
 criteria = "safe-to-run"
 
-[[exemptions.num-integer]]
-version = "0.1.46"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-iter]]
-version = "0.1.44"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-traits]]
-version = "0.2.18"
-criteria = "safe-to-deploy"
-
 [[exemptions.num_cpus]]
 version = "1.16.0"
 criteria = "safe-to-deploy"
