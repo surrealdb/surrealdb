@@ -224,17 +224,23 @@ impl Surreal<Any> {
 /// // Instantiate an in-memory instance
 /// let db = connect("mem://").await?;
 ///
-/// // Instantiate an file-backed instance
-/// let db = connect("file://temp.db").await?;
+/// // Instantiate an file-backed instance (currently uses RocksDB)
+/// let db = connect("file://path/to/database-folder").await?;
+/// 
+/// /// // Instantiate an RocksDB-backed instance
+/// let db = connect("rocksdb://path/to/database-folder").await?;
+/// 
+/// // Instantiate an SpeeDB-backed instance
+/// let db = connect("speedb://path/to/database-folder").await?;
 ///
 /// // Instantiate an IndxDB-backed instance
-/// let db = connect("indxdb://MyDatabase").await?;
+/// let db = connect("indxdb://DatabaseName").await?;
 ///
 /// // Instantiate a TiKV-backed instance
 /// let db = connect("tikv://localhost:2379").await?;
 ///
 /// // Instantiate a FoundationDB-backed instance
-/// let db = connect("fdb://fdb.cluster").await?;
+/// let db = connect("fdb://path/to/fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```
