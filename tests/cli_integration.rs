@@ -782,63 +782,63 @@ mod cli_integration {
 		// Create a long-lived WS connection so the server don't shutdown gracefully
 		let socket =
 			Socket::connect(&addr, None, Format::Json).await.expect("Failed to connect to server");
-		socket
-			.send_request("query", json!(["SLEEP 30s;"]))
-			.await
-			.expect("Failed to send WS message");
 
-		// Make sure the SLEEP query is being executed
-		tokio::select! {
-			_ = async {
+		let send_future = socket.send_request("query", json!(["SLEEP 30s;"]));
+
+		let signal_send_fut = async {
+			// Make sure the SLEEP query is being executed
+			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
-					if server.stderr().contains("Executing: SLEEP 30s") {
+					let err = server.stderr();
+					if err.contains("SLEEP 30s") {
 						break;
 					}
 					tokio::time::sleep(time::Duration::from_secs(1)).await;
 				}
-			} => {},
-			// Timeout after 10 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(10)) => panic!("Server didn't start executing the SLEEP query"),
-		}
+			})
+			.await
+			.expect("Server didn't start executing the SLEEP query");
 
-		info!("* Send first SIGINT signal");
-		server
-			.send_signal(nix::sys::signal::Signal::SIGINT)
-			.expect("Failed to send SIGINT to server");
+			info!("* Send first SIGINT signal");
+			server
+				.send_signal(nix::sys::signal::Signal::SIGINT)
+				.expect("Failed to send SIGINT to server");
 
-		tokio::select! {
-			_ = async {
+			tokio::time::timeout(time::Duration::from_secs(1), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
-						panic!("Server unexpectedly exited after receiving first SIGINT: {:?}", exit);
+						panic!(
+							"Server unexpectedly exited after receiving first SIGINT: {:?}",
+							exit
+						);
 					}
-					tokio::time::sleep(time::Duration::from_secs(1)).await;
+					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
-			} => {},
-			// Timeout after 5 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(5)) => ()
-		}
+			})
+			.await
+			.unwrap_err();
 
-		info!("* Send second SIGINT signal");
-		server
-			.send_signal(nix::sys::signal::Signal::SIGINT)
-			.expect("Failed to send SIGINT to server");
+			info!("* Send second SIGINT signal");
 
-		tokio::select! {
-			_ = async {
+			server
+				.send_signal(nix::sys::signal::Signal::SIGINT)
+				.expect("Failed to send SIGINT to server");
+
+			tokio::time::timeout(time::Duration::from_secs(5), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
 						assert!(exit.success(), "Server shutted down successfully");
 						break;
 					}
-					tokio::time::sleep(time::Duration::from_secs(1)).await;
+					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
-			} => {},
-			// Timeout after 5 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(5)) => {
-				panic!("Server didn't exit after receiving two SIGINT signals");
-			}
-		}
+			})
+			.await
+			.expect("Server didn't exit after receiving two SIGINT signals");
+		};
+
+		let _ =
+			futures::future::join(async { send_future.await.unwrap_err() }, signal_send_fut).await;
 
 		server.finish()
 	}
