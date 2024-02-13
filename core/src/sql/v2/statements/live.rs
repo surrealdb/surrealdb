@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fflags::FFLAGS;
 use crate::iam::Auth;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
@@ -95,26 +96,40 @@ impl LiveStatement {
 			..self.clone()
 		};
 		let id = stm.id.0;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Process the live query table
-		match stm.what.compute(ctx, opt, txn, doc).await? {
-			Value::Table(tb) => {
-				// Store the current Node ID
-				stm.node = nid.into();
-				// Insert the node live query
-				run.putc_ndlq(nid, id, opt.ns(), opt.db(), tb.as_str(), None).await?;
-				// Insert the table live query
-				run.putc_tblq(opt.ns(), opt.db(), &tb, stm, None).await?;
+		match FFLAGS.change_feed_live_queries.enabled() {
+			true => {
+				let mut run = txn.lock().await;
+				match stm.what.compute(ctx, opt, txn, doc).await? {
+					Value::Table(tb) => {
+						// Send the live query registration hook to the transaction pre-commit channel
+						run.prepare_lq(stm.clone()).await?;
+					}
+				}
+				Ok(id.into())
 			}
-			v => {
-				return Err(Error::LiveStatement {
-					value: v.to_string(),
-				})
+			false => {
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the live query table
+				match stm.what.compute(ctx, opt, txn, doc).await? {
+					Value::Table(tb) => {
+						// Store the current Node ID
+						stm.node = nid.into();
+						// Insert the node live query
+						run.putc_ndlq(nid, id, opt.ns(), opt.db(), tb.as_str(), None).await?;
+						// Insert the table live query
+						run.putc_tblq(opt.ns(), opt.db(), &tb, stm, None).await?;
+					}
+					v => {
+						return Err(Error::LiveStatement {
+							value: v.to_string(),
+						})
+					}
+				};
+				// Return the query id
+				Ok(id.into())
 			}
-		};
-		// Return the query id
-		Ok(id.into())
+		}
 	}
 
 	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {

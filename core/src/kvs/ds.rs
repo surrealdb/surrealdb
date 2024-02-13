@@ -49,75 +49,6 @@ const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 // In the future we will have proper pagination
 const TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION: u32 = 1000;
 
-/// Used for cluster logic to move LQ data to LQ cleanup code
-/// Not a stored struct; Used only in this module
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct LqValue {
-	pub nd: Uuid,
-	pub ns: String,
-	pub db: String,
-	pub tb: String,
-	pub lq: Uuid,
-}
-
-#[derive(Debug)]
-pub(crate) enum LqType {
-	Nd(LqValue),
-	Tb(LqValue),
-}
-
-impl LqType {
-	fn get_inner(&self) -> &LqValue {
-		match self {
-			LqType::Nd(lq) => lq,
-			LqType::Tb(lq) => lq,
-		}
-	}
-}
-
-impl PartialEq for LqType {
-	fn eq(&self, other: &Self) -> bool {
-		self.get_inner().lq == other.get_inner().lq
-	}
-}
-
-impl Eq for LqType {}
-
-impl PartialOrd for LqType {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Option::Some(self.get_inner().lq.cmp(&other.get_inner().lq))
-	}
-}
-
-impl Ord for LqType {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.get_inner().lq.cmp(&other.get_inner().lq)
-	}
-}
-
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
-struct LqSelector {
-	ns: String,
-	db: String,
-	tb: String,
-}
-
-/// This is an internal-only helper struct for organising the keys of how live queries are accessed
-/// Because we want immutable keys, we cannot put mutable things in such as ts and vs
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
-struct LqIndexKey {
-	selector: LqSelector,
-	lq: Uuid,
-}
-
-/// Internal only struct
-/// This can be assumed to have a mutable reference
-#[derive(Eq, PartialEq, Clone)]
-struct LqIndexValue {
-	query: LiveStatement,
-	vs: Versionstamp,
-	ts: Timestamp,
-}
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -145,7 +76,7 @@ pub struct Datastore {
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Map of Live Query ID to Live Query query
-	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, LqIndexValue>>>,
+	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, Vec<LqIndexValue>>>>,
 	// Set of tracked change feeds with associated watermarks
 	live_query_tracked_cfs: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
@@ -898,9 +829,11 @@ impl Datastore {
 		}
 		// Return if there are no live queries
 		if self.notification_channel.is_none() {
+			trace!("Channels is none, short-circuiting");
 			return Ok(());
 		}
 		if self.local_live_queries.read().await.is_empty() {
+			trace!("No live queries, short-circuiting");
 			return Ok(());
 		}
 
@@ -966,6 +899,19 @@ impl Datastore {
 			}
 		}
 		Ok(())
+	}
+
+	pub(crate) async fn track_live_queries(&self, lqs: &Vec<LqEntry>) -> Result<(), Error> {
+		let lq_map = self.local_live_queries.write().await;
+		for lq in lqs {
+			let lq_selector = lq.0;
+			let m = lq_map.get(lq_selector);
+			match m {
+				Some(lq_index_value) => {
+					lq_index_value.
+				}
+			}
+		}
 	}
 
 	async fn save_timestamp_for_versionstamp_impl(

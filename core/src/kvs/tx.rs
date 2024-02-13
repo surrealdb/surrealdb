@@ -1,7 +1,7 @@
 use super::kv::Add;
 use super::kv::Convert;
-use super::Key;
 use super::Val;
+use super::{Key, LqIndexKey};
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
@@ -23,7 +23,7 @@ use crate::sql::Strand;
 use crate::sql::Value;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use channel::Sender;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -46,6 +46,8 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
+
+const LQ_CAPACITY: usize = 100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -86,6 +88,7 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
+	pub(super) prepared_live_queries: Arc<Receiver<LiveStatement>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -266,7 +269,7 @@ impl Transaction {
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Commit");
-		match self {
+		let tx_result = match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
@@ -299,7 +302,15 @@ impl Transaction {
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
+		};
+	}
+
+	pub fn consume_pending_live_queries(&self) -> Vec<(LqIndexKey, LiveStatement)> {
+		let mut lq: Vec<LiveStatement> = Vec::with_capacity(LQ_CAPACITY);
+		while let Ok(l) = self.prepared_live_queries.try_recv() {
+			lq.push(l);
 		}
+		lq
 	}
 
 	/// Delete a key from the datastore.

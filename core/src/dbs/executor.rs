@@ -5,10 +5,11 @@ use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::err::Error::LiveStatement;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::kvs::{LqIndexKey, TransactionType};
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
@@ -83,7 +84,15 @@ impl<'a> Executor<'a> {
 					let _ = txn.cancel().await;
 				} else {
 					let r = match txn.complete_changes(false).await {
-						Ok(_) => txn.commit().await,
+						Ok(_) => {
+							let tx_res = txn.commit().await;
+							if let Ok(_) = tx_res {
+								// Commit succeeded
+								let lqs: Vec<(LqIndexKey, LiveStatement)> =
+									txn.consume_pending_live_queries();
+								self.kvs.track_live_queries(&lqs).await
+							}
+						}
 						r => r,
 					};
 					if let Err(e) = r {
