@@ -221,7 +221,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::SurrealKV(v),
 				..
-			} => v.closed(),
+			} => v.is_closed(),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -413,7 +413,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::SurrealKV(v),
 				..
-			} => v.exi(key).await,
+			} => v.exists(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -2842,7 +2842,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::SurrealKV(v),
 				..
-			} => v.check_level(check),
+			} => v.set_check_level(check),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
