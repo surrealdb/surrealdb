@@ -15,7 +15,6 @@ pub const DB: &str = "testdb";
 /// Child is a (maybe running) CLI process. It can be killed by dropping it
 pub struct Child {
 	inner: Option<std::process::Child>,
-	output: Option<ExitStatus>,
 	stdout_path: String,
 	stderr_path: String,
 }
