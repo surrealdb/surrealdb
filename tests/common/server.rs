@@ -2,7 +2,7 @@ use rand::{thread_rng, Rng};
 use std::error::Error;
 use std::fs::File;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 use tokio::time;
 use tracing::{debug, error, info};
@@ -15,6 +15,7 @@ pub const DB: &str = "testdb";
 /// Child is a (maybe running) CLI process. It can be killed by dropping it
 pub struct Child {
 	inner: Option<std::process::Child>,
+	output: Option<ExitStatus>,
 	stdout_path: String,
 	stderr_path: String,
 }
