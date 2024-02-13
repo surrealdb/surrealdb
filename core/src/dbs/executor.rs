@@ -8,8 +8,9 @@ use crate::err::Error;
 use crate::err::Error::LiveStatement;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::kvs::lq_structs::LqEntry;
+use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::kvs::{LqIndexKey, TransactionType};
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
@@ -85,12 +86,13 @@ impl<'a> Executor<'a> {
 				} else {
 					let r = match txn.complete_changes(false).await {
 						Ok(_) => {
-							let tx_res = txn.commit().await;
-							if let Ok(_) = tx_res {
-								// Commit succeeded
-								let lqs: Vec<(LqIndexKey, LiveStatement)> =
-									txn.consume_pending_live_queries();
-								self.kvs.track_live_queries(&lqs).await
+							match txn.commit().await {
+								Ok(()) => {
+									// Commit succeeded
+									let lqs: Vec<LqEntry> = txn.consume_pending_live_queries();
+									self.kvs.track_live_queries(&lqs).await
+								}
+								Err(e) => Err(e),
 							}
 						}
 						r => r,

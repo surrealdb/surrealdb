@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
 use crate::iam::Auth;
+use crate::kvs::lq_structs::LqEntry;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
 use revision::revisioned;
@@ -102,8 +103,14 @@ impl LiveStatement {
 				match stm.what.compute(ctx, opt, txn, doc).await? {
 					Value::Table(tb) => {
 						// Send the live query registration hook to the transaction pre-commit channel
-						run.prepare_lq(stm.clone()).await?;
+						run.prepare_lq(LqEntry {
+							live_id: stm.id,
+							ns: opt.ns().to_string(),
+							db: opt.db().to_string(),
+							stm,
+						})?;
 					}
+					_ => {}
 				}
 				Ok(id.into())
 			}

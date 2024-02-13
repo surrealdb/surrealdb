@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::instrument;
 use tracing::trace;
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +31,9 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
+use crate::kvs::lq_structs::{
+	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType,
+};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::LiveStatement;
@@ -48,7 +51,6 @@ const LQ_CHANNEL_SIZE: usize = 100;
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 // In the future we will have proper pagination
 const TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION: u32 = 1000;
-
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -663,31 +665,31 @@ impl Datastore {
 			.await?;
 		}
 		// Scan node live queries for every node
-		let mut nd_lq_set: BTreeSet<LqType> = BTreeSet::new();
+		let mut nd_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
 		for cl in &cluster {
 			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
                 Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
             })?, NON_PAGED_BATCH_SIZE).await?;
-			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
+			nd_lq_set.extend(nds.into_iter().map(UnreachableLqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
 		// Scan tables for all live queries
 		// let mut tb_lqs: Vec<LqValue> = vec![];
-		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
+		let mut tb_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
 			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NON_PAGED_BATCH_SIZE).await?;
-			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
+			tb_lq_set.extend(tbs.into_iter().map(UnreachableLqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
 		// Find and delete missing
 		for missing in nd_lq_set.symmetric_difference(&tb_lq_set) {
 			match missing {
-				LqType::Nd(ndlq) => {
+				UnreachableLqType::Nd(ndlq) => {
 					warn!("Deleting ndlq {:?}", &ndlq);
 					tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
 				}
-				LqType::Tb(tblq) => {
+				UnreachableLqType::Tb(tblq) => {
 					warn!("Deleting tblq {:?}", &tblq);
 					tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
 				}
@@ -871,9 +873,13 @@ impl Datastore {
 					.iter()
 					.filter(|(k, _)| k.selector == selector)
 					.map(|a| {
-						let (b, c) = (a.0.clone(), a.1.clone());
-						(b, c)
+						let mut changed = Vec::with_capacity(a.1.len());
+						for val in a.1 {
+							changed.push((a.0.clone(), val.clone()));
+						}
+						changed
 					})
+					.flatten()
 					.to_owned()
 					.collect()
 			};
@@ -888,10 +894,10 @@ impl Datastore {
 							// TODO(SUR-291): enforce security
 							self.local_live_queries.write().await.insert(
 								(*lq_key).clone(),
-								LqIndexValue {
+								vec![LqIndexValue {
 									vs: change_vs,
-									..(*lq_value).clone()
-								},
+									..lq_value.clone()
+								}],
 							);
 						}
 					}
@@ -902,16 +908,19 @@ impl Datastore {
 	}
 
 	pub(crate) async fn track_live_queries(&self, lqs: &Vec<LqEntry>) -> Result<(), Error> {
-		let lq_map = self.local_live_queries.write().await;
+		let mut lq_map = self.local_live_queries.write().await;
 		for lq in lqs {
-			let lq_selector = lq.0;
-			let m = lq_map.get(lq_selector);
+			let lq_index_key: LqIndexKey = lq.as_key();
+			let m = lq_map.get_mut(&lq_index_key);
 			match m {
-				Some(lq_index_value) => {
-					lq_index_value.
+				Some(mut lq_index_value) => lq_index_value.push(lq.as_value()),
+				None => {
+					let lq_vec = vec![lq.as_value()];
+					lq_map.insert(lq_index_key, lq_vec);
 				}
 			}
 		}
+		Ok(())
 	}
 
 	async fn save_timestamp_for_versionstamp_impl(
@@ -1054,6 +1063,8 @@ impl Datastore {
 			_ => unreachable!(),
 		};
 
+		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
+
 		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
@@ -1061,6 +1072,7 @@ impl Datastore {
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
+			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
 		})
 	}
 

@@ -15,80 +15,98 @@ pub struct LqValue {
 	pub lq: Uuid,
 }
 
+/// Used to track unreachable live queries in v1
 #[derive(Debug)]
-pub(crate) enum LqType {
+pub(crate) enum UnreachableLqType {
 	Nd(LqValue),
 	Tb(LqValue),
 }
 
-impl LqType {
-	fn get_inner(&self) -> &LqValue {
+impl UnreachableLqType {
+	pub(crate) fn get_inner(&self) -> &LqValue {
 		match self {
-			LqType::Nd(lq) => lq,
-			LqType::Tb(lq) => lq,
+			UnreachableLqType::Nd(lq) => lq,
+			UnreachableLqType::Tb(lq) => lq,
 		}
 	}
 }
 
-impl PartialEq for LqType {
+impl PartialEq for UnreachableLqType {
 	fn eq(&self, other: &Self) -> bool {
 		self.get_inner().lq == other.get_inner().lq
 	}
 }
 
-impl Eq for LqType {}
+impl Eq for UnreachableLqType {}
 
-impl PartialOrd for LqType {
+impl PartialOrd for UnreachableLqType {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Option::Some(self.get_inner().lq.cmp(&other.get_inner().lq))
 	}
 }
 
-impl Ord for LqType {
+impl Ord for UnreachableLqType {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.get_inner().lq.cmp(&other.get_inner().lq)
 	}
 }
 
+/// LqSelector is used for tracking change-feed backed queries in a common baseline
+/// The intention is to have a collection of live queries that can have batch operations performed on them
+/// This reduces the number of change feed queries
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
 pub(crate) struct LqSelector {
-	ns: String,
-	db: String,
-	tb: String,
+	pub(crate) ns: String,
+	pub(crate) db: String,
+	pub(crate) tb: String,
 }
 
 /// This is an internal-only helper struct for organising the keys of how live queries are accessed
 /// Because we want immutable keys, we cannot put mutable things in such as ts and vs
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
 pub(crate) struct LqIndexKey {
-	selector: LqSelector,
+	pub(crate) selector: LqSelector,
 	lq: Uuid,
 }
 
 /// Internal only struct
 /// This can be assumed to have a mutable reference
 #[derive(Eq, PartialEq, Clone)]
-struct LqIndexValue {
-	query: LiveStatement,
-	vs: Versionstamp,
-	ts: Timestamp,
+pub(crate) struct LqIndexValue {
+	pub(crate) query: LiveStatement,
+	pub(crate) vs: Versionstamp,
+	pub(crate) ts: Timestamp,
 }
 
+/// Stores all data required for tracking a live query
+/// Can be used to derive various in-memory map indexes and values
+#[derive(Debug)]
 pub(crate) struct LqEntry {
 	pub(crate) live_id: Uuid,
 	pub(crate) ns: String,
 	pub(crate) db: String,
+	pub(crate) stm: LiveStatement,
 }
 
-impl Into<LqIndexKey> for LqEntry {
-	fn into(&self) -> LqIndexKey {
+impl LqEntry {
+	/// Treat like an into from a borrow
+	pub(crate) fn as_key(&self) -> LqIndexKey {
+		let tb = self.stm.what.to_string();
 		LqIndexKey {
 			selector: LqSelector {
 				ns: self.ns.clone(),
 				db: self.db.clone(),
-				tb: "".to_string(),
+				tb,
 			},
 			lq: self.live_id,
+		}
+	}
+
+	pub(crate) fn as_value(&self) -> LqIndexValue {
+		LqIndexValue {
+			query: self.stm.clone(),
+			vs: Versionstamp::default(),
+			ts: Timestamp::default(),
 		}
 	}
 }

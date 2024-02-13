@@ -1,7 +1,7 @@
 use super::kv::Add;
 use super::kv::Convert;
+use super::Key;
 use super::Val;
-use super::{Key, LqIndexKey};
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
@@ -12,8 +12,8 @@ use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
+use crate::kvs::lq_structs::{LqEntry, LqValue};
 use crate::kvs::Check;
-use crate::kvs::LqValue;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -88,7 +88,7 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
-	pub(super) prepared_live_queries: Arc<Receiver<LiveStatement>>,
+	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -269,7 +269,7 @@ impl Transaction {
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Commit");
-		let tx_result = match self {
+		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
@@ -302,15 +302,22 @@ impl Transaction {
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
-		};
+		}
 	}
 
-	pub fn consume_pending_live_queries(&self) -> Vec<(LqIndexKey, LiveStatement)> {
-		let mut lq: Vec<LiveStatement> = Vec::with_capacity(LQ_CAPACITY);
-		while let Ok(l) = self.prepared_live_queries.try_recv() {
+	pub fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
+		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
+		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
 			lq.push(l);
 		}
 		lq
+	}
+
+	pub fn prepare_lq(&mut self, lq_entry: LqEntry) -> Result<(), Error> {
+		self.prepared_live_queries
+			.0
+			.try_send(lq_entry)
+			.map_err(|e| Error::Internal("Prepared lq failed to add lq to channel".to_string()))
 	}
 
 	/// Delete a key from the datastore.
