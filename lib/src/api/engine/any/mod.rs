@@ -21,7 +21,7 @@
 //! environment variable to provide this endpoint string, you won't need to change your code  in order to
 //! switch engines. The downside to this is that you will get a runtime error if you forget to enable the engine you
 //! want to use when compiling your code. On the other hand, this totally decouples your application from the engine
-//! you are using and makes it possible to use virtually any engine SurrealDB supports by simply changing the Cargo
+//! you are using and makes it possible to use whichever engine SurrealDB supports by simply changing the Cargo
 //! features you enable when compiling. This enables some cool workflows.
 //!
 //! One of the common use-cases we see is using SurrealDB as an embedded database using RocksDB as the local engine.
