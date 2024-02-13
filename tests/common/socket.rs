@@ -176,7 +176,7 @@ impl Socket {
 						let msg: Value = try_from_impls::Cbor(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
-						// Then output the response:three: any blockers/issues/question.
+						// Then output the response.
 						debug!("Received message: {msg:?}");
 						Ok(Some(msg))
 					}
