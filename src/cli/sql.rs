@@ -153,7 +153,7 @@ pub async fn init(
 
 	// Set up the print job
 	let (tx, rx) = mpsc::unbounded();
-	tokio::spawn(printer(rx));
+	let print_task = tokio::spawn(printer(rx));
 
 	// Loop over each command-line input
 	loop {
@@ -246,6 +246,10 @@ pub async fn init(
 			}
 		}
 	}
+	// drop the printer channel so the printer task will quit.
+	std::mem::drop(tx);
+	// print task shouldn't panic or be cancelled so this unwrap should never trigger.
+	print_task.await.unwrap();
 	// Save the inputs to the history
 	let _ = rl.save_history("history.txt");
 	// Everything OK
