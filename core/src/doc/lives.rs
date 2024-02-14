@@ -38,8 +38,9 @@ impl<'a> Document<'a> {
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender {
 			// Loop through all index statements
-			let lq_stms = self.lv(opt, txn).await?.iter().as_slice();
-			self.check_lqs_and_send_notifications(opt, stm, txn, &lq_stms.as_ref(), chn)
+			let lq_stms = self.lv(opt, txn).await?;
+			let borrows = lq_stms.iter().collect::<Vec<_>>();
+			self.check_lqs_and_send_notifications(opt, stm, txn, borrows.as_slice(), chn).await?;
 		}
 		// Carry on
 		Ok(())

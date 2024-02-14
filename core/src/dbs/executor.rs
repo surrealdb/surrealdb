@@ -1,3 +1,16 @@
+use std::sync::Arc;
+
+use channel::Receiver;
+use futures::lock::Mutex;
+use futures::StreamExt;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
+use tracing::instrument;
+use trice::Instant;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
 use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Notification;
@@ -5,10 +18,9 @@ use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::err::Error::LiveStatement;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::lq_structs::{LqEntry, TrackedResult};
+use crate::kvs::lq_structs::LqEntry;
 use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
@@ -17,17 +29,6 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
-use channel::Receiver;
-use futures::lock::Mutex;
-use futures::StreamExt;
-use std::sync::mpsc::Sender;
-use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::spawn;
-use tracing::instrument;
-use trice::Instant;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local as spawn;
 
 pub(crate) struct Executor<'a> {
 	err: bool,

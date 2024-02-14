@@ -895,9 +895,8 @@ impl Datastore {
 			};
 
 			// Find relevant changes
-			let mut tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
+			let tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
 			for change_set in change_sets {
-				let lq_stms = vec![];
 				for (lq_key, lq_value) in lq_pairs.iter() {
 					let change_vs = change_set.0;
 					let database_mutation = &change_set.1;
@@ -908,8 +907,8 @@ impl Datastore {
 							// Generate and send notifications
 
 							// TODO(phughk): process live query logic
-							for mutation in table_mutations.1 {
-								let doc = Self::construct_document(&mutation).unwrap();
+							for mutation in table_mutations.1.iter() {
+								let doc = Self::construct_document(mutation).unwrap();
 								let opt = Options::default();
 								// We track notifications as a separate channel in case we want to process
 								// for the current state we only forward
@@ -953,6 +952,8 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Construct a document from a Change Feed mutation
+	/// This is required to perform document operations such as live query notifications
 	fn construct_document<'a>(mutation: &'a TableMutation) -> Option<Document<'a>> {
 		match mutation {
 			TableMutation::Set(a, b) => {
@@ -977,7 +978,7 @@ impl Datastore {
 			let lq_index_key: LqIndexKey = lq.as_key();
 			let m = lq_map.get_mut(&lq_index_key);
 			match m {
-				Some(mut lq_index_value) => lq_index_value.push(lq.as_value()),
+				Some(lq_index_value) => lq_index_value.push(lq.as_value()),
 				None => {
 					let lq_vec = vec![lq.as_value()];
 					lq_map.insert(lq_index_key.clone(), lq_vec);
