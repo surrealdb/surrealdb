@@ -9,6 +9,7 @@ use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use std::collections::btree_map::Entry;
+use std::collections::hash_map::Entry as HEntry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -164,21 +165,12 @@ struct Hnsw {
 	efc: usize,
 	ml: f64,
 	dist: Distance,
-	layers: Vec<RwLock<Layer>>,
+	layers: Vec<RwLock<UndirectedGraph>>,
 	enter_point: Option<ElementId>,
 	elements: HashMap<ElementId, SharedVector>,
 	next_element_id: ElementId,
 	rng: SmallRng,
 	neighbors: SelectNeighbors,
-}
-
-struct Layer(HashMap<ElementId, Vec<ElementId>>);
-
-impl Layer {
-	fn new() -> Self {
-		// We set a capacity of 1, because we create a layer because we are adding one element
-		Self(HashMap::with_capacity(1))
-	}
 }
 
 type ElementId = u64;
@@ -212,7 +204,7 @@ impl Hnsw {
 		for _l in layers..=q_level {
 			#[cfg(debug_assertions)]
 			debug!("Create Layer {_l}");
-			self.layers.push(RwLock::new(Layer::new()));
+			self.layers.push(RwLock::new(UndirectedGraph::default()));
 		}
 
 		self.elements.insert(q_id, q_pt.clone());
@@ -255,7 +247,7 @@ impl Hnsw {
 					m_max = self.m0;
 				}
 				let mut layer = self.layers[lc].write().await;
-				if let Some(f_ids) = layer.0.remove(&e_id) {
+				if let Some(f_ids) = layer.remove_node(&e_id) {
 					for q_id in f_ids {
 						if let Some(q_pt) = self.elements.get(&q_id) {
 							let mut c = BTreeSet::new();
@@ -267,7 +259,7 @@ impl Hnsw {
 								!neighbors.contains(&q_id),
 								"!neighbors.contains(&q_id) = layer: {lc} - q_id: {q_id} - f_ids: {neighbors:?}"
 							);
-							layer.0.insert(q_id, neighbors);
+							layer.set_node(q_id, &neighbors);
 						}
 					}
 					removed = true;
@@ -290,7 +282,7 @@ impl Hnsw {
 		#[cfg(debug_assertions)]
 		debug!("insert_first_element - id: {id} - level: {level}");
 		for lc in 0..=level {
-			self.layers[lc].write().await.0.insert(id, vec![]);
+			self.layers[lc].write().await.set_node(id, &[]);
 		}
 		self.enter_point = Some(id);
 		#[cfg(debug_assertions)]
@@ -335,24 +327,26 @@ impl Hnsw {
 			}
 
 			let neighbors = self.neighbors.select(self, &layer, q_id, q_pt, w, m_max);
-			layer.0.insert(q_id, neighbors.clone());
+			layer.set_node(q_id, &neighbors);
 			for n_id in neighbors {
 				let e_conn =
-					layer.0.get_mut(&n_id).unwrap_or_else(|| unreachable!("Element: {}", n_id));
-				e_conn.push(q_id);
+					layer.get_edges(&n_id).unwrap_or_else(|| unreachable!("Element: {}", n_id));
 				if e_conn.len() >= m_max {
 					let n_pt = &self.elements[&n_id];
-					let n_c = self.build_priority_list(n_id, e_conn);
+					let e_conn: Vec<ElementId> = e_conn.iter().copied().collect();
+					let n_c = self.build_priority_list(n_id, &e_conn);
 					let conn_neighbors =
 						self.neighbors.select(self, &layer, n_id, n_pt, n_c, m_max);
-					layer.0.insert(n_id, conn_neighbors);
+					layer.set_node(n_id, &conn_neighbors);
+				} else {
+					layer.add_edge(n_id, q_id);
 				}
 			}
 		}
 
 		for lc in (top_layer_level + 1)..=q_level {
 			let mut layer = self.layers[lc].write().await;
-			if layer.0.insert(q_id, vec![]).is_some() {
+			if !layer.set_node(q_id, &[]) {
 				unreachable!("Already there {}", q_id);
 			}
 		}
@@ -387,13 +381,13 @@ impl Hnsw {
 		debug!("EP: {:?}", self.enter_point);
 		for (i, l) in self.layers.iter().enumerate() {
 			let l = l.read().await;
-			debug!("LAYER {i} - len: {} - {:?}", l.0.len(), l.0);
+			debug!("LAYER {i} - len: {} - {:?}", l.nodes.len(), l.nodes);
 			let m_max = if i == 0 {
 				self.m0
 			} else {
 				self.m
 			};
-			for f in l.0.values() {
+			for f in l.nodes.values() {
 				assert!(f.len() <= m_max);
 			}
 		}
@@ -410,7 +404,7 @@ impl Hnsw {
 		q: &SharedVector,
 		ep_id: ElementId,
 		ef: usize,
-		l: &Layer,
+		l: &UndirectedGraph,
 		w: &mut BTreeSet<PriorityNode>,
 		ignore: Option<ElementId>,
 	) {
@@ -432,7 +426,7 @@ impl Hnsw {
 			if c.0 > f_dist {
 				break;
 			}
-			if let Some(neighbourhood) = l.0.get(&c.1) {
+			if let Some(neighbourhood) = l.get_edges(&c.1) {
 				for e_id in neighbourhood {
 					if visited.insert(*e_id) {
 						if let Some(e_pt) = self.elements.get(e_id) {
@@ -476,7 +470,7 @@ impl Hnsw {
 				if w.len() < expected_w_len {
 					debug!(
 						"0 search_layer - ep: {ep} - ef: {ef} - k: {k} - layer: {} - w: {}",
-						l.0.len(),
+						l.nodes.len(),
 						w.len()
 					);
 				}
@@ -522,7 +516,7 @@ impl SelectNeighbors {
 	fn select(
 		&self,
 		h: &Hnsw,
-		lc: &Layer,
+		lc: &UndirectedGraph,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: BTreeSet<PriorityNode>,
@@ -580,7 +574,7 @@ impl SelectNeighbors {
 
 	fn extand(
 		h: &Hnsw,
-		lc: &Layer,
+		lc: &UndirectedGraph,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: &mut BTreeSet<PriorityNode>,
@@ -589,7 +583,8 @@ impl SelectNeighbors {
 		let mut ex: HashSet<ElementId> = c.iter().map(|pn| pn.1).collect();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for e in c.iter() {
-			for &e_adj in lc.0.get(&e.1).unwrap_or_else(|| unreachable!("Missing element {}", e.1))
+			for &e_adj in
+				lc.get_edges(&e.1).unwrap_or_else(|| unreachable!("Missing element {}", e.1))
 			{
 				if e_adj != q_id && ex.insert(e_adj) {
 					if let Some(pt) = h.elements.get(&e_adj) {
@@ -605,7 +600,7 @@ impl SelectNeighbors {
 
 	fn heuristic_ext(
 		h: &Hnsw,
-		lc: &Layer,
+		lc: &UndirectedGraph,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: BTreeSet<PriorityNode>,
@@ -617,7 +612,7 @@ impl SelectNeighbors {
 
 	fn heuristic_ext_keep(
 		h: &Hnsw,
-		lc: &Layer,
+		lc: &UndirectedGraph,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: BTreeSet<PriorityNode>,
@@ -625,6 +620,71 @@ impl SelectNeighbors {
 	) -> Vec<ElementId> {
 		Self::extand(h, lc, q_id, q_pt, &mut c, m_max);
 		Self::heuristic_keep(c, m_max)
+	}
+}
+
+#[derive(Default)]
+struct UndirectedGraph {
+	nodes: HashMap<ElementId, HashSet<ElementId>>,
+}
+
+impl UndirectedGraph {
+	fn get_edges(&self, node: &ElementId) -> Option<&HashSet<ElementId>> {
+		self.nodes.get(node)
+	}
+
+	fn add_edge(&mut self, node1: ElementId, node2: ElementId) {
+		self.nodes.entry(node1).or_default().insert(node2);
+		self.nodes.entry(node2).or_default().insert(node1);
+	}
+
+	fn remove_edge(&mut self, node1: &ElementId, node2: &ElementId) {
+		if let Some(edges) = self.nodes.get_mut(node1) {
+			edges.remove(node2);
+		}
+		if let Some(edges) = self.nodes.get_mut(node2) {
+			edges.remove(node1);
+		}
+	}
+
+	fn set_node(&mut self, node: ElementId, edges: &[ElementId]) -> bool {
+		let mut removed_edges = None;
+		let mut new_edges = None;
+		let edges: HashSet<ElementId> = edges.iter().copied().collect();
+		let res = match self.nodes.entry(node) {
+			HEntry::Occupied(old_edges) => {
+				let mut to_remove = Vec::with_capacity(1);
+				for n in edges {
+					todo!()
+				}
+				removed_edges = Some(to_remove);
+			}
+			HEntry::Vacant(e) => {
+				e.insert(edges.iter().collect().clone());
+				new_edges = Some(edges);
+				true
+			}
+		};
+		if let Some(nodes) = new_edges {
+			for n in nodes {
+				self.nodes.entry(n).or_default().insert(node);
+			}
+		}
+		if let Some(nodes) = removed_edges {}
+		res
+	}
+
+	fn remove_node(&mut self, node: &ElementId) -> Option<HashSet<ElementId>> {
+		if let Some(edges) = self.nodes.remove(node) {
+			for edge in &edges {
+				if let Some(edges_to_node) = self.nodes.get_mut(edge) {
+					edges_to_node.remove(node);
+				}
+			}
+			Some(edges)
+		} else {
+			None
+		}
 	}
 }
 
@@ -638,7 +698,7 @@ mod tests {
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use roaring::RoaringTreemap;
 	use serial_test::serial;
-	use std::collections::btree_map::Entry;
+	use std::collections::btree_map::Entry as BEntry;
 	use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 	use std::sync::Arc;
 
@@ -829,10 +889,10 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			h.insert(obj.clone(), *doc_id).await;
 			match map.entry(obj.clone()) {
-				Entry::Occupied(mut e) => {
+				BEntry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
 				}
-				Entry::Vacant(e) => {
+				BEntry::Vacant(e) => {
 					e.insert(HashSet::from([*doc_id]));
 				}
 			}
@@ -880,7 +940,7 @@ mod tests {
 	) {
 		for (doc_id, obj) in collection.as_ref() {
 			assert!(h.remove(obj.clone(), *doc_id).await, "Delete failed: {:?} {}", obj, doc_id);
-			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
+			if let BEntry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
 				if set.is_empty() {
@@ -961,35 +1021,42 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 1);
 		assert_eq!(hnsw.enter_point, Some(a0));
 		assert_eq!(hnsw.layers.len(), 1);
-		assert_eq!(hnsw.layers[0].read().await.0, HashMap::from([(a0, vec![])]));
+		assert_eq!(hnsw.layers[0].read().await.nodes, HashMap::from([(a0, HashSet::new())]));
 
 		let b1 = hnsw.insert_level(new_i16_vec(2, 2), 0).await;
 		assert_eq!(hnsw.elements.len(), 2);
 		assert_eq!(hnsw.enter_point, Some(a0));
 		assert_eq!(hnsw.layers.len(), 1);
-		assert_eq!(hnsw.layers[0].read().await.0, HashMap::from([(a0, vec![b1]), (b1, vec![a0])]));
+		assert_eq!(
+			hnsw.layers[0].read().await.nodes,
+			HashMap::from([(a0, HashSet::from([b1])), (b1, HashSet::from([a0]))])
+		);
 
 		let c2 = hnsw.insert_level(new_i16_vec(3, 3), 0).await;
 		assert_eq!(hnsw.elements.len(), 3);
 		assert_eq!(hnsw.enter_point, Some(a0));
 		assert_eq!(hnsw.layers.len(), 1);
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
-			HashMap::from([(a0, vec![b1, c2]), (b1, vec![a0, c2]), (c2, vec![b1, a0])])
+			hnsw.layers[0].read().await.nodes,
+			HashMap::from([
+				(a0, HashSet::from([b1, c2])),
+				(b1, HashSet::from([a0, c2])),
+				(c2, HashSet::from([b1, a0]))
+			])
 		);
 
 		let d3 = hnsw.insert_level(new_i16_vec(4, 4), 1).await;
 		assert_eq!(hnsw.elements.len(), 4);
 		assert_eq!(hnsw.enter_point, Some(d3));
 		assert_eq!(hnsw.layers.len(), 2);
-		assert_eq!(hnsw.layers[1].read().await.0, HashMap::from([(d3, vec![])]));
+		assert_eq!(hnsw.layers[1].read().await.nodes, HashMap::from([(d3, HashSet::new())]));
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[0].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3]),
-				(b1, vec![a0, c2, d3]),
-				(c2, vec![b1, a0, d3]),
-				(d3, vec![c2, b1, a0])
+				(a0, HashSet::from([b1, c2, d3])),
+				(b1, HashSet::from([a0, c2, d3])),
+				(c2, HashSet::from([b1, a0, d3])),
+				(d3, HashSet::from([c2, b1, a0]))
 			])
 		);
 
@@ -997,16 +1064,19 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 5);
 		assert_eq!(hnsw.enter_point, Some(e4));
 		assert_eq!(hnsw.layers.len(), 3);
-		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![])]));
-		assert_eq!(hnsw.layers[1].read().await.0, HashMap::from([(d3, vec![e4]), (e4, vec![d3])]));
+		assert_eq!(hnsw.layers[2].read().await.nodes, HashMap::from([(e4, HashSet::new())]));
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[1].read().await.nodes,
+			HashMap::from([(d3, HashSet::from([e4])), (e4, HashSet::from([d3]))])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3, e4]),
-				(b1, vec![a0, c2, d3, e4]),
-				(c2, vec![b1, d3, a0, e4]),
-				(d3, vec![c2, e4, b1, a0]),
-				(e4, vec![d3, c2, b1, a0])
+				(a0, HashSet::from([b1, c2, d3, e4])),
+				(b1, HashSet::from([a0, c2, d3, e4])),
+				(c2, HashSet::from([b1, d3, a0, e4])),
+				(d3, HashSet::from([c2, e4, b1, a0])),
+				(e4, HashSet::from([d3, c2, b1, a0]))
 			])
 		);
 
@@ -1014,20 +1084,27 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 6);
 		assert_eq!(hnsw.enter_point, Some(e4));
 		assert_eq!(hnsw.layers.len(), 3);
-		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
 		assert_eq!(
-			hnsw.layers[1].read().await.0,
-			HashMap::from([(d3, vec![e4, f5]), (e4, vec![d3, f5]), (f5, vec![e4, d3])])
+			hnsw.layers[2].read().await.nodes,
+			HashMap::from([(e4, HashSet::from([f5])), (f5, HashSet::from([e4]))])
 		);
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[1].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3, e4]),
-				(b1, vec![a0, c2, d3, e4]),
-				(c2, vec![b1, d3, a0, e4]),
-				(d3, vec![c2, e4, b1, f5]),
-				(e4, vec![d3, f5, c2, b1]),
-				(f5, vec![e4, d3, c2, b1]),
+				(d3, HashSet::from([e4, f5])),
+				(e4, HashSet::from([d3, f5])),
+				(f5, HashSet::from([e4, d3]))
+			])
+		);
+		assert_eq!(
+			hnsw.layers[0].read().await.nodes,
+			HashMap::from([
+				(a0, HashSet::from([b1, c2, d3, e4])),
+				(b1, HashSet::from([a0, c2, d3, e4])),
+				(c2, HashSet::from([b1, d3, a0, e4])),
+				(d3, HashSet::from([c2, e4, b1, f5])),
+				(e4, HashSet::from([d3, f5, c2, b1])),
+				(f5, HashSet::from([e4, d3, c2, b1])),
 			])
 		);
 
@@ -1035,26 +1112,29 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 7);
 		assert_eq!(hnsw.enter_point, Some(e4));
 		assert_eq!(hnsw.layers.len(), 3);
-		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
 		assert_eq!(
-			hnsw.layers[1].read().await.0,
+			hnsw.layers[2].read().await.nodes,
+			HashMap::from([(e4, HashSet::from([f5])), (f5, HashSet::from([e4]))])
+		);
+		assert_eq!(
+			hnsw.layers[1].read().await.nodes,
 			HashMap::from([
-				(d3, vec![e4, f5]),
-				(e4, vec![d3, f5]),
-				(f5, vec![e4, g6]),
-				(g6, vec![f5, e4])
+				(d3, HashSet::from([e4, f5])),
+				(e4, HashSet::from([d3, f5])),
+				(f5, HashSet::from([e4, g6])),
+				(g6, HashSet::from([f5, e4]))
 			])
 		);
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[0].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3, e4]),
-				(b1, vec![a0, c2, d3, e4]),
-				(c2, vec![b1, d3, a0, e4]),
-				(d3, vec![c2, e4, b1, f5]),
-				(e4, vec![d3, f5, c2, g6]),
-				(f5, vec![e4, g6, d3, c2]),
-				(g6, vec![f5, e4, d3, c2]),
+				(a0, HashSet::from([b1, c2, d3, e4])),
+				(b1, HashSet::from([a0, c2, d3, e4])),
+				(c2, HashSet::from([b1, d3, a0, e4])),
+				(d3, HashSet::from([c2, e4, b1, f5])),
+				(e4, HashSet::from([d3, f5, c2, g6])),
+				(f5, HashSet::from([e4, g6, d3, c2])),
+				(g6, HashSet::from([f5, e4, d3, c2])),
 			])
 		);
 
@@ -1062,27 +1142,30 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 8);
 		assert_eq!(hnsw.enter_point, Some(e4));
 		assert_eq!(hnsw.layers.len(), 3);
-		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
 		assert_eq!(
-			hnsw.layers[1].read().await.0,
+			hnsw.layers[2].read().await.nodes,
+			HashMap::from([(e4, HashSet::from([f5])), (f5, HashSet::from([e4]))])
+		);
+		assert_eq!(
+			hnsw.layers[1].read().await.nodes,
 			HashMap::from([
-				(d3, vec![e4, f5]),
-				(e4, vec![d3, f5]),
-				(f5, vec![e4, g6]),
-				(g6, vec![f5, e4])
+				(d3, HashSet::from([e4, f5])),
+				(e4, HashSet::from([d3, f5])),
+				(f5, HashSet::from([e4, g6])),
+				(g6, HashSet::from([f5, e4]))
 			])
 		);
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[0].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3, e4]),
-				(b1, vec![a0, c2, d3, e4]),
-				(c2, vec![b1, d3, a0, e4]),
-				(d3, vec![c2, e4, b1, f5]),
-				(e4, vec![d3, f5, c2, g6]),
-				(f5, vec![e4, g6, d3, h7]),
-				(g6, vec![f5, h7, e4, d3]),
-				(h7, vec![g6, f5, e4, d3]),
+				(a0, HashSet::from([b1, c2, d3, e4])),
+				(b1, HashSet::from([a0, c2, d3, e4])),
+				(c2, HashSet::from([b1, d3, a0, e4])),
+				(d3, HashSet::from([c2, e4, b1, f5])),
+				(e4, HashSet::from([d3, f5, c2, g6])),
+				(f5, HashSet::from([e4, g6, d3, h7])),
+				(g6, HashSet::from([f5, h7, e4, d3])),
+				(h7, HashSet::from([g6, f5, e4, d3])),
 			])
 		);
 
@@ -1090,28 +1173,31 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 9);
 		assert_eq!(hnsw.enter_point, Some(e4));
 		assert_eq!(hnsw.layers.len(), 3);
-		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
 		assert_eq!(
-			hnsw.layers[1].read().await.0,
+			hnsw.layers[2].read().await.nodes,
+			HashMap::from([(e4, HashSet::from([f5])), (f5, HashSet::from([e4]))])
+		);
+		assert_eq!(
+			hnsw.layers[1].read().await.nodes,
 			HashMap::from([
-				(d3, vec![e4, f5]),
-				(e4, vec![d3, f5]),
-				(f5, vec![e4, g6]),
-				(g6, vec![f5, e4])
+				(d3, HashSet::from([e4, f5])),
+				(e4, HashSet::from([d3, f5])),
+				(f5, HashSet::from([e4, g6])),
+				(g6, HashSet::from([f5, e4]))
 			])
 		);
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[0].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3, e4]),
-				(b1, vec![a0, c2, d3, e4]),
-				(c2, vec![b1, d3, a0, e4]),
-				(d3, vec![c2, e4, b1, f5]),
-				(e4, vec![d3, f5, c2, g6]),
-				(f5, vec![e4, g6, d3, h7]),
-				(g6, vec![f5, h7, e4, i8]),
-				(h7, vec![g6, i8, f5, e4]),
-				(i8, vec![h7, g6, f5, e4]),
+				(a0, HashSet::from([b1, c2, d3, e4])),
+				(b1, HashSet::from([a0, c2, d3, e4])),
+				(c2, HashSet::from([b1, d3, a0, e4])),
+				(d3, HashSet::from([c2, e4, b1, f5])),
+				(e4, HashSet::from([d3, f5, c2, g6])),
+				(f5, HashSet::from([e4, g6, d3, h7])),
+				(g6, HashSet::from([f5, h7, e4, i8])),
+				(h7, HashSet::from([g6, i8, f5, e4])),
+				(i8, HashSet::from([h7, g6, f5, e4])),
 			])
 		);
 
@@ -1119,29 +1205,32 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 10);
 		assert_eq!(hnsw.enter_point, Some(e4));
 		assert_eq!(hnsw.layers.len(), 3);
-		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
 		assert_eq!(
-			hnsw.layers[1].read().await.0,
+			hnsw.layers[2].read().await.nodes,
+			HashMap::from([(e4, HashSet::from([f5])), (f5, HashSet::from([e4]))])
+		);
+		assert_eq!(
+			hnsw.layers[1].read().await.nodes,
 			HashMap::from([
-				(d3, vec![e4, f5]),
-				(e4, vec![d3, f5]),
-				(f5, vec![e4, g6]),
-				(g6, vec![f5, e4])
+				(d3, HashSet::from([e4, f5])),
+				(e4, HashSet::from([d3, f5])),
+				(f5, HashSet::from([e4, g6])),
+				(g6, HashSet::from([f5, e4]))
 			])
 		);
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[0].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3, e4]),
-				(b1, vec![a0, c2, d3, e4]),
-				(c2, vec![b1, d3, a0, e4]),
-				(d3, vec![c2, e4, b1, f5]),
-				(e4, vec![d3, f5, c2, g6]),
-				(f5, vec![e4, g6, d3, h7]),
-				(g6, vec![f5, h7, e4, i8]),
-				(h7, vec![g6, i8, f5, j9]),
-				(i8, vec![h7, j9, g6, f5]),
-				(j9, vec![i8, h7, g6, f5]),
+				(a0, HashSet::from([b1, c2, d3, e4])),
+				(b1, HashSet::from([a0, c2, d3, e4])),
+				(c2, HashSet::from([b1, d3, a0, e4])),
+				(d3, HashSet::from([c2, e4, b1, f5])),
+				(e4, HashSet::from([d3, f5, c2, g6])),
+				(f5, HashSet::from([e4, g6, d3, h7])),
+				(g6, HashSet::from([f5, h7, e4, i8])),
+				(h7, HashSet::from([g6, i8, f5, j9])),
+				(i8, HashSet::from([h7, j9, g6, f5])),
+				(j9, HashSet::from([i8, h7, g6, f5])),
 			])
 		);
 
@@ -1149,31 +1238,34 @@ mod tests {
 		assert_eq!(hnsw.elements.len(), 11);
 		assert_eq!(hnsw.enter_point, Some(e4));
 		assert_eq!(hnsw.layers.len(), 3);
-		assert_eq!(hnsw.layers[2].read().await.0, HashMap::from([(e4, vec![f5]), (f5, vec![e4])]));
 		assert_eq!(
-			hnsw.layers[1].read().await.0,
+			hnsw.layers[2].read().await.nodes,
+			HashMap::from([(e4, HashSet::from([f5])), (f5, HashSet::from([e4]))])
+		);
+		assert_eq!(
+			hnsw.layers[1].read().await.nodes,
 			HashMap::from([
-				(d3, vec![e4, f5]),
-				(e4, vec![d3, f5]),
-				(f5, vec![e4, g6]),
-				(g6, vec![f5, e4]),
-				(h10, vec![g6, f5])
+				(d3, HashSet::from([e4, f5])),
+				(e4, HashSet::from([d3, f5])),
+				(f5, HashSet::from([e4, g6])),
+				(g6, HashSet::from([f5, e4])),
+				(h10, HashSet::from([g6, f5]))
 			])
 		);
 		assert_eq!(
-			hnsw.layers[0].read().await.0,
+			hnsw.layers[0].read().await.nodes,
 			HashMap::from([
-				(a0, vec![b1, c2, d3, e4]),
-				(b1, vec![a0, c2, d3, e4]),
-				(c2, vec![b1, d3, a0, e4]),
-				(d3, vec![c2, e4, b1, f5]),
-				(e4, vec![d3, f5, c2, g6]),
-				(f5, vec![e4, g6, d3, h7]),
-				(g6, vec![f5, h7, e4, i8]),
-				(h7, vec![g6, i8, f5, j9]),
-				(i8, vec![h7, j9, g6, h10]),
-				(j9, vec![i8, h10, h7, g6]),
-				(h10, vec![j9, i8, h7, g6]),
+				(a0, HashSet::from([b1, c2, d3, e4])),
+				(b1, HashSet::from([a0, c2, d3, e4])),
+				(c2, HashSet::from([b1, d3, a0, e4])),
+				(d3, HashSet::from([c2, e4, b1, f5])),
+				(e4, HashSet::from([d3, f5, c2, g6])),
+				(f5, HashSet::from([e4, g6, d3, h7])),
+				(g6, HashSet::from([f5, h7, e4, i8])),
+				(h7, HashSet::from([g6, i8, f5, j9])),
+				(i8, HashSet::from([h7, j9, g6, h10])),
+				(j9, HashSet::from([i8, h10, h7, g6])),
+				(h10, HashSet::from([j9, i8, h7, g6])),
 			])
 		);
 	}
@@ -1255,14 +1347,14 @@ mod tests {
 		assert_eq!(layer_size, expected_count);
 		for (lc, l) in h.layers.iter().enumerate() {
 			let l = l.read().await;
-			assert!(l.0.len() <= layer_size, "{} - {}", l.0.len(), layer_size);
-			layer_size = l.0.len();
+			assert!(l.nodes.len() <= layer_size, "{} - {}", l.nodes.len(), layer_size);
+			layer_size = l.nodes.len();
 			let m_layer = if lc == 0 {
 				h.m0
 			} else {
 				h.m
 			};
-			for (e_id, f_ids) in &l.0 {
+			for (e_id, f_ids) in &l.nodes {
 				assert!(f_ids.len() <= m_layer, "Foreign list len");
 				assert!(
 					!f_ids.contains(e_id),
