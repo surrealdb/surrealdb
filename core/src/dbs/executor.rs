@@ -8,7 +8,7 @@ use crate::err::Error;
 use crate::err::Error::LiveStatement;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::lq_structs::LqEntry;
+use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
@@ -20,6 +20,7 @@ use crate::sql::Base;
 use channel::Receiver;
 use futures::lock::Mutex;
 use futures::StreamExt;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
@@ -90,7 +91,9 @@ impl<'a> Executor<'a> {
 								Ok(()) => {
 									// Commit succeeded
 									let lqs: Vec<LqEntry> = txn.consume_pending_live_queries();
-									self.kvs.track_live_queries(&lqs).await
+									// Track the live queries in the data store
+									self.kvs.track_live_queries(&lqs).await?;
+									Ok(())
 								}
 								Err(e) => Err(e),
 							}

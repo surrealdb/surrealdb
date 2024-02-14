@@ -54,7 +54,7 @@ impl Ord for UnreachableLqType {
 /// LqSelector is used for tracking change-feed backed queries in a common baseline
 /// The intention is to have a collection of live queries that can have batch operations performed on them
 /// This reduces the number of change feed queries
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Debug)]
 pub(crate) struct LqSelector {
 	pub(crate) ns: String,
 	pub(crate) db: String,
@@ -73,7 +73,7 @@ pub(crate) struct LqIndexKey {
 /// This can be assumed to have a mutable reference
 #[derive(Eq, PartialEq, Clone)]
 pub(crate) struct LqIndexValue {
-	pub(crate) query: LiveStatement,
+	pub(crate) stm: LiveStatement,
 	pub(crate) vs: Versionstamp,
 	pub(crate) ts: Timestamp,
 }
@@ -86,6 +86,12 @@ pub(crate) struct LqEntry {
 	pub(crate) ns: String,
 	pub(crate) db: String,
 	pub(crate) stm: LiveStatement,
+}
+
+/// This is a type representing information that is tracked outside of a datastore
+/// For example, live query IDs need to be tracked by websockets so they are closed correctly on closing a connection
+pub(crate) enum TrackedResult {
+	LiveQuery(LqEntry),
 }
 
 impl LqEntry {
@@ -104,7 +110,7 @@ impl LqEntry {
 
 	pub(crate) fn as_value(&self) -> LqIndexValue {
 		LqIndexValue {
-			query: self.stm.clone(),
+			stm: self.stm.clone(),
 			vs: Versionstamp::default(),
 			ts: Timestamp::default(),
 		}
