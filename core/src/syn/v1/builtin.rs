@@ -85,7 +85,7 @@ macro_rules! impl_builtins {
 			)*
 
 			$(
-				match dbg!($name(dbg!($i))){
+				match $name($i){
 					Ok((i,x)) => return Ok((i,x)),
 					Err(Err::Failure(x)) => return Err(Err::Failure(x)),
 					_ => {}
