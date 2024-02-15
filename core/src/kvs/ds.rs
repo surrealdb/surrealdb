@@ -15,15 +15,14 @@ use tracing::trace;
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 use crate::cf;
-use crate::cf::{ChangeSet, TableMutation};
+use crate::cf::ChangeSet;
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Statement, Variables, Workable,
+	Variables,
 };
-use crate::doc::Document;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -32,9 +31,7 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::lq_structs::{
-	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType,
-};
+use crate::kvs::lq_structs::{LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
