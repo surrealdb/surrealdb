@@ -63,7 +63,7 @@ pub(crate) struct LqSelector {
 
 /// This is an internal-only helper struct for organising the keys of how live queries are accessed
 /// Because we want immutable keys, we cannot put mutable things in such as ts and vs
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Debug)]
 pub(crate) struct LqIndexKey {
 	pub(crate) selector: LqSelector,
 	lq: Uuid,
@@ -71,7 +71,7 @@ pub(crate) struct LqIndexKey {
 
 /// Internal only struct
 /// This can be assumed to have a mutable reference
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub(crate) struct LqIndexValue {
 	pub(crate) stm: LiveStatement,
 	pub(crate) vs: Versionstamp,

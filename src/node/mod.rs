@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use surrealdb::dbs::Options;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -52,8 +53,9 @@ pub fn live_query_change_feed(ct: CancellationToken) -> JoinHandle<()> {
 				let stop_signal = ct.cancelled();
 				let tick_interval = Duration::from_secs(1);
 
+				let opt = Options::default();
 				loop {
-					if let Err(e) = kvs.process_lq_notifications().await {
+					if let Err(e) = kvs.process_lq_notifications(&opt).await {
 						error!("Error running node agent live query tick: {}", e);
 					}
 					tokio::select! {

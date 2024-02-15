@@ -101,7 +101,7 @@ impl LiveStatement {
 			true => {
 				let mut run = txn.lock().await;
 				match stm.what.compute(ctx, opt, txn, doc).await? {
-					Value::Table(tb) => {
+					Value::Table(_tb) => {
 						// Send the live query registration hook to the transaction pre-commit channel
 						run.prepare_lq(LqEntry {
 							live_id: stm.id,

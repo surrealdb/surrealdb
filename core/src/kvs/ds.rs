@@ -33,7 +33,7 @@ use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::lq_structs::{
-	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
+	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType,
 };
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::statements::show::ShowSince;
@@ -824,7 +824,7 @@ impl Datastore {
 	}
 
 	/// Poll change feeds for live query notifications
-	pub async fn process_lq_notifications(&self) -> Result<(), Error> {
+	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
 		// Runtime feature gate, as it is not production-ready
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			return Ok(());
@@ -842,8 +842,9 @@ impl Datastore {
 		// Change map includes a mapping of selector to changesets, ordered by versionstamp
 		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
 		let mut tx = self.transaction(Read, Optimistic).await?;
-		let tracked_cfs = self.cf_watermarks.read().await;
+		let mut tracked_cfs = self.cf_watermarks.write().await;
 		println!("\n\nThere are {} cfs tracked\n\n", tracked_cfs.len());
+		let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
 		for (selector, vs) in tracked_cfs.iter() {
 			// Read the change feed for the selector
 			let res = cf::read(
@@ -868,12 +869,22 @@ impl Datastore {
 			if let Some(change_set) = res.last() {
 				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
 					trace!("Adding a change set for lq notification processing");
+					// Update the cf watermark so we can progress scans
+					// If the notifications fail from here-on, they are lost
+					// this is a separate vec that we later insert to because we are iterating immutably
+					// We shouldn't use a read lock because of consistency between watermark scans
+					tracked_cfs_updates.push((selector.clone(), change_set.0.clone()));
 					// This does not guarantee a notification, as a changeset an include many tables and many changes
 					change_map.insert(selector.clone(), res);
 				}
 			}
 		}
 		tx.cancel().await?;
+
+		// Now we update since we are no longer iterating immutably
+		for (selector, vs) in tracked_cfs_updates {
+			tracked_cfs.insert(selector, vs);
+		}
 
 		for (selector, change_sets) in change_map {
 			// find matching live queries
@@ -897,45 +908,66 @@ impl Datastore {
 			// Find relevant changes
 			let tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
 			for change_set in change_sets {
+				// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
 				for (lq_key, lq_value) in lq_pairs.iter() {
+					trace!(
+						"Processing live query for notification key={:?} and value={:?}",
+						lq_key,
+						lq_value
+					);
 					let change_vs = change_set.0;
 					let database_mutation = &change_set.1;
 					for table_mutations in database_mutation.0.iter() {
 						if table_mutations.0 == lq_key.selector.tb {
 							// Create a doc of the table value
-							// Run doc.lives, while providing live queries instead of reading from storage
-							// Generate and send notifications
-
-							// TODO(phughk): process live query logic
+							// Run the 'lives' logic on the doc, while providing live queries instead of reading from storage
+							// This will generate and send notifications
 							for mutation in table_mutations.1.iter() {
-								let doc = Self::construct_document(mutation).unwrap();
-								let opt = Options::default();
-								// We track notifications as a separate channel in case we want to process
-								// for the current state we only forward
-								let (sender, receiver) = channel::bounded(1);
-								doc.check_lqs_and_send_notifications(
-									&opt,
-									&Statement::Live(&lq_value.stm),
-									&tx,
-									[&lq_value.stm].as_slice(),
-									&sender,
-								)
-								.await
-								.unwrap();
+								if let Some(doc) = Self::construct_document(mutation) {
+									// We know we are only processing a single LQ at a time, so we can limit notifications to 1
+									let notification_capacity = 1;
+									// We track notifications as a separate channel in case we want to process
+									// for the current state we only forward
+									let (sender, receiver) =
+										channel::bounded(notification_capacity);
+									doc.check_lqs_and_send_notifications(
+										opt,
+										&Statement::Live(&lq_value.stm),
+										&tx,
+										[&lq_value.stm].as_slice(),
+										&sender,
+									)
+									.await
+									.map_err(|e| {
+										Error::Internal(format!(
+											"Error checking lqs for notifications: {:?}",
+											e
+										))
+									})?;
 
-								// Send the notifications
-								// TODO: evaluate if we want channel directly instead of proxy
-								while let Ok(notification) = receiver.try_recv() {
-									self.notification_channel
-										.as_ref()
-										.unwrap()
-										.0
-										.send(notification)
-										.await
-										.unwrap();
+									// Send the notifications to driver or api
+									// TODO: evaluate if we want channel directly instead of proxy
+									while let Ok(notification) = receiver.try_recv() {
+										trace!("Sending notification to client");
+										self.notification_channel
+											.as_ref()
+											.unwrap()
+											.0
+											.send(notification)
+											.await
+											.unwrap();
+									}
+									trace!("Ended notification sending")
 								}
 
 								// Update watermarks
+								trace!(
+									"Updating watermark to {:?} for index key {:?}",
+									change_vs,
+									lq_key
+								);
+
+								// For each live query we have processed we update the watermarks
 								self.local_live_queries.write().await.insert(
 									(*lq_key).clone(),
 									vec![LqIndexValue {
@@ -943,6 +975,8 @@ impl Datastore {
 										..lq_value.clone()
 									}],
 								);
+
+								// We also update the tracked_cfs with a minimum watermark
 							}
 						}
 					}
@@ -957,11 +991,11 @@ impl Datastore {
 	fn construct_document<'a>(mutation: &'a TableMutation) -> Option<Document<'a>> {
 		match mutation {
 			TableMutation::Set(a, b) => {
-				let mut doc = Document::new(None, Some(a), None, b, Workable::Normal);
+				let doc = Document::new(None, Some(a), None, b, Workable::Normal);
 				Some(doc)
 			}
 			TableMutation::Del(a) => {
-				let mut doc = Document::new(None, Some(a), None, &Value::None, Workable::Normal);
+				let doc = Document::new(None, Some(a), None, &Value::None, Workable::Normal);
 				Some(doc)
 			}
 			TableMutation::Def(_) => None,
