@@ -243,7 +243,7 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		Ok((i, Array(v)))
 	}
 	// Parse any simple JSON-like value
-	alt((
+	let (i, v) = alt((
 		combinator::value(Value::Null, tag_no_case("null".as_bytes())),
 		combinator::value(Value::Bool(true), tag_no_case("true".as_bytes())),
 		combinator::value(Value::Bool(false), tag_no_case("false".as_bytes())),
@@ -255,7 +255,12 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		into(array),
 		into(thing),
 		into(strand),
-	))(i)
+	))(i)?;
+
+	// eat trailing whitespace"
+	let (i, _) = mightbespace(i)?;
+
+	Ok((i, v))
 }
 
 pub fn array(i: &str) -> IResult<&str, Array> {
@@ -322,6 +327,15 @@ fn key_double(i: &str) -> IResult<&str, &str> {
 mod tests {
 	use super::*;
 	use crate::sql::array::{Clump, Transpose, Uniq};
+
+	#[test]
+	fn json_trailing_space() {
+		let sql = "{one:1,two:2,tre:3}\n\n";
+		let res = json(sql);
+		let (i, out) = res.unwrap();
+		assert_eq!(i, "");
+		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
+	}
 
 	#[test]
 	fn object_normal() {

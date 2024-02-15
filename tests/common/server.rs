@@ -2,7 +2,7 @@ use rand::{thread_rng, Rng};
 use std::error::Error;
 use std::fs::File;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 use tokio::time;
 use tracing::{debug, error, info};
@@ -33,6 +33,10 @@ impl Child {
 		self
 	}
 
+	pub fn finish(mut self) {
+		self.inner.take().unwrap().kill().unwrap();
+	}
+
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
 		nix::sys::signal::kill(
 			nix::unistd::Pid::from_raw(self.inner.as_ref().unwrap().id() as i32),
@@ -60,10 +64,6 @@ impl Child {
 		let mut buf = self.stdout();
 		buf.push_str(&self.stderr());
 
-		// Cleanup files after reading them
-		std::fs::remove_file(self.stdout_path.as_str()).unwrap();
-		std::fs::remove_file(self.stderr_path.as_str()).unwrap();
-
 		if status.success() {
 			Ok(buf)
 		} else {
@@ -75,8 +75,17 @@ impl Child {
 impl Drop for Child {
 	fn drop(&mut self) {
 		if let Some(inner) = self.inner.as_mut() {
+			println!("Server process dropped! Assuming error happend");
 			let _ = inner.kill();
+			let stdout =
+				std::fs::read_to_string(&self.stdout_path).expect("Failed to read the stdout file");
+			println!("Server STDOUT: \n{}", stdout);
+			let stderr =
+				std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file");
+			println!("Server STDERR: \n{}", stderr);
 		}
+		let _ = std::fs::remove_file(&self.stdout_path);
+		let _ = std::fs::remove_file(&self.stderr_path);
 	}
 }
 
@@ -184,9 +193,6 @@ pub async fn start_server(
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
 
-	let port: u16 = rng.gen_range(13000..14000);
-	let addr = format!("127.0.0.1:{port}");
-
 	let mut extra_args = args.clone();
 	if tls {
 		// Test the crt/key args but the keys are self signed so don't actually connect.
@@ -213,30 +219,46 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
-	let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+	'retry: for _ in 0..3 {
+		let port: u16 = rng.gen_range(13000..24000);
+		let addr = format!("127.0.0.1:{port}");
 
-	info!("starting server with args: {start_args}");
+		let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
-	// Configure where the logs go when running the test
-	let server = run_internal::<String>(&start_args, None);
+		info!("starting server with args: {start_args}");
 
-	if !wait_is_ready {
-		return Ok((addr, server));
-	}
+		// Configure where the logs go when running the test
+		let server = run_internal::<String>(&start_args, None);
 
-	// Wait 5 seconds for the server to start
-	let mut interval = time::interval(time::Duration::from_millis(1000));
-	info!("Waiting for server to start...");
-	for _i in 0..10 {
-		interval.tick().await;
-
-		if run(&format!("isready --conn http://{addr}")).output().is_ok() {
-			info!("Server ready!");
+		if !wait_is_ready {
 			return Ok((addr, server));
 		}
-	}
 
-	let server_out = server.kill().output().err().unwrap();
-	error!("server output: {server_out}");
+		// Wait 5 seconds for the server to start
+		let mut interval = time::interval(time::Duration::from_millis(1000));
+		info!("Waiting for server to start...");
+		for _i in 0..10 {
+			interval.tick().await;
+
+			let out = server.stderr();
+			if out.contains("Address already in use") {
+				continue 'retry;
+			}
+			if !out.contains("Started web server on") {
+				continue;
+			}
+
+			if run(&format!("isready --conn http://{addr}")).output().is_ok() {
+				info!("Server ready!");
+				return Ok((addr, server));
+			}
+		}
+
+		let server_out = server.kill().output().err().unwrap();
+		if !server_out.contains("Address already in use") {
+			error!("server output: {server_out}");
+			break;
+		}
+	}
 	Err("server failed to start".into())
 }

@@ -1,4 +1,5 @@
 use super::PATH;
+use super::{deserialize, serialize};
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -19,7 +20,6 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
-use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -28,6 +28,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
+use revision::revisioned;
 use serde::Deserialize;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
@@ -42,14 +43,16 @@ use std::sync::OnceLock;
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::error::Error as WsError;
+use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use trice::Instant;
-use url::Url;
 
 type WsResult<T> = std::result::Result<T, WsError>;
 
@@ -78,17 +81,29 @@ impl From<Tls> for Connector {
 }
 
 pub(crate) async fn connect(
-	url: &Url,
+	endpoint: &Endpoint,
 	config: Option<WebSocketConfig>,
 	#[allow(unused_variables)] maybe_connector: Option<Connector>,
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+	let mut request = (&endpoint.url).into_client_request()?;
+
+	if endpoint.supports_revision {
+		request
+			.headers_mut()
+			.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(super::REVISION_HEADER));
+	}
+
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
-	let (socket, _) =
-		tokio_tungstenite::connect_async_tls_with_config(url, config, NAGLE_ALG, maybe_connector)
-			.await?;
+	let (socket, _) = tokio_tungstenite::connect_async_tls_with_config(
+		request,
+		config,
+		NAGLE_ALG,
+		maybe_connector,
+	)
+	.await?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config, NAGLE_ALG).await?;
+	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG).await?;
 
 	Ok(socket)
 }
@@ -104,13 +119,13 @@ impl Connection for Client {
 	}
 
 	fn connect(
-		address: Endpoint,
+		mut address: Endpoint,
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
-			let url = address.url.join(PATH)?;
+			address.url = address.url.join(PATH)?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			let maybe_connector = address.config.tls_config.map(Connector::from);
+			let maybe_connector = address.config.tls_config.clone().map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 			let maybe_connector = None;
 
@@ -121,14 +136,14 @@ impl Connection for Client {
 				..Default::default()
 			};
 
-			let socket = connect(&url, Some(config), maybe_connector.clone()).await?;
+			let socket = connect(&address, Some(config), maybe_connector.clone()).await?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => flume::unbounded(),
 				capacity => flume::bounded(capacity),
 			};
 
-			router(url, maybe_connector, capacity, config, socket, route_rx);
+			router(address, maybe_connector, capacity, config, socket, route_rx);
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
@@ -164,7 +179,7 @@ impl Connection for Client {
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn router(
-	url: Url,
+	endpoint: Endpoint,
 	maybe_connector: Option<Connector>,
 	capacity: usize,
 	config: WebSocketConfig,
@@ -176,7 +191,7 @@ pub(crate) fn router(
 			let mut request = BTreeMap::new();
 			request.insert("method".to_owned(), PING_METHOD.into());
 			let value = Value::from(request);
-			let value = serialize(&value).unwrap();
+			let value = serialize(&value, endpoint.supports_revision).unwrap();
 			Message::Binary(value)
 		};
 
@@ -198,8 +213,6 @@ pub(crate) fn router(
 				let mut interval = time::interval(PING_INTERVAL);
 				// don't bombard the server with pings if we miss some ticks
 				interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-				// Delay sending the first ping
-				interval.tick().await;
 
 				let pinger = IntervalStream::new(interval);
 
@@ -233,7 +246,7 @@ pub(crate) fn router(
 								}
 								Method::Unset => {
 									if let [Value::Strand(Strand(key))] = &params[..1] {
-										vars.remove(key);
+										vars.swap_remove(key);
 									}
 								}
 								Method::Live => {
@@ -272,7 +285,8 @@ pub(crate) fn router(
 								}
 								let payload = Value::from(request);
 								trace!("Request {payload}");
-								let payload = serialize(&payload).unwrap();
+								let payload =
+									serialize(&payload, endpoint.supports_revision).unwrap();
 								Message::Binary(payload)
 							};
 							if let Method::Authenticate
@@ -316,7 +330,7 @@ pub(crate) fn router(
 							last_activity = Instant::now();
 							match result {
 								Ok(message) => {
-									match Response::try_from(&message) {
+									match Response::try_from(&message, endpoint.supports_revision) {
 										Ok(option) => {
 											// We are only interested in responses that are not empty
 											if let Some(response) = option {
@@ -331,7 +345,7 @@ pub(crate) fn router(
 															{
 																if matches!(method, Method::Set) {
 																	if let Some((key, value)) =
-																		var_stash.remove(&id)
+																		var_stash.swap_remove(&id)
 																	{
 																		vars.insert(key, value);
 																	}
@@ -381,9 +395,12 @@ pub(crate) fn router(
 																		);
 																		let value =
 																			Value::from(request);
-																		let value =
-																			serialize(&value)
-																				.unwrap();
+																		let value = serialize(
+																			&value,
+																			endpoint
+																				.supports_revision,
+																		)
+																		.unwrap();
 																		Message::Binary(value)
 																	};
 																	if let Err(error) =
@@ -404,6 +421,7 @@ pub(crate) fn router(
 										}
 										Err(error) => {
 											#[derive(Deserialize)]
+											#[revisioned(revision = 1)]
 											struct Response {
 												id: Option<Value>,
 											}
@@ -412,8 +430,10 @@ pub(crate) fn router(
 											if let Message::Binary(binary) = message {
 												if let Ok(Response {
 													id,
-												}) = deserialize(&binary)
-												{
+												}) = deserialize(
+													&mut &binary[..],
+													endpoint.supports_revision,
+												) {
 													// Return an error if an ID was returned
 													if let Some(Ok(id)) =
 														id.map(Value::coerce_to_i64)
@@ -475,7 +495,7 @@ pub(crate) fn router(
 
 			'reconnect: loop {
 				trace!("Reconnecting...");
-				match connect(&url, Some(config), maybe_connector.clone()).await {
+				match connect(&endpoint, Some(config), maybe_connector.clone()).await {
 					Ok(s) => {
 						socket = s;
 						for (_, message) in &replay {
@@ -514,19 +534,21 @@ pub(crate) fn router(
 }
 
 impl Response {
-	fn try_from(message: &Message) -> Result<Option<Self>> {
+	fn try_from(message: &Message, supports_revision: bool) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => deserialize(binary).map(Some).map_err(|error| {
-				Error::ResponseFromBinary {
-					binary: binary.clone(),
-					error,
-				}
-				.into()
-			}),
+			Message::Binary(binary) => {
+				deserialize(&mut &binary[..], supports_revision).map(Some).map_err(|error| {
+					Error::ResponseFromBinary {
+						binary: binary.clone(),
+						error: bincode::ErrorKind::Custom(error.to_string()).into(),
+					}
+					.into()
+				})
+			}
 			Message::Ping(..) => {
 				trace!("Received a ping from the server");
 				Ok(None)
