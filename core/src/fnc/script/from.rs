@@ -6,11 +6,13 @@ use crate::sql::value::Value;
 use crate::sql::Id;
 use chrono::{TimeZone, Utc};
 use js::prelude::This;
+use js::Coerced;
 use js::Ctx;
 use js::Error;
 use js::Exception;
 use js::FromAtom;
 use js::FromJs;
+use rust_decimal::Decimal;
 
 fn check_nul(s: &str) -> Result<(), Error> {
 	if s.contains('\0') {
@@ -22,41 +24,45 @@ fn check_nul(s: &str) -> Result<(), Error> {
 
 impl<'js> FromJs<'js> for Value {
 	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
-		match val {
-			val if val.type_name() == "null" => Ok(Value::Null),
-			val if val.type_name() == "undefined" => Ok(Value::None),
-			val if val.is_bool() => Ok(val.as_bool().unwrap().into()),
-			val if val.is_string() => match val.into_string().unwrap().to_string() {
-				Ok(v) => {
-					check_nul(&v)?;
-					Ok(Value::from(v))
-				}
-				Err(e) => Err(e),
-			},
-			val if val.is_number() => Ok(val.as_number().unwrap().into()),
-			val if val.is_array() => {
+		match val.type_of() {
+			js::Type::Undefined => Ok(Value::None),
+			js::Type::Null => Ok(Value::Null),
+			js::Type::Bool => Ok(Value::from(val.as_bool().unwrap())),
+			js::Type::Int => Ok(Value::from(val.as_int().unwrap() as f64)),
+			js::Type::Float => Ok(Value::from(val.as_float().unwrap())),
+			js::Type::String => Ok(Value::from(val.as_string().unwrap().to_string()?)),
+			js::Type::Array => {
 				let v = val.as_array().unwrap();
 				let mut x = Array::with_capacity(v.len());
 				for i in v.iter() {
 					let v = i?;
-					let v = Value::from_js(ctx, v)?;
-					x.push(v);
+					x.push(Value::from_js(ctx, v)?);
 				}
 				Ok(x.into())
 			}
-			val if val.is_object() => {
+			js::Type::BigInt => {
+				// TODO: Optimize this if rquickjs ever supports better conversion methods.
+				let str = Coerced::<String>::from_js(ctx, val)?;
+				if let Ok(i) = str.parse::<i64>() {
+					return Ok(Value::from(i));
+				}
+				match str.parse::<Decimal>() {
+					Ok(x) => Ok(Value::from(x)),
+					Err(e) => Err(Exception::from_message(ctx.clone(), &e.to_string())?.throw()),
+				}
+			}
+			js::Type::Object | js::Type::Exception => {
 				// Extract the value as an object
 				let v = val.into_object().unwrap();
 				// Check to see if this object is an error
 				if v.is_error() {
-					let e: String = v.get("message")?;
+					let e: String = v.get(js::atom::PredefinedAtom::Message)?;
 					let (Ok(e) | Err(e)) =
 						Exception::from_message(ctx.clone(), &e).map(|x| x.throw());
 					return Err(e);
 				}
 				// Check to see if this object is a record
-				if (v).instance_of::<classes::record::Record>() {
-					let v = v.into_class::<classes::record::Record>().unwrap();
+				if let Some(v) = v.as_class::<classes::record::Record>() {
 					let borrow = v.borrow();
 					let v: &classes::record::Record = &borrow;
 					check_nul(&v.value.tb)?;
@@ -66,8 +72,7 @@ impl<'js> FromJs<'js> for Value {
 					return Ok(v.value.clone().into());
 				}
 				// Check to see if this object is a duration
-				if (v).instance_of::<classes::duration::Duration>() {
-					let v = v.into_class::<classes::duration::Duration>().unwrap();
+				if let Some(v) = v.as_class::<classes::duration::Duration>() {
 					let borrow = v.borrow();
 					let v: &classes::duration::Duration = &borrow;
 					return match &v.value {
@@ -76,8 +81,7 @@ impl<'js> FromJs<'js> for Value {
 					};
 				}
 				// Check to see if this object is a uuid
-				if (v).instance_of::<classes::uuid::Uuid>() {
-					let v = v.into_class::<classes::uuid::Uuid>().unwrap();
+				if let Some(v) = v.as_class::<classes::uuid::Uuid>() {
 					let borrow = v.borrow();
 					let v: &classes::uuid::Uuid = &borrow;
 					return match &v.value {
@@ -86,7 +90,7 @@ impl<'js> FromJs<'js> for Value {
 					};
 				}
 				// Check to see if this object is a date
-				let date: js::Object = ctx.globals().get("Date")?;
+				let date: js::Object = ctx.globals().get(js::atom::PredefinedAtom::Date)?;
 				if (v).is_instance_of(&date) {
 					let f: js::Function = v.get("getTime")?;
 					let m: i64 = f.call((This(v),))?;
@@ -118,7 +122,7 @@ impl<'js> FromJs<'js> for Value {
 				}
 				Ok(x.into())
 			}
-			_ => Ok(Value::None),
+			_ => Ok(Value::Null),
 		}
 	}
 }
