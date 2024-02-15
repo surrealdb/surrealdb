@@ -24,6 +24,7 @@ mod tikv;
 mod tx;
 
 mod clock;
+pub(crate) mod lq_structs;
 #[cfg(test)]
 #[cfg(any(
 	feature = "kv-mem",
