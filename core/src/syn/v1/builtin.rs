@@ -85,7 +85,7 @@ macro_rules! impl_builtins {
 			)*
 
 			$(
-				match $name($i){
+				match dbg!($name(dbg!($i))){
 					Ok((i,x)) => return Ok((i,x)),
 					Err(Err::Failure(x)) => return Err(Err::Failure(x)),
 					_ => {}
@@ -269,6 +269,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			product => { fn },
 			round => { fn },
 			spread => { fn },
+			SQRT_2 => { const = constant::Constant::MathSqrt2 },
 			sqrt => { fn },
 			stddev => { fn },
 			sum => { fn },
@@ -293,7 +294,6 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			LOG2_10 => { const = constant::Constant::MathLog210 },
 			LOG2_E => { const = constant::Constant::MathLog2E },
 			PI => { const = constant::Constant::MathPi },
-			SQRT_2 => { const = constant::Constant::MathSqrt2 },
 			TAU => { const = constant::Constant::MathTau },
 		},
 		meta => {
@@ -547,5 +547,14 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, BuiltinName::Constant(Constant::MathPi));
+	}
+
+	#[test]
+	fn constant_sqrt_2() {
+		let sql = "math::SqRt_2";
+		let res = builtin_name(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, BuiltinName::Constant(Constant::MathSqrt2));
 	}
 }
