@@ -31,7 +31,9 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-use crate::kvs::lq_structs::{LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType};
+use crate::kvs::lq_structs::{
+	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType,
+};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
@@ -1037,6 +1039,8 @@ impl Datastore {
 			_ => unreachable!(),
 		};
 
+		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
+
 		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
@@ -1044,6 +1048,7 @@ impl Datastore {
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
+			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
 		})
 	}
 

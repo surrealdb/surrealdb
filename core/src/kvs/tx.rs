@@ -12,7 +12,7 @@ use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::LqValue;
+use crate::kvs::lq_structs::{LqEntry, LqValue};
 use crate::kvs::Check;
 use crate::sql;
 use crate::sql::paths::EDGE;
@@ -23,7 +23,7 @@ use crate::sql::Strand;
 use crate::sql::Value;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use channel::Sender;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -46,6 +46,8 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
+
+const LQ_CAPACITY: usize = 100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -86,6 +88,7 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
+	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -300,6 +303,21 @@ impl Transaction {
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
+	}
+
+	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
+		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
+		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
+			lq.push(l);
+		}
+		lq
+	}
+
+	pub(crate) fn prepare_lq(&mut self, lq_entry: LqEntry) -> Result<(), Error> {
+		self.prepared_live_queries
+			.0
+			.try_send(lq_entry)
+			.map_err(|e| Error::Internal("Prepared lq failed to add lq to channel".to_string()))
 	}
 
 	/// Delete a key from the datastore.
