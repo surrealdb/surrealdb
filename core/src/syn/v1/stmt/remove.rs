@@ -178,6 +178,7 @@ pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -187,6 +188,7 @@ pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 		i,
 		RemoveTableStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -258,6 +260,7 @@ mod tests {
 	}
 
 	#[test]
+	#[cfg(feature = "sql2")]
 	fn remove_table_if_exists() {
 		let sql = "REMOVE TABLE test IF EXISTS";
 		let res = remove(sql);
@@ -266,6 +269,7 @@ mod tests {
 	}
 
 	#[test]
+	#[cfg(feature = "sql2")]
 	fn remove_table_if() {
 		let sql = "REMOVE TABLE test IF";
 		let res = remove(sql);

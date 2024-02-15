@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Datetime, Table, Value};
+use crate::vs::{conv, Versionstamp};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,19 @@ use std::fmt;
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
+}
+
+impl ShowSince {
+	pub fn versionstamp(vs: &Versionstamp) -> ShowSince {
+		ShowSince::Versionstamp(conv::versionstamp_to_u64(vs))
+	}
+
+	pub fn as_versionstamp(&self) -> Option<Versionstamp> {
+		match self {
+			ShowSince::Timestamp(_) => None,
+			ShowSince::Versionstamp(v) => Some(conv::u64_to_versionstamp(*v)),
+		}
+	}
 }
 
 // ShowStatement is used to show changes in a table or database via
@@ -80,5 +94,35 @@ impl fmt::Display for ShowStatement {
 			write!(f, " LIMIT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::sql::Datetime;
+
+	#[test]
+	fn timestamps_are_not_versionstamps() {
+		// given
+		let sql_dt = Datetime::try_from("2020-01-01T00:00:00Z").unwrap();
+
+		// when
+		let since = super::ShowSince::Timestamp(sql_dt);
+
+		// then
+		assert_eq!(since.as_versionstamp(), None);
+	}
+
+	#[test]
+	fn versionstamp_can_be_converted() {
+		// given
+		let versionstamp = crate::vs::conv::u64_to_versionstamp(1234567890);
+		let since = super::ShowSince::Versionstamp(1234567890);
+
+		// when
+		let converted = since.as_versionstamp().unwrap();
+
+		// then
+		assert_eq!(converted, versionstamp);
 	}
 }

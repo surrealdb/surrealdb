@@ -13,6 +13,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
 use crate::engine::IntervalStream;
+use crate::fflags::FFLAGS;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
@@ -202,6 +203,11 @@ pub(crate) fn router(
 }
 
 fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
+	// Some classic ownership shenanigans
+	let kvs_two = kvs.clone();
+	let stop_signal_two = stop_signal.clone();
+
+	// Spawn the ticker, which is used for tracking versionstamps and heartbeats across databases
 	spawn_local(async move {
 		let mut interval = time::interval(tick_interval);
 		// Don't bombard the database if we miss some ticks
@@ -222,4 +228,30 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 			}
 		}
 	});
+
+	if FFLAGS.change_feed_live_queries.enabled() {
+		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
+		spawn_local(async move {
+			let kvs = kvs_two;
+			let stop_signal = stop_signal_two;
+			let mut interval = time::interval(tick_interval);
+			// Don't bombard the database if we miss some ticks
+			interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+			// Delay sending the first tick
+			interval.tick().await;
+
+			let ticker = IntervalStream::new(interval);
+
+			let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
+
+			let mut stream = streams.merge();
+
+			while let Some(Some(_)) = stream.next().await {
+				match kvs.process_lq_notifications().await {
+					Ok(()) => trace!("Live Query poll ran successfully"),
+					Err(error) => error!("Error running live query poll: {error}"),
+				}
+			}
+		})
+	}
 }
