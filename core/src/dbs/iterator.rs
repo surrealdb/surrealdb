@@ -308,15 +308,12 @@ impl Iterator {
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					cancel_ctx.set_iteration_stage(s);
-					if is_last {
-						self.iterate(&cancel_ctx, opt, txn, stm).await?;
-					} else {
+					if !is_last {
 						self.clone().iterate(&cancel_ctx, opt, txn, stm).await?;
 					};
 				}
-			} else {
-				self.iterate(&cancel_ctx, opt, txn, stm).await?;
 			}
+			self.iterate(&cancel_ctx, opt, txn, stm).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);

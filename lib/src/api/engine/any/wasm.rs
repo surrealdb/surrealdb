@@ -151,9 +151,9 @@ impl Connection for Any {
 					#[cfg(feature = "protocol-ws")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						let mut address = address;
-						address.url = address.url.join(engine::remote::ws::PATH)?;
-						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
+						let mut endpoint = address;
+						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
+						engine::remote::ws::wasm::router(endpoint, capacity, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
 

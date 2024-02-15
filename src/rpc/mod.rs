@@ -8,7 +8,9 @@ pub mod response;
 use crate::dbs::DB;
 use crate::rpc::connection::Connection;
 use crate::rpc::response::success;
+use crate::telemetry::metrics::ws::NotificationContext;
 use once_cell::sync::Lazy;
+use opentelemetry::Context as TelemetryContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,12 +50,17 @@ pub(crate) async fn notifications(canceller: CancellationToken) {
 						if let Some(rpc) = WEBSOCKETS.read().await.get(id) {
 							// Serialize the message to send
 							let message = success(None, notification);
+							// Add metrics
+							let cx = TelemetryContext::new();
+							let not_ctx = NotificationContext::default()
+								  .with_live_id(id.to_string());
+							let cx = Arc::new(cx.with_value(not_ctx));
 							// Get the WebSocket output format
 							let format = rpc.read().await.format;
 							// get the WebSocket sending channel
 							let sender = rpc.read().await.channels.0.clone();
 							// Send the notification to the client
-							message.send(format, &sender).await
+							message.send(cx, format, &sender).await
 						}
 					}
 				},

@@ -52,6 +52,7 @@ rustls = [
     "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
 ml = ["surrealdb-core/ml"]
+ml2 = ["surrealdb-core/ml2"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
 sql2 = ["surrealdb-core/sql2"]
@@ -60,7 +61,7 @@ parser2 = ["surrealdb-core/experimental-parser"]
 kv-fdb = ["tokio/time"]
 
 [package.metadata.docs.rs]
-rustdoc-args = ["--cfg", "docsrs,surrealdb_unstable"]
+rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws",
     "protocol-http",
@@ -70,7 +71,6 @@ features = [
     "native-tls",
     "http",
     "scripting",
-    "jwks",
 ]
 targets = []
 
@@ -92,6 +92,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
     "multipart",
 ], optional = true }
+revision = "0.5.0"
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
 rustls = { version = "0.21.10", optional = true }
 semver = { version = "1.0.20", features = ["serde"] }
@@ -109,6 +110,7 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 rand = "0.8.5"
+radix_trie = "0.2.1"
 regex = "1.10.2"
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
@@ -157,6 +159,10 @@ harness = false
 
 [[bench]]
 name = "processor"
+harness = false
+
+[[bench]]
+name = "hash_trie_btree"
 harness = false
 
 [[bench]]
