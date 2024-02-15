@@ -52,12 +52,11 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = [
-    "llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
-    "--skip", "api_integration",
-    "--skip", "cli_integration",
-    "--skip", "http_integration",
-    "--skip", "ws_integration",
-    "--skip", "database_upgrade"
+	"llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
+	"--skip", "api_integration",
+	"--skip", "cli_integration",
+	"--skip", "http_integration",
+	"--skip", "ws_integration"
 ]
 
 
@@ -66,12 +65,11 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS = "--cfg surrealdb_unstable" }
 args = [
-    "test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
-    "--skip", "api_integration",
-    "--skip", "cli_integration",
-    "--skip", "http_integration",
-    "--skip", "ws_integration",
-    "--skip", "database_upgrade"
+	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
+	"--skip", "api_integration",
+	"--skip", "cli_integration",
+	"--skip", "http_integration",
+	"--skip", "ws_integration"
 ]
 
 [tasks.test-workspace-coverage-complete]
