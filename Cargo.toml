@@ -18,6 +18,7 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
+ml2 = ["surrealdb/ml2"]
 jwks = ["surrealdb/jwks"]
 sql2 = ["surrealdb/sql2"]
 parser2 = ["surrealdb/parser2"]
@@ -64,6 +65,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
 	"blocking",
 	"gzip",
 ] }
+revision = "0.5.0"
 rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 serde = { version = "1.0.193", features = ["derive"] }

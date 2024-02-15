@@ -46,28 +46,28 @@ use crate::api::Surreal;
 use crate::dbs::Notification;
 use crate::dbs::Response;
 use crate::dbs::Session;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::check::check_ns_db;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::Action;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::kvs::{LockType, TransactionType};
 use crate::method::Stats;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ml::storage::surml_file::SurMlFile;
 use crate::opt::IntoEndpoint;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineModelStatement;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::sql::statements::DefineStatement;
 use crate::sql::statements::KillStatement;
@@ -79,7 +79,7 @@ use crate::sql::Strand;
 use crate::sql::Uuid;
 use crate::sql::Value;
 use channel::Sender;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -168,7 +168,7 @@ pub struct Mem;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::File;
 ///
-/// let db = Surreal::new::<File>("temp.db").await?;
+/// let db = Surreal::new::<File>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -183,7 +183,7 @@ pub struct Mem;
 /// use surrealdb::engine::local::File;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<File>(("temp.db", config)).await?;
+/// let db = Surreal::new::<File>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -204,7 +204,7 @@ pub struct File;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::RocksDb;
 ///
-/// let db = Surreal::new::<RocksDb>("temp.db").await?;
+/// let db = Surreal::new::<RocksDb>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -219,7 +219,7 @@ pub struct File;
 /// use surrealdb::engine::local::RocksDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<RocksDb>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -240,7 +240,7 @@ pub struct RocksDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::SpeeDb;
 ///
-/// let db = Surreal::new::<SpeeDb>("temp.db").await?;
+/// let db = Surreal::new::<SpeeDb>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -255,7 +255,7 @@ pub struct RocksDb;
 /// use surrealdb::engine::local::SpeeDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SpeeDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<SpeeDb>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -276,7 +276,7 @@ pub struct SpeeDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::IndxDb;
 ///
-/// let db = Surreal::new::<IndxDb>("MyDatabase").await?;
+/// let db = Surreal::new::<IndxDb>("DatabaseName").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -291,7 +291,7 @@ pub struct SpeeDb;
 /// use surrealdb::engine::local::IndxDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<IndxDb>(("MyDatabase", config)).await?;
+/// let db = Surreal::new::<IndxDb>(("DatabaseName", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -348,7 +348,7 @@ pub struct TiKv;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::FDb;
 ///
-/// let db = Surreal::new::<FDb>("fdb.cluster").await?;
+/// let db = Surreal::new::<FDb>("path/to/fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -363,7 +363,7 @@ pub struct TiKv;
 /// use surrealdb::engine::local::FDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<FDb>(("fdb.cluster", config)).await?;
+/// let db = Surreal::new::<FDb>(("path/to/fdb.cluster", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -410,7 +410,7 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 }
 
 async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
-	if let Some((_stats, result)) = process(responses).results.remove(&0) {
+	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
@@ -439,7 +439,7 @@ async fn export(
 	ml_config: Option<MlConfig>,
 ) -> Result<()> {
 	match ml_config {
-		#[cfg(feature = "ml")]
+		#[cfg(any(feature = "ml", feature = "ml2"))]
 		Some(MlConfig::Export {
 			name,
 			version,
@@ -701,7 +701,7 @@ async fn router(
 				}
 			};
 			let responses = match param.ml_config {
-				#[cfg(feature = "ml")]
+				#[cfg(any(feature = "ml", feature = "ml2"))]
 				Some(MlConfig::Import) => {
 					// Ensure a NS and DB are set
 					let (nsv, dbv) = check_ns_db(session)?;

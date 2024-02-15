@@ -1,4 +1,6 @@
 use crate::err::Error;
+use revision::revisioned;
+use revision::Revisioned;
 use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::sql::Value;
@@ -7,6 +9,34 @@ use surrealdb::sql::Value;
 pub struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: Cow<'static, str>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[revisioned(revision = 1)]
+struct Inner {
+	code: i64,
+	message: String,
+}
+
+impl Revisioned for Failure {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		let inner = Inner {
+			code: self.code,
+			message: self.message.as_ref().to_owned(),
+		};
+		inner.serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
+		unreachable!("deserialization not supported for this type")
+	}
+
+	fn revision() -> u16 {
+		1
+	}
 }
 
 impl From<&str> for Failure {

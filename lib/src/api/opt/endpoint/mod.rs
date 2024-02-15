@@ -24,7 +24,7 @@ use url::Url;
 use super::Config;
 
 /// A server address used to connect to the server
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)] // used by the embedded and remote connections
 pub struct Endpoint {
 	#[doc(hidden)]
@@ -32,9 +32,20 @@ pub struct Endpoint {
 	#[doc(hidden)]
 	pub path: String,
 	pub(crate) config: Config,
+	// Whether or not the remote server supports revision based serialisation
+	pub(crate) supports_revision: bool,
 }
 
 impl Endpoint {
+	pub(crate) fn new(url: Url) -> Self {
+		Self {
+			url,
+			path: String::new(),
+			config: Default::default(),
+			supports_revision: false,
+		}
+	}
+
 	#[doc(hidden)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
 		match EndpointKind::from(self.url.scheme()) {
@@ -149,6 +160,10 @@ impl EndpointKind {
 			self,
 			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss
 		)
+	}
+
+	pub(crate) fn is_ws(&self) -> bool {
+		matches!(self, EndpointKind::Ws | EndpointKind::Wss)
 	}
 
 	pub fn is_local(&self) -> bool {
