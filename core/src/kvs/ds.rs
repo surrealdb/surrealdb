@@ -312,7 +312,7 @@ impl Datastore {
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a SurrelKV database
+			// Parse and initiate a SurrealKV database
 			s if s.starts_with("surrealkv:") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{

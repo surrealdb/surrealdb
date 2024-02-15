@@ -163,7 +163,7 @@ run_task = { name = ["start-tikv", "ci-api-integration-tikv-tests", "stop-tikv"]
 
 [tasks.ci-api-integration-surrealkv]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv", RUSTFLAGS = "--cfg surrealdb_unstable" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 
@@ -328,4 +328,9 @@ run_task = { name = ["bench-target"] }
 [tasks.bench-sdk-ws]
 category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
+run_task = { name = ["bench-target"] }
+
+[tasks.bench-sdk-surrealkv]
+category = "CI - BENCHMARK - SurrealDB Target"
+env = { BENCH_DATASTORE_TARGET = "sdk-surrealkv" }
 run_task = { name = ["bench-target"] }
