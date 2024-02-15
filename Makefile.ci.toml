@@ -170,6 +170,7 @@ dependencies = ["build-surrealdb"]
 script = """
     #!/bin/bash -ex
 
+
     target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
     echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
@@ -196,28 +197,45 @@ script = """
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
+env = { SURREAL_LINK="https://github.com/surrealdb/surrealdb/releases/download/v1.2.0/surreal-v1.2.0.linux-amd64.tgz" }
 script = """
     #!/bin/bash -ex
+
+	if [ ! -f "/tmp/test_surreal" ]; then
+		echo "Downloading surrealdb for startup test"
+		curl -L $SURREAL_LINK | tar -xzO > /tmp/test_surreal
+		chmod +x /tmp/test_surreal
+	fi
 
     ${HOME}/.tiup/bin/tiup install pd tikv playground
 
     playground_attempts=0
-    while [[ $playground_attempts < 5 ]]; do
-        nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 3 --without-monitor > /tmp/tiup.log &
+    while [[ $playground_attempts -lt 5 ]]; do
+        nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor > /tmp/tiup.log &
 
         echo $! > /tmp/tiup.pid
 
         set +e
         echo "Waiting for tiup playground to be ready..."
         tries=0
-        while [[ $tries < 10 ]]; do
-                ${HOME}/.tiup/bin/tiup playground display >/dev/null && echo "Ready!" && exit 0 || sleep 5
+        while [[ $tries -lt 10 ]]; do
+                if  ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
+					tries=$((tries + 1));
+					sleep 5;
+					continue
+				fi
+				if echo "create __tikv_test_thing" | /tmp/test_surreal sql --hide-welcome --endpoint tikv://127.0.0.1:2379 > /dev/null; then
+					echo "TIKV started correctly";
+					exit 0;
+				fi
+				sleep 5;
                 tries=$((tries + 1))
         done
         set -e
 
         echo "ERROR: TiUP Playground is unhealthy! Try again..."
-        kill $(cat /tmp/tiup.pid) || true
+		${HOME}/.tiup/bin/tiup clean --all
+
 
         playground_attempts=$((playground_attempts + 1))
     done
@@ -230,7 +248,9 @@ script = """
 
 [tasks.stop-tikv]
 category = "CI - SERVICES"
-script = "kill $(cat /tmp/tiup.pid) || true"
+script = """
+${HOME}/.tiup/bin/tiup clean --all
+"""
 
 #
 # Builds
