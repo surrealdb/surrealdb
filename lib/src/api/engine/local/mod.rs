@@ -372,6 +372,11 @@ pub struct TiKv;
 #[derive(Debug)]
 pub struct FDb;
 
+#[cfg(feature = "kv-surrealkv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
+#[derive(Debug)]
+pub struct SurrealKV;
+
 /// An embedded database
 #[derive(Debug, Clone)]
 pub struct Db {
