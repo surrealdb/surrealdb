@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
+#[cfg(debug_assertions)]
+use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -80,7 +82,7 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = self.extract_vector(v)?;
+			let vector = self.extract_vector(v)?.into();
 			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
 		}
 		Ok(())
@@ -117,7 +119,7 @@ impl MTreeIndex {
 				});
 			}
 		}
-		Ok(Arc::new(vec))
+		Ok(vec.into())
 	}
 
 	fn extract_vector(&self, v: Value) -> Result<Vector, Error> {
@@ -158,7 +160,7 @@ impl MTreeIndex {
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = self.extract_vector(v)?;
+				let vector = self.extract_vector(v)?.into();
 				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
 			}
 		}
@@ -385,12 +387,11 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		obj: Vector,
+		obj: SharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
-		let obj = Arc::new(obj);
 		// First we check if we already have the object. In this case we just append the doc.
 		if self.append(tx, store, &obj, id).await? {
 			return Ok(());
@@ -439,10 +440,10 @@ impl MTree {
 			"New internal root - node: {} - e1.node: {} - e1.obj: {:?} - e1.radius: {} - e2.node: {} - e2.obj: {:?} - e2.radius: {}",
 			new_root_id,
 			p1.node,
-			o1.as_ref(),
+			o1,
 			p1.radius,
 			p2.node,
-			o2.as_ref(),
+			o2,
 			p2.radius
 		);
 		let mut entries = InternalMap::new();
@@ -554,7 +555,7 @@ impl MTree {
 				// Remove ObestSubtree from N;
 				node.remove(&best_entry_obj);
 				// if (N U P will fit into N)
-				let mut nup: HashSet<SharedVector> = HashSet::from_iter(node.keys().cloned());
+				let mut nup: BTreeSet<SharedVector> = BTreeSet::from_iter(node.keys().cloned());
 				nup.insert(o1.clone());
 				nup.insert(o2.clone());
 				if nup.len() <= self.state.capacity as usize {
@@ -592,10 +593,7 @@ impl MTree {
 					#[cfg(debug_assertions)]
 					debug!(
 						"NODE: {} - BE_OBJ: {:?} - BE_RADIUS: {} -> {}",
-						node_id,
-						best_entry_obj.as_ref(),
-						best_entry.radius,
-						covering_radius
+						node_id, best_entry_obj, best_entry.radius, covering_radius
 					);
 					best_entry.radius = covering_radius;
 					node.insert(best_entry_obj, best_entry);
@@ -754,7 +752,7 @@ impl MTree {
 		let mut promo = None;
 		let mut max_dist = 0f64;
 		let n = objects.len();
-		let mut dist_cache = HashMap::with_capacity(n * 2);
+		let mut dist_cache = BTreeMap::new();
 		for (i, o1) in objects.iter().enumerate() {
 			for o2 in objects.iter().take(n).skip(i + 1) {
 				let distance = self.calculate_distance(o1, o2)?;
@@ -838,14 +836,14 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		object: Vector,
+		object: SharedVector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
 		let mut deleted = false;
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(tx, store, root_node, &None, Arc::new(object), doc_id, &mut deleted)
+				.delete_at_node(tx, store, root_node, &None, object, doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
@@ -947,7 +945,7 @@ impl MTree {
 		for (on_obj, on_entry) in &n_node {
 			let on_od_dist = self.calculate_distance(on_obj, &od)?;
 			#[cfg(debug_assertions)]
-			debug!("on_od_dist: {:?} / {} / {}", on_obj.as_ref(), on_od_dist, on_entry.radius);
+			debug!("on_od_dist: {:?} / {} / {}", on_obj, on_od_dist, on_entry.radius);
 			// If (d(Od, On) <= r(On))
 			if on_od_dist <= on_entry.radius {
 				on_objs.push((on_obj.clone(), on_entry.clone()));
@@ -957,7 +955,7 @@ impl MTree {
 		debug!("on_objs: {:?}", on_objs);
 		for (on_obj, mut on_entry) in on_objs {
 			#[cfg(debug_assertions)]
-			debug!("on_obj: {:?}", on_obj.as_ref());
+			debug!("on_obj: {:?}", on_obj);
 			// Delete (Od, child(On))
 			let on_node = store.get_node_mut(tx, on_entry.node).await?;
 			#[cfg(debug_assertions)]
@@ -1256,7 +1254,7 @@ impl MTree {
 	}
 }
 
-struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
+struct DistanceCache(BTreeMap<(SharedVector, SharedVector), f64>);
 
 struct PriorityNode(f64, NodeId);
 
@@ -1606,8 +1604,7 @@ impl VersionedSerdeState for MState {}
 mod tests {
 	use rand::prelude::StdRng;
 	use rand::{Rng, SeedableRng};
-	use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-	use std::sync::Arc;
+	use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 	use crate::err::Error;
 	use test_log::test;
@@ -1661,7 +1658,7 @@ mod tests {
 			n += 1;
 			vec.add(Number::Int(n));
 		}
-		Arc::new(vec)
+		vec.into()
 	}
 
 	fn new_random_vec(rng: &mut StdRng, t: VectorType, dim: usize) -> SharedVector {
@@ -1669,7 +1666,7 @@ mod tests {
 		for _ in 0..dim {
 			vec.add(Number::Float(rng.gen_range(-5.0..5.0)));
 		}
-		Arc::new(vec)
+		vec.into()
 	}
 
 	#[test(tokio::test)]
@@ -1691,7 +1688,7 @@ mod tests {
 		// Insert single element
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec1.as_ref().clone(), 1).await?;
+			t.insert(&mut tx, &mut &mut st, vec1.clone(), 1).await?;
 			assert_eq!(t.state.root, Some(0));
 			check_leaf_write(&mut tx, &mut &mut st, 0, |m| {
 				assert_eq!(m.len(), 1);
@@ -1714,7 +1711,7 @@ mod tests {
 		let vec2 = new_vec(2, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 2).await?;
+			t.insert(&mut tx, &mut &mut st, vec2.clone(), 2).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec1 knn
@@ -1745,7 +1742,7 @@ mod tests {
 		// insert new doc to existing vector
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec2.as_ref().clone(), 3).await?;
+			t.insert(&mut tx, &mut &mut st, vec2.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec2 knn
@@ -1769,7 +1766,7 @@ mod tests {
 		let vec3 = new_vec(3, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec3.as_ref().clone(), 3).await?;
+			t.insert(&mut tx, &mut &mut st, vec3.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec3 knn
@@ -1794,7 +1791,7 @@ mod tests {
 		let vec4 = new_vec(4, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec4.as_ref().clone(), 4).await?;
+			t.insert(&mut tx, &mut &mut st, vec4.clone(), 4).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec4 knn
@@ -1830,7 +1827,7 @@ mod tests {
 		let vec6 = new_vec(6, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec6.as_ref().clone(), 6).await?;
+			t.insert(&mut tx, &mut &mut st, vec6.clone(), 6).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec6 knn
@@ -1869,7 +1866,7 @@ mod tests {
 		let vec8 = new_vec(8, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec8.as_ref().clone(), 8).await?;
+			t.insert(&mut tx, &mut &mut st, vec8.clone(), 8).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1908,7 +1905,7 @@ mod tests {
 		let vec9 = new_vec(9, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec9.as_ref().clone(), 9).await?;
+			t.insert(&mut tx, &mut &mut st, vec9.clone(), 9).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1948,7 +1945,7 @@ mod tests {
 		let vec10 = new_vec(10, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec10.as_ref().clone(), 10).await?;
+			t.insert(&mut tx, &mut &mut st, vec10.clone(), 10).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -2042,7 +2039,7 @@ mod tests {
 			{
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
-				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
+				t.insert(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?;
 				finish_operation(t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
@@ -2067,7 +2064,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 			for (doc_id, obj) in collection.as_ref() {
-				t.insert(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?;
+				t.insert(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			finish_operation(t, tx, st, true).await?;
@@ -2091,7 +2088,7 @@ mod tests {
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Write, cache_size).await;
 				assert!(
-					t.delete(&mut tx, &mut &mut st, obj.as_ref().clone(), *doc_id).await?,
+					t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
 					"Delete failed: {} {:?}",
 					doc_id,
 					obj
@@ -2600,7 +2597,7 @@ mod tests {
 		if let Some(root_id) = t.state.root {
 			nodes.push_back((root_id, 0.0, None, 1));
 		}
-		let mut leaf_objects = HashSet::new();
+		let mut leaf_objects = BTreeSet::new();
 		while let Some((node_id, radius, center, depth)) = nodes.pop_front() {
 			assert!(node_ids.insert(node_id), "Node already exist: {}", node_id);
 			checks.node_count += 1;
@@ -2649,7 +2646,7 @@ mod tests {
 						if let Some(center) = center.as_ref() {
 							let pd = t.calculate_distance(center, &o)?;
 							debug!("calc_dist: {:?} {:?} = {}", center, &o, pd);
-							assert_eq!(pd, p.parent_dist, "Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}", p.parent_dist, t.distance, pd, node_id, o.as_ref(), center.as_ref() );
+							assert_eq!(pd, p.parent_dist, "Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}", p.parent_dist, t.distance, pd, node_id, o, center);
 						}
 						checks.doc_count += p.docs.len() as usize;
 					}

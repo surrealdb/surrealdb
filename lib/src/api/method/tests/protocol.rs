@@ -29,11 +29,7 @@ impl IntoEndpoint<Test> for () {
 	type Client = Client;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		Ok(Endpoint {
-			url: Url::parse("test://")?,
-			path: String::new(),
-			config: Default::default(),
-		})
+		Ok(Endpoint::new(Url::parse("test://")?))
 	}
 }
 

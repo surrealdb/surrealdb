@@ -293,7 +293,7 @@ impl Connection {
 		async move {
 			let span = Span::current();
 			let req_cx = RequestContext::default();
-			let otel_cx = TelemetryContext::new().with_value(req_cx.clone());
+			let otel_cx = Arc::new(TelemetryContext::new().with_value(req_cx.clone()));
 			// Parse the RPC request structure
 			match fmt.req(msg) {
 				Ok(req) => {
@@ -304,18 +304,24 @@ impl Connection {
 						"rpc.request_id",
 						req.id.clone().map(Value::as_string).unwrap_or_default(),
 					);
-					let otel_cx = TelemetryContext::current_with_value(
+					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(&req.method).with_size(len),
-					);
+					));
 					// Process the message
 					let res =
 						Connection::process_message(rpc.clone(), &req.method, req.params).await;
 					// Process the response
-					res.into_response(req.id).send(fmt, &chn).with_context(otel_cx).await
+					res.into_response(req.id)
+						.send(otel_cx.clone(), fmt, &chn)
+						.with_context(otel_cx.as_ref().clone())
+						.await
 				}
 				Err(err) => {
 					// Process the response
-					failure(None, err).send(fmt, &chn).with_context(otel_cx).await
+					failure(None, err)
+						.send(otel_cx.clone(), fmt, &chn)
+						.with_context(otel_cx.as_ref().clone())
+						.await
 				}
 			}
 		}

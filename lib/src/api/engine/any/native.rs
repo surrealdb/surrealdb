@@ -175,9 +175,10 @@ impl Connection for Any {
 					#[cfg(feature = "protocol-ws")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						let url = address.url.join(engine::remote::ws::PATH)?;
+						let mut endpoint = address;
+						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
-						let maybe_connector = address.config.tls_config.map(Connector::from);
+						let maybe_connector = endpoint.config.tls_config.clone().map(Connector::from);
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
 
@@ -188,13 +189,13 @@ impl Connection for Any {
 							..Default::default()
 						};
 						let socket = engine::remote::ws::native::connect(
-							&url,
+							&endpoint,
 							Some(config),
 							maybe_connector.clone(),
 						)
 						.await?;
 						engine::remote::ws::native::router(
-							url,
+							endpoint,
 							maybe_connector,
 							capacity,
 							config,
