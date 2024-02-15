@@ -698,8 +698,6 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test surrealkv engine
-        env:
-          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo make ci-api-integration-surrealkv
 
       - name: Debug info
