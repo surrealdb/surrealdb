@@ -53,8 +53,8 @@ impl Location {
 		assert!(offset <= source.len(), "tried to find location of substring in unrelated string");
 		// Bytes of input prior to line being iterated.
 		let mut bytes_prior = 0;
-		for (line_idx, (line, seperator_offset)) in LineIterator::new(source).enumerate() {
-			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
+		for (line_idx, (line, seperator_len)) in LineIterator::new(source).enumerate() {
+			let bytes_so_far = bytes_prior + line.len() + seperator_len.unwrap_or(0) as usize;
 			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
