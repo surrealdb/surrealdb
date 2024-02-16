@@ -20,3 +20,17 @@ pub use v2::{
 pub trait Parse<T> {
 	fn parse(val: &str) -> T;
 }
+
+#[cfg(test)]
+mod test {
+	use super::parse;
+
+	#[test]
+	fn test_error_in_lineterminator() {
+		let q = r#"
+select * from person
+CREATE person CONTENT { foo:'bar'};
+"#;
+		parse(q).unwrap_err();
+	}
+}
