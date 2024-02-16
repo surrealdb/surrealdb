@@ -140,7 +140,7 @@ impl TokenValue for f32 {
 				})?;
 				Ok(number)
 			}
-			x => unexpected!(parser, x, "an floating point number"),
+			x => unexpected!(parser, x, "a floating point number"),
 		}
 	}
 }
@@ -165,7 +165,7 @@ impl TokenValue for f64 {
 				})?;
 				Ok(number)
 			}
-			x => unexpected!(parser, x, "an floating point number"),
+			x => unexpected!(parser, x, "a floating point number"),
 		}
 	}
 }
