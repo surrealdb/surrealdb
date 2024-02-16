@@ -9,6 +9,7 @@ use crate::sql::{Array, Thing, Value};
 use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
+use roaring::RoaringTreemap;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -18,26 +19,18 @@ pub(crate) struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
 	hnsw: Hnsw,
+	docs: HnswDocs,
 	vec_docs: BTreeMap<SharedVector, (Ids64, ElementId)>,
-	doc_ids: Trie<Key, DocId>,
-	ids_doc: Vec<Thing>,
 }
 
 impl HnswIndex {
 	pub(crate) fn new(p: &HnswParams) -> Self {
-		let doc_ids = Trie::default();
-		let ids_doc = Vec::default();
-		let dim = p.dimension as usize;
-		let vector_type = p.vector_type;
-		let hnsw = Hnsw::new(p);
-		let vec_docs = BTreeMap::new();
-		HnswIndex {
-			dim,
-			vector_type,
-			hnsw,
-			vec_docs,
-			doc_ids,
-			ids_doc,
+		Self {
+			dim: p.dimension as usize,
+			vector_type: p.vector_type,
+			hnsw: Hnsw::new(p),
+			docs: HnswDocs::default(),
+			vec_docs: BTreeMap::default(),
 		}
 	}
 
@@ -47,19 +40,11 @@ impl HnswIndex {
 		content: Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
-		let doc_key: Key = rid.into();
-		let doc_id = if let Some(doc_id) = self.doc_ids.get(&doc_key) {
-			*doc_id
-		} else {
-			let doc_id = self.ids_doc.len() as DocId;
-			self.ids_doc.push(rid.clone());
-			self.doc_ids.insert(doc_key, doc_id);
-			doc_id
-		};
+		let doc_id = self.docs.resolve(rid);
 		// Index the values
-		for v in content {
+		for value in content {
 			// Extract the vector
-			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
+			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
 			vector.check_dimension(self.dim)?;
 			self.insert(Arc::new(vector), doc_id).await;
 		}
@@ -83,21 +68,19 @@ impl HnswIndex {
 		}
 	}
 
-	async fn remove(&mut self, o: SharedVector, d: DocId) -> bool {
+	async fn remove(&mut self, o: SharedVector, d: DocId) {
 		if let Entry::Occupied(mut e) = self.vec_docs.entry(o) {
 			let (docs, e_id) = e.get_mut();
 			if let Some(new_docs) = docs.remove(d) {
 				let e_id = *e_id;
 				if new_docs.is_empty() {
 					e.remove();
-					return self.hnsw.remove(e_id).await;
+					self.hnsw.remove(e_id).await;
 				} else {
 					e.insert((new_docs, e_id));
-					return true;
 				}
 			}
 		}
-		false
 	}
 
 	pub(crate) async fn remove_document(
@@ -105,8 +88,7 @@ impl HnswIndex {
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
-		let doc_key: Key = rid.into();
-		if let Some(doc_id) = self.doc_ids.get(&doc_key).cloned() {
+		if let Some(doc_id) = self.docs.remove(rid) {
 			for v in content {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
@@ -135,7 +117,7 @@ impl HnswIndex {
 	fn result(&self, res: KnnResult) -> VecDeque<(Thing, f64)> {
 		res.docs
 			.into_iter()
-			.map(|(doc_id, dist)| (self.ids_doc[doc_id as usize].clone(), dist))
+			.filter_map(|(doc_id, dist)| self.docs.get(doc_id).map(|t| (t.clone(), dist)))
 			.collect()
 	}
 
@@ -156,6 +138,58 @@ impl HnswIndex {
 			#[cfg(debug_assertions)]
 			HashMap::new(),
 		)
+	}
+}
+
+#[derive(Default)]
+struct HnswDocs {
+	doc_ids: Trie<Key, DocId>,
+	ids_doc: Vec<Option<Thing>>,
+	available: RoaringTreemap,
+}
+
+impl HnswDocs {
+	fn resolve(&mut self, rid: &Thing) -> DocId {
+		let doc_key: Key = rid.into();
+		if let Some(doc_id) = self.doc_ids.get(&doc_key) {
+			*doc_id
+		} else {
+			let doc_id = self.next_doc_id();
+			self.ids_doc.push(Some(rid.clone()));
+			self.doc_ids.insert(doc_key, doc_id);
+			doc_id
+		}
+	}
+
+	fn next_doc_id(&mut self) -> DocId {
+		if let Some(doc_id) = self.available.iter().next() {
+			self.available.remove(doc_id);
+			doc_id
+		} else {
+			self.ids_doc.len() as DocId
+		}
+	}
+
+	fn get(&self, doc_id: DocId) -> Option<Thing> {
+		if let Some(t) = self.ids_doc.get(doc_id as usize) {
+			t.clone()
+		} else {
+			None
+		}
+	}
+
+	fn remove(&mut self, rid: &Thing) -> Option<DocId> {
+		let doc_key: Key = rid.into();
+		if let Some(doc_id) = self.doc_ids.remove(&doc_key) {
+			let n = doc_id as usize;
+			if n < self.ids_doc.len() {
+				self.ids_doc[n] = None;
+			}
+			self.available.insert(doc_id);
+			Some(doc_id)
+		} else {
+			None
+		}
 	}
 }
 
@@ -456,8 +490,7 @@ impl Hnsw {
 				#[cfg(debug_assertions)]
 				if w.len() < expected_w_len {
 					debug!(
-						"0 search_layer - ep: {ep} - ef: {ef} - k: {k} - layer: {} - w: {}",
-						l.len(),
+						"0 search_layer - ep: {ep} - ef: {ef} - k: {k} - w.len: {} < {expected_w_len}",
 						w.len()
 					);
 				}
@@ -614,9 +647,10 @@ impl SelectNeighbors {
 
 #[cfg(test)]
 mod tests {
+	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::hnsw::{Hnsw, HnswIndex};
-	use crate::idx::trees::knn::tests::TestCollection;
+	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
@@ -864,7 +898,7 @@ mod tests {
 		mut map: BTreeMap<SharedVector, HashSet<DocId>>,
 	) {
 		for (doc_id, obj) in collection.as_ref() {
-			assert!(h.remove(obj.clone(), *doc_id).await, "Delete failed: {:?} {}", obj, doc_id);
+			h.remove(obj.clone(), *doc_id).await;
 			if let BEntry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
@@ -1157,10 +1191,13 @@ mod tests {
 
 	#[test_log::test(tokio::test)]
 	#[serial]
-	async fn test_recall() {
-		let (dim, vt, m, size) = (20, VectorType::F32, 24, 10000);
-		info!("Build test collection");
-		let collection = TestCollection::new(false, size, vt, dim, &Distance::Euclidean);
+	async fn test_recall() -> Result<(), Error> {
+		let (dim, vt, m) = (20, VectorType::F32, 24);
+		info!("Build data collection");
+		let collection = TestCollection::NonUnique(new_vectors_from_file(
+			VectorType::F32,
+			"../tests/data/hnsw-random-9000-20-euclidean.gz",
+		)?);
 		let p = new_params(dim, vt, Distance::Euclidean, m, 500, false, false, false);
 		let mut h = HnswIndex::new(&p);
 		info!("Insert collection");
@@ -1168,7 +1205,11 @@ mod tests {
 			h.insert(obj.clone(), *doc_id).await;
 		}
 
-		let queries = TestCollection::new(false, 50, vt, dim, &Distance::Euclidean);
+		info!("Build query collection");
+		let queries = TestCollection::NonUnique(new_vectors_from_file(
+			VectorType::F32,
+			"../tests/data/hnsw-random-5000-20-euclidean.gz",
+		)?);
 
 		info!("Check recall");
 		for (efs, expected_recall) in [(80, 1.0)] {
@@ -1184,7 +1225,9 @@ mod tests {
 					collection.as_ref().len()
 				);
 				let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
-				total_recall += brute_force_res.recall(&hnsw_res);
+				let rec = brute_force_res.recall(&hnsw_res);
+				assert_eq!(brute_force_res.docs, hnsw_res.docs);
+				total_recall += rec;
 			}
 			let recall = total_recall / queries.as_ref().len() as f64;
 			assert!(
@@ -1194,6 +1237,7 @@ mod tests {
 				expected_recall
 			);
 		}
+		Ok(())
 	}
 
 	async fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {

@@ -501,16 +501,21 @@ pub struct KnnResult {
 
 #[cfg(test)]
 pub(super) mod tests {
+	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::Number;
+	use crate::sql::{Array, Number};
+	use crate::syn::Parse;
+	use flate2::read::GzDecoder;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
 	use std::collections::{BTreeSet, HashMap, VecDeque};
+	use std::fs::File;
+	use std::io::{BufRead, BufReader};
 	use std::sync::Arc;
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {
@@ -535,6 +540,30 @@ pub(super) mod tests {
 				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
 			}
 		}
+	}
+
+	pub(in crate::idx::trees) fn new_vectors_from_file(
+		t: VectorType,
+		path: &str,
+	) -> Result<Vec<(DocId, SharedVector)>, Error> {
+		// Open the gzip file
+		let file = File::open(path)?;
+
+		// Create a GzDecoder to read the file
+		let gz = GzDecoder::new(file);
+
+		// Wrap the decoder in a BufReader
+		let reader = BufReader::new(gz);
+
+		let mut res = Vec::new();
+		// Iterate over each line in the file
+		for (i, line_result) in reader.lines().enumerate() {
+			let line = line_result?;
+			let array = Array::parse(&line);
+			let vec = Arc::new(Vector::try_from_array(t, array)?);
+			res.push((i as DocId, vec));
+		}
+		Ok(res)
 	}
 
 	pub(in crate::idx::trees) fn new_vec(mut n: i64, t: VectorType, dim: usize) -> SharedVector {

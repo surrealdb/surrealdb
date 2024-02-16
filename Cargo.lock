@@ -5381,6 +5381,7 @@ dependencies = [
  "dmp",
  "echodb",
  "env_logger",
+ "flate2",
  "foundationdb",
  "fst",
  "futures",

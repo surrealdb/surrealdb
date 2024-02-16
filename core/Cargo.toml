@@ -153,6 +153,7 @@ geo-types = { version = "0.7.12", features = ["arbitrary"] }
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
+flate2 = "1.0.28"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
