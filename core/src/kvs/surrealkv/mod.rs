@@ -130,7 +130,7 @@ impl Transaction {
 		self.done = true;
 
 		// Commit the transaction.
-		self.inner.commit().await.map_err(|e| Error::from(e))
+		self.inner.commit().await.map_err(Into::into)
 	}
 
 	/// Checks if a key exists in the database.
@@ -256,7 +256,7 @@ impl Transaction {
 		}
 
 		// Set the key.
-		self.inner.set(key.into().as_slice(), &val.into()).map_err(|e| Error::from(e))
+		self.inner.set(key.into().as_slice(), &val.into()).map_err(Into::into)
 	}
 
 	/// Inserts a key-value pair into the database if the key doesn't already exist.
@@ -285,7 +285,7 @@ impl Transaction {
 		}
 
 		// Insert the key-value pair.
-		self.inner.set(&key, &val.into()).map_err(|e| Error::from(e))
+		self.inner.set(&key, &val.into()).map_err(Into::into)
 	}
 
 	/// Inserts a key-value pair into the database if the key doesn't already exist,
@@ -335,7 +335,7 @@ impl Transaction {
 
 		// Delete the key.
 		let key_slice = key.into();
-		self.inner.delete(key_slice.as_slice()).map_err(|e| Error::from(e))
+		self.inner.delete(key_slice.as_slice()).map_err(Into::into)
 	}
 
 	/// Deletes a key from the database if the existing value matches the provided check value.
