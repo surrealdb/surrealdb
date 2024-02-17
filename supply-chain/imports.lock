@@ -3,11 +3,11 @@
 
 [[unpublished.surrealdb]]
 version = "1.3.0"
-audited_as = "1.1.1"
+audited_as = "1.2.0"
 
 [[unpublished.surrealdb-core]]
 version = "1.3.0"
-audited_as = "1.1.5"
+audited_as = "1.2.1"
 
 [[publisher.addr]]
 version = "0.15.6"
@@ -115,15 +115,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "1.1.1"
-when = "2024-01-16"
+version = "1.2.0"
+when = "2024-02-13"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "1.1.5"
-when = "2024-01-31"
+version = "1.2.1"
+when = "2024-02-16"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -143,8 +143,8 @@ user-login = "rushmorem"
 user-name = "Rushmore Mushambi"
 
 [[publisher.surrealkv]]
-version = "0.1.1"
-when = "2024-02-10"
+version = "0.1.2"
+when = "2024-02-17"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
