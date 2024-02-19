@@ -334,10 +334,9 @@ impl Transaction {
 	}
 
 	pub(crate) fn prepare_lq(&mut self, lq_entry: LqEntry) -> Result<(), Error> {
-		self.prepared_live_queries
-			.0
-			.try_send(lq_entry)
-			.map_err(|e| Error::Internal("Prepared lq failed to add lq to channel".to_string()))
+		self.prepared_live_queries.0.try_send(lq_entry).map_err(|_try_send_err| {
+			Error::Internal("Prepared lq failed to add lq to channel".to_string())
+		})
 	}
 
 	/// Delete a key from the datastore.
