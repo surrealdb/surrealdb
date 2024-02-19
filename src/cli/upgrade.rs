@@ -1,6 +1,7 @@
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
+use semver::{Comparator, Op, Version};
 use std::borrow::Cow;
 use std::fs;
 use std::io::{Error as IoError, ErrorKind};
@@ -30,15 +31,48 @@ pub struct UpgradeCommandArguments {
 impl UpgradeCommandArguments {
 	/// Get the version string to download based on the user preference
 	async fn version(&self) -> Result<Cow<'_, str>, Error> {
-		if self.nightly {
-			Ok(Cow::Borrowed("nightly"))
-		} else if self.beta {
-			fetch("beta").await
-		} else if let Some(version) = self.version.as_ref() {
-			Ok(Cow::Borrowed(version))
+		let nightly = "nightly";
+		let beta = "beta";
+		// Convert the version to lowercase, if supplied
+		let version = self.version.as_deref().map(str::to_ascii_lowercase);
+
+		if self.nightly || version.as_deref() == Some(nightly) {
+			Ok(Cow::Borrowed(nightly))
+		} else if self.beta || version.as_deref() == Some(beta) {
+			fetch(beta).await
+		} else if let Some(version) = version {
+			// Parse the version string to make sure it's valid, return an error if not
+			let version = parse_version(&version)?;
+			// Return the version, ensuring it's prefixed by `v`
+			Ok(Cow::Owned(format!("v{version}")))
 		} else {
 			fetch("latest").await
 		}
+	}
+}
+
+fn parse_version(input: &str) -> Result<Version, Error> {
+	// Remove the `v` prefix, if supplied
+	let version = input.strip_prefix('v').unwrap_or(input);
+	// Parse the version
+	let comp = Comparator::parse(version)
+		.map_err(|_| Error::Other(format!("Invalid version `{input}`",)))?;
+	// See if a supported operation was requested
+	if !matches!(comp.op, Op::Exact | Op::Caret) {
+		return Err(Error::Other(format!(
+			"Unsupported version `{version}`. Only exact matches are supported."
+		)));
+	}
+	// Build and return the version if supported
+	match (comp.minor, comp.patch) {
+		(Some(minor), Some(patch)) => {
+			let mut version = Version::new(comp.major, minor, patch);
+			version.pre = comp.pre;
+			Ok(version)
+		}
+		_ => Err(Error::Other(format!(
+			"Unsupported version `{version}`. Please specify a full version, like `v1.2.1`."
+		))),
 	}
 }
 
