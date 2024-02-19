@@ -392,6 +392,41 @@ mod api_integration {
 		include!("api/backup.rs");
 	}
 
+	#[cfg(feature = "kv-surrealkv")]
+	mod surrealkv {
+		use super::*;
+		use surrealdb::engine::local::Db;
+		use surrealdb::engine::local::SurrealKV;
+
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+			let permit = PERMITS.acquire().await.unwrap();
+			let path = format!("/tmp/{}.db", Ulid::new());
+			let root = Root {
+				username: ROOT_USER,
+				password: ROOT_PASS,
+			};
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
+			let db = Surreal::new::<SurrealKV>((path, config)).await.unwrap();
+			db.signin(root).await.unwrap();
+			(permit, db)
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn any_engine_can_connect() {
+			let path = format!("{}.db", Ulid::new());
+			surrealdb::engine::any::connect(format!("surrealkv://{path}")).await.unwrap();
+			surrealdb::engine::any::connect(format!("surrealkv:///tmp/{path}")).await.unwrap();
+			tokio::fs::remove_dir_all(path).await.unwrap();
+		}
+
+		include!("api/mod.rs");
+		include!("api/live.rs");
+		include!("api/backup.rs");
+	}
+
 	#[cfg(feature = "protocol-http")]
 	mod any {
 		use super::*;

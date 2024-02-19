@@ -1,5 +1,3 @@
-use crate::kvs::LqValue;
-
 #[tokio::test]
 #[serial]
 async fn write_scan_ndlq() {

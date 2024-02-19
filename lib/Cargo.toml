@@ -39,6 +39,7 @@ kv-fdb-6_2 = ["surrealdb-core/kv-fdb-6_2", "kv-fdb"]
 kv-fdb-6_3 = ["surrealdb-core/kv-fdb-6_3", "kv-fdb"]
 kv-fdb-7_0 = ["surrealdb-core/kv-fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1", "kv-fdb"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
 native-tls = [

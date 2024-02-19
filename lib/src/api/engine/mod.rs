@@ -8,6 +8,7 @@ pub mod any;
 	feature = "kv-speedb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
 ))]
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
