@@ -5,6 +5,7 @@ use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Fields, Ident, Param};
+use crate::syn::v2::parser::{ParseError, ParseErrorKind};
 use crate::syn::v2::token::{t, TokenKind};
 use crate::{
 	sql::{
@@ -43,13 +44,49 @@ impl Parser<'_> {
 					let stmt = self.parse_stmt()?;
 					res.push(stmt);
 					if !self.eat(t!(";")) {
+						if self.eat(t!("eof")) {
+							break;
+						}
+
+						if Self::token_kind_starts_statement(self.peek_kind()) {
+							// user likely forgot a semicolon.
+							return Err(ParseError::new(
+								ParseErrorKind::UnexpectedExplain {
+									found: self.peek_kind(),
+									expected: "the query to end",
+									explain:
+										"maybe forgot a semicolon after the previous statement?",
+								},
+								self.recent_span(),
+							));
+						}
+
 						expected!(self, t!("eof"));
-						break;
 					}
 				}
 			}
 		}
 		Ok(Statements(res))
+	}
+
+	fn token_kind_starts_statement(kind: TokenKind) -> bool {
+		matches!(
+			kind,
+			t!("ANALYZE")
+				| t!("BEGIN") | t!("BREAK")
+				| t!("CANCEL") | t!("COMMIT")
+				| t!("CONTINUE") | t!("CREATE")
+				| t!("DEFINE") | t!("DELETE")
+				| t!("FOR") | t!("IF")
+				| t!("INFO") | t!("INSERT")
+				| t!("KILL") | t!("LIVE")
+				| t!("OPTION") | t!("RETURN")
+				| t!("RELATE") | t!("REMOVE")
+				| t!("SELECT") | t!("LET")
+				| t!("SHOW") | t!("SLEEP")
+				| t!("THROW") | t!("UPDATE")
+				| t!("USE")
+		)
 	}
 
 	pub(super) fn parse_stmt(&mut self) -> ParseResult<Statement> {
