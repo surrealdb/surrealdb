@@ -6,7 +6,7 @@ macro_rules! unexpected {
 				let error = $parser.lexer.error.take().unwrap();
 				return Err($crate::syn::v2::parser::ParseError::new(
 					$crate::syn::v2::parser::ParseErrorKind::InvalidToken(error),
-					$parser.last_span(),
+					$parser.recent_span(),
 				));
 			}
 			$crate::syn::v2::token::TokenKind::Eof => {
@@ -15,7 +15,7 @@ macro_rules! unexpected {
 					$crate::syn::v2::parser::ParseErrorKind::UnexpectedEof {
 						expected,
 					},
-					$parser.last_span(),
+					$parser.recent_span(),
 				));
 			}
 			x => {
@@ -25,7 +25,7 @@ macro_rules! unexpected {
 						found: x,
 						expected,
 					},
-					$parser.last_span(),
+					$parser.recent_span(),
 				));
 			}
 		}
@@ -42,7 +42,7 @@ macro_rules! expected {
 				let error = $parser.lexer.error.take().unwrap();
 				return Err($crate::syn::v2::parser::ParseError::new(
 					$crate::syn::v2::parser::ParseErrorKind::InvalidToken(error),
-					$parser.last_span(),
+					$parser.recent_span(),
 				));
 			}
 			x => {
