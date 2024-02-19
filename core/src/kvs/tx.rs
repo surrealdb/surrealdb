@@ -324,6 +324,7 @@ impl Transaction {
 		}
 	}
 
+	#[allow(unused)]
 	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
 		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
 		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
