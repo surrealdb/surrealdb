@@ -519,10 +519,6 @@ criteria = "safe-to-deploy"
 version = "0.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.dotenv]]
-version = "0.15.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.earcutr]]
 version = "0.4.3"
 criteria = "safe-to-deploy"
