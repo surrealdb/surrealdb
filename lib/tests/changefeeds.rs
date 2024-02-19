@@ -672,3 +672,5 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	assert_eq!(array.len(), 0);
 	Ok(())
 }
+
+// TODO(phughk): Add test for change feed with diff support
