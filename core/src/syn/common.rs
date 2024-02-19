@@ -22,14 +22,21 @@ impl Location {
 		let offset = (substr.as_ptr() as usize)
 			.checked_sub(input.as_ptr() as usize)
 			.expect("tried to find location of substring in unrelated string");
-		// Bytes of input prior to line being iteratated.
+		assert!(offset <= input.len(), "tried to find location of substring in unrelated string");
+		// Bytes of input prior to line being iterated.
 		let mut bytes_prior = 0;
-		for (line_idx, (line, seperator_offset)) in LineIterator::new(input).enumerate() {
-			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
+		for (line_idx, (line, seperator_len)) in LineIterator::new(input).enumerate() {
+			let bytes_so_far = bytes_prior + line.len() + seperator_len.unwrap_or(0) as usize;
 			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
-				let column = line[..line_offset].chars().count();
+
+				let column = if line_offset > line.len() {
+					// error is inside line terminator.
+					line.chars().count() + 1
+				} else {
+					line[..line_offset].chars().count()
+				};
 				// +1 because line and column are 1 index.
 				return Self {
 					line: line_idx + 1,
@@ -43,14 +50,21 @@ impl Location {
 
 	#[cfg(feature = "experimental-parser")]
 	pub fn of_offset(source: &str, offset: usize) -> Self {
-		// Bytes of input prior to line being iteratated.
+		assert!(offset <= source.len(), "tried to find location of substring in unrelated string");
+		// Bytes of input prior to line being iterated.
 		let mut bytes_prior = 0;
-		for (line_idx, (line, seperator_offset)) in LineIterator::new(source).enumerate() {
-			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
+		for (line_idx, (line, seperator_len)) in LineIterator::new(source).enumerate() {
+			let bytes_so_far = bytes_prior + line.len() + seperator_len.unwrap_or(0) as usize;
 			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
-				let column = line[..line_offset].chars().count();
+
+				let column = if line_offset > line.len() {
+					// error is inside line terminator.
+					line.chars().count() + 1
+				} else {
+					line[..line_offset].chars().count()
+				};
 				// +1 because line and column are 1 index.
 				return Self {
 					line: line_idx + 1,
@@ -94,7 +108,11 @@ impl Location {
 			if bytes_so_far >= offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
-				let column = line[..line_offset].chars().count();
+				let column = if line_offset > line.len() {
+					line.chars().count() + 1
+				} else {
+					line[..line_offset.min(line.len())].chars().count()
+				};
 				// +1 because line and column are 1 index.
 				if bytes_so_far >= end {
 					// end is on the same line, finish immediatly.
@@ -124,12 +142,17 @@ impl Location {
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
 			if bytes_so_far >= end {
 				let line_offset = end - bytes_prior;
-				let column = line[..line_offset].chars().count();
+				let column = if line_offset > line.len() {
+					line.chars().count() + 1
+				} else {
+					line[..line_offset.min(line.len())].chars().count()
+				};
 				return start..Self {
 					line: line_idx + 1,
 					column: column + 1,
 				};
 			}
+			bytes_prior = bytes_so_far;
 		}
 	}
 }
