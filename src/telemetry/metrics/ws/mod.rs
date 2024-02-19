@@ -98,6 +98,27 @@ impl RequestContext {
 	}
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationContext {
+	pub live_id: String,
+}
+
+impl Default for NotificationContext {
+	fn default() -> Self {
+		Self {
+			live_id: "unknown".to_string(),
+		}
+	}
+}
+
+impl NotificationContext {
+	pub fn with_live_id(self, live_id: String) -> Self {
+		Self {
+			live_id,
+		}
+	}
+}
+
 /// Updates the request and response metrics for an RPC method.
 pub fn record_rpc(cx: &TelemetryContext, res_size: usize, is_error: bool) {
 	let mut attrs = otel_common_attrs();
@@ -111,6 +132,12 @@ pub fn record_rpc(cx: &TelemetryContext, res_size: usize, is_error: bool) {
 		]);
 		duration = cx.start.elapsed().as_millis() as u64;
 		req_size = cx.size as u64;
+	} else if let Some(cx) = cx.get::<NotificationContext>() {
+		attrs.extend_from_slice(&[
+			KeyValue::new("rpc.method", "notification"),
+			KeyValue::new("rpc.error", is_error),
+			KeyValue::new("rpc.live_id", cx.live_id.clone()),
+		]);
 	} else {
 		// If a bug causes the RequestContent to be empty, we still want to record the metrics to avoid a silent failure.
 		warn!("record_rpc: no request context found, resulting metrics will be invalid");

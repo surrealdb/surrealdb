@@ -5,6 +5,7 @@ mod cli_integration {
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use common::Format;
 	use common::Socket;
+	use serde_json::json;
 	use std::fs;
 	use std::fs::File;
 	use std::time;
@@ -257,7 +258,7 @@ mod cli_integration {
 	#[test(tokio::test)]
 	async fn with_root_auth() {
 		// Commands with credentials when auth is enabled, should succeed
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -307,12 +308,13 @@ mod cli_integration {
 			// TODO: Once backups are functional, update this test.
 			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
 		}
+		server.finish()
 	}
 
 	#[test(tokio::test)]
 	async fn with_auth_level() {
 		// Commands with credentials for different auth levels
-		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
+		let (addr, server) = common::start_server_with_auth_level().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let ns = Ulid::new();
 		let db = Ulid::new();
@@ -491,13 +493,14 @@ mod cli_integration {
 				output
 			);
 		}
+		server.finish();
 	}
 
 	#[test(tokio::test)]
 	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
 	async fn without_auth_level() {
 		// Commands with credentials for different auth levels
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let ns = Ulid::new();
 		let db = Ulid::new();
@@ -557,12 +560,13 @@ mod cli_integration {
 				output
 			);
 		}
+		server.finish()
 	}
 
 	#[test(tokio::test)]
 	async fn with_anon_auth() {
 		// Commands without credentials when auth is enabled, should fail
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, server) = common::start_server_with_defaults().await.unwrap();
 		let creds = ""; // Anonymous user
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -624,12 +628,13 @@ mod cli_integration {
 			// );
 			assert!(output.is_ok(), "anonymous user can do backups: {:?}", output);
 		}
+		server.finish();
 	}
 
 	#[test(tokio::test)]
 	async fn node() {
 		// Commands without credentials when auth is disabled, should succeed
-		let (addr, _server) = common::start_server(StartServerArguments {
+		let (addr, server) = common::start_server(StartServerArguments {
 			auth: false,
 			tls: false,
 			wait_is_ready: true,
@@ -706,6 +711,7 @@ mod cli_integration {
 				"failed to send sql: {args}"
 			);
 		}
+		server.finish()
 	}
 
 	#[test]
@@ -784,66 +790,67 @@ mod cli_integration {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
 
 		// Create a long-lived WS connection so the server don't shutdown gracefully
-		let mut socket = Socket::connect(&addr, None).await.expect("Failed to connect to server");
-		let json = serde_json::json!({
-			"id": "1",
-			"method": "query",
-			"params": ["SLEEP 30s;"],
-		});
-		socket.send_message(Format::Json, json).await.expect("Failed to send WS message");
+		let socket =
+			Socket::connect(&addr, None, Format::Json).await.expect("Failed to connect to server");
 
-		// Make sure the SLEEP query is being executed
-		tokio::select! {
-			_ = async {
+		let send_future = socket.send_request("query", json!(["SLEEP 30s;"]));
+
+		let signal_send_fut = async {
+			// Make sure the SLEEP query is being executed
+			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
-					if server.stderr().contains("Executing: SLEEP 30s") {
+					let err = server.stderr();
+					if err.contains("SLEEP 30s") {
 						break;
 					}
 					tokio::time::sleep(time::Duration::from_secs(1)).await;
 				}
-			} => {},
-			// Timeout after 10 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(10)) => panic!("Server didn't start executing the SLEEP query"),
-		}
+			})
+			.await
+			.expect("Server didn't start executing the SLEEP query");
 
-		info!("* Send first SIGINT signal");
-		server
-			.send_signal(nix::sys::signal::Signal::SIGINT)
-			.expect("Failed to send SIGINT to server");
+			info!("* Send first SIGINT signal");
+			server
+				.send_signal(nix::sys::signal::Signal::SIGINT)
+				.expect("Failed to send SIGINT to server");
 
-		tokio::select! {
-			_ = async {
+			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
-						panic!("Server unexpectedly exited after receiving first SIGINT: {:?}", exit);
+						panic!(
+							"Server unexpectedly exited after receiving first SIGINT: {:?}",
+							exit
+						);
 					}
-					tokio::time::sleep(time::Duration::from_secs(1)).await;
+					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
-			} => {},
-			// Timeout after 5 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(5)) => ()
-		}
+			})
+			.await
+			.unwrap_err();
 
-		info!("* Send second SIGINT signal");
-		server
-			.send_signal(nix::sys::signal::Signal::SIGINT)
-			.expect("Failed to send SIGINT to server");
+			info!("* Send second SIGINT signal");
 
-		tokio::select! {
-			_ = async {
+			server
+				.send_signal(nix::sys::signal::Signal::SIGINT)
+				.expect("Failed to send SIGINT to server");
+
+			tokio::time::timeout(time::Duration::from_secs(5), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
 						assert!(exit.success(), "Server shutted down successfully");
 						break;
 					}
-					tokio::time::sleep(time::Duration::from_secs(1)).await;
+					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
-			} => {},
-			// Timeout after 5 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(5)) => {
-				panic!("Server didn't exit after receiving two SIGINT signals");
-			}
-		}
+			})
+			.await
+			.expect("Server didn't exit after receiving two SIGINT signals");
+		};
+
+		let _ =
+			futures::future::join(async { send_future.await.unwrap_err() }, signal_send_fut).await;
+
+		server.finish()
 	}
 
 	#[test(tokio::test)]
@@ -852,7 +859,7 @@ mod cli_integration {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				args: "".to_owned(),
 				..Default::default()
 			})
@@ -878,12 +885,14 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
+
+			server.finish();
 		}
 
 		// Deny all, denies all users to execute functions and access any network address
 		info!("* When all capabilities are denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				args: "--deny-all".to_owned(),
 				..Default::default()
 			})
@@ -909,12 +918,13 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
+			server.finish()
 		}
 
 		// When all capabilities are allowed, anyone (including non-authenticated users) can execute functions and access any network address
 		info!("* When all capabilities are allowed");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				args: "--allow-all".to_owned(),
 				..Default::default()
 			})
@@ -933,11 +943,13 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
+
+			server.finish()
 		}
 
 		info!("* When scripting is denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				args: "--deny-scripting".to_owned(),
 				..Default::default()
 			})
@@ -956,11 +968,12 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
+			server.finish()
 		}
 
 		info!("* When net is denied and function is enabled");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				args: "--deny-net 127.0.0.1 --allow-funcs http::get".to_owned(),
 				..Default::default()
 			})
@@ -981,11 +994,12 @@ mod cli_integration {
 				),
 				"unexpected output: {output:?}"
 			);
+			server.finish()
 		}
 
 		info!("* When net is enabled for an IP and also denied for a specific port that doesn't match");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				args: "--allow-net 127.0.0.1 --deny-net 127.0.0.1:80 --allow-funcs http::get"
 					.to_owned(),
 				..Default::default()
@@ -1001,11 +1015,12 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			server.finish()
 		}
 
 		info!("* When a function family is denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				args: "--deny-funcs http".to_owned(),
 				..Default::default()
 			})
@@ -1023,11 +1038,12 @@ mod cli_integration {
 				output.contains("Function 'http::get' is not allowed"),
 				"unexpected output: {output:?}"
 			);
+			server.finish()
 		}
 
 		info!("* When auth is enabled and guest access is allowed");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				auth: true,
 				args: "--allow-guests".to_owned(),
 				..Default::default()
@@ -1043,11 +1059,12 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
+			server.finish()
 		}
 
 		info!("* When auth is enabled and guest access is denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				auth: true,
 				args: "--deny-guests".to_owned(),
 				..Default::default()
@@ -1066,11 +1083,12 @@ mod cli_integration {
 				output.contains("Not enough permissions to perform this action"),
 				"unexpected output: {output:?}"
 			);
+			server.finish()
 		}
 
 		info!("* When auth is disabled, guest access is always allowed");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, server) = common::start_server(StartServerArguments {
 				auth: false,
 				args: "--deny-guests".to_owned(),
 				..Default::default()
@@ -1086,6 +1104,7 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
+			server.finish()
 		}
 	}
 }

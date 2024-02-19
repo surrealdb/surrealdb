@@ -139,6 +139,22 @@ impl Connection for Any {
 					);
 				}
 
+				EndpointKind::SurrealKV => {
+					#[cfg(feature = "kv-surrealkv")]
+					{
+						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
+						engine::local::native::router(address, conn_tx, route_rx);
+						conn_rx.into_recv_async().await??
+					}
+
+					#[cfg(not(feature = "kv-surrealkv"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
+				}
+
 				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
@@ -175,9 +191,10 @@ impl Connection for Any {
 					#[cfg(feature = "protocol-ws")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						let url = address.url.join(engine::remote::ws::PATH)?;
+						let mut endpoint = address;
+						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
 						#[cfg(any(feature = "native-tls", feature = "rustls"))]
-						let maybe_connector = address.config.tls_config.map(Connector::from);
+						let maybe_connector = endpoint.config.tls_config.clone().map(Connector::from);
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
 
@@ -188,13 +205,13 @@ impl Connection for Any {
 							..Default::default()
 						};
 						let socket = engine::remote::ws::native::connect(
-							&url,
+							&endpoint,
 							Some(config),
 							maybe_connector.clone(),
 						)
 						.await?;
 						engine::remote::ws::native::router(
-							url,
+							endpoint,
 							maybe_connector,
 							capacity,
 							config,
