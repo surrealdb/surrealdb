@@ -57,7 +57,7 @@ jobs:
           git config --add --bool push.autoSetupRemote true
 
           # Calculate new version
-          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           patch=$(echo $currentVersion | tr "." "\n" | sed -n 3p)

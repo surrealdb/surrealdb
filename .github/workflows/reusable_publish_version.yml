@@ -90,7 +90,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
             git push origin --delete releases/stable || true
@@ -125,7 +125,7 @@ jobs:
         run: |
           set -x
 
-          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
 
           if [[ $currentVersion == *"-beta"* ]]; then
             if [[ "${{ inputs.bump-version }}" == "true" ]]; then
@@ -179,7 +179,7 @@ jobs:
         run: |
           set -x
 
-          version=$(taplo get -f lib/Cargo.toml "package.version")
+          version=$(taplo get -f Cargo.toml "package.version")
 
           if [[ "${{ inputs.publish }}" == "true" && ("${{ inputs.environment }}" == "beta" || "${{ inputs.environment }}" == "stable")  ]]; then
             echo "git-ref=v${version}" >> $GITHUB_OUTPUT
@@ -585,7 +585,7 @@ jobs:
           set -x
 
           # Derive crate version
-          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           betaNum=$(echo $currentVersion | tr "." "\n" | sed -n 4p)
@@ -603,7 +603,7 @@ jobs:
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
 
           # Derive crate version
-          currentVersion=$(taplo get -f lib/Cargo.toml "package.version")
+          currentVersion=$(taplo get -f Cargo.toml "package.version")
           major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $currentVersion | tr "." "\n" | sed -n 2p)
           # This sets the nightly version to something like `1.3.20231117`
