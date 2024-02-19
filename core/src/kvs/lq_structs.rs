@@ -81,6 +81,7 @@ pub(crate) struct LqIndexValue {
 /// Stores all data required for tracking a live query
 /// Can be used to derive various in-memory map indexes and values
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Clone))]
 pub(crate) struct LqEntry {
 	pub(crate) live_id: Uuid,
 	pub(crate) ns: String,
