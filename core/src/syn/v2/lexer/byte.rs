@@ -52,10 +52,11 @@ impl<'a> Lexer<'a> {
 				return Err(Error::UnexpectedEof);
 			};
 			if let b'*' = byte {
-				let Some(byte) = self.reader.next() else {
+				let Some(byte) = self.reader.peek() else {
 					return Err(Error::UnexpectedEof);
 				};
 				if b'/' == byte {
+					self.reader.next();
 					self.set_whitespace_span(self.current_span());
 					self.skip_offset();
 					return Ok(());

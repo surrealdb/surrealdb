@@ -99,13 +99,13 @@ impl Location {
 
 		// Bytes of input prior to line being iteratated.
 		let mut bytes_prior = 0;
-		let mut iterator = LineIterator::new(source).enumerate();
+		let mut iterator = LineIterator::new(source).enumerate().peekable();
 		let start = loop {
-			let Some((line_idx, (line, seperator_offset))) = iterator.next() else {
+			let Some((line_idx, (line, seperator_offset))) = iterator.peek() else {
 				panic!("tried to find location of span not belonging to string");
 			};
 			let bytes_so_far = bytes_prior + line.len() + seperator_offset.unwrap_or(0) as usize;
-			if bytes_so_far >= offset {
+			if bytes_so_far > offset {
 				// found line.
 				let line_offset = offset - bytes_prior;
 				let column = if line_offset > line.len() {
@@ -133,6 +133,7 @@ impl Location {
 				}
 			}
 			bytes_prior = bytes_so_far;
+			iterator.next();
 		};
 
 		loop {
