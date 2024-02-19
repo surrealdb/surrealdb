@@ -7,12 +7,12 @@ use std::collections::btree_map::Entry;
 #[cfg(debug_assertions)]
 use std::collections::HashMap;
 use std::collections::{BTreeMap, VecDeque};
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(super) struct PriorityNode(pub(super) f64, pub(super) u64);
 
 impl PartialEq<Self> for PriorityNode {
 	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0 && self.1 == other.1
+		self.0.total_cmp(&other.0) == Ordering::Equal && self.1 == other.1
 	}
 }
 
@@ -27,7 +27,7 @@ impl PartialOrd for PriorityNode {
 impl Ord for PriorityNode {
 	fn cmp(&self, other: &Self) -> Ordering {
 		let o = self.0.total_cmp(&other.0);
-		if !matches!(o, Ordering::Equal) {
+		if o != Ordering::Equal {
 			return o;
 		}
 		self.1.cmp(&other.1)
@@ -41,7 +41,7 @@ impl Eq for PriorityResult {}
 
 impl PartialEq<Self> for PriorityResult {
 	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
+		self.cmp(other) == Ordering::Equal
 	}
 }
 impl PartialOrd for PriorityResult {
