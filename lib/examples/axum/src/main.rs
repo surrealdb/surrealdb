@@ -3,14 +3,18 @@ mod person;
 
 use axum::routing::{delete, get, post, put};
 use axum::Router;
-use surrealdb::engine::remote::ws::Ws;
+use dotenv::dotenv;
+use surrealdb::engine::any;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let db = Surreal::new::<Ws>("localhost:8000").await?;
+	// export
+	dotenv().ok();
+	let endpoint = dotenv::var("SURREALDB_ENDPOINT").unwrap_or_else(|_| "memory".to_owned());
+	let db = any::connect(endpoint).await?;
 
 	db.signin(Root {
 		username: "root",
@@ -28,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-fn create_router(db: Surreal<surrealdb::engine::remote::ws::Client>) -> Router {
+fn create_router(db: Surreal<surrealdb::engine::any::Any>) -> Router {
 	Router::new()
 		//curl -X POST -H "Content-Type: application/json" -d '{"name":"John Doe"}' http://localhost:8080/person/1
 		.route("/person/:id", post(person::create))
