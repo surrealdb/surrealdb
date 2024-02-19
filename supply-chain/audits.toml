@@ -81,6 +81,12 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2023-08-29"
 end = "2025-01-24"
 
+[[trusted.surrealkv]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-02-08"
+end = "2025-02-10"
+
 [[trusted.surrealml-core]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -92,3 +98,9 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-02-17"
 end = "2025-01-24"
+
+[[trusted.vart]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-01-16"
+end = "2025-02-10"
