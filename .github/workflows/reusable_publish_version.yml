@@ -29,16 +29,6 @@ on:
         type: boolean
         default: false
         description: "Create a GitHub release"
-      http-compression:
-        required: false
-        type: boolean
-        default: true
-        description: "Enable HTTP compression in binaries"
-      ml:
-        required: false
-        type: boolean
-        default: true
-        description: "Enable ML support in binaries"
       rust_version:
         required: false
         type: string
@@ -49,6 +39,11 @@ on:
         type: string
         default: "1.16.3"
         description: "The ONNX library version"
+      extra-features:
+        required: false
+        type: string
+        default: "ml"
+        description: "Extra features enabled in the binary"
     secrets:
       AWS_CI_ACCESS_KEY_ID:
         description: "AWS access key ID"
@@ -351,20 +346,13 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,sql2,jwks
-              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
-                features=${features},http-compression
-              fi
+              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
 
-              if [[ "${{ inputs.ml }}" == "true" ]]; then
-                features=${features},ml
-
-                # Download libonnxruntime's static library and tell ORT crate to use it
-                mkdir /tmp/onnxruntime
-                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-x86_64-static_lib-${{ inputs.onnx_version }}.tgz | \
-                  tar -xz -C /tmp/onnxruntime/
-                export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
-              fi
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              mkdir /tmp/onnxruntime
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-x86_64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C /tmp/onnxruntime/
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
               cargo build --features $features --release --locked --target x86_64-apple-darwin
 
@@ -385,20 +373,14 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,sql2,jwks
-              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
-                features=${features},http-compression
-              fi
+              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
 
-              if [[ "${{ inputs.ml }}" == "true" ]]; then
-                features=${features},ml
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              mkdir /tmp/onnxruntime
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-arm64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C /tmp/onnxruntime/
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-                # Download libonnxruntime's static library and tell ORT crate to use it
-                mkdir /tmp/onnxruntime
-                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-osx-arm64-static_lib-${{ inputs.onnx_version }}.tgz | \
-                  tar -xz -C /tmp/onnxruntime/
-                export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
-              fi
               cargo build --features $features --release --locked --target aarch64-apple-darwin
 
               # Package
@@ -413,20 +395,13 @@ jobs:
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
-              features=storage-tikv,sql2,jwks
-              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
-                features=${features},http-compression
-              fi
+              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
 
-              if [[ "${{ inputs.ml }}" == "true" ]]; then
-                features=${features},ml
-
-                # Download libonnxruntime's static library and tell ORT crate to use it
-                tmpdir=$(mktemp -d)
-                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-x64-static_lib-${{ inputs.onnx_version }}.tgz | \
-                  tar -xz -C $tmpdir
-                export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
-              fi
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmpdir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-x64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C $tmpdir
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
               docker run \
                 --rm -t \
@@ -458,20 +433,13 @@ jobs:
               set -x
 
               # Build
-              features=storage-tikv,sql2,jwks
-              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
-                features=${features},http-compression
-              fi
+              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
 
-              if [[ "${{ inputs.ml }}" == "true" ]]; then
-                features=${features},ml
-
-                # Download libonnxruntime's static library and tell ORT crate to use it
-                tmpdir=$(mktemp -d)
-                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-aarch64-static_lib-${{ inputs.onnx_version }}.tgz | \
-                  tar -xz -C $tmpdir
-                export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
-              fi
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmpdir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-linux-aarch64-static_lib-${{ inputs.onnx_version }}.tgz | \
+                tar -xz -C $tmpdir
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
               docker run \
                 --rm -t \
@@ -506,20 +474,13 @@ jobs:
               vcpkg integrate install
 
               # Build
-              features=storage-tikv,sql2,jwks
-              if [[ "${{ inputs.http-compression }}" == "true" ]]; then
-                features=${features},http-compression
-              fi
+              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
 
-              if [[ "${{ inputs.ml }}" == "true" ]]; then
-                features=${features},ml
-
-                # Download libonnxruntime's static library and tell ORT crate to use it
-                tmp_dir=$(mktemp -d)
-                curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx_version }}.zip -o $tmp_dir/onnxruntime.zip
-                unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
-                export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
-              fi
+              # Download libonnxruntime's static library and tell ORT crate to use it
+              tmp_dir=$(mktemp -d)
+              curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx_version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx_version }}.zip -o $tmp_dir/onnxruntime.zip
+              unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
+              export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
 
               cargo build --features $features --release --locked --target x86_64-pc-windows-msvc
 
