@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-dotenv = "0.15.0"
 axum = "0.7.2"
 serde = { version = "1.0.193", features = ["derive"] }
 surrealdb = { path = "../.." ,features = ["kv-mem"]}
