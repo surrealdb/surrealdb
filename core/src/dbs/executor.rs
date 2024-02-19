@@ -153,14 +153,21 @@ impl<'a> Executor<'a> {
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
 	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
 		let sender = ctx.notifications();
+		println!("flushing notifications");
 		spawn(async move {
+			println!("Started flush");
 			while let Some(notification) = rcv.next().await {
+				println!("There was a notification");
 				if let Some(chn) = &sender {
+					println!("There is a channel");
 					if chn.send(notification).await.is_err() {
+						println!("Failed to send");
 						break;
 					}
+					println!("Sent gud");
 				}
 			}
+			println!("Ended flush");
 		});
 	}
 
@@ -283,6 +290,7 @@ impl<'a> Executor<'a> {
 									ctx.add_value(stm.name, val);
 									// Finalise transaction, returning nothing unless it couldn't commit
 									if writeable {
+										println!("Doing live query abort or flush");
 										match self.commit(loc).await {
 											Err(e) => {
 												// Clear live query notifications
