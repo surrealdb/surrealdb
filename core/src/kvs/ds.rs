@@ -1020,8 +1020,10 @@ impl Datastore {
 				Some(doc)
 			}
 			TableMutation::Def(_) => None,
-			TableMutation::SetPrevious(_id, _old, _new) => {
-				panic!("SetPrevious is not supported in live queries");
+			TableMutation::SetPrevious(id, _old, new) => {
+				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
+				// TODO set previous value
+				Some(doc)
 			}
 		}
 	}
