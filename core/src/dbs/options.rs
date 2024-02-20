@@ -49,7 +49,6 @@ pub struct Options {
 	/// Should we process variable field projections?
 	pub projections: bool,
 	/// The channel over which we send notifications
-	/// This is set by datastore
 	pub sender: Option<Sender<Notification>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
@@ -428,9 +427,6 @@ impl Options {
 	/// Check whether this request supports realtime queries
 	pub fn realtime(&self) -> Result<(), Error> {
 		if !self.live {
-			if true {
-				panic!("wow, bakktrace")
-			};
 			return Err(Error::RealtimeDisabled);
 		}
 		Ok(())
