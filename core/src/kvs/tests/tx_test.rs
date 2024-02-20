@@ -3,7 +3,7 @@ use crate::kvs::lq_structs::LqEntry;
 #[tokio::test]
 #[serial]
 async fn live_queries_sent_to_tx_are_received() {
-	panic!("BLAAA");
+	// panic!("BLAAA");
 	let node_id = uuid::uuid!("d0f1a200-e24e-44fe-98c1-2271a5781da7");
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(node_id, clock).await.unwrap();
