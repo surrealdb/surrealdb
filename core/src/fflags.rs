@@ -7,6 +7,7 @@
 /// Use this while implementing features
 #[allow(dead_code)]
 pub static FFLAGS: FFlags = FFlags {
+	// TODO(fflag-lqcf): This TODO signature marks tests that are affected by the fflag that do not have access to the fflag (scope)
     change_feed_live_queries: FFlagEnabledStatus {
         enabled_release: false,
         enabled_debug: true,
