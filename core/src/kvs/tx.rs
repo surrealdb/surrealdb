@@ -335,7 +335,10 @@ impl Transaction {
 
 	/// Sends a live query to the transaction which is forwarded only once committed
 	/// And removed once a transaction is aborted
-	pub fn pre_commit_register_live_query(&mut self, lq_entry: LqEntry) -> Result<(), Error> {
+	pub(crate) fn pre_commit_register_live_query(
+		&mut self,
+		lq_entry: LqEntry,
+	) -> Result<(), Error> {
 		self.prepared_live_queries
 			.0
 			.try_send(lq_entry)
