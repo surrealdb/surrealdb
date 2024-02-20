@@ -71,6 +71,7 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 		i,
 		ChangeFeed {
 			expiry: v.0,
+			store_original: false,
 		},
 	))
 }

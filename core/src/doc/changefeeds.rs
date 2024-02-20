@@ -30,6 +30,7 @@ impl<'a> Document<'a> {
 			// Get the arguments
 			let tb = tb.name.as_str();
 			let id = self.id.as_ref().unwrap();
+			let should_store_previous = false;
 			// Create the changefeed entry
 			run.record_change(
 				opt.ns(),
@@ -38,6 +39,7 @@ impl<'a> Document<'a> {
 				id,
 				self.initial.doc.clone(),
 				self.current.doc.clone(),
+				should_store_previous,
 			);
 		}
 		// Carry on

@@ -151,6 +151,7 @@ mod tests {
 			name: crate::sql::Ident(db.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
+				store_original: false,
 			}),
 			..Default::default()
 		};
@@ -158,6 +159,7 @@ mod tests {
 			name: tb.into(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
+				store_original: false,
 			}),
 			..Default::default()
 		};
@@ -193,13 +195,7 @@ mod tests {
 		};
 		let value_a: super::Value = "a".into();
 		let mut previous = Cow::from(Value::None);
-		let should_store_previous = if FFLAGS.change_feed_live_queries.enabled() {
-			// TODO Check that we do want to store diffs
-			previous = Cow::from(Value::None);
-			true
-		} else {
-			false
-		};
+		let should_store_previous = false;
 		tx1.record_change(
 			ns,
 			db,
