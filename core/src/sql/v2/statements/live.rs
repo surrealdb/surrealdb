@@ -110,7 +110,11 @@ impl LiveStatement {
 							stm,
 						})?;
 					}
-					_ => {}
+					v => {
+						return Err(Error::LiveStatement {
+							value: v.to_string(),
+						});
+					}
 				}
 				Ok(id.into())
 			}
