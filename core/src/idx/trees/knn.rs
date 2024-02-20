@@ -8,11 +8,14 @@ use std::collections::btree_map::Entry;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, VecDeque};
 #[derive(Debug, Clone, Copy)]
-pub(super) struct PriorityNode(pub(super) f64, pub(super) u64);
+pub(super) struct PriorityNode {
+	pub(super) dist: f64,
+	pub(super) doc: u64,
+}
 
 impl PartialEq<Self> for PriorityNode {
 	fn eq(&self, other: &Self) -> bool {
-		self.0.total_cmp(&other.0) == Ordering::Equal && self.1 == other.1
+		self.dist.total_cmp(&other.dist) == Ordering::Equal && self.doc == other.doc
 	}
 }
 
@@ -26,11 +29,11 @@ impl PartialOrd for PriorityNode {
 
 impl Ord for PriorityNode {
 	fn cmp(&self, other: &Self) -> Ordering {
-		let o = self.0.total_cmp(&other.0);
+		let o = self.dist.total_cmp(&other.dist);
 		if o != Ordering::Equal {
 			return o;
 		}
-		self.1.cmp(&other.1)
+		self.doc.cmp(&other.doc)
 	}
 }
 
@@ -445,19 +448,6 @@ impl KnnResultBuilder {
 				}
 			}
 		}
-
-		// #[cfg(debug_assertions)]
-		// {
-		// 	let mut doc_len_priority_list = 0;
-		// 	for docs in self.priority_list.values() {
-		// 		doc_len_priority_list += docs.len();
-		// 	}
-		// 	assert!(
-		// 		doc_len_priority_list >=
-		// 		self.docs.len(),
-		// 		"Add failed - Dist: {dist} - Docs: {docs:?} - self.docs: {:?} - self.priority_list: {:?}", self.docs, self.priority_list
-		// 	);
-		// }
 	}
 
 	pub(super) fn build(
@@ -503,7 +493,7 @@ pub struct KnnResult {
 pub(super) mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
-	use crate::idx::trees::knn::{Ids64, KnnResultBuilder};
+	use crate::idx::trees::knn::{Ids64, KnnResultBuilder, PriorityNode};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::{Array, Number};
@@ -513,10 +503,13 @@ pub(super) mod tests {
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
-	use std::collections::{BTreeSet, HashMap, VecDeque};
+	use std::cmp::Reverse;
+	use std::collections::{BTreeSet, BinaryHeap, HashMap, VecDeque};
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
 	use std::sync::Arc;
+	use std::time::SystemTime;
+	use test_log::test;
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {
 		let seed: u64 = std::env::var("TEST_SEED")
@@ -755,5 +748,86 @@ pub(super) mod tests {
 		assert_eq!(ids, Ids64::One(100));
 		let ids = ids.remove(100).expect("Ids64::Empty");
 		assert_eq!(ids, Ids64::Empty);
+	}
+
+	#[test]
+	fn test_priority_node() {
+		let (n1, n2, n3) = (
+			PriorityNode {
+				dist: 1.0,
+				doc: 1,
+			},
+			PriorityNode {
+				dist: 2.0,
+				doc: 2,
+			},
+			PriorityNode {
+				dist: 3.0,
+				doc: 3,
+			},
+		);
+		let mut q = BinaryHeap::from([n3, n1, n2]);
+
+		assert_eq!(q.pop(), Some(n3));
+		assert_eq!(q.pop(), Some(n2));
+		assert_eq!(q.pop(), Some(n1));
+
+		let (n1, n2, n3) = (Reverse(n1), Reverse(n2), Reverse(n3));
+		let mut q = BinaryHeap::from([n3, n1, n2]);
+
+		assert_eq!(q.pop(), Some(n1));
+		assert_eq!(q.pop(), Some(n2));
+		assert_eq!(q.pop(), Some(n3));
+	}
+
+	#[test]
+	// In HNSW we are maintaining a candidate list that requires both to know the first element
+	// and the last element of a set.
+	// There is two possible options.
+	// 1. Using a BTreeSet that provide first() and last() methods.
+	// 2. Maintaining two BinaryHeap. One providing the min, and the other the max.
+	// This test checks that option 2 is faster than option 1.
+	// Actually option 2 is about 4 times faster than option 1.
+	fn confirm_binaryheaps_faster_than_btreeset() {
+		// Build samples
+		const TOTAL: usize = 500;
+		let mut pns = Vec::with_capacity(TOTAL);
+		for i in 0..TOTAL {
+			pns.push(PriorityNode {
+				dist: i as f64,
+				doc: i as u64,
+			});
+		}
+
+		// Test BTreeSet
+		let duration_btree_set = {
+			let first = Some(&pns[0]);
+			let t = SystemTime::now();
+			let mut bt = BTreeSet::new();
+			for pn in &pns {
+				bt.insert(*pn);
+				assert_eq!(bt.first(), first);
+				assert_eq!(bt.last(), Some(pn));
+			}
+			t.elapsed().unwrap()
+		};
+
+		// Test double BinaryHeap
+		let duration_binary_heap = {
+			let r_first = Reverse(pns[0]);
+			let first = Some(&r_first);
+			let t = SystemTime::now();
+			let mut max = BinaryHeap::with_capacity(TOTAL);
+			let mut min = BinaryHeap::with_capacity(TOTAL);
+			for pn in &pns {
+				max.push(*pn);
+				min.push(Reverse(*pn));
+				assert_eq!(min.peek(), first);
+				assert_eq!(max.peek(), Some(pn));
+			}
+			t.elapsed().unwrap()
+		};
+		info!("{duration_btree_set:?} {duration_binary_heap:?}");
+		assert!(duration_btree_set > duration_binary_heap);
 	}
 }

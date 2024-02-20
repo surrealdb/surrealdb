@@ -126,10 +126,10 @@ impl HnswIndex {
 
 		let mut builder = KnnResultBuilder::new(n);
 		for pn in neighbors {
-			if builder.check_add(pn.0) {
-				let v = &self.hnsw.elements[&pn.1];
+			if builder.check_add(pn.dist) {
+				let v = &self.hnsw.elements[&pn.doc];
 				if let Some((docs, _)) = self.vec_docs.get(v) {
-					builder.add(pn.0, docs);
+					builder.add(pn.dist, docs);
 				}
 			}
 		}
@@ -273,7 +273,10 @@ impl Hnsw {
 			// Are we deleting the current enter point?
 			if Some(e_id) == self.enter_point {
 				let layer = self.layers[layers - 1].read().await;
-				let ep = PriorityNode(0.0, e_id);
+				let ep = PriorityNode {
+					dist: 0.0,
+					doc: e_id,
+				};
 				new_enter_point = self.search_layer_single_ignore_ep(&e_pt, ep, &layer).await;
 			}
 
@@ -289,7 +292,10 @@ impl Hnsw {
 				if let Some(f_ids) = layer.remove_node(&e_id) {
 					for q_id in f_ids {
 						if let Some(q_pt) = self.elements.get(&q_id) {
-							let q_pn = PriorityNode(0.0, q_id);
+							let q_pn = PriorityNode {
+								dist: 0.0,
+								doc: q_id,
+							};
 							let c = self
 								.search_layer_multi_ignore_ep(q_pt, q_pn, self.efc, &layer)
 								.await;
@@ -307,7 +313,7 @@ impl Hnsw {
 			}
 
 			if removed && Some(e_id) == self.enter_point {
-				self.enter_point = new_enter_point.map(|pn| pn.1);
+				self.enter_point = new_enter_point.map(|pn| pn.doc);
 			}
 		}
 		removed
@@ -402,7 +408,10 @@ impl Hnsw {
 		for n_id in neighbors {
 			if let Some(n_pt) = self.elements.get(n_id) {
 				let dist = self.dist.calculate(e_pt, n_pt);
-				w.insert(PriorityNode(dist, *n_id));
+				w.insert(PriorityNode {
+					dist,
+					doc: *n_id,
+				});
 			}
 		}
 		w
@@ -411,7 +420,10 @@ impl Hnsw {
 	fn get_pn(&self, q: &SharedVector, e_id: ElementId) -> PriorityNode {
 		let e_pt = &self.elements[&e_id];
 		let dist = self.dist.calculate(e_pt, q);
-		PriorityNode(dist, e_id)
+		PriorityNode {
+			dist,
+			doc: e_id,
+		}
 	}
 
 	async fn search_layer_single(
@@ -421,7 +433,7 @@ impl Hnsw {
 		ef: usize,
 		l: &UndirectedGraph,
 	) -> BTreeSet<PriorityNode> {
-		let visited = HashSet::from([ep.1]);
+		let visited = HashSet::from([ep.doc]);
 		let candidates = BTreeSet::from([ep]);
 		let w = candidates.clone();
 		self.search_layer(q, candidates, visited, w, ef, l).await
@@ -441,7 +453,7 @@ impl Hnsw {
 		l: &UndirectedGraph,
 	) -> BTreeSet<PriorityNode> {
 		let candidates = eps;
-		let visited: HashSet<ElementId> = candidates.iter().map(|pn| pn.1).collect();
+		let visited: HashSet<ElementId> = candidates.iter().map(|pn| pn.doc).collect();
 		let w = candidates.clone();
 		self.search_layer(q, candidates, visited, w, ef, l).await
 	}
@@ -452,7 +464,7 @@ impl Hnsw {
 		ep: PriorityNode,
 		l: &UndirectedGraph,
 	) -> Option<PriorityNode> {
-		let visited = HashSet::from([ep.1]);
+		let visited = HashSet::from([ep.doc]);
 		let candidates = BTreeSet::from([ep]);
 		let w = candidates.clone();
 		let q = self.search_layer(q, candidates, visited, w, 1, l).await;
@@ -467,7 +479,7 @@ impl Hnsw {
 		l: &UndirectedGraph,
 	) -> BTreeSet<PriorityNode> {
 		let candidates = BTreeSet::from([ep]);
-		let visited: HashSet<ElementId> = candidates.iter().map(|pn| pn.1).collect();
+		let visited: HashSet<ElementId> = candidates.iter().map(|pn| pn.doc).collect();
 		let w = BTreeSet::new();
 		self.search_layer(q, candidates, visited, w, ef, l).await
 	}
@@ -481,24 +493,28 @@ impl Hnsw {
 		ef: usize,
 		l: &UndirectedGraph,
 	) -> BTreeSet<PriorityNode> {
-		let mut f_dist = w.last().map(|pn| pn.0).unwrap_or_else(|| unreachable!());
+		let mut f_dist = w.last().map(|pn| pn.dist).unwrap_or_else(|| unreachable!());
 		while let Some(c) = candidates.pop_first() {
-			if c.0 > f_dist {
+			if c.dist > f_dist {
 				break;
 			}
-			if let Some(neighbourhood) = l.get_edges(&c.1) {
+			if let Some(neighbourhood) = l.get_edges(&c.doc) {
 				for &e_id in neighbourhood {
 					if visited.insert(e_id) {
 						if let Some(e_pt) = self.elements.get(&e_id) {
 							let e_dist = self.dist.calculate(e_pt, q);
 							if e_dist < f_dist || w.len() < ef {
-								let pn = PriorityNode(e_dist, e_id);
+								let pn = PriorityNode {
+									dist: e_dist,
+									doc: e_id,
+								};
 								candidates.insert(pn.clone());
 								w.insert(pn);
 								if w.len() > ef {
 									w.pop_last();
 								}
-								f_dist = w.last().map(|pn| pn.0).unwrap_or_else(|| unreachable!());
+								f_dist =
+									w.last().map(|pn| pn.dist).unwrap_or_else(|| unreachable!());
 							}
 						}
 					}
@@ -534,8 +550,6 @@ impl Hnsw {
 					);
 				}
 				w.into_iter().take(k).collect()
-				// let w: Vec<PriorityNode> = w.into_iter().collect();
-				// w.into_iter().take(k).collect()
 			}
 		} else {
 			vec![]
@@ -592,16 +606,16 @@ impl SelectNeighbors {
 	}
 
 	fn simple(w: BTreeSet<PriorityNode>, m_max: usize) -> HashSet<ElementId> {
-		w.into_iter().take(m_max).map(|pn| pn.1).collect()
+		w.into_iter().take(m_max).map(|pn| pn.doc).collect()
 	}
 
 	fn heuristic(mut c: BTreeSet<PriorityNode>, m_max: usize) -> HashSet<ElementId> {
 		let mut r = HashSet::with_capacity(m_max.min(c.len()));
 		let mut closest_neighbors_distance = f64::MAX;
 		while let Some(e) = c.pop_first() {
-			if e.0 < closest_neighbors_distance {
-				r.insert(e.1);
-				closest_neighbors_distance = e.0;
+			if e.dist < closest_neighbors_distance {
+				r.insert(e.doc);
+				closest_neighbors_distance = e.dist;
 				if r.len() >= m_max {
 					break;
 				}
@@ -615,9 +629,9 @@ impl SelectNeighbors {
 		let mut closest_neighbors_distance = f64::INFINITY;
 		let mut wd = Vec::new();
 		while let Some(e) = c.pop_first() {
-			if e.0 < closest_neighbors_distance {
-				r.insert(e.1);
-				closest_neighbors_distance = e.0;
+			if e.dist < closest_neighbors_distance {
+				r.insert(e.doc);
+				closest_neighbors_distance = e.dist;
 				if r.len() >= m_max {
 					break;
 				}
@@ -628,7 +642,7 @@ impl SelectNeighbors {
 		let d = (m_max - r.len()).min(wd.len());
 		if d > 0 {
 			wd.drain(0..d).for_each(|e| {
-				r.insert(e.1);
+				r.insert(e.doc);
 			});
 		}
 		r
@@ -642,15 +656,18 @@ impl SelectNeighbors {
 		c: &mut BTreeSet<PriorityNode>,
 		m_max: usize,
 	) {
-		let mut ex: HashSet<ElementId> = c.iter().map(|pn| pn.1).collect();
+		let mut ex: HashSet<ElementId> = c.iter().map(|pn| pn.doc).collect();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for e in c.iter() {
 			for &e_adj in
-				lc.get_edges(&e.1).unwrap_or_else(|| unreachable!("Missing element {}", e.1))
+				lc.get_edges(&e.doc).unwrap_or_else(|| unreachable!("Missing element {}", e.doc))
 			{
 				if e_adj != q_id && ex.insert(e_adj) {
 					if let Some(pt) = h.elements.get(&e_adj) {
-						ext.push(PriorityNode(h.dist.calculate(q_pt, pt), e_adj));
+						ext.push(PriorityNode {
+							dist: h.dist.calculate(q_pt, pt),
+							doc: e_adj,
+						});
 					}
 				}
 			}
@@ -721,7 +738,7 @@ mod tests {
 				if collection.is_unique() {
 					let mut found = false;
 					for pn in &res {
-						if h.elements[&pn.1].eq(obj) {
+						if h.elements[&pn.doc].eq(obj) {
 							found = true;
 							break;
 						}
@@ -1252,7 +1269,7 @@ mod tests {
 		)?);
 
 		info!("Check recall");
-		for (efs, expected_recall) in [(10, 0.0), (20, 0.0), (40, 0.0), (80, 0.0)] {
+		for (efs, expected_recall) in [(10, 0.85), (80, 0.90)] {
 			let mut total_recall = 0.0;
 			for (_, pt) in queries.as_ref() {
 				let knn = 10;
@@ -1260,7 +1277,7 @@ mod tests {
 				assert_eq!(
 					hnsw_res.docs.len(),
 					knn,
-					"Different size - knn: {knn} - efs: {efs} - docs: {:?}",
+					"Different size - knn: {knn} - efs: {efs} - docƒBs: {:?}",
 					collection.as_ref().len()
 				);
 				let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
