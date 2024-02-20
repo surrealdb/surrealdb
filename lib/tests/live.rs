@@ -12,7 +12,7 @@ use surrealdb_core::kvs::TransactionType::Write;
 #[tokio::test]
 async fn live_query_sends_registered_lq_details() -> Result<(), Error> {
 	if !FFLAGS.change_feed_live_queries.enabled() {
-		Ok(())
+		return Ok(());
 	}
 	let sql = "
 		DEFINE TABLE lq_test_123 CHANGEFEED 10m;
