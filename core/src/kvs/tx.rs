@@ -332,7 +332,9 @@ impl Transaction {
 		lq
 	}
 
-	pub fn prepare_lq(&mut self, lq_entry: LqEntry) -> Result<(), Error> {
+	/// Sends a live query to the transaction which is forwarded only once committed
+	/// And removed once a transaction is aborted
+	pub fn pre_commit_register_live_query(&mut self, lq_entry: LqEntry) -> Result<(), Error> {
 		self.prepared_live_queries
 			.0
 			.try_send(lq_entry)
@@ -3158,7 +3160,7 @@ mod tx_test {
 				auth: None,
 			},
 		};
-		tx.prepare_lq(lq_entry.clone()).unwrap();
+		tx.pre_commit_register_live_query(lq_entry.clone()).unwrap();
 
 		tx.commit().await.unwrap();
 
