@@ -847,13 +847,16 @@ impl Datastore {
 	pub async fn process_lq_notifications(&self) -> Result<(), Error> {
 		// Runtime feature gate, as it is not production-ready
 		if !FFLAGS.change_feed_live_queries.enabled() {
+			println!("FFlag not set");
 			return Ok(());
 		}
 		// Return if there are no live queries
 		if self.notification_channel.is_none() {
+			println!("FFlag notifications are none");
 			return Ok(());
 		}
 		if self.local_live_queries.read().await.is_empty() {
+			println!("local live queries are none");
 			return Ok(());
 		}
 
@@ -1167,7 +1170,10 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		let res = exe.execute(ctx, opt, ast).await;
+		// Post-process live query hooks
+
+		res
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed

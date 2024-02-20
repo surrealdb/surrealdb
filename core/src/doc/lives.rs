@@ -38,6 +38,7 @@ impl<'a> Document<'a> {
 		}
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender {
+			println!("Lives has a sender");
 			// Loop through all index statements
 			let lq_stms = self.lv(opt, txn).await?;
 			let borrows = lq_stms.iter().collect::<Vec<_>>();
@@ -112,6 +113,7 @@ impl<'a> Document<'a> {
 			live_statements.len()
 		);
 		for lv in live_statements {
+			println!("There is a live statement being processed for notifs");
 			// Create a new statement
 			let lq = Statement::from(*lv);
 			// Get the event action
