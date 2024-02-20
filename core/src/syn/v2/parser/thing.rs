@@ -93,8 +93,27 @@ impl Parser<'_> {
 				end,
 			})))
 		} else {
-			let Bound::Included(id) = beg else {
-				unexpected!(self, self.peek_kind(), "the range operator '..'")
+			let id = match beg {
+				Bound::Unbounded => {
+					if self.peek_kind() == t!("$param") {
+						return Err(ParseError::new(
+							ParseErrorKind::UnexpectedExplain {
+								found: t!("$param"),
+								expected: "a record-id id",
+								explain: "you can create a record-id from a param with the function 'type::thing'",
+							},
+							self.recent_span(),
+						));
+					}
+
+					// we haven't matched anythong so far so we still want any type of id.
+					unexpected!(self, self.peek_kind(), "a record-id id")
+				}
+				Bound::Excluded(_) => {
+					// we have matched a bounded id but we don't see an range operator.
+					unexpected!(self, self.peek_kind(), "the range operator `..`")
+				}
+				Bound::Included(id) => id,
 			};
 			Ok(Value::Thing(Thing {
 				tb: ident,

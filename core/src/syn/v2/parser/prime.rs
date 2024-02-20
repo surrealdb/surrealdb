@@ -3,8 +3,8 @@ use geo::Point;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{
-		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Strand, Subquery,
-		Table, Value,
+		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Part, Script, Strand, Subquery, Table,
+		Value,
 	},
 	syn::v2::{
 		lexer::Lexer,
@@ -12,7 +12,7 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, Span, TokenKind},
+		token::{t, NumberKind, Span, TokenKind},
 	},
 };
 
@@ -322,6 +322,7 @@ impl Parser<'_> {
 		match peek.kind {
 			t!("(") => {
 				self.pop_peek();
+				dbg!("called");
 				self.parse_inner_subquery(Some(peek.span))
 			}
 			t!("IF") => {
@@ -334,8 +335,8 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_inner_subquery_or_coordinate(&mut self, start: Span) -> ParseResult<Value> {
-		let next = self.peek();
-		let res = match next.kind {
+		let peek = self.peek();
+		let res = match peek.kind {
 			t!("RETURN") => {
 				self.pop_peek();
 				let stmt = self.parse_return_stmt()?;
@@ -376,40 +377,98 @@ impl Parser<'_> {
 				let stmt = self.parse_remove_stmt()?;
 				Subquery::Remove(stmt)
 			}
+			t!("+") | t!("-") => {
+				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
+				if let TokenKind::Number(kind) = self.peek_token_at(1).kind {
+					// take the value so we don't overwrite it if the next token happens to be an
+					// strand or an ident, both of which are invalid syntax.
+					let number_value = self.lexer.string.take().unwrap();
+					if self.peek_token_at(2).kind == t!(",") {
+						match kind {
+							NumberKind::Decimal | NumberKind::NaN => {
+								return Err(ParseError::new(
+									ParseErrorKind::UnexpectedExplain {
+										found: TokenKind::Number(kind),
+										expected: "a non-decimal, non-nan number",
+										explain: "coordinate numbers can't be NaN or a decimal",
+									},
+									peek.span,
+								));
+							}
+							_ => {}
+						}
+
+						self.lexer.string = Some(number_value);
+						let a = self.parse_signed_float()?;
+						self.next();
+						let b = self.parse_signed_float()?;
+						self.expect_closing_delimiter(t!(")"), start)?;
+						return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
+					}
+					self.lexer.string = Some(number_value);
+				}
+				Subquery::Value(self.parse_value_field()?)
+			}
+			TokenKind::Number(kind) => {
+				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
+				// take the value so we don't overwrite it if the next token happens to be an
+				// strand or an ident, both of which are invalid syntax.
+				let number_value = self.lexer.string.take().unwrap();
+				if self.peek_token_at(1).kind == t!(",") {
+					match kind {
+						NumberKind::Decimal | NumberKind::NaN => {
+							return Err(ParseError::new(
+								ParseErrorKind::UnexpectedExplain {
+									found: TokenKind::Number(kind),
+									expected: "a non-decimal, non-nan number",
+									explain: "coordinate numbers can't be NaN or a decimal",
+								},
+								peek.span,
+							));
+						}
+						_ => {}
+					}
+					self.pop_peek();
+					// was a semicolon, put the strand back for code reuse.
+					self.lexer.string = Some(number_value);
+					let a = self.token_value::<f64>(peek)?;
+					// eat the semicolon.
+					self.next();
+					let b = self.parse_signed_float()?;
+					self.expect_closing_delimiter(t!(")"), start)?;
+					return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
+				}
+				self.lexer.string = Some(number_value);
+				Subquery::Value(self.parse_value_field()?)
+			}
 			_ => {
 				let value = self.parse_value_field()?;
 				Subquery::Value(value)
 			}
 		};
-		match res {
-			Subquery::Value(Value::Number(x)) => {
-				if self.eat(t!(",")) {
-					// TODO: Fix number parsing.
-					let b = self.next_token_value::<Number>()?;
-
-					let a: f64 = x
-						.try_into()
-						.map_err(|_| ParseError::new(ParseErrorKind::Todo, next.span))?;
-					let b: f64 = b
-						.try_into()
-						.map_err(|_| ParseError::new(ParseErrorKind::Todo, next.span))?;
-
-					self.expect_closing_delimiter(t!(")"), start)?;
-					Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))))
-				} else {
-					self.expect_closing_delimiter(t!(")"), start)?;
-					Ok(Value::Subquery(Box::new(Subquery::Value(Value::Number(x)))))
+		if self.peek_kind() != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
+			if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
+				if idiom.len() == 1 {
+					// we parsed a single idiom and the next token was a dissallowed statement so
+					// it is likely that the used meant to use an invalid statement.
+					return Err(ParseError::new(
+						ParseErrorKind::DisallowedStatement {
+							found: self.peek_kind(),
+							expected: t!(")"),
+							disallowed: peek.span,
+						},
+						self.recent_span(),
+					));
 				}
 			}
-			x => {
-				self.expect_closing_delimiter(t!(")"), start)?;
-				Ok(Value::Subquery(Box::new(x)))
-			}
 		}
+		self.expect_closing_delimiter(t!(")"), start)?;
+		Ok(Value::Subquery(Box::new(res)))
 	}
 
 	pub fn parse_inner_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {
-		let res = match self.peek().kind {
+		let peek = self.peek();
+		let res = match peek.kind {
 			t!("RETURN") => {
 				self.pop_peek();
 				let stmt = self.parse_return_stmt()?;
@@ -456,9 +515,42 @@ impl Parser<'_> {
 			}
 		};
 		if let Some(start) = start {
+			if self.peek_kind() != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind)
+			{
+				if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
+					if idiom.len() == 1 {
+						// we parsed a single idiom and the next token was a dissallowed statement so
+						// it is likely that the used meant to use an invalid statement.
+						return Err(ParseError::new(
+							ParseErrorKind::DisallowedStatement {
+								found: self.peek_kind(),
+								expected: t!(")"),
+								disallowed: peek.span,
+							},
+							self.recent_span(),
+						));
+					}
+				}
+			}
+
 			self.expect_closing_delimiter(t!(")"), start)?;
 		}
 		Ok(res)
+	}
+
+	fn starts_disallowed_subquery_statement(kind: TokenKind) -> bool {
+		matches!(
+			kind,
+			t!("ANALYZE")
+				| t!("BEGIN") | t!("BREAK")
+				| t!("CANCEL") | t!("COMMIT")
+				| t!("CONTINUE") | t!("FOR")
+				| t!("INFO") | t!("KILL")
+				| t!("LIVE") | t!("OPTION")
+				| t!("LET") | t!("SHOW")
+				| t!("SLEEP") | t!("THROW")
+				| t!("USE")
+		)
 	}
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string

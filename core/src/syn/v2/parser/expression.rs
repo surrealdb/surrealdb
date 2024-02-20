@@ -1,8 +1,10 @@
 //! This module defines the pratt parser for operators.
+
 use super::mac::unexpected;
+use super::ParseError;
 use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
 use crate::syn::v2::{
-	parser::{mac::expected, ParseResult, Parser},
+	parser::{mac::expected, ParseErrorKind, ParseResult, Parser},
 	token::{t, NumberKind, TokenKind},
 };
 use std::cmp::Ordering;
@@ -60,9 +62,8 @@ impl Parser<'_> {
 	fn infix_binding_power(token: TokenKind) -> Option<(u8, u8)> {
 		// TODO: Look at ordering of operators.
 		match token {
-			// assigment operators have the lowes binding power.
-			t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
-
+			// assigment operators have the lowest binding power.
+			//t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
 			t!("||") | t!("OR") => Some((3, 4)),
 			t!("&&") | t!("AND") => Some((5, 6)),
 
@@ -261,7 +262,7 @@ impl Parser<'_> {
 			}
 
 			// should be unreachable as we previously check if the token was a prefix op.
-			_ => unreachable!(),
+			x => unreachable!("found non-operator token {x:?}"),
 		};
 		let rhs = self.pratt_parse_expr(min_bp)?;
 		Ok(Value::Expression(Box::new(Expression::Binary {
@@ -284,6 +285,17 @@ impl Parser<'_> {
 		loop {
 			let token = self.peek();
 			let Some((l_bp, r_bp)) = Self::infix_binding_power(token.kind) else {
+				// explain that assignment operators can't be used in normal expressions.
+				if let t!("+=") | t!("*=") | t!("-=") | t!("+?=") = token.kind {
+					return Err(ParseError::new(
+							    ParseErrorKind::UnexpectedExplain {
+								    found: token.kind,
+								    expected: "an operator",
+								    explain: "assignement operator are only allowed in SET and DUPLICATE KEY UPDATE statements",
+							    },
+							    token.span,
+						    ));
+				}
 				break;
 			};
 
