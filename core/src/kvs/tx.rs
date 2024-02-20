@@ -2571,9 +2571,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		id: &Thing,
+		p: Cow<'_, Value>,
 		v: Cow<'_, Value>,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), v)
+		self.cf.update(ns, db, tb, id.clone(), p, v)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
