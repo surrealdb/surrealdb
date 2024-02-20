@@ -69,6 +69,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
 revision = "0.5.0"
 rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
+semver = "1.0.20"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }

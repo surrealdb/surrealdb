@@ -86,7 +86,7 @@ jobs:
           set -x
 
           # Retrieve just released version
-          betaVersion=$(taplo get -f lib/Cargo.toml "package.version")
+          betaVersion=$(taplo get -f Cargo.toml "package.version")
           major=$(echo $betaVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $betaVersion | tr "." "\n" | sed -n 2p)
           betaNum=$(echo $betaVersion | tr "." "\n" | sed -n 4p)
