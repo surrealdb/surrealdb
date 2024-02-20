@@ -6,6 +6,7 @@ use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
+use crate::fflags::FFLAGS;
 use crate::idg::u32::U32;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
@@ -2573,8 +2574,9 @@ impl Transaction {
 		id: &Thing,
 		p: Cow<'_, Value>,
 		v: Cow<'_, Value>,
+		include_previous: bool,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), p, v)
+		self.cf.update(ns, db, tb, id.clone(), p, v, include_previous)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
