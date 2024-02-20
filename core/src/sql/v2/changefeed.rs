@@ -16,7 +16,7 @@ pub struct ChangeFeed {
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let diff = match self.store_original {
-			true => "STORE ORIGINAL ",
+			true => "INCLUDE ORIGINAL",
 			false => "",
 		};
 		write!(f, "CHANGEFEED {}{}", Duration(self.expiry), diff)?;
