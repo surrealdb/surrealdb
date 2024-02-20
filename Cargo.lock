@@ -5306,7 +5306,6 @@ dependencies = [
  "clap",
  "env_logger",
  "futures",
- "futures-concurrency",
  "futures-util",
  "glob",
  "http 0.2.11",
