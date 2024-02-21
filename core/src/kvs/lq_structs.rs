@@ -93,6 +93,7 @@ pub(crate) struct LqEntry {
 /// For example, live query IDs need to be tracked by websockets so they are closed correctly on closing a connection
 pub(crate) enum TrackedResult {
 	LiveQuery(LqEntry),
+	#[allow(dead_code)]
 	KillQuery(LqEntry),
 }
 

@@ -20,7 +20,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::lq_structs::{LqEntry, TrackedResult};
+use crate::kvs::lq_structs::TrackedResult;
 use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
@@ -185,7 +185,7 @@ impl<'a> Executor<'a> {
 	/// We use this function to get these transactions and send them to the invoker without channels
 	async fn consume_committed_live_query_registrations(&self) -> Option<Vec<TrackedResult>> {
 		if let Some(txn) = self.txn.as_ref() {
-			let mut txn = txn.lock().await;
+			let txn = txn.lock().await;
 			Some(txn.consume_pending_live_queries())
 		} else {
 			None

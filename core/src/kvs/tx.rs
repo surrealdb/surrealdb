@@ -324,7 +324,8 @@ impl Transaction {
 		}
 	}
 
-	pub fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
+	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
+	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
 		let mut lq: Vec<TrackedResult> = Vec::with_capacity(LQ_CAPACITY);
 		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
 			lq.push(TrackedResult::LiveQuery(l));

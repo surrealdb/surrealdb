@@ -34,6 +34,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Duration;
+use surrealdb_core::dbs::Options;
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
 use wasmtimer::tokio::MissedTickBehavior;
@@ -246,7 +247,7 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 
 			let mut stream = streams.merge();
 
-			let opt = Option::default();
+			let opt = Options::default();
 			while let Some(Some(_)) = stream.next().await {
 				match kvs.process_lq_notifications(&opt).await {
 					Ok(()) => trace!("Live Query poll ran successfully"),
