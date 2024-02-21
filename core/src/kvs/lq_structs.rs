@@ -91,6 +91,8 @@ pub(crate) struct LqEntry {
 
 /// This is a type representing information that is tracked outside of a datastore
 /// For example, live query IDs need to be tracked by websockets so they are closed correctly on closing a connection
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Clone))]
 pub(crate) enum TrackedResult {
 	LiveQuery(LqEntry),
 	#[allow(dead_code)]
