@@ -16,4 +16,10 @@ pub struct Config {
 	pub crt: Option<PathBuf>,
 	pub key: Option<PathBuf>,
 	pub tick_interval: Duration,
+	pub engine: Option<EngineConfig>,
+}
+
+pub struct EngineConfig {
+	/// The maximum number of live queries that can be created in a single transaction
+	pub new_live_queries_per_transaction: usize,
 }
