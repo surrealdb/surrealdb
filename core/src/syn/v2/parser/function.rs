@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use crate::{
 	sql::{Function, Ident, Model},
 	syn::v2::{
@@ -12,7 +14,7 @@ impl Parser<'_> {
 	/// Parse a custom function function call
 	///
 	/// Expects `fn` to already be called.
-	pub fn parse_custom_function(&mut self) -> ParseResult<Function> {
+	pub async fn parse_custom_function(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Function> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
@@ -26,7 +28,8 @@ impl Parser<'_> {
 				break;
 			}
 
-			args.push(self.parse_value_field()?);
+			let arg = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			args.push(arg);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!(")"), start)?;
@@ -40,7 +43,7 @@ impl Parser<'_> {
 	/// Parse a model invocation
 	///
 	/// Expects `ml` to already be called.
-	pub fn parse_model(&mut self) -> ParseResult<Model> {
+	pub async fn parse_model(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Model> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
@@ -80,7 +83,8 @@ impl Parser<'_> {
 				break;
 			}
 
-			args.push(self.parse_value_field()?);
+			let arg = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			args.push(arg);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!(")"), start)?;

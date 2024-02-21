@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use crate::{
 	sql::{
 		filter::Filter,
@@ -21,18 +23,22 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub fn parse_define_stmt(&mut self) -> ParseResult<DefineStatement> {
+	pub async fn parse_define_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<DefineStatement> {
 		match self.next().kind {
 			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
-			t!("FUNCTION") => self.parse_define_function().map(DefineStatement::Function),
+			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
 			t!("TOKEN") => self.parse_define_token().map(DefineStatement::Token),
-			t!("SCOPE") => self.parse_define_scope().map(DefineStatement::Scope),
-			t!("PARAM") => self.parse_define_param().map(DefineStatement::Param),
-			t!("TABLE") => self.parse_define_table().map(DefineStatement::Table),
-			t!("EVENT") => self.parse_define_event().map(DefineStatement::Event),
-			t!("FIELD") => self.parse_define_field().map(DefineStatement::Field),
+			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Scope),
+			t!("PARAM") => self.parse_define_param(ctx).await.map(DefineStatement::Param),
+			t!("TABLE") => self.parse_define_table(ctx).await.map(DefineStatement::Table),
+			t!("EVENT") => {
+				ctx.run(|ctx| self.parse_define_event(ctx)).await.map(DefineStatement::Event)
+			}
+			t!("FIELD") => {
+				ctx.run(|ctx| self.parse_define_field(ctx)).await.map(DefineStatement::Field)
+			}
 			t!("INDEX") => self.parse_define_index().map(DefineStatement::Index),
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
 			x => unexpected!(self, x, "a define statement keyword"),
@@ -74,7 +80,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_function(&mut self) -> ParseResult<DefineFunctionStatement> {
+	pub async fn parse_define_function(
+		&mut self,
+		ctx: Ctx<'_>,
+	) -> ParseResult<DefineFunctionStatement> {
 		let name = self.parse_custom_function_name()?;
 		let token = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
@@ -85,7 +94,7 @@ impl Parser<'_> {
 
 			let param = self.next_token_value::<Param>()?.0;
 			expected!(self, t!(":"));
-			let kind = self.parse_inner_kind()?;
+			let kind = ctx.run(|ctx| self.parse_inner_kind(ctx))?;
 
 			args.push((param, kind));
 
@@ -96,7 +105,7 @@ impl Parser<'_> {
 		}
 
 		let next = expected!(self, t!("{")).span;
-		let block = self.parse_block(next)?;
+		let block = ctx.run(|ctx| self.parse_block(ctx, next)).await?;
 
 		let mut res = DefineFunctionStatement {
 			name,
@@ -113,7 +122,7 @@ impl Parser<'_> {
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = self.parse_permission_value()?;
+					res.permissions = ctx.run(|ctx| self.parse_permission_value(ctx)).await?;
 				}
 				_ => break,
 			}
@@ -198,7 +207,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_scope(&mut self) -> ParseResult<DefineScopeStatement> {
+	pub async fn parse_define_scope(
+		&mut self,
+		mut ctx: Ctx<'_>,
+	) -> ParseResult<DefineScopeStatement> {
 		let name = self.next_token_value()?;
 		let mut res = DefineScopeStatement {
 			name,
@@ -218,11 +230,11 @@ impl Parser<'_> {
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					res.signup = Some(self.parse_value()?);
+					res.signup = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					res.signin = Some(self.parse_value()?);
+					res.signin = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
 				}
 				_ => break,
 			}
@@ -231,7 +243,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_param(&mut self) -> ParseResult<DefineParamStatement> {
+	pub async fn parse_define_param(
+		&mut self,
+		mut ctx: Ctx<'_>,
+	) -> ParseResult<DefineParamStatement> {
 		let name = self.next_token_value::<Param>()?.0;
 
 		let mut res = DefineParamStatement {
@@ -243,7 +258,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = self.parse_value()?;
+					res.value = ctx.run(|ctx| self.parse_value(ctx)).await?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
@@ -251,7 +266,7 @@ impl Parser<'_> {
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = self.parse_permission_value()?;
+					res.permissions = ctx.run(|ctx| self.parse_permission_value(ctx)).await?;
 				}
 				_ => break,
 			}
@@ -259,7 +274,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_table(&mut self) -> ParseResult<DefineTableStatement> {
+	pub async fn parse_define_table(
+		&mut self,
+		mut ctx: Ctx<'_>,
+	) -> ParseResult<DefineTableStatement> {
 		let name = self.next_token_value()?;
 		let mut res = DefineTableStatement {
 			name,
@@ -287,7 +305,7 @@ impl Parser<'_> {
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = self.parse_permission(false)?;
+					res.permissions = ctx.run(|ctx| self.parse_permission(ctx, false)).await?;
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
@@ -298,11 +316,11 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("(") => {
 							let open = self.pop_peek().span;
-							res.view = Some(self.parse_view()?);
+							res.view = Some(ctx.run(|ctx| self.parse_view(ctx)).await?);
 							self.expect_closing_delimiter(t!(")"), open)?;
 						}
 						t!("SELECT") => {
-							res.view = Some(self.parse_view()?);
+							res.view = Some(ctx.run(|ctx| self.parse_view(ctx)).await?);
 						}
 						x => unexpected!(self, x, "`SELECT`"),
 					}
@@ -314,7 +332,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_event(&mut self) -> ParseResult<DefineEventStatement> {
+	pub async fn parse_define_event(
+		&mut self,
+		mut ctx: Ctx<'_>,
+	) -> ParseResult<DefineEventStatement> {
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -330,13 +351,13 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("WHEN") => {
 					self.pop_peek();
-					res.when = self.parse_value()?;
+					res.when = ctx.run(|ctx| self.parse_value(ctx)).await?;
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![self.parse_value()?]);
+					res.then = Values(vec![ctx.run(|ctx| self.parse_value(ctx)).await?]);
 					while self.eat(t!(",")) {
-						res.then.0.push(self.parse_value()?)
+						res.then.0.push(ctx.run(|ctx| self.parse_value(ctx)).await?)
 					}
 				}
 				t!("COMMENT") => {
@@ -349,7 +370,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_field(&mut self) -> ParseResult<DefineFieldStatement> {
+	pub async fn parse_define_field(
+		&mut self,
+		mut ctx: Ctx<'_>,
+	) -> ParseResult<DefineFieldStatement> {
 		let name = self.parse_local_idiom()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -370,7 +394,7 @@ impl Parser<'_> {
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					res.kind = Some(self.parse_inner_kind()?);
+					res.kind = Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
 				}
 				#[cfg(feature = "sql2")]
 				t!("READONLY") => {
@@ -379,19 +403,19 @@ impl Parser<'_> {
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = Some(self.parse_value()?);
+					res.value = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = Some(self.parse_value()?);
+					res.assert = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
-					res.default = Some(self.parse_value()?);
+					res.default = Some(ctx.run(|ctx| self.parse_value(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					res.permissions = self.parse_permission(true)?;
+					res.permissions = ctx.run(|ctx| self.parse_permission(ctx, true)).await?;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

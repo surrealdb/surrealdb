@@ -4182,6 +4182,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reblessive"
+version = "0.1.0"
+dependencies = [
+ "pin-project-lite",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5406,6 +5413,7 @@ dependencies = [
  "quick_cache",
  "radix_trie",
  "rand 0.8.5",
+ "reblessive",
  "regex",
  "regex-syntax 0.8.2",
  "reqwest",

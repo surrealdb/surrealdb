@@ -1,4 +1,5 @@
 use geo::Point;
+use reblessive::Ctx;
 
 use super::{ParseResult, Parser};
 use crate::{
@@ -20,7 +21,7 @@ impl Parser<'_> {
 	/// Parse a what primary.
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
-	pub fn parse_what_primary(&mut self) -> ParseResult<Value> {
+	pub async fn parse_what_primary(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
 		match self.peek_kind() {
 			TokenKind::Duration => {
 				let duration = self.next_token_value()?;
@@ -32,11 +33,13 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				Ok(Value::Thing(self.parse_record_string(true)?))
+				let thing = ctx.run(|ctx| self.parse_record_string(ctx, true)).await?;
+				Ok(Value::Thing(thing))
 			}
 			t!("r'") => {
 				self.pop_peek();
-				Ok(Value::Thing(self.parse_record_string(false)?))
+				let thing = ctx.run(|ctx| self.parse_record_string(ctx, false)).await?;
+				Ok(Value::Thing(thing))
 			}
 			t!("$param") => {
 				let param = self.next_token_value()?;
@@ -44,22 +47,25 @@ impl Parser<'_> {
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
-				Ok(Value::Function(Box::new(self.parse_script()?)))
+				let func = ctx.run(|ctx| self.parse_script(ctx)).await?;
+				Ok(Value::Function(Box::new(func)))
 			}
 			t!("IF") => {
-				let stmt = self.parse_if_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_if_stmt(ctx)).await?;
 				Ok(Value::Subquery(Box::new(Subquery::Ifelse(stmt))))
 			}
 			t!("(") => {
 				let token = self.pop_peek();
-				self.parse_inner_subquery(Some(token.span)).map(|x| Value::Subquery(Box::new(x)))
+				ctx.run(|ctx| self.parse_inner_subquery(ctx, Some(token.span)))
+					.await
+					.map(|x| Value::Subquery(Box::new(x)))
 			}
 			t!("<") => {
 				self.pop_peek();
 				expected!(self, t!("FUTURE"));
 				expected!(self, t!(">"));
 				let start = expected!(self, t!("{")).span;
-				let block = self.parse_block(start)?;
+				let block = ctx.run(|ctx| self.parse_block(ctx, start)).await?;
 				Ok(Value::Future(Box::new(crate::sql::Future(block))))
 			}
 			t!("|") => {
@@ -78,9 +84,17 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x))),
-			t!("fn") => self.parse_custom_function().map(|x| Value::Function(Box::new(x))),
-			t!("ml") => self.parse_model().map(|x| Value::Model(Box::new(x))),
+			| t!("REMOVE") => ctx
+				.run(|ctx| self.parse_inner_subquery(ctx, None))
+				.await
+				.map(|x| Value::Subquery(Box::new(x))),
+			t!("fn") => ctx
+				.run(|ctx| self.parse_custom_function(ctx))
+				.await
+				.map(|x| Value::Function(Box::new(x))),
+			t!("ml") => {
+				ctx.run(|ctx| self.parse_model(ctx)).await.map(|x| Value::Model(Box::new(x)))
+			}
 			x => {
 				if !self.peek_can_be_ident() {
 					unexpected!(self, x, "a value")
@@ -88,10 +102,10 @@ impl Parser<'_> {
 
 				let token = self.next();
 				match self.peek_kind() {
-					t!("::") | t!("(") => self.parse_builtin(token.span),
+					t!("::") | t!("(") => self.parse_builtin(ctx, token.span).await,
 					t!(":") => {
 						let str = self.token_value::<Ident>(token)?.0;
-						self.parse_thing_or_range(str)
+						ctx.run(|ctx| self.parse_thing_or_range(ctx, str)).await
 					}
 					x => {
 						if x.has_data() {
@@ -108,7 +122,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse an expressions
-	pub fn parse_idiom_expression(&mut self) -> ParseResult<Value> {
+	pub async fn parse_idiom_expression(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
 		let token = self.peek();
 		let value = match token.kind {
 			t!("NONE") => {
@@ -133,13 +147,13 @@ impl Parser<'_> {
 				expected!(self, t!("FUTURE"));
 				self.expect_closing_delimiter(t!(">"), token.span)?;
 				let next = expected!(self, t!("{")).span;
-				let block = self.parse_block(next)?;
+				let block = ctx.run(|ctx| self.parse_block(ctx, next)).await?;
 				return Ok(Value::Future(Box::new(crate::sql::Future(block))));
 			}
 			TokenKind::Strand => {
 				self.pop_peek();
 				if self.legacy_strands {
-					return self.parse_legacy_strand();
+					return ctx.run(|ctx| self.parse_legacy_strand(ctx));
 				} else {
 					let strand = self.token_value(token)?;
 					return Ok(Value::Strand(strand));
@@ -167,11 +181,13 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				Value::Thing(self.parse_record_string(true)?)
+				let thing = ctx.run(|ctx| self.parse_record_string(ctx, true)).await?;
+				Value::Thing(thing)
 			}
 			t!("r'") => {
 				self.pop_peek();
-				Value::Thing(self.parse_record_string(false)?)
+				let thing = ctx.run(|ctx| self.parse_record_string(ctx, false)).await?;
+				Value::Thing(thing)
 			}
 			t!("$param") => {
 				self.pop_peek();
@@ -180,30 +196,31 @@ impl Parser<'_> {
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
-				Value::Function(Box::new(self.parse_script()?))
+				let script = ctx.run(|ctx| self.parse_script(ctx)).await?;
+				Value::Function(Box::new(script))
 			}
 			t!("->") => {
 				self.pop_peek();
-				let graph = self.parse_graph(Dir::Out)?;
+				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<->") => {
 				self.pop_peek();
-				let graph = self.parse_graph(Dir::Both)?;
+				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("<-") => {
 				self.pop_peek();
-				let graph = self.parse_graph(Dir::In)?;
+				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
 				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_array(token.span).map(Value::Array)?
+				ctx.run(|ctx| self.parse_array(ctx, token.span)).await.map(Value::Array)?
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_object_like(token.span)?
+				ctx.run(|ctx| self.parse_object_like(ctx, token.span)).await?
 			}
 			t!("|") => {
 				self.pop_peek();
@@ -211,12 +228,12 @@ impl Parser<'_> {
 			}
 			t!("IF") => {
 				self.pop_peek();
-				let stmt = self.parse_if_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_if_stmt(ctx)).await?;
 				Value::Subquery(Box::new(Subquery::Ifelse(stmt)))
 			}
 			t!("(") => {
 				self.pop_peek();
-				self.parse_inner_subquery_or_coordinate(token.span)?
+				ctx.run(|ctx| self.parse_inner_subquery_or_coordinate(ctx, token.span)).await?
 			}
 			t!("/") => {
 				self.pop_peek();
@@ -230,22 +247,29 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => self.parse_inner_subquery(None).map(|x| Value::Subquery(Box::new(x)))?,
+			| t!("REMOVE") => ctx
+				.run(|ctx| self.parse_inner_subquery(ctx, None))
+				.await
+				.map(|x| Value::Subquery(Box::new(x)))?,
 			t!("fn") => {
 				self.pop_peek();
-				self.parse_custom_function().map(|x| Value::Function(Box::new(x)))?
+				ctx.run(|ctx| self.parse_custom_function(ctx))
+					.await
+					.map(|x| Value::Function(Box::new(x)))?
 			}
 			t!("ml") => {
 				self.pop_peek();
-				self.parse_model().map(|x| Value::Model(Box::new(x)))?
+				ctx.run(|ctx| self.parse_model(ctx)).await.map(|x| Value::Model(Box::new(x)))?
 			}
 			_ => {
 				self.pop_peek();
 				match self.peek_kind() {
-					t!("::") | t!("(") => self.parse_builtin(token.span)?,
+					t!("::") | t!("(") => {
+						ctx.run(|ctx| self.parse_builtin(ctx, token.span)).await?
+					}
 					t!(":") => {
 						let str = self.token_value::<Ident>(token)?.0;
-						self.parse_thing_or_range(str)?
+						ctx.run(|ctx| self.parse_thing_or_range(ctx, str)).await?
 					}
 					x => {
 						if x.has_data() {
@@ -268,11 +292,18 @@ impl Parser<'_> {
 				| Value::Bool(_)
 				| Value::Future(_)
 				| Value::Strand(_) => unreachable!(),
-				Value::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(x),
-				Value::Table(Table(x)) => {
-					self.parse_remaining_value_idiom(vec![Part::Field(Ident(x))])
+				Value::Idiom(Idiom(x)) => {
+					ctx.run(|ctx| self.parse_remaining_value_idiom(ctx, x)).await
 				}
-				x => self.parse_remaining_value_idiom(vec![Part::Start(x)]),
+				Value::Table(Table(x)) => {
+					ctx.run(|ctx| {
+						self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))])
+					})
+					.await
+				}
+				x => {
+					ctx.run(|ctx| self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)])).await
+				}
 			}
 		} else {
 			Ok(value)
@@ -283,13 +314,15 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the starting `[` to already be eaten and its span passed as an argument.
-	pub fn parse_array(&mut self, start: Span) -> ParseResult<Array> {
+	pub async fn parse_array(&mut self, ctx: Ctx<'_>, start: Span) -> ParseResult<Array> {
 		let mut values = Vec::new();
 		loop {
 			if self.eat(t!("]")) {
 				break;
 			}
-			values.push(self.parse_value_field()?);
+
+			let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			values.push(value);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!("]"), start)?;
@@ -317,59 +350,63 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_full_subquery(&mut self) -> ParseResult<Subquery> {
+	pub async fn parse_full_subquery(&mut self, ctx: Ctx<'_>) -> ParseResult<Subquery> {
 		let peek = self.peek();
 		match peek.kind {
 			t!("(") => {
 				self.pop_peek();
 				dbg!("called");
-				self.parse_inner_subquery(Some(peek.span))
+				ctx.run(|ctx| self.parse_inner_subquery(ctx, Some(peek.span))).await
 			}
 			t!("IF") => {
 				self.pop_peek();
-				let if_stmt = self.parse_if_stmt()?;
+				let if_stmt = ctx.run(|ctx| self.parse_if_stmt(ctx)).await?;
 				Ok(Subquery::Ifelse(if_stmt))
 			}
-			_ => self.parse_inner_subquery(None),
+			_ => ctx.run(|ctx| self.parse_inner_subquery(ctx, None)).await,
 		}
 	}
 
-	pub fn parse_inner_subquery_or_coordinate(&mut self, start: Span) -> ParseResult<Value> {
+	pub async fn parse_inner_subquery_or_coordinate(
+		&mut self,
+		ctx: Ctx<'_>,
+		start: Span,
+	) -> ParseResult<Value> {
 		let peek = self.peek();
 		let res = match peek.kind {
 			t!("RETURN") => {
 				self.pop_peek();
-				let stmt = self.parse_return_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_return_stmt(ctx)).await?;
 				Subquery::Output(stmt)
 			}
 			t!("SELECT") => {
 				self.pop_peek();
-				let stmt = self.parse_select_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_select_stmt(ctx)).await?;
 				Subquery::Select(stmt)
 			}
 			t!("CREATE") => {
 				self.pop_peek();
-				let stmt = self.parse_create_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
 			}
 			t!("UPDATE") => {
 				self.pop_peek();
-				let stmt = self.parse_update_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_update_stmt(ctx)).await?;
 				Subquery::Update(stmt)
 			}
 			t!("DELETE") => {
 				self.pop_peek();
-				let stmt = self.parse_delete_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_delete_stmt(ctx)).await?;
 				Subquery::Delete(stmt)
 			}
 			t!("RELATE") => {
 				self.pop_peek();
-				let stmt = self.parse_relate_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_relate_stmt(ctx)).await?;
 				Subquery::Relate(stmt)
 			}
 			t!("DEFINE") => {
 				self.pop_peek();
-				let stmt = self.parse_define_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_define_stmt(ctx)).await?;
 				Subquery::Define(stmt)
 			}
 			t!("REMOVE") => {
@@ -407,7 +444,7 @@ impl Parser<'_> {
 					}
 					self.lexer.string = Some(number_value);
 				}
-				Subquery::Value(self.parse_value_field()?)
+				Subquery::Value(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			TokenKind::Number(kind) => {
 				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
@@ -439,10 +476,10 @@ impl Parser<'_> {
 					return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
 				}
 				self.lexer.string = Some(number_value);
-				Subquery::Value(self.parse_value_field()?)
+				Subquery::Value(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			_ => {
-				let value = self.parse_value_field()?;
+				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				Subquery::Value(value)
 			}
 		};
@@ -466,42 +503,46 @@ impl Parser<'_> {
 		Ok(Value::Subquery(Box::new(res)))
 	}
 
-	pub fn parse_inner_subquery(&mut self, start: Option<Span>) -> ParseResult<Subquery> {
+	pub async fn parse_inner_subquery(
+		&mut self,
+		ctx: Ctx<'_>,
+		start: Option<Span>,
+	) -> ParseResult<Subquery> {
 		let peek = self.peek();
 		let res = match peek.kind {
 			t!("RETURN") => {
 				self.pop_peek();
-				let stmt = self.parse_return_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_return_stmt(ctx)).await?;
 				Subquery::Output(stmt)
 			}
 			t!("SELECT") => {
 				self.pop_peek();
-				let stmt = self.parse_select_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_select_stmt(ctx)).await?;
 				Subquery::Select(stmt)
 			}
 			t!("CREATE") => {
 				self.pop_peek();
-				let stmt = self.parse_create_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
 				Subquery::Create(stmt)
 			}
 			t!("UPDATE") => {
 				self.pop_peek();
-				let stmt = self.parse_update_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_update_stmt(ctx)).await?;
 				Subquery::Update(stmt)
 			}
 			t!("DELETE") => {
 				self.pop_peek();
-				let stmt = self.parse_delete_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_delete_stmt(ctx)).await?;
 				Subquery::Delete(stmt)
 			}
 			t!("RELATE") => {
 				self.pop_peek();
-				let stmt = self.parse_relate_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_relate_stmt(ctx)).await?;
 				Subquery::Relate(stmt)
 			}
 			t!("DEFINE") => {
 				self.pop_peek();
-				let stmt = self.parse_define_stmt()?;
+				let stmt = ctx.run(|ctx| self.parse_define_stmt(ctx)).await?;
 				Subquery::Define(stmt)
 			}
 			t!("REMOVE") => {
@@ -510,7 +551,7 @@ impl Parser<'_> {
 				Subquery::Remove(stmt)
 			}
 			_ => {
-				let value = self.parse_value_field()?;
+				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				Subquery::Value(value)
 			}
 		};
@@ -556,9 +597,9 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
 	/// matches.
-	pub fn parse_legacy_strand(&mut self) -> ParseResult<Value> {
+	pub fn parse_legacy_strand(&mut self, ctx: Ctx<'_>) -> ParseResult<Value> {
 		let text = self.lexer.string.take().unwrap();
-		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing() {
+		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx) {
 			return Ok(Value::Thing(x));
 		}
 		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_datetime() {
@@ -570,7 +611,7 @@ impl Parser<'_> {
 		Ok(Value::Strand(Strand(text)))
 	}
 
-	fn parse_script(&mut self) -> ParseResult<Function> {
+	async fn parse_script(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Function> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -578,7 +619,8 @@ impl Parser<'_> {
 				break;
 			}
 
-			args.push(self.parse_value_field()?);
+			let arg = ctx.run(|ctx| self.parse_value_field(ctx)?).await;
+			args.push(arg);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!(")"), start)?;

@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use crate::{
 	sql::{statements::CreateStatement, Values},
 	syn::v2::{
@@ -7,11 +9,11 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub fn parse_create_stmt(&mut self) -> ParseResult<CreateStatement> {
+	pub async fn parse_create_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<CreateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let what = Values(self.parse_what_list()?);
-		let data = self.try_parse_data()?;
-		let output = self.try_parse_output()?;
+		let what = Values(ctx.run(|mut ctx| self.parse_what_list(&mut ctx)).await?);
+		let data = ctx.run(|ctx| self.try_parse_data(ctx)).await?;
+		let output = ctx.run(|ctx| self.try_parse_output(ctx)).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 

@@ -44,6 +44,7 @@ mod token_buffer;
 pub mod test;
 
 pub use error::{IntErrorKind, ParseError, ParseErrorKind};
+use reblessive::Stack;
 
 /// The result returned by most parser function.
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -218,13 +219,13 @@ impl<'a> Parser<'a> {
 	///
 	/// This is the primary entry point of the parser.
 	pub fn parse_query(&mut self) -> ParseResult<sql::Query> {
-		let statements = self.parse_stmt_list()?;
+		let statements = self.stack.run(|ctx| self.parse_stmt_list(ctx))?;
 		Ok(sql::Query(statements))
 	}
 
 	/// Parse a single statement.
 	pub fn parse_statement(&mut self) -> ParseResult<sql::Statement> {
-		self.parse_stmt()
+		self.stack.run(|ctx| self.parse_stmt(ctx))
 	}
 
 	/// Parse a possibly partial statement.
@@ -234,7 +235,7 @@ impl<'a> Parser<'a> {
 	pub fn parse_partial_statement(&mut self) -> PartialResult<sql::Statement> {
 		while self.eat(t!(";")) {}
 
-		let res = self.parse_stmt();
+		let res = self.stack.run(|ctx| self.parse_stmt(ctx));
 		match res {
 			Err(ParseError {
 				kind: ParseErrorKind::UnexpectedEof {

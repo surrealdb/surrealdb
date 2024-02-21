@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{id::Gen, Id, Ident, Range, Thing, Value},
@@ -12,8 +14,8 @@ use crate::{
 use std::ops::Bound;
 
 impl Parser<'_> {
-	pub fn parse_record_string(&mut self, double: bool) -> ParseResult<Thing> {
-		let thing = self.parse_thing()?;
+	pub async fn parse_record_string(&mut self, ctx: Ctx<'_>, double: bool) -> ParseResult<Thing> {
+		let thing = self.parse_thing(ctx).await?;
 		// can't have any tokens in the buffer, since the next token must be produced by a specific
 		// call.
 		debug_assert_eq!(self.token_buffer.len(), 0);
@@ -35,7 +37,11 @@ impl Parser<'_> {
 		Ok(thing)
 	}
 
-	pub fn parse_thing_or_range(&mut self, ident: String) -> ParseResult<Value> {
+	pub async fn parse_thing_or_range(
+		&mut self,
+		mut ctx: Ctx<'_>,
+		ident: String,
+	) -> ParseResult<Value> {
 		expected!(self, t!(":"));
 
 		self.peek();
@@ -44,12 +50,14 @@ impl Parser<'_> {
 		if self.eat(t!("..")) {
 			let end = if self.eat(t!("=")) {
 				self.no_whitespace()?;
-				Bound::Included(self.parse_id()?)
+				let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Included(id)
 			} else if self.peek_can_be_ident()
 				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 			{
 				self.no_whitespace()?;
-				Bound::Excluded(self.parse_id()?)
+				let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
@@ -63,7 +71,7 @@ impl Parser<'_> {
 		let beg = if self.peek_can_be_ident()
 			|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 		{
-			let id = self.parse_id()?;
+			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 
 			if self.eat(t!(">")) {
 				self.no_whitespace()?;
@@ -179,33 +187,37 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
+	pub async fn parse_thing(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
 		self.parse_thing_from_ident(ident)
 	}
 
-	pub fn parse_thing_from_ident(&mut self, ident: String) -> ParseResult<Thing> {
+	pub async fn parse_thing_from_ident(
+		&mut self,
+		mut ctx: Ctx<'_>,
+		ident: String,
+	) -> ParseResult<Thing> {
 		expected!(self, t!(":"));
 
 		self.peek();
 		self.no_whitespace()?;
 
-		let id = self.parse_id()?;
+		let id = self.parse_id(ctx).await?;
 		Ok(Thing {
 			tb: ident,
 			id,
 		})
 	}
 
-	pub fn parse_id(&mut self) -> ParseResult<Id> {
+	pub async fn parse_id(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Id> {
 		let token = self.next();
 		match token.kind {
 			t!("{") => {
-				let object = self.parse_object(token.span)?;
+				let object = ctx.run(|ctx| self.parse_object(ctx, token.span)).await?;
 				Ok(Id::Object(object))
 			}
 			t!("[") => {
-				let array = self.parse_array(token.span)?;
+				let array = ctx.run(|ctx| self.parse_array(ctx, token.span)).await?;
 				Ok(Id::Array(array))
 			}
 			TokenKind::Number(NumberKind::Integer) => {

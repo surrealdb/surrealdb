@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use crate::{
 	sql::Kind,
 	syn::v2::{
@@ -13,14 +15,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub fn parse_kind(&mut self, delim: Span) -> ParseResult<Kind> {
-		let kind = self.parse_inner_kind()?;
+	pub async fn parse_kind(&mut self, mut ctx: Ctx<'_>, delim: Span) -> ParseResult<Kind> {
+		let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub fn parse_inner_kind(&mut self) -> ParseResult<Kind> {
+	pub async fn parse_inner_kind(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
 				self.pop_peek();
@@ -30,11 +32,11 @@ impl Parser<'_> {
 				self.pop_peek();
 
 				let delim = expected!(self, t!("<")).span;
-				let mut first = self.parse_concrete_kind()?;
+				let mut first = ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?;
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
 					while self.eat(t!("|")) {
-						kind.push(self.parse_concrete_kind()?);
+						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
 					first = Kind::Either(kind);
 				}
@@ -42,11 +44,11 @@ impl Parser<'_> {
 				Ok(Kind::Option(Box::new(first)))
 			}
 			_ => {
-				let first = self.parse_concrete_kind()?;
+				let first = ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?;
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
 					while self.eat(t!("|")) {
-						kind.push(self.parse_concrete_kind()?);
+						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
 					Ok(Kind::Either(kind))
 				} else {
@@ -57,7 +59,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a single kind which is not any, option, or either.
-	fn parse_concrete_kind(&mut self) -> ParseResult<Kind> {
+	async fn parse_concrete_kind(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Kind> {
 		match self.next().kind {
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NULL") => Ok(Kind::Null),
@@ -132,7 +134,7 @@ impl Parser<'_> {
 			t!("ARRAY") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let kind = self.parse_inner_kind()?;
+					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
 					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Array(Box::new(kind), size))
@@ -143,7 +145,7 @@ impl Parser<'_> {
 			t!("SET") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let kind = self.parse_inner_kind()?;
+					let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
 					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Set(Box::new(kind), size))
@@ -175,12 +177,15 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use reblessive::Stack;
+
 	use super::*;
 	use crate::sql::table::Table;
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());
-		parser.parse_inner_kind()
+		let mut stack = Stack::new();
+		stack.run(|ctx| parser.parse_inner_kind(ctx)).finish()
 	}
 
 	#[test]

@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use crate::{
 	sql::{
 		statements::SelectStatement, Explain, Field, Fields, Ident, Idioms, Limit, Order, Orders,
@@ -14,7 +16,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub(crate) fn parse_select_stmt(&mut self) -> ParseResult<SelectStatement> {
+	pub(crate) async fn parse_select_stmt(&mut self, ctx: Ctx<'_>) -> ParseResult<SelectStatement> {
 		let before = self.peek().span;
 		let expr = self.parse_fields()?;
 		let fields_span = before.covers(self.last_span());

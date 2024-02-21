@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use crate::{
 	sql::{statements::DeleteStatement, Values},
 	syn::v2::{
@@ -7,12 +9,12 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub fn parse_delete_stmt(&mut self) -> ParseResult<DeleteStatement> {
+	pub async fn parse_delete_stmt(&mut self, ctx: Ctx<'_>) -> ParseResult<DeleteStatement> {
 		self.eat(t!("FROM"));
 		let only = self.eat(t!("ONLY"));
-		let what = Values(self.parse_what_list()?);
-		let cond = self.try_parse_condition()?;
-		let output = self.try_parse_output()?;
+		let what = Values(ctx.run(|ctx| self.parse_what_list(&mut ctx))?);
+		let cond = ctx.run(|ctx| self.try_parse_condition(ctx)).await?;
+		let output = ctx.run(|ctx| self.try_parse_output(ctx)).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 

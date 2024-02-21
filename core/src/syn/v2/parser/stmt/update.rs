@@ -1,3 +1,5 @@
+use reblessive::Ctx;
+
 use crate::{
 	sql::{statements::UpdateStatement, Values},
 	syn::v2::{
@@ -7,7 +9,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub fn parse_update_stmt(&mut self) -> ParseResult<UpdateStatement> {
+	pub async fn parse_update_stmt(&mut self, ctx: Ctx<'_>) -> ParseResult<UpdateStatement> {
 		let only = self.eat(t!("ONLY"));
 		let what = Values(self.parse_what_list()?);
 		let data = self.try_parse_data()?;
