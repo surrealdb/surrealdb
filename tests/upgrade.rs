@@ -4,13 +4,16 @@ mod upgrade {
     use surrealdb::engine::any::{connect, Any};
     use surrealdb::engine::remote::http::{Client, Http};
     use surrealdb::opt::auth::Root;
-    use surrealdb::Surreal;
+    use surrealdb::{Connection, Response, Surreal};
     use test_log::test;
     use tokio::time::sleep;
     use tracing::{error, info, warn};
     use ulid::Ulid;
 
     const DOCKER_VERSION: &str = "SURREALDB_TEST_DOCKER_PREVIOUS_VERSION";
+    const DEFAULT_DOCKER_VERSION: &str = "v1.2.1";
+    const DOCKER_EXPOSED_PORT: usize = 8000;
+    const CNX_TIMEOUT: Duration = Duration::from_secs(180);
     const NS: &str = "test";
     const DB: &str = "test";
     const USER: &str = "root";
@@ -23,7 +26,8 @@ mod upgrade {
     #[test(tokio::test(flavor = "multi_thread"))]
     async fn upgrade_test() {
         // Get the version to migrate from (Docker TAG)
-        let docker_version: String = std::env::var(DOCKER_VERSION).unwrap_or("v1.2.1".to_string());
+        let docker_version: String =
+            std::env::var(DOCKER_VERSION).unwrap_or(DEFAULT_DOCKER_VERSION.to_string());
 
         // Location of the database files (RocksDB) in the Host
         let file_path = format!("/tmp/{}.db", Ulid::new());
@@ -54,28 +58,36 @@ mod upgrade {
             "CREATE account SET name='Tobie', user_defined_id='Tobie'"
         ];
         for l in data {
-            db.query(l).await.expect(l).check().expect(l);
+            checked_query(db, l).await;
         }
     }
 
     async fn check_data(db: &Surreal<Any>) {
         info!("Check data");
 
-        let mut res = db.query("SELECT name FROM account").await.unwrap().check().unwrap();
+        let mut res = checked_query(db, "SELECT name FROM account").await;
         assert_eq!(res.num_statements(), 1);
-        let n: Vec<String> = res.take("name").unwrap();
+        let n: Vec<String> = res.take("name").expect("Take name");
         assert_eq!(n, vec!["Tobie"]);
 
-        let res = db.query("INFO FOR DB").await.unwrap().check().unwrap();
+        let res = checked_query(db, "INFO FOR DB").await;
         assert_eq!(res.num_statements(), 1);
-        println!("{:?}", res);
     }
 
+    // Executes the query and ensures to print out the query if it does not pass
+    async fn checked_query<C>(db: &Surreal<C>, q: &str) -> Response
+        where
+            C: Connection,
+    {
+        db.query(q).await.expect(q).check().expect(q)
+    }
+
+    // Establish and wait for the connection.
     async fn wait_for_connection() -> Surreal<Client> {
         let start = SystemTime::now();
-        while start.elapsed().unwrap() < Duration::from_secs(180) {
+        while start.elapsed().unwrap() < CNX_TIMEOUT {
             sleep(Duration::from_secs(2)).await;
-            if let Ok(db) = Surreal::new::<Http>("127.0.0.1:8000").await {
+            if let Ok(db) = Surreal::new::<Http>(format!("127.0.0.1:{DOCKER_EXPOSED_PORT}")).await {
                 info!("DB connected!");
                 db.signin(Root {
                     username: USER,
@@ -105,7 +117,8 @@ mod upgrade {
 
     impl DockerContainer {
         fn start(version: &str, file_path: &str) -> Self {
-            let mut args = Arguments::new(["run", "-p", "8000:8000", "-d"]);
+            let mut args =
+                Arguments::new(["run", "-p", &format!("8000:{DOCKER_EXPOSED_PORT}"), "-d"]);
             args.add(["-v"]);
             args.add([format!("{file_path}:{file_path}")]);
             args.add([format!("surrealdb/surrealdb:{version}")]);
