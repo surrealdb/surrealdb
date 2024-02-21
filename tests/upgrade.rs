@@ -10,47 +10,38 @@ mod upgrade {
     use tracing::{error, info, warn};
     use ulid::Ulid;
 
-    #[test(tokio::test(flavor = "multi_thread", worker_threads = 4))]
+    const DOCKER_VERSION: &str = "SURREALDB_TEST_DOCKER_PREVIOUS_VERSION";
+    const NS: &str = "test";
+    const DB: &str = "test";
+    const USER: &str = "root";
+    const PASS: &str = "root";
+
+    // Optionally set the tag for the SurrealDB Docker image to upgrade from:
+    // export SURREALDB_TEST_DOCKER_PREVIOUS_VERSION="v1.2.1"
+    // To run this test:
+    // cargo test --package surreal --test upgrade upgrade::upgrade_test
+    #[test(tokio::test(flavor = "multi_thread"))]
     async fn upgrade_test() {
+        // Get the version to migrate from (Docker TAG)
+        let docker_version: String = std::env::var(DOCKER_VERSION).unwrap_or("v1.2.1".to_string());
+
+        // Location of the database files (RocksDB) in the Host
         let file_path = format!("/tmp/{}.db", Ulid::new());
         {
-            let docker = DockerContainer::start("v1.2.1", &file_path);
+            // Start the docker instance
+            let docker = DockerContainer::start(&docker_version, &file_path);
             let db = wait_for_connection().await;
+            // Create data samples
             create_data(&db).await;
+            // Stop the docker instance
             docker.stop();
         }
         {
+            // Start a local RocksDB instance using the same location
             let db = new_local_instance(&file_path).await;
+            // Perform checks
             check_data(&db).await;
         }
-    }
-
-    async fn wait_for_connection() -> Surreal<Client> {
-        let start = SystemTime::now();
-        while start.elapsed().unwrap() < Duration::from_secs(180) {
-            sleep(Duration::from_secs(2)).await;
-            if let Ok(db) = Surreal::new::<Http>("127.0.0.1:8000").await {
-                info!("DB connected!");
-                db.signin(Root {
-                    username: "root",
-                    password: "root",
-                })
-                    .await
-                    .unwrap();
-                db.use_ns("test").use_db("test").await.unwrap();
-                return db;
-            }
-            warn!("DB not yet responding");
-            sleep(Duration::from_secs(2)).await;
-        }
-        panic!("Cannot connect to DB");
-    }
-
-    async fn new_local_instance(file_path: &String) -> Surreal<Any> {
-        let db = connect(format!("file:/{}", file_path)).await.unwrap();
-        db.use_ns("test").await.unwrap();
-        db.use_db("test").await.unwrap();
-        db
     }
 
     async fn create_data(db: &Surreal<Client>) {
@@ -63,21 +54,49 @@ mod upgrade {
             "CREATE account SET name='Tobie', user_defined_id='Tobie'"
         ];
         for l in data {
-            let res = db.query(l).await.unwrap();
-            println!("{res:?}");
+            db.query(l).await.unwrap().check().unwrap();
         }
     }
 
     async fn check_data(db: &Surreal<Any>) {
         info!("Check data");
-        let res = db.query("INFO FOR ROOT").await.unwrap().check().unwrap();
-        assert_eq!(res.num_statements(), 1);
-        println!("{:?}", res);
 
         let mut res = db.query("SELECT name FROM account").await.unwrap().check().unwrap();
         assert_eq!(res.num_statements(), 1);
         let n: Vec<String> = res.take("name").unwrap();
         assert_eq!(n, vec!["Tobie"]);
+
+        let res = db.query("INFO FOR DB").await.unwrap().check().unwrap();
+        assert_eq!(res.num_statements(), 1);
+        println!("{:?}", res);
+    }
+
+    async fn wait_for_connection() -> Surreal<Client> {
+        let start = SystemTime::now();
+        while start.elapsed().unwrap() < Duration::from_secs(180) {
+            sleep(Duration::from_secs(2)).await;
+            if let Ok(db) = Surreal::new::<Http>("127.0.0.1:8000").await {
+                info!("DB connected!");
+                db.signin(Root {
+                    username: USER,
+                    password: PASS,
+                })
+                    .await
+                    .unwrap();
+                db.use_ns(NS).use_db(DB).await.unwrap();
+                return db;
+            }
+            warn!("DB not yet responding");
+            sleep(Duration::from_secs(2)).await;
+        }
+        panic!("Cannot connect to DB");
+    }
+
+    async fn new_local_instance(file_path: &String) -> Surreal<Any> {
+        let db = connect(format!("file:{}", file_path)).await.unwrap();
+        db.use_ns(NS).await.unwrap();
+        db.use_db(DB).await.unwrap();
+        db
     }
 
     struct DockerContainer {
@@ -91,7 +110,7 @@ mod upgrade {
             args.add([format!("{file_path}:{file_path}")]);
             args.add([format!("surrealdb/surrealdb:{version}")]);
             args.add(["start", "--log", "trace"]);
-            args.add(["--auth", "--user", "root", "--pass", "root"]);
+            args.add(["--auth", "--user", USER, "--pass", PASS]);
             args.add([format!("file:{file_path}")]);
             let id = Self::docker(args);
             Self {
