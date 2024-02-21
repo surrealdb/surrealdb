@@ -1131,6 +1131,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredAuth);
+		}
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {

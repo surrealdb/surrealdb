@@ -764,6 +764,10 @@ pub enum Error {
 	#[error("Auth was expected to be set but was unknown")]
 	UnknownAuth,
 
+	/// The authenticated session has expired
+	#[error("The authenticated session has expired")]
+	ExpiredAuth,
+
 	/// Auth requires a token header which is missing
 	#[error("Auth token is missing the '{0}' header")]
 	MissingTokenHeader(String),

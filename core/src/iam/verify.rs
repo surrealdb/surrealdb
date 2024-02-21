@@ -240,6 +240,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.sc = Some(sc.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				Default::default(),
@@ -274,6 +275,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.db = Some(db.to_owned());
 			session.sc = Some(sc.to_owned());
 			session.sd = Some(Value::from(id.to_owned()));
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				Default::default(),
@@ -316,6 +318,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				roles,
@@ -348,6 +351,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
@@ -388,6 +392,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au =
 				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
 			Ok(())
@@ -415,6 +420,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
