@@ -246,7 +246,7 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 
 			let mut stream = streams.merge();
 
-			let opt = Options::default();
+			let opt = Option::default();
 			while let Some(Some(_)) = stream.next().await {
 				match kvs.process_lq_notifications(&opt).await {
 					Ok(()) => trace!("Live Query poll ran successfully"),

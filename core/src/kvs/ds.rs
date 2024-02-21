@@ -917,14 +917,13 @@ impl Datastore {
 				lq_lock
 					.iter()
 					.filter(|(k, _)| k.selector == selector)
-					.map(|a| {
-						let mut changed = Vec::with_capacity(a.1.len());
-						for val in a.1 {
-							changed.push((a.0.clone(), val.clone()));
+					.flat_map(|(lq_index, lq_values)| {
+						let mut changed = Vec::with_capacity(lq_values.len());
+						for val in lq_values {
+							changed.push((lq_index.clone(), val.clone()));
 						}
 						changed
 					})
-					.flatten()
 					.to_owned()
 					.collect()
 			};
@@ -1013,7 +1012,7 @@ impl Datastore {
 
 	/// Construct a document from a Change Feed mutation
 	/// This is required to perform document operations such as live query notifications
-	fn construct_document<'a>(mutation: &'a TableMutation) -> Option<Document<'a>> {
+	fn construct_document(mutation: &TableMutation) -> Option<Document> {
 		match mutation {
 			TableMutation::Set(a, b) => {
 				let doc = Document::new(None, Some(a), None, b, Workable::Normal);
