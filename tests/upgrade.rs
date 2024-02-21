@@ -54,7 +54,7 @@ mod upgrade {
             "CREATE account SET name='Tobie', user_defined_id='Tobie'"
         ];
         for l in data {
-            db.query(l).await.unwrap().check().unwrap();
+            db.query(l).await.expect(l).check().expect(l);
         }
     }
 
