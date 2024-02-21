@@ -277,7 +277,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("RS256") => TokenKind::Algorithm(Algorithm::Rs256),
 	UniCase::ascii("RS384") => TokenKind::Algorithm(Algorithm::Rs384),
 	UniCase::ascii("RS512") => TokenKind::Algorithm(Algorithm::Rs512),
-	UniCase::ascii("JWKS") => TokenKind::Algorithm(Algorithm::Jwks),
+	UniCase::ascii("JWKS") => jwks_token_kind(), // Necessary because `phf_map!` doesn't support `cfg` attributes
 
 	// Distance
 	UniCase::ascii("EUCLIDEAN") => TokenKind::Distance(DistanceKind::Euclidean),
@@ -285,3 +285,11 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("HAMMING") => TokenKind::Distance(DistanceKind::Hamming),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 };
+
+const fn jwks_token_kind() -> TokenKind {
+	#[cfg(feature = "jwks")]
+	let token = TokenKind::Algorithm(Algorithm::Jwks);
+	#[cfg(not(feature = "jwks"))]
+	let token = TokenKind::Identifier;
+	token
+}

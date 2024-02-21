@@ -21,7 +21,8 @@ pub mod dbs;
 pub mod env;
 #[doc(hidden)]
 pub mod err;
-pub(crate) mod fflags;
+#[doc(hidden)]
+pub mod fflags;
 #[doc(hidden)]
 pub mod iam;
 #[doc(hidden)]
@@ -32,7 +33,7 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(any(feature = "ml", feature = "jwks"))]
+#[cfg(any(feature = "ml", feature = "ml2", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;
 #[doc(hidden)]
@@ -47,7 +48,12 @@ pub mod channel {
 	pub use channel::Sender;
 }
 
-#[cfg(feature = "ml")]
+#[cfg(all(feature = "ml", not(feature = "ml2")))]
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
-pub use surrealml_core as ml;
+pub use surrealml_core1 as ml;
+
+#[cfg(feature = "ml2")]
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use surrealml_core2 as ml;

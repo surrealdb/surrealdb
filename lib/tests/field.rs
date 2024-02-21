@@ -866,6 +866,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn field_definition_readonly() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;

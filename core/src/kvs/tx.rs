@@ -12,8 +12,8 @@ use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
+use crate::kvs::lq_structs::{LqEntry, LqValue};
 use crate::kvs::Check;
-use crate::kvs::LqValue;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -23,7 +23,7 @@ use crate::sql::Strand;
 use crate::sql::Value;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use channel::Sender;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -46,6 +46,8 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
+
+const LQ_CAPACITY: usize = 100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -86,6 +88,7 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
+	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -102,6 +105,8 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Transaction),
+	#[cfg(feature = "kv-surrealkv")]
+	SurrealKV(super::surrealkv::Transaction),
 }
 #[derive(Copy, Clone)]
 pub enum TransactionType {
@@ -139,6 +144,8 @@ impl fmt::Display for Transaction {
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
 			Inner::FoundationDB(_) => write!(f, "fdb"),
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -213,6 +220,11 @@ impl Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.closed(),
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
+				..
+			} => v.is_closed(),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -253,6 +265,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.cancel().await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.cancel().await,
 			#[allow(unreachable_patterns)]
@@ -297,9 +314,34 @@ impl Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.commit().await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
+				..
+			} => v.commit().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
+	}
+
+	#[allow(unused)]
+	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
+		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
+		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
+			lq.push(l);
+		}
+		lq
+	}
+
+	/// Sends a live query to the transaction which is forwarded only once committed
+	/// And removed once a transaction is aborted
+	pub(crate) fn pre_commit_register_live_query(
+		&mut self,
+		lq_entry: LqEntry,
+	) -> Result<(), Error> {
+		self.prepared_live_queries.0.try_send(lq_entry).map_err(|_send_err| {
+			Error::Internal("Prepared lq failed to add lq to channel".to_string())
+		})
 	}
 
 	/// Delete a key from the datastore.
@@ -339,6 +381,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.del(key).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.del(key).await,
 			#[allow(unreachable_patterns)]
@@ -385,6 +432,11 @@ impl Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.exi(key).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
+				..
+			} => v.exists(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -427,6 +479,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.get(key).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.get(key).await,
 			#[allow(unreachable_patterns)]
@@ -472,6 +529,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.set(key, val).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.set(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -520,6 +582,11 @@ impl Transaction {
 			#[cfg(feature = "kv-speedb")]
 			Transaction {
 				inner: Inner::SpeeDB(v),
+				..
+			} => v.get_timestamp(key).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.get_timestamp(key).await,
 			#[allow(unreachable_patterns)]
@@ -611,6 +678,14 @@ impl Transaction {
 				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
 				v.set(k, val).await
 			}
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
+				..
+			} => {
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				v.set(k, val).await
+			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -652,6 +727,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.put(category, key, val).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.put(category, key, val).await,
 			#[allow(unreachable_patterns)]
@@ -698,6 +778,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
@@ -749,6 +834,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.scan(range, batch_limit).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.scan(range, batch_limit).await,
 			#[allow(unreachable_patterns)]
@@ -818,6 +908,11 @@ impl Transaction {
 				inner: Inner::FoundationDB(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
+				..
+			} => v.putc(key, val, chk).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -861,6 +956,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FoundationDB(v),
+				..
+			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
 				..
 			} => v.delc(key, chk).await,
 			#[allow(unreachable_patterns)]
@@ -2494,9 +2594,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		id: &Thing,
+		p: Cow<'_, Value>,
 		v: Cow<'_, Value>,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), v)
+		self.cf.update(ns, db, tb, id.clone(), p, v)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
@@ -2674,7 +2775,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		lock: bool,
-	) -> Result<(), Error> {
+	) -> Result<Versionstamp, Error> {
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
@@ -2696,7 +2797,7 @@ impl Transaction {
 			}
 		}
 		self.set(ts_key, vs).await?;
-		Ok(())
+		Ok(vs)
 	}
 
 	pub(crate) async fn get_versionstamp_from_timestamp(
@@ -2761,6 +2862,11 @@ impl Transaction {
 				inner: Inner::FoundationDB(ref mut v),
 				..
 			} => v.check_level(check),
+			#[cfg(feature = "kv-surrealkv")]
+			Transaction {
+				inner: Inner::SurrealKV(v),
+				..
+			} => v.set_check_level(check),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -3021,5 +3127,49 @@ mod tests {
 			let res = txn.getr(rng, u32::MAX).await.unwrap();
 			assert_eq!(res.len(), 0);
 		}
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tx_test {
+	use crate::kvs::lq_structs::LqEntry;
+	use crate::kvs::Datastore;
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::TransactionType::Write;
+	use crate::sql;
+	use crate::sql::statements::LiveStatement;
+	use crate::sql::Value;
+
+	#[tokio::test]
+	pub async fn lqs_can_be_submitted_and_read() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+
+		// Create live query data
+		let node_id = uuid::uuid!("d2715187-9d1a-49a5-9b0a-b496035b6c21");
+		let lq_entry = LqEntry {
+			live_id: sql::Uuid::new_v4(),
+			ns: "namespace".to_string(),
+			db: "database".to_string(),
+			stm: LiveStatement {
+				id: sql::Uuid::new_v4(),
+				node: sql::uuid::Uuid(node_id),
+				expr: Default::default(),
+				what: Default::default(),
+				cond: None,
+				fetch: None,
+				archived: None,
+				session: Some(Value::None),
+				auth: None,
+			},
+		};
+		tx.pre_commit_register_live_query(lq_entry.clone()).unwrap();
+
+		tx.commit().await.unwrap();
+
+		// Verify data
+		let live_queries = tx.consume_pending_live_queries();
+		assert_eq!(live_queries.len(), 1);
+		assert_eq!(live_queries[0], lq_entry);
 	}
 }

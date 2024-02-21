@@ -65,6 +65,7 @@ impl Parser<'_> {
 			}
 			t!("TABLE") => {
 				let name = self.next_token_value()?;
+				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -74,6 +75,7 @@ impl Parser<'_> {
 
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
+					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}

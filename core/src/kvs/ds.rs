@@ -1,5 +1,21 @@
-use super::tx::Transaction;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
+use tokio::sync::RwLock;
+use tracing::instrument;
+use tracing::trace;
+
+#[cfg(target_arch = "wasm32")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
 use crate::cf;
+use crate::cf::ChangeSet;
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -8,29 +24,23 @@ use crate::dbs::{
 	Variables,
 };
 use crate::err::Error;
+use crate::fflags::FFLAGS;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
+use crate::kvs::lq_structs::{
+	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType,
+};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
-use crate::vs::Oracle;
-use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::sync::Arc;
-use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::instrument;
-use tracing::trace;
-#[cfg(target_arch = "wasm32")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+use crate::vs::{conv, Oracle, Versionstamp};
+
+use super::tx::Transaction;
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -38,52 +48,8 @@ const LQ_CHANNEL_SIZE: usize = 100;
 
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
-
-/// Used for cluster logic to move LQ data to LQ cleanup code
-/// Not a stored struct; Used only in this module
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct LqValue {
-	pub nd: Uuid,
-	pub ns: String,
-	pub db: String,
-	pub tb: String,
-	pub lq: Uuid,
-}
-
-#[derive(Debug)]
-pub(crate) enum LqType {
-	Nd(LqValue),
-	Tb(LqValue),
-}
-
-impl LqType {
-	fn get_inner(&self) -> &LqValue {
-		match self {
-			LqType::Nd(lq) => lq,
-			LqType::Tb(lq) => lq,
-		}
-	}
-}
-
-impl PartialEq for LqType {
-	fn eq(&self, other: &Self) -> bool {
-		self.get_inner().lq == other.get_inner().lq
-	}
-}
-
-impl Eq for LqType {}
-
-impl PartialOrd for LqType {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Option::Some(self.get_inner().lq.cmp(&other.get_inner().lq))
-	}
-}
-
-impl Ord for LqType {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.get_inner().lq.cmp(&other.get_inner().lq)
-	}
-}
+// In the future we will have proper pagination
+const TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION: u32 = 1000;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -110,6 +76,10 @@ pub struct Datastore {
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	// Map of Live Query ID to Live Query query
+	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, LqIndexValue>>>,
+	// Set of tracked change feeds
+	local_live_query_cfs: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -134,6 +104,8 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Datastore),
+	#[cfg(feature = "kv-surrealkv")]
+	SurrealKV(super::surrealkv::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -152,6 +124,8 @@ impl fmt::Display for Datastore {
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
 			Inner::FoundationDB(_) => write!(f, "fdb"),
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -224,7 +198,8 @@ impl Datastore {
 			feature = "kv-speedb",
 			feature = "kv-indxdb",
 			feature = "kv-tikv",
-			feature = "kv-fdb"
+			feature = "kv-fdb",
+			feature = "kv-surrealkv"
 		)))]
 		let _ = (clock_override, default_clock);
 
@@ -339,6 +314,22 @@ impl Datastore {
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
+			// Parse and initiate a SurrealKV database
+			s if s.starts_with("surrealkv:") => {
+				#[cfg(feature = "kv-surrealkv")]
+				{
+					info!("Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealkv://");
+					let s = s.trim_start_matches("surrealkv:");
+					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
+					info!("Started to kvs store at {}", path);
+					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
+				}
+				#[cfg(not(feature = "kv-surrealkv"))]
+                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
 			// The datastore path is not valid
 			_ => {
 				// use clock_override and default_clock to remove warning when no kv is enabled.
@@ -362,6 +353,8 @@ impl Datastore {
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
 			index_stores: IndexStores::default(),
+			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
+			local_live_query_cfs: Arc::new(RwLock::new(BTreeMap::new())),
 		})
 	}
 
@@ -692,31 +685,31 @@ impl Datastore {
 			.await?;
 		}
 		// Scan node live queries for every node
-		let mut nd_lq_set: BTreeSet<LqType> = BTreeSet::new();
+		let mut nd_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
 		for cl in &cluster {
 			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
                 Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
             })?, NON_PAGED_BATCH_SIZE).await?;
-			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
+			nd_lq_set.extend(nds.into_iter().map(UnreachableLqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
 		// Scan tables for all live queries
 		// let mut tb_lqs: Vec<LqValue> = vec![];
-		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
+		let mut tb_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
 			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NON_PAGED_BATCH_SIZE).await?;
-			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
+			tb_lq_set.extend(tbs.into_iter().map(UnreachableLqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
 		// Find and delete missing
 		for missing in nd_lq_set.symmetric_difference(&tb_lq_set) {
 			match missing {
-				LqType::Nd(ndlq) => {
+				UnreachableLqType::Nd(ndlq) => {
 					warn!("Deleting ndlq {:?}", &ndlq);
 					tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
 				}
-				LqType::Tb(tblq) => {
+				UnreachableLqType::Tb(tblq) => {
 					warn!("Deleting tblq {:?}", &tblq);
 					tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
 				}
@@ -820,7 +813,7 @@ impl Datastore {
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
-		self.save_timestamp_for_versionstamp(ts).await?;
+		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
 		// TODO Add LQ GC
 		// TODO Add Node GC?
@@ -828,17 +821,101 @@ impl Datastore {
 	}
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
-	pub(crate) async fn save_timestamp_for_versionstamp(&self, ts: u64) -> Result<(), Error> {
+	pub(crate) async fn save_timestamp_for_versionstamp(
+		&self,
+		ts: u64,
+	) -> Result<Option<Versionstamp>, Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
-		if let Err(e) = self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
-			return match tx.cancel().await {
-				Ok(_) => {
-					Err(e)
+		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
+			Ok(vs) => Ok(vs),
+			Err(e) => {
+				match tx.cancel().await {
+					Ok(_) => {
+						Err(e)
+					}
+					Err(txe) => {
+						Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+					}
 				}
-				Err(txe) => {
-					Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+			}
+		}
+	}
+
+	/// This is a future that is from whatever is running the datastore as a SurrealDB instance (api WASM and native)
+	/// It's responsibility is to catch up all live queries based on changes to the relevant change feeds,
+	/// and send notifications after assessing authorisation. Live queries then have their watermarks updated.
+	pub async fn process_lq_notifications(&self) -> Result<(), Error> {
+		// Runtime feature gate, as it is not production-ready
+		if !FFLAGS.change_feed_live_queries.enabled() {
+			return Ok(());
+		}
+		// Return if there are no live queries
+		if self.notification_channel.is_none() {
+			return Ok(());
+		}
+		if self.local_live_queries.read().await.is_empty() {
+			return Ok(());
+		}
+
+		// Find live queries that need to catch up
+		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
+		let mut tx = self.transaction(Read, Optimistic).await?;
+		for (selector, vs) in self.local_live_query_cfs.read().await.iter() {
+			// Read the change feed for the selector
+			let res = cf::read(
+				&mut tx,
+				&selector.ns,
+				&selector.db,
+				// Technically, we can not fetch by table and do the per-table filtering this side.
+				// That is an improvement though
+				Some(&selector.tb),
+				ShowSince::versionstamp(vs),
+				Some(TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION),
+			)
+			.await?;
+			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
+			if let Some(change_set) = res.last() {
+				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
+					change_map.insert(selector.clone(), res);
 				}
+			}
+		}
+		tx.cancel().await?;
+
+		for (selector, change_sets) in change_map {
+			// find matching live queries
+			let lq_pairs: Vec<(LqIndexKey, LqIndexValue)> = {
+				let lq_lock = self.local_live_queries.read().await;
+				lq_lock
+					.iter()
+					.filter(|(k, _)| k.selector == selector)
+					.map(|a| {
+						let (b, c) = (a.0.clone(), a.1.clone());
+						(b, c)
+					})
+					.to_owned()
+					.collect()
 			};
+
+			for change_set in change_sets {
+				for (lq_key, lq_value) in lq_pairs.iter() {
+					let change_vs = change_set.0;
+					let database_mutation = &change_set.1;
+					for table_mutation in database_mutation.0.iter() {
+						if table_mutation.0 == lq_key.selector.tb {
+							// TODO(phughk): process live query logic
+							// TODO(SUR-291): enforce security
+							self.local_live_queries.write().await.insert(
+								(*lq_key).clone(),
+								LqIndexValue {
+									vs: change_vs,
+									..(*lq_value).clone()
+								},
+							);
+						}
+					}
+				}
+			}
 		}
 		Ok(())
 	}
@@ -847,7 +924,8 @@ impl Datastore {
 		&self,
 		ts: u64,
 		tx: &mut Transaction,
-	) -> Result<(), Error> {
+	) -> Result<Option<Versionstamp>, Error> {
+		let mut vs: Option<Versionstamp> = None;
 		let nses = tx.all_ns().await?;
 		let nses = nses.as_ref();
 		for ns in nses {
@@ -856,11 +934,11 @@ impl Datastore {
 			let dbs = dbs.as_ref();
 			for db in dbs {
 				let db = db.name.as_str();
-				tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?;
+				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?);
 			}
 		}
 		tx.commit().await?;
-		Ok(())
+		Ok(vs)
 	}
 
 	// garbage_collect_stale_change_feeds deletes all change feed entries that are older than the watermarks.
@@ -978,9 +1056,16 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::FoundationDB(tx)
 			}
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tx::Inner::SurrealKV(tx)
+			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
+
+		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
 
 		#[allow(unreachable_code)]
 		Ok(Transaction {
@@ -989,6 +1074,7 @@ impl Datastore {
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
+			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
 		})
 	}
 

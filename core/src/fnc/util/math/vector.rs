@@ -9,7 +9,7 @@ pub trait Add {
 	fn add(&self, other: &Self) -> Result<Vec<Number>, Error>;
 }
 
-fn check_same_dimension(fnc: &str, a: &Vec<Number>, b: &Vec<Number>) -> Result<(), Error> {
+fn check_same_dimension(fnc: &str, a: &[Number], b: &[Number]) -> Result<(), Error> {
 	if a.len() != b.len() {
 		Err(Error::InvalidArguments {
 			name: String::from(fnc),

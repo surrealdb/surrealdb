@@ -33,6 +33,7 @@ jobs:
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       environment: nightly
+      extra-features: parser2,ml2,storage-surrealkv
       git-ref: ${{ inputs.git-ref || github.ref_name }}
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit

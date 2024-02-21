@@ -1,4 +1,4 @@
-#[cfg(not(feature = "jwks"))]
+#[cfg(all(not(feature = "jwks"), feature = "sql2"))]
 use super::super::super::error::ParseError::Expected;
 use super::super::super::{
 	comment::shouldbespace,
@@ -38,7 +38,7 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	for opt in opts {
 		match opt {
 			DefineTokenOption::Type(v) => {
-				#[cfg(not(feature = "jwks"))]
+				#[cfg(all(not(feature = "jwks"), feature = "sql2"))]
 				if matches!(v, Algorithm::Jwks) {
 					return Err(Err::Error(Expected {
 						tried: i,

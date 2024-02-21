@@ -12,13 +12,16 @@ use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
 	// we do include it in the first field for convenience.
 	Set(Thing, Value),
 	Del(Thing),
 	Def(DefineTableStatement),
+	#[revision(start = 2)]
+	// Includes the previous value that may be None
+	SetPrevious(Thing, Value, Value),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -67,7 +70,10 @@ impl TableMutation {
 	pub fn into_value(self) -> Value {
 		let (k, v) = match self {
 			TableMutation::Set(_t, v) => ("update".to_string(), v),
+			TableMutation::SetPrevious(_t, Value::None, v) => ("create".to_string(), v),
+			TableMutation::SetPrevious(_t, _previous, v) => ("update".to_string(), v),
 			TableMutation::Del(t) => {
+				// TODO(phughk): Future PR for lq on cf feature, store update in delete for diff and notification
 				let mut h = BTreeMap::<String, Value>::new();
 				h.insert("id".to_string(), Value::Thing(t));
 				let o = Object::from(h);
@@ -110,6 +116,7 @@ impl Display for TableMutation {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
+			TableMutation::SetPrevious(id, _previous, v) => write!(f, "SET {} {}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::Def(t) => write!(f, "{}", t),
 		}
@@ -160,6 +167,8 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
+	use crate::sql::Strand;
+
 	#[test]
 	fn serialization() {
 		use super::*;
@@ -192,6 +201,56 @@ mod tests {
 		assert_eq!(
 			s,
 			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
+		);
+	}
+
+	#[test]
+	fn serialization_rev2() {
+		use super::*;
+		use std::collections::HashMap;
+		let cs = ChangeSet(
+			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			DatabaseMutation(vec![TableMutations(
+				"mytb".to_string(),
+				vec![
+					TableMutation::SetPrevious(
+						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						Value::None,
+						Value::Object(Object::from(HashMap::from([
+							(
+								"id",
+								Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+							),
+							("note", Value::from("surreal")),
+						]))),
+					),
+					TableMutation::SetPrevious(
+						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						Value::Strand(Strand::from("this would normally be an object")),
+						Value::Object(Object::from(HashMap::from([
+							(
+								"id",
+								Value::from(Thing::from((
+									"mytb".to_string(),
+									"tobie2".to_string(),
+								))),
+							),
+							("note", Value::from("surreal")),
+						]))),
+					),
+					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+					TableMutation::Def(DefineTableStatement {
+						name: "mytb".into(),
+						..DefineTableStatement::default()
+					}),
+				],
+			)]),
+		);
+		let v = cs.into_value().into_json();
+		let s = serde_json::to_string(&v).unwrap();
+		assert_eq!(
+			s,
+			r#"{"changes":[{"create":{"id":"mytb:tobie","note":"surreal"}},{"update":{"id":"mytb:tobie2","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
 		);
 	}
 }
