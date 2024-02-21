@@ -9,7 +9,7 @@ use std::time;
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
-	#[revisioned(start = 2)]
+	#[revision(start = 2)]
 	pub store_original: bool,
 }
 
@@ -17,8 +17,8 @@ impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
 		if self.store_original {
-			write!(f, "INCLUDE ORIGINAL")
-		}
+			write!(f, " INCLUDE ORIGINAL")?;
+		};
 		Ok(())
 	}
 }

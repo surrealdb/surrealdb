@@ -5,13 +5,14 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+/// ChangeFeedInclude statements are an appendix
 pub enum ChangeFeedInclude {
 	Original,
 }
 
 impl Default for ChangeFeedInclude {
 	fn default() -> Self {
-		Self::Hs512
+		Self::Original
 	}
 }
 
