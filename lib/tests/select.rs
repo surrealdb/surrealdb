@@ -1074,3 +1074,36 @@ async fn select_only() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_issue_3510() -> Result<(), Error> {
+	let sql: &str = "
+		CREATE a:1;
+		CREATE b:1 SET link = a:1, num = 1;
+		SELECT link.* FROM b;
+		SELECT link.* FROM b WHERE num = 1;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					link: {
+						id: a:1
+					}
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
