@@ -45,31 +45,29 @@ pub fn init(ct: CancellationToken) -> JoinHandle<()> {
 // Start live query on change feeds notification processing
 pub fn live_query_change_feed(ct: CancellationToken) -> JoinHandle<()> {
 	tokio::spawn(async move {
-		if FFLAGS.change_feed_live_queries.enabled() {
-			warn!("\n\nFEATURE ENABLED SPAWNING\n\n");
-			// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
-			tokio::spawn(async move {
-				let kvs = crate::dbs::DB.get().unwrap();
-				let stop_signal = ct.cancelled();
-				let tick_interval = Duration::from_secs(1);
-
-				let opt = Options::default();
-				loop {
-					if let Err(e) = kvs.process_lq_notifications(&opt).await {
-						error!("Error running node agent live query tick: {}", e);
-					}
-					tokio::select! {
-						  _ = ct.cancelled() => {
-							   info!(target: LOG, "Gracefully stopping live query node agent");
-							   break;
-						  }
-						  _ = tokio::time::sleep(tick_interval) => {}
-					}
-				}
-				info!("Stopped live query node agent")
-			});
-		} else {
-			warn!("\n\nFEATURE DISABLED\n\n");
+		if !FFLAGS.change_feed_live_queries.enabled() {
+			return;
 		}
+		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
+		tokio::spawn(async move {
+			let kvs = crate::dbs::DB.get().unwrap();
+			let stop_signal = ct.cancelled();
+			let tick_interval = Duration::from_secs(1);
+
+			let opt = Options::default();
+			loop {
+				if let Err(e) = kvs.process_lq_notifications(&opt).await {
+					error!("Error running node agent live query tick: {}", e);
+				}
+				tokio::select! {
+					  _ = ct.cancelled() => {
+						   info!(target: LOG, "Gracefully stopping live query node agent");
+						   break;
+					  }
+					  _ = tokio::time::sleep(tick_interval) => {}
+				}
+			}
+			info!("Stopped live query node agent")
+		});
 	})
 }

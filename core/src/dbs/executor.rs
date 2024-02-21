@@ -20,7 +20,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::kvs::lq_structs::LqEntry;
+use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
@@ -91,7 +91,8 @@ impl<'a> Executor<'a> {
 							match txn.commit().await {
 								Ok(()) => {
 									// Commit succeeded
-									let lqs: Vec<LqEntry> = txn.consume_pending_live_queries();
+									let lqs: Vec<TrackedResult> =
+										txn.consume_pending_live_queries();
 									// Track the live queries in the data store
 									self.kvs.track_live_queries(&lqs).await?;
 									Ok(())
@@ -166,6 +167,7 @@ impl<'a> Executor<'a> {
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
+	/// TODO we can delete this once we migrate to lq v2
 	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
 		let sender = ctx.notifications();
 		spawn(async move {
@@ -177,6 +179,17 @@ impl<'a> Executor<'a> {
 				}
 			}
 		});
+	}
+
+	/// A transaction collects created live queries which can then be consumed when a transaction is committed
+	/// We use this function to get these transactions and send them to the invoker without channels
+	async fn consume_committed_live_query_registrations(&self) -> Option<Vec<TrackedResult>> {
+		if let Some(txn) = self.txn.as_ref() {
+			let mut txn = txn.lock().await;
+			Some(txn.consume_pending_live_queries())
+		} else {
+			None
+		}
 	}
 
 	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
@@ -199,7 +212,7 @@ impl<'a> Executor<'a> {
 		mut ctx: Context<'_>,
 		opt: Options,
 		qry: Query,
-	) -> Result<Vec<Response>, Error> {
+	) -> Result<(Vec<Response>, Vec<TrackedResult>), Error> {
 		// Create a notification channel
 		let (send, recv) = channel::unbounded();
 		// Set the notification channel
@@ -208,6 +221,7 @@ impl<'a> Executor<'a> {
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
+		let mut live_queries: Vec<TrackedResult> = vec![];
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
@@ -264,6 +278,9 @@ impl<'a> Executor<'a> {
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
 					self.flush(&ctx, recv.clone()).await;
+					if let Some(lqs) = self.consume_committed_live_query_registrations().await {
+						live_queries.extend(lqs);
+					}
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
 					self.txn = None;
@@ -309,6 +326,12 @@ impl<'a> Executor<'a> {
 											Ok(_) => {
 												// Flush live query notifications
 												self.flush(&ctx, recv.clone()).await;
+												if let Some(lqs) = self
+													.consume_committed_live_query_registrations()
+													.await
+												{
+													live_queries.extend(lqs);
+												}
 												Ok(Value::None)
 											}
 										}
@@ -381,7 +404,11 @@ impl<'a> Executor<'a> {
 									} else {
 										// Flush the live query change notifications
 										self.flush(&ctx, recv.clone()).await;
-										// Successful, committed result
+										if let Some(lqs) =
+											self.consume_committed_live_query_registrations().await
+										{
+											live_queries.extend(lqs);
+										}
 										res
 									}
 								} else {
@@ -407,8 +434,18 @@ impl<'a> Executor<'a> {
 					e
 				}),
 				query_type: match (is_stm_live, is_stm_kill) {
-					(true, _) => QueryType::Live,
-					(_, true) => QueryType::Kill,
+					(true, _) => {
+						if let Some(lqs) = self.consume_committed_live_query_registrations().await {
+							live_queries.extend(lqs);
+						}
+						QueryType::Live
+					}
+					(_, true) => {
+						if let Some(lqs) = self.consume_committed_live_query_registrations().await {
+							live_queries.extend(lqs);
+						}
+						QueryType::Kill
+					}
 					_ => QueryType::Other,
 				},
 			};
@@ -423,7 +460,7 @@ impl<'a> Executor<'a> {
 			}
 		}
 		// Return responses
-		Ok(out)
+		Ok((out, live_queries))
 	}
 }
 

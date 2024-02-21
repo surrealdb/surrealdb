@@ -44,10 +44,12 @@ async fn live_query_sends_registered_lq_details() -> Result<(), Error> {
 	let result = res.remove(0);
 	assert!(result.result.is_ok());
 
+	dbs.process_lq_notifications(&Default::default()).await?;
+
 	let notifications_chan = dbs.notifications().unwrap();
 
-	assert!(notifications_chan.recv().await.is_ok());
-	assert!(notifications_chan.recv().await.is_err());
+	assert!(notifications_chan.try_recv().is_ok());
+	assert!(notifications_chan.try_recv().is_err());
 
 	Ok(())
 }

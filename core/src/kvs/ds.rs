@@ -33,7 +33,7 @@ use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::lq_structs::{
-	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, UnreachableLqType,
+	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
 };
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::statements::show::ShowSince;
@@ -848,15 +848,18 @@ impl Datastore {
 	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
 		// Runtime feature gate, as it is not production-ready
 		if !FFLAGS.change_feed_live_queries.enabled() {
+			println!("FFLag off");
 			return Ok(());
 		}
 		// Return if there are no live queries
 		if self.notification_channel.is_none() {
 			trace!("Channels is none, short-circuiting");
+			println!("No chan");
 			return Ok(());
 		}
 		if self.local_live_queries.read().await.is_empty() {
 			trace!("No live queries, short-circuiting");
+			println!("No lq");
 			return Ok(());
 		}
 
@@ -1004,6 +1007,7 @@ impl Datastore {
 				}
 			}
 		}
+		println!("Finished processing normally");
 		Ok(())
 	}
 
@@ -1030,31 +1034,41 @@ impl Datastore {
 
 	/// Add live queries to track on the datastore
 	/// These get polled by the change feed tick
-	pub(crate) async fn track_live_queries(&self, lqs: &Vec<LqEntry>) -> Result<(), Error> {
+	pub(crate) async fn track_live_queries(&self, lqs: &Vec<TrackedResult>) -> Result<(), Error> {
+		println!("Tracking live queries {}", lqs.len());
+		let backtrace = std::backtrace::Backtrace::force_capture();
+		println!("{}", backtrace);
 		// Lock the local live queries
 		let mut lq_map = self.local_live_queries.write().await;
 		let mut cf_watermarks = self.cf_watermarks.write().await;
 		for lq in lqs {
-			let lq_index_key: LqIndexKey = lq.as_key();
-			let m = lq_map.get_mut(&lq_index_key);
-			match m {
-				Some(lq_index_value) => lq_index_value.push(lq.as_value()),
-				None => {
-					let lq_vec = vec![lq.as_value()];
-					lq_map.insert(lq_index_key.clone(), lq_vec);
+			match lq {
+				TrackedResult::LiveQuery(lq) => {
+					let lq_index_key: LqIndexKey = lq.as_key();
+					let m = lq_map.get_mut(&lq_index_key);
+					match m {
+						Some(lq_index_value) => lq_index_value.push(lq.as_value()),
+						None => {
+							let lq_vec = vec![lq.as_value()];
+							lq_map.insert(lq_index_key.clone(), lq_vec);
+						}
+					}
+					let selector = lq_index_key.selector;
+					let mut_watermark = cf_watermarks.get_mut(&selector);
+					match mut_watermark {
+						Some(_vs) => {
+							// We don't have a versionstamp, and even if we did - the watermarks are only for consumed events
+							// So we don't want to overwrite and leave that to the cf heartbeat
+						}
+						None => {
+							// TODO: (phughk) - read watermark for catchup
+							// We insert the current watermark.
+							cf_watermarks.insert(selector, Versionstamp::default());
+						}
+					}
 				}
-			}
-			let selector = lq_index_key.selector;
-			let mut_watermark = cf_watermarks.get_mut(&selector);
-			match mut_watermark {
-				Some(_vs) => {
-					// We don't have a versionstamp, and even if we did - the watermarks are only for consumed events
-					// So we don't want to overwrite and leave that to the cf heartbeat
-				}
-				None => {
-					// TODO: (phughk) - read watermark for catchup
-					// We insert the current watermark.
-					cf_watermarks.insert(selector, Versionstamp::default());
+				TrackedResult::KillQuery(_lq) => {
+					unimplemented!("Cannot kill queries yet")
 				}
 			}
 		}
@@ -1309,7 +1323,15 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Process all statements
 		let res = exe.execute(ctx, opt, ast).await;
-		res
+		match res {
+			Ok((responses, lives)) => {
+				// Register live queries
+				println!("Tracking from end of process");
+				self.track_live_queries(&lives).await?;
+				Ok(responses)
+			}
+			Err(e) => Err(e),
+		}
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed

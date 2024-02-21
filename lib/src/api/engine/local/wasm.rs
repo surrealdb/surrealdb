@@ -254,7 +254,5 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 				}
 			}
 		})
-	} else {
-		println!("\n\n\nFEATURE DISABLED\n\n\n");
 	}
 }

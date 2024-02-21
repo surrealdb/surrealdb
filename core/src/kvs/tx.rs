@@ -12,7 +12,7 @@ use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::{LqEntry, LqValue};
+use crate::kvs::lq_structs::{LqEntry, LqValue, TrackedResult};
 use crate::kvs::Check;
 use crate::sql;
 use crate::sql::paths::EDGE;
@@ -324,10 +324,10 @@ impl Transaction {
 		}
 	}
 
-	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
-		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
+	pub fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
+		let mut lq: Vec<TrackedResult> = Vec::with_capacity(LQ_CAPACITY);
 		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
-			lq.push(l);
+			lq.push(TrackedResult::LiveQuery(l));
 		}
 		lq
 	}
