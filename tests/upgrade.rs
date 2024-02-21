@@ -2,7 +2,7 @@ mod upgrade {
     use std::process::Command;
     use std::time::{Duration, SystemTime};
     use surrealdb::engine::any::{connect, Any};
-    use surrealdb::engine::remote::ws::{Client, Ws};
+    use surrealdb::engine::remote::http::{Client, Http};
     use surrealdb::opt::auth::Root;
     use surrealdb::{Connection, Response, Surreal};
     use test_log::test;
@@ -38,7 +38,7 @@ mod upgrade {
             let docker = DockerContainer::start(&docker_version, &file_path);
             let db = wait_for_connection().await;
             // Create data samples
-            create_data(&db).await;
+            create_data(&db, &docker_version).await;
             // Stop the docker instance
             docker.stop();
         }
@@ -50,15 +50,29 @@ mod upgrade {
         }
     }
 
-    async fn create_data(db: &Surreal<Client>) {
+    const DATA_V_1_1_X: [&str; 5] = [
+        "DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128)",
+        "DEFINE ANALYZER userdefinedid TOKENIZERS blank FILTERS lowercase,ngram(1,32)",
+        "DEFINE INDEX account_name_search_idx ON account FIELDS name SEARCH ANALYZER name BM25(1.2,0.75) HIGHLIGHTS",
+        "DEFINE INDEX account_user_defined_id_search_idx ON account FIELDS user_defined_id SEARCH ANALYZER userdefinedid BM25 HIGHLIGHTS",
+        "CREATE account SET name='Tobie', user_defined_id='Tobie'",
+    ];
+
+    const DATA_V_1_2_X: [&str; 5] = [
+        "DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128)",
+        "DEFINE ANALYZER userdefinedid TOKENIZERS blank FILTERS lowercase,ngram(1,32)",
+        "DEFINE INDEX account_name_search_idx ON TABLE account COLUMNS name SEARCH ANALYZER name BM25(1.2,0.75) HIGHLIGHTS",
+        "DEFINE INDEX account_user_defined_id_search_idx ON TABLE account COLUMNS user_defined_id SEARCH ANALYZER userdefinedid BM25 HIGHLIGHTS",
+        "CREATE account SET name='Tobie', user_defined_id='Tobie'",
+    ];
+
+    async fn create_data(db: &Surreal<Client>, docker_version: &str) {
+        let data: &[&str] = if docker_version.starts_with("v1.1.") {
+            &DATA_V_1_1_X
+        } else {
+            &DATA_V_1_2_X
+        };
         info!("Create data");
-        let data = [
-            "DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128)",
-            "DEFINE ANALYZER userdefinedid TOKENIZERS blank FILTERS lowercase,ngram(1,32)",
-            "DEFINE INDEX account_name_search_idx ON TABLE account COLUMNS name SEARCH ANALYZER name BM25(1.2,0.75) HIGHLIGHTS",
-            "DEFINE INDEX account_user_defined_id_search_idx ON TABLE account COLUMNS user_defined_id SEARCH ANALYZER userdefinedid BM25 HIGHLIGHTS",
-            "CREATE account SET name='Tobie', user_defined_id='Tobie'"
-        ];
         for l in data {
             checked_query(db, l).await;
         }
@@ -89,7 +103,7 @@ mod upgrade {
         let start = SystemTime::now();
         while start.elapsed().unwrap() < CNX_TIMEOUT {
             sleep(Duration::from_secs(2)).await;
-            if let Ok(db) = Surreal::new::<Ws>(format!("127.0.0.1:{DOCKER_EXPOSED_PORT}")).await {
+            if let Ok(db) = Surreal::new::<Http>(format!("127.0.0.1:{DOCKER_EXPOSED_PORT}")).await {
                 info!("DB connected!");
                 db.signin(Root {
                     username: USER,
@@ -119,6 +133,7 @@ mod upgrade {
 
     impl DockerContainer {
         fn start(version: &str, file_path: &str) -> Self {
+            info!("Start docker {version} with file {file_path}");
             let mut args =
                 Arguments::new(["run", "-p", &format!("8000:{DOCKER_EXPOSED_PORT}"), "-d"]);
             args.add(["-v"]);
