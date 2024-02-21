@@ -333,7 +333,7 @@ impl Parser<'_> {
 		let expiry = self.next_token_value::<Duration>()?.0;
 		let mut store_original = false;
 		match self.peek_kind() {
-			t!("ORIGINAL") => {
+			t!("INCLUDE") => {
 				self.pop_peek();
 				store_original = true;
 			}

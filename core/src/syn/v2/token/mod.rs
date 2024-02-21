@@ -385,6 +385,7 @@ impl TokenKind {
 			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
+			TokenKind::ChangeFeedInclude(_) => "change feed include",
 		}
 	}
 }

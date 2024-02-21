@@ -67,14 +67,14 @@ impl Writer {
 		id: Thing,
 		p: Cow<'_, Value>,
 		v: Cow<'_, Value>,
-		include_previous: bool,
+		store_original: bool,
 	) {
 		if v.is_some() {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
 				tb.to_string(),
-				match include_previous {
+				match store_original {
 					true => TableMutation::SetPrevious(id, p.into_owned(), v.into_owned()),
 					false => TableMutation::Set(id, v.into_owned()),
 				},
@@ -136,6 +136,8 @@ mod tests {
 	use crate::sql::value::Value;
 	use crate::vs;
 
+	const dont_store_previous: bool = false;
+
 	#[tokio::test]
 	async fn test_changefeed_read_write() {
 		let ts = crate::sql::Datetime::default();
@@ -194,7 +196,6 @@ mod tests {
 		};
 		let value_a: super::Value = "a".into();
 		let mut previous = Cow::from(Value::None);
-		let should_store_previous = false;
 		tx1.record_change(
 			ns,
 			db,
@@ -202,7 +203,7 @@ mod tests {
 			&thing_a,
 			previous.clone(),
 			Cow::Borrowed(&value_a),
-			should_store_previous,
+			dont_store_previous,
 		);
 		tx1.complete_changes(true).await.unwrap();
 		tx1.commit().await.unwrap();
@@ -213,7 +214,15 @@ mod tests {
 			id: Id::String("C".to_string()),
 		};
 		let value_c: Value = "c".into();
-		tx2.record_change(ns, db, tb, &thing_c, previous.clone(), Cow::Borrowed(&value_c), false);
+		tx2.record_change(
+			ns,
+			db,
+			tb,
+			&thing_c,
+			previous.clone(),
+			Cow::Borrowed(&value_c),
+			dont_store_previous,
+		);
 		tx2.complete_changes(true).await.unwrap();
 		tx2.commit().await.unwrap();
 
@@ -224,13 +233,29 @@ mod tests {
 			id: Id::String("B".to_string()),
 		};
 		let value_b: Value = "b".into();
-		tx3.record_change(ns, db, tb, &thing_b, previous.clone(), Cow::Borrowed(&value_b), false);
+		tx3.record_change(
+			ns,
+			db,
+			tb,
+			&thing_b,
+			previous.clone(),
+			Cow::Borrowed(&value_b),
+			dont_store_previous,
+		);
 		let thing_c2 = Thing {
 			tb: tb.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c2: Value = "c2".into();
-		tx3.record_change(ns, db, tb, &thing_c2, previous.clone(), Cow::Borrowed(&value_c2), false);
+		tx3.record_change(
+			ns,
+			db,
+			tb,
+			&thing_c2,
+			previous.clone(),
+			Cow::Borrowed(&value_c2),
+			dont_store_previous,
+		);
 		tx3.complete_changes(true).await.unwrap();
 		tx3.commit().await.unwrap();
 

@@ -67,11 +67,11 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 	let (i, _) = tag_no_case("CHANGEFEED")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(duration)(i)?;
-	// V1 does not support further CF syntax
 	Ok((
 		i,
 		ChangeFeed {
 			expiry: v.0,
+			// V1 does not support further CF syntax
 			store_original: false,
 		},
 	))

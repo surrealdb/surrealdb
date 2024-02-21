@@ -5,8 +5,8 @@ use std::fmt::{self, Display, Formatter};
 use std::str;
 use std::time;
 
-#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 2)]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
 	#[revision(start = 2)]
