@@ -3132,7 +3132,7 @@ mod tests {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tx_test {
-	use crate::kvs::lq_structs::LqEntry;
+	use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -3170,6 +3170,6 @@ mod tx_test {
 		// Verify data
 		let live_queries = tx.consume_pending_live_queries();
 		assert_eq!(live_queries.len(), 1);
-		assert_eq!(live_queries[0], lq_entry);
+		assert_eq!(live_queries[0], TrackedResult::LiveQuery(lq_entry));
 	}
 }

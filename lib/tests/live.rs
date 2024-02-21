@@ -6,8 +6,6 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
 use surrealdb_core::fflags::FFLAGS;
-use surrealdb_core::kvs::LockType::Optimistic;
-use surrealdb_core::kvs::TransactionType::Write;
 
 // RUST_LOG=trace cargo test -p surrealdb --features kv-mem --test live -- --nocapture
 
