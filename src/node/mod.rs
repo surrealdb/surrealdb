@@ -51,7 +51,6 @@ pub fn live_query_change_feed(ct: CancellationToken) -> JoinHandle<()> {
 		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
 		tokio::spawn(async move {
 			let kvs = crate::dbs::DB.get().unwrap();
-			let stop_signal = ct.cancelled();
 			let tick_interval = Duration::from_secs(1);
 
 			let opt = Options::default();
