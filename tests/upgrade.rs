@@ -2,7 +2,7 @@ mod upgrade {
     use std::process::Command;
     use std::time::{Duration, SystemTime};
     use surrealdb::engine::any::{connect, Any};
-    use surrealdb::engine::remote::http::{Client, Http};
+    use surrealdb::engine::remote::ws::{Client, Ws};
     use surrealdb::opt::auth::Root;
     use surrealdb::{Connection, Response, Surreal};
     use test_log::test;
@@ -87,7 +87,7 @@ mod upgrade {
         let start = SystemTime::now();
         while start.elapsed().unwrap() < CNX_TIMEOUT {
             sleep(Duration::from_secs(2)).await;
-            if let Ok(db) = Surreal::new::<Http>(format!("127.0.0.1:{DOCKER_EXPOSED_PORT}")).await {
+            if let Ok(db) = Surreal::new::<Ws>(format!("127.0.0.1:{DOCKER_EXPOSED_PORT}")).await {
                 info!("DB connected!");
                 db.signin(Root {
                     username: USER,
