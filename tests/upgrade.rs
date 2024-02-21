@@ -21,6 +21,8 @@ mod upgrade {
 
     // Optionally set the tag for the SurrealDB Docker image to upgrade from:
     // export SURREALDB_TEST_DOCKER_PREVIOUS_VERSION="v1.2.1"
+    // We may also change the log level:
+    // export RUST_LOG=info
     // To run this test:
     // cargo test --package surreal --test upgrade upgrade::upgrade_test
     #[test(tokio::test(flavor = "multi_thread"))]
