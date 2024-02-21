@@ -848,18 +848,15 @@ impl Datastore {
 	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
 		// Runtime feature gate, as it is not production-ready
 		if !FFLAGS.change_feed_live_queries.enabled() {
-			println!("FFLag off");
 			return Ok(());
 		}
 		// Return if there are no live queries
 		if self.notification_channel.is_none() {
 			trace!("Channels is none, short-circuiting");
-			println!("No chan");
 			return Ok(());
 		}
 		if self.local_live_queries.read().await.is_empty() {
 			trace!("No live queries, short-circuiting");
-			println!("No lq");
 			return Ok(());
 		}
 
@@ -867,7 +864,6 @@ impl Datastore {
 		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
 		let mut tx = self.transaction(Read, Optimistic).await?;
 		let mut tracked_cfs = self.cf_watermarks.write().await;
-		println!("\n\nThere are {} cfs tracked\n\n", tracked_cfs.len());
 		let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
 		for (selector, vs) in tracked_cfs.iter() {
 			// Read the change feed for the selector
@@ -1006,7 +1002,6 @@ impl Datastore {
 				}
 			}
 		}
-		println!("Finished processing normally");
 		Ok(())
 	}
 
@@ -1034,9 +1029,6 @@ impl Datastore {
 	/// Add live queries to track on the datastore
 	/// These get polled by the change feed tick
 	pub(crate) async fn track_live_queries(&self, lqs: &Vec<TrackedResult>) -> Result<(), Error> {
-		println!("Tracking live queries {}", lqs.len());
-		let backtrace = std::backtrace::Backtrace::force_capture();
-		println!("{}", backtrace);
 		// Lock the local live queries
 		let mut lq_map = self.local_live_queries.write().await;
 		let mut cf_watermarks = self.cf_watermarks.write().await;
@@ -1325,7 +1317,6 @@ impl Datastore {
 		match res {
 			Ok((responses, lives)) => {
 				// Register live queries
-				println!("Tracking from end of process");
 				self.track_live_queries(&lives).await?;
 				Ok(responses)
 			}
