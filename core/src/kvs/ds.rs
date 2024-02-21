@@ -883,7 +883,7 @@ impl Datastore {
 			)
 			.await?;
 			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
-			if res.len() == 0 {
+			if res.is_empty() {
 				trace!(
 					"There were no changes in the change feed for {:?} from versionstamp {:?}",
 					selector,
@@ -897,7 +897,7 @@ impl Datastore {
 					// If the notifications fail from here-on, they are lost
 					// this is a separate vec that we later insert to because we are iterating immutably
 					// We shouldn't use a read lock because of consistency between watermark scans
-					tracked_cfs_updates.push((selector.clone(), change_set.0.clone()));
+					tracked_cfs_updates.push((selector.clone(), change_set.0));
 					// This does not guarantee a notification, as a changeset an include many tables and many changes
 					change_map.insert(selector.clone(), res);
 				}
