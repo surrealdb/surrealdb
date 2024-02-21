@@ -63,7 +63,6 @@ mod mem {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -112,7 +111,6 @@ mod rocksdb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-speedb")]
@@ -159,7 +157,6 @@ mod speedb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -207,7 +204,6 @@ mod tikv {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -255,7 +251,6 @@ mod fdb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -305,5 +300,4 @@ mod surrealkv {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
-	include!("tx_test.rs");
 }
