@@ -130,8 +130,7 @@ mod upgrade {
 			args.add(["-v"]);
 			args.add([format!("{file_path}:{file_path}")]);
 			args.add([docker_image]);
-			args.add(["start", "--log", "trace"]);
-			args.add(["--auth", "--user", USER, "--pass", PASS]);
+			args.add(["start", "--auth", "--user", USER, "--pass", PASS]);
 			args.add([format!("file:{file_path}")]);
 			let id = Self::docker(args);
 			Self {

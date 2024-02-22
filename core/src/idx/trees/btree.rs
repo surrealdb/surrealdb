@@ -33,6 +33,9 @@ pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
+	#[serde[skip]]
+	// Not used anymore
+	_updated: bool,
 	#[revision(start = 2)]
 	generation: u64,
 }
@@ -47,6 +50,7 @@ impl BState {
 			root: None,
 			next_node_id: 0,
 			generation: 0,
+			_updated: false,
 		}
 	}
 
