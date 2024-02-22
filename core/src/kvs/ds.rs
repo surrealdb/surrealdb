@@ -916,8 +916,6 @@ impl Datastore {
 					.flat_map(|(lq_index, lq_values)| {
 						lq_values.iter().cloned().map(|x| (lq_index.clone(), x))
 					})
-
-					})
 					.to_owned()
 					.collect()
 			};
@@ -1043,18 +1041,9 @@ impl Datastore {
 						}
 					}
 					let selector = lq_index_key.selector;
-					let mut_watermark = cf_watermarks.get_mut(&selector);
-					match mut_watermark {
-						Some(_vs) => {
-							// We don't have a versionstamp, and even if we did - the watermarks are only for consumed events
-							// So we don't want to overwrite and leave that to the cf heartbeat
-						}
-						None => {
-							// TODO: (phughk) - read watermark for catchup
-							// We insert the current watermark.
-							cf_watermarks.insert(selector, Versionstamp::default());
-						}
-					}
+					// TODO(phughk): - read watermark for catchup
+					// We insert the current watermark.
+					cf_watermarks.entry(selector).or_insert_with(|| Versionstamp::default());
 				}
 				TrackedResult::KillQuery(_lq) => {
 					unimplemented!("Cannot kill queries yet")
