@@ -90,7 +90,7 @@ impl<'a> Executor<'a> {
 						Ok(_) => {
 							match txn.commit().await {
 								Ok(()) => {
-									// Commit succeeded
+									// Commit succeeded, do post commit operations that do not matter to the tx
 									let lqs: Vec<TrackedResult> =
 										txn.consume_pending_live_queries();
 									// Track the live queries in the data store
