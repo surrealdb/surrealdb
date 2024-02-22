@@ -1043,7 +1043,7 @@ impl Datastore {
 					let selector = lq_index_key.selector;
 					// TODO(phughk): - read watermark for catchup
 					// We insert the current watermark.
-					cf_watermarks.entry(selector).or_insert_with(|| Versionstamp::default());
+					cf_watermarks.entry(selector).or_insert_with(Versionstamp::default);
 				}
 				TrackedResult::KillQuery(_lq) => {
 					unimplemented!("Cannot kill queries yet")
