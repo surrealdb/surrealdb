@@ -79,6 +79,7 @@ pub use self::base::Base;
 pub use self::block::Block;
 pub use self::bytes::Bytes;
 pub use self::cast::Cast;
+pub use self::change_feed_include::ChangeFeedInclude;
 pub use self::changefeed::ChangeFeed;
 pub use self::cond::Cond;
 pub use self::constant::Constant;
