@@ -603,6 +603,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		//
@@ -630,6 +631,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		// Test invalid password
@@ -673,6 +675,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		//
@@ -701,6 +704,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		// Test invalid password
@@ -745,6 +749,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		//
@@ -774,6 +779,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		// Test invalid password
@@ -837,6 +843,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -861,6 +868,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -944,6 +952,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -969,6 +978,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -1055,6 +1065,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -1082,6 +1093,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -1339,6 +1351,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 			let tk = match sess.tk {
 				Some(Value::Object(tk)) => tk,
 				_ => panic!("Session token is not an object"),
@@ -1481,6 +1494,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
