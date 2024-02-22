@@ -76,6 +76,9 @@ impl Session {
 	pub(crate) fn expired(&self) -> bool {
 		match self.exp {
 			Some(exp) => Utc::now().timestamp() > exp,
+			// Sessions for system users using basic authentication have no expiration.
+			// TODO(gguillemas): Change this to "true" once session lifetime is configurable
+			// for system users and a default expiration is always set in their session.
 			None => false,
 		}
 	}
