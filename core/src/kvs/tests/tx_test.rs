@@ -1,4 +1,4 @@
-use crate::kvs::lq_structs::LqEntry;
+use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 
 #[tokio::test]
 #[serial]
@@ -32,5 +32,5 @@ async fn live_queries_sent_to_tx_are_received() {
 	// Verify data
 	let live_queries = tx.consume_pending_live_queries();
 	assert_eq!(live_queries.len(), 1);
-	assert_eq!(live_queries[0], lq_entry);
+	assert_eq!(live_queries[0], TrackedResult::LiveQuery(lq_entry));
 }
