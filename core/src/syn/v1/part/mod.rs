@@ -67,12 +67,22 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 	let (i, _) = tag_no_case("CHANGEFEED")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(duration)(i)?;
+
+	let (i, opt) = opt(terminated(shouldbespace, tag_no_case("INCLUDE")))(i)?;
+	let mut should_store = false;
+	if let Some(_) = opt {
+		let (i, _) = shouldbespace(i)?;
+		let (i, v) = tag_no_case("ORIGINAL")(i)?;
+		if v == "ORIGINAL" {
+			should_store = true;
+		}
+	}
 	Ok((
 		i,
 		ChangeFeed {
 			expiry: v.0,
 			// V1 does not support further CF syntax
-			store_original: false,
+			store_original: should_store,
 		},
 	))
 }
@@ -260,6 +270,21 @@ mod tests {
 			ChangeFeed {
 				expiry: time::Duration::from_secs(3600),
 				store_original: false,
+			}
+		);
+	}
+
+	#[test]
+	fn changefeed_include_original() {
+		let sql = "CHANGEFEED 1h INCLUDE ORIGINAL";
+		let res = changefeed(sql);
+		let out = res.unwrap().1;
+		assert_eq!("CHANGEFEED 1h INCLUDE ORIGINAL", format!("{}", out));
+		assert_eq!(
+			out,
+			ChangeFeed {
+				expiry: time::Duration::from_secs(3600),
+				store_original: true,
 			}
 		);
 	}
