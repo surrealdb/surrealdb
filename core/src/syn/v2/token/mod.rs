@@ -8,7 +8,7 @@ pub use keyword::Keyword;
 mod mac;
 pub(crate) use mac::t;
 
-use crate::sql::change_feed_include::ChangeFeedInclude;
+pub use crate::sql::change_feed_include::ChangeFeedInclude;
 use crate::sql::{language::Language, Algorithm};
 
 /// A location in the source passed to the lexer.

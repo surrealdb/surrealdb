@@ -1,5 +1,7 @@
 //! Contains parsing code for smaller common parts of statements.
 
+use crate::sql::change_feed_include::ChangeFeedInclude;
+use crate::syn::v2::token::Token;
 use crate::{
 	sql::{
 		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Field,
@@ -332,12 +334,24 @@ impl Parser<'_> {
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
 		let expiry = self.next_token_value::<Duration>()?.0;
 		let mut store_original = false;
-		match self.peek_kind() {
+		println!("Checking next kind");
+		let next_kind = self.peek_kind();
+		match next_kind {
 			t!("INCLUDE") => {
 				self.pop_peek();
-				store_original = true;
+				println!("Is include");
+				match self.peek().kind {
+					TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original) => {
+						println!("Is original");
+						self.pop_peek();
+						store_original = true;
+					}
+					_ => {}
+				}
 			}
-			_ => {}
+			_ => {
+				println!("Not include, was {:?}", self.peek_kind());
+			}
 		}
 		Ok(ChangeFeed {
 			expiry,
