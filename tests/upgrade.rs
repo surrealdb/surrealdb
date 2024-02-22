@@ -1,16 +1,17 @@
 mod upgrade {
+    use http::{header, HeaderMap, StatusCode};
+    use reqwest::Client;
+    use serde_json::Value as JsonValue;
     use std::process::Command;
     use std::time::{Duration, SystemTime};
     use surrealdb::engine::any::{connect, Any};
-    use surrealdb::engine::remote::http::{Client, Http};
-    use surrealdb::opt::auth::Root;
     use surrealdb::{Connection, Response, Surreal};
     use test_log::test;
     use tokio::time::sleep;
-    use tracing::{error, info, warn};
+    use tracing::{debug, error, info, warn};
     use ulid::Ulid;
 
-    const DOCKER_VERSION: &str = "SURREALDB_TEST_DOCKER_PREVIOUS_VERSION";
+    const PREVIOUS_DOCKER_VERSION: &str = "SURREALDB_TEST_DOCKER_PREVIOUS_VERSION";
     const DEFAULT_DOCKER_VERSION: &str = "v1.2.1";
     const DOCKER_EXPOSED_PORT: usize = 8000;
     const CNX_TIMEOUT: Duration = Duration::from_secs(180);
@@ -29,36 +30,30 @@ mod upgrade {
     async fn upgrade_test() {
         // Get the version to migrate from (Docker TAG)
         let docker_version: String =
-            std::env::var(DOCKER_VERSION).unwrap_or(DEFAULT_DOCKER_VERSION.to_string());
+            std::env::var(PREVIOUS_DOCKER_VERSION).unwrap_or(DEFAULT_DOCKER_VERSION.to_string());
 
         // Location of the database files (RocksDB) in the Host
         let file_path = format!("/tmp/{}.db", Ulid::new());
         {
             // Start the docker instance
-            let docker = DockerContainer::start(&docker_version, &file_path);
-            let db = wait_for_connection().await;
+            let mut docker = DockerContainer::start(&docker_version, &file_path);
+            let client = RestClient::new().wait_for_connection().await;
             // Create data samples
-            create_data(&db, &docker_version).await;
+            create_data_on_docker(&client).await;
+            // Check that the data are okay on the original instance
+            check_data_on_docker(&client).await;
             // Stop the docker instance
             docker.stop();
         }
         {
             // Start a local RocksDB instance using the same location
             let db = new_local_instance(&file_path).await;
-            // Perform checks
-            check_data(&db).await;
+            // Check that the data has properly migrated
+            check_migrated_data(&db).await;
         }
     }
 
-    const DATA_V_1_1_X: [&str; 5] = [
-        "DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128)",
-        "DEFINE ANALYZER userdefinedid TOKENIZERS blank FILTERS lowercase,ngram(1,32)",
-        "DEFINE INDEX account_name_search_idx ON account FIELDS name SEARCH ANALYZER name BM25(1.2,0.75) HIGHLIGHTS",
-        "DEFINE INDEX account_user_defined_id_search_idx ON account FIELDS user_defined_id SEARCH ANALYZER userdefinedid BM25 HIGHLIGHTS",
-        "CREATE account SET name='Tobie', user_defined_id='Tobie'",
-    ];
-
-    const DATA_V_1_2_X: [&str; 5] = [
+    const DATA: [&str; 5] = [
         "DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128)",
         "DEFINE ANALYZER userdefinedid TOKENIZERS blank FILTERS lowercase,ngram(1,32)",
         "DEFINE INDEX account_name_search_idx ON TABLE account COLUMNS name SEARCH ANALYZER name BM25(1.2,0.75) HIGHLIGHTS",
@@ -66,26 +61,38 @@ mod upgrade {
         "CREATE account SET name='Tobie', user_defined_id='Tobie'",
     ];
 
-    async fn create_data(db: &Surreal<Client>, docker_version: &str) {
-        let data: &[&str] = if docker_version.starts_with("v1.1.") {
-            &DATA_V_1_1_X
-        } else {
-            &DATA_V_1_2_X
-        };
-        info!("Create data");
-        for l in data {
-            checked_query(db, l).await;
+    async fn create_data_on_docker(client: &RestClient) {
+        info!("Create data on Docker's instance");
+        for l in DATA {
+            client.checked_query(l, None).await;
         }
     }
 
-    async fn check_data(db: &Surreal<Any>) {
-        info!("Check data");
+    async fn check_data_on_docker(client: &RestClient) {
+        info!("Check data on Docker's instance");
 
-        let mut res = checked_query(db, "SELECT name FROM account").await;
+        // Check that the full-text search is working
+        client
+            .checked_query(
+                "SELECT name FROM account WHERE name @@ 'Tobie'",
+                Some("[{\"name\":\"Tobie\"}]"),
+            )
+            .await;
+
+        // Check that we can deserialize the table definitions
+        client.checked_query("INFO FOR ROOT", None).await;
+    }
+
+    async fn check_migrated_data(db: &Surreal<Any>) {
+        info!("Check migrated data");
+
+        // Check that the full-text search is working
+        let mut res = checked_query(db, "SELECT name FROM account WHERE name @@ 'Tobie'").await;
         assert_eq!(res.num_statements(), 1);
         let n: Vec<String> = res.take("name").expect("Take name");
         assert_eq!(n, vec!["Tobie"]);
 
+        // Check that we can deserialize the table definitions
         let res = checked_query(db, "INFO FOR DB").await;
         assert_eq!(res.num_statements(), 1);
     }
@@ -98,28 +105,6 @@ mod upgrade {
         db.query(q).await.expect(q).check().expect(q)
     }
 
-    // Establish and wait for the connection.
-    async fn wait_for_connection() -> Surreal<Client> {
-        let start = SystemTime::now();
-        while start.elapsed().unwrap() < CNX_TIMEOUT {
-            sleep(Duration::from_secs(2)).await;
-            if let Ok(db) = Surreal::new::<Http>(format!("127.0.0.1:{DOCKER_EXPOSED_PORT}")).await {
-                info!("DB connected!");
-                db.signin(Root {
-                    username: USER,
-                    password: PASS,
-                })
-                    .await
-                    .unwrap();
-                db.use_ns(NS).use_db(DB).await.unwrap();
-                return db;
-            }
-            warn!("DB not yet responding");
-            sleep(Duration::from_secs(2)).await;
-        }
-        panic!("Cannot connect to DB");
-    }
-
     async fn new_local_instance(file_path: &String) -> Surreal<Any> {
         let db = connect(format!("file:{}", file_path)).await.unwrap();
         db.use_ns(NS).await.unwrap();
@@ -129,28 +114,34 @@ mod upgrade {
 
     struct DockerContainer {
         id: String,
+        running: bool,
     }
 
     impl DockerContainer {
         fn start(version: &str, file_path: &str) -> Self {
-            info!("Start docker {version} with file {file_path}");
+            let docker_image = format!("surrealdb/surrealdb:{version}");
+            info!("Start Docker image {docker_image} with file {file_path}");
             let mut args =
                 Arguments::new(["run", "-p", &format!("8000:{DOCKER_EXPOSED_PORT}"), "-d"]);
             args.add(["-v"]);
             args.add([format!("{file_path}:{file_path}")]);
-            args.add([format!("surrealdb/surrealdb:{version}")]);
+            args.add([docker_image]);
             args.add(["start", "--log", "trace"]);
             args.add(["--auth", "--user", USER, "--pass", PASS]);
             args.add([format!("file:{file_path}")]);
             let id = Self::docker(args);
             Self {
                 id,
+                running: true,
             }
         }
 
-        fn stop(&self) {
-            info!("Stopping docker");
-            Self::docker(Arguments::new(["stop", &self.id]));
+        fn stop(&mut self) {
+            if self.running {
+                info!("Stopping Docker container {}", self.id);
+                Self::docker(Arguments::new(["stop", &self.id]));
+                self.running = false;
+            }
         }
 
         fn docker(args: Arguments) -> String {
@@ -158,9 +149,6 @@ mod upgrade {
 
             let output = command.args(args.0).output().unwrap();
             let std_out = String::from_utf8(output.stdout).unwrap().trim().to_string();
-            if !std_out.is_empty() {
-                info!("{}", std_out);
-            }
             if !output.stderr.is_empty() {
                 error!("{}", String::from_utf8(output.stderr).unwrap());
             }
@@ -171,7 +159,10 @@ mod upgrade {
 
     impl Drop for DockerContainer {
         fn drop(&mut self) {
+            // Be sure the container is stopped
             self.stop();
+            // Delete the container
+            info!("Delete Docker container {}", self.id);
             Self::docker(Arguments::new(["rm", &self.id]));
         }
     }
@@ -196,6 +187,74 @@ mod upgrade {
         {
             for arg in args {
                 self.0.push(arg.into());
+            }
+        }
+    }
+
+    struct RestClient {
+        c: Client,
+        u: String,
+    }
+
+    impl RestClient {
+        fn new() -> Self {
+            let mut headers = HeaderMap::new();
+            headers.insert("NS", NS.parse().unwrap());
+            headers.insert("DB", DB.parse().unwrap());
+            headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+            let c = Client::builder()
+                .connect_timeout(Duration::from_millis(10))
+                .default_headers(headers)
+                .build()
+                .expect("Client::builder()...build()");
+            Self {
+                c,
+                u: format!("http://127.0.0.1:{DOCKER_EXPOSED_PORT}/sql"),
+            }
+        }
+
+        async fn wait_for_connection(self) -> Self {
+            let start = SystemTime::now();
+            while start.elapsed().unwrap() < CNX_TIMEOUT {
+                sleep(Duration::from_secs(2)).await;
+                if self.query("INFO FOR ROOT").await.status() == 200 {
+                    return self;
+                }
+                warn!("DB not yet responding");
+                sleep(Duration::from_secs(2)).await;
+            }
+            panic!("Cannot connect to DB");
+        }
+
+        async fn query(&self, q: &str) -> reqwest::Response {
+            self.c
+                .post(&self.u)
+                .basic_auth(USER, Some(PASS))
+                .body(q.to_string())
+                .send()
+                .await
+                .expect(q)
+        }
+
+        async fn checked_query(&self, q: &str, expected_json_result: Option<&str>) {
+            let r = self.query(q).await;
+            assert_eq!(r.status(), StatusCode::OK);
+            if let Some(expected) = expected_json_result {
+                // Convert the result to JSON
+                let j: JsonValue = r.json().await.expect(q);
+                debug!("{q} => {j:#}");
+                // The result is should be an array
+                let a = j.as_array().expect(q);
+                // Extract the first item of the array
+                let r0 = a.get(0).expect("Empty array for {q}");
+                // Check the status
+                let status = r0.get("status").expect(&format!("No status for {q}"));
+                assert_eq!(status.as_str(), Some("OK"), "Wrong status for {q} => {status:#}");
+                // Check we have a result
+                let result = r0.get("result").unwrap_or_else(|| panic!("No result for {q}"));
+                // Compare the result with what is expected
+                let expected: JsonValue = serde_json::from_str(expected).expect(expected);
+                assert_eq!(format!("{:#}", result), format!("{:#}", expected));
             }
         }
     }
