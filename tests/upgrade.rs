@@ -218,11 +218,14 @@ mod upgrade {
 		}
 
 		async fn wait_for_connection(self) -> Self {
+			sleep(Duration::from_secs(2)).await;
 			let start = SystemTime::now();
 			while start.elapsed().unwrap() < CNX_TIMEOUT {
 				sleep(Duration::from_secs(2)).await;
-				if self.query("INFO FOR ROOT").await.status() == 200 {
-					return self;
+				if let Some(r) = self.query("INFO FOR ROOT").await {
+					if r.status() == StatusCode::OK {
+						return self;
+					}
 				}
 				warn!("DB not yet responding");
 				sleep(Duration::from_secs(2)).await;
@@ -230,18 +233,19 @@ mod upgrade {
 			panic!("Cannot connect to DB");
 		}
 
-		async fn query(&self, q: &str) -> reqwest::Response {
-			self.c
-				.post(&self.u)
-				.basic_auth(USER, Some(PASS))
-				.body(q.to_string())
-				.send()
-				.await
-				.expect(q)
+		async fn query(&self, q: &str) -> Option<reqwest::Response> {
+			match self.c.post(&self.u).basic_auth(USER, Some(PASS)).body(q.to_string()).send().await
+			{
+				Ok(r) => Some(r),
+				Err(e) => {
+					error!("{e}");
+					None
+				}
+			}
 		}
 
 		async fn checked_query(&self, q: &str, expected_json_result: Option<&str>) {
-			let r = self.query(q).await;
+			let r = self.query(q).await.unwrap_or_else(|| panic!("No response for {q}"));
 			assert_eq!(r.status(), StatusCode::OK);
 			if let Some(expected) = expected_json_result {
 				// Convert the result to JSON
