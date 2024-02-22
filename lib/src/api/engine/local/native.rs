@@ -209,7 +209,7 @@ pub(crate) fn router(
 }
 
 fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
-	warn!("Starting maintenance");
+	trace!("Starting maintenance");
 	// Some classic ownership shenanigans
 	let kvs_two = kvs.clone();
 	let stop_signal_two = stop_signal.clone();
@@ -237,7 +237,7 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 	});
 
 	if FFLAGS.change_feed_live_queries.enabled() {
-		warn!("\n\nFEATURE ENABLED SPAWNING\n\n");
+		trace!("Live queries v2 enabled");
 		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
 		tokio::spawn(async move {
 			let kvs = kvs_two;
@@ -263,6 +263,6 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 			}
 		});
 	} else {
-		warn!("\n\nFEATURE DISABLED\n\n");
+		trace!("Live queries v2 disabled")
 	}
 }
