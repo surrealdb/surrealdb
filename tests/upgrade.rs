@@ -246,12 +246,12 @@ mod upgrade {
                 // The result is should be an array
                 let a = j.as_array().expect(q);
                 // Extract the first item of the array
-                let r0 = a.get(0).expect("Empty array for {q}");
+                let r0 = a.first().unwrap_or_else(|| panic!("Empty array on query: {q}"));
                 // Check the status
-                let status = r0.get("status").expect(&format!("No status for {q}"));
+                let status = r0.get("status").unwrap_or_else(|| panic!("No status on query: {q}"));
                 assert_eq!(status.as_str(), Some("OK"), "Wrong status for {q} => {status:#}");
                 // Check we have a result
-                let result = r0.get("result").unwrap_or_else(|| panic!("No result for {q}"));
+                let result = r0.get("result").unwrap_or_else(|| panic!("No result for query: {q}"));
                 // Compare the result with what is expected
                 let expected: JsonValue = serde_json::from_str(expected).expect(expected);
                 assert_eq!(format!("{:#}", result), format!("{:#}", expected));
