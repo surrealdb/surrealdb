@@ -71,6 +71,8 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 		i,
 		ChangeFeed {
 			expiry: v.0,
+			// V1 does not support further CF syntax
+			store_original: false,
 		},
 	))
 }

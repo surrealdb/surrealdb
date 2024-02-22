@@ -38,6 +38,7 @@ impl ser::Serializer for Serializer {
 #[derive(Default)]
 pub struct SerializeChangeFeed {
 	expiry: Duration,
+	store_original: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeChangeFeed {
@@ -52,6 +53,9 @@ impl serde::ser::SerializeStruct for SerializeChangeFeed {
 			"expiry" => {
 				self.expiry = value.serialize(ser::duration::Serializer.wrap())?;
 			}
+			"store_original" => {
+				self.store_original = value.serialize(ser::bool::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `ChangeFeed::{key}`")));
 			}
@@ -62,6 +66,7 @@ impl serde::ser::SerializeStruct for SerializeChangeFeed {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(ChangeFeed {
 			expiry: self.expiry,
+			store_original: self.store_original,
 		})
 	}
 }
