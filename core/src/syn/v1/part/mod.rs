@@ -70,9 +70,9 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 
 	let (i, opt) = opt(terminated(shouldbespace, tag_no_case("INCLUDE")))(i)?;
 	let mut should_store = false;
-	if let Some(_) = opt {
+	if opt.is_some() {
 		let (i, _) = shouldbespace(i)?;
-		let (i, v) = tag_no_case("ORIGINAL")(i)?;
+		let (_i, v) = tag_no_case("ORIGINAL")(i)?;
 		if v == "ORIGINAL" {
 			should_store = true;
 		}
