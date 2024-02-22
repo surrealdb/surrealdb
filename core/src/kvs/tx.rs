@@ -335,6 +335,8 @@ impl Transaction {
 
 	/// Sends a live query to the transaction which is forwarded only once committed
 	/// And removed once a transaction is aborted
+	// allow(dead_code) because this is used in v2, but not v1
+	#[allow(dead_code)]
 	pub(crate) fn pre_commit_register_live_query(
 		&mut self,
 		lq_entry: LqEntry,
