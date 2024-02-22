@@ -350,6 +350,7 @@ impl Parser<'_> {
 		}
 		Ok(ChangeFeed {
 			expiry,
+			store_original,
 		})
 	}
 
