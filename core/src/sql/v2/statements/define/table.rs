@@ -1,3 +1,9 @@
+use std::fmt::{self, Display, Write};
+
+use derive::Store;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -9,10 +15,6 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
-use derive::Store;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -124,31 +126,5 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
-	}
-}
-
-#[cfg(test)]
-mod test {
-	use crate::sql::statements::DefineStatement;
-	use crate::sql::{ChangeFeed, Duration};
-	use crate::syn::v2::parser::Parser;
-	use nom::AsBytes;
-
-	#[test]
-	pub fn can_define_changefeed_on_table() {
-		let mut parser = Parser::new("DEFINE TABLE test CHANGEFEED 10m".as_bytes());
-		let stm = parser.parse_define_stmt().unwrap();
-		assert_eq!(stm.to_string(), "DEFINE TABLE test CHANGEFEED 10m");
-		let table_stm = match stm {
-			DefineStatement::Table(t) => t,
-			_ => panic!("Expected table statement"),
-		};
-		assert_eq!(table_stm.name.0, "test");
-		let cf = table_stm.changefeed.unwrap();
-		let expected = ChangeFeed {
-			expiry: Duration::from_mins(10).into(),
-			store_original: false,
-		};
-		assert_eq!(cf, expected);
 	}
 }

@@ -337,6 +337,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				store_original = true;
 			}
+			_ => {}
 		}
 		Ok(ChangeFeed {
 			expiry,
