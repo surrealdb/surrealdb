@@ -280,7 +280,7 @@ fn parse_define_param() {
 #[test]
 fn parse_define_table() {
 	let res =
-		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
+		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
 			.unwrap();
 
 	assert_eq!(
@@ -315,7 +315,8 @@ fn parse_define_table() {
 				delete: Permission::None,
 			},
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(1)
+				expiry: std::time::Duration::from_secs(1),
+				store_original: true,
 			}),
 			comment: None,
 		}))

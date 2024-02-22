@@ -225,6 +225,7 @@ pub enum NumberKind {
 pub enum TokenKind {
 	Keyword(Keyword),
 	Algorithm(Algorithm),
+	ChangeFeedInclude(ChangeFeedInclude),
 	Language(Language),
 	Distance(DistanceKind),
 	Operator(Operator),
@@ -384,6 +385,7 @@ impl TokenKind {
 			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
+			TokenKind::ChangeFeedInclude(_) => "change feed include",
 		}
 	}
 }
