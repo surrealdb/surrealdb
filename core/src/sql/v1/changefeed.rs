@@ -6,9 +6,12 @@ use std::str;
 use std::time;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
+	// SQL v1 ends on revision 1 and following syntax is SQL v2 only
+	#[revision(start = 2)]
+	pub store_original: bool,
 }
 
 impl Display for ChangeFeed {
@@ -22,6 +25,7 @@ impl Default for ChangeFeed {
 	fn default() -> Self {
 		Self {
 			expiry: time::Duration::from_secs(0),
+			store_original: false,
 		}
 	}
 }

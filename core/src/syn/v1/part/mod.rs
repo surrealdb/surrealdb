@@ -258,7 +258,8 @@ mod tests {
 		assert_eq!(
 			out,
 			ChangeFeed {
-				expiry: time::Duration::from_secs(3600)
+				expiry: time::Duration::from_secs(3600),
+				store_original: false,
 			}
 		);
 	}
