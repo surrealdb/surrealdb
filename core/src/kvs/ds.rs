@@ -914,11 +914,9 @@ impl Datastore {
 					.iter()
 					.filter(|(k, _)| k.selector == selector)
 					.flat_map(|(lq_index, lq_values)| {
-						let mut changed = Vec::with_capacity(lq_values.len());
-						for val in lq_values {
-							changed.push((lq_index.clone(), val.clone()));
-						}
-						changed
+						lq_values.iter().cloned().map(|x| (lq_index.clone(), x))
+					})
+
 					})
 					.to_owned()
 					.collect()
