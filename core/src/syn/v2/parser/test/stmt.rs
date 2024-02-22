@@ -138,7 +138,9 @@ fn parse_define_namespace() {
 
 #[test]
 fn parse_define_database() {
-	let res = test_parse!(parse_stmt, "DEFINE DATABASE a COMMENT 'test' CHANGEFEED 10m").unwrap();
+	let res =
+		test_parse!(parse_stmt, "DEFINE DATABASE a COMMENT 'test' CHANGEFEED 10m INCLUDE ORIGINAL")
+			.unwrap();
 	assert_eq!(
 		res,
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
@@ -146,7 +148,8 @@ fn parse_define_database() {
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(60) * 10
+				expiry: std::time::Duration::from_secs(60) * 10,
+				store_original: true,
 			})
 		}))
 	);
@@ -312,7 +315,8 @@ fn parse_define_table() {
 				delete: Permission::None,
 			},
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(1)
+				expiry: std::time::Duration::from_secs(1),
+				store_original: true,
 			}),
 			comment: None,
 		}))

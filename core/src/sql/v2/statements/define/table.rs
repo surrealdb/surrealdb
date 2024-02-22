@@ -137,7 +137,7 @@ mod test {
 	#[test]
 	pub fn can_define_changefeed_on_table() {
 		let mut parser = Parser::new("DEFINE TABLE test CHANGEFEED 10m".as_bytes());
-		let stm = parser.parse_define_stmt()?;
+		let stm = parser.parse_define_stmt().unwrap();
 		assert_eq!(stm.to_string(), "DEFINE TABLE test CHANGEFEED 10m");
 		let table_stm = match stm {
 			DefineStatement::Table(t) => t,
