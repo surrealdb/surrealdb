@@ -916,3 +916,329 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	server.finish();
 	Ok(())
 }
+
+#[test(tokio::test)]
+async fn session_expiration() -> Result<(), Box<dyn std::error::Error>> {
+	// Setup database server
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await?;
+	// Setup the scope
+	socket
+		.send_message_query(
+			r#"
+			DEFINE SCOPE scope SESSION 1s
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			;"#,
+		)
+		.await?;
+	// Create resource that requires a scope session to query
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE test SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+			;"#,
+		)
+		.await?;
+	socket
+		.send_message_query(
+			r#"
+			CREATE test:1 SET working = "yes"
+			;"#,
+		)
+		.await?;
+	// Send SIGNUP command
+	let res = socket
+		.send_request(
+			"signup",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+	// Authenticate using the token, which will expire soon
+	socket.send_request("authenticate", json!([res,])).await?;
+	// Check if the session is now authenticated
+	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await?;
+	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
+	// Wait two seconds for token to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// Check that the session has expired and queries fail
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	// Sign in again using the same session
+	let res = socket
+		.send_request(
+			"signin",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Check that the session is now valid again and queries succeed
+	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await?;
+	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
+	// Test passed
+	server.finish();
+	Ok(())
+}
+
+#[test(tokio::test)]
+async fn session_expiration_operations() -> Result<(), Box<dyn std::error::Error>> {
+	// Setup database server
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	// Authenticate the connection
+	// We store the root token to test reauthentication later
+	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await?;
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await?;
+	// Setup the scope
+	socket
+		.send_message_query(
+			r#"
+			DEFINE SCOPE scope SESSION 1s
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			;"#,
+		)
+		.await?;
+	// Create resource that requires a scope session to query
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE test SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+			;"#,
+		)
+		.await?;
+	socket
+		.send_message_query(
+			r#"
+			CREATE test:1 SET working = "yes"
+			;"#,
+		)
+		.await?;
+	// Send SIGNUP command
+	let res = socket
+		.send_request(
+			"signup",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+	// Authenticate using the token, which will expire soon
+	socket.send_request("authenticate", json!([res,])).await?;
+	// Check if the session is now authenticated
+	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await?;
+	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
+	// Wait two seconds for the session to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// Check if the session is now expired
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	// Test operations that SHOULD NOT work with an expired session
+	let operations_ko = vec![
+		socket.send_request("let", json!(["let_var", "let_value",])).await,
+		socket.send_request("set", json!(["set_var", "set_value",])).await,
+		socket.send_request("info", json!([])).await,
+		socket.send_request("select", json!(["tester",])).await,
+		socket
+			.send_request(
+				"insert",
+				json!([
+					"tester",
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]),
+			)
+			.await,
+		socket
+			.send_request(
+				"create",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			)
+			.await,
+		socket
+			.send_request(
+				"update",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			)
+			.await,
+		socket
+			.send_request(
+				"merge",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			)
+			.await,
+		socket
+			.send_request(
+				"patch",
+				json!([
+					"tester:id",
+					[
+						{
+							"op": "add",
+							"path": "value",
+							"value": "bar"
+						},
+						{
+							"op": "remove",
+							"path": "name",
+						}
+					]
+				]),
+			)
+			.await,
+		socket.send_request("delete", json!(["tester"])).await,
+		socket.send_request("live", json!(["tester"])).await,
+		socket.send_request("kill", json!(["tester"])).await,
+	];
+	for op in operations_ko.iter() {
+		let res = op.as_ref();
+		assert!(res.is_ok(), "result: {:?}", res);
+		let res = res.unwrap();
+		assert!(res.is_object(), "result: {:?}", res);
+		let res = res.as_object().unwrap();
+		assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	}
+
+	// Test operations that SHOULD work with an expired session
+	let operations_ok = vec![
+		socket.send_request("ping", json!([])).await,
+		socket.send_request("version", json!([])).await,
+		socket
+			.send_request(
+				"signup",
+				json!([{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "another@email.com",
+					"pass": "pass",
+				}]),
+			)
+			.await,
+		socket
+			.send_request(
+				"signin",
+				json!(
+					[{
+						"ns": NS,
+						"db": DB,
+						"sc": "scope",
+						"email": "another@email.com",
+						"pass": "pass",
+					}]
+				),
+			)
+			.await,
+		socket.send_request("authenticate", json!([root_token,])).await,
+		socket.send_request("invalidate", json!([])).await,
+	];
+	for op in operations_ok.iter() {
+		let res = op.as_ref();
+		assert!(res.is_ok(), "result: {:?}", res);
+		let res = res.unwrap();
+		assert!(res.is_object(), "result: {:?}", res);
+		let res = res.as_object().unwrap();
+		// Verify response contains no error
+		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+		// Some of these methods may refresh the expiration of the session
+		// Verify that the session is expired still after the allowed operation
+		let res = socket.send_message_query("SELECT VALUE working FROM test:1").await;
+		// Otherwise, wait for it to expire again
+		if res.is_ok() {
+			// Wait two seconds for the session to expire
+			tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+			// The session must be expired now or we fail the test
+			let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+			assert!(res.is_ok(), "result: {:?}", res);
+			let res = res.unwrap();
+			assert!(res.is_object(), "result: {:?}", res);
+			let res = res.as_object().unwrap();
+			assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+		}
+	}
+
+	// Test passed
+	server.finish();
+	Ok(())
+}
