@@ -106,6 +106,7 @@ where
 											rx: Some(rx),
 											client: Surreal {
 												router: self.client.router.clone(),
+												waiter: self.client.waiter.clone(),
 												engine: PhantomData,
 											},
 											response_type: PhantomData,
@@ -128,6 +129,7 @@ where
 			}
 			response.client = Surreal {
 				router: self.client.router.clone(),
+				waiter: self.client.waiter.clone(),
 				engine: PhantomData,
 			};
 			Ok(response)
