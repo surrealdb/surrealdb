@@ -127,6 +127,8 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
+				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+				session.exp = None;
 				session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 				Ok(())
 			}
@@ -136,6 +138,8 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
+				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+				session.exp = None;
 				session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 				Ok(())
 			}
@@ -145,6 +149,8 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
+				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+				session.exp = None;
 				session.au = Arc::new((&u, Level::Root).into());
 				Ok(())
 			}
@@ -167,16 +173,22 @@ pub async fn basic_legacy(
 	match verify_creds_legacy(kvs, session.ns.as_ref(), session.db.as_ref(), user, pass).await {
 		Ok((au, _)) if au.is_root() => {
 			debug!("Authenticated as root user '{}'", user);
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+			session.exp = None;
 			session.au = Arc::new(au);
 			Ok(())
 		}
 		Ok((au, _)) if au.is_ns() => {
 			debug!("Authenticated as namespace user '{}'", user);
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+			session.exp = None;
 			session.au = Arc::new(au);
 			Ok(())
 		}
 		Ok((au, _)) if au.is_db() => {
 			debug!("Authenticated as database user '{}'", user);
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+			session.exp = None;
 			session.au = Arc::new(au);
 			Ok(())
 		}
