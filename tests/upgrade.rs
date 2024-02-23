@@ -2,14 +2,11 @@ mod upgrade {
 	use http::{header, HeaderMap, StatusCode};
 	use reqwest::Client;
 	use serde_json::Value as JsonValue;
-	use std::fs::Permissions;
-	use std::os::unix::fs::PermissionsExt;
 	use std::process::Command;
 	use std::time::{Duration, SystemTime};
 	use surrealdb::engine::any::{connect, Any};
 	use surrealdb::{Connection, Response, Surreal};
 	use test_log::test;
-	use tokio::fs::{create_dir, set_permissions};
 	use tokio::time::sleep;
 	use tracing::{debug, error, info, warn};
 	use ulid::Ulid;
@@ -38,10 +35,6 @@ mod upgrade {
 
 		// Location of the database files (RocksDB) in the Host
 		let file_path = format!("/tmp/{}.db", Ulid::new());
-		// The directory must be created with the right permissions
-		// (required to work on  GithubAction runners)
-		create_dir(&file_path).await.unwrap();
-		set_permissions(&file_path, Permissions::from_mode(0o777)).await.unwrap();
 
 		{
 			// Start the docker instance
@@ -56,6 +49,8 @@ mod upgrade {
 			check_data_on_docker(&client).await;
 			// Stop the docker instance
 			docker.stop();
+			// Extract the database directory
+			docker.extract_data_dir(&file_path);
 		}
 		{
 			// Start a local RocksDB instance using the same location
@@ -139,8 +134,6 @@ mod upgrade {
 				&format!("127.0.0.1:8000:{DOCKER_EXPOSED_PORT}"),
 				"-d",
 			]);
-			args.add(["-v"]);
-			args.add([format!("{file_path}:{file_path}")]);
 			args.add([docker_image]);
 			args.add(["start", "--auth", "--user", USER, "--pass", PASS]);
 			args.add([format!("file:{file_path}")]);
@@ -151,17 +144,22 @@ mod upgrade {
 			}
 		}
 
-		fn logs(&mut self) {
+		fn logs(&self) {
 			info!("Logging Docker container {}", self.id);
 			Self::docker(Arguments::new(["logs", &self.id]));
 		}
-
 		fn stop(&mut self) {
 			if self.running {
 				info!("Stopping Docker container {}", self.id);
 				Self::docker(Arguments::new(["stop", &self.id]));
 				self.running = false;
 			}
+		}
+
+		fn extract_data_dir(&self, file_path: &str) {
+			let container_src_path = format!("{}:{file_path}", self.id);
+			info!("Extract directory from Docker container {}", container_src_path);
+			Self::docker(Arguments::new(["cp", &container_src_path, file_path]));
 		}
 
 		fn docker(args: Arguments) -> String {
