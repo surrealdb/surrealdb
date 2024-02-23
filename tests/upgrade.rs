@@ -2,12 +2,14 @@ mod upgrade {
 	use http::{header, HeaderMap, StatusCode};
 	use reqwest::Client;
 	use serde_json::Value as JsonValue;
+	use std::fs::Permissions;
+	use std::os::unix::fs::PermissionsExt;
 	use std::process::Command;
 	use std::time::{Duration, SystemTime};
 	use surrealdb::engine::any::{connect, Any};
 	use surrealdb::{Connection, Response, Surreal};
 	use test_log::test;
-	use tokio::fs::create_dir;
+	use tokio::fs::{create_dir, set_permissions};
 	use tokio::time::sleep;
 	use tracing::{debug, error, info, warn};
 	use ulid::Ulid;
@@ -35,9 +37,10 @@ mod upgrade {
 
 		// Location of the database files (RocksDB) in the Host
 		let file_path = format!("/tmp/{}.db", Ulid::new());
-		// The directory must be created with the right persmissions
+		// The directory must be created with the right permissions
 		// (required to work on  GithubAction runners)
 		create_dir(&file_path).await.unwrap();
+		set_permissions(&file_path, Permissions::from_mode(0o777)).await.unwrap();
 
 		{
 			// Start the docker instance
