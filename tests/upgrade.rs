@@ -30,6 +30,7 @@ mod upgrade {
 	// To run this test:
 	// cargo test --package surreal --test upgrade upgrade::upgrade_test
 	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test() {
 		// Get the version to migrate from (Docker TAG)
 		let docker_version: String =

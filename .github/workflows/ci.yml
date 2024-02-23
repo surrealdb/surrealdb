@@ -595,9 +595,9 @@ jobs:
         run: cargo make ci-api-integration-speedb
 
   tikv-engine:
-     name: TiKV engine
-     runs-on: ubuntu-latest
-     steps:
+    name: TiKV engine
+    runs-on: ubuntu-latest
+    steps:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -708,3 +708,27 @@ jobs:
           df -h
           ps auxf
           cat /tmp/surrealdb.log || true
+
+  upgrade-v1-0-1:
+    name: Upgrade from v1.0.1
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test upgrade
+        run: cargo make ci-upgrade-1-0-1

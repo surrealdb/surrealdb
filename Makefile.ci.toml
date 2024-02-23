@@ -17,7 +17,7 @@ args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-w
 category = "CI - CHECK"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples","--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests
@@ -26,25 +26,25 @@ args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,st
 [tasks.ci-cli-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG = { value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting,jwks", "--workspace", "--test", "cli_integration", "--", "cli_integration"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG = { value = "http_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http-compression,jwks", "--workspace", "--test", "http_integration", "--", "http_integration"]
 
 [tasks.ci-ws-integration]
 category = "WS - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG = { value = "ws_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,sql2", "--workspace", "--test", "ws_integration", "--", "ws_integration"]
 
 [tasks.ci-ml-integration]
 category = "ML - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG={ value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
+env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = ["RUST_LOG"] } } }
 args = ["test", "--locked", "--features", "storage-mem,ml,sql2", "--workspace", "--test", "ml_integration", "--", "ml_integration", "--nocapture"]
 
 [tasks.ci-workspace-coverage]
@@ -52,24 +52,24 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = [
-	"llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
-	"--skip", "api_integration",
-	"--skip", "cli_integration",
-	"--skip", "http_integration",
-	"--skip", "ws_integration"
+    "llvm-cov", "--html", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,jwks", "--workspace", "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration"
 ]
 
 
 [tasks.test-experimental-parser]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
-env = { RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS="--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS = "--cfg surrealdb_unstable" }
 args = [
-	"test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
-	"--skip", "api_integration",
-	"--skip", "cli_integration",
-	"--skip", "http_integration",
-	"--skip", "ws_integration"
+    "test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration"
 ]
 
 [tasks.test-workspace-coverage-complete]
@@ -83,6 +83,26 @@ env = { _START_SURREALDB_PATH = "memory" }
 category = "CI - INTEGRATION TESTS"
 run_task = { name = ["start-surrealdb", "test-workspace-coverage-complete", "stop-surrealdb"], fork = true }
 
+[tasks.ci-upgrade-1-0-1]
+env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "1.0.1", _TEST_FEATURES = "storage-rocksdb" }
+category = "CI - UPGRADE TESTS"
+run_task = { name = ["test-upgrade"], fork = true }
+
+[tasks.ci-upgrade-1-1-1]
+env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.1.1", _TEST_FEATURES = "storage-rocksdb" }
+category = "CI - UPGRADE TESTS"
+run_task = { name = ["test-upgrade"], fork = true }
+
+[tasks.ci-upgrade-1-2-1]
+env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.2.1", _TEST_FEATURES = "storage-rocksdb" }
+category = "CI - UPGRADE TESTS"
+run_task = { name = ["test-upgrade"], fork = true }
+
+[tasks.ci-upgrade-1-2-1-parser2]
+env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.2.1", _TEST_FEATURES = "parser2,storage-rocksdb" }
+category = "CI - UPGRADE TESTS"
+run_task = { name = ["test-upgrade"], fork = true }
+
 #
 # Tests private tasks
 #
@@ -90,20 +110,27 @@ run_task = { name = ["start-surrealdb", "test-workspace-coverage-complete", "sto
 [tasks.test-kvs]
 private = true
 command = "cargo"
-env = {RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--lib", "kvs"]
 
 
 [tasks.test-api-integration]
 private = true
 command = "cargo"
-env = {RUST_BACKTRACE=1, RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable" }
 args = ["test", "--locked", "--package", "surrealdb", "--no-default-features", "--features", "${_TEST_FEATURES}", "--test", "api", "api_integration::${_TEST_API_ENGINE}"]
 
 [tasks.ci-api-integration]
-env = {RUST_BACKTRACE=1, _START_SURREALDB_PATH = "memory", RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { RUST_BACKTRACE = 1, _START_SURREALDB_PATH = "memory", RUSTFLAGS = "--cfg surrealdb_unstable" }
 private = true
 run_task = { name = ["start-surrealdb", "test-api-integration", "stop-surrealdb"], fork = true }
+
+[tasks.test-upgrade]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1, RUST_LOG = "info", RUSTFLAGS = "--cfg surrealdb_unstable" }
+args = ["test", "--locked", "--no-default-features", "--features", "${_TEST_FEATURES}", "--workspace", "--test", "upgrade", "--", "upgrade", "--show-output"]
+
 
 #
 # Integration tests with background services
@@ -203,7 +230,7 @@ script = """
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
-env = { SURREAL_LINK="https://github.com/surrealdb/surrealdb/releases/download/v1.2.0/surreal-v1.2.0.linux-amd64.tgz" }
+env = { SURREAL_LINK = "https://github.com/surrealdb/surrealdb/releases/download/v1.2.0/surreal-v1.2.0.linux-amd64.tgz" }
 script = """
     #!/bin/bash -ex
 
