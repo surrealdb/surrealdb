@@ -461,6 +461,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticated to root level with user `{}`", id);
 			// Set the session
 			session.tk = Some(value);
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
