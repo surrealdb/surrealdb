@@ -56,7 +56,8 @@ args = [
     "--skip", "api_integration",
     "--skip", "cli_integration",
     "--skip", "http_integration",
-    "--skip", "ws_integration"
+    "--skip", "ws_integration",
+    "--skip", "upgrade"
 ]
 
 
@@ -69,7 +70,8 @@ args = [
     "--skip", "api_integration",
     "--skip", "cli_integration",
     "--skip", "http_integration",
-    "--skip", "ws_integration"
+    "--skip", "ws_integration",
+    "--skip", "upgrade"
 ]
 
 [tasks.test-workspace-coverage-complete]

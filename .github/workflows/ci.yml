@@ -782,7 +782,7 @@ jobs:
         run: cargo make ci-upgrade-1-2-1
 
   upgrade-v1-2-1-parser2:
-    name: Upgrade from v1.2.1
+    name: Upgrade from v1.2.1 (Parser2)
     runs-on: ubuntu-latest
     steps:
 
