@@ -7,6 +7,7 @@ mod upgrade {
 	use surrealdb::engine::any::{connect, Any};
 	use surrealdb::{Connection, Response, Surreal};
 	use test_log::test;
+	use tokio::fs::create_dir;
 	use tokio::time::sleep;
 	use tracing::{debug, error, info, warn};
 	use ulid::Ulid;
@@ -34,6 +35,10 @@ mod upgrade {
 
 		// Location of the database files (RocksDB) in the Host
 		let file_path = format!("/tmp/{}.db", Ulid::new());
+		// The directory must be created with the right persmissions
+		// (required to work on  GithubAction runners)
+		create_dir(&file_path).await.unwrap();
+
 		{
 			// Start the docker instance
 			let mut docker = DockerContainer::start(&docker_version, &file_path);
