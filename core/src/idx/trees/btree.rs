@@ -4,7 +4,7 @@ use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
-use revision::revisioned;
+use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
@@ -33,14 +33,67 @@ pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
-	#[serde[skip]]
-	// Not used anymore
-	_updated: bool,
 	#[revision(start = 2)]
 	generation: u64,
 }
 
-impl VersionedSerdeState for BState {}
+impl VersionedSerdeState for BState {
+	fn try_from_val(val: Val) -> Result<Self, Error> {
+		match Self::deserialize_revisioned(&mut val.as_slice()) {
+			Ok(r) => Ok(r),
+			// If it fails here, there is the chance it was an old version of BState
+			// that included the #[serde[skip]] updated parameter
+			Err(e) => match BState1skip::deserialize_revisioned(&mut val.as_slice()) {
+				Ok(b_old) => Ok(b_old.into()),
+				Err(_) => match BState1::deserialize_revisioned(&mut val.as_slice()) {
+					Ok(b_old) => Ok(b_old.into()),
+					// Otherwise we return the initial error
+					Err(_) => Err(Error::Revision(e)),
+				},
+			},
+		}
+	}
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
+pub(in crate::idx) struct BState1 {
+	minimum_degree: u32,
+	root: Option<NodeId>,
+	next_node_id: NodeId,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
+pub(in crate::idx) struct BState1skip {
+	minimum_degree: u32,
+	root: Option<NodeId>,
+	next_node_id: NodeId,
+	#[serde(skip)]
+	updated: bool,
+}
+
+impl From<BState1> for BState {
+	fn from(o: BState1) -> Self {
+		Self {
+			minimum_degree: o.minimum_degree,
+			root: o.root,
+			next_node_id: o.next_node_id,
+			generation: 0,
+		}
+	}
+}
+
+impl From<BState1skip> for BState {
+	fn from(o: BState1skip) -> Self {
+		Self {
+			minimum_degree: o.minimum_degree,
+			root: o.root,
+			next_node_id: o.next_node_id,
+			generation: 0,
+		}
+	}
+}
 
 impl BState {
 	pub fn new(minimum_degree: u32) -> Self {
@@ -50,7 +103,6 @@ impl BState {
 			root: None,
 			next_node_id: 0,
 			generation: 0,
-			_updated: false,
 		}
 	}
 
