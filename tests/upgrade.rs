@@ -37,7 +37,10 @@ mod upgrade {
 		{
 			// Start the docker instance
 			let mut docker = DockerContainer::start(&docker_version, &file_path);
-			let client = RestClient::new().wait_for_connection().await;
+			let client = RestClient::new().wait_for_connection().await.unwrap_or_else(|| {
+				docker.logs();
+				panic!("No connected client")
+			});
 			// Create data samples
 			create_data_on_docker(&client).await;
 			// Check that the data are okay on the original instance
@@ -139,6 +142,11 @@ mod upgrade {
 			}
 		}
 
+		fn logs(&mut self) {
+			info!("Logging Docker container {}", self.id);
+			Self::docker(Arguments::new(["logs", &self.id]));
+		}
+
 		fn stop(&mut self) {
 			if self.running {
 				info!("Stopping Docker container {}", self.id);
@@ -216,20 +224,20 @@ mod upgrade {
 			}
 		}
 
-		async fn wait_for_connection(self) -> Self {
+		async fn wait_for_connection(self) -> Option<Self> {
 			sleep(Duration::from_secs(2)).await;
 			let start = SystemTime::now();
 			while start.elapsed().unwrap() < CNX_TIMEOUT {
 				sleep(Duration::from_secs(2)).await;
 				if let Some(r) = self.query("INFO FOR ROOT").await {
 					if r.status() == StatusCode::OK {
-						return self;
+						return Some(self);
 					}
 				}
 				warn!("DB not yet responding");
 				sleep(Duration::from_secs(2)).await;
 			}
-			panic!("Cannot connect to DB");
+			None
 		}
 
 		async fn query(&self, q: &str) -> Option<reqwest::Response> {
