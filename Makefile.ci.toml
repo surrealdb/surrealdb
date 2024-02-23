@@ -100,11 +100,6 @@ env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.2.1", _TEST_FEATURES = "sto
 category = "CI - UPGRADE TESTS"
 run_task = { name = ["test-upgrade"], fork = true }
 
-[tasks.ci-upgrade-1-2-1-parser2]
-env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.2.1", _TEST_FEATURES = "parser2,storage-rocksdb" }
-category = "CI - UPGRADE TESTS"
-run_task = { name = ["test-upgrade"], fork = true }
-
 #
 # Tests private tasks
 #

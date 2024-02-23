@@ -121,7 +121,7 @@ fn parse_define_namespace() {
 		Statement::Define(DefineStatement::Namespace(DefineNamespaceStatement {
 			id: None,
 			name: Ident("a".to_string()),
-			comment: Some(Strand("test".to_string())),
+			comment: Some(Strand("test".to_string()))
 		}))
 	);
 
@@ -131,7 +131,7 @@ fn parse_define_namespace() {
 		Statement::Define(DefineStatement::Namespace(DefineNamespaceStatement {
 			id: None,
 			name: Ident("a".to_string()),
-			comment: None,
+			comment: None
 		}))
 	)
 }
@@ -147,7 +147,7 @@ fn parse_define_database() {
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(60) * 10
-			}),
+			})
 		}))
 	);
 
@@ -158,7 +158,7 @@ fn parse_define_database() {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: None,
-			changefeed: None,
+			changefeed: None
 		}))
 	)
 }
@@ -180,7 +180,7 @@ fn parse_define_function() {
 			name: Ident("foo::bar".to_string()),
 			args: vec![
 				(Ident("a".to_string()), Kind::Number),
-				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3))),
+				(Ident("b".to_string()), Kind::Array(Box::new(Kind::Bool), Some(3)))
 			],
 			block: Block(vec![Entry::Output(OutputStatement {
 				what: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_string()))])),
@@ -225,7 +225,7 @@ fn parse_define_token() {
 			base: Base::Sc(Ident("b".to_string())),
 			kind: Algorithm::EdDSA,
 			code: "foo".to_string(),
-			comment: Some(Strand("bar".to_string())),
+			comment: Some(Strand("bar".to_string()))
 		}))
 	)
 }
@@ -269,7 +269,7 @@ fn parse_define_param() {
 				.collect()
 			)),
 			comment: None,
-			permissions: Permission::Specific(Value::Null),
+			permissions: Permission::Specific(Value::Null)
 		}))
 	);
 }
@@ -277,8 +277,8 @@ fn parse_define_param() {
 #[test]
 fn parse_define_table() {
 	let res =
-        test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
-            .unwrap();
+		test_parse!(parse_stmt, r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#)
+			.unwrap();
 
 	assert_eq!(
 		res,
@@ -293,7 +293,7 @@ fn parse_define_table() {
 						expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 						alias: None,
 					}],
-					false,
+					false
 				),
 				what: Tables(vec![Table("bar".to_owned())]),
 				cond: None,
@@ -304,7 +304,7 @@ fn parse_define_table() {
 					crate::sql::Expression::Binary {
 						l: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_owned()))])),
 						o: Operator::Equal,
-						r: Value::Number(Number::Int(1)),
+						r: Value::Number(Number::Int(1))
 					}
 				))),
 				create: Permission::None,
@@ -357,7 +357,7 @@ fn parse_define_field() {
 			flex: true,
 			kind: Some(Kind::Option(Box::new(Kind::Either(vec![
 				Kind::Number,
-				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10)),
+				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10))
 			])))),
 			#[cfg(feature = "sql2")]
 			readonly: false,
@@ -370,7 +370,7 @@ fn parse_define_field() {
 				create: Permission::Specific(Value::Bool(true)),
 				select: Permission::Full,
 			},
-			comment: None,
+			comment: None
 		}))
 	)
 }
@@ -399,14 +399,14 @@ fn parse_define_index() {
 			what: Ident("table".to_owned()),
 			cols: Idioms(vec![
 				Idiom(vec![Part::Field(Ident("a".to_owned()))]),
-				Idiom(vec![Part::Field(Ident("b".to_owned())), Part::All]),
+				Idiom(vec![Part::Field(Ident("b".to_owned())), Part::All])
 			]),
 			index: Index::Search(SearchParams {
 				az: Ident("ana".to_owned()),
 				hl: true,
 				sc: Scoring::Bm {
 					k1: 0.1,
-					b: 0.2,
+					b: 0.2
 				},
 				doc_ids_order: 1,
 				doc_lengths_order: 2,
@@ -417,7 +417,7 @@ fn parse_define_index() {
 				postings_cache: 7,
 				terms_cache: 8,
 			}),
-			comment: None,
+			comment: None
 		}))
 	);
 
@@ -429,21 +429,21 @@ fn parse_define_index() {
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
 			what: Ident("table".to_owned()),
-			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))])]),
+			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
 			index: Index::Uniq,
-			comment: None,
+			comment: None
 		}))
 	);
 
 	let res =
-        test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9"#).unwrap();
+		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9"#).unwrap();
 
 	assert_eq!(
 		res,
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
 			what: Ident("table".to_owned()),
-			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))])]),
+			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
@@ -453,7 +453,7 @@ fn parse_define_index() {
 				mtree_cache: 9,
 				vector_type: VectorType::F64,
 			}),
-			comment: None,
+			comment: None
 		}))
 	);
 }
@@ -484,6 +484,7 @@ fn parse_define_analyzer() {
 				Filter::Uppercase,
 			]),
 			comment: None,
+			#[cfg(feature = "sql2")]
 			function: Some(Ident("foo::bar".to_string())),
 		})),
 	)
@@ -536,7 +537,7 @@ fn parse_delete_2() {
 			cond: Some(Cond(Value::Null)),
 			output: Some(Output::Null),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
-			parallel: true,
+			parallel: true
 		})
 	)
 }
@@ -560,17 +561,17 @@ pub fn parse_for() {
 					expr: Fields(
 						vec![Field::Single {
 							expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
-							alias: None,
+							alias: None
 						}],
-						false,
+						false
 					),
 					what: Values(vec![Value::Table(Table("bar".to_owned()))]),
 					..Default::default()
 				}))),
 				o: Operator::Mul,
-				r: Value::Number(Number::Int(2)),
+				r: Value::Number(Number::Int(2))
 			})),
-			block: Block(vec![Entry::Break(BreakStatement)]),
+			block: Block(vec![Entry::Break(BreakStatement)])
 		})
 	)
 }
@@ -590,9 +591,9 @@ fn parse_if() {
 				(
 					Value::Idiom(Idiom(vec![Part::Field(Ident("faz".to_owned()))])),
 					Value::Idiom(Idiom(vec![Part::Field(Ident("baz".to_owned()))]))
-				),
+				)
 			],
-			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))]))),
+			close: Some(Value::Idiom(Idiom(vec![Part::Field(Ident("baq".to_owned()))])))
 		})
 	)
 }
@@ -616,7 +617,7 @@ fn parse_if_block() {
 					Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(vec![
 						Part::Field(Ident("baz".to_owned()))
 					])))]))),
-				),
+				)
 			],
 			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(Value::Idiom(Idiom(
 				vec![Part::Field(Ident("baq".to_owned()))]
@@ -750,7 +751,7 @@ fn parse_let() {
 		res,
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
-			what: Value::Number(Number::Int(1)),
+			what: Value::Number(Number::Int(1))
 		})
 	);
 
@@ -759,7 +760,7 @@ fn parse_let() {
 		res,
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
-			what: Value::Number(Number::Int(1)),
+			what: Value::Number(Number::Int(1))
 		})
 	);
 }
@@ -773,7 +774,7 @@ fn parse_show() {
 		Statement::Show(ShowStatement {
 			table: Some(Table("foo".to_owned())),
 			since: ShowSince::Versionstamp(1),
-			limit: Some(10),
+			limit: Some(10)
 		})
 	);
 
@@ -799,7 +800,7 @@ fn parse_show() {
 		Statement::Show(ShowStatement {
 			table: None,
 			since: ShowSince::Timestamp(Datetime(expected_datetime)),
-			limit: None,
+			limit: None
 		})
 	)
 }
@@ -986,7 +987,7 @@ fn parse_option() {
 		res,
 		Statement::Option(OptionStatement {
 			name: Ident("value".to_owned()),
-			what: true,
+			what: true
 		})
 	)
 }
@@ -1083,7 +1084,7 @@ fn parse_remove() {
 		res,
 		Statement::Remove(RemoveStatement::Token(RemoveTokenStatement {
 			name: Ident("foo".to_owned()),
-			base: Base::Sc(Ident("bar".to_owned())),
+			base: Base::Sc(Ident("bar".to_owned()))
 		}))
 	);
 
@@ -1129,7 +1130,7 @@ fn parse_remove() {
 			name: Idiom(vec![
 				Part::Field(Ident("foo".to_owned())),
 				Part::Field(Ident("bar".to_owned())),
-				Part::Index(Number::Int(10)),
+				Part::Index(Number::Int(10))
 			]),
 			what: Ident("bar".to_owned()),
 		}))
@@ -1168,7 +1169,7 @@ fn parse_update() {
 		parse_stmt,
 		r#"UPDATE ONLY <future> { "text" }, a->b UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL"#
 	)
-        .unwrap();
+	.unwrap();
 	assert_eq!(
 		res,
 		Statement::Update(UpdateStatement {
@@ -1184,8 +1185,8 @@ fn parse_update() {
 						what: Tables(vec![Table("b".to_string())]),
 						expr: Fields::all(),
 						..Default::default()
-					}),
-				])),
+					})
+				]))
 			]),
 			cond: Some(Cond(Value::Bool(true))),
 			data: Some(Data::UnsetExpression(vec![
@@ -1197,9 +1198,9 @@ fn parse_update() {
 						what: Tables(vec![Table("b".to_string())]),
 						expr: Fields::all(),
 						..Default::default()
-					}),
+					})
 				]),
-				Idiom(vec![Part::Field(Ident("c".to_string())), Part::All]),
+				Idiom(vec![Part::Field(Ident("c".to_string())), Part::All])
 			])),
 			output: Some(Output::Diff),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),

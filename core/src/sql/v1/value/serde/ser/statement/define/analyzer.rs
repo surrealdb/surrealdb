@@ -77,7 +77,6 @@ impl serde::ser::SerializeStruct for SerializeDefineAnalyzerStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(DefineAnalyzerStatement {
 			name: self.name,
-			function: None, // In sql v1, functions are not supported
 			tokenizers: self.tokenizers,
 			filters: self.filters,
 			comment: self.comment,

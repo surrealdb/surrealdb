@@ -566,6 +566,7 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			function: None,
 			tokenizers: None,
 			filters: None,
