@@ -9,7 +9,6 @@ use std::time;
 #[revisioned(revision = 2)]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
-	// SQL v1 ends on revision 1 and following syntax is SQL v2 only
 	#[revision(start = 2)]
 	pub store_original: bool,
 }
@@ -17,6 +16,9 @@ pub struct ChangeFeed {
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
+		if self.store_original {
+			write!(f, " INCLUDE ORIGINAL")?;
+		};
 		Ok(())
 	}
 }

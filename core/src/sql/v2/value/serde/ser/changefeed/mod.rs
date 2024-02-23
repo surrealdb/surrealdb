@@ -53,6 +53,9 @@ impl serde::ser::SerializeStruct for SerializeChangeFeed {
 			"expiry" => {
 				self.expiry = value.serialize(ser::duration::Serializer.wrap())?;
 			}
+			"store_original" => {
+				self.store_original = value.serialize(ser::primitive::bool::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `ChangeFeed::{key}`")));
 			}
