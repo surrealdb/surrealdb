@@ -1185,33 +1185,6 @@ async fn session_expiration_operations() -> Result<(), Box<dyn std::error::Error
 		socket.send_request("use", json!([NS, DB])).await,
 		socket.send_request("ping", json!([])).await,
 		socket.send_request("version", json!([])).await,
-		socket
-			.send_request(
-				"signup",
-				json!([{
-					"ns": NS,
-					"db": DB,
-					"sc": "scope",
-					"email": "another@email.com",
-					"pass": "pass",
-				}]),
-			)
-			.await,
-		socket
-			.send_request(
-				"signin",
-				json!(
-					[{
-						"ns": NS,
-						"db": DB,
-						"sc": "scope",
-						"email": "another@email.com",
-						"pass": "pass",
-					}]
-				),
-			)
-			.await,
-		socket.send_request("authenticate", json!([root_token,])).await,
 		socket.send_request("invalidate", json!([])).await,
 	];
 	for op in operations_ok.iter() {
@@ -1222,22 +1195,75 @@ async fn session_expiration_operations() -> Result<(), Box<dyn std::error::Error
 		let res = res.as_object().unwrap();
 		// Verify response contains no error
 		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
-		// Some of these methods may refresh the expiration of the session
-		// Verify that the session is expired still after the allowed operation
-		let res = socket.send_message_query("SELECT VALUE working FROM test:1").await;
-		// Otherwise, wait for it to expire again
-		if res.is_ok() {
-			// Wait two seconds for the session to expire
-			tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-			// The session must be expired now or we fail the test
-			let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
-			assert!(res.is_ok(), "result: {:?}", res);
-			let res = res.unwrap();
-			assert!(res.is_object(), "result: {:?}", res);
-			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
-		}
 	}
+
+	// Test operations that SHOULD work with an expired session
+	// These operations will refresh the session expiration
+	let res = socket
+			.send_request(
+				"signup",
+				json!([{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "another@email.com",
+					"pass": "pass",
+				}]),
+			)
+			.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Wait two seconds for the session to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// The session must be expired now or we fail the test
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	let res = socket
+		.send_request(
+			"signin",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "another@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Wait two seconds for the session to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// The session must be expired now or we fail the test
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+
+	// This needs to be last operation as the session will no longer expire afterwards
+	let res = socket.send_request("authenticate", json!([root_token,])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
 
 	// Test passed
 	server.finish();
