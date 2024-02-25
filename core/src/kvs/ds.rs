@@ -126,8 +126,6 @@ impl fmt::Display for Datastore {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
 		}
 	}
 }
@@ -1061,8 +1059,6 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::SurrealKV(tx)
 			}
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
 		};
 
 		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
