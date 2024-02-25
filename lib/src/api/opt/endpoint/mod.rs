@@ -17,6 +17,8 @@ mod speedb;
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
+#[cfg(feature = "kv-postgres")]
+mod postgres;
 
 use crate::api::err::Error;
 use crate::api::Connection;
@@ -134,6 +136,7 @@ pub enum EndpointKind {
 	TiKv,
 	Unsupported(String),
 	SurrealKV,
+	Postgres,
 }
 
 impl From<&str> for EndpointKind {
@@ -152,6 +155,7 @@ impl From<&str> for EndpointKind {
 			"speedb" => Self::SpeeDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKV,
+			"postgres" => Self::Postgres,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}

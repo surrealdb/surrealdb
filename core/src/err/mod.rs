@@ -866,6 +866,13 @@ impl From<surrealkv::Error> for Error {
 	}
 }
 
+#[cfg(feature = "sea-orm")]
+impl From<sea_orm::error::DbErr> for Error {
+	fn from(e: sea_orm::error::DbErr) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
 impl From<channel::RecvError> for Error {
 	fn from(e: channel::RecvError) -> Error {
 		Error::Channel(e.to_string())

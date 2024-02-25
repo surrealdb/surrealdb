@@ -111,6 +111,8 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Transaction),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Transaction),
+	#[cfg(feature = "kv-postgres")]
+	Postgres(super::postgres::Transaction),
 }
 #[derive(Copy, Clone)]
 pub enum TransactionType {
@@ -150,6 +152,8 @@ impl fmt::Display for Transaction {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
+			#[cfg(feature = "kv-postgres")]
+			Inner::Postgres(_) => write!(f, "postgres"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -229,6 +233,11 @@ impl Transaction {
 				inner: Inner::SurrealKV(v),
 				..
 			} => v.is_closed(),
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.is_closed(),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -276,6 +285,11 @@ impl Transaction {
 				inner: Inner::SurrealKV(v),
 				..
 			} => v.cancel().await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.cancel().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -321,6 +335,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.commit().await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
@@ -392,6 +411,11 @@ impl Transaction {
 				inner: Inner::SurrealKV(v),
 				..
 			} => v.del(key).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.del(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -439,6 +463,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.exists(key).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.exists(key).await,
 			#[allow(unreachable_patterns)]
@@ -490,6 +519,11 @@ impl Transaction {
 				inner: Inner::SurrealKV(v),
 				..
 			} => v.get(key).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.get(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -538,6 +572,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.set(key, val).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.set(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -591,6 +630,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.get_timestamp(key).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.get_timestamp(key).await,
 			#[allow(unreachable_patterns)]
@@ -690,6 +734,14 @@ impl Transaction {
 				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
 				v.set(k, val).await
 			}
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => {
+				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
+				v.set(k, val).await
+			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -736,6 +788,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.put(category, key, val).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.put(category, key, val).await,
 			#[allow(unreachable_patterns)]
@@ -787,6 +844,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
@@ -843,6 +905,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.scan(range, batch_limit).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.scan(range, batch_limit).await,
 			#[allow(unreachable_patterns)]
@@ -917,6 +984,11 @@ impl Transaction {
 				inner: Inner::SurrealKV(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.putc(key, val, chk).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -965,6 +1037,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.delc(key, chk).await,
 			#[allow(unreachable_patterns)]
@@ -2869,6 +2946,11 @@ impl Transaction {
 			#[cfg(feature = "kv-surrealkv")]
 			Transaction {
 				inner: Inner::SurrealKV(v),
+				..
+			} => v.set_check_level(check),
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.set_check_level(check),
 			#[allow(unreachable_patterns)]

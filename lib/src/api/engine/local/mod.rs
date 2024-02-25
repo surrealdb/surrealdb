@@ -377,6 +377,11 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKV;
 
+#[cfg(feature = "kv-postgres")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-postgres")))]
+#[derive(Debug)]
+pub struct SurrealKV;
+
 /// An embedded database
 #[derive(Debug, Clone)]
 pub struct Db {

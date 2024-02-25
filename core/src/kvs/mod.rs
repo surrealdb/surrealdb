@@ -22,6 +22,7 @@ mod rocksdb;
 mod speedb;
 mod surrealkv;
 mod tikv;
+mod postgres;
 mod tx;
 
 mod clock;
@@ -34,7 +35,8 @@ pub(crate) mod lq_structs;
 	feature = "kv-indxdb",
 	feature = "kv-tikv",
 	feature = "kv-fdb",
-	feature = "kv-surrealkv"
+	feature = "kv-surrealkv",
+	feature = "kv-postgres"
 ))]
 mod tests;
 
