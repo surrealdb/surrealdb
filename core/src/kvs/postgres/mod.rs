@@ -16,7 +16,6 @@ use sqlx::postgres::PgRow;
 use sqlx::Executor;
 use sqlx::PgPool;
 use sqlx::Row;
-use std::time::Duration;
 
 #[derive(Clone)]
 pub struct Datastore {
@@ -318,7 +317,7 @@ impl Transactable for Transaction {
 			sqlx::query("DELETE FROM kvstore WHERE ctid IN (SELECT ctid FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3)")
 			.bind(rng.start.into())
 			.bind(rng.end.into())
-			// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values. 
+			// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values.
 			// So we are forced to cast to signed integer. Fortunately, we are converting from unsigned to signed,
 			// we just need to make sure the casted type is big enough to not have integer overflow
 			.bind(limit as i64)
@@ -385,7 +384,7 @@ impl Transactable for Transaction {
 
 			let verbytes = u64_to_versionstamp(ver);
 
-			self.put(KeyCategory::Unknown, k, verbytes.to_vec()).await?;
+			self.set(k, verbytes.to_vec()).await?;
 			// Return the uint64 representation of the timestamp as the result
 			Ok(verbytes)
 		} else {
