@@ -18,11 +18,11 @@ mod fdb;
 mod indxdb;
 mod kv;
 mod mem;
+mod postgres;
 mod rocksdb;
 mod speedb;
 mod surrealkv;
 mod tikv;
-mod postgres;
 mod tx;
 
 mod clock;

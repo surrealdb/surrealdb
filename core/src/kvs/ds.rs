@@ -1077,12 +1077,12 @@ impl Datastore {
 			Inner::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::SurrealKV(tx)
-			},
+			}
 			#[cfg(feature = "kv-postgres")]
 			Inner::Postgres(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::Postgres(tx)
-			},
+			}
 		};
 
 		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);

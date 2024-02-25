@@ -11,8 +11,13 @@ use crate::kvs::Val;
 use crate::vs::try_to_u64_be;
 use crate::vs::u64_to_versionstamp;
 use crate::vs::Versionstamp;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::PgRow;
 use sqlx::Executor;
 use sqlx::PgPool;
+use sqlx::Row;
+use std::time::Duration;
+
 #[derive(Clone)]
 pub struct Datastore {
 	pool: PgPool,
@@ -30,24 +35,24 @@ pub struct Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		let pool = PgPool::connect(path).await?;
+		let pool = PgPoolOptions::new().connect(path).await?;
 		sqlx::query(
 			r#"
 			CREATE TABLE IF NOT EXISTS kvstore (
-				key bytea PRIMARY KEY,
-				value bytea
+				key bytea PRIMARY KEY NOT NULL,
+				value bytea NOT NULL
 			);
 			"#,
 		)
 		.execute(&pool)
 		.await?;
-	sqlx::query(
-		r#"
-		CREATE UNIQUE INDEX IF NOT EXISTS kvstore_sorted_pk ON kvstore(key ASC);
+		sqlx::query(
+			r#"
+		CREATE UNIQUE INDEX IF NOT EXISTS kvstore_sorted_pk ON kvstore(key ASC, value);
 		"#,
-	)
-	.execute(&pool)
-	.await?;
+		)
+		.execute(&pool)
+		.await?;
 		Ok(Self {
 			pool,
 		})
@@ -135,7 +140,7 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 	{
 		if let Some(ref mut tx) = self.inner {
-			Ok(sqlx::query_as("SELECT value FROM kvstore WHERE key = $1")
+			Ok(sqlx::query_scalar("SELECT value FROM kvstore WHERE key = $1")
 				.bind(key.into())
 				.fetch_optional(&mut **tx)
 				.await?)
@@ -149,6 +154,10 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 		V: Into<crate::kvs::Val>,
 	{
+		// If the transaction is already closed or is read-only, return an error.
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
 		if let Some(ref mut tx) = self.inner {
 			sqlx::query(
 				"INSERT INTO kvstore(key, value) VALUES($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -173,6 +182,10 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 		V: Into<crate::kvs::Val>,
 	{
+		// If the transaction is already closed or is read-only, return an error.
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
 		if let Some(ref mut tx) = self.inner {
 			sqlx::query(
 				"INSERT INTO kvstore(key, value) VALUES($1, $2) ON CONFLICT (key) DO NOTHING",
@@ -192,23 +205,39 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 		V: Into<crate::kvs::Val>,
 	{
+		// If the transaction is already closed or is read-only, return an error.
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
 		if let Some(ref mut tx) = self.inner {
-			match chk {
+			let key: crate::kvs::Key = key.into();
+			let ok = match chk {
 				Some(chk) => {
-					let execution = sqlx::query("INSERT INTO kvstore(key, value) VALUES($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value WHERE value = $3")
-						.bind(key.into())
-						.bind(val.into())
-						.bind(chk.into())
-						.execute(&mut **tx)
-						.await?;
-					if execution.rows_affected() == 0 {
-						Err(Error::TxConditionNotMet)
-					} else {
-						Ok(())
-					}
+					sqlx::query_scalar(
+						"SELECT EXISTS(SELECT 1 FROM kvstore WHERE key = $1 AND value = $2)",
+					)
+					.bind(key.clone())
+					.bind(chk.into())
+					.fetch_one(&mut **tx)
+					.await?
 				}
-				None if self.exi(key).await? => return Err(Error::TxConditionNotMet),
-				_ => Ok(()),
+				None => {
+					sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM kvstore WHERE key = $1)")
+						.bind(key.clone())
+						.fetch_one(&mut **tx)
+						.await?
+				}
+			};
+
+			if ok {
+				sqlx::query("INSERT INTO kvstore(key, value) VALUES($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+				.bind(key)
+				.bind(val.into())
+				.execute(&mut **tx)
+				.await?;
+				Ok(())
+			} else {
+				Err(Error::TxConditionNotMet)
 			}
 		} else {
 			Err(Error::TxFinished)
@@ -219,6 +248,10 @@ impl Transactable for Transaction {
 	where
 		K: Into<crate::kvs::Key>,
 	{
+		// If the transaction is already closed or is read-only, return an error.
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
 		if let Some(ref mut tx) = self.inner {
 			sqlx::query("DELETE FROM kvstore WHERE key = $1")
 				.bind(key.into())
@@ -235,23 +268,37 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 		V: Into<crate::kvs::Val>,
 	{
+		// If the transaction is already closed or is read-only, return an error.
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
 		if let Some(ref mut tx) = self.inner {
-			match chk {
+			let key: crate::kvs::Key = key.into();
+			let ok = match chk {
 				Some(chk) => {
-					let execution =
-						sqlx::query("DELETE FROM kvstore WHERE key = $1 AND value = $2")
-							.bind(key.into())
-							.bind(chk.into())
-							.execute(&mut **tx)
-							.await?;
-					if execution.rows_affected() == 0 {
-						Err(Error::TxConditionNotMet)
-					} else {
-						Ok(())
-					}
+					sqlx::query_scalar(
+						"SELECT EXISTS(SELECT 1 FROM kvstore WHERE key = $1 AND value = $2)",
+					)
+					.bind(key.clone())
+					.bind(chk.into())
+					.fetch_one(&mut **tx)
+					.await?
 				}
-				None if self.exi(key).await? => return Err(Error::TxConditionNotMet),
-				_ => Ok(()),
+				None => {
+					sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM kvstore WHERE key = $1)")
+						.bind(key.clone())
+						.fetch_one(&mut **tx)
+						.await?
+				}
+			};
+			if ok {
+				sqlx::query("DELETE FROM kvstore WHERE key = $1")
+					.bind(key)
+					.execute(&mut **tx)
+					.await?;
+				Ok(())
+			} else {
+				Err(Error::TxConditionNotMet)
 			}
 		} else {
 			Err(Error::TxFinished)
@@ -262,8 +309,12 @@ impl Transactable for Transaction {
 	where
 		K: Into<Key>,
 	{
+		// If the transaction is already closed or is read-only, return an error.
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
 		if let Some(ref mut tx) = self.inner {
-			sqlx::query("DELETE FROM kvstore WHERE ctid IN (SELECT ctid FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3)")
+			sqlx::query("DELETE FROM kvstore WHERE key IN (SELECT key FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3)")
 			.bind(rng.start.into())
 			.bind(rng.end.into())
 			// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values. 
@@ -283,13 +334,16 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 	{
 		if let Some(ref mut tx) = self.inner {
-			Ok(sqlx::query_as("SELECT key, value FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3")
+			Ok(sqlx::query("SELECT key, value FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3")
 			.bind(rng.start.into())
 			.bind(rng.end.into())
 			// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values. 
 			// So we are forced to cast to signed integer. Fortunately, we are converting from unsigned to signed,
 			// we just need to make sure the casted type is big enough to not have integer overflow
 			.bind(limit as i64)
+			.map(|row: PgRow| {
+				(row.get("key"), row.get("value"))
+			})
 			.fetch_all(&mut **tx)
 			.await?)
 		} else {
@@ -301,28 +355,61 @@ impl Transactable for Transaction {
 	where
 		K: Into<crate::kvs::Key>,
 	{
-		// Write the timestamp to the "last-write-timestamp" key
-		// to ensure that no other transactions can commit with older timestamps.
-		let k: Key = key.into();
-		let prev = self.get(k.clone()).await?;
-		let ver = match prev {
-			Some(prev) => {
-				let slice = prev.as_slice();
-				let res: Result<[u8; 10], Error> = match slice.try_into() {
-					Ok(ba) => Ok(ba),
-					Err(e) => Err(Error::Ds(e.to_string())),
-				};
-				let array = res?;
-				let prev: u64 = try_to_u64_be(array)?;
-				prev + 1
-			}
-			None => 1,
-		};
+		// If the transaction is already closed or is read-only, return an error.
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		if let Some(ref mut tx) = self.inner {
+			// Write the timestamp to the "last-write-timestamp" key
+			// to ensure that no other transactions can commit with older timestamps.
+			let k: Key = key.into();
+			let prev: Option<Val> =
+				sqlx::query_scalar("SELECT value FROM kvstore WHERE key = $1 FOR UPDATE")
+					.bind(k.clone())
+					.fetch_optional(&mut **tx)
+					.await?;
+			let ver = match prev {
+				Some(prev) => {
+					let slice = prev.as_slice();
+					let res: Result<[u8; 10], Error> = match slice.try_into() {
+						Ok(ba) => Ok(ba),
+						Err(e) => Err(Error::Ds(e.to_string())),
+					};
+					let array = res?;
+					let prev: u64 = try_to_u64_be(array)?;
+					prev + 1
+				}
+				None => 1,
+			};
 
-		let verbytes = u64_to_versionstamp(ver);
+			let verbytes = u64_to_versionstamp(ver);
 
-		self.put(KeyCategory::Unknown, k, verbytes.to_vec()).await?;
-		// Return the uint64 representation of the timestamp as the result
-		Ok(verbytes)
+			self.put(KeyCategory::Unknown, k, verbytes.to_vec()).await?;
+			// Return the uint64 representation of the timestamp as the result
+			Ok(verbytes)
+		} else {
+			Err(Error::TxFinished)
+		}
+	}
+
+	/// Obtain a new key that is suffixed with the change timestamp
+	async fn get_versionstamped_key<K>(
+		&mut self,
+		ts_key: K,
+		prefix: K,
+		suffix: K,
+	) -> Result<Vec<u8>, Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is writable
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+		let ts = self.get_timestamp(ts_key, false).await?;
+		let mut k: Vec<u8> = prefix.into();
+		k.append(&mut ts.to_vec());
+		k.append(&mut suffix.into());
+		Ok(k)
 	}
 }
