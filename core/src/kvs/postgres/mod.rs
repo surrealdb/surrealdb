@@ -359,37 +359,29 @@ impl Transactable for Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		if let Some(ref mut tx) = self.inner {
-			// Write the timestamp to the "last-write-timestamp" key
-			// to ensure that no other transactions can commit with older timestamps.
-			let k: Key = key.into();
-			let prev: Option<Val> =
-				sqlx::query_scalar("SELECT value FROM kvstore WHERE key = $1 FOR UPDATE")
-					.bind(k.clone())
-					.fetch_optional(&mut **tx)
-					.await?;
-			let ver = match prev {
-				Some(prev) => {
-					let slice = prev.as_slice();
-					let res: Result<[u8; 10], Error> = match slice.try_into() {
-						Ok(ba) => Ok(ba),
-						Err(e) => Err(Error::Ds(e.to_string())),
-					};
-					let array = res?;
-					let prev: u64 = try_to_u64_be(array)?;
-					prev + 1
-				}
-				None => 1,
-			};
+		// Write the timestamp to the "last-write-timestamp" key
+		// to ensure that no other transactions can commit with older timestamps.
+		let k: Key = key.into();
+		let prev = self.get(k.clone()).await?;
+		let ver = match prev {
+			Some(prev) => {
+				let slice = prev.as_slice();
+				let res: Result<[u8; 10], Error> = match slice.try_into() {
+					Ok(ba) => Ok(ba),
+					Err(e) => Err(Error::Ds(e.to_string())),
+				};
+				let array = res?;
+				let prev: u64 = try_to_u64_be(array)?;
+				prev + 1
+			}
+			None => 1,
+		};
 
-			let verbytes = u64_to_versionstamp(ver);
+		let verbytes = u64_to_versionstamp(ver);
 
-			self.set(k, verbytes.to_vec()).await?;
-			// Return the uint64 representation of the timestamp as the result
-			Ok(verbytes)
-		} else {
-			Err(Error::TxFinished)
-		}
+		self.set(k, verbytes.to_vec()).await?;
+		// Return the uint64 representation of the timestamp as the result
+		Ok(verbytes)
 	}
 
 	/// Obtain a new key that is suffixed with the change timestamp
