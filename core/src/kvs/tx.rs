@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
+use std::future::Future;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -84,6 +85,108 @@ where
 	pub values: Vec<(Key, Val)>,
 }
 
+pub trait Transactable {
+	/// Check if closed
+	fn closed(&self) -> bool;
+	/// Cancel a transaction
+	fn cancel(&mut self) -> impl Future<Output = Result<(), Error>>;
+	/// Commit a transaction
+	fn commit(&mut self) -> impl Future<Output = Result<(), Error>>;
+	/// Check if a key exists
+	fn exi<K>(&mut self, key: K) -> impl Future<Output = Result<bool, Error>>
+	where
+		K: Into<Key>;
+	/// Fetch a key from the database
+	fn get<K>(&mut self, key: K) -> impl Future<Output = Result<Option<Val>, Error>>
+	where
+		K: Into<Key>;
+	/// Insert or update a key in the database
+	fn set<K, V>(&mut self, key: K, val: V) -> impl Future<Output = Result<(), Error>>
+	where
+		K: Into<Key>,
+		V: Into<Val>;
+	/// Insert a key if it doesn't exist in the database
+	fn put<K, V>(
+		&mut self,
+		category: KeyCategory,
+		key: K,
+		val: V,
+	) -> impl Future<Output = Result<(), Error>>
+	where
+		K: Into<Key>,
+		V: Into<Val>;
+	/// Insert a key if it doesn't exist in the database
+	fn putc<K, V>(
+		&mut self,
+		key: K,
+		val: V,
+		chk: Option<V>,
+	) -> impl Future<Output = Result<(), Error>>
+	where
+		K: Into<Key>,
+		V: Into<Val>;
+	/// Delete a key
+	fn del<K>(&mut self, key: K) -> impl Future<Output = Result<(), Error>>
+	where
+		K: Into<Key>;
+	/// Delete a key
+	fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> impl Future<Output = Result<(), Error>>
+	where
+		K: Into<Key>,
+		V: Into<Val>;
+
+	#[allow(unused_variables)]
+	fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> impl Future<Output = Result<(), Error>>
+	where
+		K: Into<Key>,
+	{
+		async { Err(Error::UnimplementedInternally) }
+	}
+	/// Retrieve a range of keys from the databases
+	fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> impl Future<Output = Result<Vec<(Key, Val)>, Error>>
+	where
+		K: Into<Key>;
+	fn get_timestamp<K>(
+		&mut self,
+		key: K,
+		lock: bool,
+	) -> impl Future<Output = Result<Versionstamp, Error>>
+	where
+		K: Into<Key>;
+	fn set_versionstamped_key<K, V>(
+		&mut self,
+		ts_key: K,
+		prefix: K,
+		suffix: K,
+		val: V,
+	) -> impl Future<Output = Result<(), Error>>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		async {
+			let k = self.get_versionstamped_key(ts_key, prefix, suffix).await?;
+			self.set(k, val).await
+		}
+	}
+	#[allow(unused_variables)]
+	fn get_versionstamped_key<K>(
+		&mut self,
+		ts_key: K,
+		prefix: K,
+		suffix: K,
+	) -> impl Future<Output = Result<Key, Error>>
+	where
+		K: Into<Key>,
+	{
+		async { Err(Error::UnimplementedInternally) }
+	}
+}
+
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
@@ -114,6 +217,30 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-postgres")]
 	Postgres(super::postgres::Transaction),
 }
+
+macro_rules! expand_inner {
+	( $v:expr, $arm:pat_param => $b:block ) => {
+		match $v {
+			#[cfg(feature = "kv-mem")]
+			Inner::Mem($arm) => $b,
+			#[cfg(feature = "kv-rocksdb")]
+			Inner::RocksDB($arm) => $b,
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB($arm) => $b,
+			#[cfg(feature = "kv-indxdb")]
+			Inner::IndxDB($arm) => $b,
+			#[cfg(feature = "kv-tikv")]
+			Inner::TiKV($arm) => $b,
+			#[cfg(feature = "kv-fdb")]
+			Inner::FoundationDB($arm) => $b,
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV($arm) => $b,
+			#[cfg(feature = "kv-postgres")]
+			Inner::Postgres($arm) => $b,
+		}
+	};
+}
+
 #[derive(Copy, Clone)]
 pub enum TransactionType {
 	Read,
@@ -154,8 +281,6 @@ impl fmt::Display for Transaction {
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
 			#[cfg(feature = "kv-postgres")]
 			Inner::Postgres(_) => write!(f, "postgres"),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
 		}
 	}
 }
@@ -197,50 +322,8 @@ impl Transaction {
 	pub async fn closed(&self) -> bool {
 		#[cfg(debug_assertions)]
 		trace!("Closed");
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.is_closed(),
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.is_closed(),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+
+		expand_inner!(&self.inner, v => { v.closed() })
 	}
 
 	/// Cancel a transaction.
@@ -249,50 +332,7 @@ impl Transaction {
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Cancel");
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.cancel(),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.cancel().await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.cancel().await })
 	}
 
 	/// Commit a transaction.
@@ -301,50 +341,7 @@ impl Transaction {
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!("Commit");
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.commit(),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.commit().await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.commit().await })
 	}
 
 	#[allow(unused)]
@@ -375,50 +372,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Del {:?}", key);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.del(key),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.del(key).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.del(key).await })
 	}
 
 	/// Check if a key exists in the datastore.
@@ -429,50 +383,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Exi {:?}", key);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.exi(key),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.exists(key).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.exists(key).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.exi(key).await })
 	}
 
 	/// Fetch a key from the datastore.
@@ -483,50 +394,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Get {:?}", key);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.get(key),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.get(key).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.get(key).await })
 	}
 
 	/// Insert or update a key in the datastore.
@@ -538,50 +406,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} => {:?}", key, val);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.set(key, val),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.set(key, val).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
 	}
 
 	/// Obtain a new change timestamp for a key
@@ -596,50 +421,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Get Timestamp {:?}", key);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.get_timestamp(key),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.get_timestamp(key).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.get_timestamp(key).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.get_timestamp(key, lock).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.get_timestamp().await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.get_timestamp(key).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.get_timestamp(key).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.get_timestamp(key).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.get_timestamp(key, lock).await })
 	}
 
 	#[allow(unused)]
@@ -680,71 +462,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val)
-			}
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val).await
-			}
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val).await
-			}
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val).await
-			}
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.set_versionstamped_key(prefix, suffix, val).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val).await
-			}
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val).await
-			}
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => {
-				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val).await
-			}
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.set_versionstamped_key(ts_key, prefix, suffix, val).await })
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -754,50 +472,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.put(key, val),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.put(category, key, val).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.put(category, key, val).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.put(key, val).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.put(category, key, val).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.put(category, key, val).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.put(category, key, val).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.put(category, key, val).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.put(category, key, val).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -810,50 +485,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", rng.start, rng.end);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.scan(rng, limit),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.scan(rng, limit).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -871,50 +503,8 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
 		let range = page.range.clone();
-		let res = match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.scan(range, batch_limit),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.scan(range, batch_limit).await,
-			#[allow(unreachable_patterns)]
-			_ => Err(Error::MissingStorageEngine),
-		};
+		let res = expand_inner!(&mut self.inner, v => { v.scan(range, batch_limit).await });
+
 		// Construct next page
 		res.map(|tup_vec: Vec<(Key, Val)>| {
 			if tup_vec.len() < batch_limit as usize {
@@ -948,50 +538,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.putc(key, val, chk),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
@@ -1003,50 +550,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delc {:?} if {:?}", key, chk);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.delc(key, chk),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.delc(key, chk).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
 	}
 
 	// --------------------------------------------------
@@ -1092,23 +596,13 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
-		match self {
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.delr(rng, limit).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(v),
-				..
-			} => v.delr(rng).await,
-			#[allow(unreachable_patterns)]
-			_ => self._delr(rng, limit).await,
+		match expand_inner!(&mut self.inner, v => { v.delr(rng.clone(), limit).await }) {
+			Err(Error::UnimplementedInternally) => self._delr(rng, limit).await,
+			ret => ret,
 		}
 	}
 
@@ -2911,51 +2405,7 @@ impl Transaction {
 
 	#[allow(unused_variables)]
 	fn check_level(&mut self, check: Check) {
-		#![allow(unused_variables)]
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(ref mut v),
-				..
-			} => v.check_level(check),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(ref mut v),
-				..
-			} => v.check_level(check),
-			#[cfg(feature = "kv-speedb")]
-			Transaction {
-				inner: Inner::SpeeDB(ref mut v),
-				..
-			} => v.check_level(check),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(ref mut v),
-				..
-			} => v.check_level(check),
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(ref mut v),
-				..
-			} => v.check_level(check),
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FoundationDB(ref mut v),
-				..
-			} => v.check_level(check),
-			#[cfg(feature = "kv-surrealkv")]
-			Transaction {
-				inner: Inner::SurrealKV(v),
-				..
-			} => v.set_check_level(check),
-			#[cfg(feature = "kv-postgres")]
-			Transaction {
-				inner: Inner::Postgres(v),
-				..
-			} => v.set_check_level(check),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		expand_inner!(&mut self.inner, v => { v.check_level(check) })
 	}
 }
 

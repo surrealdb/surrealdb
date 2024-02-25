@@ -3,7 +3,7 @@ name = "surrealdb-core"
 publish = true
 edition = "2021"
 version = "1.3.0"
-rust-version = "1.70.0"
+rust-version = "1.75.0"
 readme = "../lib/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
@@ -38,9 +38,8 @@ kv-fdb-6_3 = ["foundationdb/fdb-6_3", "kv-fdb"]
 kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time"]
-kv-postgres = ["sea-orm", "sea-orm?/sqlx-postgres", "tokio/time"]
+kv-postgres = ["dep:sqlx", "sqlx?/postgres", "tokio/time"]
 scripting = ["dep:js"]
-sea-orm = ["dep:sea-orm"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core1", "dep:ndarray"]
 ml2 = ["dep:surrealml-core2", "dep:ndarray"]
@@ -131,7 +130,7 @@ rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
-sea-orm = { version = "0.12.14", optional = true, features = ["runtime-tokio", "macros", "debug-print"] }
+sqlx = { version = "0.7.3", optional = true, features = ["runtime-tokio"] }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"

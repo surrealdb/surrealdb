@@ -779,6 +779,10 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	/// Placeholder for internal methods to indicate unimplemented features
+	#[error("Placeholder for internal methods to indicate unimplemented features")]
+	UnimplementedInternally,
 }
 
 impl From<Error> for String {
