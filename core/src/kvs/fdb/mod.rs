@@ -5,6 +5,7 @@ mod cnf;
 use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
+use crate::kvs::Transactable;
 use crate::kvs::Val;
 use crate::vs::{u64_to_versionstamp, Versionstamp};
 use foundationdb::options::DatabaseOption;
@@ -139,14 +140,6 @@ impl Datastore {
 }
 
 impl Transaction {
-	/// Behaviour if unclosed
-	pub(crate) fn check_level(&mut self, check: Check) {
-		self.check = check;
-	}
-	/// Check if closed
-	pub(crate) fn closed(&self) -> bool {
-		self.done
-	}
 	/// We use lock=true to enable the tikv's own pessimistic inner (https://docs.pingcap.com/tidb/v4.0/pessimistic-transaction)
 	/// for tikv kvs.
 	/// FDB's standard transaction(snapshot=false) behaves like a tikv perssimistic inner
@@ -158,8 +151,20 @@ impl Transaction {
 	fn snapshot(&self) -> bool {
 		!self.write && !self.lock
 	}
+
+	/// Behaviour if unclosed
+	pub(crate) fn check_level(&mut self, check: Check) {
+		self.check = check;
+	}
+}
+
+impl Transactable for Transaction {
+	/// Check if closed
+	fn closed(&self) -> bool {
+		self.done
+	}
 	/// Cancel a transaction
-	pub(crate) async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -185,7 +190,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Commit a transaction
-	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -217,7 +222,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Check if a key exists
-	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
 	{
@@ -242,7 +247,7 @@ impl Transaction {
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FoundationDB: {}", e)))
 	}
 	/// Fetch a key from the database
-	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
 	{
@@ -272,7 +277,10 @@ impl Transaction {
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[allow(unused)]
-	pub(crate) async fn get_timestamp(&mut self) -> Result<Versionstamp, Error> {
+	async fn get_timestamp<K>(&mut self, _: K, lock: bool) -> Result<Versionstamp, Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -290,7 +298,7 @@ impl Transaction {
 		Ok(res)
 	}
 	/// Inserts or update a key in the database
-	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -324,12 +332,7 @@ impl Transaction {
 	/// Suppose you've sent a query like `CREATE author:john SET ...` with
 	/// the namespace `test` and the database `test`-
 	/// You'll see SurrealDB sets a value to the key `/*test\x00*test\x00*author\x00*\x00\x00\x00\x01john\x00`.
-	pub(crate) async fn put<K, V>(
-		&mut self,
-		category: KeyCategory,
-		key: K,
-		val: V,
-	) -> Result<(), Error>
+	async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -357,7 +360,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -398,8 +401,9 @@ impl Transaction {
 		Ok(())
 	}
 	// Sets the value for a versionstamped key prefixed with the user-supplied key.
-	pub(crate) async fn set_versionstamped_key<K, V>(
+	async fn set_versionstamped_key<K, V>(
 		&mut self,
+		_: K,
 		prefix: K,
 		suffix: K,
 		val: V,
@@ -441,7 +445,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
@@ -463,7 +467,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -496,11 +500,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
-	pub(crate) async fn scan<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
 	{
@@ -544,7 +544,7 @@ impl Transaction {
 	}
 
 	/// Delete a range of keys from the databases
-	pub(crate) async fn delr<K>(&mut self, rng: Range<K>) -> Result<(), Error>
+	async fn delr<K>(&mut self, rng: Range<K>, _: u32) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{

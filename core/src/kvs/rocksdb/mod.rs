@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::key::error::KeyCategory;
 use crate::kvs::Check;
 use crate::kvs::Key;
+use crate::kvs::Transactable;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use futures::lock::Mutex;
@@ -166,12 +167,15 @@ impl Transaction {
 	pub(crate) fn check_level(&mut self, check: Check) {
 		self.check = check;
 	}
+}
+
+impl Transactable for Transaction {
 	/// Check if closed
-	pub(crate) fn closed(&self) -> bool {
+	fn closed(&self) -> bool {
 		self.done
 	}
 	/// Cancel a transaction
-	pub(crate) async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -187,7 +191,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Commit a transaction
-	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.done {
 			return Err(Error::TxFinished);
@@ -207,7 +211,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Check if a key exists
-	pub(crate) async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
 	{
@@ -222,7 +226,7 @@ impl Transaction {
 		Ok(res)
 	}
 	/// Fetch a key from the database
-	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
 	{
@@ -241,7 +245,7 @@ impl Transaction {
 	/// which should be done immediately before the transaction commit.
 	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[allow(unused)]
-	pub(crate) async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	async fn get_timestamp<K>(&mut self, key: K, lock: bool) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key>,
 	{
@@ -274,7 +278,7 @@ impl Transaction {
 		Ok(verbytes)
 	}
 	/// Obtain a new key that is suffixed with the change timestamp
-	pub(crate) async fn get_versionstamped_key<K>(
+	async fn get_versionstamped_key<K>(
 		&mut self,
 		ts_key: K,
 		prefix: K,
@@ -291,14 +295,14 @@ impl Transaction {
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		let ts = self.get_timestamp(ts_key).await?;
+		let ts = self.get_timestamp(ts_key, false).await?;
 		let mut k: Vec<u8> = prefix.into();
 		k.append(&mut ts.to_vec());
 		k.append(&mut suffix.into());
 		Ok(k)
 	}
 	/// Insert or update a key in the database
-	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -317,12 +321,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn put<K, V>(
-		&mut self,
-		category: KeyCategory,
-		key: K,
-		val: V,
-	) -> Result<(), Error>
+	async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -350,7 +349,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -380,7 +379,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
@@ -398,7 +397,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
@@ -427,11 +426,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
-	pub(crate) async fn scan<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error>
+	async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
 	{
