@@ -1084,7 +1084,7 @@ impl Datastore {
 			Inner::Postgres(v) => {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::Postgres(tx)
-			}
+			},
 		};
 
 		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);

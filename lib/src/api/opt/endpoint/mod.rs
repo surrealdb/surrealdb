@@ -9,6 +9,8 @@ mod fdb;
 mod indxdb;
 #[cfg(feature = "kv-mem")]
 mod mem;
+#[cfg(feature = "kv-postgres")]
+mod postgres;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
 #[cfg(feature = "kv-speedb")]
@@ -17,8 +19,6 @@ mod speedb;
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
-#[cfg(feature = "kv-postgres")]
-mod postgres;
 
 use crate::api::err::Error;
 use crate::api::Connection;

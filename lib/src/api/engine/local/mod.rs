@@ -380,7 +380,7 @@ pub struct SurrealKV;
 #[cfg(feature = "kv-postgres")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-postgres")))]
 #[derive(Debug)]
-pub struct SurrealKV;
+pub struct Postgres;
 
 /// An embedded database
 #[derive(Debug, Clone)]
