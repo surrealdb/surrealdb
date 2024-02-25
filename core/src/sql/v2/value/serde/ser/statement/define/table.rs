@@ -5,6 +5,7 @@ use crate::sql::value::serde::ser;
 use crate::sql::Ident;
 use crate::sql::Permissions;
 use crate::sql::Strand;
+use crate::sql::TableType;
 use crate::sql::View;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -47,6 +48,7 @@ pub struct SerializeDefineTableStatement {
 	permissions: Permissions,
 	changefeed: Option<ChangeFeed>,
 	comment: Option<Strand>,
+	table_type: TableType,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
@@ -82,6 +84,9 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
+			"table_type" => {
+				self.table_type = value.serialize(ser::table_type::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineTableStatement::{key}`"
@@ -101,6 +106,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			permissions: self.permissions,
 			changefeed: self.changefeed,
 			comment: self.comment,
+			table_type: self.table_type,
 		})
 	}
 }

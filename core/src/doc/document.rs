@@ -14,6 +14,7 @@ use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Base;
+use crate::sql::TableType;
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -108,11 +109,13 @@ impl<'a> Document<'a> {
 	pub fn is_new(&self) -> bool {
 		self.initial.doc.is_none()
 	}
-	/// Get the table for this document
-	pub async fn tb(
+
+	/// Get the table for this document, with option to initialise as relation or not if does't exist
+	pub async fn tb_with_rel(
 		&self,
 		opt: &Options,
 		txn: &Transaction,
+		table_type: TableType,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Clone transaction
 		let run = txn.clone();
@@ -133,7 +136,7 @@ impl<'a> Document<'a> {
 				// We can create the table automatically
 				run.add_and_cache_ns(opt.ns(), opt.strict).await?;
 				run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
+				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict, table_type).await
 			}
 			// There was an error
 			Err(err) => Err(err),
@@ -141,6 +144,16 @@ impl<'a> Document<'a> {
 			Ok(tb) => Ok(tb),
 		}
 	}
+
+	/// Get the table for this document, or initalise as non-relation table
+	pub async fn tb(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Arc<DefineTableStatement>, Error> {
+		self.tb_with_rel(opt, txn, TableType::Normal).await
+	}
+
 	/// Get the foreign tables for this document
 	pub async fn ft(
 		&self,

@@ -41,7 +41,12 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
+use crate::sql::Idiom;
+use crate::sql::Kind;
+use crate::sql::Part;
+use crate::sql::Relation;
 use crate::sql::Strand;
+use crate::sql::TableType;
 use crate::sql::Value;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
@@ -2328,6 +2333,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
+		table_type: TableType,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		match self.get_and_cache_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
@@ -2335,9 +2341,13 @@ impl Transaction {
 			}) => match strict {
 				false => {
 					let key = crate::key::database::tb::new(ns, db, tb);
+					if let TableType::Relation(rel) = &table_type {
+						self.define_in_out_fd_from_relation(ns, db, tb, rel).await?
+					}
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
+						table_type,
 						..Default::default()
 					};
 					self.put(key.key_category(), key, &val).await?;
@@ -2826,6 +2836,43 @@ impl Transaction {
 			}
 		}
 		Ok(None)
+	}
+
+	pub async fn define_in_out_fd_from_relation(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		rel: &Relation,
+	) -> Result<(), Error> {
+		let in_kind = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+		let out_kind = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+
+		let in_key = crate::key::table::fd::new(ns, db, tb, "in");
+		let out_key = crate::key::table::fd::new(ns, db, tb, "out");
+
+		// TODO: fix permissions so they don't defalut to full
+		self.set(
+			in_key,
+			DefineFieldStatement {
+				name: Idiom(vec![Part::from("in")]),
+				what: tb.into(),
+				kind: Some(in_kind),
+				..Default::default()
+			},
+		)
+		.await?;
+		self.set(
+			out_key,
+			DefineFieldStatement {
+				name: Idiom(vec![Part::from("out")]),
+				what: tb.into(),
+				kind: Some(out_kind),
+				..Default::default()
+			},
+		)
+		.await?;
+		Ok(())
 	}
 
 	// --------------------------------------------------

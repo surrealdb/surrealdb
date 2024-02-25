@@ -25,7 +25,7 @@ use crate::{
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
+		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::v2::parser::mac::test_parse,
 };
@@ -315,6 +315,8 @@ fn parse_define_table() {
 				expiry: std::time::Duration::from_secs(1)
 			}),
 			comment: None,
+			// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
+			table_type: TableType::Any,
 		}))
 	);
 }
