@@ -144,7 +144,7 @@ pub trait Transactable {
 	where
 		K: Into<Key>,
 	{
-		async { Err(Error::UnimplementedInternally) }
+		async { Err(Error::Unimplemented(String::new())) }
 	}
 	/// Retrieve a range of keys from the databases
 	fn scan<K>(
@@ -187,7 +187,7 @@ pub trait Transactable {
 	where
 		K: Into<Key>,
 	{
-		async { Err(Error::UnimplementedInternally) }
+		async { Err(Error::Unimplemented(String::new())) }
 	}
 }
 
@@ -630,7 +630,7 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		match expand_inner!(&mut self.inner, v => { v.delr(rng.clone(), limit).await }) {
-			Err(Error::UnimplementedInternally) => self._delr(rng, limit).await,
+			Err(Error::Unimplemented(_)) => self._delr(rng, limit).await,
 			ret => ret,
 		}
 	}
