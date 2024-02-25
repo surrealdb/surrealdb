@@ -427,6 +427,39 @@ mod api_integration {
 		include!("api/backup.rs");
 	}
 
+	#[cfg(feature = "kv-postgres")]
+	mod postgres {
+		use super::*;
+		use surrealdb::engine::local::Db;
+		use surrealdb::engine::local::Postgres;
+
+		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+			let permit = PERMITS.acquire().await.unwrap();
+			let root = Root {
+				username: ROOT_USER,
+				password: ROOT_PASS,
+			};
+			let config = Config::new()
+				.user(root)
+				.tick_interval(TICK_INTERVAL)
+				.capabilities(Capabilities::all());
+			let db = Surreal::new::<Postgres>(("127.0.0.1:5432", config)).await.unwrap();
+			db.signin(root).await.unwrap();
+			(permit, db)
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn any_engine_can_connect() {
+			let permit = PERMITS.acquire().await.unwrap();
+			surrealdb::engine::any::connect("postgres://127.0.0.1:5432").await.unwrap();
+			drop(permit);
+		}
+
+		include!("api/mod.rs");
+		include!("api/live.rs");
+		include!("api/backup.rs");
+	}
+
 	#[cfg(feature = "protocol-http")]
 	mod any {
 		use super::*;

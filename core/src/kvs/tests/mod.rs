@@ -301,3 +301,50 @@ mod surrealkv {
 	include!("tblq.rs");
 	include!("tbnt.rs");
 }
+
+#[cfg(feature = "kv-postgres")]
+mod postgres {
+
+	use crate::kvs::tests::{ClockType, Kvs};
+	use crate::kvs::Transaction;
+	use crate::kvs::{Datastore, LockType, TransactionType};
+	use serial_test::serial;
+
+	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
+		let ds = Datastore::new_full("postgres://127.0.0.1:5432", Some(clock_override))
+			.await
+			.unwrap()
+			.with_node_id(sql::uuid::Uuid(node_id));
+		// Clear any previous test entries
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		tx.delp(vec![], u32::MAX).await.unwrap();
+		tx.commit().await.unwrap();
+		// Return the datastore
+		(ds, Kvs::Tikv)
+	}
+
+	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
+		// Shared node id for one-off transactions
+		// We should delete this, node IDs should be known.
+		let new_tx_uuid = Uuid::parse_str("18717a0f-0ab0-421e-b20c-e69fb03e90a3").unwrap();
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+		new_ds(new_tx_uuid, clock).await.0.transaction(write, lock).await.unwrap()
+	}
+
+	include!("cluster_init.rs");
+	include!("hb.rs");
+	include!("helper.rs");
+	include!("lq.rs");
+	include!("nq.rs");
+	include!("raw.rs");
+	include!("snapshot.rs");
+	include!("tb.rs");
+	include!("multireader.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_conflict.rs");
+	include!("timestamp_to_versionstamp.rs");
+	include!("nd.rs");
+	include!("ndlq.rs");
+	include!("tblq.rs");
+	include!("tbnt.rs");
+}
