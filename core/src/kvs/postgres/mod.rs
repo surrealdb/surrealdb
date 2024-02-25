@@ -172,12 +172,7 @@ impl Transactable for Transaction {
 		}
 	}
 
-	async fn put<K, V>(
-		&mut self,
-		_: crate::key::error::KeyCategory,
-		key: K,
-		val: V,
-	) -> Result<(), Error>
+	async fn put<K, V>(&mut self, category: KeyCategory, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<crate::kvs::Key>,
 		V: Into<crate::kvs::Val>,
@@ -187,14 +182,20 @@ impl Transactable for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		if let Some(ref mut tx) = self.inner {
-			sqlx::query(
-				"INSERT INTO kvstore(key, value) VALUES($1, $2) ON CONFLICT (key) DO NOTHING",
-			)
-			.bind(key.into())
-			.bind(val.into())
-			.execute(&mut **tx)
-			.await?;
-			Ok(())
+			if let Err(e) = sqlx::query("INSERT INTO kvstore(key, value) VALUES($1, $2)")
+				.bind(key.into())
+				.bind(val.into())
+				.execute(&mut **tx)
+				.await
+			{
+				if let Some(true) = e.as_database_error().map(|x| x.is_unique_violation()) {
+					Err(Error::TxKeyAlreadyExistsCategory(category))
+				} else {
+					Err(e.into())
+				}
+			} else {
+				Ok(())
+			}
 		} else {
 			Err(Error::TxFinished)
 		}
