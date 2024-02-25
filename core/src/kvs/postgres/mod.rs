@@ -315,7 +315,7 @@ impl Transactable for Transaction {
 			return Err(Error::TxReadonly);
 		}
 		if let Some(ref mut tx) = self.inner {
-			sqlx::query("DELETE FROM kvstore WHERE key IN (SELECT key FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3)")
+			sqlx::query("DELETE FROM kvstore WHERE ctid IN (SELECT ctid FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3)")
 			.bind(rng.start.into())
 			.bind(rng.end.into())
 			// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values. 
