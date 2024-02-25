@@ -1,11 +1,11 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::Postgres;
+use crate::api::err::Error;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Result;
-use std::path::Path;
-use std::path::PathBuf;
+use std::net::SocketAddr;
 use url::Url;
 
 macro_rules! endpoints {
@@ -15,11 +15,9 @@ macro_rules! endpoints {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let protocol = "postgres://";
-					let url = Url::parse(protocol)
-					    .unwrap_or_else(|_| unreachable!("`{protocol}` should be static and valid"));
-					let mut endpoint = Endpoint::new(url);
-					endpoint.path = super::path_to_string(protocol, self);
+					let url = format!("postgres://{self}");
+					let mut endpoint = Endpoint::new(Url::parse(&url).map_err(|_| Error::InvalidUrl(url.clone()))?);
+					endpoint.path = url;
 					Ok(endpoint)
 				}
 			}
@@ -37,4 +35,4 @@ macro_rules! endpoints {
 	}
 }
 
-endpoints!(&str, &String, String, &Path, PathBuf);
+endpoints!(&str, &String, String, SocketAddr);

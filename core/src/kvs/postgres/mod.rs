@@ -37,11 +37,17 @@ impl Datastore {
 				key bytea PRIMARY KEY,
 				value bytea
 			);
-			CREATE UNIQUE INDEX IF NOT EXISTS kvstore_sorted_pk ON kvstore(key ASC);
 			"#,
 		)
 		.execute(&pool)
 		.await?;
+	sqlx::query(
+		r#"
+		CREATE UNIQUE INDEX IF NOT EXISTS kvstore_sorted_pk ON kvstore(key ASC);
+		"#,
+	)
+	.execute(&pool)
+	.await?;
 		Ok(Self {
 			pool,
 		})
@@ -129,7 +135,7 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 	{
 		if let Some(ref mut tx) = self.inner {
-			Ok(sqlx::query_scalar("SELECT value FROM kvstore WHERE key = $1")
+			Ok(sqlx::query_as("SELECT value FROM kvstore WHERE key = $1")
 				.bind(key.into())
 				.fetch_optional(&mut **tx)
 				.await?)
@@ -277,7 +283,7 @@ impl Transactable for Transaction {
 		K: Into<crate::kvs::Key>,
 	{
 		if let Some(ref mut tx) = self.inner {
-			Ok(sqlx::query_scalar("SELECT key, value FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3")
+			Ok(sqlx::query_as("SELECT key, value FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3")
 			.bind(rng.start.into())
 			.bind(rng.end.into())
 			// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values. 
