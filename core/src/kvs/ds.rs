@@ -334,12 +334,10 @@ impl Datastore {
                 return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a SurrealKV database
-			s if s.starts_with("postgres:") => {
+			s if s.starts_with("postgres://") => {
 				#[cfg(feature = "kv-postgres")]
 				{
 					info!("Starting postgres store at {}", path);
-					let s = s.trim_start_matches("postgres://");
-					let s = s.trim_start_matches("postgres:");
 					let v = super::postgres::Datastore::new(s).await.map(Inner::Postgres);
 					info!("Started to postgres store at {}", path);
 					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));

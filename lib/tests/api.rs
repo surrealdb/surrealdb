@@ -443,7 +443,7 @@ mod api_integration {
 				.user(root)
 				.tick_interval(TICK_INTERVAL)
 				.capabilities(Capabilities::all());
-			let db = Surreal::new::<Postgres>(("127.0.0.1:5432", config)).await.unwrap();
+			let db = Surreal::new::<Postgres>(("postgres:postgres@127.0.0.1:5432/postgres", config)).await.unwrap();
 			db.signin(root).await.unwrap();
 			(permit, db)
 		}
@@ -451,7 +451,7 @@ mod api_integration {
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
 			let permit = PERMITS.acquire().await.unwrap();
-			surrealdb::engine::any::connect("postgres://127.0.0.1:5432").await.unwrap();
+			surrealdb::engine::any::connect("postgres://postgres:postgres@127.0.0.1:5432/postgres").await.unwrap();
 			drop(permit);
 		}
 
