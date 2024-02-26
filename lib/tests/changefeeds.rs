@@ -693,7 +693,7 @@ async fn changefeed_with_original() -> Result<(), Error> {
     // Now validate original values are stored
     let value: Value =
         db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
-    let Value::Array(array) = value.clone() else {
+    let Value::Array(array) = value else {
         unreachable!()
     };
     assert_eq!(array.len(), 2);
@@ -717,6 +717,26 @@ async fn changefeed_with_original() -> Result<(), Error> {
         "versionstamp": 131072
     }
     "#).unwrap());
+
+    db.execute("UPDATE user:id_one SET name = 'Raynor';", &ses, None).await?.remove(0).result?;
+    let array = db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
+    let Value::Array(array) = array else {
+        unreachable!()
+    };
+    assert_eq!(array.len(), 3);
+    assert_eq!(array.get(2).unwrap(), &surrealdb::sql::value(r#"
+    {
+        "changes": [{
+            "update": {
+                "id": user:id_one,
+                "name": "Raynor",
+            },
+            "original": {
+                "id": user:id_one,
+            },
+        }],
+        "versionstamp": 196608,
+    }"#).unwrap());
 
     Ok(())
 }
