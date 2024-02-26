@@ -1,3 +1,5 @@
+#[cfg(feature = "sql2")]
+use crate::sql::{table_type, TableType};
 use crate::{
 	sql::{
 		filter::Filter,
@@ -8,9 +10,8 @@ use crate::{
 			DefineNamespaceStatement, DefineParamStatement, DefineScopeStatement, DefineStatement,
 			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
 		},
-		table_type,
 		tokenizer::Tokenizer,
-		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType, Values,
+		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, Values,
 	},
 	syn::v2::{
 		parser::{
@@ -265,8 +266,8 @@ impl Parser<'_> {
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
-			// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
-			table_type: TableType::Any,
+			#[cfg(feature = "sql2")]
+			table_type: TableType::Normal,
 			..Default::default()
 		};
 
@@ -280,10 +281,12 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.drop = true;
 				}
+				#[cfg(feature = "sql2")]
 				t!("RELATION") => {
 					self.pop_peek();
 					res.table_type = TableType::Relation(self.parse_relation_schema()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("TYPE") => {
 					self.pop_peek();
 					match self.peek_kind() {
@@ -685,6 +688,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	#[cfg(feature = "sql2")]
 	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {
 		let mut res = table_type::Relation {
 			from: None,

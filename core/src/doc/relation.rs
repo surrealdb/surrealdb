@@ -1,3 +1,5 @@
+#![cfg(feature = "sql2")]
+
 use crate::ctx::Context;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};

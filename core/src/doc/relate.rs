@@ -14,6 +14,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Check if table has corrent relation status
+		#[cfg(feature = "sql2")]
 		self.relation(ctx, opt, txn, stm).await?;
 		// Check current record
 		match self.current.doc.is_some() {

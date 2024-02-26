@@ -6,19 +6,19 @@ use super::super::super::{
 	part::{changefeed, permission::permissions, view},
 	IResult,
 };
+use crate::sql::{
+	statements::DefineTableStatement, ChangeFeed, Permission, Permissions, Strand, View,
+};
+#[cfg(feature = "sql2")]
 use crate::{
-	sql::{
-		statements::DefineTableStatement, ChangeFeed, Kind, Permission, Permissions, Relation,
-		Strand, TableType, View,
-	},
+	sql::{Kind, Relation, TableType},
 	syn::v1::common::verbar,
 	syn::v1::ParseError,
 };
 
-use nom::{
-	branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0,
-	multi::separated_list1, Err,
-};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+#[cfg(feature = "sql2")]
+use nom::{multi::separated_list1, Err};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
@@ -34,6 +34,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 		name,
 		permissions: Permissions::none(),
 		// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
+		#[cfg(feature = "sql2")]
 		table_type: TableType::Any,
 		..Default::default()
 	};
@@ -61,6 +62,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			#[cfg(feature = "sql2")]
 			DefineTableOption::TableType(t) => {
 				res.table_type = t;
 			}
@@ -79,14 +81,17 @@ enum DefineTableOption {
 	Comment(Strand),
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
+	#[cfg(feature = "sql2")]
 	TableType(TableType),
 }
 
+#[cfg(feature = "sql2")]
 enum RelationDir {
 	From(Kind),
 	To(Kind),
 }
 
+#[cfg(feature = "sql2")]
 impl Relation {
 	fn merge<'a>(&mut self, i: &'a str, other: RelationDir) -> IResult<&'a str, ()> {
 		//TODO: error if both self and other are some
@@ -126,7 +131,9 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_schemafull,
 		table_permissions,
 		table_changefeed,
+		#[cfg(feature = "sql2")]
 		table_type,
+		#[cfg(feature = "sql2")]
 		table_relation,
 	))(i)
 }
@@ -175,23 +182,28 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	Ok((i, DefineTableOption::Permissions(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn table_type(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TYPE")(i)?;
 	alt((table_normal, table_any, table_relation))(i)
 }
 
+#[cfg(feature = "sql2")]
 fn table_normal(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("NORMAL")(i)?;
 	Ok((i, DefineTableOption::TableType(TableType::Normal)))
 }
+
+#[cfg(feature = "sql2")]
 fn table_any(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ANY")(i)?;
 	Ok((i, DefineTableOption::TableType(TableType::Any)))
 }
 
+#[cfg(feature = "sql2")]
 fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("RELATION")(i)?;
@@ -207,6 +219,7 @@ fn table_relation(i: &str) -> IResult<&str, DefineTableOption> {
 	Ok((i, DefineTableOption::TableType(TableType::Relation(relation))))
 }
 
+#[cfg(feature = "sql2")]
 fn relation_from(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = alt((tag_no_case("FROM"), tag_no_case("IN")))(i)?;
@@ -215,6 +228,7 @@ fn relation_from(i: &str) -> IResult<&str, RelationDir> {
 	Ok((i, RelationDir::From(Kind::Record(idents.into_iter().map(Into::into).collect()))))
 }
 
+#[cfg(feature = "sql2")]
 fn relation_to(i: &str) -> IResult<&str, RelationDir> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = alt((tag_no_case("TO"), tag_no_case("OUT")))(i)?;
@@ -225,6 +239,7 @@ fn relation_to(i: &str) -> IResult<&str, RelationDir> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "sql2")]
 mod tests {
 
 	use super::*;

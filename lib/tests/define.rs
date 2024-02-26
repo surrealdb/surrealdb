@@ -2120,6 +2120,7 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_table_relation() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE likes RELATION;

@@ -41,11 +41,16 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
+#[cfg(feature = "sql2")]
 use crate::sql::Idiom;
+#[cfg(feature = "sql2")]
 use crate::sql::Kind;
+#[cfg(feature = "sql2")]
 use crate::sql::Part;
+#[cfg(feature = "sql2")]
 use crate::sql::Relation;
 use crate::sql::Strand;
+#[cfg(feature = "sql2")]
 use crate::sql::TableType;
 use crate::sql::Value;
 use crate::vs::Oracle;
@@ -2333,7 +2338,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
-		table_type: TableType,
+		#[cfg(feature = "sql2")] table_type: TableType,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		match self.get_and_cache_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
@@ -2341,12 +2346,14 @@ impl Transaction {
 			}) => match strict {
 				false => {
 					let key = crate::key::database::tb::new(ns, db, tb);
+					#[cfg(feature = "sql2")]
 					if let TableType::Relation(rel) = &table_type {
 						self.define_in_out_fd_from_relation(ns, db, tb, rel).await?
 					}
 					let val = DefineTableStatement {
 						name: tb.to_owned().into(),
 						permissions: Permissions::none(),
+						#[cfg(feature = "sql2")]
 						table_type,
 						..Default::default()
 					};
@@ -2838,6 +2845,7 @@ impl Transaction {
 		Ok(None)
 	}
 
+	#[cfg(feature = "sql2")]
 	pub async fn define_in_out_fd_from_relation(
 		&mut self,
 		ns: &str,
