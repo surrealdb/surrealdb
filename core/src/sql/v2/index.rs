@@ -64,16 +64,20 @@ pub struct MTreeParams {
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub enum Distance {
-	Chebyshev,
-	Cosine,
 	#[default]
 	Euclidean,
-	Hamming,
-	Jaccard,
 	Manhattan,
+	Hamming,
 	Minkowski(Number),
+	#[revision(start = 2)]
+	Chebyshev,
+	#[revision(start = 2)]
+	Cosine,
+	#[revision(start = 2)]
+	Jaccard,
+	#[revision(start = 2)]
 	Pearson,
 }
 

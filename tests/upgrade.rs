@@ -95,9 +95,13 @@ mod upgrade {
 		"DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4",
 	];
 
-	static CHECK_MTREE: [Check; 1] = [
+	static CHECK_MTREE_RPC: [Check; 1] = [
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
-		 Expected::Two("{\"dist\": 2.0, \"id\": \"pts:1\" }", "{  \"dist\": 4.0, \"id\": \"pts:2\" }"))];
+		 Expected::Two("{\"dist\": 2.0, \"id\": \"pts:1\"}", "{ \"dist\": 4.0, \"id\": \"pts:2\"}"))];
+
+	static CHECK_MTREE_DB: [Check; 1] = [
+		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
+		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
 	type Check = (&'static str, Expected);
 	enum Expected {
@@ -151,12 +155,12 @@ mod upgrade {
 	async fn create_data_for_1_1(client: &RestClient) {
 		create_data_for_1_0(client).await;
 		create_data_on_docker(client, &DATA_MTREE).await;
-		check_data_on_docker(client, &CHECK_MTREE).await;
+		check_data_on_docker(client, &CHECK_MTREE_RPC).await;
 	}
 
 	async fn check_migrated_data_1_1(db: &Surreal<Any>) {
 		check_migrated_data_1_0(db).await;
-		check_migrated_data(db, &CHECK_MTREE).await;
+		check_migrated_data(db, &CHECK_MTREE_DB).await;
 	}
 
 	async fn create_data_for_1_2(client: &RestClient) {
