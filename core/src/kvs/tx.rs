@@ -135,6 +135,7 @@ macro_rules! expand_inner {
 			Inner::SurrealKV($arm) => $b,
 			#[cfg(feature = "kv-postgres")]
 			Inner::Postgres($arm) => $b,
+			_ => unreachable!(),
 		}
 	};
 }
@@ -179,6 +180,7 @@ impl fmt::Display for Transaction {
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
 			#[cfg(feature = "kv-postgres")]
 			Inner::Postgres(_) => write!(f, "postgres"),
+			_ => unreachable!(),
 		}
 	}
 }
@@ -401,7 +403,8 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
 		let range = page.range.clone();
-		let res = expand_inner!(&mut self.inner, v => { v.scan(range, batch_limit).await });
+		let res: Result<Vec<(Key, Val)>, Error> =
+			expand_inner!(&mut self.inner, v => { v.scan(range, batch_limit).await });
 
 		// Construct next page
 		res.map(|tup_vec: Vec<(Key, Val)>| {
