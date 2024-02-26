@@ -427,11 +427,11 @@ mod api_integration {
 		include!("api/backup.rs");
 	}
 
-	#[cfg(feature = "kv-postgres")]
-	mod postgres {
+	#[cfg(feature = "kv-mysql")]
+	mod mysql {
 		use super::*;
 		use surrealdb::engine::local::Db;
-		use surrealdb::engine::local::Postgres;
+		use surrealdb::engine::local::Mysql;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 			let permit = PERMITS.acquire().await.unwrap();
@@ -444,7 +444,7 @@ mod api_integration {
 				.tick_interval(TICK_INTERVAL)
 				.capabilities(Capabilities::all());
 			let db =
-				Surreal::new::<Postgres>(("postgres:postgres@127.0.0.1:5432/postgres", config))
+				Surreal::new::<Mysql>(("root:mysql@127.0.0.1:3306/mysql", config))
 					.await
 					.unwrap();
 			db.signin(root).await.unwrap();
@@ -455,7 +455,7 @@ mod api_integration {
 		async fn any_engine_can_connect() {
 			let permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect(
-				"postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+				"mysql://root:mysql@127.0.0.1:3306/mysql",
 			)
 			.await
 			.unwrap();

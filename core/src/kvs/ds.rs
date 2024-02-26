@@ -106,8 +106,8 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
-	#[cfg(feature = "kv-postgres")]
-	Postgres(super::postgres::Datastore),
+	#[cfg(feature = "kv-mysql")]
+	Mysql(super::mysql::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -128,8 +128,8 @@ impl fmt::Display for Datastore {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
-			#[cfg(feature = "kv-postgres")]
-			Inner::Postgres(_) => write!(f, "postgres"),
+			#[cfg(feature = "kv-mysql")]
+			Inner::Mysql(_) => write!(f, "mysql"),
 		}
 	}
 }
@@ -202,7 +202,7 @@ impl Datastore {
 			feature = "kv-tikv",
 			feature = "kv-fdb",
 			feature = "kv-surrealkv",
-			feature = "kv-postgres"
+			feature = "kv-mysql"
 		)))]
 		let _ = (clock_override, default_clock);
 
@@ -334,18 +334,18 @@ impl Datastore {
                 return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a SurrealKV database
-			s if s.starts_with("postgres://") || s.starts_with("postgresql://") => {
-				#[cfg(feature = "kv-postgres")]
+			s if s.starts_with("mysql://") || s.starts_with("mariadb://") => {
+				#[cfg(feature = "kv-mysql")]
 				{
-					info!("Starting postgres store at {}", path);
-					let v = super::postgres::Datastore::new(s).await.map(Inner::Postgres);
-					info!("Started to postgres store at {}", path);
+					info!("Starting mysql store at {}", path);
+					let v = super::mysql::Datastore::new(s).await.map(Inner::Mysql);
+					info!("Started to mysql store at {}", path);
 					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
 					let clock = clock_override.unwrap_or(default_clock);
 					Ok((v, clock))
 				}
-				#[cfg(not(feature = "kv-postgres"))]
-                return Err(Error::Ds("Cannot connect to the `postgres` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				#[cfg(not(feature = "kv-mysql"))]
+                return Err(Error::Ds("Cannot connect to the `mysql` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
@@ -1078,10 +1078,10 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::SurrealKV(tx)
 			}
-			#[cfg(feature = "kv-postgres")]
-			Inner::Postgres(v) => {
+			#[cfg(feature = "kv-mysql")]
+			Inner::Mysql(v) => {
 				let tx = v.transaction(write, lock).await?;
-				super::tx::Inner::Postgres(tx)
+				super::tx::Inner::Mysql(tx)
 			}
 		};
 

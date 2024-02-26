@@ -112,8 +112,8 @@ pub(super) enum Inner {
 	FoundationDB(super::fdb::Transaction),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Transaction),
-	#[cfg(feature = "kv-postgres")]
-	Postgres(super::postgres::Transaction),
+	#[cfg(feature = "kv-mysql")]
+	Mysql(super::mysql::Transaction),
 }
 
 macro_rules! expand_inner {
@@ -133,8 +133,8 @@ macro_rules! expand_inner {
 			Inner::FoundationDB($arm) => $b,
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV($arm) => $b,
-			#[cfg(feature = "kv-postgres")]
-			Inner::Postgres($arm) => $b,
+			#[cfg(feature = "kv-mysql")]
+			Inner::Mysql($arm) => $b,
 		}
 	};
 }
@@ -177,8 +177,8 @@ impl fmt::Display for Transaction {
 			Inner::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
-			#[cfg(feature = "kv-postgres")]
-			Inner::Postgres(_) => write!(f, "postgres"),
+			#[cfg(feature = "kv-mysql")]
+			Inner::Mysql(_) => write!(f, "mysql"),
 		}
 	}
 }

@@ -18,7 +18,7 @@ mod fdb;
 mod indxdb;
 mod kv;
 mod mem;
-mod postgres;
+mod mysql;
 mod rocksdb;
 mod speedb;
 mod surrealkv;
@@ -37,7 +37,7 @@ pub(crate) mod lq_structs;
 	feature = "kv-tikv",
 	feature = "kv-fdb",
 	feature = "kv-surrealkv",
-	feature = "kv-postgres"
+	feature = "kv-mysql"
 ))]
 mod tests;
 

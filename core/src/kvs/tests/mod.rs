@@ -302,8 +302,8 @@ mod surrealkv {
 	include!("tbnt.rs");
 }
 
-#[cfg(feature = "kv-postgres")]
-mod postgres {
+#[cfg(feature = "kv-mysql")]
+mod mysql {
 
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Transaction;
@@ -311,7 +311,7 @@ mod postgres {
 	use serial_test::serial;
 
 	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
-		let ds = Datastore::new_full("postgres://127.0.0.1:5432", Some(clock_override))
+		let ds = Datastore::new_full("mysql://127.0.0.1:3306", Some(clock_override))
 			.await
 			.unwrap()
 			.with_node_id(sql::uuid::Uuid(node_id));

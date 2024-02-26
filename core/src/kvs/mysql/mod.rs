@@ -1,4 +1,4 @@
-#![cfg(feature = "kv-postgres")]
+#![cfg(feature = "kv-mysql")]
 
 use std::ops::Range;
 
@@ -11,16 +11,16 @@ use crate::vs::try_to_u64_be;
 use crate::vs::u64_to_versionstamp;
 use crate::vs::Versionstamp;
 
-use sqlx::postgres::PgPoolOptions;
-use sqlx::postgres::PgRow;
+use sqlx::mysql::MySqlPoolOptions;
+use sqlx::mysql::MySqlRow;
 use sqlx::Executor;
-use sqlx::PgPool;
+use sqlx::MySqlPool;
 use sqlx::Row;
 use std::ops::DerefMut;
 
 #[derive(Clone)]
 pub struct Datastore {
-	pool: PgPool,
+	pool: MySqlPool,
 }
 
 pub struct Transaction {
@@ -29,30 +29,30 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: Option<sqlx::Transaction<'static, sqlx::Postgres>>,
+	inner: Option<sqlx::Transaction<'static, sqlx::MySql>>,
 }
 
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
-		let pool = PgPoolOptions::new().connect(path).await?;
+		let pool = MySqlPoolOptions::new().connect(path).await?;
 		sqlx::query(
 			r#"
 			CREATE TABLE IF NOT EXISTS kvstore (
-				key bytea PRIMARY KEY NOT NULL,
-				value bytea NOT NULL
-			);
+				`key` BLOB NOT NULL,
+				`value` LONGBLOB NOT NULL,
+				PRIMARY KEY (`key`(1024)),
+				UNIQUE INDEX (`key`(1024) ASC, `value`(1024))
+			) DEFAULT CHARSET=utf8mb4;
 			"#,
 		)
 		.execute(&pool)
 		.await?;
-		sqlx::query(
-			r#"
-		CREATE UNIQUE INDEX IF NOT EXISTS kvstore_sorted_pk ON kvstore(key ASC, value);
-		"#,
-		)
-		.execute(&pool)
-		.await?;
+		// Enables repeatable read, also known as "Snapshot Isolation" for the ivory tower folks
+		sqlx::query("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+			.execute(&pool)
+			.await?;
+		sqlx::query("SET autocommit=0;").execute(&pool).await?;
 		Ok(Self {
 			pool,
 		})
@@ -60,25 +60,20 @@ impl Datastore {
 
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _lock: bool) -> Result<Transaction, Error> {
-		// TODO: Explicit lock level: https://www.postgresql.org/docs/current/explicit-locking.html
+		// TODO: Explicit lock level: https://www.mysql.org/docs/current/explicit-locking.html
 		// However, how to implement locking (we have row lock and table lock) is still subjectable to debate
 
 		// Create a new transaction
 		match self.pool.begin().await {
-			Ok(mut tx) => {
-				// Enables repeatable read, also known as "Snapshot Isolation" for the ivory tower folks
-				tx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;").await?;
-
-				Ok(Transaction {
-					check: if cfg!(debug_assertions) {
-						Check::Panic
-					} else {
-						Check::Warn
-					},
-					write,
-					inner: Some(tx),
-				})
-			}
+			Ok(tx) => Ok(Transaction {
+				check: if cfg!(debug_assertions) {
+					Check::Panic
+				} else {
+					Check::Warn
+				},
+				write,
+				inner: Some(tx),
+			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
@@ -103,12 +98,14 @@ impl Transaction {
 		let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
 		let check = match chk {
 			Some(chk) => sqlx::query_scalar(
-				"SELECT EXISTS(SELECT 1 FROM kvstore WHERE key = $1 AND value = $2)",
+				"SELECT EXISTS(SELECT 1 FROM kvstore WHERE `key` = ? AND `value` = ? LIMIT 1)",
 			)
 			.bind(key)
 			.bind(chk.into()),
-			None => sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM kvstore WHERE key = $1)")
-				.bind(key),
+			None => sqlx::query_scalar(
+				"SELECT NOT EXISTS(SELECT 1 FROM kvstore WHERE `key` = ? LIMIT 1)",
+			)
+			.bind(key),
 		};
 		Ok(check.fetch_one(tx).await?)
 	}
@@ -142,7 +139,7 @@ impl crate::kvs::api::Transaction for Transaction {
 		K: Into<Key>,
 	{
 		let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
-		Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM kvstore WHERE key = $1)")
+		Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM kvstore WHERE `key` = ? LIMIT 1)")
 			.bind(key.into())
 			.fetch_one(tx)
 			.await?)
@@ -153,7 +150,7 @@ impl crate::kvs::api::Transaction for Transaction {
 		K: Into<Key>,
 	{
 		let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
-		Ok(sqlx::query_scalar("SELECT value FROM kvstore WHERE key = $1")
+		Ok(sqlx::query_scalar("SELECT `value` FROM kvstore WHERE `key` = ? LIMIT 1")
 			.bind(key.into())
 			.fetch_optional(tx)
 			.await?)
@@ -169,7 +166,7 @@ impl crate::kvs::api::Transaction for Transaction {
 			Err(Error::TxReadonly)
 		} else {
 			let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
-			sqlx::query("INSERT INTO kvstore(key, value) VALUES($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+			sqlx::query("INSERT INTO kvstore(`key`, `value`) VALUES(?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)")
 				.bind(key.into())
 				.bind(val.into())
 				.execute(tx)
@@ -188,7 +185,7 @@ impl crate::kvs::api::Transaction for Transaction {
 			Err(Error::TxReadonly)
 		} else {
 			let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
-			if let Err(e) = sqlx::query("INSERT INTO kvstore(key, value) VALUES($1, $2)")
+			if let Err(e) = sqlx::query("INSERT INTO kvstore(`key`, `value`) VALUES(?, ?)")
 				.bind(key.into())
 				.bind(val.into())
 				.execute(tx)
@@ -230,7 +227,10 @@ impl crate::kvs::api::Transaction for Transaction {
 			Err(Error::TxReadonly)
 		} else {
 			let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
-			sqlx::query("DELETE FROM kvstore WHERE key = $1").bind(key.into()).execute(tx).await?;
+			sqlx::query("DELETE FROM kvstore WHERE `key` = ? LIMIT 1")
+				.bind(key.into())
+				.execute(tx)
+				.await?;
 			Ok(())
 		}
 	}
@@ -260,8 +260,10 @@ impl crate::kvs::api::Transaction for Transaction {
 			Err(Error::TxReadonly)
 		} else {
 			let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
-			sqlx::query("DELETE FROM kvstore WHERE ctid IN (SELECT ctid FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3)")
-				.bind(rng.start.into())
+			let start = rng.start.into();
+			sqlx::query("DELETE FROM kvstore WHERE `key` IN (SELECT `key` FROM kvstore WHERE `key` = ? OR (`key` >= ? AND `key` < ?) ORDER BY `key` ASC LIMIT ?)")
+				.bind(start.clone())
+				.bind(start)
 				.bind(rng.end.into())
 				// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values.
 				// So we are forced to cast to signed integer. Fortunately, we are converting from unsigned to signed,
@@ -279,14 +281,16 @@ impl crate::kvs::api::Transaction for Transaction {
 	{
 		let tx = self.inner.as_mut().ok_or(Error::TxFinished)?.deref_mut();
 
-		let result_set = sqlx::query("SELECT key, value FROM kvstore WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key ASC LIMIT $3")
-			.bind(rng.start.into())
+		let start = rng.start.into();
+		let result_set = sqlx::query("SELECT `key`, `value` FROM kvstore WHERE `key` = ? OR (`key` >= ? AND `key` < ?) ORDER BY `key` ASC LIMIT ?")
+			.bind(start.clone())
+			.bind(start)
 			.bind(rng.end.into())
 			// HACK: because sqlx, for some reason, do not have numeric encoding for unsigned values but do have implementations for signed values. 
 			// So we are forced to cast to signed integer. Fortunately, we are converting from unsigned to signed,
 			// we just need to make sure the casted type is big enough to not have integer overflow
 			.bind(limit as i64)
-			.map(|row: PgRow| {
+			.map(|row: MySqlRow| {
 				(row.get("key"), row.get("value"))
 			})
 			.fetch_all(tx)

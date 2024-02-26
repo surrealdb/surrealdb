@@ -1,5 +1,5 @@
 use crate::api::engine::local::Db;
-use crate::api::engine::local::Postgres;
+use crate::api::engine::local::Mysql;
 use crate::api::err::Error;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
@@ -11,22 +11,22 @@ use url::Url;
 macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
-			impl IntoEndpoint<Postgres> for $name {
+			impl IntoEndpoint<Mysql> for $name {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let url = format!("postgres://{self}");
+					let url = format!("mysql://{self}");
 					let mut endpoint = Endpoint::new(Url::parse(&url).map_err(|_| Error::InvalidUrl(url.clone()))?);
 					endpoint.path = url;
 					Ok(endpoint)
 				}
 			}
 
-			impl IntoEndpoint<Postgres> for ($name, Config) {
+			impl IntoEndpoint<Mysql> for ($name, Config) {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-					let mut endpoint = IntoEndpoint::<Postgres>::into_endpoint(self.0)?;
+					let mut endpoint = IntoEndpoint::<Mysql>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}

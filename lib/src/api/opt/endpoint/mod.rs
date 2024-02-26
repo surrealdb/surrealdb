@@ -9,8 +9,8 @@ mod fdb;
 mod indxdb;
 #[cfg(feature = "kv-mem")]
 mod mem;
-#[cfg(feature = "kv-postgres")]
-mod postgres;
+#[cfg(feature = "kv-mysql")]
+mod mysql;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
 #[cfg(feature = "kv-speedb")]
@@ -136,7 +136,7 @@ pub enum EndpointKind {
 	TiKv,
 	Unsupported(String),
 	SurrealKV,
-	Postgres,
+	Mysql,
 }
 
 impl From<&str> for EndpointKind {
@@ -155,7 +155,7 @@ impl From<&str> for EndpointKind {
 			"speedb" => Self::SpeeDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKV,
-			"postgres" | "postgresql" => Self::Postgres,
+			"mysql" | "mariadb" => Self::Mysql,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}

@@ -377,10 +377,10 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKV;
 
-#[cfg(feature = "kv-postgres")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-postgres")))]
+#[cfg(feature = "kv-mysql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-mysql")))]
 #[derive(Debug)]
-pub struct Postgres;
+pub struct Mysql;
 
 /// An embedded database
 #[derive(Debug, Clone)]

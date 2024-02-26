@@ -866,7 +866,7 @@ impl From<surrealkv::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-postgres")]
+#[cfg(feature = "kv-mysql")]
 impl From<sqlx::Error> for Error {
 	fn from(e: sqlx::Error) -> Error {
 		Error::Tx(e.to_string())

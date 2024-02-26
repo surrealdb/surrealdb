@@ -9,7 +9,7 @@ pub mod any;
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 	feature = "kv-surrealkv",
-	feature = "kv-postgres",
+	feature = "kv-mysql",
 ))]
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]

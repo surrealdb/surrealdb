@@ -166,9 +166,9 @@ category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv", RUSTFLAGS = "--cfg surrealdb_unstable" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
-[tasks.ci-api-integration-postgres]
+[tasks.ci-api-integration-mysql]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "postgres", _TEST_FEATURES = "kv-postgres" }
+env = { _TEST_API_ENGINE = "mysql", _TEST_FEATURES = "kv-mysql" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 #
