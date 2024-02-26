@@ -332,21 +332,17 @@ impl Parser<'_> {
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
 		let expiry = self.next_token_value::<Duration>()?.0;
-		let mut store_original = false;
-		let next_kind = self.peek_kind();
-		match next_kind {
-			t!("INCLUDE") => {
-				self.pop_peek();
-				match self.peek().kind {
-					TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original) => {
-						self.pop_peek();
-						store_original = true;
-					}
-					_ => {}
-				}
-			}
-			_ => {}
-		}
+		let mut store_original = if self.eat(t!("INCLUDE")) {
+			expected!(
+				self,
+				TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original),
+				"keyword `ORIGINAL` after `INCLUDE`"
+			);
+			true
+		} else {
+			false
+		};
+
 		Ok(ChangeFeed {
 			expiry,
 			store_original,
