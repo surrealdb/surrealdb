@@ -5,7 +5,7 @@ mod upgrade {
 	use std::process::Command;
 	use std::time::{Duration, SystemTime};
 	use surrealdb::engine::any::{connect, Any};
-	use surrealdb::{Connection, Response, Surreal};
+	use surrealdb::{Connection, Surreal};
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::{debug, error, info, warn};
@@ -44,9 +44,15 @@ mod upgrade {
 				panic!("No connected client")
 			});
 			// Create data samples
-			create_data_on_docker(&client).await;
-			// Check that the data are okay on the original instance
-			check_data_on_docker(&client).await;
+			if docker_version.starts_with("1.0.") {
+				create_data_for_1_0(&client).await;
+			} else if docker_version.starts_with("v1.1.") {
+				create_data_for_1_1(&client).await;
+			} else if docker_version.starts_with("v1.2.") {
+				create_data_for_1_2(&client).await;
+			} else {
+				panic!("Unsupported version {docker_version}");
+			}
 			// Stop the docker instance
 			docker.stop();
 			// Extract the database directory
@@ -56,11 +62,20 @@ mod upgrade {
 			// Start a local RocksDB instance using the same location
 			let db = new_local_instance(&file_path).await;
 			// Check that the data has properly migrated
-			check_migrated_data(&db).await;
+			if docker_version.starts_with("1.0.") {
+				check_migrated_data_1_0(&db).await;
+			} else if docker_version.starts_with("v1.1.") {
+				check_migrated_data_1_1(&db).await;
+			} else if docker_version.starts_with("v1.2.") {
+				check_migrated_data_1_2(&db).await;
+			} else {
+				panic!("Unsupported version {docker_version}");
+			}
 		}
 	}
 
-	const DATA: [&str; 5] = [
+	// Set of DATA for Full Text Search
+	const DATA_FTS: [&str; 5] = [
         "DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128)",
         "DEFINE ANALYZER userdefinedid TOKENIZERS blank FILTERS lowercase,ngram(1,32)",
         "DEFINE INDEX account_name_search_idx ON TABLE account COLUMNS name SEARCH ANALYZER name BM25(1.2,0.75) HIGHLIGHTS",
@@ -68,48 +83,113 @@ mod upgrade {
         "CREATE account SET name='Tobie', user_defined_id='Tobie'",
     ];
 
-	async fn create_data_on_docker(client: &RestClient) {
-		info!("Create data on Docker's instance");
-		for l in DATA {
-			client.checked_query(l, None).await;
+	// Set of QUERY and RESULT to check for Full Text Search
+	static CHECK_FTS: [Check; 1] =
+		[("SELECT name FROM account WHERE name @@ 'Tobie'", Expected::One("{\"name\":\"Tobie\"}"))];
+
+	// Set of DATA for VectorSearch and  Knn Operator checking
+	const DATA_MTREE: [&str; 4] = [
+		"CREATE pts:1 SET point = [1,2,3,4]",
+		"CREATE pts:2 SET point = [4,5,6,7]",
+		"CREATE pts:3 SET point = [8,9,10,11]",
+		"DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4",
+	];
+
+	static CHECK_MTREE: [Check; 1] = [
+		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
+		 Expected::Two("{\"dist\": 2.0, \"id\": \"pts:1\" }", "{  \"dist\": 4.0, \"id\": \"pts:2\" }"))];
+
+	type Check = (&'static str, Expected);
+	enum Expected {
+		Any,
+		One(&'static str),
+		Two(&'static str, &'static str),
+	}
+
+	impl Expected {
+		fn check_results(&self, q: &str, results: &[JsonValue]) {
+			match self {
+				Expected::Any => {}
+				Expected::One(expected) => {
+					assert_eq!(results.len(), 1, "Wrong number of result for {}", q);
+					Self::check_json(q, &results[0], expected);
+				}
+				Expected::Two(expected1, expected2) => {
+					assert_eq!(results.len(), 2, "Wrong number of result for {}", q);
+					Self::check_json(q, &results[0], expected1);
+					Self::check_json(q, &results[1], expected2);
+				}
+			}
+		}
+
+		fn check_json(q: &str, result: &JsonValue, expected: &str) {
+			let expected: JsonValue = serde_json::from_str(expected).expect(expected);
+			assert_eq!(result, &expected, "Unexpected result on query {}", q);
 		}
 	}
 
-	async fn check_data_on_docker(client: &RestClient) {
-		info!("Check data on Docker's instance");
+	const CHECK_DB: [Check; 1] = [("INFO FOR DB", Expected::Any)];
 
-		// Check that the full-text search is working
-		client
-			.checked_query(
-				"SELECT name FROM account WHERE name @@ 'Tobie'",
-				Some("[{\"name\":\"Tobie\"}]"),
-			)
-			.await;
-
-		// Check that we can deserialize the table definitions
-		client.checked_query("INFO FOR ROOT", None).await;
+	async fn create_data_on_docker(client: &RestClient, data: &[&str]) {
+		info!("Create data on Docker's instance");
+		for l in data {
+			client.checked_query(l, &Expected::Any).await;
+		}
 	}
 
-	async fn check_migrated_data(db: &Surreal<Any>) {
+	async fn create_data_for_1_0(client: &RestClient) {
+		create_data_on_docker(client, &DATA_FTS).await;
+		check_data_on_docker(client, &CHECK_FTS).await;
+		check_data_on_docker(client, &CHECK_DB).await;
+	}
+
+	async fn check_migrated_data_1_0(db: &Surreal<Any>) {
+		check_migrated_data(db, &CHECK_FTS).await;
+		check_migrated_data(db, &CHECK_DB).await;
+	}
+
+	async fn create_data_for_1_1(client: &RestClient) {
+		create_data_for_1_0(client).await;
+		create_data_on_docker(client, &DATA_MTREE).await;
+		check_data_on_docker(client, &CHECK_MTREE).await;
+	}
+
+	async fn check_migrated_data_1_1(db: &Surreal<Any>) {
+		check_migrated_data_1_0(db).await;
+		check_migrated_data(db, &CHECK_MTREE).await;
+	}
+
+	async fn create_data_for_1_2(client: &RestClient) {
+		create_data_for_1_1(client).await;
+	}
+
+	async fn check_migrated_data_1_2(db: &Surreal<Any>) {
+		check_migrated_data_1_1(db).await;
+	}
+
+	async fn check_data_on_docker(client: &RestClient, queries: &[Check]) {
+		info!("Check data on Docker's instance");
+		for (query, expected) in queries.to_owned().into_iter() {
+			client.checked_query(query, expected).await;
+		}
+	}
+
+	async fn check_migrated_data(db: &Surreal<Any>, queries: &[Check]) {
 		info!("Check migrated data");
-
-		// Check that the full-text search is working
-		let mut res = checked_query(db, "SELECT name FROM account WHERE name @@ 'Tobie'").await;
-		assert_eq!(res.num_statements(), 1);
-		let n: Vec<String> = res.take("name").expect("Take name");
-		assert_eq!(n, vec!["Tobie"]);
-
-		// Check that we can deserialize the table definitions
-		let res = checked_query(db, "INFO FOR DB").await;
-		assert_eq!(res.num_statements(), 1);
+		for (query, expected_results) in queries.into_iter() {
+			checked_query(db, query, expected_results).await;
+		}
 	}
 
 	// Executes the query and ensures to print out the query if it does not pass
-	async fn checked_query<C>(db: &Surreal<C>, q: &str) -> Response
+	async fn checked_query<C>(db: &Surreal<C>, q: &str, expected: &Expected)
 	where
 		C: Connection,
 	{
-		db.query(q).await.expect(q).check().expect(q)
+		let mut res = db.query(q).await.expect(q).check().expect(q);
+		assert_eq!(res.num_statements(), 1, "Wrong number of result on query {q}");
+		let results: Vec<JsonValue> = res.take(0).unwrap();
+		expected.check_results(q, &results);
 	}
 
 	async fn new_local_instance(file_path: &String) -> Surreal<Any> {
@@ -258,25 +338,34 @@ mod upgrade {
 			}
 		}
 
-		async fn checked_query(&self, q: &str, expected_json_result: Option<&str>) {
+		async fn checked_query(&self, q: &str, expected: &Expected) {
 			let r = self.query(q).await.unwrap_or_else(|| panic!("No response for {q}"));
-			assert_eq!(r.status(), StatusCode::OK);
-			if let Some(expected) = expected_json_result {
-				// Convert the result to JSON
-				let j: JsonValue = r.json().await.expect(q);
-				debug!("{q} => {j:#}");
-				// The result is should be an array
-				let a = j.as_array().expect(q);
-				// Extract the first item of the array
-				let r0 = a.first().unwrap_or_else(|| panic!("Empty array on query: {q}"));
-				// Check the status
-				let status = r0.get("status").unwrap_or_else(|| panic!("No status on query: {q}"));
-				assert_eq!(status.as_str(), Some("OK"), "Wrong status for {q} => {status:#}");
-				// Check we have a result
-				let result = r0.get("result").unwrap_or_else(|| panic!("No result for query: {q}"));
-				// Compare the result with what is expected
-				let expected: JsonValue = serde_json::from_str(expected).expect(expected);
-				assert_eq!(format!("{:#}", result), format!("{:#}", expected));
+			assert_eq!(
+				r.status(),
+				StatusCode::OK,
+				"Wrong response for {q} -> {}",
+				r.text().await.expect(q)
+			);
+			// Convert the result to JSON
+			let j: JsonValue = r.json().await.expect(q);
+			debug!("{q} => {j:#}");
+			// The result should be an array
+			let results_with_status = j.as_array().expect(q);
+			assert_eq!(results_with_status.len(), 1, "Wrong number of results on query {q}");
+			let result_with_status = &results_with_status[0];
+			// Check the status
+			let status = result_with_status
+				.get("status")
+				.unwrap_or_else(|| panic!("No status on query: {q}"));
+			assert_eq!(status.as_str(), Some("OK"), "Wrong status for {q} => {status:#}");
+			// Extract the results
+			let results = result_with_status
+				.get("result")
+				.unwrap_or_else(|| panic!("No result for query: {q}"));
+			if !matches!(expected, Expected::Any) {
+				// Check the results
+				let results = results.as_array().expect(q);
+				expected.check_results(q, &results);
 			}
 		}
 	}
