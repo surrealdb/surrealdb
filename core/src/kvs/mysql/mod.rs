@@ -41,8 +41,8 @@ impl Datastore {
 			CREATE TABLE IF NOT EXISTS kvstore (
 				`key` BLOB NOT NULL,
 				`value` LONGBLOB NOT NULL,
-				PRIMARY KEY (`key`(1024)),
-				UNIQUE INDEX (`key`(1024) ASC, `value`(1024))
+				PRIMARY KEY (`key`(767)),
+				UNIQUE INDEX (`key`(767) ASC, `value`(767))
 			) DEFAULT CHARSET=utf8mb4;
 			"#,
 		)
