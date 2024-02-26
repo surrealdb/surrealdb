@@ -92,7 +92,11 @@ impl Transaction {
 
 	/// Checks if the key either matches the "check variable", or don't match at all
 	/// In other word, this is "exclusive or"
-	async fn key_either_matches_check_or_dont<V>(&mut self, key: Key, chk: Option<V>) -> Result<bool, Error>
+	async fn key_either_matches_check_or_dont<V>(
+		&mut self,
+		key: Key,
+		chk: Option<V>,
+	) -> Result<bool, Error>
 	where
 		V: Into<Val>,
 	{
