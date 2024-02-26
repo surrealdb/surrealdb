@@ -131,7 +131,21 @@ pub async fn sc(
 								// Create the authentication claim
 								let exp = Some(
 									match sv.session {
-										Some(v) => Utc::now() + Duration::from_std(v.0).unwrap(),
+										Some(v) => {
+											// The defined session duration must be valid
+											match Duration::from_std(v.0) {
+												// The resulting session expiration must be valid
+												Ok(d) => match Utc::now().checked_add_signed(d) {
+													Some(exp) => exp,
+													None => {
+														return Err(Error::InvalidSessionExpiration)
+													}
+												},
+												Err(_) => {
+													return Err(Error::InvalidSessionDuration)
+												}
+											}
+										}
 										_ => Utc::now() + Duration::hours(1),
 									}
 									.timestamp(),

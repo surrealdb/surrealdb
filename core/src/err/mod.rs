@@ -758,6 +758,14 @@ pub enum Error {
 	#[error("The session has expired")]
 	ExpiredSession,
 
+	/// The session has an invalid duration
+	#[error("The session has an invalid duration")]
+	InvalidSessionDuration,
+
+	/// The session has an invalid expiration
+	#[error("The session has an invalid expiration")]
+	InvalidSessionExpiration,
+
 	/// There was an error with authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
