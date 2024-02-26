@@ -315,8 +315,7 @@ fn parse_define_table() {
 				expiry: std::time::Duration::from_secs(1)
 			}),
 			comment: None,
-			// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
-			table_type: TableType::Any,
+			table_type: TableType::Normal,
 		}))
 	);
 }

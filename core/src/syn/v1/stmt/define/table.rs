@@ -33,9 +33,8 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let mut res = DefineTableStatement {
 		name,
 		permissions: Permissions::none(),
-		// TODO (2.0.0) (RaphaelDarley) : Change default to TableType::Normal
 		#[cfg(feature = "sql2")]
-		table_type: TableType::Any,
+		table_type: TableType::Normal,
 		..Default::default()
 	};
 	// Assign any defined options
