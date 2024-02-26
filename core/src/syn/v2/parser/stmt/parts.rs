@@ -107,7 +107,7 @@ impl Parser<'_> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
-		let v = self.parse_idiom_list(ctx)?.into_iter().map(Fetch).collect();
+		let v = self.parse_idiom_list(ctx).await?.into_iter().map(Fetch).collect();
 		Ok(Some(Fetchs(v)))
 	}
 
@@ -215,7 +215,7 @@ impl Parser<'_> {
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
 	pub async fn parse_permission(
 		&mut self,
-		ctx: Ctx<'_>,
+		mut ctx: Ctx<'_>,
 		permissive: bool,
 	) -> ParseResult<Permissions> {
 		match self.next().kind {

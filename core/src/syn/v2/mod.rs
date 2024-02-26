@@ -30,7 +30,12 @@ use reblessive::Stack;
 pub fn parse(input: &str) -> Result<Query, Error> {
 	debug!("parsing query, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_query().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.run(|ctx| parser.parse_query(ctx))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parses a SurrealQL [`Value`].
@@ -65,7 +70,12 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 pub fn json(input: &str) -> Result<Value, Error> {
 	debug!("parsing json, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.run(|ctx| parser.parse_json(ctx))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
@@ -73,8 +83,13 @@ pub fn json(input: &str) -> Result<Value, Error> {
 pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	debug!("parsing json, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
+	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
-	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	stack
+		.run(|ctx| parser.parse_json(ctx))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 /// Parses a SurrealQL Subquery [`Subquery`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
@@ -84,6 +99,7 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 	let mut stack = Stack::new();
 	stack
 		.run(|ctx| parser.parse_full_subquery(ctx))
+		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
 }
@@ -132,7 +148,12 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 pub fn range(input: &str) -> Result<Range, Error> {
 	debug!("parsing range, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_range().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.run(|ctx| parser.parse_range(ctx))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parse a record id.

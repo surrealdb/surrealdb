@@ -47,7 +47,7 @@ impl Parser<'_> {
 					let start = expected!(self, t!("(")).span;
 					let mut inner_values = vec![ctx.run(|ctx| self.parse_value(ctx)).await?];
 					while self.eat(t!(",")) {
-						inner_values.push(ctx.run(|ctx| self.parse_value(ctx))?);
+						inner_values.push(ctx.run(|ctx| self.parse_value(ctx)).await?);
 					}
 					values.push(inner_values);
 					self.expect_closing_delimiter(t!(")"), start)?;

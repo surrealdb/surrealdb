@@ -153,7 +153,7 @@ impl Parser<'_> {
 			TokenKind::Strand => {
 				self.pop_peek();
 				if self.legacy_strands {
-					return ctx.run(|ctx| self.parse_legacy_strand(ctx));
+					return ctx.run(|ctx| self.parse_legacy_strand(ctx)).await;
 				} else {
 					let strand = self.token_value(token)?;
 					return Ok(Value::Strand(strand));
@@ -314,7 +314,7 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the starting `[` to already be eaten and its span passed as an argument.
-	pub async fn parse_array(&mut self, ctx: Ctx<'_>, start: Span) -> ParseResult<Array> {
+	pub async fn parse_array(&mut self, mut ctx: Ctx<'_>, start: Span) -> ParseResult<Array> {
 		let mut values = Vec::new();
 		loop {
 			if self.eat(t!("]")) {
@@ -350,7 +350,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_full_subquery(&mut self, ctx: Ctx<'_>) -> ParseResult<Subquery> {
+	pub async fn parse_full_subquery(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Subquery> {
 		let peek = self.peek();
 		match peek.kind {
 			t!("(") => {
@@ -369,7 +369,7 @@ impl Parser<'_> {
 
 	pub async fn parse_inner_subquery_or_coordinate(
 		&mut self,
-		ctx: Ctx<'_>,
+		mut ctx: Ctx<'_>,
 		start: Span,
 	) -> ParseResult<Value> {
 		let peek = self.peek();
@@ -505,7 +505,7 @@ impl Parser<'_> {
 
 	pub async fn parse_inner_subquery(
 		&mut self,
-		ctx: Ctx<'_>,
+		mut ctx: Ctx<'_>,
 		start: Option<Span>,
 	) -> ParseResult<Subquery> {
 		let peek = self.peek();
@@ -597,9 +597,9 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
 	/// matches.
-	pub fn parse_legacy_strand(&mut self, ctx: Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_legacy_strand(&mut self, ctx: Ctx<'_>) -> ParseResult<Value> {
 		let text = self.lexer.string.take().unwrap();
-		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx) {
+		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx).await {
 			return Ok(Value::Thing(x));
 		}
 		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_datetime() {
@@ -619,7 +619,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = ctx.run(|ctx| self.parse_value_field(ctx)?).await;
+			let arg = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

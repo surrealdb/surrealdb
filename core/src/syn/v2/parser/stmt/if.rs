@@ -41,7 +41,7 @@ impl Parser<'_> {
 
 	async fn parse_worded_tail(
 		&mut self,
-		ctx: Ctx<'_>,
+		mut ctx: Ctx<'_>,
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {
@@ -69,7 +69,7 @@ impl Parser<'_> {
 
 	async fn parse_bracketed_tail(
 		&mut self,
-		ctx: Ctx<'_>,
+		mut ctx: Ctx<'_>,
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {

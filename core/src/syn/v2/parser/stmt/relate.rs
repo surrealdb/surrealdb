@@ -34,7 +34,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_relation(&mut self, ctx: Ctx<'_>) -> ParseResult<(Value, Value, Value)> {
+	pub async fn parse_relation(&mut self, mut ctx: Ctx<'_>) -> ParseResult<(Value, Value, Value)> {
 		let first = ctx.run(|ctx| self.parse_relate_value(ctx)).await?;
 		let is_o = match self.next().kind {
 			t!("->") => true,
@@ -55,7 +55,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_value(&mut self, ctx: Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_relate_value(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
@@ -93,7 +93,7 @@ impl Parser<'_> {
 
 	pub async fn parse_thing_or_table(&mut self, ctx: Ctx<'_>) -> ParseResult<Value> {
 		if self.peek_token_at(1).kind == t!(":") {
-			self.parse_thing(ctx).map(Value::Thing)
+			self.parse_thing(ctx).await.map(Value::Thing)
 		} else {
 			self.next_token_value().map(Value::Table)
 		}

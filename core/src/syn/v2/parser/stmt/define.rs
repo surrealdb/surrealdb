@@ -82,7 +82,7 @@ impl Parser<'_> {
 
 	pub async fn parse_define_function(
 		&mut self,
-		ctx: Ctx<'_>,
+		mut ctx: Ctx<'_>,
 	) -> ParseResult<DefineFunctionStatement> {
 		let name = self.parse_custom_function_name()?;
 		let token = expected!(self, t!("(")).span;
@@ -94,7 +94,7 @@ impl Parser<'_> {
 
 			let param = self.next_token_value::<Param>()?.0;
 			expected!(self, t!(":"));
-			let kind = ctx.run(|ctx| self.parse_inner_kind(ctx))?;
+			let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
 
 			args.push((param, kind));
 

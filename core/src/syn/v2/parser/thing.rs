@@ -86,12 +86,14 @@ impl Parser<'_> {
 		if self.eat(t!("..")) {
 			let end = if self.eat(t!("=")) {
 				self.no_whitespace()?;
-				Bound::Included(self.parse_id()?)
+				let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Included(id)
 			} else if self.peek_can_be_ident()
 				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 			{
 				self.no_whitespace()?;
-				Bound::Excluded(self.parse_id()?)
+				let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
@@ -130,7 +132,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_range(&mut self) -> ParseResult<Range> {
+	pub async fn parse_range(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Range> {
 		let tb = self.next_token_value::<Ident>()?.0;
 
 		expected!(self, t!(":"));
@@ -142,7 +144,7 @@ impl Parser<'_> {
 			self.peek();
 			self.no_whitespace()?;
 
-			let id = self.parse_id()?;
+			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 
 			self.peek();
 			self.no_whitespace()?;
@@ -170,7 +172,7 @@ impl Parser<'_> {
 		self.no_whitespace()?;
 
 		let end = if self.peek_can_be_ident() {
-			let id = self.parse_id()?;
+			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 			if inclusive {
 				Bound::Included(id)
 			} else {
@@ -189,7 +191,7 @@ impl Parser<'_> {
 
 	pub async fn parse_thing(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
-		self.parse_thing_from_ident(ident)
+		self.parse_thing_from_ident(ctx, ident).await
 	}
 
 	pub async fn parse_thing_from_ident(
@@ -256,15 +258,17 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use reblessive::Stack;
+
 	use super::*;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
-	use crate::sql::value::Value;
 	use crate::syn::Parse;
 
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());
-		parser.parse_thing()
+		let mut stack = Stack::new();
+		stack.run(|ctx| parser.parse_thing(ctx)).finish()
 	}
 
 	#[test]

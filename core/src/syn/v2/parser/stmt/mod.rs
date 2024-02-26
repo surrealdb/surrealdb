@@ -35,7 +35,7 @@ mod select;
 mod update;
 
 impl Parser<'_> {
-	pub async fn parse_stmt_list(&mut self, ctx: Ctx<'_>) -> ParseResult<Statements> {
+	pub async fn parse_stmt_list(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Statements> {
 		let mut res = Vec::new();
 		loop {
 			match self.peek_kind() {
@@ -91,7 +91,7 @@ impl Parser<'_> {
 		)
 	}
 
-	pub(super) async fn parse_stmt(&mut self, ctx: Ctx<'_>) -> ParseResult<Statement> {
+	pub(super) async fn parse_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
 			t!("ANALYZE") => {
@@ -206,7 +206,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(super) async fn parse_entry(&mut self, ctx: Ctx<'_>) -> ParseResult<Entry> {
+	pub(super) async fn parse_entry(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Entry> {
 		let token = self.peek();
 		match token.kind {
 			t!("BREAK") => {

@@ -9,12 +9,12 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_update_stmt(&mut self, ctx: Ctx<'_>) -> ParseResult<UpdateStatement> {
+	pub async fn parse_update_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<UpdateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let what = Values(self.parse_what_list()?);
-		let data = self.try_parse_data()?;
-		let cond = self.try_parse_condition()?;
-		let output = self.try_parse_output()?;
+		let what = Values(ctx.run(|ctx| self.parse_what_list(ctx)).await?);
+		let data = ctx.run(|ctx| self.try_parse_data(ctx)).await?;
+		let cond = ctx.run(|ctx| self.try_parse_condition(ctx)).await?;
+		let output = ctx.run(|ctx| self.try_parse_output(ctx)).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 

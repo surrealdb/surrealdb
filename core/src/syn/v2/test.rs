@@ -1,3 +1,5 @@
+use reblessive::Stack;
+
 use super::super::Parse;
 use super::lexer::Lexer;
 use super::parser::Parser;
@@ -13,9 +15,10 @@ impl Parse<Self> for Value {
 impl Parse<Self> for Array {
 	fn parse(val: &str) -> Self {
 		let mut parser = Parser::new(val.as_bytes());
+		let mut stack = Stack::new();
 		let start = parser.peek().span;
 		assert!(parser.eat(t!("[")));
-		parser.parse_array(start).unwrap()
+		stack.run(|ctx| parser.parse_array(ctx, start)).finish().unwrap()
 	}
 }
 
@@ -49,7 +52,8 @@ impl Parse<Self> for Thing {
 impl Parse<Self> for Expression {
 	fn parse(val: &str) -> Self {
 		let mut parser = Parser::new(val.as_bytes());
-		let value = parser.parse_value_field().unwrap();
+		let mut stack = Stack::new();
+		let value = stack.run(|ctx| parser.parse_value_field(ctx)).finish().unwrap();
 		if let Value::Expression(x) = value {
 			return *x;
 		}

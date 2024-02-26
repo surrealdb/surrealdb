@@ -399,10 +399,10 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what list.
-	pub async fn parse_what_list(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Vec<Value>> {
-		let mut res = vec![self.parse_what_value(ctx).await?];
+	pub async fn parse_what_list(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Vec<Value>> {
+		let mut res = vec![self.parse_what_value(&mut ctx).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_what_value(ctx).await?)
+			res.push(self.parse_what_value(&mut ctx).await?)
 		}
 		Ok(res)
 	}
@@ -434,10 +434,13 @@ impl Parser<'_> {
 	/// of the graph
 	pub async fn parse_graph(&mut self, mut ctx: Ctx<'_>, dir: Dir) -> ParseResult<Graph> {
 		match self.peek_kind() {
-			t!("?") => Ok(Graph {
-				dir,
-				..Default::default()
-			}),
+			t!("?") => {
+				self.pop_peek();
+				Ok(Graph {
+					dir,
+					..Default::default()
+				})
+			}
 			t!("(") => {
 				let span = self.pop_peek().span;
 				let what = match self.peek_kind() {

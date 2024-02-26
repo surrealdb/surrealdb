@@ -153,6 +153,7 @@ impl Parser<'_> {
 									BTreeMap::from([(key, Value::Strand(strand))]),
 									start,
 								)
+								.await
 								.map(Value::Object);
 						}
 						let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
@@ -441,13 +442,15 @@ impl Parser<'_> {
 		expected!(self, t!(":"));
 		if coord_key != "coordinates" {
 			// next field was not correct, fallback to parsing plain object.
-			return self
-				.parse_object_from_key(
-					&mut ctx,
-					coord_key,
-					BTreeMap::from([(key, Value::Strand(strand))]),
-					start,
-				)
+			return ctx
+				.run(|ctx| {
+					self.parse_object_from_key(
+						ctx,
+						coord_key,
+						BTreeMap::from([(key, Value::Strand(strand))]),
+						start,
+					)
+				})
 				.await
 				.map(Value::Object);
 		}
@@ -465,12 +468,14 @@ impl Parser<'_> {
 				));
 			}
 
-			return self
-				.parse_object_from_map(
-					&mut ctx,
-					BTreeMap::from([(key, Value::Strand(strand)), (coord_key, value)]),
-					start,
-				)
+			return ctx
+				.run(|ctx| {
+					self.parse_object_from_map(
+						ctx,
+						BTreeMap::from([(key, Value::Strand(strand)), (coord_key, value)]),
+						start,
+					)
+				})
 				.await
 				.map(Value::Object);
 		}
@@ -599,7 +604,7 @@ impl Parser<'_> {
 				return Ok(Object(map));
 			}
 
-			let (key, value) = self.parse_object_entry(&mut ctx)?;
+			let (key, value) = self.parse_object_entry(&mut ctx).await?;
 			// TODO: Error on duplicate key?
 			map.insert(key, value);
 
