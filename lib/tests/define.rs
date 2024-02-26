@@ -1186,6 +1186,7 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_statement_analyzer() -> Result<(), Error> {
 	let sql = r#"
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);

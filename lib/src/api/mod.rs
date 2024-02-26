@@ -10,6 +10,7 @@ pub mod opt;
 mod conn;
 
 pub use method::query::Response;
+use semver::Version;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
@@ -26,10 +27,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use self::opt::EndpointKind;
+
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
 const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <2.0.0", "20230701.55918b7c");
+const REVISION_SUPPORTED_SERVER_VERSION: Version = Version::new(1, 2, 0);
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
@@ -91,8 +95,20 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let client = Client::connect(self.address?, self.capacity).await?;
-			client.check_server_version().await?;
+			let mut endpoint = self.address?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
+			let mut client = Client::connect(endpoint.clone(), self.capacity).await?;
+			if endpoint_kind.is_remote() {
+				let mut version = client.version().await?;
+				// we would like to be able to connect to pre-releases too
+				version.pre = Default::default();
+				client.check_server_version(&version).await?;
+				if version >= REVISION_SUPPORTED_SERVER_VERSION && endpoint_kind.is_ws() {
+					// Switch to revision based serialisation
+					endpoint.supports_revision = true;
+					client = Client::connect(endpoint, self.capacity).await?;
+				}
+			}
 			Ok(client)
 		})
 	}
@@ -111,15 +127,27 @@ where
 			if self.router.get().is_some() {
 				return Err(Error::AlreadyConnected.into());
 			}
-			let arc = Client::connect(self.address?, self.capacity).await?.router;
-			let cell = Arc::into_inner(arc).expect("new connection to have no references");
-			let router = cell.into_inner().expect("router to be set");
-			self.router.set(router).map_err(|_| Error::AlreadyConnected)?;
-			let client = Surreal {
-				router: self.router,
+			let mut endpoint = self.address?;
+			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
+			let mut client = Surreal {
+				router: Client::connect(endpoint.clone(), self.capacity).await?.router,
 				engine: PhantomData::<Client>,
 			};
-			client.check_server_version().await?;
+			if endpoint_kind.is_remote() {
+				let mut version = client.version().await?;
+				// we would like to be able to connect to pre-releases too
+				version.pre = Default::default();
+				client.check_server_version(&version).await?;
+				if version >= REVISION_SUPPORTED_SERVER_VERSION && endpoint_kind.is_ws() {
+					// Switch to revision based serialisation
+					endpoint.supports_revision = true;
+					client = Client::connect(endpoint, self.capacity).await?;
+				}
+			}
+			let cell =
+				Arc::into_inner(client.router).expect("new connection to have no references");
+			let router = cell.into_inner().expect("router to be set");
+			self.router.set(router).map_err(|_| Error::AlreadyConnected)?;
 			Ok(())
 		})
 	}
@@ -141,18 +169,15 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	async fn check_server_version(&self) -> Result<()> {
+	async fn check_server_version(&self, version: &Version) -> Result<()> {
 		let (versions, build_meta) = SUPPORTED_VERSIONS;
 		// invalid version requirements should be caught during development
 		let req = VersionReq::parse(versions).expect("valid supported versions");
 		let build_meta = BuildMetadata::new(build_meta).expect("valid supported build metadata");
-		let mut version = self.version().await?;
-		// we would like to be able to connect to pre-releases too
-		version.pre = Default::default();
 		let server_build = &version.build;
-		if !req.matches(&version) {
+		if !req.matches(version) {
 			return Err(Error::VersionMismatch {
-				server_version: version,
+				server_version: version.clone(),
 				supported_versions: versions.to_owned(),
 			}
 			.into());

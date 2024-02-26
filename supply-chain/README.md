@@ -65,6 +65,8 @@ The following process can be followed whenever the dependency checking action fa
       - `cargo vet trust <PACKAGE>`
     - Otherwise, it can be (for now) exempted from the vetting process.
       - `cargo vet add-exemption <PACKAGE>`
+  - Afterwards, prune the list of audits to remove outdated entries.
+  	- `cargo vet prune`
   - The changes will be approved by **@surrealdb/security**.
 - If the action fails due to `cargo-acl`:
   - The newly required access (e.g. `unsafe`, `fs`, `net`...) should be understood by the author of the PR.

@@ -1,7 +1,7 @@
 // RUST_LOG=warn cargo make ci-ml-integration
 mod common;
 
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 mod ml_integration {
 
 	use super::*;
@@ -10,7 +10,7 @@ mod ml_integration {
 	use serde::{Deserialize, Serialize};
 	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::time::Duration;
-	use surrealml_core::storage::stream_adapter::StreamAdapter;
+	use surrealdb::ml::storage::stream_adapter::StreamAdapter;
 	use test_log::test;
 	use ulid::Ulid;
 

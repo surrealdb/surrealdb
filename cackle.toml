@@ -29,6 +29,7 @@ include = [
     "mio::net",
     "surreal::net",
     "surrealdb",
+    "surrealdb_core",
     "tokio::net",
     "tracing",
     "tracing_core",
@@ -509,6 +510,9 @@ allow_unsafe = true
 
 [pkg.futures-util]
 allow_unsafe = true
+allow_apis = [
+    "net",
+]
 
 [pkg.indexmap]
 allow_unsafe = true
@@ -1151,8 +1155,14 @@ allow_apis = [
 ]
 
 [pkg.surrealdb]
+allow_apis = [
+    "fs",
+]
+
+[pkg.surrealdb-core]
 allow_unsafe = true
 allow_apis = [
+    "net",
     "fs",
 ]
 
@@ -1273,3 +1283,23 @@ allow_unsafe = true
 
 [pkg.pprof]
 allow_unsafe = true
+
+[pkg.crossbeam-queue]
+allow_unsafe = true
+
+[pkg.lru]
+allow_unsafe = true
+allow_apis = [
+    "net",
+]
+
+[pkg.surrealkv]
+allow_apis = [
+    "fs",
+    "net",
+]
+
+[pkg.vart]
+allow_apis = [
+    "net",
+]
