@@ -130,7 +130,6 @@ impl fmt::Display for Datastore {
 			Inner::SurrealKV(_) => write!(f, "surrealkv"),
 			#[cfg(feature = "kv-postgres")]
 			Inner::Postgres(_) => write!(f, "postgres"),
-			_ => unreachable!(),
 		}
 	}
 }
@@ -1084,7 +1083,6 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::Postgres(tx)
 			}
-			_ => unreachable!(),
 		};
 
 		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
