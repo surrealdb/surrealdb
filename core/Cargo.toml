@@ -55,6 +55,8 @@ experimental-parser = ["dep:phf", "dep:unicase"]
 sql2 = []
 # Private features
 kv-fdb = ["tokio/time"]
+native-tls = ["sqlx?/tls-native-tls"]
+rustls = ["sqlx?/tls-rustls"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

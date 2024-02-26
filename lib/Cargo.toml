@@ -47,11 +47,13 @@ native-tls = [
     "dep:native-tls",
     "reqwest?/native-tls",
     "tokio-tungstenite?/native-tls",
+    "surrealdb-core/native-tls"
 ]
 rustls = [
     "dep:rustls",
     "reqwest?/rustls-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
+    "surrealdb-core/rustls"
 ]
 ml = ["surrealdb-core/ml"]
 ml2 = ["surrealdb-core/ml2"]
