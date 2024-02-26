@@ -12,12 +12,14 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineParamStatement {
 	pub name: Ident,
 	pub value: Value,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
+	#[revision(start = 2)]
+	pub if_not_exists: bool,
 }
 
 impl DefineParamStatement {
@@ -35,16 +37,27 @@ impl DefineParamStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Compute the param
-		let val = DefineParamStatement {
-			value: self.value.compute(ctx, opt, txn, doc).await?,
-			..self.clone()
-		};
+		// Check if param already exists
+		if self.if_not_exists && run.get_db_param(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			return Err(Error::PaAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
 		// Process the statement
 		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, val).await?;
+		run.set(
+			key,
+			DefineParamStatement {
+				// Compute the param
+				value: self.value.compute(ctx, opt, txn, doc).await?,
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -63,6 +76,9 @@ impl Display for DefineParamStatement {
 			None
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
 		Ok(())
 	}
 }

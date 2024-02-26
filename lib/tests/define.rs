@@ -2120,6 +2120,7 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_analyzer_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE ANALYZER example_blank TOKENIZERS blank;
@@ -2140,6 +2141,7 @@ async fn redefining_existing_analyzer_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_analyzer_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE ANALYZER example TOKENIZERS blank IF NOT EXISTS;
@@ -2160,6 +2162,7 @@ async fn redefining_existing_analyzer_with_if_not_exists_should_error() -> Resul
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_database_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE DATABASE example;
@@ -2180,6 +2183,7 @@ async fn redefining_existing_database_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_database_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE DATABASE example IF NOT EXISTS;
@@ -2200,6 +2204,7 @@ async fn redefining_existing_database_with_if_not_exists_should_error() -> Resul
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_event_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT example ON example THEN {};
@@ -2220,6 +2225,7 @@ async fn redefining_existing_event_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_event_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT example ON example THEN {} IF NOT EXISTS;
@@ -2240,6 +2246,7 @@ async fn redefining_existing_event_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_field_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD example ON example;
@@ -2260,6 +2267,7 @@ async fn redefining_existing_field_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_field_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD example ON example IF NOT EXISTS;
@@ -2280,6 +2288,7 @@ async fn redefining_existing_field_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_function_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE FUNCTION fn::example() {};
@@ -2300,6 +2309,7 @@ async fn redefining_existing_function_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_function_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE FUNCTION fn::example() {} IF NOT EXISTS;
@@ -2320,6 +2330,7 @@ async fn redefining_existing_function_with_if_not_exists_should_error() -> Resul
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_index_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX example ON example FIELDS example;
@@ -2340,6 +2351,7 @@ async fn redefining_existing_index_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_index_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX example ON example FIELDS example IF NOT EXISTS;
@@ -2360,6 +2372,7 @@ async fn redefining_existing_index_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_namespace_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE NAMESPACE example;
@@ -2380,6 +2393,7 @@ async fn redefining_existing_namespace_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_namespace_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE NAMESPACE example IF NOT EXISTS;
@@ -2400,6 +2414,7 @@ async fn redefining_existing_namespace_with_if_not_exists_should_error() -> Resu
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_param_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE PARAM $example VALUE 123;
@@ -2420,6 +2435,7 @@ async fn redefining_existing_param_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_param_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE PARAM $example VALUE 123 IF NOT EXISTS;
@@ -2440,6 +2456,7 @@ async fn redefining_existing_param_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_scope_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE SCOPE example;
@@ -2460,6 +2477,7 @@ async fn redefining_existing_scope_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_scope_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE SCOPE example IF NOT EXISTS;
@@ -2480,6 +2498,7 @@ async fn redefining_existing_scope_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_table_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE example;
@@ -2500,6 +2519,7 @@ async fn redefining_existing_table_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE example IF NOT EXISTS;
@@ -2520,6 +2540,7 @@ async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\";
@@ -2540,6 +2561,7 @@ async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\" IF NOT EXISTS;
@@ -2560,6 +2582,7 @@ async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER;
@@ -2580,6 +2603,7 @@ async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;

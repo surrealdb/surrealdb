@@ -53,6 +53,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -82,6 +83,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -136,6 +138,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.permissions = self.parse_permission_value()?;
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -181,6 +184,7 @@ impl Parser<'_> {
 						res.roles.push(self.next_token_value()?);
 					}
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -224,6 +228,7 @@ impl Parser<'_> {
 						x => unexpected!(self, x, "a token algorithm"),
 					}
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -263,6 +268,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.signin = Some(self.parse_value()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -298,6 +304,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.permissions = self.parse_permission_value()?;
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -358,6 +365,7 @@ impl Parser<'_> {
 						x => unexpected!(self, x, "`SELECT`"),
 					}
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -400,6 +408,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -460,6 +469,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -624,6 +634,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));
@@ -646,6 +657,7 @@ impl Parser<'_> {
 			tokenizers: None,
 			filters: None,
 			comment: None,
+			#[cfg(feature = "sql2")]
 			if_not_exists: false,
 		};
 		loop {
@@ -730,6 +742,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				#[cfg(feature = "sql2")]
 				t!("IF") => {
 					self.pop_peek();
 					expected!(self, t!("NOT"));

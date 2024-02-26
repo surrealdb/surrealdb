@@ -50,6 +50,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			#[cfg(feature = "sql2")]
 			DefineTableOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -68,6 +69,7 @@ enum DefineTableOption {
 	Comment(Strand),
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
@@ -80,6 +82,7 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_schemafull,
 		table_permissions,
 		table_changefeed,
+		#[cfg(feature = "sql2")]
 		table_if_not_exists,
 	))(i)
 }
@@ -128,6 +131,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	Ok((i, DefineTableOption::Permissions(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn table_if_not_exists(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

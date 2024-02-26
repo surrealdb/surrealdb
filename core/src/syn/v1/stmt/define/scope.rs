@@ -36,6 +36,7 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 			DefineScopeOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			#[cfg(feature = "sql2")]
 			DefineScopeOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -50,11 +51,19 @@ enum DefineScopeOption {
 	Signup(Value),
 	Signin(Value),
 	Comment(Strand),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
 fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
-	alt((scope_session, scope_signup, scope_signin, scope_comment, scope_if_not_exists))(i)
+	alt((
+		scope_session,
+		scope_signup,
+		scope_signin,
+		scope_comment,
+		#[cfg(feature = "sql2")]
+		scope_if_not_exists
+	))(i)
 }
 
 fn scope_session(i: &str) -> IResult<&str, DefineScopeOption> {
@@ -89,6 +98,7 @@ fn scope_comment(i: &str) -> IResult<&str, DefineScopeOption> {
 	Ok((i, DefineScopeOption::Comment(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn scope_if_not_exists(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

@@ -70,6 +70,7 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 			DefineFieldOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			#[cfg(feature = "sql2")]
 			DefineFieldOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -89,6 +90,7 @@ enum DefineFieldOption {
 	Default(Value),
 	Comment(Strand),
 	Permissions(Permissions),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
@@ -103,6 +105,7 @@ fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
 		field_default,
 		field_comment,
 		field_permissions,
+		#[cfg(feature = "sql2")]
 		field_if_not_exists,
 	))(i)
 }
@@ -166,6 +169,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 	Ok((i, DefineFieldOption::Permissions(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn field_if_not_exists(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

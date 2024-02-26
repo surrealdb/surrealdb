@@ -49,6 +49,7 @@ pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 			DefineEventOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			#[cfg(feature = "sql2")]
 			DefineEventOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -70,11 +71,18 @@ enum DefineEventOption {
 	When(Value),
 	Then(Values),
 	Comment(Strand),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
 fn event_opts(i: &str) -> IResult<&str, DefineEventOption> {
-	alt((event_when, event_then, event_comment, event_if_not_exists))(i)
+	alt((
+		event_when,
+		event_then,
+		event_comment,
+		#[cfg(feature = "sql2")]
+		event_if_not_exists
+	))(i)
 }
 
 fn event_when(i: &str) -> IResult<&str, DefineEventOption> {
@@ -101,6 +109,7 @@ fn event_comment(i: &str) -> IResult<&str, DefineEventOption> {
 	Ok((i, DefineEventOption::Comment(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn event_if_not_exists(i: &str) -> IResult<&str, DefineEventOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

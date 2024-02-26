@@ -11,11 +11,13 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineNamespaceStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub comment: Option<Strand>,
+	#[revision(start = 2)]
+	pub if_not_exists: bool,
 }
 
 impl DefineNamespaceStatement {
@@ -35,13 +37,29 @@ impl DefineNamespaceStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Set the id
+		// Check if namespace already exists
+		if self.if_not_exists && run.get_ns(&self.name).await.is_ok() {
+			return Err(Error::NsAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
 		if self.id.is_none() {
-			let mut ns = self.clone();
-			ns.id = Some(run.get_next_ns_id().await?);
+			// Set the id
+			let ns = DefineNamespaceStatement {
+				id: Some(run.get_next_ns_id().await?),
+				if_not_exists: false,
+				..self.clone()
+			};
 			run.set(key, ns).await?;
 		} else {
-			run.set(key, self).await?;
+			run.set(
+				key,
+				DefineNamespaceStatement {
+					if_not_exists: false,
+					..self.clone()
+				},
+			)
+			.await?;
 		}
 		// Ok all good
 		Ok(Value::None)
@@ -53,6 +71,9 @@ impl Display for DefineNamespaceStatement {
 		write!(f, "DEFINE NAMESPACE {}", self.name)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
+		}
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
 		}
 		Ok(())
 	}

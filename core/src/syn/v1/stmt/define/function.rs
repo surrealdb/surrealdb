@@ -58,6 +58,7 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 			DefineFunctionOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			#[cfg(feature = "sql2")]
 			DefineFunctionOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -70,11 +71,17 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 enum DefineFunctionOption {
 	Comment(Strand),
 	Permissions(Permission),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
 fn function_opts(i: &str) -> IResult<&str, DefineFunctionOption> {
-	alt((function_comment, function_permissions, function_if_not_exists))(i)
+	alt((
+		function_comment,
+		function_permissions,
+		#[cfg(feature = "sql2")]
+		function_if_not_exists
+	))(i)
 }
 
 fn function_comment(i: &str) -> IResult<&str, DefineFunctionOption> {
@@ -93,6 +100,7 @@ fn function_permissions(i: &str) -> IResult<&str, DefineFunctionOption> {
 	Ok((i, DefineFunctionOption::Permissions(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn function_if_not_exists(i: &str) -> IResult<&str, DefineFunctionOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

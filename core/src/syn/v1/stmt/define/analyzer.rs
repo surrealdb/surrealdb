@@ -39,6 +39,7 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 			DefineAnalyzerOption::Tokenizers(v) => {
 				res.tokenizers = Some(v);
 			}
+			#[cfg(feature = "sql2")]
 			DefineAnalyzerOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -54,6 +55,7 @@ enum DefineAnalyzerOption {
 	Comment(Strand),
 	Filters(Vec<Filter>),
 	Tokenizers(Vec<Tokenizer>),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
@@ -64,6 +66,7 @@ fn analyzer_opts(i: &str) -> IResult<&str, DefineAnalyzerOption> {
 		analyzer_comment,
 		analyzer_filters,
 		analyzer_tokenizers,
+		#[cfg(feature = "sql2")]
 		analyzer_if_not_exists,
 	))(i)
 }
@@ -102,6 +105,7 @@ fn analyzer_tokenizers(i: &str) -> IResult<&str, DefineAnalyzerOption> {
 	Ok((i, DefineAnalyzerOption::Tokenizers(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn analyzer_if_not_exists(i: &str) -> IResult<&str, DefineAnalyzerOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

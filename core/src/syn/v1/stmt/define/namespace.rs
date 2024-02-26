@@ -25,6 +25,7 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 			DefineNamespaceOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			#[cfg(feature = "sql2")]
 			DefineNamespaceOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -36,11 +37,16 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 
 enum DefineNamespaceOption {
 	Comment(Strand),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
 fn namespace_opts(i: &str) -> IResult<&str, DefineNamespaceOption> {
-	alt((namespace_comment, namespace_if_not_exists))(i)
+	alt((
+		namespace_comment,
+		#[cfg(feature = "sql2")]
+		namespace_if_not_exists
+	))(i)
 }
 
 fn namespace_comment(i: &str) -> IResult<&str, DefineNamespaceOption> {
@@ -51,6 +57,7 @@ fn namespace_comment(i: &str) -> IResult<&str, DefineNamespaceOption> {
 	Ok((i, DefineNamespaceOption::Comment(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn namespace_if_not_exists(i: &str) -> IResult<&str, DefineNamespaceOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

@@ -44,7 +44,6 @@ pub struct SerializeDefineScopeStatement {
 	signup: Option<Value>,
 	signin: Option<Value>,
 	comment: Option<Strand>,
-	if_not_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineScopeStatement {
@@ -75,9 +74,6 @@ impl serde::ser::SerializeStruct for SerializeDefineScopeStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
-			"if_not_exists" => {
-				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
-			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineScopeStatement::{key}`"
@@ -95,7 +91,6 @@ impl serde::ser::SerializeStruct for SerializeDefineScopeStatement {
 			signup: self.signup,
 			signin: self.signin,
 			comment: self.comment,
-			if_not_exists: self.if_not_exists,
 		})
 	}
 }

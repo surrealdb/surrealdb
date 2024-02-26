@@ -52,6 +52,7 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			DefineIndexOption::Comment(v) => {
 				res.comment = Some(v);
 			}
+			#[cfg(feature = "sql2")]
 			DefineIndexOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -73,11 +74,18 @@ enum DefineIndexOption {
 	Index(Index),
 	Columns(Idioms),
 	Comment(Strand),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
 fn index_opts(i: &str) -> IResult<&str, DefineIndexOption> {
-	alt((index_kind, index_columns, index_comment, index_if_not_exists))(i)
+	alt((
+		index_kind,
+		index_columns,
+		index_comment,
+		#[cfg(feature = "sql2")]
+		index_if_not_exists
+	))(i)
 }
 
 fn index_kind(i: &str) -> IResult<&str, DefineIndexOption> {
@@ -102,6 +110,7 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 	Ok((i, DefineIndexOption::Comment(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn index_if_not_exists(i: &str) -> IResult<&str, DefineIndexOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;
@@ -136,6 +145,7 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Idx,
 				comment: None,
+				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -154,6 +164,7 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Uniq,
 				comment: None,
+				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -189,6 +200,7 @@ mod tests {
 					terms_cache: 400,
 				}),
 				comment: None,
+				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -221,6 +233,7 @@ mod tests {
 					terms_cache: 100,
 				}),
 				comment: None,
+				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -250,6 +263,7 @@ mod tests {
 					mtree_cache: 100,
 				}),
 				comment: None,
+				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);

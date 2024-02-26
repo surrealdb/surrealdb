@@ -42,7 +42,6 @@ pub struct SerializeDefineParamStatement {
 	value: Value,
 	comment: Option<Strand>,
 	permissions: Permission,
-	if_not_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
@@ -66,9 +65,6 @@ impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
 			"permissions" => {
 				self.permissions = value.serialize(ser::permission::Serializer.wrap())?;
 			}
-			"if_not_exists" => {
-				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
-			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineParamStatement::{key}`"
@@ -84,7 +80,6 @@ impl serde::ser::SerializeStruct for SerializeDefineParamStatement {
 			value: self.value,
 			comment: self.comment,
 			permissions: self.permissions,
-			if_not_exists: self.if_not_exists,
 		})
 	}
 }

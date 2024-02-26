@@ -30,6 +30,7 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 			DefineDatabaseOption::ChangeFeed(v) => {
 				res.changefeed = Some(v);
 			}
+			#[cfg(feature = "sql2")]
 			DefineDatabaseOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -42,11 +43,17 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 enum DefineDatabaseOption {
 	Comment(Strand),
 	ChangeFeed(ChangeFeed),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
 fn database_opts(i: &str) -> IResult<&str, DefineDatabaseOption> {
-	alt((database_comment, database_changefeed, database_if_not_exists))(i)
+	alt((
+		database_comment,
+		database_changefeed,
+		#[cfg(feature = "sql2")]
+		database_if_not_exists
+	))(i)
 }
 
 fn database_comment(i: &str) -> IResult<&str, DefineDatabaseOption> {
@@ -63,6 +70,7 @@ fn database_changefeed(i: &str) -> IResult<&str, DefineDatabaseOption> {
 	Ok((i, DefineDatabaseOption::ChangeFeed(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn database_if_not_exists(i: &str) -> IResult<&str, DefineDatabaseOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;

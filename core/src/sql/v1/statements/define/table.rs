@@ -16,7 +16,7 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -26,8 +26,6 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
 }
 
 impl DefineTableStatement {
@@ -44,29 +42,19 @@ impl DefineTableStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Check if table already exists
-		if self.if_not_exists && run.get_tb(opt.ns(), opt.db(), &self.name).await.is_ok() {
-			return Err(Error::TbAlreadyExists {
-				value: self.name.to_string(),
-			});
-		}
 		// Process the statement
 		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
 		let ns = run.add_ns(opt.ns(), opt.strict).await?;
 		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		let dt = if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
-			DefineTableStatement {
-				id: Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?),
-				if_not_exists: false,
-				..self.clone()
-			}
+			let mut tb = self.clone();
+			tb.id = Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?);
+			run.set(key, &tb).await?;
+			tb
 		} else {
-			DefineTableStatement {
-				if_not_exists: false,
-				..self.clone()
-			}
+			run.set(key, self).await?;
+			self.to_owned()
 		};
-		run.set(key, &dt).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
@@ -135,9 +123,6 @@ impl Display for DefineTableStatement {
 			None
 		};
 		write!(f, "{}", self.permissions)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
 		Ok(())
 	}
 }

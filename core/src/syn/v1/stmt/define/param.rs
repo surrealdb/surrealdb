@@ -40,6 +40,7 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 			DefineParamOption::Permissions(v) => {
 				res.permissions = v;
 			}
+			#[cfg(feature = "sql2")]
 			DefineParamOption::IfNotExists(v) => {
 				res.if_not_exists = v;
 			}
@@ -61,11 +62,18 @@ enum DefineParamOption {
 	Value(Value),
 	Comment(Strand),
 	Permissions(Permission),
+	#[cfg(feature = "sql2")]
 	IfNotExists(bool),
 }
 
 fn param_opts(i: &str) -> IResult<&str, DefineParamOption> {
-	alt((param_value, param_comment, param_permissions, param_if_not_exists))(i)
+	alt((
+		param_value,
+		param_comment,
+		param_permissions,
+		#[cfg(feature = "sql2")]
+		param_if_not_exists
+	))(i)
 }
 
 fn param_value(i: &str) -> IResult<&str, DefineParamOption> {
@@ -92,6 +100,7 @@ fn param_permissions(i: &str) -> IResult<&str, DefineParamOption> {
 	Ok((i, DefineParamOption::Permissions(v)))
 }
 
+#[cfg(feature = "sql2")]
 fn param_if_not_exists(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("IF")(i)?;
