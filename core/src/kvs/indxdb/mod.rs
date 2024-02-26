@@ -3,7 +3,6 @@
 use crate::err::Error;
 use crate::kvs::Check;
 use crate::kvs::Key;
-use crate::kvs::Transactable;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
@@ -92,7 +91,7 @@ impl Transaction {
 	}
 }
 
-impl Transactable for Transaction {
+impl crate::kvs::api::Transaction for Transaction {
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done

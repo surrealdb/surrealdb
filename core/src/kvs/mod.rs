@@ -23,6 +23,8 @@ mod surrealkv;
 mod tikv;
 mod tx;
 
+pub(super) mod api;
+
 pub(crate) mod lq_structs;
 
 mod lq_cf;
