@@ -26,6 +26,7 @@ mod tikv;
 mod tx;
 
 mod clock;
+pub(crate) mod api;
 pub(crate) mod lq_structs;
 #[cfg(test)]
 #[cfg(any(
