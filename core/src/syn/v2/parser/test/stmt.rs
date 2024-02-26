@@ -1,3 +1,5 @@
+#[cfg(feature = "sql2")]
+use crate::sql::TableType;
 use crate::{
 	sql::{
 		block::Entry,
@@ -25,7 +27,7 @@ use crate::{
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
+		Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::v2::parser::mac::test_parse,
 };
@@ -315,6 +317,7 @@ fn parse_define_table() {
 				expiry: std::time::Duration::from_secs(1)
 			}),
 			comment: None,
+			#[cfg(feature = "sql2")]
 			table_type: TableType::Normal,
 		}))
 	);
