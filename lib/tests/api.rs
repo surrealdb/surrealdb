@@ -454,7 +454,7 @@ mod api_integration {
 		#[test_log::test(tokio::test)]
 		async fn any_engine_can_connect() {
 			let permit = PERMITS.acquire().await.unwrap();
-			surrealdb::engine::any::connect("postgres://postgres:postgres@127.0.0.1:5432/postgres")
+			surrealdb::engine::any::connect("postgresql://postgres:postgres@127.0.0.1:5432/postgres")
 				.await
 				.unwrap();
 			drop(permit);

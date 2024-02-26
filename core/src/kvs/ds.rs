@@ -334,7 +334,7 @@ impl Datastore {
                 return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a SurrealKV database
-			s if s.starts_with("postgres://") => {
+			s if s.starts_with("postgres://") || s.starts_with("postgresql://") => {
 				#[cfg(feature = "kv-postgres")]
 				{
 					info!("Starting postgres store at {}", path);

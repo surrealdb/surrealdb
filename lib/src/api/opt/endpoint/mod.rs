@@ -155,7 +155,7 @@ impl From<&str> for EndpointKind {
 			"speedb" => Self::SpeeDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKV,
-			"postgres" => Self::Postgres,
+			"postgres" | "postgresql" => Self::Postgres,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}
