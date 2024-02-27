@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.1.1"
+version = "1.3.0"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -14,15 +14,18 @@ storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-speedb = ["surrealdb/kv-speedb"]
 storage-tikv = ["surrealdb/kv-tikv"]
 storage-fdb = ["surrealdb/kv-fdb-7_1"]
+storage-surrealkv = ["surrealdb/kv-surrealkv"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 http-compression = []
-ml = ["surrealdb/ml", "surrealml-core"]
-experimental-parser = ["surrealdb/experimental-parser"]
+ml = ["surrealdb/ml"]
+ml2 = ["surrealdb/ml2"]
 jwks = ["surrealdb/jwks"]
+sql2 = ["surrealdb/sql2"]
+parser2 = ["surrealdb/parser2"]
 
 [workspace]
-members = ["lib", "lib/examples/actix", "lib/examples/axum"]
+members = ["core", "lib", "lib/examples/actix", "lib/examples/axum"]
 
 [profile.release]
 lto = true
@@ -37,7 +40,6 @@ strip = false
 [dependencies]
 argon2 = "0.5.2"
 axum = { version = "0.6.20", features = ["tracing", "ws", "headers"] }
-axum-client-ip = "0.5.0"
 axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
@@ -55,8 +57,6 @@ glob = "0.3.1"
 http = "0.2.11"
 http-body = "0.4.5"
 hyper = "0.14.27"
-ipnet = "2.9.0"
-ndarray = { version = "0.15.6", optional = true }
 once_cell = "1.18.0"
 opentelemetry = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
@@ -66,8 +66,10 @@ reqwest = { version = "0.11.22", default-features = false, features = [
 	"blocking",
 	"gzip",
 ] }
+revision = "0.5.0"
 rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
+semver = "1.0.20"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
@@ -76,7 +78,6 @@ surrealdb = { version = "1", path = "lib", features = [
 	"protocol-ws",
 	"rustls",
 ] }
-surrealml-core = { version = "0.0.7", optional = true }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "signal"] }

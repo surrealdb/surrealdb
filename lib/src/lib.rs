@@ -98,46 +98,35 @@
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(test, deny(warnings))]
+
+#[cfg(all(not(surrealdb_unstable), feature = "parser2"))]
+compile_error!(
+	"`parser2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
+);
+
+#[cfg(all(not(surrealdb_unstable), feature = "ml2"))]
+compile_error!(
+	"`ml2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
+);
+
+#[cfg(all(not(surrealdb_unstable), feature = "jwks"))]
+compile_error!("`jwks` depends on a currently unstable feature, `sql2`. You need to enable the `surrealdb_unstable` flag to use it.");
+
+#[cfg(all(not(surrealdb_unstable), feature = "sql2"))]
+compile_error!(
+	"`sql2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
+);
+
+#[cfg(all(not(surrealdb_unstable), feature = "kv-surrealkv"))]
+compile_error!(
+	"`kv-surrealkv` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
+);
 
 #[macro_use]
 extern crate tracing;
 
-#[macro_use]
-mod mac;
-
 mod api;
-mod cf;
-mod ctx;
-mod doc;
-mod exe;
-mod fnc;
-mod vs;
-
-pub mod sql;
-
-#[doc(hidden)]
-pub mod cnf;
-#[doc(hidden)]
-pub mod dbs;
-#[doc(hidden)]
-pub mod env;
-#[doc(hidden)]
-pub mod err;
-#[doc(hidden)]
-pub mod iam;
-#[doc(hidden)]
-pub mod idg;
-#[doc(hidden)]
-pub mod idx;
-#[doc(hidden)]
-pub mod key;
-#[doc(hidden)]
-pub mod kvs;
-#[cfg(any(feature = "ml", feature = "jwks"))]
-#[doc(hidden)]
-pub mod obs;
-#[doc(hidden)]
-pub mod syn;
 
 #[doc(inline)]
 pub use api::engine;
@@ -158,6 +147,10 @@ pub use api::Response;
 pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
+
+#[doc(inline)]
+pub use surrealdb_core::*;
+
 use uuid::Uuid;
 
 #[doc(hidden)]

@@ -96,8 +96,28 @@ jobs:
       - name: Install cargo-deny
         run: cargo install --debug --locked cargo-deny
 
-      - name: Check dependencies
+      - name: Install cargo-vet
+        run: cargo install --debug --locked cargo-vet
+
+      - name: Install cargo-acl
+        run: |
+          cargo install --debug --locked cargo-acl
+          sudo apt-get install -y bubblewrap
+
+      - name: Check dependencies for known issues
         run: cargo deny check
+
+      - name: Check dependencies for untrusted sources
+        run: cargo vet
+
+      - name: Check dependencies for unauthorized access
+        run: cargo acl -n
+
+      - name: Dependency check failure
+        if: failure()
+        run: |
+          echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
+          echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
 
   check-wasm:
     name: Check Wasm
@@ -227,7 +247,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.74.1
+          toolchain: 1.75.0
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -363,6 +383,8 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test workspace for experimental_parser
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo make test-experimental-parser
 
   ws-engine:
@@ -644,6 +666,39 @@ jobs:
 
       - name: Test fdb engine
         run: cargo make ci-api-integration-fdb
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
+  surrealkv-engine:
+    name: SurrealKV engine
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test surrealkv engine
+        run: cargo make ci-api-integration-surrealkv
 
       - name: Debug info
         if: always()
