@@ -65,7 +65,6 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::index::Distance;
 	use crate::sql::value::serde::ser::Serializer;
 	use serde::Serialize;
 
@@ -81,9 +80,7 @@ mod tests {
 			Distance::Minkowski(7.into()),
 			Distance::Pearson,
 		] {
-			let serialized = dist
-				.serialize(crate::sql::v2::value::serde::ser::distance::Serializer.wrap())
-				.unwrap();
+			let serialized = dist.serialize(Serializer.wrap()).unwrap();
 			assert_eq!(dist, serialized, "{}", dist);
 		}
 	}
