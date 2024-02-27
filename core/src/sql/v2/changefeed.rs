@@ -10,7 +10,6 @@ use std::time;
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
 }
-
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
