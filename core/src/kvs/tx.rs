@@ -1,7 +1,29 @@
-use super::kv::Add;
-use super::kv::Convert;
-use super::Key;
-use super::Val;
+use std::borrow::Cow;
+use std::fmt;
+use std::fmt::Debug;
+use std::ops::Range;
+use std::sync::Arc;
+
+use channel::{Receiver, Sender};
+use futures::lock::Mutex;
+use uuid::Uuid;
+
+use sql::permission::Permissions;
+use sql::statements::DefineAnalyzerStatement;
+use sql::statements::DefineDatabaseStatement;
+use sql::statements::DefineEventStatement;
+use sql::statements::DefineFieldStatement;
+use sql::statements::DefineFunctionStatement;
+use sql::statements::DefineIndexStatement;
+use sql::statements::DefineModelStatement;
+use sql::statements::DefineNamespaceStatement;
+use sql::statements::DefineParamStatement;
+use sql::statements::DefineScopeStatement;
+use sql::statements::DefineTableStatement;
+use sql::statements::DefineTokenStatement;
+use sql::statements::DefineUserStatement;
+use sql::statements::LiveStatement;
+
 use crate::cf;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
@@ -23,29 +45,11 @@ use crate::sql::Strand;
 use crate::sql::Value;
 use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use channel::{Receiver, Sender};
-use futures::lock::Mutex;
-use sql::permission::Permissions;
-use sql::statements::DefineAnalyzerStatement;
-use sql::statements::DefineDatabaseStatement;
-use sql::statements::DefineEventStatement;
-use sql::statements::DefineFieldStatement;
-use sql::statements::DefineFunctionStatement;
-use sql::statements::DefineIndexStatement;
-use sql::statements::DefineModelStatement;
-use sql::statements::DefineNamespaceStatement;
-use sql::statements::DefineParamStatement;
-use sql::statements::DefineScopeStatement;
-use sql::statements::DefineTableStatement;
-use sql::statements::DefineTokenStatement;
-use sql::statements::DefineUserStatement;
-use sql::statements::LiveStatement;
-use std::borrow::Cow;
-use std::fmt;
-use std::fmt::Debug;
-use std::ops::Range;
-use std::sync::Arc;
-use uuid::Uuid;
+
+use super::kv::Add;
+use super::kv::Convert;
+use super::Key;
+use super::Val;
 
 const LQ_CAPACITY: usize = 100;
 
