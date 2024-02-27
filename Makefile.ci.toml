@@ -86,18 +86,18 @@ category = "CI - INTEGRATION TESTS"
 run_task = { name = ["start-surrealdb", "test-workspace-coverage-complete", "stop-surrealdb"], fork = true }
 
 [tasks.ci-upgrade-1-0-1]
-env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "1.0.1", _TEST_FEATURES = "storage-rocksdb" }
-category = "CI - UPGRADE TESTS"
+env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "1.0.1", _TEST_FEATURES = "storage-rocksdb,sql2" }
+category = "CI - SERVER UPGRADE TESTS"
 run_task = { name = ["test-upgrade"], fork = true }
 
 [tasks.ci-upgrade-1-1-1]
-env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.1.1", _TEST_FEATURES = "storage-rocksdb" }
-category = "CI - UPGRADE TESTS"
+env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.1.1", _TEST_FEATURES = "storage-rocksdb,sql2" }
+category = "CI - SERVER UPGRADE TESTS"
 run_task = { name = ["test-upgrade"], fork = true }
 
 [tasks.ci-upgrade-1-2-1]
-env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.2.1", _TEST_FEATURES = "storage-rocksdb" }
-category = "CI - UPGRADE TESTS"
+env = { SURREALDB_TEST_DOCKER_PREVIOUS_VERSION = "v1.2.1", _TEST_FEATURES = "storage-rocksdb,sql2" }
+category = "CI - SERVER UPGRADE TESTS"
 run_task = { name = ["test-upgrade"], fork = true }
 
 #

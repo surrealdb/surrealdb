@@ -52,6 +52,9 @@ pub struct SearchParams {
 #[revisioned(revision = 2)]
 pub struct MTreeParams {
 	pub dimension: u16,
+	#[revision(start = 1, end = 2, convert_fn = "convert_old_distance")]
+	pub _distance: Distance1, // TODO remove once 1.0 && 1.1 are EOL
+	#[revision(start = 2)]
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
@@ -62,36 +65,61 @@ pub struct MTreeParams {
 	pub mtree_cache: u32,
 }
 
+impl MTreeParams {
+	fn convert_old_distance(
+		&mut self,
+		_revision: u16,
+		d1: Distance1,
+	) -> Result<(), revision::Error> {
+		self.distance = match d1 {
+			Distance1::Euclidean => Distance::Euclidean,
+			Distance1::Manhattan => Distance::Manhattan,
+			Distance1::Cosine => Distance::Cosine,
+			Distance1::Hamming => Distance::Hamming,
+			Distance1::Minkowski(n) => Distance::Minkowski(n),
+		};
+		Ok(())
+	}
+}
+
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
-pub enum Distance {
+#[revisioned(revision = 1)]
+pub enum Distance1 {
 	#[default]
 	Euclidean,
 	Manhattan,
+	Cosine,
 	Hamming,
 	Minkowski(Number),
-	#[revision(start = 2)]
+}
+
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[revisioned(revision = 1)]
+pub enum Distance {
 	Chebyshev,
-	#[revision(start = 2)]
 	Cosine,
-	#[revision(start = 2)]
+	#[default]
+	Euclidean,
+	Hamming,
 	Jaccard,
-	#[revision(start = 2)]
+	Manhattan,
+	Minkowski(Number),
 	Pearson,
 }
 
 impl Distance {
 	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
 		match self {
-			Distance::Cosine => v1.cosine_similarity(v2),
-			Distance::Chebyshev => v1.chebyshev_distance(v2),
-			Distance::Euclidean => v1.euclidean_distance(v2),
-			Distance::Hamming => v1.hamming_distance(v2),
-			Distance::Jaccard => v1.jaccard_similarity(v2),
-			Distance::Manhattan => v1.manhattan_distance(v2),
-			Distance::Minkowski(r) => v1.minkowski_distance(v2, r),
-			Distance::Pearson => v1.pearson_similarity(v2),
+			Self::Cosine => v1.cosine_similarity(v2),
+			Self::Chebyshev => v1.chebyshev_distance(v2),
+			Self::Euclidean => v1.euclidean_distance(v2),
+			Self::Hamming => v1.hamming_distance(v2),
+			Self::Jaccard => v1.jaccard_similarity(v2),
+			Self::Manhattan => v1.manhattan_distance(v2),
+			Self::Minkowski(r) => v1.minkowski_distance(v2, r),
+			Self::Pearson => v1.pearson_similarity(v2),
 		}
 	}
 }
