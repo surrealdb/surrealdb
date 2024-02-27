@@ -10,7 +10,7 @@ use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 
 pub async fn new_ds() -> Result<Datastore, Error> {
-	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()))
+	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
 }
 
 #[allow(dead_code)]

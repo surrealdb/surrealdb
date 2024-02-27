@@ -1,15 +1,16 @@
 mod parse;
 
 use chrono::DateTime;
-use parse::Parse;
-
-mod helpers;
 
 use helpers::new_ds;
+use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
-use surrealdb_core::fflags::{FFlags, FFLAGS};
+use surrealdb_core::fflags::FFLAGS;
+
+mod helpers;
+mod parse;
 
 #[tokio::test]
 async fn database_change_feeds() -> Result<(), Error> {
