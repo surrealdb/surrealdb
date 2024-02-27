@@ -26,12 +26,12 @@ impl Parser<'_> {
 				let body = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				self.eat(t!(";"));
 				res.exprs.push((condition, body));
-				self.parse_worded_tail(ctx, &mut res).await?;
+				self.parse_worded_tail(&mut ctx, &mut res).await?;
 			}
 			t!("{") => {
-				let body = ctx.run(|ctx| self.parse_block(ctx, next.span)).await?;
+				let body = self.parse_block(&mut ctx, next.span).await?;
 				res.exprs.push((condition, body.into()));
-				self.parse_bracketed_tail(ctx, &mut res).await?;
+				self.parse_bracketed_tail(&mut ctx, &mut res).await?;
 			}
 			x => unexpected!(self, x, "THEN or '{'"),
 		}
@@ -41,7 +41,7 @@ impl Parser<'_> {
 
 	async fn parse_worded_tail(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {
@@ -69,7 +69,7 @@ impl Parser<'_> {
 
 	async fn parse_bracketed_tail(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {
@@ -79,11 +79,11 @@ impl Parser<'_> {
 					if self.eat(t!("IF")) {
 						let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						let span = expected!(self, t!("{")).span;
-						let body = ctx.run(|ctx| self.parse_block(ctx, span)).await?;
+						let body = self.parse_block(ctx, span).await?;
 						res.exprs.push((condition, body.into()));
 					} else {
 						let span = expected!(self, t!("{")).span;
-						let value = ctx.run(|ctx| self.parse_block(ctx, span)).await?;
+						let value = self.parse_block(ctx, span).await?;
 						res.close = Some(value.into());
 						return Ok(());
 					}

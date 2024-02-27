@@ -19,7 +19,7 @@ impl Parser<'_> {
 	/// Either a block statemnt, a object or geometry.
 	pub(super) async fn parse_object_like(
 		&mut self,
-		ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		start: Span,
 	) -> ParseResult<Value> {
 		if self.eat(t!("}")) {
@@ -42,7 +42,7 @@ impl Parser<'_> {
 	/// fallsback to parsing normal objects.
 	async fn parse_object_or_geometry(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		start: Span,
 	) -> ParseResult<Value> {
 		// empty object was already matched previously so next must be a key.
@@ -64,7 +64,7 @@ impl Parser<'_> {
 						//
 						// we can unwrap strand since we just matched it to not be an err.
 						self.parse_geometry_after_type(
-							&mut ctx,
+							ctx,
 							start,
 							key,
 							strand.unwrap(),
@@ -75,7 +75,7 @@ impl Parser<'_> {
 					}
 					Ok("LineString") => {
 						self.parse_geometry_after_type(
-							&mut ctx,
+							ctx,
 							start,
 							key,
 							strand.unwrap(),
@@ -86,7 +86,7 @@ impl Parser<'_> {
 					}
 					Ok("Polygon") => {
 						self.parse_geometry_after_type(
-							&mut ctx,
+							ctx,
 							start,
 							key,
 							strand.unwrap(),
@@ -97,7 +97,7 @@ impl Parser<'_> {
 					}
 					Ok("MultiPoint") => {
 						self.parse_geometry_after_type(
-							&mut ctx,
+							ctx,
 							start,
 							key,
 							strand.unwrap(),
@@ -108,7 +108,7 @@ impl Parser<'_> {
 					}
 					Ok("MultiLineString") => {
 						self.parse_geometry_after_type(
-							&mut ctx,
+							ctx,
 							start,
 							key,
 							strand.unwrap(),
@@ -119,7 +119,7 @@ impl Parser<'_> {
 					}
 					Ok("MultiPolygon") => {
 						self.parse_geometry_after_type(
-							&mut ctx,
+							ctx,
 							start,
 							key,
 							strand.unwrap(),
@@ -442,15 +442,13 @@ impl Parser<'_> {
 		expected!(self, t!(":"));
 		if coord_key != "coordinates" {
 			// next field was not correct, fallback to parsing plain object.
-			return ctx
-				.run(|ctx| {
-					self.parse_object_from_key(
-						ctx,
-						coord_key,
-						BTreeMap::from([(key, Value::Strand(strand))]),
-						start,
-					)
-				})
+			return self
+				.parse_object_from_key(
+					ctx,
+					coord_key,
+					BTreeMap::from([(key, Value::Strand(strand))]),
+					start,
+				)
 				.await
 				.map(Value::Object);
 		}
@@ -468,14 +466,12 @@ impl Parser<'_> {
 				));
 			}
 
-			return ctx
-				.run(|ctx| {
-					self.parse_object_from_map(
-						ctx,
-						BTreeMap::from([(key, Value::Strand(strand)), (coord_key, value)]),
-						start,
-					)
-				})
+			return self
+				.parse_object_from_map(
+					ctx,
+					BTreeMap::from([(key, Value::Strand(strand)), (coord_key, value)]),
+					start,
+				)
 				.await
 				.map(Value::Object);
 		}
@@ -569,7 +565,7 @@ impl Parser<'_> {
 
 	async fn parse_object_from_key(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		key: String,
 		mut map: BTreeMap<String, Value>,
 		start: Span,
@@ -589,13 +585,17 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the first `{` to already have been eaten.
-	pub(super) async fn parse_object(&mut self, ctx: Ctx<'_>, start: Span) -> ParseResult<Object> {
+	pub(super) async fn parse_object(
+		&mut self,
+		ctx: &mut Ctx<'_>,
+		start: Span,
+	) -> ParseResult<Object> {
 		self.parse_object_from_map(ctx, BTreeMap::new(), start).await
 	}
 
 	async fn parse_object_from_map(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		mut map: BTreeMap<String, Value>,
 		start: Span,
 	) -> ParseResult<Object> {
@@ -604,7 +604,7 @@ impl Parser<'_> {
 				return Ok(Object(map));
 			}
 
-			let (key, value) = self.parse_object_entry(&mut ctx).await?;
+			let (key, value) = self.parse_object_entry(ctx).await?;
 			// TODO: Error on duplicate key?
 			map.insert(key, value);
 
@@ -622,7 +622,7 @@ impl Parser<'_> {
 	/// functions as the `start` parameter.
 	pub(super) async fn parse_block(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		start: Span,
 	) -> ParseResult<Block> {
 		let mut statements = Vec::new();

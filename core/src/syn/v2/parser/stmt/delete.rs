@@ -12,9 +12,9 @@ impl Parser<'_> {
 	pub async fn parse_delete_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<DeleteStatement> {
 		self.eat(t!("FROM"));
 		let only = self.eat(t!("ONLY"));
-		let what = Values(ctx.run(|ctx| self.parse_what_list(ctx)).await?);
-		let cond = ctx.run(|ctx| self.try_parse_condition(ctx)).await?;
-		let output = ctx.run(|ctx| self.try_parse_output(ctx)).await?;
+		let what = Values(self.parse_what_list(&mut ctx).await?);
+		let cond = self.try_parse_condition(&mut ctx).await?;
+		let output = self.try_parse_output(&mut ctx).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 

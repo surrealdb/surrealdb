@@ -20,7 +20,7 @@ impl Parser<'_> {
 	pub async fn parse_value(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
-		let res = ctx.run(|ctx| self.pratt_parse_expr(ctx, 0)).await;
+		let res = self.pratt_parse_expr(&mut ctx, 0).await;
 		self.table_as_field = old;
 		res
 	}
@@ -33,7 +33,7 @@ impl Parser<'_> {
 	pub async fn parse_value_field(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
-		let res = ctx.run(|ctx| self.pratt_parse_expr(ctx, 0)).await;
+		let res = self.pratt_parse_expr(&mut ctx, 0).await;
 		self.table_as_field = old;
 		res
 	}
@@ -128,7 +128,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_prefix_op(&mut self, mut ctx: Ctx<'_>, min_bp: u8) -> ParseResult<Value> {
+	async fn parse_prefix_op(&mut self, ctx: &mut Ctx<'_>, min_bp: u8) -> ParseResult<Value> {
 		const I64_ABS_MAX: u64 = 9223372036854775808;
 
 		let token = self.next();
@@ -137,8 +137,10 @@ impl Parser<'_> {
 			t!("-") => Operator::Neg,
 			t!("!") => Operator::Not,
 			t!("<") => {
-				let kind = ctx.run(|ctx| self.parse_kind(ctx, token.span)).await?;
-				let value = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
+				let kind = self.parse_kind(ctx, token.span).await?;
+				let value = ctx
+					.run(|mut ctx| async move { self.pratt_parse_expr(&mut ctx, min_bp).await })
+					.await?;
 				let cast = Cast(kind, value);
 				return Ok(Value::Cast(Box::new(cast)));
 			}
@@ -169,7 +171,8 @@ impl Parser<'_> {
 			}
 		}
 
-		let v = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
+		let v =
+			ctx.run(|mut ctx| async move { self.pratt_parse_expr(&mut ctx, min_bp).await }).await?;
 
 		// HACK: For compatiblity with the old parser apply + and - operator immediately if the
 		// left value is a number.
@@ -197,7 +200,7 @@ impl Parser<'_> {
 
 	async fn parse_infix_op(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		min_bp: u8,
 		lhs: Value,
 	) -> ParseResult<Value> {
@@ -271,7 +274,8 @@ impl Parser<'_> {
 			// should be unreachable as we previously check if the token was a prefix op.
 			x => unreachable!("found non-operator token {x:?}"),
 		};
-		let rhs = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
+		let rhs =
+			ctx.run(|mut ctx| async move { self.pratt_parse_expr(&mut ctx, min_bp).await }).await?;
 		Ok(Value::Expression(Box::new(Expression::Binary {
 			l: lhs,
 			o: operator,
@@ -281,12 +285,12 @@ impl Parser<'_> {
 
 	/// The pratt parsing loop.
 	/// Parses expression according to binding power.
-	async fn pratt_parse_expr(&mut self, mut ctx: Ctx<'_>, min_bp: u8) -> ParseResult<Value> {
+	async fn pratt_parse_expr(&mut self, ctx: &mut Ctx<'_>, min_bp: u8) -> ParseResult<Value> {
 		let peek = self.peek();
 		let mut lhs = if let Some(((), r_bp)) = self.prefix_binding_power(peek.kind) {
-			ctx.run(|ctx| self.parse_prefix_op(ctx, r_bp)).await?
+			self.parse_prefix_op(ctx, r_bp).await?
 		} else {
-			ctx.run(|ctx| self.parse_idiom_expression(ctx)).await?
+			self.parse_idiom_expression(ctx).await?
 		};
 
 		loop {
@@ -310,7 +314,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			lhs = ctx.run(|ctx| self.parse_infix_op(ctx, r_bp, lhs)).await?;
+			lhs = self.parse_infix_op(ctx, r_bp, lhs).await?;
 		}
 
 		Ok(lhs)

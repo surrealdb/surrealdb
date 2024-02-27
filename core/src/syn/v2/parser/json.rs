@@ -29,7 +29,7 @@ impl Parser<'_> {
 			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
 			TokenKind::Strand => {
 				if self.legacy_strands {
-					self.parse_legacy_strand(ctx).await
+					self.parse_legacy_strand(&mut ctx).await
 				} else {
 					Ok(Value::Strand(Strand(self.lexer.string.take().unwrap())))
 				}
@@ -38,7 +38,7 @@ impl Parser<'_> {
 			TokenKind::Uuid => self.token_value(token).map(Value::Uuid),
 			_ => {
 				let ident = self.token_value::<Ident>(token)?.0;
-				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)
+				self.parse_thing_from_ident(&mut ctx, ident).await.map(Value::Thing)
 			}
 		}
 	}

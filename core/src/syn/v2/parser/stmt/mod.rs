@@ -219,35 +219,35 @@ impl Parser<'_> {
 			}
 			t!("CREATE") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_create_stmt(ctx)).await.map(Entry::Create)
+				self.parse_create_stmt(ctx).await.map(Entry::Create)
 			}
 			t!("DEFINE") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_define_stmt(ctx)).await.map(Entry::Define)
+				self.parse_define_stmt(ctx).await.map(Entry::Define)
 			}
 			t!("DELETE") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_delete_stmt(ctx)).await.map(Entry::Delete)
+				self.parse_delete_stmt(ctx).await.map(Entry::Delete)
 			}
 			t!("FOR") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_for_stmt(ctx)).await.map(Entry::Foreach)
+				self.parse_for_stmt(ctx).await.map(Entry::Foreach)
 			}
 			t!("IF") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_if_stmt(ctx)).await.map(Entry::Ifelse)
+				self.parse_if_stmt(ctx).await.map(Entry::Ifelse)
 			}
 			t!("INSERT") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_insert_stmt(ctx)).await.map(Entry::Insert)
+				self.parse_insert_stmt(ctx).await.map(Entry::Insert)
 			}
 			t!("RETURN") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_return_stmt(ctx)).await.map(Entry::Output)
+				self.parse_return_stmt(ctx).await.map(Entry::Output)
 			}
 			t!("RELATE") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_relate_stmt(ctx)).await.map(Entry::Relate)
+				self.parse_relate_stmt(ctx).await.map(Entry::Relate)
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
@@ -255,19 +255,19 @@ impl Parser<'_> {
 			}
 			t!("SELECT") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_select_stmt(ctx)).await.map(Entry::Select)
+				self.parse_select_stmt(ctx).await.map(Entry::Select)
 			}
 			t!("LET") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_let_stmt(ctx)).await.map(Entry::Set)
+				self.parse_let_stmt(ctx).await.map(Entry::Set)
 			}
 			t!("THROW") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_throw_stmt(ctx)).await.map(Entry::Throw)
+				self.parse_throw_stmt(ctx).await.map(Entry::Throw)
 			}
 			t!("UPDATE") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_update_stmt(ctx)).await.map(Entry::Update)
+				self.parse_update_stmt(ctx).await.map(Entry::Update)
 			}
 			_ => {
 				// TODO: Provide information about keywords.
@@ -398,7 +398,7 @@ impl Parser<'_> {
 		let range = ctx.run(|ctx| self.parse_value(ctx)).await?;
 
 		let span = expected!(self, t!("{")).span;
-		let block = ctx.run(|ctx| self.parse_block(ctx, span)).await?;
+		let block = self.parse_block(&mut ctx, span).await?;
 		Ok(ForeachStatement {
 			param,
 			range,
@@ -465,15 +465,15 @@ impl Parser<'_> {
 				self.pop_peek();
 				Fields::default()
 			}
-			_ => ctx.run(|ctx| self.parse_fields(ctx)).await?,
+			_ => self.parse_fields(&mut ctx).await?,
 		};
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
 			t!("$param") => Value::Param(self.next_token_value()?),
 			_ => Value::Table(self.next_token_value()?),
 		};
-		let cond = ctx.run(|ctx| self.try_parse_condition(ctx)).await?;
-		let fetch = ctx.run(|ctx| self.try_parse_fetch(ctx)).await?;
+		let cond = self.try_parse_condition(&mut ctx).await?;
+		let fetch = self.try_parse_fetch(&mut ctx).await?;
 
 		Ok(LiveStatement::from_source_parts(expr, what, cond, fetch))
 	}
@@ -508,7 +508,7 @@ impl Parser<'_> {
 		mut ctx: Ctx<'_>,
 	) -> ParseResult<OutputStatement> {
 		let what = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-		let fetch = ctx.run(|ctx| self.try_parse_fetch(ctx)).await?;
+		let fetch = self.try_parse_fetch(&mut ctx).await?;
 		Ok(OutputStatement {
 			what,
 			fetch,

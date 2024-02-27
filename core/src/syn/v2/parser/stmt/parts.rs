@@ -21,13 +21,13 @@ use crate::{
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub async fn try_parse_data(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Option<Data>> {
+	pub async fn try_parse_data(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
 				let mut set_list = Vec::new();
 				loop {
-					let idiom = ctx.run(|ctx| self.parse_plain_idiom(ctx)).await?;
+					let idiom = self.parse_plain_idiom(ctx).await?;
 					let operator = self.parse_assigner()?;
 					let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
 					set_list.push((idiom, operator, value));
@@ -39,7 +39,7 @@ impl Parser<'_> {
 			}
 			t!("UNSET") => {
 				self.pop_peek();
-				let idiom_list = ctx.run(|ctx| self.parse_idiom_list(ctx)).await?;
+				let idiom_list = self.parse_idiom_list(ctx).await?;
 				Data::UnsetExpression(idiom_list)
 			}
 			t!("PATCH") => {
@@ -64,7 +64,7 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement output if the next token is `return`.
-	pub async fn try_parse_output(&mut self, ctx: Ctx<'_>) -> ParseResult<Option<Output>> {
+	pub async fn try_parse_output(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
@@ -103,7 +103,7 @@ impl Parser<'_> {
 		Ok(Some(Timeout(duration)))
 	}
 
-	pub async fn try_parse_fetch(&mut self, ctx: Ctx<'_>) -> ParseResult<Option<Fetchs>> {
+	pub async fn try_parse_fetch(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Fetchs>> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
@@ -111,11 +111,11 @@ impl Parser<'_> {
 		Ok(Some(Fetchs(v)))
 	}
 
-	pub async fn try_parse_condition(&mut self, ctx: Ctx<'_>) -> ParseResult<Option<Cond>> {
+	pub async fn try_parse_condition(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Cond>> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
-		let v = self.parse_value_field(ctx).await?;
+		let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		Ok(Some(Cond(v)))
 	}
 
@@ -351,10 +351,10 @@ impl Parser<'_> {
 	/// # Parse State
 	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
 	/// parens. Expects the next keyword to be `SELECT`.
-	pub async fn parse_view(&mut self, mut ctx: Ctx<'_>) -> ParseResult<View> {
+	pub async fn parse_view(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;
-		let fields = ctx.run(|ctx| self.parse_fields(ctx)).await?;
+		let fields = self.parse_fields(ctx).await?;
 		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
 		let mut from = vec![self.next_token_value()?];
@@ -362,7 +362,7 @@ impl Parser<'_> {
 			from.push(self.next_token_value()?);
 		}
 
-		let cond = ctx.run(|ctx| self.try_parse_condition(ctx)).await?;
+		let cond = self.try_parse_condition(ctx).await?;
 		let group = self.try_parse_group(&fields, fields_span)?;
 
 		Ok(View {

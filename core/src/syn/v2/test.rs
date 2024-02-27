@@ -18,7 +18,10 @@ impl Parse<Self> for Array {
 		let mut stack = Stack::new();
 		let start = parser.peek().span;
 		assert!(parser.eat(t!("[")));
-		stack.run(|ctx| parser.parse_array(ctx, start)).finish().unwrap()
+		stack
+			.run(|mut ctx| async move { parser.parse_array(&mut ctx, start).await })
+			.finish()
+			.unwrap()
 	}
 }
 

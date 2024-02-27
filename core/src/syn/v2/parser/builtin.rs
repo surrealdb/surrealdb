@@ -409,7 +409,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub async fn parse_builtin(&mut self, mut ctx: Ctx<'_>, start: Span) -> ParseResult<Value> {
+	pub async fn parse_builtin(&mut self, ctx: &mut Ctx<'_>, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			self.next_token_value::<Ident>()?;

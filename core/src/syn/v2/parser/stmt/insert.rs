@@ -31,7 +31,7 @@ impl Parser<'_> {
 		let data = match self.peek_kind() {
 			t!("(") => {
 				let start = self.pop_peek().span;
-				let fields = ctx.run(|ctx| self.parse_idiom_list(ctx)).await?;
+				let fields = self.parse_idiom_list(&mut ctx).await?;
 				self.expect_closing_delimiter(t!(")"), start)?;
 				expected!(self, t!("VALUES"));
 
@@ -67,11 +67,11 @@ impl Parser<'_> {
 		};
 
 		let update = if self.eat(t!("ON")) {
-			Some(ctx.run(|ctx| self.parse_insert_update(ctx)).await?)
+			Some(self.parse_insert_update(&mut ctx).await?)
 		} else {
 			None
 		};
-		let output = ctx.run(|ctx| self.try_parse_output(ctx)).await?;
+		let output = self.try_parse_output(&mut ctx).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(InsertStatement {
@@ -85,17 +85,17 @@ impl Parser<'_> {
 		})
 	}
 
-	async fn parse_insert_update(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Data> {
+	async fn parse_insert_update(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Data> {
 		expected!(self, t!("DUPLICATE"));
 		expected!(self, t!("KEY"));
 		expected!(self, t!("UPDATE"));
-		let l = ctx.run(|ctx| self.parse_plain_idiom(ctx)).await?;
+		let l = self.parse_plain_idiom(ctx).await?;
 		let o = self.parse_assigner()?;
 		let r = ctx.run(|ctx| self.parse_value(ctx)).await?;
 		let mut data = vec![(l, o, r)];
 
 		while self.eat(t!(",")) {
-			let l = ctx.run(|ctx| self.parse_plain_idiom(ctx)).await?;
+			let l = self.parse_plain_idiom(ctx).await?;
 			let o = self.parse_assigner()?;
 			let r = ctx.run(|ctx| self.parse_value(ctx)).await?;
 			data.push((l, o, r))

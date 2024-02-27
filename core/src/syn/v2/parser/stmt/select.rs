@@ -21,11 +21,11 @@ impl Parser<'_> {
 		mut ctx: Ctx<'_>,
 	) -> ParseResult<SelectStatement> {
 		let before = self.peek().span;
-		let expr = ctx.run(|ctx| self.parse_fields(ctx)).await?;
+		let expr = self.parse_fields(&mut ctx).await?;
 		let fields_span = before.covers(self.last_span());
 
 		let omit = if self.eat(t!("OMIT")) {
-			Some(Idioms(ctx.run(|ctx| self.parse_idiom_list(ctx)).await?))
+			Some(Idioms(self.parse_idiom_list(&mut ctx).await?))
 		} else {
 			None
 		};
@@ -41,20 +41,20 @@ impl Parser<'_> {
 		let what = Values(what);
 
 		let with = self.try_parse_with()?;
-		let cond = ctx.run(|ctx| self.try_parse_condition(ctx)).await?;
+		let cond = self.try_parse_condition(&mut ctx).await?;
 		let split = self.try_parse_split(&expr, fields_span)?;
 		let group = self.try_parse_group(&expr, fields_span)?;
 		let order = self.try_parse_orders(&expr, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
-			let start = ctx.run(|ctx| self.try_parse_start(ctx)).await?;
-			let limit = ctx.run(|ctx| self.try_parse_limit(ctx)).await?;
+			let start = self.try_parse_start(&mut ctx).await?;
+			let limit = self.try_parse_limit(&mut ctx).await?;
 			(limit, start)
 		} else {
-			let limit = ctx.run(|ctx| self.try_parse_limit(ctx)).await?;
-			let start = ctx.run(|ctx| self.try_parse_start(ctx)).await?;
+			let limit = self.try_parse_limit(&mut ctx).await?;
+			let start = self.try_parse_start(&mut ctx).await?;
 			(limit, start)
 		};
-		let fetch = ctx.run(|ctx| self.try_parse_fetch(ctx)).await?;
+		let fetch = self.try_parse_fetch(&mut ctx).await?;
 		let version = self.try_parse_version()?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
@@ -206,21 +206,21 @@ impl Parser<'_> {
 		})
 	}
 
-	async fn try_parse_limit(&mut self, ctx: Ctx<'_>) -> ParseResult<Option<Limit>> {
+	async fn try_parse_limit(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Limit>> {
 		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = self.parse_value(ctx).await?;
+		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
-	async fn try_parse_start(&mut self, ctx: Ctx<'_>) -> ParseResult<Option<Start>> {
+	async fn try_parse_start(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Start>> {
 		if !self.eat(t!("START")) {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = self.parse_value(ctx).await?;
+		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
 		Ok(Some(Start(value)))
 	}
 

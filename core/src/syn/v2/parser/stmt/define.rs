@@ -105,7 +105,7 @@ impl Parser<'_> {
 		}
 
 		let next = expected!(self, t!("{")).span;
-		let block = ctx.run(|ctx| self.parse_block(ctx, next)).await?;
+		let block = self.parse_block(&mut ctx, next).await?;
 
 		let mut res = DefineFunctionStatement {
 			name,
@@ -316,11 +316,11 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("(") => {
 							let open = self.pop_peek().span;
-							res.view = Some(ctx.run(|ctx| self.parse_view(ctx)).await?);
+							res.view = Some(self.parse_view(&mut ctx).await?);
 							self.expect_closing_delimiter(t!(")"), open)?;
 						}
 						t!("SELECT") => {
-							res.view = Some(ctx.run(|ctx| self.parse_view(ctx)).await?);
+							res.view = Some(self.parse_view(&mut ctx).await?);
 						}
 						x => unexpected!(self, x, "`SELECT`"),
 					}

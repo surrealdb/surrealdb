@@ -45,7 +45,7 @@ pub fn value(input: &str) -> Result<Value, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 	stack
-		.run(|ctx| parser.parse_value_field(ctx))
+		.run(|mut ctx| parser.parse_value_field(ctx))
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
@@ -59,7 +59,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
 	stack
-		.run(|ctx| parser.parse_value(ctx))
+		.run(|mut ctx| parser.parse_value(ctx))
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
@@ -98,7 +98,7 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 	stack
-		.run(|ctx| parser.parse_full_subquery(ctx))
+		.run(|mut ctx| async move { parser.parse_full_subquery(&mut ctx).await })
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
@@ -111,7 +111,7 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 	stack
-		.run(|ctx| parser.parse_plain_idiom(ctx))
+		.run(|mut ctx| async move { parser.parse_plain_idiom(&mut ctx).await })
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
@@ -162,7 +162,7 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 	stack
-		.run(|ctx| parser.parse_thing(ctx))
+		.run(|mut ctx| async move { parser.parse_thing(&mut ctx).await })
 		.finish()
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)

@@ -17,8 +17,8 @@ impl Parser<'_> {
 		let (kind, from, with) = ctx.run(|ctx| self.parse_relation(ctx)).await?;
 		let uniq = self.eat(t!("UNIQUE"));
 
-		let data = ctx.run(|ctx| self.try_parse_data(ctx)).await?;
-		let output = ctx.run(|ctx| self.try_parse_output(ctx)).await?;
+		let data = self.try_parse_data(&mut ctx).await?;
+		let output = self.try_parse_output(&mut ctx).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(RelateStatement {
@@ -35,19 +35,19 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_relation(&mut self, mut ctx: Ctx<'_>) -> ParseResult<(Value, Value, Value)> {
-		let first = ctx.run(|ctx| self.parse_relate_value(ctx)).await?;
+		let first = self.parse_relate_value(&mut ctx).await?;
 		let is_o = match self.next().kind {
 			t!("->") => true,
 			t!("<-") => false,
 			x => unexpected!(self, x, "a relation arrow"),
 		};
-		let kind = ctx.run(|ctx| self.parse_thing_or_table(ctx)).await?;
+		let kind = self.parse_thing_or_table(&mut ctx).await?;
 		if is_o {
 			expected!(self, t!("->"))
 		} else {
 			expected!(self, t!("<-"))
 		};
-		let second = ctx.run(|ctx| self.parse_relate_value(ctx)).await?;
+		let second = self.parse_relate_value(&mut ctx).await?;
 		if is_o {
 			Ok((kind, first, second))
 		} else {
@@ -55,11 +55,11 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_value(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_relate_value(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
-				ctx.run(|ctx| self.parse_array(ctx, start)).await.map(Value::Array)
+				self.parse_array(ctx, start).await.map(Value::Array)
 			}
 			t!("$param") => self.next_token_value().map(Value::Param),
 			t!("RETURN")
@@ -69,10 +69,9 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => ctx
-				.run(|ctx| self.parse_inner_subquery(ctx, None))
-				.await
-				.map(|x| Value::Subquery(Box::new(x))),
+			| t!("REMOVE") => {
+				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
+			}
 			t!("IF") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_if_stmt(ctx))
@@ -81,17 +80,17 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let res = ctx
-					.run(|ctx| self.parse_inner_subquery(ctx, Some(span)))
+				let res = self
+					.parse_inner_subquery(ctx, Some(span))
 					.await
 					.map(|x| Value::Subquery(Box::new(x)))?;
 				Ok(res)
 			}
-			_ => ctx.run(|ctx| self.parse_thing(ctx)).await.map(Value::Thing),
+			_ => self.parse_thing(ctx).await.map(Value::Thing),
 		}
 	}
 
-	pub async fn parse_thing_or_table(&mut self, ctx: Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_thing_or_table(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Value> {
 		if self.peek_token_at(1).kind == t!(":") {
 			self.parse_thing(ctx).await.map(Value::Thing)
 		} else {

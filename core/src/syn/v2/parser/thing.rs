@@ -14,7 +14,11 @@ use crate::{
 use std::ops::Bound;
 
 impl Parser<'_> {
-	pub async fn parse_record_string(&mut self, ctx: Ctx<'_>, double: bool) -> ParseResult<Thing> {
+	pub async fn parse_record_string(
+		&mut self,
+		ctx: &mut Ctx<'_>,
+		double: bool,
+	) -> ParseResult<Thing> {
 		let thing = self.parse_thing(ctx).await?;
 		// can't have any tokens in the buffer, since the next token must be produced by a specific
 		// call.
@@ -39,7 +43,7 @@ impl Parser<'_> {
 
 	pub async fn parse_thing_or_range(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		ident: String,
 	) -> ParseResult<Value> {
 		expected!(self, t!(":"));
@@ -189,14 +193,14 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_thing(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Thing> {
+	pub async fn parse_thing(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
 		self.parse_thing_from_ident(ctx, ident).await
 	}
 
 	pub async fn parse_thing_from_ident(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		ctx: &mut Ctx<'_>,
 		ident: String,
 	) -> ParseResult<Thing> {
 		expected!(self, t!(":"));
@@ -204,7 +208,7 @@ impl Parser<'_> {
 		self.peek();
 		self.no_whitespace()?;
 
-		let id = self.parse_id(ctx).await?;
+		let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 		Ok(Thing {
 			tb: ident,
 			id,
@@ -215,11 +219,11 @@ impl Parser<'_> {
 		let token = self.next();
 		match token.kind {
 			t!("{") => {
-				let object = ctx.run(|ctx| self.parse_object(ctx, token.span)).await?;
+				let object = self.parse_object(&mut ctx, token.span).await?;
 				Ok(Id::Object(object))
 			}
 			t!("[") => {
-				let array = ctx.run(|ctx| self.parse_array(ctx, token.span)).await?;
+				let array = self.parse_array(&mut ctx, token.span).await?;
 				Ok(Id::Array(array))
 			}
 			TokenKind::Number(NumberKind::Integer) => {
@@ -268,7 +272,7 @@ mod tests {
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
-		stack.run(|ctx| parser.parse_thing(ctx)).finish()
+		stack.run(|mut ctx| async move { parser.parse_thing(&mut ctx).await }).finish()
 	}
 
 	#[test]

@@ -15,8 +15,8 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub async fn parse_kind(&mut self, ctx: Ctx<'_>, delim: Span) -> ParseResult<Kind> {
-		let kind = self.parse_inner_kind(ctx).await?;
+	pub async fn parse_kind(&mut self, ctx: &mut Ctx<'_>, delim: Span) -> ParseResult<Kind> {
+		let kind = ctx.wrap(|ctx| self.parse_inner_kind(ctx)).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
@@ -185,7 +185,7 @@ mod tests {
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
-		stack.run(|ctx| parser.parse_inner_kind(ctx)).finish()
+		stack.run(|mut ctx| parser.parse_inner_kind(ctx)).finish()
 	}
 
 	#[test]
