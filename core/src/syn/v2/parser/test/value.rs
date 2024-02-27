@@ -10,7 +10,39 @@ use crate::{
 };
 
 #[test]
-fn parse_large_depth() {
+fn parse_large_depth_object() {
+	let mut text = String::new();
+	let start = r#" { foo: "#;
+	let middle = r#" {bar: 1} "#;
+	let end = r#" } "#;
+
+	for _ in 0..1000 {
+		text.push_str(start);
+	}
+	text.push_str(middle);
+	for _ in 0..1000 {
+		text.push_str(end);
+	}
+	let mut parser = Parser::new(text.as_bytes())
+		.with_query_recursion_limit(100000)
+		.with_object_recursion_limit(100000);
+	let mut stack = Stack::new();
+	let query = stack.run(|ctx| parser.parse_query(ctx)).finish().unwrap();
+	let Query(Statements(stmts)) = query;
+	let Statement::Value(Value::Object(ref object)) = stmts[0] else {
+		panic!()
+	};
+	let mut object = object;
+	for _ in 0..999 {
+		let Some(Value::Object(ref new_object)) = object.get("foo") else {
+			panic!()
+		};
+		object = new_object
+	}
+}
+
+#[test]
+fn parse_large_depth_record_id() {
 	let mut text = String::new();
 	let start = r#" r"a:[ "#;
 	let middle = r#" b:{c: 1} "#;
