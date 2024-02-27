@@ -13,6 +13,8 @@ mod mem;
 mod rocksdb;
 #[cfg(feature = "kv-speedb")]
 mod speedb;
+#[cfg(feature = "kv-surrealkv")]
+mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
@@ -131,6 +133,7 @@ pub enum EndpointKind {
 	SpeeDb,
 	TiKv,
 	Unsupported(String),
+	SurrealKV,
 }
 
 impl From<&str> for EndpointKind {
@@ -148,6 +151,7 @@ impl From<&str> for EndpointKind {
 			"rocksdb" => Self::RocksDb,
 			"speedb" => Self::SpeeDb,
 			"tikv" => Self::TiKv,
+			"surrealkv" => Self::SurrealKV,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}

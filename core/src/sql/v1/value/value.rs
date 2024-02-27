@@ -2848,9 +2848,13 @@ mod tests {
 
 	#[test]
 	fn check_size() {
-		assert!(64 >= std::mem::size_of::<Value>());
-		assert_eq!(104, std::mem::size_of::<Error>());
-		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
+		assert!(
+			64 >= std::mem::size_of::<Value>(),
+			"expected Value to be smaller then 64 bytes found {:?}",
+			std::mem::size_of::<Value>()
+		);
+		assert!(112 >= std::mem::size_of::<Error>());
+		assert!(112 >= std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());

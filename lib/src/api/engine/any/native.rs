@@ -139,6 +139,22 @@ impl Connection for Any {
 					);
 				}
 
+				EndpointKind::SurrealKV => {
+					#[cfg(feature = "kv-surrealkv")]
+					{
+						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
+						engine::local::native::router(address, conn_tx, route_rx);
+						conn_rx.into_recv_async().await??
+					}
+
+					#[cfg(not(feature = "kv-surrealkv"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
+				}
+
 				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
