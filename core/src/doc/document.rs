@@ -116,7 +116,6 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-		#[cfg(feature = "sql2")] table_type: TableType,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Clone transaction
 		let run = txn.clone();
@@ -143,7 +142,7 @@ impl<'a> Document<'a> {
 					&rid.tb,
 					opt.strict,
 					#[cfg(feature = "sql2")]
-					table_type,
+					TableType::Any,
 				)
 				.await
 			}

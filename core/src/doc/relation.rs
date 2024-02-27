@@ -15,13 +15,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		let table_type = if let Statement::Relate(_) = stm {
-			TableType::Relation(Default::default())
-		} else {
-			TableType::Normal
-		};
 		// TODO: Implicit table definition doesn't define in/out fields
-		let tb = self.tb_with_rel(opt, txn, table_type).await?;
+		let tb = self.tb_with_rel(opt, txn).await?;
 
 		let rid = self.id.as_ref().unwrap();
 		match stm {
