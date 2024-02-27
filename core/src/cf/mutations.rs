@@ -77,24 +77,23 @@ impl TableMutation {
 				h.insert("update".to_string(), v);
 				h
 			}
-			TableMutation::SetWithDiff(_thing, Value::None, v) => {
+			TableMutation::SetWithDiff(_thing, Value::None, _operations) => {
 				h.insert("original".to_string(), Value::None);
 				h.insert("create".to_string(), Value::Array(Array(Vec::new())));
 				h
 			}
-			TableMutation::SetWithDiff(_thing, previous, v) => {
+			TableMutation::SetWithDiff(_thing, previous, _operations) => {
 				h.insert("original".to_string(), previous);
 				h.insert(
 					"update".to_string(),
 					Value::Array(Array(
-						v.into_iter().map(|x| Value::Object(Object::from(x))).collect(),
+						previous.into_iter().map(|x| Value::Object(Object::from(x))).collect(),
 					)),
 				);
 				h
 			}
 			TableMutation::Del(t) => {
-				// if true { panic!("The del value is {:?}", t); }
-				// TODO(phughk): Future PR for lq on cf feature, store update in delete for diff and notification
+				// TODO(SUR-329): Store update in delete for diff and notification
 				let mut other = BTreeMap::<String, Value>::new();
 				other.insert("id".to_string(), Value::Thing(t));
 				let o = Object::from(other);

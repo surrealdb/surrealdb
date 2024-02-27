@@ -368,12 +368,12 @@ mod tests {
 						TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "B".to_string())),
 							Value::None,
-							Value::from("b"),
+							vec![],
 						),
 						TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "C".to_string())),
 							Value::None,
-							Value::from("c2"),
+							vec![],
 						),
 					],
 					false => vec![
