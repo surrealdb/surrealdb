@@ -830,18 +830,18 @@ impl Datastore {
 	) -> Result<Option<Versionstamp>, Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
-			Ok(vs) => Ok(vs),
-			Err(e) => {
-				match tx.cancel().await {
-					Ok(_) => {
-						Err(e)
-					}
-					Err(txe) => {
-						Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
-					}
-				}
-			}
-		}
+            Ok(vs) => Ok(vs),
+            Err(e) => {
+                match tx.cancel().await {
+                    Ok(_) => {
+                        Err(e)
+                    }
+                    Err(txe) => {
+                        Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+                    }
+                }
+            }
+        }
 	}
 
 	/// Poll change feeds for live query notifications
@@ -1014,8 +1014,9 @@ impl Datastore {
 				Some(doc)
 			}
 			TableMutation::Def(_) => None,
-			TableMutation::SetPrevious(id, _old, new) => {
+			TableMutation::SetWithDiff(id, new, _operations) => {
 				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
+				println!("We don't support applying patches as that was always on the user");
 				// TODO set previous value
 				Some(doc)
 			}
@@ -1079,13 +1080,13 @@ impl Datastore {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
 			return match tx.cancel().await {
-				Ok(_) => {
-					Err(e)
-				}
-				Err(txe) => {
-					Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
-				}
-			};
+                Ok(_) => {
+                    Err(e)
+                }
+                Err(txe) => {
+                    Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
+                }
+            };
 		}
 		Ok(())
 	}
