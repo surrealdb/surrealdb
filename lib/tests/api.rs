@@ -73,6 +73,9 @@ mod api_integration {
 	#[cfg(feature = "protocol-ws")]
 	mod ws {
 		use super::*;
+		use futures::poll;
+		use std::pin::pin;
+		use std::task::Poll;
 		use surrealdb::engine::remote::ws::Client;
 		use surrealdb::engine::remote::ws::Ws;
 
@@ -92,6 +95,50 @@ mod api_integration {
 		async fn any_engine_can_connect() {
 			let permit = PERMITS.acquire().await.unwrap();
 			surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
+			drop(permit);
+		}
+
+		#[test_log::test(tokio::test)]
+		async fn wait_for() {
+			use surrealdb::opt::WaitFor::{Connection, Database};
+
+			let permit = PERMITS.acquire().await.unwrap();
+
+			// Create an unconnected client
+			// At this point wait_for should continue to wait for both the connection and database selection.
+			let db: Surreal<ws::Client> = Surreal::init();
+			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Pending);
+			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
+
+			// Connect to the server
+			// The connection event should fire and allow wait_for to return immediately when waiting for a connection.
+			// When waiting for a database to be selected, it should continue waiting.
+			db.connect::<Ws>("127.0.0.1:8000").await.unwrap();
+			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
+			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
+
+			// Sign into the server
+			// At this point the connection has already been established but the database hasn't been selected yet.
+			db.signin(Root {
+				username: ROOT_USER,
+				password: ROOT_PASS,
+			})
+			.await
+			.unwrap();
+			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
+			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
+
+			// Selecting a namespace shouldn't fire the database selection event
+			db.use_ns("namespace").await.unwrap();
+			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
+			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
+
+			// Select the database to use
+			// Both the connection and database events have fired, wait_for should return immediately for both.
+			db.use_db("database").await.unwrap();
+			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
+			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Ready(()));
+
 			drop(permit);
 		}
 
