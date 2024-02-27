@@ -103,6 +103,10 @@ mod upgrade {
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
+	static CHECK_KNN_DB_BRUTEFORCE: [Check; 1] = [
+		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2,EUCLIDEAN> [2,3,4,5]",
+		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
+
 	type Check = (&'static str, Expected);
 	enum Expected {
 		Any,
@@ -169,18 +173,19 @@ mod upgrade {
 
 	async fn check_migrated_data_1_2(db: &Surreal<Any>) {
 		check_migrated_data_1_1(db).await;
+		check_migrated_data(db, &CHECK_KNN_DB_BRUTEFORCE).await;
 	}
 
 	async fn check_data_on_docker(client: &RestClient, queries: &[Check]) {
 		info!("Check data on Docker's instance");
-		for (query, expected) in queries.to_owned().into_iter() {
+		for (query, expected) in queries {
 			client.checked_query(query, expected).await;
 		}
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, queries: &[Check]) {
 		info!("Check migrated data");
-		for (query, expected_results) in queries.into_iter() {
+		for (query, expected_results) in queries {
 			checked_query(db, query, expected_results).await;
 		}
 	}
@@ -369,7 +374,7 @@ mod upgrade {
 			if !matches!(expected, Expected::Any) {
 				// Check the results
 				let results = results.as_array().expect(q);
-				expected.check_results(q, &results);
+				expected.check_results(q, results);
 			}
 		}
 	}
