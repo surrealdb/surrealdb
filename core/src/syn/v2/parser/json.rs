@@ -19,12 +19,8 @@ impl Parser<'_> {
 			t!("NULL") => Ok(Value::Null),
 			t!("true") => Ok(Value::Bool(true)),
 			t!("false") => Ok(Value::Bool(false)),
-			t!("{") => {
-				ctx.run(|ctx| self.parse_json_object(ctx, token.span)).await.map(Value::Object)
-			}
-			t!("[") => {
-				ctx.run(|ctx| self.parse_json_array(ctx, token.span)).await.map(Value::Array)
-			}
+			t!("{") => self.parse_json_object(&mut ctx, token.span).await.map(Value::Object),
+			t!("[") => self.parse_json_array(&mut ctx, token.span).await.map(Value::Array),
 			TokenKind::Duration => self.token_value(token).map(Value::Duration),
 			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
 			TokenKind::Strand => {
@@ -43,7 +39,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_json_object(&mut self, mut ctx: Ctx<'_>, start: Span) -> ParseResult<Object> {
+	async fn parse_json_object(&mut self, ctx: &mut Ctx<'_>, start: Span) -> ParseResult<Object> {
 		let mut obj = BTreeMap::new();
 		loop {
 			if self.eat(t!("}")) {
@@ -61,7 +57,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_json_array(&mut self, mut ctx: Ctx<'_>, start: Span) -> ParseResult<Array> {
+	async fn parse_json_array(&mut self, ctx: &mut Ctx<'_>, start: Span) -> ParseResult<Array> {
 		let mut array = Vec::new();
 		loop {
 			if self.eat(t!("]")) {
