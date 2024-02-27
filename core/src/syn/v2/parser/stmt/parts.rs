@@ -1,6 +1,6 @@
 //! Contains parsing code for smaller common parts of statements.
 
-use crate::sql::change_feed_include::ChangeFeedInclude;
+use crate::sql::ChangeFeedInclude;
 use crate::{
 	sql::{
 		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Field,
@@ -333,7 +333,7 @@ impl Parser<'_> {
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
 		let expiry = self.next_token_value::<Duration>()?.0;
 		let mut store_original = if self.eat(t!("INCLUDE")) {
-			expected!(self, t!("keyword `ORIGINAL` after `INCLUDE`"));
+			expected!(self, TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original));
 			true
 		} else {
 			false
