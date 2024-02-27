@@ -9,12 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveParamStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
-	pub if_exists: bool,
 }
 
 impl RemoveParamStatement {
@@ -25,37 +23,22 @@ impl RemoveParamStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
-			// Claim transaction
-			let mut run = txn.lock().await;
-			// Clear the cache
-			run.clear_cache();
-			// Get the definition
-			let pa = run.get_db_param(opt.ns(), opt.db(), &self.name).await?;
-			// Delete the definition
-			let key = crate::key::database::pa::new(opt.ns(), opt.db(), &pa.name);
-			run.del(key).await?;
-			// Ok all good
-			Ok(Value::None)
-		}
-		.await
-		{
-			Err(Error::PaNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
+		// Claim transaction
+		let mut run = txn.lock().await;
+		// Clear the cache
+		run.clear_cache();
+		// Delete the definition
+		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
 impl Display for RemoveParamStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE PARAM ${}", self.name)?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		Ok(())
+		write!(f, "REMOVE PARAM ${}", self.name)
 	}
 }

@@ -10,11 +10,9 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
-	pub if_exists: bool,
 }
 
 impl RemoveFunctionStatement {
@@ -25,38 +23,23 @@ impl RemoveFunctionStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
-			// Claim transaction
-			let mut run = txn.lock().await;
-			// Clear the cache
-			run.clear_cache();
-			// Get the definition
-			let fc = run.get_db_function(opt.ns(), opt.db(), &self.name).await?;
-			// Delete the definition
-			let key = crate::key::database::fc::new(opt.ns(), opt.db(), &fc.name);
-			run.del(key).await?;
-			// Ok all good
-			Ok(Value::None)
-		}
-		.await
-		{
-			Err(Error::FcNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
+		// Claim transaction
+		let mut run = txn.lock().await;
+		// Clear the cache
+		run.clear_cache();
+		// Delete the definition
+		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
 impl Display for RemoveFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE FUNCTION fn::{}", self.name.0)?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		Ok(())
+		write!(f, "REMOVE FUNCTION fn::{}", self.name.0)
 	}
 }

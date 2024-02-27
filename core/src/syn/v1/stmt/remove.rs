@@ -43,6 +43,7 @@ pub fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 	let (i, _) = tag_no_case("ANALYZER")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -52,6 +53,7 @@ pub fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 		i,
 		RemoveAnalyzerStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -61,6 +63,7 @@ pub fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -70,6 +73,7 @@ pub fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 		i,
 		RemoveDatabaseStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -84,6 +88,7 @@ pub fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -94,6 +99,7 @@ pub fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 		RemoveEventStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -108,6 +114,7 @@ pub fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -118,6 +125,7 @@ pub fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 		RemoveFieldStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -135,6 +143,7 @@ pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 		let (i, _) = char(')')(i)?;
 		Ok((i, ()))
 	})(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -144,6 +153,7 @@ pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 		i,
 		RemoveFunctionStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -158,6 +168,7 @@ pub fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -168,6 +179,7 @@ pub fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 		RemoveIndexStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -177,6 +189,7 @@ pub fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -186,6 +199,7 @@ pub fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 		i,
 		RemoveNamespaceStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -196,6 +210,7 @@ pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = cut(char('$'))(i)?;
 	let (i, name) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -205,6 +220,7 @@ pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 		i,
 		RemoveParamStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -214,6 +230,7 @@ pub fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -223,6 +240,7 @@ pub fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 		i,
 		RemoveScopeStatement {
 			name,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -256,6 +274,7 @@ pub fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 	let (i, _) = expect_tag_no_case("ON")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, base) = cut(base_or_scope)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -266,6 +285,7 @@ pub fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 		RemoveTokenStatement {
 			name,
 			base,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -279,6 +299,7 @@ pub fn user(i: &str) -> IResult<&str, RemoveUserStatement> {
 	let (i, _) = expect_tag_no_case("ON")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, base) = cut(base)(i)?;
+	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -289,6 +310,7 @@ pub fn user(i: &str) -> IResult<&str, RemoveUserStatement> {
 		RemoveUserStatement {
 			name,
 			base,
+			#[cfg(feature = "sql2")]
 			if_exists: if_exists.is_some(),
 		},
 	))
@@ -304,10 +326,14 @@ mod tests {
 	fn check_remove_serialize() {
 		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident::from("test"),
+			#[cfg(feature = "sql2")]
 			if_exists: false,
 		});
 		let enc: Vec<u8> = stm.try_into().unwrap();
+		#[cfg(not(feature = "sql2"))]
 		assert_eq!(10, enc.len());
+		#[cfg(feature = "sql2")]
+		assert_eq!(11, enc.len());
 	}
 
 	/// REMOVE ANALYZER tests

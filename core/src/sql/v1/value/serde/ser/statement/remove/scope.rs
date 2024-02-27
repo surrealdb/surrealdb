@@ -36,7 +36,6 @@ impl ser::Serializer for Serializer {
 #[derive(Default)]
 pub struct SerializeRemoveScopeStatement {
 	name: Ident,
-	if_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeRemoveScopeStatement {
@@ -51,9 +50,6 @@ impl serde::ser::SerializeStruct for SerializeRemoveScopeStatement {
 			"name" => {
 				self.name = Ident(value.serialize(ser::string::Serializer.wrap())?);
 			}
-			"if_exists" => {
-				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
-			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `RemoveScopeStatement::{key}`"
@@ -66,7 +62,6 @@ impl serde::ser::SerializeStruct for SerializeRemoveScopeStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(RemoveScopeStatement {
 			name: self.name,
-			if_exists: self.if_exists,
 		})
 	}
 }

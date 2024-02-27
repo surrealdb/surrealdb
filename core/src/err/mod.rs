@@ -321,6 +321,7 @@ pub enum Error {
 
 	/// The requested event does not exist
 	#[error("The event '{value}' does not exist")]
+	#[cfg(feature = "sql2")]
 	EvNotFound {
 		value: String,
 	},
@@ -333,6 +334,7 @@ pub enum Error {
 
 	/// The requested field does not exist
 	#[error("The field '{value}' does not exist")]
+	#[cfg(feature = "sql2")]
 	FdNotFound {
 		value: String,
 	},

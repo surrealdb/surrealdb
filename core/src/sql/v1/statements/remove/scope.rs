@@ -10,11 +10,9 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 pub struct RemoveScopeStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
-	pub if_exists: bool,
 }
 
 impl RemoveScopeStatement {
@@ -25,40 +23,25 @@ impl RemoveScopeStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Scope, &Base::Db)?;
-			// Claim transaction
-			let mut run = txn.lock().await;
-			// Clear the cache
-			run.clear_cache();
-			// Get the definition
-			let sc = run.get_sc(opt.ns(), opt.db(), &self.name).await?;
-			// Delete the definition
-			let key = crate::key::database::sc::new(opt.ns(), opt.db(), &sc.name);
-			run.del(key).await?;
-			// Remove the resource data
-			let key = crate::key::scope::all::new(opt.ns(), opt.db(), &sc.name);
-			run.delp(key, u32::MAX).await?;
-			// Ok all good
-			Ok(Value::None)
-		}
-		.await
-		{
-			Err(Error::ScNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Scope, &Base::Db)?;
+		// Claim transaction
+		let mut run = txn.lock().await;
+		// Clear the cache
+		run.clear_cache();
+		// Delete the definition
+		let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// Remove the resource data
+		let key = crate::key::scope::all::new(opt.ns(), opt.db(), &self.name);
+		run.delp(key, u32::MAX).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
 impl Display for RemoveScopeStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE SCOPE {}", self.name)?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		Ok(())
+		write!(f, "REMOVE SCOPE {}", self.name)
 	}
 }

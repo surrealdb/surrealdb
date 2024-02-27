@@ -10,10 +10,12 @@ use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
+	#[revision(start = 2)]
+	pub if_exists: bool,
 }
 
 impl RemoveEventStatement {
@@ -24,25 +26,40 @@ impl RemoveEventStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Clear the cache
-		run.clear_cache();
-		// Delete the definition
-		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.del(key).await?;
-		// Clear the cache
-		let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &self.what);
-		run.clr(key).await?;
-		// Ok all good
-		Ok(Value::None)
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Clear the cache
+			run.clear_cache();
+			// Get the definition
+			let ev = run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await?;
+			// Delete the definition
+			let key = crate::key::table::ev::new(opt.ns(), opt.db(), &ev.what, &ev.name);
+			run.del(key).await?;
+			// Clear the cache
+			let key = crate::key::table::ev::prefix(opt.ns(), opt.db(), &ev.what);
+			run.clr(key).await?;
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::EvNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
+		}
 	}
 }
 
 impl Display for RemoveEventStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)
+		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		Ok(())
 	}
 }
