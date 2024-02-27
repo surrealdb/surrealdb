@@ -39,7 +39,7 @@ mod upgrade {
 		{
 			// Start the docker instance
 			let mut docker = DockerContainer::start(&docker_version, &file_path, USER, PASS);
-			let client = RestClient::new(&NS, &DB, &USER, &PASS)
+			let client = RestClient::new(NS, DB, USER, PASS)
 				.wait_for_connection(&CNX_TIMEOUT)
 				.await
 				.unwrap_or_else(|| {
