@@ -82,12 +82,15 @@ impl TableMutation {
 				h.insert("create".to_string(), Value::Array(Array(Vec::new())));
 				h
 			}
-			TableMutation::SetWithDiff(_thing, previous, _operations) => {
-				h.insert("original".to_string(), previous);
+			TableMutation::SetWithDiff(_thing, current, operations) => {
+				// TODO
+				// TODO -- Figure this out
+				// TODO
+				h.insert("original".to_string(), current);
 				h.insert(
 					"update".to_string(),
 					Value::Array(Array(
-						previous.into_iter().map(|x| Value::Object(Object::from(x))).collect(),
+						operations.into_iter().map(|x| Value::Object(Object::from(x))).collect(),
 					)),
 				);
 				h
