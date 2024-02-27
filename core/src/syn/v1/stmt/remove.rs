@@ -331,9 +331,9 @@ mod tests {
 		});
 		let enc: Vec<u8> = stm.try_into().unwrap();
 		#[cfg(not(feature = "sql2"))]
-		assert_eq!(10, enc.len());
+		assert_eq!(9, enc.len());
 		#[cfg(feature = "sql2")]
-		assert_eq!(11, enc.len());
+		assert_eq!(10, enc.len());
 	}
 
 	/// REMOVE ANALYZER tests
