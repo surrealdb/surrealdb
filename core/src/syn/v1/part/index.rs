@@ -118,6 +118,7 @@ pub fn mtree_distance(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
+		map(tag_no_case("COSINE"), |_| Distance::Cosine),
 		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),
 		minkowski,
 	))(i)

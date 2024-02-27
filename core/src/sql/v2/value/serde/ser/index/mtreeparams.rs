@@ -66,6 +66,9 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 			"dimension" => {
 				self.dimension = value.serialize(ser::primitive::u16::Serializer.wrap())?;
 			}
+			"_distance" => {
+				self.distance = value.serialize(ser::distance::Serializer.wrap())?;
+			}
 			"distance" => {
 				self.distance = value.serialize(ser::distance::Serializer.wrap())?;
 			}
