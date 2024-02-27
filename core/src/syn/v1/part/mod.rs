@@ -68,21 +68,23 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
     let (i, _) = shouldbespace(i)?;
     let (i, v) = cut(duration)(i)?;
 
-	let (i, opt) = opt(|i| {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _) = tag_no_case("INCLUDE")?;
-		let (i, _) = shouldbespace(i)?;
-		tag_no_case("ORIGINAL")
-	})(i)?;
+    let (i, opt) = opt(|i| {
+        let (i, a) = shouldbespace(i)?;
+        let (i, _): (&str, &str) = tag_no_case("INCLUDE")(i)?;
+        let (i, c) = shouldbespace(i)?;
+        let (i, b): (&str, &str) = tag_no_case("ORIGINAL")(i)?;
+        Ok((i, b))
+    })(i)?;
 
-	Ok((
-		i,
-		ChangeFeed {
-			expiry: v.0,
-			store_original: opt.is_some(),
 
-		},
-	))
+    Ok((
+        i,
+        ChangeFeed {
+            expiry: v.0,
+            store_original: opt.is_some(),
+
+        },
+    ))
 }
 
 pub fn cond(i: &str) -> IResult<&str, Cond> {
