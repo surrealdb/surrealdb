@@ -843,8 +843,8 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested field already exists
-	#[error("The field '{value}' already exists")]
+	/// The requested scope already exists
+	#[error("The scope '{value}' already exists")]
 	#[cfg(feature = "sql2")]
 	ScAlreadyExists {
 		value: String,
