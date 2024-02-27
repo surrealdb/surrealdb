@@ -5,6 +5,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use crate::sql::Idiom;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
 // The versionstamp key is the key that contains the current versionstamp and might be used by the
@@ -65,19 +66,22 @@ impl Writer {
         db: &str,
         tb: &str,
         id: Thing,
-        p: Cow<'_, Value>,
-        v: Cow<'_, Value>,
-        store_original: bool,
+        previous: Cow<'_, Value>,
+        current: Cow<'_, Value>,
+        store_difference: bool,
     ) {
-        if v.is_some() {
+        if current.is_some() {
             self.buf.push(
                 ns.to_string(),
                 db.to_string(),
                 tb.to_string(),
-                match store_original {
-                    true => TableMutation::SetPrevious(id, p.into_owned(), v.into_owned()),
+                match store_difference {
+                    true => {
+                        let patches = current.diff(&previous, Idiom(Vec::new()));
+                        TableMutation::SetWithDiff(id, current.into_owned(), patches)
+                    }
                     false => {
-                        TableMutation::Set(id, v.into_owned())
+                        TableMutation::Set(id, current.into_owned())
                     }
                 },
             );
@@ -280,7 +284,7 @@ mod tests {
                 DatabaseMutation(vec![TableMutations(
                     "mytb".to_string(),
                     match FFLAGS.change_feed_live_queries.enabled() {
-                        true => vec![TableMutation::SetPrevious(
+                        true => vec![TableMutation::SetWithDiff(
                             Thing::from(("mytb".to_string(), "A".to_string())),
                             Value::None,
                             Value::from("a"),
@@ -297,7 +301,7 @@ mod tests {
                 DatabaseMutation(vec![TableMutations(
                     "mytb".to_string(),
                     match FFLAGS.change_feed_live_queries.enabled() {
-                        true => vec![TableMutation::SetPrevious(
+                        true => vec![TableMutation::SetWithDiff(
                             Thing::from(("mytb".to_string(), "C".to_string())),
                             Value::None,
                             Value::from("c"),
@@ -315,12 +319,12 @@ mod tests {
                     "mytb".to_string(),
                     match FFLAGS.change_feed_live_queries.enabled() {
                         true => vec![
-                            TableMutation::SetPrevious(
+                            TableMutation::SetWithDiff(
                                 Thing::from(("mytb".to_string(), "B".to_string())),
                                 Value::None,
                                 Value::from("b"),
                             ),
-                            TableMutation::SetPrevious(
+                            TableMutation::SetWithDiff(
                                 Thing::from(("mytb".to_string(), "C".to_string())),
                                 Value::None,
                                 Value::from("c2"),
@@ -363,12 +367,12 @@ mod tests {
                 "mytb".to_string(),
                 match FFLAGS.change_feed_live_queries.enabled() {
                     true => vec![
-                        TableMutation::SetPrevious(
+                        TableMutation::SetWithDiff(
                             Thing::from(("mytb".to_string(), "B".to_string())),
                             Value::None,
                             Value::from("b"),
                         ),
-                        TableMutation::SetPrevious(
+                        TableMutation::SetWithDiff(
                             Thing::from(("mytb".to_string(), "C".to_string())),
                             Value::None,
                             Value::from("c2"),

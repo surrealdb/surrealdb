@@ -9,6 +9,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
+use crate::sql::Operation;
 
 // Mutation is a single mutation to a table.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -21,7 +22,7 @@ pub enum TableMutation {
     Def(DefineTableStatement),
     #[revision(start = 2)]
     // Includes the previous value that may be None
-    SetPrevious(Thing, Value, Value),
+    SetWithDiff(Thing, Value, Vec<Operation>),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -76,17 +77,17 @@ impl TableMutation {
                 h.insert("update".to_string(), v);
                 h
             }
-            TableMutation::SetPrevious(_thing, Value::None, v) => {
+            TableMutation::SetWithDiff(_thing, Value::None, v) => {
                 // if true { panic!("The set previous value is {:?},    NONE,    {:?}", _thing, v); }
                 h.insert("original".to_string(), Value::None);
-                h.insert("create".to_string(), v);
+                h.insert("create".to_string(), Value::Array(Array(Vec::new())));
                 h
             }
-            TableMutation::SetPrevious(_thing, previous, v) => {
+            TableMutation::SetWithDiff(_thing, previous, v) => {
                 // if true { panic!("The set previous value is {:?},      {:?},       {:?}", _thing, previous, v); }
                 println!("The previous value is {:?}", previous);
                 h.insert("original".to_string(), previous);
-                h.insert("update".to_string(), v);
+                h.insert("update".to_string(), Value::Array(Array(v.into_iter().map(|x| Value::Object(Object::from(x))).collect())));
                 h
             }
             TableMutation::Del(t) => {
@@ -135,7 +136,7 @@ impl Display for TableMutation {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
-            TableMutation::SetPrevious(id, _previous, v) => write!(f, "SET {} {}", id, v),
+            TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
             TableMutation::Del(id) => write!(f, "DEL {}", id),
             TableMutation::Def(t) => write!(f, "{}", t),
         }
@@ -232,7 +233,7 @@ mod tests {
             DatabaseMutation(vec![TableMutations(
                 "mytb".to_string(),
                 vec![
-                    TableMutation::SetPrevious(
+                    TableMutation::SetWithDiff(
                         Thing::from(("mytb".to_string(), "tobie".to_string())),
                         Value::None,
                         Value::Object(Object::from(HashMap::from([
@@ -243,7 +244,7 @@ mod tests {
                             ("note", Value::from("surreal")),
                         ]))),
                     ),
-                    TableMutation::SetPrevious(
+                    TableMutation::SetWithDiff(
                         Thing::from(("mytb".to_string(), "tobie".to_string())),
                         Value::Strand(Strand::from("this would normally be an object")),
                         Value::Object(Object::from(HashMap::from([
