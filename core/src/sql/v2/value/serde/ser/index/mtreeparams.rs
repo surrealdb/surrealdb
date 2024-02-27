@@ -109,6 +109,7 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 fn mtree_params() {
 	let params = MTreeParams {
 		dimension: 1,
+		_distance: Default::default(),
 		distance: Default::default(),
 		vector_type: Default::default(),
 		capacity: 2,
