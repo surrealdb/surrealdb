@@ -122,7 +122,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test DROP TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -154,7 +154,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -190,7 +190,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -222,7 +222,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -263,8 +263,8 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
-				view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
+				view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -276,7 +276,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			events: {},
 			fields: {},
-			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' },
+			tables: { view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
 		}",
@@ -296,7 +296,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
