@@ -79,7 +79,7 @@ fn user_opts(i: &str) -> IResult<&str, Vec<DefineUserOption>> {
 		user_roles,
 		user_comment,
 		#[cfg(feature = "sql2")]
-		user_if_not_exists
+		user_if_not_exists,
 	)))(i)
 }
 

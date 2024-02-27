@@ -62,7 +62,7 @@ fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
 		scope_signin,
 		scope_comment,
 		#[cfg(feature = "sql2")]
-		scope_if_not_exists
+		scope_if_not_exists,
 	))(i)
 }
 

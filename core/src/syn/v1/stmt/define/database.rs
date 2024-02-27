@@ -52,7 +52,7 @@ fn database_opts(i: &str) -> IResult<&str, DefineDatabaseOption> {
 		database_comment,
 		database_changefeed,
 		#[cfg(feature = "sql2")]
-		database_if_not_exists
+		database_if_not_exists,
 	))(i)
 }
 

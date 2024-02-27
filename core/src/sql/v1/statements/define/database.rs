@@ -16,7 +16,7 @@ pub struct DefineDatabaseStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub comment: Option<Strand>,
-	pub changefeed: Option<ChangeFeed>
+	pub changefeed: Option<ChangeFeed>,
 }
 
 impl DefineDatabaseStatement {

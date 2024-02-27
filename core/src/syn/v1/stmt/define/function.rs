@@ -80,7 +80,7 @@ fn function_opts(i: &str) -> IResult<&str, DefineFunctionOption> {
 		function_comment,
 		function_permissions,
 		#[cfg(feature = "sql2")]
-		function_if_not_exists
+		function_if_not_exists,
 	))(i)
 }
 

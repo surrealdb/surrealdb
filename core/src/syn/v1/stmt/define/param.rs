@@ -72,7 +72,7 @@ fn param_opts(i: &str) -> IResult<&str, DefineParamOption> {
 		param_comment,
 		param_permissions,
 		#[cfg(feature = "sql2")]
-		param_if_not_exists
+		param_if_not_exists,
 	))(i)
 }
 

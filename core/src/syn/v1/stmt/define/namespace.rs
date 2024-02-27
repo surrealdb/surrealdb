@@ -45,7 +45,7 @@ fn namespace_opts(i: &str) -> IResult<&str, DefineNamespaceOption> {
 	alt((
 		namespace_comment,
 		#[cfg(feature = "sql2")]
-		namespace_if_not_exists
+		namespace_if_not_exists,
 	))(i)
 }
 

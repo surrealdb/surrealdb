@@ -84,7 +84,7 @@ fn index_opts(i: &str) -> IResult<&str, DefineIndexOption> {
 		index_columns,
 		index_comment,
 		#[cfg(feature = "sql2")]
-		index_if_not_exists
+		index_if_not_exists,
 	))(i)
 }
 

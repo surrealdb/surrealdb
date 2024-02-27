@@ -85,7 +85,7 @@ fn token_opts(i: &str) -> IResult<&str, DefineTokenOption> {
 		token_value,
 		token_comment,
 		#[cfg(feature = "sql2")]
-		token_if_not_exists
+		token_if_not_exists,
 	))(i)
 }
 

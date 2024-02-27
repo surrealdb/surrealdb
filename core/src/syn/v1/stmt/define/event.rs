@@ -81,7 +81,7 @@ fn event_opts(i: &str) -> IResult<&str, DefineEventOption> {
 		event_then,
 		event_comment,
 		#[cfg(feature = "sql2")]
-		event_if_not_exists
+		event_if_not_exists,
 	))(i)
 }
 
