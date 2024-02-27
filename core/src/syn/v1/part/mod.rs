@@ -69,9 +69,9 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 	let (i, v) = cut(duration)(i)?;
 
 	let (i, opt) = opt(|i| {
-		let (i, a) = shouldbespace(i)?;
+		let (i, _) = shouldbespace(i)?;
 		let (i, _): (&str, &str) = tag_no_case("INCLUDE")(i)?;
-		let (i, c) = shouldbespace(i)?;
+		let (i, _) = shouldbespace(i)?;
 		let (i, b): (&str, &str) = tag_no_case("ORIGINAL")(i)?;
 		Ok((i, b))
 	})(i)?;
