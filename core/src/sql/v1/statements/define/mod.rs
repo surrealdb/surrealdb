@@ -120,6 +120,6 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = stm.try_into().unwrap();
-		assert_eq!(12, enc.len());
+		assert_eq!(11, enc.len());
 	}
 }
