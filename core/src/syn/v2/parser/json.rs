@@ -19,8 +19,12 @@ impl Parser<'_> {
 			t!("NULL") => Ok(Value::Null),
 			t!("true") => Ok(Value::Bool(true)),
 			t!("false") => Ok(Value::Bool(false)),
-			t!("{") => self.parse_json_object(ctx, token.span).await.map(Value::Object),
-			t!("[") => self.parse_json_array(ctx, token.span).await.map(Value::Array),
+			t!("{") => {
+				ctx.run(|ctx| self.parse_json_object(ctx, token.span)).await.map(Value::Object)
+			}
+			t!("[") => {
+				ctx.run(|ctx| self.parse_json_array(ctx, token.span)).await.map(Value::Array)
+			}
 			TokenKind::Duration => self.token_value(token).map(Value::Duration),
 			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
 			TokenKind::Strand => {

@@ -15,8 +15,8 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub async fn parse_kind(&mut self, mut ctx: Ctx<'_>, delim: Span) -> ParseResult<Kind> {
-		let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
+	pub async fn parse_kind(&mut self, ctx: Ctx<'_>, delim: Span) -> ParseResult<Kind> {
+		let kind = self.parse_inner_kind(ctx).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
