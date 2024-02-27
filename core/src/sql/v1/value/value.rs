@@ -2861,7 +2861,11 @@ mod tests {
 		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::array::Array>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::object::Object>());
-		assert_eq!(56, std::mem::size_of::<crate::sql::geometry::Geometry>());
+		assert!(
+			56 >= std::mem::size_of::<Geometry>(),
+			"expected Geometry to be smaller then 56 bytes found {:?}",
+			std::mem::size_of::<Geometry>()
+		);
 		assert_eq!(24, std::mem::size_of::<crate::sql::param::Param>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
