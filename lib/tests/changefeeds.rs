@@ -13,7 +13,7 @@ use surrealdb_core::fflags::{FFlags, FFLAGS};
 
 #[tokio::test]
 async fn database_change_feeds() -> Result<(), Error> {
-    let sql = "
+	let sql = "
 	    DEFINE DATABASE test CHANGEFEED 1h;
         DEFINE TABLE person;
 		DEFINE FIELD name ON TABLE person
@@ -34,43 +34,43 @@ async fn database_change_feeds() -> Result<(), Error> {
 		DELETE person:test;
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-    let dbs = new_ds().await?;
-    let ses = Session::owner().with_ns("test").with_db("test");
-    let start_ts = 0u64;
-    let end_ts = start_ts + 1;
-    dbs.tick_at(start_ts).await?;
-    let res = &mut dbs.execute(sql, &ses, None).await?;
-    dbs.tick_at(end_ts).await?;
-    assert_eq!(res.len(), 6);
-    // DEFINE DATABASE
-    let tmp = res.remove(0).result;
-    assert!(tmp.is_ok());
-    // DEFINE TABLE
-    let tmp = res.remove(0).result;
-    assert!(tmp.is_ok());
-    // DEFINE FIELD
-    let tmp = res.remove(0).result;
-    assert!(tmp.is_ok());
-    // UPDATE CONTENT
-    let tmp = res.remove(0).result?;
-    let val = Value::parse(
-        "[
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let start_ts = 0u64;
+	let end_ts = start_ts + 1;
+	dbs.tick_at(start_ts).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	dbs.tick_at(end_ts).await?;
+	assert_eq!(res.len(), 6);
+	// DEFINE DATABASE
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	// DEFINE TABLE
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	// DEFINE FIELD
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	// UPDATE CONTENT
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-    );
-    assert_eq!(tmp, val);
-    // DELETE
-    let tmp = res.remove(0).result?;
-    let val = Value::parse("[]");
-    assert_eq!(tmp, val);
-    // SHOW CHANGES
-    let tmp = res.remove(0).result?;
-    let val = match FFLAGS.change_feed_live_queries.enabled() {
-        true => Value::parse(
-            "[
+	);
+	assert_eq!(tmp, val);
+	// DELETE
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	// SHOW CHANGES
+	let tmp = res.remove(0).result?;
+	let val = match FFLAGS.change_feed_live_queries.enabled() {
+		true => Value::parse(
+			"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -93,9 +93,9 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-        ),
-        false => Value::parse(
-            "[
+		),
+		false => Value::parse(
+			"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -118,30 +118,30 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-        ),
-    };
-    assert_eq!(tmp, val);
-    // Retain for 1h
-    let sql = "
+		),
+	};
+	assert_eq!(tmp, val);
+	// Retain for 1h
+	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-    dbs.tick_at(end_ts + 3599).await?;
-    let res = &mut dbs.execute(sql, &ses, None).await?;
-    let tmp = res.remove(0).result?;
-    assert_eq!(tmp, val);
-    // GC after 1hs
-    dbs.tick_at(end_ts + 3600).await?;
-    let res = &mut dbs.execute(sql, &ses, None).await?;
-    let tmp = res.remove(0).result?;
-    let val = Value::parse("[]");
-    assert_eq!(tmp, val);
-    //
-    Ok(())
+	dbs.tick_at(end_ts + 3599).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, val);
+	// GC after 1hs
+	dbs.tick_at(end_ts + 3600).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
 }
 
 #[tokio::test]
 async fn table_change_feeds() -> Result<(), Error> {
-    let sql = "
+	let sql = "
         DEFINE TABLE person CHANGEFEED 1h;
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -166,76 +166,76 @@ async fn table_change_feeds() -> Result<(), Error> {
 		CREATE person:1000 SET name = 'Yusuke';
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-    let dbs = new_ds().await?;
-    let ses = Session::owner().with_ns("test").with_db("test");
-    let start_ts = 0u64;
-    let end_ts = start_ts + 1;
-    dbs.tick_at(start_ts).await?;
-    let res = &mut dbs.execute(sql, &ses, None).await?;
-    dbs.tick_at(end_ts).await?;
-    assert_eq!(res.len(), 10);
-    // DEFINE TABLE
-    let tmp = res.remove(0).result;
-    assert!(tmp.is_ok());
-    // DEFINE FIELD
-    let tmp = res.remove(0).result;
-    assert!(tmp.is_ok());
-    // UPDATE CONTENT
-    let tmp = res.remove(0).result?;
-    let val = Value::parse(
-        "[
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let start_ts = 0u64;
+	let end_ts = start_ts + 1;
+	dbs.tick_at(start_ts).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	dbs.tick_at(end_ts).await?;
+	assert_eq!(res.len(), 10);
+	// DEFINE TABLE
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	// DEFINE FIELD
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	// UPDATE CONTENT
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-    );
-    assert_eq!(tmp, val);
-    // UPDATE REPLACE
-    let tmp = res.remove(0).result;
-    assert!(matches!(
+	);
+	assert_eq!(tmp, val);
+	// UPDATE REPLACE
+	let tmp = res.remove(0).result;
+	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Found 'Name: jaime' for field `name`, with record `person:test`, but field must conform to: IF $input THEN $input = /^[A-Z]{1}[a-z]+$/ ELSE true END"#
 	));
-    // UPDATE MERGE
-    let tmp = res.remove(0).result?;
-    let val = Value::parse(
-        "[
+	// UPDATE MERGE
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
 			{
 				id: person:test,
 				name: 'Name: Jaime',
 			}
 		]",
-    );
-    assert_eq!(tmp, val);
-    // UPDATE SET
-    let tmp = res.remove(0).result;
-    assert!(matches!(
+	);
+	assert_eq!(tmp, val);
+	// UPDATE SET
+	let tmp = res.remove(0).result;
+	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Found 'Name: tobie' for field `name`, with record `person:test`, but field must conform to: IF $input THEN $input = /^[A-Z]{1}[a-z]+$/ ELSE true END"#
 	));
-    // UPDATE SET
-    let tmp = res.remove(0).result?;
-    let val = Value::parse(
-        "[
+	// UPDATE SET
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-    );
-    assert_eq!(tmp, val);
-    // DELETE
-    let tmp = res.remove(0).result?;
-    let val = Value::parse("[]");
-    assert_eq!(tmp, val);
-    // CREATE
-    let _tmp = res.remove(0).result?;
-    // SHOW CHANGES
-    let tmp = res.remove(0).result?;
-    let val = match FFLAGS.change_feed_live_queries.enabled() {
-        true => Value::parse(
-            "[
+	);
+	assert_eq!(tmp, val);
+	// DELETE
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	// CREATE
+	let _tmp = res.remove(0).result?;
+	// SHOW CHANGES
+	let tmp = res.remove(0).result?;
+	let val = match FFLAGS.change_feed_live_queries.enabled() {
+		true => Value::parse(
+			"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -301,9 +301,9 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-        ),
-        false => Value::parse(
-            "[
+		),
+		false => Value::parse(
+			"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -369,55 +369,55 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-        ),
-    };
-    assert_eq!(tmp, val);
-    // Retain for 1h
-    let sql = "
+		),
+	};
+	assert_eq!(tmp, val);
+	// Retain for 1h
+	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-    dbs.tick_at(end_ts + 3599).await?;
-    let res = &mut dbs.execute(sql, &ses, None).await?;
-    let tmp = res.remove(0).result?;
-    assert_eq!(tmp, val);
-    // GC after 1hs
-    dbs.tick_at(end_ts + 3600).await?;
-    let res = &mut dbs.execute(sql, &ses, None).await?;
-    let tmp = res.remove(0).result?;
-    let val = Value::parse("[]");
-    assert_eq!(tmp, val);
-    //
-    Ok(())
+	dbs.tick_at(end_ts + 3599).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, val);
+	// GC after 1hs
+	dbs.tick_at(end_ts + 3600).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
 }
 
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<(), Error> {
-    let db = new_ds().await?;
-    let ses = Session::owner().with_ns("test").with_db("test");
-    // Enable change feeds
-    let sql = "
+	let db = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	// Enable change feeds
+	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
-    db.execute(sql, &ses, None).await?.remove(0).result?;
-    // Save timestamp 1
-    let ts1_dt = "2023-08-01T00:00:00Z";
-    let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
-    db.tick_at(ts1.timestamp().try_into().unwrap()).await.unwrap();
-    // Create and update users
-    let sql = "
+	db.execute(sql, &ses, None).await?.remove(0).result?;
+	// Save timestamp 1
+	let ts1_dt = "2023-08-01T00:00:00Z";
+	let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
+	db.tick_at(ts1.timestamp().try_into().unwrap()).await.unwrap();
+	// Create and update users
+	let sql = "
         CREATE user:amos SET name = 'Amos';
         CREATE user:jane SET name = 'Jane';
         UPDATE user:amos SET name = 'AMOS';
     ";
-    let table = "user";
-    let res = db.execute(sql, &ses, None).await?;
-    for res in res {
-        res.result?;
-    }
-    let sql = format!("UPDATE {table} SET name = 'Doe'");
-    let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
-    let expected = Value::parse(
-        "[
+	let table = "user";
+	let res = db.execute(sql, &ses, None).await?;
+	for res in res {
+		res.result?;
+	}
+	let sql = format!("UPDATE {table} SET name = 'Doe'");
+	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	let expected = Value::parse(
+		"[
 		{
 			id: user:amos,
 			name: 'Doe',
@@ -427,56 +427,56 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 			name: 'Doe',
 		},
 	]",
-    );
-    assert_eq!(users, expected);
-    let sql = format!("SELECT * FROM {table}");
-    let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
-    assert_eq!(users, expected);
-    let sql = "
+	);
+	assert_eq!(users, expected);
+	let sql = format!("SELECT * FROM {table}");
+	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	assert_eq!(users, expected);
+	let sql = "
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
-    let value: Value = db.execute(sql, &ses, None).await?.remove(0).result?;
-    let Value::Array(array) = value.clone() else {
-        unreachable!()
-    };
-    assert_eq!(array.len(), 5);
-    // DEFINE TABLE
-    let a = array.get(0).unwrap();
-    let Value::Object(a) = a else {
-        unreachable!()
-    };
-    let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    let changes = a.get("changes").unwrap().to_owned();
-    assert_eq!(
-        changes,
-        surrealdb::sql::value(
-            "[
+	let value: Value = db.execute(sql, &ses, None).await?.remove(0).result?;
+	let Value::Array(array) = value.clone() else {
+		unreachable!()
+	};
+	assert_eq!(array.len(), 5);
+	// DEFINE TABLE
+	let a = array.get(0).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	let changes = a.get("changes").unwrap().to_owned();
+	assert_eq!(
+		changes,
+		surrealdb::sql::value(
+			"[
 		{
 			define_table: {
 				name: 'user'
 			}
 		}
 	]"
-        )
-            .unwrap()
-    );
-    // UPDATE user:amos
-    let a = array.get(1).unwrap();
-    let Value::Object(a) = a else {
-        unreachable!()
-    };
-    let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    let changes = a.get("changes").unwrap().to_owned();
-    match FFLAGS.change_feed_live_queries.enabled() {
-        true => {
-            assert_eq!(
-                changes,
-                surrealdb::sql::value(
-                    "[
+		)
+		.unwrap()
+	);
+	// UPDATE user:amos
+	let a = array.get(1).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	let changes = a.get("changes").unwrap().to_owned();
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
 		{
 			create: {
 				id: user:amos,
@@ -484,15 +484,15 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 			}
 		}
 	]"
-                )
-                    .unwrap()
-            );
-        }
-        false => {
-            assert_eq!(
-                changes,
-                surrealdb::sql::value(
-                    "[
+				)
+				.unwrap()
+			);
+		}
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
 		{
 			update: {
 				id: user:amos,
@@ -500,27 +500,27 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 			}
 		}
 	]"
-                )
-                    .unwrap()
-            );
-        }
-    }
-    // UPDATE user:jane
-    let a = array.get(2).unwrap();
-    let Value::Object(a) = a else {
-        unreachable!()
-    };
-    let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    assert!(versionstamp2 < versionstamp3);
-    let changes = a.get("changes").unwrap().to_owned();
-    match FFLAGS.change_feed_live_queries.enabled() {
-        true => {
-            assert_eq!(
-                changes,
-                surrealdb::sql::value(
-                    "[
+				)
+				.unwrap()
+			);
+		}
+	}
+	// UPDATE user:jane
+	let a = array.get(2).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	assert!(versionstamp2 < versionstamp3);
+	let changes = a.get("changes").unwrap().to_owned();
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
 						{
 							 create: {
 								 id: user:jane,
@@ -528,15 +528,15 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 							 }
 						}
 					]"
-                )
-                    .unwrap()
-            );
-        }
-        false => {
-            assert_eq!(
-                changes,
-                surrealdb::sql::value(
-                    "[
+				)
+				.unwrap()
+			);
+		}
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
 					{
 						 update: {
 							 id: user:jane,
@@ -544,25 +544,25 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 						 }
 					}
 	]"
-                )
-                    .unwrap()
-            );
-        }
-    }
-    // UPDATE user:amos
-    let a = array.get(3).unwrap();
-    let Value::Object(a) = a else {
-        unreachable!()
-    };
-    let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    assert!(versionstamp3 < versionstamp4);
-    let changes = a.get("changes").unwrap().to_owned();
-    assert_eq!(
-        changes,
-        surrealdb::sql::value(
-            "[
+				)
+				.unwrap()
+			);
+		}
+	}
+	// UPDATE user:amos
+	let a = array.get(3).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	assert!(versionstamp3 < versionstamp4);
+	let changes = a.get("changes").unwrap().to_owned();
+	assert_eq!(
+		changes,
+		surrealdb::sql::value(
+			"[
 		{
 			update: {
 				id: user:amos,
@@ -570,23 +570,23 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 			}
 		}
 	]"
-        )
-            .unwrap()
-    );
-    // UPDATE table
-    let a = array.get(4).unwrap();
-    let Value::Object(a) = a else {
-        unreachable!()
-    };
-    let Value::Number(versionstamp5) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    assert!(versionstamp4 < versionstamp5);
-    let changes = a.get("changes").unwrap().to_owned();
-    assert_eq!(
-        changes,
-        surrealdb::sql::value(
-            "[
+		)
+		.unwrap()
+	);
+	// UPDATE table
+	let a = array.get(4).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp5) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	assert!(versionstamp4 < versionstamp5);
+	let changes = a.get("changes").unwrap().to_owned();
+	assert_eq!(
+		changes,
+		surrealdb::sql::value(
+			"[
 		{
 			update: {
 				id: user:amos,
@@ -600,38 +600,38 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 			}
 		}
 	]"
-        )
-            .unwrap()
-    );
-    // Save timestamp 2
-    let ts2_dt = "2023-08-01T00:00:05Z";
-    let ts2 = DateTime::parse_from_rfc3339(ts2_dt).unwrap();
-    db.tick_at(ts2.timestamp().try_into().unwrap()).await.unwrap();
-    //
-    // Show changes using timestamp 1
-    //
-    let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts1_dt}' LIMIT 10; ");
-    let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
-    let Value::Array(array) = value.clone() else {
-        unreachable!()
-    };
-    assert_eq!(array.len(), 4);
-    // UPDATE user:amos
-    let a = array.get(0).unwrap();
-    let Value::Object(a) = a else {
-        unreachable!()
-    };
-    let Value::Number(versionstamp1b) = a.get("versionstamp").unwrap() else {
-        unreachable!()
-    };
-    assert!(versionstamp2 == versionstamp1b);
-    let changes = a.get("changes").unwrap().to_owned();
-    match FFLAGS.change_feed_live_queries.enabled() {
-        true => {
-            assert_eq!(
-                changes,
-                surrealdb::sql::value(
-                    "[
+		)
+		.unwrap()
+	);
+	// Save timestamp 2
+	let ts2_dt = "2023-08-01T00:00:05Z";
+	let ts2 = DateTime::parse_from_rfc3339(ts2_dt).unwrap();
+	db.tick_at(ts2.timestamp().try_into().unwrap()).await.unwrap();
+	//
+	// Show changes using timestamp 1
+	//
+	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts1_dt}' LIMIT 10; ");
+	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	let Value::Array(array) = value.clone() else {
+		unreachable!()
+	};
+	assert_eq!(array.len(), 4);
+	// UPDATE user:amos
+	let a = array.get(0).unwrap();
+	let Value::Object(a) = a else {
+		unreachable!()
+	};
+	let Value::Number(versionstamp1b) = a.get("versionstamp").unwrap() else {
+		unreachable!()
+	};
+	assert!(versionstamp2 == versionstamp1b);
+	let changes = a.get("changes").unwrap().to_owned();
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
 					{
 						 create: {
 							 id: user:amos,
@@ -639,15 +639,15 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 						 }
 					}
 				]"
-                )
-                    .unwrap()
-            );
-        }
-        false => {
-            assert_eq!(
-                changes,
-                surrealdb::sql::value(
-                    "[
+				)
+				.unwrap()
+			);
+		}
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
 					{
 						 update: {
 							 id: user:amos,
@@ -655,58 +655,67 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 						 }
 					}
 				]"
-                )
-                    .unwrap()
-            );
-        }
-    }
-    // Save timestamp 3
-    let ts3_dt = "2023-08-01T00:00:10Z";
-    let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
-    db.tick_at(ts3.timestamp().try_into().unwrap()).await.unwrap();
-    //
-    // Show changes using timestamp 3
-    //
-    let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts3_dt}' LIMIT 10; ");
-    let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
-    let Value::Array(array) = value.clone() else {
-        unreachable!()
-    };
-    assert_eq!(array.len(), 0);
-    Ok(())
+				)
+				.unwrap()
+			);
+		}
+	}
+	// Save timestamp 3
+	let ts3_dt = "2023-08-01T00:00:10Z";
+	let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
+	db.tick_at(ts3.timestamp().try_into().unwrap()).await.unwrap();
+	//
+	// Show changes using timestamp 3
+	//
+	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts3_dt}' LIMIT 10; ");
+	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
+	let Value::Array(array) = value.clone() else {
+		unreachable!()
+	};
+	assert_eq!(array.len(), 0);
+	Ok(())
 }
 
 #[tokio::test]
 async fn changefeed_with_original() -> Result<(), Error> {
-    if !FFLAGS.change_feed_live_queries.enabled() {
-        return Ok(());
-    }
-    let db = new_ds().await?;
-    let ses = Session::owner().with_ns("test").with_db("test");
-    // Enable change feeds
-    db.execute("DEFINE TABLE user CHANGEFEED 1h INCLUDE ORIGINAL;", &ses, None)
-        .await?
-        .remove(0)
-        .result?;
-    db.execute("CREATE user CONTENT {'id': 'id_one'};", &ses, None).await?.remove(0).result?;
+	if !FFLAGS.change_feed_live_queries.enabled() {
+		return Ok(());
+	}
+	let db = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	// Enable change feeds
+	db.execute("DEFINE TABLE user CHANGEFEED 1h INCLUDE ORIGINAL;", &ses, None)
+		.await?
+		.remove(0)
+		.result?;
+	db.execute("CREATE user CONTENT {'id': 'id_one'};", &ses, None).await?.remove(0).result?;
 
-    // Now validate original values are stored
-    let value: Value =
-        db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
-    let Value::Array(array) = value else {
-        unreachable!()
-    };
-    assert_eq!(array.len(), 2);
+	// Now validate original values are stored
+	let value: Value =
+		db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
+	let Value::Array(array) = value else {
+		unreachable!()
+	};
+	assert_eq!(array.len(), 2);
 
-    assert_eq!(array.get(0).unwrap(), &surrealdb::sql::value(r#"{
+	assert_eq!(
+		array.get(0).unwrap(),
+		&surrealdb::sql::value(
+			r#"{
     "changes": [{
         "define_table": {
             "name": "user",
         },
     }],
     "versionstamp": 65536
-    }"#).unwrap());
-    assert_eq!(array.get(1).unwrap(), &surrealdb::sql::value(r#"
+    }"#
+		)
+		.unwrap()
+	);
+	assert_eq!(
+		array.get(1).unwrap(),
+		&surrealdb::sql::value(
+			r#"
     {
         "changes": [{
             "create": {
@@ -716,15 +725,22 @@ async fn changefeed_with_original() -> Result<(), Error> {
         }],
         "versionstamp": 131072
     }
-    "#).unwrap());
+    "#
+		)
+		.unwrap()
+	);
 
-    db.execute("UPDATE user:id_one SET name = 'Raynor';", &ses, None).await?.remove(0).result?;
-    let array = db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
-    let Value::Array(array) = array else {
-        unreachable!()
-    };
-    assert_eq!(array.len(), 3);
-    assert_eq!(array.get(2).unwrap(), &surrealdb::sql::value(r#"
+	db.execute("UPDATE user:id_one SET name = 'Raynor';", &ses, None).await?.remove(0).result?;
+	let array =
+		db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
+	let Value::Array(array) = array else {
+		unreachable!()
+	};
+	assert_eq!(array.len(), 3);
+	assert_eq!(
+		array.get(2).unwrap(),
+		&surrealdb::sql::value(
+			r#"
     {
         "changes": [{
             "update": {
@@ -736,7 +752,10 @@ async fn changefeed_with_original() -> Result<(), Error> {
             },
         }],
         "versionstamp": 196608,
-    }"#).unwrap());
+    }"#
+		)
+		.unwrap()
+	);
 
-    Ok(())
+	Ok(())
 }
