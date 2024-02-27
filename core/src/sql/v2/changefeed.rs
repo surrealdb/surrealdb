@@ -12,7 +12,6 @@ pub struct ChangeFeed {
 	#[revision(start = 2)]
 	pub store_original: bool,
 }
-
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
