@@ -168,10 +168,10 @@ pub struct Capabilities {
 impl std::fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
-			f,
-			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-			self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
-		)
+            f,
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+        )
 	}
 }
 
@@ -214,6 +214,7 @@ impl Capabilities {
 		self
 	}
 
+	// TODO delete
 	pub fn with_live_query_notifications(mut self, live_query_notifications: bool) -> Self {
 		self.live_query_notifications = live_query_notifications;
 		self

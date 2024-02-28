@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
+use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
@@ -173,6 +174,7 @@ pub async fn init(
 		tick_interval,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
+		engine: None,
 	});
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
