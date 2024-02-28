@@ -2,6 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fflags::FFLAGS;
+use crate::kvs::lq_structs::LqEntry;
 use crate::sql::Uuid;
 use crate::sql::Value;
 use derive::Store;
@@ -41,47 +43,62 @@ impl KillStatement {
 					_ => {
 						return Err(Error::KillStatement {
 							value: self.id.to_string(),
-						})
+						});
 					}
 				},
 				_ => {
 					return Err(Error::KillStatement {
 						value: self.id.to_string(),
-					})
+					});
 				}
 			},
 			_ => {
 				return Err(Error::KillStatement {
 					value: self.id.to_string(),
-				})
+				});
 			}
 		};
 		// Claim transaction
 		let mut run = txn.lock().await;
-		// Fetch the live query key
-		let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
-		// Fetch the live query key if it exists
-		match run.get(key).await? {
-			Some(val) => match std::str::from_utf8(&val) {
-				Ok(tb) => {
-					// Delete the node live query
-					let key =
-						crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
-					run.del(key).await?;
-					// Delete the table live query
-					let key = crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
-					run.del(key).await?;
-				}
-				_ => {
+		if FFLAGS.change_feed_live_queries.enabled() {
+			let Value::Uuid(live_id) = self.id;
+			run.pre_commit_register_live_query(LqEntry {
+				live_id,
+				ns: "".to_string(),
+				db: "".to_string(),
+				stm: Default::default(),
+			});
+		} else {
+			// Fetch the live query key
+			let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
+			// Fetch the live query key if it exists
+			match run.get(key).await? {
+				Some(val) => match std::str::from_utf8(&val) {
+					Ok(tb) => {
+						// Delete the node live query
+						let key = crate::key::node::lq::new(
+							opt.id()?,
+							live_query_id.0,
+							opt.ns(),
+							opt.db(),
+						);
+						run.del(key).await?;
+						// Delete the table live query
+						let key =
+							crate::key::table::lq::new(opt.ns(), opt.db(), tb, live_query_id.0);
+						run.del(key).await?;
+					}
+					_ => {
+						return Err(Error::KillStatement {
+							value: self.id.to_string(),
+						});
+					}
+				},
+				None => {
 					return Err(Error::KillStatement {
 						value: self.id.to_string(),
-					})
+					});
 				}
-			},
-			None => {
-				return Err(Error::KillStatement {
-					value: self.id.to_string(),
-				})
 			}
 		}
 		// Return the query id
