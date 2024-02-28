@@ -55,10 +55,11 @@ impl RemoveDatabaseStatement {
 
 impl Display for RemoveDatabaseStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE DATABASE {}", self.name)?;
+		write!(f, "REMOVE DATABASE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {}", self.name);
 		Ok(())
 	}
 }

@@ -94,10 +94,11 @@ impl RemoveTokenStatement {
 
 impl Display for RemoveTokenStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE TOKEN {} ON {}", self.name, self.base)?;
+		write!(f, "REMOVE TOKEN")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {} ON {}", self.name, self.base);
 		Ok(())
 	}
 }

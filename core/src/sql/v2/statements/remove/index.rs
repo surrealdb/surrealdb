@@ -59,10 +59,11 @@ impl RemoveIndexStatement {
 
 impl Display for RemoveIndexStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE INDEX {} ON {}", self.name, self.what)?;
+		write!(f, "REMOVE INDEX")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {} ON {}", self.name, self.what);
 		Ok(())
 	}
 }

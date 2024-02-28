@@ -58,10 +58,11 @@ impl RemoveFieldStatement {
 
 impl Display for RemoveFieldStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE FIELD {} ON {}", self.name, self.what)?;
+		write!(f, "REMOVE FIELD")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {} ON {}", self.name, self.what);
 		Ok(())
 	}
 }

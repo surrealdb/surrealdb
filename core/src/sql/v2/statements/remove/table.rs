@@ -67,10 +67,11 @@ impl RemoveTableStatement {
 
 impl Display for RemoveTableStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE TABLE {}", self.name)?;
+		write!(f, "REMOVE TABLE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {}", self.name);
 		Ok(())
 	}
 }

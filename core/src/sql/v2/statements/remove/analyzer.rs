@@ -52,10 +52,11 @@ impl RemoveAnalyzerStatement {
 
 impl Display for RemoveAnalyzerStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE ANALYZER {}", self.name)?;
+		write!(f, "REMOVE ANALYZER")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {}", self.name);
 		Ok(())
 	}
 }

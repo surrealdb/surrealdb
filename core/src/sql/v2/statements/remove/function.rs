@@ -53,10 +53,11 @@ impl RemoveFunctionStatement {
 impl Display for RemoveFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE FUNCTION fn::{}", self.name.0)?;
+		write!(f, "REMOVE FUNCTION")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " fn::{}", self.name.0);
 		Ok(())
 	}
 }

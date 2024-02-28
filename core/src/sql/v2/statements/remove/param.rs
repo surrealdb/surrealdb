@@ -52,10 +52,11 @@ impl RemoveParamStatement {
 
 impl Display for RemoveParamStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE PARAM ${}", self.name)?;
+		write!(f, "REMOVE PARAM")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " ${}", self.name);
 		Ok(())
 	}
 }

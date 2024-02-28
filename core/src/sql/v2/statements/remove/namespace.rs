@@ -56,10 +56,11 @@ impl RemoveNamespaceStatement {
 
 impl Display for RemoveNamespaceStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE NAMESPACE {}", self.name)?;
+		write!(f, "REMOVE NAMESPACE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {}", self.name);
 		Ok(())
 	}
 }

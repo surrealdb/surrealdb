@@ -151,7 +151,7 @@ async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_table_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE TABLE foo IF EXISTS;
+		REMOVE TABLE IF EXISTS foo;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -185,7 +185,7 @@ async fn should_error_when_remove_and_analyzer_does_not_exist() -> Result<(), Er
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_analyzer_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE ANALYZER foo IF EXISTS;
+		REMOVE ANALYZER IF EXISTS foo;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -219,7 +219,7 @@ async fn should_error_when_remove_and_database_does_not_exist() -> Result<(), Er
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_database_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE DATABASE foo IF EXISTS;
+		REMOVE DATABASE IF EXISTS foo;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -253,7 +253,7 @@ async fn should_error_when_remove_and_event_does_not_exist() -> Result<(), Error
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_event_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE EVENT foo ON bar IF EXISTS;
+		REMOVE EVENT IF EXISTS foo ON bar;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -287,7 +287,7 @@ async fn should_error_when_remove_and_field_does_not_exist() -> Result<(), Error
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_field_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE FIELD foo ON bar IF EXISTS;
+		REMOVE FIELD IF EXISTS foo ON bar;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -321,7 +321,7 @@ async fn should_error_when_remove_and_function_does_not_exist() -> Result<(), Er
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_function_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE FUNCTION fn::foo IF EXISTS;
+		REMOVE FUNCTION IF EXISTS fn::foo;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -355,7 +355,7 @@ async fn should_error_when_remove_and_index_does_not_exist() -> Result<(), Error
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_index_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE INDEX foo ON bar IF EXISTS;
+		REMOVE INDEX IF EXISTS foo ON bar;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -389,7 +389,7 @@ async fn should_error_when_remove_and_namespace_does_not_exist() -> Result<(), E
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_namespace_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE NAMESPACE foo IF EXISTS;
+		REMOVE NAMESPACE IF EXISTS foo;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -423,7 +423,7 @@ async fn should_error_when_remove_and_param_does_not_exist() -> Result<(), Error
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_param_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE PARAM $foo IF EXISTS;
+		REMOVE PARAM IF EXISTS $foo;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -457,7 +457,7 @@ async fn should_error_when_remove_and_scope_does_not_exist() -> Result<(), Error
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_scope_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE SCOPE foo IF EXISTS;
+		REMOVE SCOPE IF EXISTS foo;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -491,7 +491,7 @@ async fn should_error_when_remove_and_token_does_not_exist() -> Result<(), Error
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_token_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE TOKEN foo ON NAMESPACE IF EXISTS;
+		REMOVE TOKEN IF EXISTS foo ON NAMESPACE;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -525,7 +525,7 @@ async fn should_error_when_remove_and_user_does_not_exist() -> Result<(), Error>
 #[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_user_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE USER foo ON ROOT IF EXISTS;
+		REMOVE USER IF EXISTS foo ON ROOT;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

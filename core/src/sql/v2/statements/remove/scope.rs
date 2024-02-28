@@ -55,10 +55,11 @@ impl RemoveScopeStatement {
 
 impl Display for RemoveScopeStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE SCOPE {}", self.name)?;
+		write!(f, "REMOVE SCOPE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {}", self.name);
 		Ok(())
 	}
 }

@@ -56,10 +56,11 @@ impl RemoveEventStatement {
 
 impl Display for RemoveEventStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)?;
+		write!(f, "REMOVE EVENT")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {} ON {}", self.name, self.what);
 		Ok(())
 	}
 }

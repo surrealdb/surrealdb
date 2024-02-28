@@ -94,10 +94,11 @@ impl RemoveUserStatement {
 
 impl Display for RemoveUserStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE USER {} ON {}", self.name, self.base)?;
+		write!(f, "REMOVE USER")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {} ON {}", self.name, self.base);
 		Ok(())
 	}
 }

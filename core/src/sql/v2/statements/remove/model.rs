@@ -54,10 +54,11 @@ impl RemoveModelStatement {
 impl Display for RemoveModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE MODEL ml::{}<{}>", self.name.0, self.version)?;
+		write!(f, "REMOVE MODEL")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " ml::{}<{}>", self.name.0, self.version);
 		Ok(())
 	}
 }

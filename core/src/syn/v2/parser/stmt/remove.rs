@@ -21,7 +21,6 @@ impl Parser<'_> {
 	pub fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
 		let res = match self.next().kind {
 			t!("NAMESPACE") => {
-				let name = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -29,6 +28,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
 
 				RemoveStatement::Namespace(RemoveNamespaceStatement {
 					name,
@@ -37,7 +37,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("DATABASE") => {
-				let name = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -45,6 +44,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
 
 				RemoveStatement::Database(RemoveDatabaseStatement {
 					name,
@@ -53,11 +53,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("FUNCTION") => {
-				let name = self.parse_custom_function_name()?;
-				let next = self.peek();
-				if self.eat(t!("(")) {
-					self.expect_closing_delimiter(t!(")"), next.span)?;
-				}
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -65,6 +60,11 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.parse_custom_function_name()?;
+				let next = self.peek();
+				if self.eat(t!("(")) {
+					self.expect_closing_delimiter(t!(")"), next.span)?;
+				}
 
 				RemoveStatement::Function(RemoveFunctionStatement {
 					name,
@@ -73,9 +73,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("TOKEN") => {
-				let name = self.next_token_value()?;
-				expected!(self, t!("ON"));
-				let base = self.parse_base(true)?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -83,6 +80,9 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				let base = self.parse_base(true)?;
 
 				RemoveStatement::Token(crate::sql::statements::RemoveTokenStatement {
 					name,
@@ -92,7 +92,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("SCOPE") => {
-				let name = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -100,6 +99,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
 
 				RemoveStatement::Scope(RemoveScopeStatement {
 					name,
@@ -108,7 +108,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("PARAM") => {
-				let name = self.next_token_value::<Param>()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -116,6 +115,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value::<Param>()?;
 
 				RemoveStatement::Param(RemoveParamStatement {
 					name: name.0,
@@ -124,7 +124,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("TABLE") => {
-				let name = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -132,6 +131,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
 
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
@@ -140,10 +140,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("EVENT") => {
-				let name = self.next_token_value()?;
-				expected!(self, t!("ON"));
-				self.eat(t!("TABLE"));
-				let table = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -151,6 +147,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				self.eat(t!("TABLE"));
+				let table = self.next_token_value()?;
 
 				RemoveStatement::Event(RemoveEventStatement {
 					name,
@@ -160,10 +160,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("FIELD") => {
-				let idiom = self.parse_local_idiom()?;
-				expected!(self, t!("ON"));
-				self.eat(t!("TABLE"));
-				let table = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -171,6 +167,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let idiom = self.parse_local_idiom()?;
+				expected!(self, t!("ON"));
+				self.eat(t!("TABLE"));
+				let table = self.next_token_value()?;
 
 				RemoveStatement::Field(RemoveFieldStatement {
 					name: idiom,
@@ -180,10 +180,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("INDEX") => {
-				let name = self.next_token_value()?;
-				expected!(self, t!("ON"));
-				self.eat(t!("TABLE"));
-				let what = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -191,6 +187,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				self.eat(t!("TABLE"));
+				let what = self.next_token_value()?;
 
 				RemoveStatement::Index(RemoveIndexStatement {
 					name,
@@ -200,7 +200,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("ANALYZER") => {
-				let name = self.next_token_value()?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -208,6 +207,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
 
 				RemoveStatement::Analyzer(RemoveAnalyzerStatement {
 					name,
@@ -216,9 +216,6 @@ impl Parser<'_> {
 				})
 			}
 			t!("USER") => {
-				let name = self.next_token_value()?;
-				expected!(self, t!("ON"));
-				let base = self.parse_base(false)?;
 				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -226,6 +223,9 @@ impl Parser<'_> {
 				} else {
 					false
 				};
+				let name = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				let base = self.parse_base(false)?;
 
 				RemoveStatement::User(RemoveUserStatement {
 					name,
