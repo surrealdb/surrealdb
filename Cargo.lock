@@ -3198,6 +3198,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "multimap"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+
+[[package]]
 name = "nanoid"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3504,7 +3510,7 @@ dependencies = [
  "http 0.2.11",
  "opentelemetry",
  "opentelemetry-proto",
- "prost",
+ "prost 0.11.9",
  "thiserror",
  "tokio",
  "tonic 0.8.3",
@@ -3519,7 +3525,7 @@ dependencies = [
  "futures",
  "futures-util",
  "opentelemetry",
- "prost",
+ "prost 0.11.9",
  "tonic 0.8.3",
 ]
 
@@ -3881,6 +3887,10 @@ dependencies = [
  "nix 0.26.4",
  "once_cell",
  "parking_lot",
+ "prost 0.12.3",
+ "prost-build",
+ "prost-derive 0.12.3",
+ "sha2",
  "smallvec",
  "symbolic-demangle",
  "tempfile",
@@ -4009,7 +4019,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b82eaa1d779e9a4bc1c3217db8ffbeabaae1dca241bf70183242128d48681cd"
 dependencies = [
  "bytes",
- "prost-derive",
+ "prost-derive 0.11.9",
+]
+
+[[package]]
+name = "prost"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "146c289cda302b98a28d40c8b3b90498d6e526dd24ac2ecea73e4e491685b94a"
+dependencies = [
+ "bytes",
+ "prost-derive 0.12.3",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
+dependencies = [
+ "bytes",
+ "heck",
+ "itertools 0.10.5",
+ "log",
+ "multimap",
+ "once_cell",
+ "petgraph",
+ "prettyplease",
+ "prost 0.12.3",
+ "prost-types",
+ "regex",
+ "syn 2.0.48",
+ "tempfile",
+ "which",
 ]
 
 [[package]]
@@ -4023,6 +4065,28 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efb6c9a1dd1def8e2124d17e83a20af56f1570d6c2d2bd9e266ccb768df3840e"
+dependencies = [
+ "anyhow",
+ "itertools 0.10.5",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e081b29f63d83a4bc75cfc9f3fe424f9156cf92d8a4f0c9407cce9a1b67327cf"
+dependencies = [
+ "prost 0.12.3",
 ]
 
 [[package]]
@@ -5319,6 +5383,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-proto",
  "pin-project-lite",
+ "pprof",
  "rand 0.8.5",
  "rcgen",
  "reqwest",
@@ -5540,7 +5605,7 @@ dependencies = [
  "log",
  "pin-project",
  "prometheus",
- "prost",
+ "prost 0.11.9",
  "rand 0.8.5",
  "regex",
  "semver",
@@ -6036,8 +6101,8 @@ dependencies = [
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
- "prost",
- "prost-derive",
+ "prost 0.11.9",
+ "prost-derive 0.11.9",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -6068,7 +6133,7 @@ dependencies = [
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
- "prost",
+ "prost 0.11.9",
  "rustls-pemfile",
  "tokio",
  "tokio-rustls",
