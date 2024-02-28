@@ -1,9 +1,12 @@
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
 mod common;
 
 mod database_upgrade {
-	use crate::common::docker::DockerContainer;
-	use crate::common::expected::Expected;
-	use crate::common::rest_client::RestClient;
+	use super::common::docker::DockerContainer;
+	use super::common::expected::Expected;
+	use super::common::rest_client::RestClient;
 	use serde_json::Value as JsonValue;
 	use std::time::Duration;
 	use surrealdb::engine::any::{connect, Any};
@@ -25,7 +28,7 @@ mod database_upgrade {
 	// We may also change the log level:
 	// export RUST_LOG=info
 	// To run this test:
-	// cargo test --package surreal --test upgrade upgrade::upgrade_test
+	// cargo test --package surreal --test database_upgrade database_upgrade::upgrade_test
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	async fn upgrade_test() {
