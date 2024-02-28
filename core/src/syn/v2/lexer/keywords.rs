@@ -1,4 +1,5 @@
 use crate::{
+	sql::change_feed_include::ChangeFeedInclude,
 	sql::{language::Language, Algorithm},
 	syn::v2::token::{DistanceKind, Keyword, TokenKind},
 };
@@ -74,6 +75,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("GROUP") => TokenKind::Keyword(Keyword::Group),
 	UniCase::ascii("HIGHLIGHTS") => TokenKind::Keyword(Keyword::Highlights),
 	UniCase::ascii("IGNORE") => TokenKind::Keyword(Keyword::Ignore),
+	UniCase::ascii("INCLUDE") => TokenKind::Keyword(Keyword::Include),
 	UniCase::ascii("INDEX") => TokenKind::Keyword(Keyword::Index),
 	UniCase::ascii("INFO") => TokenKind::Keyword(Keyword::Info),
 	UniCase::ascii("INSERT") => TokenKind::Keyword(Keyword::Insert),
@@ -284,6 +286,9 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MANHATTAN") => TokenKind::Distance(DistanceKind::Manhattan),
 	UniCase::ascii("HAMMING") => TokenKind::Distance(DistanceKind::Hamming),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
+
+	// Change Feed keywords
+	UniCase::ascii("ORIGINAL") => TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original),
 };
 
 const fn jwks_token_kind() -> TokenKind {
