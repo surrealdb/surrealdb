@@ -1,6 +1,6 @@
 mod common;
 
-mod upgrade {
+mod database_upgrade {
 	use crate::common::docker::DockerContainer;
 	use crate::common::expected::Expected;
 	use crate::common::rest_client::RestClient;
