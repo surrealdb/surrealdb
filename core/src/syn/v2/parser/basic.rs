@@ -140,7 +140,32 @@ impl TokenValue for f32 {
 				})?;
 				Ok(number)
 			}
-			x => unexpected!(parser, x, "an floating point"),
+			x => unexpected!(parser, x, "a floating point number"),
+		}
+	}
+}
+
+impl TokenValue for f64 {
+	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
+		match token.kind {
+			TokenKind::Number(NumberKind::NaN) => Ok(f64::NAN),
+			TokenKind::Number(
+				NumberKind::Integer
+				| NumberKind::Float
+				| NumberKind::Mantissa
+				| NumberKind::MantissaExponent,
+			) => {
+				let number = parser.lexer.string.take().unwrap().parse().map_err(|e| {
+					ParseError::new(
+						ParseErrorKind::InvalidFloat {
+							error: e,
+						},
+						token.span,
+					)
+				})?;
+				Ok(number)
+			}
+			x => unexpected!(parser, x, "a floating point number"),
 		}
 	}
 }
@@ -281,6 +306,19 @@ impl Parser<'_> {
 			self.pop_peek();
 		}
 		res
+	}
+
+	pub fn parse_signed_float(&mut self) -> ParseResult<f64> {
+		let neg = self.eat(t!("-"));
+		if !neg {
+			self.eat(t!("+"));
+		}
+		let res: f64 = self.next_token_value()?;
+		if neg {
+			Ok(-res)
+		} else {
+			Ok(res)
+		}
 	}
 
 	/// Parse a token value from the given token.

@@ -155,6 +155,10 @@ criteria = "safe-to-run"
 version = "1.9.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.async-channel]]
+version = "2.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.async-compression]]
 version = "0.4.6"
 criteria = "safe-to-deploy"
@@ -435,17 +439,25 @@ criteria = "safe-to-run"
 version = "1.1.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.crossbeam]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.crossbeam-channel]]
 version = "0.5.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-deque]]
 version = "0.8.5"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-epoch]]
 version = "0.9.18"
-criteria = "safe-to-run"
+criteria = "safe-to-deploy"
+
+[[exemptions.crossbeam-queue]]
+version = "0.3.11"
+criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-utils]]
 version = "0.8.19"
@@ -903,6 +915,10 @@ criteria = "safe-to-deploy"
 version = "0.4.11"
 criteria = "safe-to-deploy"
 
+[[exemptions.lru]]
+version = "0.12.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.lz4-sys]]
 version = "1.9.4"
 criteria = "safe-to-deploy"
@@ -1002,18 +1018,6 @@ criteria = "safe-to-deploy"
 [[exemptions.num-format]]
 version = "0.4.4"
 criteria = "safe-to-run"
-
-[[exemptions.num-integer]]
-version = "0.1.46"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-iter]]
-version = "0.1.44"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-traits]]
-version = "0.2.18"
-criteria = "safe-to-deploy"
 
 [[exemptions.num_cpus]]
 version = "1.16.0"
@@ -1368,19 +1372,19 @@ version = "0.21.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
-version = "0.4.3"
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-core]]
-version = "0.4.3"
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-macro]]
-version = "0.4.3"
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-sys]]
-version = "0.4.3"
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rsa]]

@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
@@ -11,18 +10,20 @@ use futures::{lock::Mutex, Future};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
+
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 use crate::cf;
-use crate::cf::ChangeSet;
+use crate::cf::{ChangeSet, TableMutation};
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Variables,
+	Statement, Variables, Workable,
 };
+use crate::doc::Document;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -31,9 +32,11 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
+use crate::kvs::lq_structs::{
+	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
+};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::statements::show::ShowSince;
-use crate::sql::statements::LiveStatement;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
@@ -48,76 +51,6 @@ const LQ_CHANNEL_SIZE: usize = 100;
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 // In the future we will have proper pagination
 const TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION: u32 = 1000;
-
-/// Used for cluster logic to move LQ data to LQ cleanup code
-/// Not a stored struct; Used only in this module
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct LqValue {
-	pub nd: Uuid,
-	pub ns: String,
-	pub db: String,
-	pub tb: String,
-	pub lq: Uuid,
-}
-
-#[derive(Debug)]
-pub(crate) enum LqType {
-	Nd(LqValue),
-	Tb(LqValue),
-}
-
-impl LqType {
-	fn get_inner(&self) -> &LqValue {
-		match self {
-			LqType::Nd(lq) => lq,
-			LqType::Tb(lq) => lq,
-		}
-	}
-}
-
-impl PartialEq for LqType {
-	fn eq(&self, other: &Self) -> bool {
-		self.get_inner().lq == other.get_inner().lq
-	}
-}
-
-impl Eq for LqType {}
-
-impl PartialOrd for LqType {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Option::Some(self.get_inner().lq.cmp(&other.get_inner().lq))
-	}
-}
-
-impl Ord for LqType {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.get_inner().lq.cmp(&other.get_inner().lq)
-	}
-}
-
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
-struct LqSelector {
-	ns: String,
-	db: String,
-	tb: String,
-}
-
-/// This is an internal-only helper struct for organising the keys of how live queries are accessed
-/// Because we want immutable keys, we cannot put mutable things in such as ts and vs
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone)]
-struct LqIndexKey {
-	selector: LqSelector,
-	lq: Uuid,
-}
-
-/// Internal only struct
-/// This can be assumed to have a mutable reference
-#[derive(Eq, PartialEq, Clone)]
-struct LqIndexValue {
-	query: LiveStatement,
-	vs: Versionstamp,
-	ts: Timestamp,
-}
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -144,10 +77,12 @@ pub struct Datastore {
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
-	// Map of Live Query ID to Live Query query
-	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, LqIndexValue>>>,
-	// Set of tracked change feeds
-	local_live_query_cfs: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
+	// Map of Live Query identifier (ns+db+tb) for change feed tracking
+	// the mapping is to a list of affected live queries
+	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, Vec<LqIndexValue>>>>,
+	// Set of tracked change feeds with associated watermarks
+	// This is updated with new/removed live queries and improves cf request performance
+	cf_watermarks: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -172,6 +107,8 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FoundationDB(super::fdb::Datastore),
+	#[cfg(feature = "kv-surrealkv")]
+	SurrealKV(super::surrealkv::Datastore),
 }
 
 impl fmt::Display for Datastore {
@@ -190,6 +127,8 @@ impl fmt::Display for Datastore {
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
 			Inner::FoundationDB(_) => write!(f, "fdb"),
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -262,7 +201,8 @@ impl Datastore {
 			feature = "kv-speedb",
 			feature = "kv-indxdb",
 			feature = "kv-tikv",
-			feature = "kv-fdb"
+			feature = "kv-fdb",
+			feature = "kv-surrealkv"
 		)))]
 		let _ = (clock_override, default_clock);
 
@@ -377,6 +317,22 @@ impl Datastore {
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
+			// Parse and initiate a SurrealKV database
+			s if s.starts_with("surrealkv:") => {
+				#[cfg(feature = "kv-surrealkv")]
+				{
+					info!("Starting kvs store at {}", path);
+					let s = s.trim_start_matches("surrealkv://");
+					let s = s.trim_start_matches("surrealkv:");
+					let v = super::surrealkv::Datastore::new(s).await.map(Inner::SurrealKV);
+					info!("Started to kvs store at {}", path);
+					let default_clock = Arc::new(SizedClock::System(SystemClock::new()));
+					let clock = clock_override.unwrap_or(default_clock);
+					Ok((v, clock))
+				}
+				#[cfg(not(feature = "kv-surrealkv"))]
+                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
 			// The datastore path is not valid
 			_ => {
 				// use clock_override and default_clock to remove warning when no kv is enabled.
@@ -401,7 +357,7 @@ impl Datastore {
 			clock,
 			index_stores: IndexStores::default(),
 			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
-			local_live_query_cfs: Arc::new(RwLock::new(BTreeMap::new())),
+			cf_watermarks: Arc::new(RwLock::new(BTreeMap::new())),
 		})
 	}
 
@@ -732,31 +688,31 @@ impl Datastore {
 			.await?;
 		}
 		// Scan node live queries for every node
-		let mut nd_lq_set: BTreeSet<LqType> = BTreeSet::new();
+		let mut nd_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
 		for cl in &cluster {
 			let nds = tx.scan_ndlq(&uuid::Uuid::parse_str(&cl.name).map_err(|e| {
                 Error::Unimplemented(format!("cluster id was not uuid when parsing to aggregate cluster live queries: {:?}", e))
             })?, NON_PAGED_BATCH_SIZE).await?;
-			nd_lq_set.extend(nds.into_iter().map(LqType::Nd));
+			nd_lq_set.extend(nds.into_iter().map(UnreachableLqType::Nd));
 		}
 		trace!("Found {} node live queries", nd_lq_set.len());
 		// Scan tables for all live queries
 		// let mut tb_lqs: Vec<LqValue> = vec![];
-		let mut tb_lq_set: BTreeSet<LqType> = BTreeSet::new();
+		let mut tb_lq_set: BTreeSet<UnreachableLqType> = BTreeSet::new();
 		for ndlq in &nd_lq_set {
 			let lq = ndlq.get_inner();
 			let tbs = tx.scan_tblq(&lq.ns, &lq.db, &lq.tb, NON_PAGED_BATCH_SIZE).await?;
-			tb_lq_set.extend(tbs.into_iter().map(LqType::Tb));
+			tb_lq_set.extend(tbs.into_iter().map(UnreachableLqType::Tb));
 		}
 		trace!("Found {} table live queries", tb_lq_set.len());
 		// Find and delete missing
 		for missing in nd_lq_set.symmetric_difference(&tb_lq_set) {
 			match missing {
-				LqType::Nd(ndlq) => {
+				UnreachableLqType::Nd(ndlq) => {
 					warn!("Deleting ndlq {:?}", &ndlq);
 					tx.del_ndlq(ndlq.nd.0, ndlq.lq.0, &ndlq.ns, &ndlq.db).await?;
 				}
-				LqType::Tb(tblq) => {
+				UnreachableLqType::Tb(tblq) => {
 					warn!("Deleting tblq {:?}", &tblq);
 					tx.del_tblq(&tblq.ns, &tblq.db, &tblq.tb, tblq.lq.0).await?;
 				}
@@ -888,26 +844,28 @@ impl Datastore {
 		}
 	}
 
-	/// This is a future that is from whatever is running the datastore as a SurrealDB instance (api WASM and native)
-	/// It's responsibility is to catch up all live queries based on changes to the relevant change feeds,
-	/// and send notifications after assessing authorisation. Live queries then have their watermarks updated.
-	pub async fn process_lq_notifications(&self) -> Result<(), Error> {
+	/// Poll change feeds for live query notifications
+	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
 		// Runtime feature gate, as it is not production-ready
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			return Ok(());
 		}
 		// Return if there are no live queries
 		if self.notification_channel.is_none() {
+			trace!("Channels is none, short-circuiting");
 			return Ok(());
 		}
 		if self.local_live_queries.read().await.is_empty() {
+			trace!("No live queries, short-circuiting");
 			return Ok(());
 		}
 
-		// Find live queries that need to catch up
+		// Change map includes a mapping of selector to changesets, ordered by versionstamp
 		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
 		let mut tx = self.transaction(Read, Optimistic).await?;
-		for (selector, vs) in self.local_live_query_cfs.read().await.iter() {
+		let mut tracked_cfs = self.cf_watermarks.write().await;
+		let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
+		for (selector, vs) in tracked_cfs.iter() {
 			// Read the change feed for the selector
 			let res = cf::read(
 				&mut tx,
@@ -921,13 +879,32 @@ impl Datastore {
 			)
 			.await?;
 			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
+			if res.is_empty() {
+				trace!(
+					"There were no changes in the change feed for {:?} from versionstamp {:?}",
+					selector,
+					vs
+				)
+			}
 			if let Some(change_set) = res.last() {
 				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
+					trace!("Adding a change set for lq notification processing");
+					// Update the cf watermark so we can progress scans
+					// If the notifications fail from here-on, they are lost
+					// this is a separate vec that we later insert to because we are iterating immutably
+					// We shouldn't use a read lock because of consistency between watermark scans
+					tracked_cfs_updates.push((selector.clone(), change_set.0));
+					// This does not guarantee a notification, as a changeset an include many tables and many changes
 					change_map.insert(selector.clone(), res);
 				}
 			}
 		}
 		tx.cancel().await?;
+
+		// Now we update since we are no longer iterating immutably
+		for (selector, vs) in tracked_cfs_updates {
+			tracked_cfs.insert(selector, vs);
+		}
 
 		for (selector, change_sets) in change_map {
 			// find matching live queries
@@ -936,31 +913,140 @@ impl Datastore {
 				lq_lock
 					.iter()
 					.filter(|(k, _)| k.selector == selector)
-					.map(|a| {
-						let (b, c) = (a.0.clone(), a.1.clone());
-						(b, c)
+					.flat_map(|(lq_index, lq_values)| {
+						lq_values.iter().cloned().map(|x| (lq_index.clone(), x))
 					})
 					.to_owned()
 					.collect()
 			};
 
+			// Find relevant changes
+			let tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
 			for change_set in change_sets {
+				// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
 				for (lq_key, lq_value) in lq_pairs.iter() {
+					trace!(
+						"Processing live query for notification key={:?} and value={:?}",
+						lq_key,
+						lq_value
+					);
 					let change_vs = change_set.0;
 					let database_mutation = &change_set.1;
-					for table_mutation in database_mutation.0.iter() {
-						if table_mutation.0 == lq_key.selector.tb {
-							// TODO(phughk): process live query logic
-							// TODO(SUR-291): enforce security
-							self.local_live_queries.write().await.insert(
-								(*lq_key).clone(),
-								LqIndexValue {
-									vs: change_vs,
-									..(*lq_value).clone()
-								},
-							);
+					for table_mutations in database_mutation.0.iter() {
+						if table_mutations.0 == lq_key.selector.tb {
+							// Create a doc of the table value
+							// Run the 'lives' logic on the doc, while providing live queries instead of reading from storage
+							// This will generate and send notifications
+							for mutation in table_mutations.1.iter() {
+								if let Some(doc) = Self::construct_document(mutation) {
+									// We know we are only processing a single LQ at a time, so we can limit notifications to 1
+									let notification_capacity = 1;
+									// We track notifications as a separate channel in case we want to process
+									// for the current state we only forward
+									let (sender, receiver) =
+										channel::bounded(notification_capacity);
+									doc.check_lqs_and_send_notifications(
+										opt,
+										&Statement::Live(&lq_value.stm),
+										&tx,
+										[&lq_value.stm].as_slice(),
+										&sender,
+									)
+									.await
+									.map_err(|e| {
+										Error::Internal(format!(
+											"Error checking lqs for notifications: {:?}",
+											e
+										))
+									})?;
+
+									// Send the notifications to driver or api
+									// TODO: evaluate if we want channel directly instead of proxy
+									while let Ok(notification) = receiver.try_recv() {
+										trace!("Sending notification to client");
+										self.notification_channel
+											.as_ref()
+											.unwrap()
+											.0
+											.send(notification)
+											.await
+											.unwrap();
+									}
+									trace!("Ended notification sending")
+								}
+
+								// Update watermarks
+								trace!(
+									"Updating watermark to {:?} for index key {:?}",
+									change_vs,
+									lq_key
+								);
+
+								// For each live query we have processed we update the watermarks
+								self.local_live_queries.write().await.insert(
+									(*lq_key).clone(),
+									vec![LqIndexValue {
+										vs: change_vs,
+										..lq_value.clone()
+									}],
+								);
+
+								// We also update the tracked_cfs with a minimum watermark
+							}
 						}
 					}
+				}
+			}
+		}
+		Ok(())
+	}
+
+	/// Construct a document from a Change Feed mutation
+	/// This is required to perform document operations such as live query notifications
+	fn construct_document(mutation: &TableMutation) -> Option<Document> {
+		match mutation {
+			TableMutation::Set(a, b) => {
+				let doc = Document::new(None, Some(a), None, b, Workable::Normal);
+				Some(doc)
+			}
+			TableMutation::Del(a) => {
+				let doc = Document::new(None, Some(a), None, &Value::None, Workable::Normal);
+				Some(doc)
+			}
+			TableMutation::Def(_) => None,
+			TableMutation::SetPrevious(id, _old, new) => {
+				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
+				// TODO set previous value
+				Some(doc)
+			}
+		}
+	}
+
+	/// Add live queries to track on the datastore
+	/// These get polled by the change feed tick
+	pub(crate) async fn track_live_queries(&self, lqs: &Vec<TrackedResult>) -> Result<(), Error> {
+		// Lock the local live queries
+		let mut lq_map = self.local_live_queries.write().await;
+		let mut cf_watermarks = self.cf_watermarks.write().await;
+		for lq in lqs {
+			match lq {
+				TrackedResult::LiveQuery(lq) => {
+					let lq_index_key: LqIndexKey = lq.as_key();
+					let m = lq_map.get_mut(&lq_index_key);
+					match m {
+						Some(lq_index_value) => lq_index_value.push(lq.as_value()),
+						None => {
+							let lq_vec = vec![lq.as_value()];
+							lq_map.insert(lq_index_key.clone(), lq_vec);
+						}
+					}
+					let selector = lq_index_key.selector;
+					// TODO(phughk): - read watermark for catchup
+					// We insert the current watermark.
+					cf_watermarks.entry(selector).or_insert_with(Versionstamp::default);
+				}
+				TrackedResult::KillQuery(_lq) => {
+					unimplemented!("Cannot kill queries yet")
 				}
 			}
 		}
@@ -1103,9 +1189,16 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				super::tx::Inner::FoundationDB(tx)
 			}
+			#[cfg(feature = "kv-surrealkv")]
+			Inner::SurrealKV(v) => {
+				let tx = v.transaction(write, lock).await?;
+				super::tx::Inner::SurrealKV(tx)
+			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
+
+		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
 
 		#[allow(unreachable_code)]
 		Ok(Transaction {
@@ -1114,6 +1207,7 @@ impl Datastore {
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
+			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
 		})
 	}
 
@@ -1206,7 +1300,15 @@ impl Datastore {
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
 		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		let res = exe.execute(ctx, opt, ast).await;
+		match res {
+			Ok((responses, lives)) => {
+				// Register live queries
+				self.track_live_queries(&lives).await?;
+				Ok(responses)
+			}
+			Err(e) => Err(e),
+		}
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed

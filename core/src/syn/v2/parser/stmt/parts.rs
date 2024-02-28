@@ -2,15 +2,17 @@
 
 use crate::{
 	sql::{
-		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Group,
-		Groups, Ident, Operator, Output, Permission, Permissions, Tables, Timeout, View,
+		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Field,
+		Fields, Group, Groups, Ident, Idiom, Output, Permission, Permissions, Tables, Timeout,
+		Value, View,
 	},
 	syn::v2::{
 		parser::{
+			error::MissingKind,
 			mac::{expected, unexpected},
-			ParseResult, Parser,
+			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, DistanceKind, TokenKind},
+		token::{t, DistanceKind, Span, TokenKind},
 	},
 };
 
@@ -24,13 +26,7 @@ impl Parser<'_> {
 				let mut set_list = Vec::new();
 				loop {
 					let idiom = self.parse_plain_idiom()?;
-					let operator = match self.next().kind {
-						t!("=") => Operator::Equal,
-						t!("+=") => Operator::Inc,
-						t!("-=") => Operator::Dec,
-						t!("+?=") => Operator::Ext,
-						x => unexpected!(self, x, "a assign operator"),
-					};
+					let operator = self.parse_assigner()?;
 					let value = self.parse_value()?;
 					set_list.push((idiom, operator, value));
 					if !self.eat(t!(",")) {
@@ -121,34 +117,94 @@ impl Parser<'_> {
 		Ok(Some(Cond(v)))
 	}
 
-	pub fn try_parse_group(&mut self) -> ParseResult<Option<Groups>> {
+	pub fn check_idiom<'a>(
+		kind: MissingKind,
+		fields: &'a Fields,
+		field_span: Span,
+		idiom: &Idiom,
+		idiom_span: Span,
+	) -> ParseResult<&'a Field> {
+		let mut found = None;
+		for field in fields.iter() {
+			let Field::Single {
+				expr,
+				alias,
+			} = field
+			else {
+				unreachable!()
+			};
+
+			if let Some(alias) = alias {
+				if idiom == alias {
+					found = Some(field);
+					break;
+				}
+			}
+
+			match expr {
+				Value::Idiom(x) => {
+					if idiom == x {
+						found = Some(field);
+						break;
+					}
+				}
+				v => {
+					if *idiom == v.to_idiom() {
+						found = Some(field);
+						break;
+					}
+				}
+			}
+		}
+
+		found.ok_or_else(|| {
+			ParseError::new(
+				ParseErrorKind::MissingField {
+					field: field_span,
+					idiom: idiom.to_string(),
+					kind,
+				},
+				idiom_span,
+			)
+		})
+	}
+
+	pub fn try_parse_group(
+		&mut self,
+		fields: &Fields,
+		fields_span: Span,
+	) -> ParseResult<Option<Groups>> {
 		if !self.eat(t!("GROUP")) {
 			return Ok(None);
 		}
 
-		let res = match self.peek_kind() {
-			t!("ALL") => {
-				self.pop_peek();
-				Groups(Vec::new())
-			}
-			t!("BY") => {
-				self.pop_peek();
-				let mut groups = Groups(vec![Group(self.parse_basic_idiom()?)]);
-				while self.eat(t!(",")) {
-					groups.0.push(Group(self.parse_basic_idiom()?));
-				}
-				groups
-			}
-			_ => {
-				let mut groups = Groups(vec![Group(self.parse_basic_idiom()?)]);
-				while self.eat(t!(",")) {
-					groups.0.push(Group(self.parse_basic_idiom()?));
-				}
-				groups
-			}
-		};
+		if self.eat(t!("ALL")) {
+			return Ok(Some(Groups(Vec::new())));
+		}
 
-		Ok(Some(res))
+		self.eat(t!("BY"));
+
+		let has_all = fields.contains(&Field::All);
+
+		let before = self.peek().span;
+		let group = self.parse_basic_idiom()?;
+		let group_span = before.covers(self.last_span());
+		if !has_all {
+			Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
+		}
+
+		let mut groups = Groups(vec![Group(group)]);
+		while self.eat(t!(",")) {
+			let before = self.peek().span;
+			let group = self.parse_basic_idiom()?;
+			let group_span = before.covers(self.last_span());
+			if !has_all {
+				Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
+			}
+			groups.0.push(Group(group));
+		}
+
+		Ok(Some(groups))
 	}
 
 	/// Parse a permissions production
@@ -287,7 +343,9 @@ impl Parser<'_> {
 	/// parens. Expects the next keyword to be `SELECT`.
 	pub fn parse_view(&mut self) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
+		let before_fields = self.peek().span;
 		let fields = self.parse_fields()?;
+		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
 		let mut from = vec![self.next_token_value()?];
 		while self.eat(t!(",")) {
@@ -295,7 +353,7 @@ impl Parser<'_> {
 		}
 
 		let cond = self.try_parse_condition()?;
-		let group = self.try_parse_group()?;
+		let group = self.try_parse_group(&fields, fields_span)?;
 
 		Ok(View {
 			expr: fields,

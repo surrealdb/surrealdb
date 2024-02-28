@@ -55,9 +55,11 @@ impl<'a> Lexer<'a> {
 			// When finished parsing the identifier, try to match it to an keyword.
 			// If there is one, return it as the keyword. Original identifier can be reconstructed
 			// from the token.
-			if let Some(x) = KEYWORDS.get(&UniCase::ascii(&self.scratch)).copied().flatten() {
-				self.scratch.clear();
-				return self.finish_token(x);
+			if let Some(x) = KEYWORDS.get(&UniCase::ascii(&self.scratch)).copied() {
+				if x != TokenKind::Identifier {
+					self.scratch.clear();
+					return self.finish_token(x);
+				}
 			}
 
 			if self.scratch == "NaN" {
