@@ -140,5 +140,8 @@ async fn check_upgrade() {
 			warn!("A new version of SurrealDB is available: {}", new_version);
 			warn!("You can upgrade using the {} command", "surreal upgrade");
 		}
+	} else {
+		// Request failed, check against date
+		// TODO: We don't have an "expiry" set per-version, so this is a todo
 	}
 }
