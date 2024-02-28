@@ -57,7 +57,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", self.name.0);
+		write!(f, " fn::{}", self.name.0)?;
 		Ok(())
 	}
 }

@@ -98,7 +98,7 @@ impl Display for RemoveUserStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.base);
+		write!(f, " {} ON {}", self.name, self.base)?;
 		Ok(())
 	}
 }

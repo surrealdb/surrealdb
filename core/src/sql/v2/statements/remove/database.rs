@@ -59,7 +59,7 @@ impl Display for RemoveDatabaseStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name);
+		write!(f, " {}", self.name)?;
 		Ok(())
 	}
 }

@@ -63,7 +63,7 @@ impl Display for RemoveIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what);
+		write!(f, " {} ON {}", self.name, self.what)?;
 		Ok(())
 	}
 }
