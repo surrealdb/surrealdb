@@ -112,7 +112,7 @@ impl<'a> Document<'a> {
 	}
 
 	/// Get the table for this document, with option to initialise as relation or not if does't exist
-	pub async fn tb_with_rel(
+	pub async fn tb(
 		&self,
 		opt: &Options,
 		txn: &Transaction,
@@ -151,21 +151,6 @@ impl<'a> Document<'a> {
 			// The table exists
 			Ok(tb) => Ok(tb),
 		}
-	}
-
-	/// Get the table for this document, or initalise as non-relation table
-	pub async fn tb(
-		&self,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Arc<DefineTableStatement>, Error> {
-		self.tb_with_rel(
-			opt,
-			txn,
-			#[cfg(feature = "sql2")]
-			TableType::Normal,
-		)
-		.await
 	}
 
 	/// Get the foreign tables for this document

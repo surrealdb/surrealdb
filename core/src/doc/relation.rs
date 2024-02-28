@@ -15,8 +15,7 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// TODO: Implicit table definition doesn't define in/out fields
-		let tb = self.tb_with_rel(opt, txn).await?;
+		let tb = self.tb(opt, txn).await?;
 
 		let rid = self.id.as_ref().unwrap();
 		match stm {
