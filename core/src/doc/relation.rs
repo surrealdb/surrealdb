@@ -5,7 +5,6 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::TableType;
 
 impl<'a> Document<'a> {
 	pub async fn relation(
