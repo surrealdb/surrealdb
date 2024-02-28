@@ -15,6 +15,7 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -93,8 +94,11 @@ impl DefineTableStatement {
 			let opt = &opt.new_with_events(false);
 			// Don't process index queries
 			let opt = &opt.new_with_indexes(false);
+			// Don't process index queries
+			let opt = &opt.clone().with_limited_fts(vec![dt.name.to_string()]);
 			// Process each foreign table
 			for v in view.what.0.iter() {
+				println!("{}", v);
 				// Process the view data
 				let stm = UpdateStatement {
 					what: Values(vec![Value::Table(v.clone())]),
@@ -102,6 +106,12 @@ impl DefineTableStatement {
 				};
 				stm.compute(ctx, opt, txn, doc).await?;
 			}
+			// let stm = UpdateStatement {
+			// 	what: Values(vec![Value::Table(dt.name.into())]),
+			// 	data: Some(dt.data(ctx, opt, txn, Action::Update, &tb.expr).await?),
+			// 	..UpdateStatement::default()
+			// };
+			// stm.compute(ctx, opt, txn, doc).await?;
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
 		}

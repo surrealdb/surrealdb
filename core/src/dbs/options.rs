@@ -52,6 +52,8 @@ pub struct Options {
 	pub sender: Option<Sender<Notification>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
+	/// Which foreign tables should be updates
+	pub limit_to_fts: Option<Vec<String>>,
 }
 
 impl Default for Options {
@@ -82,6 +84,7 @@ impl Options {
 			sender: None,
 			auth: Arc::new(Auth::default()),
 			capabilities: Arc::new(Capabilities::default()),
+			limit_to_fts: None,
 		}
 	}
 
@@ -228,6 +231,12 @@ impl Options {
 		self
 	}
 
+	/// Create a new Options object with the given Capabilities
+	pub fn with_limited_fts(mut self, fts: Vec<String>) -> Self {
+		self.limit_to_fts = Some(fts);
+		self
+	}
+
 	// --------------------------------------------------
 
 	/// Create a new Options object for a subquery
@@ -238,6 +247,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			perms,
 			..*self
 		}
@@ -251,6 +261,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			force,
 			..*self
 		}
@@ -264,6 +275,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			strict,
 			..*self
 		}
@@ -277,6 +289,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			fields,
 			..*self
 		}
@@ -290,6 +303,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			events,
 			..*self
 		}
@@ -303,6 +317,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			tables,
 			..*self
 		}
@@ -316,6 +331,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			indexes,
 			..*self
 		}
@@ -329,6 +345,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			futures,
 			..*self
 		}
@@ -342,6 +359,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			projections,
 			..*self
 		}
@@ -355,6 +373,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			fields: !import,
 			events: !import,
 			tables: !import,
@@ -369,6 +388,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			limit_to_fts: self.limit_to_fts.clone(),
 			sender: Some(sender),
 			..*self
 		}
@@ -397,6 +417,7 @@ impl Options {
 				capabilities: self.capabilities.clone(),
 				ns: self.ns.clone(),
 				db: self.db.clone(),
+				limit_to_fts: self.limit_to_fts.clone(),
 				dive,
 				..*self
 			})

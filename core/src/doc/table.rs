@@ -19,6 +19,7 @@ use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use futures::future::try_join_all;
+use std::backtrace::Backtrace;
 
 type Ops = Vec<(Idiom, Operator, Value)>;
 
@@ -59,6 +60,11 @@ impl<'a> Document<'a> {
 		};
 		// Loop through all foreign table statements
 		for ft in self.ft(opt, txn).await?.iter() {
+			if let Some(fts) = opt.limit_to_fts.clone() {
+				if !fts.contains(&ft.name.to_string()) {
+					continue;
+				}
+			}
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
 			// Check if there is a GROUP BY clause
@@ -320,6 +326,8 @@ impl<'a> Document<'a> {
 	}
 	/// Increment or decrement the field in the foreign table
 	fn chg(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
+		println!("key {} act {:?} val {}", key, act, val);
+		// println!("Custom backtrace: {}", Backtrace::force_capture());
 		ops.push((
 			key,
 			match act {

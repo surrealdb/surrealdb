@@ -1,6 +1,8 @@
 use crate::kvs::clock::SizedClock;
 use std::sync::Arc;
 
+mod ft;
+
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
 	#[allow(dead_code)]
