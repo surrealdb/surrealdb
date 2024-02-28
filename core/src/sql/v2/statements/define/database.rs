@@ -72,15 +72,16 @@ impl DefineDatabaseStatement {
 
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE {}", self.name)?;
+		write!(f, "DEFINE DATABASE")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
-		}
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
 		}
 		Ok(())
 	}

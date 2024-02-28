@@ -2144,8 +2144,8 @@ async fn redefining_existing_analyzer_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_analyzer_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE ANALYZER example TOKENIZERS blank IF NOT EXISTS;
-		DEFINE ANALYZER example TOKENIZERS blank IF NOT EXISTS;
+		DEFINE ANALYZER IF NOT EXISTS example TOKENIZERS blank;
+		DEFINE ANALYZER IF NOT EXISTS example TOKENIZERS blank;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2186,8 +2186,8 @@ async fn redefining_existing_database_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_database_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE DATABASE example IF NOT EXISTS;
-		DEFINE DATABASE example IF NOT EXISTS;
+		DEFINE DATABASE IF NOT EXISTS example;
+		DEFINE DATABASE IF NOT EXISTS example;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2228,8 +2228,8 @@ async fn redefining_existing_event_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_event_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE EVENT example ON example THEN {} IF NOT EXISTS;
-		DEFINE EVENT example ON example THEN {} IF NOT EXISTS;
+		DEFINE EVENT IF NOT EXISTS example ON example THEN {};
+		DEFINE EVENT IF NOT EXISTS example ON example THEN {};
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2270,8 +2270,8 @@ async fn redefining_existing_field_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_field_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE FIELD example ON example IF NOT EXISTS;
-		DEFINE FIELD example ON example IF NOT EXISTS;
+		DEFINE FIELD IF NOT EXISTS example ON example;
+		DEFINE FIELD IF NOT EXISTS example ON example;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2312,8 +2312,8 @@ async fn redefining_existing_function_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_function_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE FUNCTION fn::example() {} IF NOT EXISTS;
-		DEFINE FUNCTION fn::example() {} IF NOT EXISTS;
+		DEFINE FUNCTION IF NOT EXISTS fn::example() {};
+		DEFINE FUNCTION IF NOT EXISTS fn::example() {};
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2354,8 +2354,8 @@ async fn redefining_existing_index_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_index_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX example ON example FIELDS example IF NOT EXISTS;
-		DEFINE INDEX example ON example FIELDS example IF NOT EXISTS;
+		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
+		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2396,8 +2396,8 @@ async fn redefining_existing_namespace_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_namespace_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE NAMESPACE example IF NOT EXISTS;
-		DEFINE NAMESPACE example IF NOT EXISTS;
+		DEFINE NAMESPACE IF NOT EXISTS example;
+		DEFINE NAMESPACE IF NOT EXISTS example;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2438,8 +2438,8 @@ async fn redefining_existing_param_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_param_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE PARAM $example VALUE 123 IF NOT EXISTS;
-		DEFINE PARAM $example VALUE 123 IF NOT EXISTS;
+		DEFINE PARAM IF NOT EXISTS $example VALUE 123;
+		DEFINE PARAM IF NOT EXISTS $example VALUE 123;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2480,8 +2480,8 @@ async fn redefining_existing_scope_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_scope_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE SCOPE example IF NOT EXISTS;
-		DEFINE SCOPE example IF NOT EXISTS;
+		DEFINE SCOPE IF NOT EXISTS example;
+		DEFINE SCOPE IF NOT EXISTS example;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2522,8 +2522,8 @@ async fn redefining_existing_table_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE TABLE example IF NOT EXISTS;
-		DEFINE TABLE example IF NOT EXISTS;
+		DEFINE TABLE IF NOT EXISTS example;
+		DEFINE TABLE IF NOT EXISTS example;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2564,8 +2564,8 @@ async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\" IF NOT EXISTS;
-		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\" IF NOT EXISTS;
+		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE \"example\";
+		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE \"example\";
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2606,8 +2606,8 @@ async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 #[cfg(feature = "sql2")]
 async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER IF NOT EXISTS;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

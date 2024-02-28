@@ -18,6 +18,12 @@ use nom::{
 
 pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 	let (i, _) = tag_no_case("EVENT")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, what, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -35,6 +41,8 @@ pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 		name,
 		what,
 		when: Value::Bool(true),
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -48,10 +56,6 @@ pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 			}
 			DefineEventOption::Comment(v) => {
 				res.comment = Some(v);
-			}
-			#[cfg(feature = "sql2")]
-			DefineEventOption::IfNotExists(v) => {
-				res.if_not_exists = v;
 			}
 		}
 	}
@@ -71,18 +75,10 @@ enum DefineEventOption {
 	When(Value),
 	Then(Values),
 	Comment(Strand),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn event_opts(i: &str) -> IResult<&str, DefineEventOption> {
-	alt((
-		event_when,
-		event_then,
-		event_comment,
-		#[cfg(feature = "sql2")]
-		event_if_not_exists,
-	))(i)
+	alt((event_when, event_then, event_comment))(i)
 }
 
 fn event_when(i: &str) -> IResult<&str, DefineEventOption> {
@@ -107,17 +103,6 @@ fn event_comment(i: &str) -> IResult<&str, DefineEventOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineEventOption::Comment(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn event_if_not_exists(i: &str) -> IResult<&str, DefineEventOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineEventOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

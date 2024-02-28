@@ -66,7 +66,11 @@ impl DefineAnalyzerStatement {
 
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYZER {}", self.name)?;
+		write!(f, "DEFINE ANALYZER")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {
 			write!(f, " FUNCTION fn::{i}")?
 		}
@@ -80,9 +84,6 @@ impl Display for DefineAnalyzerStatement {
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
-		}
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
 		}
 		Ok(())
 	}

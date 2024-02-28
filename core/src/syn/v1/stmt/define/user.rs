@@ -21,6 +21,12 @@ use nom::{
 
 pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 	let (i, _) = tag_no_case("USER")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, base, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -38,6 +44,12 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 		base,
 		vec!["Viewer".into()], // New users get the viewer role by default
 	);
+
+	#[cfg(feature = "sql2")]
+	if if_not_exists.is_some() {
+		res.if_not_exists = true;
+	};
+
 	// Assign any defined options
 	for opt in opts {
 		match opt {
@@ -53,10 +65,6 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 			DefineUserOption::Comment(v) => {
 				res.comment = Some(v);
 			}
-			#[cfg(feature = "sql2")]
-			DefineUserOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Return the statement
@@ -68,19 +76,10 @@ enum DefineUserOption {
 	Passhash(String),
 	Roles(Vec<Ident>),
 	Comment(Strand),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn user_opts(i: &str) -> IResult<&str, Vec<DefineUserOption>> {
-	many0(alt((
-		user_pass,
-		user_hash,
-		user_roles,
-		user_comment,
-		#[cfg(feature = "sql2")]
-		user_if_not_exists,
-	)))(i)
+	many0(alt((user_pass, user_hash, user_roles, user_comment)))(i)
 }
 
 fn user_pass(i: &str) -> IResult<&str, DefineUserOption> {
@@ -120,15 +119,4 @@ fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
 	})(i)?;
 
 	Ok((i, DefineUserOption::Roles(roles)))
-}
-
-#[cfg(feature = "sql2")]
-fn user_if_not_exists(i: &str) -> IResult<&str, DefineUserOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineUserOption::IfNotExists(true)))
 }

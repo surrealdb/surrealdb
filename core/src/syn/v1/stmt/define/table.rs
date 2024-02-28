@@ -13,6 +13,12 @@ use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::man
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(table_opts)(i)?;
@@ -24,6 +30,8 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let mut res = DefineTableStatement {
 		name,
 		permissions: Permissions::none(),
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -50,10 +58,6 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 			DefineTableOption::Permissions(v) => {
 				res.permissions = v;
 			}
-			#[cfg(feature = "sql2")]
-			DefineTableOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Return the statement
@@ -69,8 +73,6 @@ enum DefineTableOption {
 	Comment(Strand),
 	Permissions(Permissions),
 	ChangeFeed(ChangeFeed),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
@@ -82,8 +84,6 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_schemafull,
 		table_permissions,
 		table_changefeed,
-		#[cfg(feature = "sql2")]
-		table_if_not_exists,
 	))(i)
 }
 
@@ -129,17 +129,6 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i, Permission::None)?;
 	Ok((i, DefineTableOption::Permissions(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn table_if_not_exists(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineTableOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

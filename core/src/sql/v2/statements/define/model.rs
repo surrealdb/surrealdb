@@ -27,7 +27,11 @@ pub struct DefineModelStatement {
 
 impl fmt::Display for DefineModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "DEFINE MODEL ml::{}<{}>", self.name, self.version)?;
+		write!(f, "DEFINE MODEL")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
 			write!(f, " COMMENT {}", comment)?;
 		}
@@ -38,9 +42,6 @@ impl fmt::Display for DefineModelStatement {
 			None
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
 		Ok(())
 	}
 }

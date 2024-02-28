@@ -22,6 +22,12 @@ use nom::{
 
 pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = tag_no_case("INDEX")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, what, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -38,6 +44,8 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let mut res = DefineIndexStatement {
 		name,
 		what,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -51,10 +59,6 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			}
 			DefineIndexOption::Comment(v) => {
 				res.comment = Some(v);
-			}
-			#[cfg(feature = "sql2")]
-			DefineIndexOption::IfNotExists(v) => {
-				res.if_not_exists = v;
 			}
 		}
 	}
@@ -74,18 +78,10 @@ enum DefineIndexOption {
 	Index(Index),
 	Columns(Idioms),
 	Comment(Strand),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn index_opts(i: &str) -> IResult<&str, DefineIndexOption> {
-	alt((
-		index_kind,
-		index_columns,
-		index_comment,
-		#[cfg(feature = "sql2")]
-		index_if_not_exists,
-	))(i)
+	alt((index_kind, index_columns, index_comment))(i)
 }
 
 fn index_kind(i: &str) -> IResult<&str, DefineIndexOption> {
@@ -108,17 +104,6 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = strand(i)?;
 	Ok((i, DefineIndexOption::Comment(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn index_if_not_exists(i: &str) -> IResult<&str, DefineIndexOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineIndexOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

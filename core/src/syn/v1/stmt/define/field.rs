@@ -20,6 +20,12 @@ use nom::{
 
 pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let (i, _) = tag_no_case("FIELD")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, what, opts)) = cut(|i| {
 		let (i, name) = idiom::local(i)?;
@@ -40,6 +46,8 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let mut res = DefineFieldStatement {
 		name,
 		what,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -70,10 +78,6 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 			DefineFieldOption::Permissions(v) => {
 				res.permissions = v;
 			}
-			#[cfg(feature = "sql2")]
-			DefineFieldOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Return the statement
@@ -90,8 +94,6 @@ enum DefineFieldOption {
 	Default(Value),
 	Comment(Strand),
 	Permissions(Permissions),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
@@ -105,8 +107,6 @@ fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
 		field_default,
 		field_comment,
 		field_permissions,
-		#[cfg(feature = "sql2")]
-		field_if_not_exists,
 	))(i)
 }
 
@@ -167,17 +167,6 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = permissions(i, Permission::Full)?;
 	Ok((i, DefineFieldOption::Permissions(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn field_if_not_exists(i: &str) -> IResult<&str, DefineFieldOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineFieldOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

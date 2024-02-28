@@ -14,6 +14,12 @@ use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::man
 
 pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(analyzer_opts)(i)?;
@@ -21,6 +27,8 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	// Create the base statement
 	let mut res = DefineAnalyzerStatement {
 		name,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -39,10 +47,6 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 			DefineAnalyzerOption::Tokenizers(v) => {
 				res.tokenizers = Some(v);
 			}
-			#[cfg(feature = "sql2")]
-			DefineAnalyzerOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Return the statement
@@ -55,8 +59,6 @@ enum DefineAnalyzerOption {
 	Comment(Strand),
 	Filters(Vec<Filter>),
 	Tokenizers(Vec<Tokenizer>),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn analyzer_opts(i: &str) -> IResult<&str, DefineAnalyzerOption> {
@@ -66,8 +68,6 @@ fn analyzer_opts(i: &str) -> IResult<&str, DefineAnalyzerOption> {
 		analyzer_comment,
 		analyzer_filters,
 		analyzer_tokenizers,
-		#[cfg(feature = "sql2")]
-		analyzer_if_not_exists,
 	))(i)
 }
 
@@ -103,15 +103,4 @@ fn analyzer_tokenizers(i: &str) -> IResult<&str, DefineAnalyzerOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(tokenizers)(i)?;
 	Ok((i, DefineAnalyzerOption::Tokenizers(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn analyzer_if_not_exists(i: &str) -> IResult<&str, DefineAnalyzerOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineAnalyzerOption::IfNotExists(true)))
 }

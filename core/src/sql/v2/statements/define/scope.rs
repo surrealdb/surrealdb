@@ -72,7 +72,11 @@ impl DefineScopeStatement {
 
 impl Display for DefineScopeStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE SCOPE {}", self.name)?;
+		write!(f, "DEFINE SCOPE")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.session {
 			write!(f, " SESSION {v}")?
 		}
@@ -84,9 +88,6 @@ impl Display for DefineScopeStatement {
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
-		}
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
 		}
 		Ok(())
 	}

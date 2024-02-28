@@ -17,6 +17,12 @@ use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::man
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, base, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -32,6 +38,8 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let mut res = DefineTokenStatement {
 		name,
 		base,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -53,10 +61,6 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 			DefineTokenOption::Comment(v) => {
 				res.comment = Some(v);
 			}
-			#[cfg(feature = "sql2")]
-			DefineTokenOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Check necessary options
@@ -75,18 +79,10 @@ enum DefineTokenOption {
 	Type(Algorithm),
 	Value(String),
 	Comment(Strand),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn token_opts(i: &str) -> IResult<&str, DefineTokenOption> {
-	alt((
-		token_type,
-		token_value,
-		token_comment,
-		#[cfg(feature = "sql2")]
-		token_if_not_exists,
-	))(i)
+	alt((token_type, token_value, token_comment))(i)
 }
 
 fn token_type(i: &str) -> IResult<&str, DefineTokenOption> {
@@ -111,17 +107,6 @@ fn token_comment(i: &str) -> IResult<&str, DefineTokenOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineTokenOption::Comment(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn token_if_not_exists(i: &str) -> IResult<&str, DefineTokenOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineTokenOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

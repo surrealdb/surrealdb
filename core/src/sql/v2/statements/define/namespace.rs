@@ -68,12 +68,13 @@ impl DefineNamespaceStatement {
 
 impl Display for DefineNamespaceStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE NAMESPACE {}", self.name)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
-		}
+		write!(f, "DEFINE NAMESPACE")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

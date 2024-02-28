@@ -178,9 +178,13 @@ impl DefineUserStatement {
 
 impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE USER")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
 		write!(
 			f,
-			"DEFINE USER {} ON {} PASSHASH {} ROLES {}",
+			" {} ON {} PASSHASH {} ROLES {}",
 			self.name,
 			self.base,
 			quote_str(&self.hash),
@@ -190,9 +194,6 @@ impl Display for DefineUserStatement {
 		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
-		}
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
 		}
 		Ok(())
 	}

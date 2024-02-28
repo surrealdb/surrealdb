@@ -68,16 +68,13 @@ impl DefineEventStatement {
 
 impl Display for DefineEventStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"DEFINE EVENT {} ON {} WHEN {} THEN {}",
-			self.name, self.what, self.when, self.then
-		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
-		}
+		write!(f, "DEFINE EVENT",)?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
 	}

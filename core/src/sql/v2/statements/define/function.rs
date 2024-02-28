@@ -66,7 +66,11 @@ impl DefineFunctionStatement {
 
 impl fmt::Display for DefineFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FUNCTION fn::{}(", self.name.0)?;
+		write!(f, "DEFINE FUNCTION")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " fn::{}(", self.name.0d)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;
@@ -85,9 +89,6 @@ impl fmt::Display for DefineFunctionStatement {
 			None
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
 		Ok(())
 	}
 }

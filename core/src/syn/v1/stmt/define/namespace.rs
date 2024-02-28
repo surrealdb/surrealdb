@@ -10,6 +10,12 @@ use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::man
 
 pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(namespace_opts)(i)?;
@@ -17,6 +23,8 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 	// Create the base statement
 	let mut res = DefineNamespaceStatement {
 		name,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -24,10 +32,6 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 		match opt {
 			DefineNamespaceOption::Comment(v) => {
 				res.comment = Some(v);
-			}
-			#[cfg(feature = "sql2")]
-			DefineNamespaceOption::IfNotExists(v) => {
-				res.if_not_exists = v;
 			}
 		}
 	}
@@ -37,16 +41,10 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 
 enum DefineNamespaceOption {
 	Comment(Strand),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn namespace_opts(i: &str) -> IResult<&str, DefineNamespaceOption> {
-	alt((
-		namespace_comment,
-		#[cfg(feature = "sql2")]
-		namespace_if_not_exists,
-	))(i)
+	alt((namespace_comment,))(i)
 }
 
 fn namespace_comment(i: &str) -> IResult<&str, DefineNamespaceOption> {
@@ -55,15 +53,4 @@ fn namespace_comment(i: &str) -> IResult<&str, DefineNamespaceOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineNamespaceOption::Comment(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn namespace_if_not_exists(i: &str) -> IResult<&str, DefineNamespaceOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineNamespaceOption::IfNotExists(true)))
 }

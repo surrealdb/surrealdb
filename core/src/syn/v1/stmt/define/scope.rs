@@ -11,6 +11,12 @@ use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::man
 
 pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(scope_opts)(i)?;
@@ -19,6 +25,8 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let mut res = DefineScopeStatement {
 		name,
 		code: DefineScopeStatement::random_code(),
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -36,10 +44,6 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 			DefineScopeOption::Comment(v) => {
 				res.comment = Some(v);
 			}
-			#[cfg(feature = "sql2")]
-			DefineScopeOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Return the statement
@@ -51,19 +55,10 @@ enum DefineScopeOption {
 	Signup(Value),
 	Signin(Value),
 	Comment(Strand),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
-	alt((
-		scope_session,
-		scope_signup,
-		scope_signin,
-		scope_comment,
-		#[cfg(feature = "sql2")]
-		scope_if_not_exists,
-	))(i)
+	alt((scope_session, scope_signup, scope_signin, scope_comment))(i)
 }
 
 fn scope_session(i: &str) -> IResult<&str, DefineScopeOption> {
@@ -96,15 +91,4 @@ fn scope_comment(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(strand)(i)?;
 	Ok((i, DefineScopeOption::Comment(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn scope_if_not_exists(i: &str) -> IResult<&str, DefineScopeOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineScopeOption::IfNotExists(true)))
 }

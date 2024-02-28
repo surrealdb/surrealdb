@@ -121,7 +121,11 @@ impl DefineFieldStatement {
 
 impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
+		write!(f, "DEFINE FIELD")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {} ON {}", self.name, self.what)?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}
@@ -150,9 +154,6 @@ impl Display for DefineFieldStatement {
 			None
 		};
 		write!(f, "{}", self.permissions)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
 		Ok(())
 	}
 }

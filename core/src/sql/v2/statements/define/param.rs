@@ -65,7 +65,11 @@ impl DefineParamStatement {
 
 impl Display for DefineParamStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE PARAM ${} VALUE {}", self.name, self.value)?;
+		write!(f, "DEFINE PARAM")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -76,9 +80,6 @@ impl Display for DefineParamStatement {
 			None
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
 		Ok(())
 	}
 }

@@ -11,6 +11,12 @@ use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::man
 
 pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(database_opts)(i)?;
@@ -19,6 +25,8 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	// Create the base statement
 	let mut res = DefineDatabaseStatement {
 		name,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -30,10 +38,6 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 			DefineDatabaseOption::ChangeFeed(v) => {
 				res.changefeed = Some(v);
 			}
-			#[cfg(feature = "sql2")]
-			DefineDatabaseOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Return the statement
@@ -43,17 +47,10 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 enum DefineDatabaseOption {
 	Comment(Strand),
 	ChangeFeed(ChangeFeed),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn database_opts(i: &str) -> IResult<&str, DefineDatabaseOption> {
-	alt((
-		database_comment,
-		database_changefeed,
-		#[cfg(feature = "sql2")]
-		database_if_not_exists,
-	))(i)
+	alt((database_comment, database_changefeed))(i)
 }
 
 fn database_comment(i: &str) -> IResult<&str, DefineDatabaseOption> {
@@ -68,17 +65,6 @@ fn database_changefeed(i: &str) -> IResult<&str, DefineDatabaseOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = changefeed(i)?;
 	Ok((i, DefineDatabaseOption::ChangeFeed(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn database_if_not_exists(i: &str) -> IResult<&str, DefineDatabaseOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineDatabaseOption::IfNotExists(true)))
 }
 
 #[cfg(test)]

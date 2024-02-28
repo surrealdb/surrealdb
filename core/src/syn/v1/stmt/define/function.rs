@@ -20,6 +20,12 @@ use nom::{
 
 pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
 	let (i, name) = ident_path(i)?;
@@ -47,6 +53,8 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 		name,
 		args,
 		block,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -58,10 +66,6 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 			DefineFunctionOption::Permissions(v) => {
 				res.permissions = v;
 			}
-			#[cfg(feature = "sql2")]
-			DefineFunctionOption::IfNotExists(v) => {
-				res.if_not_exists = v;
-			}
 		}
 	}
 	// Return the statement
@@ -71,17 +75,10 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 enum DefineFunctionOption {
 	Comment(Strand),
 	Permissions(Permission),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn function_opts(i: &str) -> IResult<&str, DefineFunctionOption> {
-	alt((
-		function_comment,
-		function_permissions,
-		#[cfg(feature = "sql2")]
-		function_if_not_exists,
-	))(i)
+	alt((function_comment, function_permissions))(i)
 }
 
 fn function_comment(i: &str) -> IResult<&str, DefineFunctionOption> {
@@ -98,15 +95,4 @@ fn function_permissions(i: &str) -> IResult<&str, DefineFunctionOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(permission)(i)?;
 	Ok((i, DefineFunctionOption::Permissions(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn function_if_not_exists(i: &str) -> IResult<&str, DefineFunctionOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineFunctionOption::IfNotExists(true)))
 }

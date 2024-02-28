@@ -110,7 +110,11 @@ impl DefineTableStatement {
 
 impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TABLE {}", self.name)?;
+		write!(f, "DEFINE TABLE")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
@@ -135,9 +139,6 @@ impl Display for DefineTableStatement {
 			None
 		};
 		write!(f, "{}", self.permissions)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
 		Ok(())
 	}
 }

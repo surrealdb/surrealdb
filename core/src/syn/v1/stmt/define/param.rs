@@ -18,6 +18,12 @@ use nom::{
 
 pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 	let (i, _) = tag_no_case("PARAM")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = cut(char('$'))(i)?;
 	let (i, name) = cut(ident)(i)?;
@@ -26,6 +32,8 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 	// Create the base statement
 	let mut res = DefineParamStatement {
 		name,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -39,10 +47,6 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 			}
 			DefineParamOption::Permissions(v) => {
 				res.permissions = v;
-			}
-			#[cfg(feature = "sql2")]
-			DefineParamOption::IfNotExists(v) => {
-				res.if_not_exists = v;
 			}
 		}
 	}
@@ -62,18 +66,10 @@ enum DefineParamOption {
 	Value(Value),
 	Comment(Strand),
 	Permissions(Permission),
-	#[cfg(feature = "sql2")]
-	IfNotExists(bool),
 }
 
 fn param_opts(i: &str) -> IResult<&str, DefineParamOption> {
-	alt((
-		param_value,
-		param_comment,
-		param_permissions,
-		#[cfg(feature = "sql2")]
-		param_if_not_exists,
-	))(i)
+	alt((param_value, param_comment, param_permissions))(i)
 }
 
 fn param_value(i: &str) -> IResult<&str, DefineParamOption> {
@@ -98,17 +94,6 @@ fn param_permissions(i: &str) -> IResult<&str, DefineParamOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(permission)(i)?;
 	Ok((i, DefineParamOption::Permissions(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn param_if_not_exists(i: &str) -> IResult<&str, DefineParamOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("NOT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("EXISTS")(i)?;
-	Ok((i, DefineParamOption::IfNotExists(true)))
 }
 
 #[cfg(test)]
