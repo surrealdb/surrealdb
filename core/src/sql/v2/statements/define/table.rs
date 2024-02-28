@@ -1,3 +1,9 @@
+use std::fmt::{self, Display, Write};
+
+use derive::Store;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -9,10 +15,6 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
-use derive::Store;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

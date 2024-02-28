@@ -165,6 +165,7 @@ fn statements() -> Vec<Statement> {
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(60) * 10,
+				store_original: false,
 			}),
 			if_not_exists: false,
 		})),
@@ -242,6 +243,7 @@ fn statements() -> Vec<Statement> {
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
+				store_original: false,
 			}),
 			comment: None,
 			if_not_exists: false,
