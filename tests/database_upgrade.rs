@@ -26,67 +26,96 @@ mod database_upgrade {
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_1_0_1() {
-		upgrade_test("1.0.1").await;
+		// Start the docker instance
+		let (path, mut docker, client) = start_docker("1.0.1").await;
+
+		// Create the data set
+		create_data_on_docker(&client, &DATA_FTS).await;
+
+		// Check the data set
+		check_data_on_docker(&client, &CHECK_FTS).await;
+		check_data_on_docker(&client, &CHECK_DB).await;
+
+		// Stop the docker instance
+		docker.stop();
+
+		// Extract the database directory
+		docker.extract_data_dir(&path);
+
+		// Connect to a local instance
+		let db = new_local_instance(&path).await;
+
+		// Check that the data has properly migrated
+		check_migrated_data(&db, &CHECK_FTS).await;
+		check_migrated_data(&db, &CHECK_DB).await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_1_1_1() {
-		upgrade_test("v1.1.1").await;
+		// Start the docker instance
+		let (path, mut docker, client) = start_docker("v1.1.1").await;
+
+		// Create the data set
+		create_data_on_docker(&client, &DATA_FTS).await;
+		create_data_on_docker(&client, &DATA_MTREE).await;
+
+		// Check the data set
+		check_data_on_docker(&client, &CHECK_FTS).await;
+		check_data_on_docker(&client, &CHECK_DB).await;
+		check_data_on_docker(&client, &CHECK_MTREE_RPC).await;
+
+		// Stop the docker instance
+		docker.stop();
+
+		// Extract the database directory
+		docker.extract_data_dir(&path);
+
+		// Connect to a local instance
+		let db = new_local_instance(&path).await;
+
+		// Check that the data has properly migrated
+		check_migrated_data(&db, &CHECK_FTS).await;
+		check_migrated_data(&db, &CHECK_DB).await;
+		check_migrated_data(&db, &CHECK_MTREE_DB).await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_1_2_1() {
-		upgrade_test("v1.2.1").await;
+		// Start the docker instance
+		let (path, mut docker, client) = start_docker("v1.2.1").await;
+
+		// Create the data set
+		create_data_on_docker(&client, &DATA_FTS).await;
+		create_data_on_docker(&client, &DATA_MTREE).await;
+
+		// Check the data set
+		check_data_on_docker(&client, &CHECK_FTS).await;
+		check_data_on_docker(&client, &CHECK_DB).await;
+		check_data_on_docker(&client, &CHECK_MTREE_RPC).await;
+
+		// Stop the docker instance
+		docker.stop();
+
+		// Extract the database directory
+		docker.extract_data_dir(&path);
+
+		// Connect to a local instance
+		let db = new_local_instance(&path).await;
+
+		// Check that the data has properly migrated
+		check_migrated_data(&db, &CHECK_FTS).await;
+		check_migrated_data(&db, &CHECK_DB).await;
+		check_migrated_data(&db, &CHECK_MTREE_DB).await;
+		check_migrated_data(&db, &CHECK_KNN_DB_BRUTEFORCE).await;
 	}
 
-	async fn upgrade_test(docker_version: &str) {
-		// Location of the database files (RocksDB) in the Host
-		let file_path = format!("/tmp/{}.db", Ulid::new());
-
-		{
-			// Start the docker instance
-			let mut docker = DockerContainer::start(&docker_version, &file_path, USER, PASS);
-			let client = RestClient::new(NS, DB, USER, PASS)
-				.wait_for_connection(&CNX_TIMEOUT)
-				.await
-				.unwrap_or_else(|| {
-					docker.logs();
-					panic!("No connected client")
-				});
-			// Create data samples
-			if docker_version.starts_with("1.0.") {
-				create_data_for_1_0(&client).await;
-			} else if docker_version.starts_with("v1.1.") {
-				create_data_for_1_1(&client).await;
-			} else if docker_version.starts_with("v1.2.") {
-				create_data_for_1_2(&client).await;
-			} else {
-				panic!("Unsupported version {docker_version}");
-			}
-			// Stop the docker instance
-			docker.stop();
-			// Extract the database directory
-			docker.extract_data_dir(&file_path);
-		}
-		{
-			// Start a local RocksDB instance using the same location
-			let db = new_local_instance(&file_path).await;
-			// Check that the data has properly migrated
-			if docker_version.starts_with("1.0.") {
-				check_migrated_data_1_0(&db).await;
-			} else if docker_version.starts_with("v1.1.") {
-				check_migrated_data_1_1(&db).await;
-			} else if docker_version.starts_with("v1.2.") {
-				check_migrated_data_1_2(&db).await;
-			} else {
-				panic!("Unsupported version {docker_version}");
-			}
-		}
-	}
+	// *******
+	// DATASET
+	// *******
 
 	// Set of DATA for Full Text Search
 	const DATA_FTS: [&str; 5] = [
@@ -125,42 +154,29 @@ mod database_upgrade {
 
 	const CHECK_DB: [Check; 1] = [("INFO FOR DB", Expected::Any)];
 
+	// *******
+	// HELPERS
+	// *******
+
+	async fn start_docker(docker_version: &str) -> (String, DockerContainer, RestClient) {
+		// Location of the database files (RocksDB) in the Host
+		let file_path = format!("/tmp/{}.db", Ulid::new());
+		let docker = DockerContainer::start(docker_version, &file_path, USER, PASS);
+		let client = RestClient::new(NS, DB, USER, PASS)
+			.wait_for_connection(&CNX_TIMEOUT)
+			.await
+			.unwrap_or_else(|| {
+				docker.logs();
+				panic!("No connected client")
+			});
+		(file_path, docker, client)
+	}
+
 	async fn create_data_on_docker(client: &RestClient, data: &[&str]) {
 		info!("Create data on Docker's instance");
 		for l in data {
 			client.checked_query(l, &Expected::Any).await;
 		}
-	}
-
-	async fn create_data_for_1_0(client: &RestClient) {
-		create_data_on_docker(client, &DATA_FTS).await;
-		check_data_on_docker(client, &CHECK_FTS).await;
-		check_data_on_docker(client, &CHECK_DB).await;
-	}
-
-	async fn check_migrated_data_1_0(db: &Surreal<Any>) {
-		check_migrated_data(db, &CHECK_FTS).await;
-		check_migrated_data(db, &CHECK_DB).await;
-	}
-
-	async fn create_data_for_1_1(client: &RestClient) {
-		create_data_for_1_0(client).await;
-		create_data_on_docker(client, &DATA_MTREE).await;
-		check_data_on_docker(client, &CHECK_MTREE_RPC).await;
-	}
-
-	async fn check_migrated_data_1_1(db: &Surreal<Any>) {
-		check_migrated_data_1_0(db).await;
-		check_migrated_data(db, &CHECK_MTREE_DB).await;
-	}
-
-	async fn create_data_for_1_2(client: &RestClient) {
-		create_data_for_1_1(client).await;
-	}
-
-	async fn check_migrated_data_1_2(db: &Surreal<Any>) {
-		check_migrated_data_1_1(db).await;
-		check_migrated_data(db, &CHECK_KNN_DB_BRUTEFORCE).await;
 	}
 
 	async fn check_data_on_docker(client: &RestClient, queries: &[Check]) {
