@@ -15,7 +15,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
-use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
