@@ -34,6 +34,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Duration;
+use surrealdb_core::dbs::Options;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
 
@@ -208,6 +209,7 @@ pub(crate) fn router(
 }
 
 fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
+	trace!("Starting maintenance");
 	// Some classic ownership shenanigans
 	let kvs_two = kvs.clone();
 	let stop_signal_two = stop_signal.clone();
@@ -235,6 +237,7 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 	});
 
 	if FFLAGS.change_feed_live_queries.enabled() {
+		trace!("Live queries v2 enabled");
 		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
 		tokio::spawn(async move {
 			let kvs = kvs_two;
@@ -251,12 +254,15 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 
 			let mut stream = streams.merge();
 
+			let opt = Options::default();
 			while let Some(Some(_)) = stream.next().await {
-				match kvs.process_lq_notifications().await {
+				match kvs.process_lq_notifications(&opt).await {
 					Ok(()) => trace!("Live Query poll ran successfully"),
 					Err(error) => error!("Error running live query poll: {error}"),
 				}
 			}
 		});
+	} else {
+		trace!("Live queries v2 disabled")
 	}
 }

@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate tracing;
+extern crate core;
 
 #[macro_use]
 mod mac;
