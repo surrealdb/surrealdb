@@ -882,7 +882,7 @@ impl Datastore {
 				// That is an improvement though
 				Some(&selector.tb),
 				ShowSince::versionstamp(vs),
-				Some(self.engine_options.new_live_queries_per_transaction),
+				Some(self.engine_options.live_query_catchup_size),
 			)
 			.await?;
 			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
@@ -1215,6 +1215,7 @@ impl Datastore {
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
 			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
+			engine_options: self.engine_options,
 		})
 	}
 
