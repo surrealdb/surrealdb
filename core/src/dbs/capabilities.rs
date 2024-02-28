@@ -214,7 +214,6 @@ impl Capabilities {
 		self
 	}
 
-	// TODO delete
 	pub fn with_live_query_notifications(mut self, live_query_notifications: bool) -> Self {
 		self.live_query_notifications = live_query_notifications;
 		self
