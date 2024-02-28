@@ -9,7 +9,10 @@ use super::super::super::{
 use crate::sql::{
 	statements::DefineTableStatement, ChangeFeed, Permission, Permissions, Strand, View,
 };
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
+	sequence::tuple,
+};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;

@@ -13,7 +13,10 @@ use crate::{
 	syn::v1::ParseError,
 };
 use nom::Err;
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
+	sequence::tuple,
+};
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;

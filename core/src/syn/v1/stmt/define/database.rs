@@ -7,7 +7,10 @@ use super::super::super::{
 	IResult,
 };
 use crate::sql::{statements::DefineDatabaseStatement, ChangeFeed, Strand};
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
+	sequence::tuple,
+};
 
 pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;

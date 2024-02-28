@@ -70,7 +70,7 @@ impl fmt::Display for DefineFunctionStatement {
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
-		write!(f, " fn::{}(", self.name.0d)?;
+		write!(f, " fn::{}(", self.name.0)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;

@@ -6,7 +6,10 @@ use super::super::super::{
 	IResult,
 };
 use crate::sql::{statements::DefineNamespaceStatement, Strand};
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
+	sequence::tuple,
+};
 
 pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;

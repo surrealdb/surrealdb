@@ -7,7 +7,10 @@ use super::super::super::{
 	IResult,
 };
 use crate::sql::{statements::DefineScopeStatement, Duration, Strand, Value};
-use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{
+	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
+	sequence::tuple,
+};
 
 pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;

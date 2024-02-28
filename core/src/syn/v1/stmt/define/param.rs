@@ -13,7 +13,7 @@ use crate::{
 };
 use nom::{
 	branch::alt, bytes::complete::tag_no_case, character::complete::char, combinator::cut,
-	multi::many0, Err,
+	combinator::opt, multi::many0, sequence::tuple, Err,
 };
 
 pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {

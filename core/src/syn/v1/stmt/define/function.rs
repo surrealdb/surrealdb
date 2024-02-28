@@ -15,7 +15,9 @@ use nom::{
 	bytes::complete::{tag, tag_no_case},
 	character::complete::char,
 	combinator::cut,
+	combinator::opt,
 	multi::many0,
+	sequence::tuple,
 };
 
 pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
