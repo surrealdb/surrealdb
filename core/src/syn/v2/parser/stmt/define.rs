@@ -180,6 +180,7 @@ impl Parser<'_> {
 			vec!["Viewer".into()], // New users get the viewer role by default
 		);
 
+		#[cfg(feature = "sql2")]
 		if if_not_exists {
 			res.if_not_exists = true;
 		}
