@@ -8,6 +8,7 @@ use std::io::{Error as IoError, ErrorKind};
 use std::ops::Deref;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 use surrealdb::env::{arch, os};
 
 const ROOT: &str = "https://download.surrealdb.com";
@@ -39,19 +40,19 @@ impl UpgradeCommandArguments {
 		if self.nightly || version.as_deref() == Some(nightly) {
 			Ok(Cow::Borrowed(nightly))
 		} else if self.beta || version.as_deref() == Some(beta) {
-			fetch(beta).await
+			fetch(beta, None).await
 		} else if let Some(version) = version {
 			// Parse the version string to make sure it's valid, return an error if not
 			let version = parse_version(&version)?;
 			// Return the version, ensuring it's prefixed by `v`
 			Ok(Cow::Owned(format!("v{version}")))
 		} else {
-			fetch("latest").await
+			fetch("latest", None).await
 		}
 	}
 }
 
-fn parse_version(input: &str) -> Result<Version, Error> {
+pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
 	// Remove the `v` prefix, if supplied
 	let version = input.strip_prefix('v').unwrap_or(input);
 	// Parse the version
@@ -76,8 +77,14 @@ fn parse_version(input: &str) -> Result<Version, Error> {
 	}
 }
 
-async fn fetch(version: &str) -> Result<Cow<'_, str>, Error> {
-	let response = reqwest::get(format!("{ROOT}/{version}.txt")).await?;
+pub(crate) async fn fetch(version: &str, timeout: Option<Duration>) -> Result<Cow<'_, str>, Error> {
+	let mut client = reqwest::Client::builder();
+	if let Some(timeout) = timeout {
+		client = client.timeout(timeout);
+	}
+	let client = client.build()?;
+	let request = client.get(format!("{ROOT}/{version}.txt")).build().unwrap();
+	let response = client.execute(request).await?;
 	if !response.status().is_success() {
 		return Err(Error::Io(IoError::new(
 			ErrorKind::Other,

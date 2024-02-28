@@ -12,7 +12,7 @@ mod validate;
 pub(crate) mod validator;
 mod version;
 
-use crate::cnf::LOGO;
+use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
@@ -23,7 +23,9 @@ use isready::IsReadyCommandArguments;
 use ml::MlCommand;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
+use std::ops::Deref;
 use std::process::ExitCode;
+use std::time::Duration;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use version::VersionCommandArguments;
@@ -80,6 +82,9 @@ enum Commands {
 
 pub async fn init() -> ExitCode {
 	let args = Cli::parse();
+	// After parsing arguments, we check the version online
+	check_upgrade().await;
+	// After version warning we can now proceed to command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
 		Commands::Backup(args) => backup::init(args).await,
@@ -97,5 +102,18 @@ pub async fn init() -> ExitCode {
 		ExitCode::FAILURE
 	} else {
 		ExitCode::SUCCESS
+	}
+}
+
+/// Check if there is a newer version and warn the user that they should upgrade
+async fn check_upgrade() {
+	if let Ok(version) = upgrade::fetch("latest", Some(Duration::from_millis(500))).await {
+		// Request was successful, compare against current
+		let old_version = upgrade::parse_version(PKG_VERSION.deref()).unwrap();
+		let new_version = upgrade::parse_version(&version).unwrap();
+		if old_version < new_version {
+			warn!("A new version of SurrealDB is available: {}", new_version);
+			warn!("You can upgrade using the {} command", "surreal upgrade");
+		}
 	}
 }
