@@ -709,8 +709,8 @@ jobs:
           ps auxf
           cat /tmp/surrealdb.log || true
 
-  db-upgrade-v1-0-1:
-    name: Database Upgrade from v1.0.1
+  db-upgrade:
+    name: Database Upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
 
@@ -731,52 +731,5 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
-        run: cargo make ci-database-upgrade-1-0-1
+        run: cargo make ci-database-upgrade
 
-  db-upgrade-v1-1-1:
-    name: Database Upgrade from v1.1.1
-    runs-on: ubuntu-latest
-    steps:
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.75.0
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test DB upgrade
-        run: cargo make ci-database-upgrade-1-1-1
-
-  db-upgrade-v1-2-1:
-    name: Database Upgrade from v1.2.1
-    runs-on: ubuntu-latest
-    steps:
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.75.0
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test upgrade
-        run: cargo make ci-database-upgrade-1-2-1

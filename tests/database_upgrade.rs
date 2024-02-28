@@ -8,6 +8,7 @@ mod database_upgrade {
 	use super::common::expected::Expected;
 	use super::common::rest_client::RestClient;
 	use serde_json::Value as JsonValue;
+	use serial_test::serial;
 	use std::time::Duration;
 	use surrealdb::engine::any::{connect, Any};
 	use surrealdb::{Connection, Surreal};
@@ -15,27 +16,34 @@ mod database_upgrade {
 	use tracing::info;
 	use ulid::Ulid;
 
-	const PREVIOUS_DOCKER_VERSION: &str = "SURREALDB_TEST_DOCKER_PREVIOUS_VERSION";
-	const DEFAULT_DOCKER_VERSION: &str = "v1.2.1";
 	const CNX_TIMEOUT: Duration = Duration::from_secs(180);
 	const NS: &str = "test";
 	const DB: &str = "test";
 	const USER: &str = "root";
 	const PASS: &str = "root";
 
-	// Optionally set the tag for the SurrealDB Docker image to upgrade from:
-	// export SURREALDB_TEST_DOCKER_PREVIOUS_VERSION="v1.2.1"
-	// We may also change the log level:
-	// export RUST_LOG=info
-	// To run this test:
-	// cargo test --package surreal --test database_upgrade database_upgrade::upgrade_test
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
-	async fn upgrade_test() {
-		// Get the version to migrate from (Docker TAG)
-		let docker_version: String =
-			std::env::var(PREVIOUS_DOCKER_VERSION).unwrap_or(DEFAULT_DOCKER_VERSION.to_string());
+	#[serial]
+	async fn upgrade_test_1_0_1() {
+		upgrade_test("1.0.1").await;
+	}
 
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_1_1() {
+		upgrade_test("v1.1.1").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_2_1() {
+		upgrade_test("v1.2.1").await;
+	}
+
+	async fn upgrade_test(docker_version: &str) {
 		// Location of the database files (RocksDB) in the Host
 		let file_path = format!("/tmp/{}.db", Ulid::new());
 
@@ -90,7 +98,7 @@ mod database_upgrade {
 	];
 
 	// Set of QUERY and RESULT to check for Full Text Search
-	static CHECK_FTS: [Check; 1] =
+	const CHECK_FTS: [Check; 1] =
 		[("SELECT name FROM account WHERE name @@ 'Tobie'", Expected::One("{\"name\":\"Tobie\"}"))];
 
 	// Set of DATA for VectorSearch and  Knn Operator checking
@@ -101,15 +109,15 @@ mod database_upgrade {
 		"DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4",
 	];
 
-	static CHECK_MTREE_RPC: [Check; 1] = [
+	const CHECK_MTREE_RPC: [Check; 1] = [
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": \"pts:1\"}", "{ \"dist\": 4.0, \"id\": \"pts:2\"}"))];
 
-	static CHECK_MTREE_DB: [Check; 1] = [
+	const CHECK_MTREE_DB: [Check; 1] = [
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
-	static CHECK_KNN_DB_BRUTEFORCE: [Check; 1] = [
+	const CHECK_KNN_DB_BRUTEFORCE: [Check; 1] = [
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2,EUCLIDEAN> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
