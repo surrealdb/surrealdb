@@ -1915,7 +1915,7 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
 		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
@@ -2106,9 +2106,9 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-					default: 'DEFINE TABLE default SCHEMALESS PERMISSIONS NONE',
-					full: 'DEFINE TABLE full SCHEMALESS PERMISSIONS FULL',
-					select_full: 'DEFINE TABLE select_full SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
+					default: 'DEFINE TABLE default TYPE ANY SCHEMALESS PERMISSIONS NONE',
+					full: 'DEFINE TABLE full TYPE ANY SCHEMALESS PERMISSIONS FULL',
+					select_full: 'DEFINE TABLE select_full TYPE ANY SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
 			},
 			tokens: {},
 			users: {}
