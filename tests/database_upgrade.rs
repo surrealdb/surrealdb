@@ -30,11 +30,11 @@ mod database_upgrade {
 		let (path, mut docker, client) = start_docker("1.0.1").await;
 
 		// Create the data set
-		create_data_on_docker(&client, &DATA_FTS).await;
+		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
 
 		// Check the data set
-		check_data_on_docker(&client, &CHECK_FTS).await;
-		check_data_on_docker(&client, &CHECK_DB).await;
+		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
+		check_data_on_docker(&client, "DB", &CHECK_DB).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -46,8 +46,8 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
-		check_migrated_data(&db, &CHECK_FTS).await;
-		check_migrated_data(&db, &CHECK_DB).await;
+		check_migrated_data(&db, "DB", &CHECK_DB).await;
+		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -58,13 +58,13 @@ mod database_upgrade {
 		let (path, mut docker, client) = start_docker("v1.1.1").await;
 
 		// Create the data set
-		create_data_on_docker(&client, &DATA_FTS).await;
-		create_data_on_docker(&client, &DATA_MTREE).await;
+		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
+		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
 
 		// Check the data set
-		check_data_on_docker(&client, &CHECK_FTS).await;
-		check_data_on_docker(&client, &CHECK_DB).await;
-		check_data_on_docker(&client, &CHECK_MTREE_RPC).await;
+		check_data_on_docker(&client, "DB", &CHECK_DB).await;
+		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
+		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -76,9 +76,9 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
-		check_migrated_data(&db, &CHECK_FTS).await;
-		check_migrated_data(&db, &CHECK_DB).await;
-		check_migrated_data(&db, &CHECK_MTREE_DB).await;
+		check_migrated_data(&db, "DB", &CHECK_DB).await;
+		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
+		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -89,13 +89,13 @@ mod database_upgrade {
 		let (path, mut docker, client) = start_docker("v1.2.1").await;
 
 		// Create the data set
-		create_data_on_docker(&client, &DATA_FTS).await;
-		create_data_on_docker(&client, &DATA_MTREE).await;
+		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
+		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
 
 		// Check the data set
-		check_data_on_docker(&client, &CHECK_FTS).await;
-		check_data_on_docker(&client, &CHECK_DB).await;
-		check_data_on_docker(&client, &CHECK_MTREE_RPC).await;
+		check_data_on_docker(&client, "DB", &CHECK_DB).await;
+		check_data_on_docker(&client, "FTS", &CHECK_FTS).await;
+		check_data_on_docker(&client, "MTREE", &CHECK_MTREE_RPC).await;
 
 		// Stop the docker instance
 		docker.stop();
@@ -107,10 +107,10 @@ mod database_upgrade {
 		let db = new_local_instance(&path).await;
 
 		// Check that the data has properly migrated
-		check_migrated_data(&db, &CHECK_FTS).await;
-		check_migrated_data(&db, &CHECK_DB).await;
-		check_migrated_data(&db, &CHECK_MTREE_DB).await;
-		check_migrated_data(&db, &CHECK_KNN_DB_BRUTEFORCE).await;
+		check_migrated_data(&db, "DB", &CHECK_DB).await;
+		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
+		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
+		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
 	}
 
 	// *******
@@ -146,7 +146,7 @@ mod database_upgrade {
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
-	const CHECK_KNN_DB_BRUTEFORCE: [Check; 1] = [
+	const CHECK_KNN_BRUTEFORCE: [Check; 1] = [
 		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2,EUCLIDEAN> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
@@ -172,22 +172,22 @@ mod database_upgrade {
 		(file_path, docker, client)
 	}
 
-	async fn create_data_on_docker(client: &RestClient, data: &[&str]) {
-		info!("Create data on Docker's instance");
+	async fn create_data_on_docker(client: &RestClient, info: &str, data: &[&str]) {
+		info!("Create {info} data on Docker's instance");
 		for l in data {
 			client.checked_query(l, &Expected::Any).await;
 		}
 	}
 
-	async fn check_data_on_docker(client: &RestClient, queries: &[Check]) {
-		info!("Check data on Docker's instance");
+	async fn check_data_on_docker(client: &RestClient, info: &str, queries: &[Check]) {
+		info!("Check {info} data on Docker's instance");
 		for (query, expected) in queries {
 			client.checked_query(query, expected).await;
 		}
 	}
 
-	async fn check_migrated_data(db: &Surreal<Any>, queries: &[Check]) {
-		info!("Check migrated data");
+	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {
+		info!("Check migrated {info} data");
 		for (query, expected_results) in queries {
 			checked_query(db, query, expected_results).await;
 		}
