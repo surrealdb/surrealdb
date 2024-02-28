@@ -128,7 +128,7 @@ mod api_integration {
 			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
 			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
 
-			// Selecting a namespace shouldn't fire the database selection event
+			// Selecting a namespace shouldn't fire the database selection event.
 			db.use_ns("namespace").await.unwrap();
 			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
 			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
