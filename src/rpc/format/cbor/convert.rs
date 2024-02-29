@@ -292,14 +292,14 @@ impl TryFrom<Value> for Cbor {
 						Id::String(v) => Data::Text(v),
 						Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
-						Id::Generate(_) => unreachable!(),
+						Id::Generate(_) => return Err("Cannot encode an ungenerated Record ID into CBOR"),
 					},
 				])),
 			))),
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v))),
 			// We shouldn't reach here
-			_ => unreachable!(),
+			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value")
 		}
 	}
 }
