@@ -1,5 +1,7 @@
 use ciborium::Value as Data;
+use surrealdb::sql::Geometry;
 use std::collections::BTreeMap;
+use std::ops::Deref;
 use surrealdb::sql::Datetime;
 use surrealdb::sql::Duration;
 use surrealdb::sql::Id;
@@ -7,6 +9,9 @@ use surrealdb::sql::Number;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
+use std::iter::once;
+use geo::{LineString, Point, Polygon};
+use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 
 const TAG_DATETIME: u64 = 0;
 const TAG_NONE: u64 = 6;
@@ -14,6 +19,14 @@ const TAG_UUID: u64 = 7;
 const TAG_DECIMAL: u64 = 8;
 const TAG_DURATION: u64 = 9;
 const TAG_RECORDID: u64 = 10;
+const TAG_TABLE: u64 = 11;
+const TAG_GEOMETRY_POINT: u64 = 12;
+const TAG_GEOMETRY_LINE: u64 = 13;
+const TAG_GEOMETRY_POLYGON: u64 = 14;
+const TAG_GEOMETRY_MULTIPOINT: u64 = 15;
+const TAG_GEOMETRY_MULTILINE: u64 = 16;
+const TAG_GEOMETRY_MULTIPOLYGON: u64 = 17;
+const TAG_GEOMETRY_COLLECTION: u64 = 18;
 
 #[derive(Debug)]
 pub struct Cbor(pub Data);
@@ -113,6 +126,114 @@ impl TryFrom<Cbor> for Value {
 						},
 						_ => Err("Expected a CBOR text data type, or a CBOR array with 2 elements"),
 					},
+					// A literal table
+					TAG_TABLE => match *v {
+						Data::Text(v) => Ok(Value::Table(v.into())),
+						_ => Err("Expected a CBOR text data type"),
+					},
+					TAG_GEOMETRY_POINT => match v.deref() {
+						Data::Array(v) if v.len() == 2 => {
+							let x = Value::try_from(Cbor(v.clone().remove(0)))?;
+							let y = Value::try_from(Cbor(v.clone().remove(0)))?;
+
+							match (x, y) {
+								(Value::Number(x), Value::Number(y)) => {
+									Ok(Value::Geometry(Geometry::Point((x.as_float(), y.as_float()).into())))
+								},
+								_ => Err("Expected a CBOR array with 2 decimal values"),
+							}
+						},
+						_ => Err("Expected a CBOR array with 2 decimal values"),
+					},
+					TAG_GEOMETRY_LINE => match v.deref() {
+						Data::Array(v) => {
+							let points = v
+								.iter()
+								.map(|v| match Value::try_from(Cbor(v.clone()))? {
+									Value::Geometry(Geometry::Point(v)) => Ok(v),
+									_ => Err("Expected a CBOR array with Geometry Point values")
+								})
+								.collect::<Result<Vec<Point>, &str>>()?;
+
+							Ok(Value::Geometry(Geometry::Line(LineString::from(points))))
+						},
+						_ => Err("Expected a CBOR array with Geometry Point values"),
+					},
+					TAG_GEOMETRY_POLYGON => match v.deref() {
+						Data::Array(v) if v.len() >= 2 => {
+							let lines = v
+								.iter()
+								.map(|v| match Value::try_from(Cbor(v.clone()))? {
+									Value::Geometry(Geometry::Line(v)) => Ok(v),
+									_ => Err("Expected a CBOR array with Geometry Line values")
+								})
+								.collect::<Result<Vec<LineString>, &str>>()?;
+
+							let first = match lines.get(0) {
+								Some(v) => v,
+								_ => return Err("Expected a CBOR array with at least two Geometry Line values")
+							};
+
+							Ok(Value::Geometry(Geometry::Polygon(Polygon::new(first.clone(), Vec::from(&lines[1..])))))
+						},
+						_ => Err("Expected a CBOR array with at least two Geometry Line values"),
+					},
+					TAG_GEOMETRY_MULTIPOINT => match v.deref() {
+						Data::Array(v) => {
+							let points = v
+								.iter()
+								.map(|v| match Value::try_from(Cbor(v.clone()))? {
+									Value::Geometry(Geometry::Point(v)) => Ok(v),
+									_ => Err("Expected a CBOR array with Geometry Point values")
+								})
+								.collect::<Result<Vec<Point>, &str>>()?;
+
+							Ok(Value::Geometry(Geometry::MultiPoint(MultiPoint::from(points))))
+						},
+						_ => Err("Expected a CBOR array with Geometry Point values"),
+					},
+					TAG_GEOMETRY_MULTILINE => match v.deref() {
+						Data::Array(v) => {
+							let lines = v
+								.iter()
+								.map(|v| match Value::try_from(Cbor(v.clone()))? {
+									Value::Geometry(Geometry::Line(v)) => Ok(v),
+									_ => Err("Expected a CBOR array with Geometry Line values")
+								})
+								.collect::<Result<Vec<LineString>, &str>>()?;
+
+							Ok(Value::Geometry(Geometry::MultiLine(MultiLineString::new(lines))))
+						},
+						_ => Err("Expected a CBOR array with Geometry Point values"),
+					},
+					TAG_GEOMETRY_MULTIPOLYGON => match v.deref() {
+						Data::Array(v) => {
+							let polygons = v
+								.iter()
+								.map(|v| match Value::try_from(Cbor(v.clone()))? {
+									Value::Geometry(Geometry::Polygon(v)) => Ok(v),
+									_ => Err("Expected a CBOR array with Geometry Polygon values")
+								})
+								.collect::<Result<Vec<Polygon>, &str>>()?;
+
+							Ok(Value::Geometry(Geometry::MultiPolygon(MultiPolygon::from(polygons))))
+						},
+						_ => Err("Expected a CBOR array with Geometry Polygon values"),
+					},
+					TAG_GEOMETRY_COLLECTION => match v.deref() {
+						Data::Array(v) => {
+							let geometries = v
+								.iter()
+								.map(|v| match Value::try_from(Cbor(v.clone()))? {
+									Value::Geometry(v) => Ok(v),
+									_ => Err("Expected a CBOR array with Geometry values")
+								})
+								.collect::<Result<Vec<Geometry>, &str>>()?;
+
+							Ok(Value::Geometry(Geometry::Collection(geometries)))
+						},
+						_ => Err("Expected a CBOR array with Geometry values"),
+					},
 					// An unknown tag
 					_ => Err("Encountered an unknown CBOR tag"),
 				}
@@ -175,8 +296,69 @@ impl TryFrom<Value> for Cbor {
 					},
 				])),
 			))),
+			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
+			Value::Geometry(v) => Ok(Cbor(encode_geometry(v))),
 			// We shouldn't reach here
 			_ => unreachable!(),
 		}
+	}
+}
+
+fn encode_geometry(v: Geometry) -> Data {
+	match v {
+		Geometry::Point(v) => Data::Tag(TAG_GEOMETRY_POINT, Box::new(
+			Data::Array(vec![
+				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
+				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
+			])
+		)),
+		Geometry::Line(v) => {
+			let data = v
+				.points()
+				.map(|v| encode_geometry(v.into()))
+				.collect::<Vec<Data>>();
+
+			Data::Tag(TAG_GEOMETRY_LINE, Box::new(Data::Array(data)))
+		},
+		Geometry::Polygon(v) => {
+			let data = once(v.exterior())
+				.chain(v.interiors())
+				.map(|v| encode_geometry(v.clone().into()))
+				.collect::<Vec<Data>>();
+
+			Data::Tag(TAG_GEOMETRY_POLYGON, Box::new(Data::Array(data)))
+		},
+		Geometry::MultiPoint(v) => {
+			let data = v
+				.iter()
+				.map(|v| encode_geometry(v.clone().into()))
+				.collect::<Vec<Data>>();
+
+			Data::Tag(TAG_GEOMETRY_MULTIPOINT, Box::new(Data::Array(data)))
+		},
+		Geometry::MultiLine(v) => {
+			let data = v
+				.iter()
+				.map(|v| encode_geometry(v.clone().into()))
+				.collect::<Vec<Data>>();
+
+			Data::Tag(TAG_GEOMETRY_MULTILINE, Box::new(Data::Array(data)))
+		},
+		Geometry::MultiPolygon(v) => {
+			let data = v
+				.iter()
+				.map(|v| encode_geometry(v.clone().into()))
+				.collect::<Vec<Data>>();
+
+			Data::Tag(TAG_GEOMETRY_MULTIPOLYGON, Box::new(Data::Array(data)))
+		},
+		Geometry::Collection(v) => {
+			let data = v
+				.iter()
+				.map(|v| encode_geometry(v.clone()))
+				.collect::<Vec<Data>>();
+
+			Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data)))
+		},
 	}
 }
