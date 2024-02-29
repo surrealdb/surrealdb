@@ -150,6 +150,7 @@ mod tests {
 			name: crate::sql::Ident(db.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
+				store_original: false,
 			}),
 			..Default::default()
 		};
@@ -157,6 +158,7 @@ mod tests {
 			name: tb.into(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
+				store_original: false,
 			}),
 			..Default::default()
 		};
