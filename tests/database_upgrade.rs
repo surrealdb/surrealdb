@@ -22,12 +22,9 @@ mod database_upgrade {
 	const USER: &str = "root";
 	const PASS: &str = "root";
 
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_1_0_1() {
+	async fn upgrade_test_1_0(version: &str) {
 		// Start the docker instance
-		let (path, mut docker, client) = start_docker("1.0.1").await;
+		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
@@ -53,9 +50,20 @@ mod database_upgrade {
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_1_1() {
+	async fn upgrade_test_1_0_0() {
+		upgrade_test_1_0("1.0.0").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_0_1() {
+		upgrade_test_1_0("1.0.1").await;
+	}
+
+	async fn upgrade_test_1_1(version: &str) {
 		// Start the docker instance
-		let (path, mut docker, client) = start_docker("v1.1.1").await;
+		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
@@ -84,9 +92,20 @@ mod database_upgrade {
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
-	async fn upgrade_test_1_2_1() {
+	async fn upgrade_test_1_1_0() {
+		upgrade_test_1_1("v1.1.0").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_1_1() {
+		upgrade_test_1_1("v1.1.1").await;
+	}
+
+	async fn upgrade_test_1_2(version: &str) {
 		// Start the docker instance
-		let (path, mut docker, client) = start_docker("v1.2.1").await;
+		let (path, mut docker, client) = start_docker(version).await;
 
 		// Create the data set
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
@@ -111,6 +130,20 @@ mod database_upgrade {
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
 		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_2_0() {
+		upgrade_test_1_2("v1.2.0").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_2_1() {
+		upgrade_test_1_2("v1.2.1").await;
 	}
 
 	// *******
