@@ -20,9 +20,9 @@ If this pull request is related to other pull requests, or resolves any issues, 
 
 ## Does this change need documentation?
 
-If this pull request requires changes, updates, or improvements to the documentation, then add a corresponding pull request on the [docs.surrealdb.com](https://github.com/surrealdb/docs.surrealdb.com) repository, and link to it here.
+If this pull request requires changes, updates, or improvements to the documentation, then add a corresponding issue on the [docs.surrealdb.com](https://github.com/surrealdb/docs.surrealdb.com) repository, and link to it here.
 
-<!-- Delete one of the following lines as necessary, and enter the correct corresponding pull request number. -->
+<!-- Delete one of the following lines as necessary, and enter the correct corresponding issue number. -->
 
 - [ ] No documentation needed
 - [ ] surrealdb/docs.surrealdb.com#1
