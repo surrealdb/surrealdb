@@ -177,19 +177,27 @@ pub enum Delim {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum DistanceKind {
+	Chebyshev,
+	Cosine,
 	Euclidean,
-	Manhattan,
 	Hamming,
+	Jaccard,
+	Manhattan,
 	Minkowski,
+	Pearson,
 }
 
 impl DistanceKind {
 	pub fn as_str(&self) -> &'static str {
 		match self {
+			DistanceKind::Chebyshev => "CHEBYSHEV",
+			DistanceKind::Cosine => "COSINE",
 			DistanceKind::Euclidean => "EUCLIDEAN",
-			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Hamming => "HAMMING",
+			DistanceKind::Jaccard => "JACCARD",
+			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Minkowski => "MINKOWSKI",
+			DistanceKind::Pearson => "PEARSON",
 		}
 	}
 }
