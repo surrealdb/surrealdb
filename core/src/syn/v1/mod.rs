@@ -107,7 +107,7 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 		// Continue parsing the query
 		_ => match parser(input).finish() {
 			// The query was parsed successfully
-			Ok((v, parsed)) if v.is_empty() => Ok(parsed),
+			Ok(("", parsed)) => Ok(parsed),
 			// There was unparsed SQL remaining
 			Ok((_, _)) => Err(Error::QueryRemaining),
 			// There was an error when parsing the query
