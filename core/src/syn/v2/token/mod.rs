@@ -8,6 +8,7 @@ pub use keyword::Keyword;
 mod mac;
 pub(crate) use mac::t;
 
+use crate::sql::change_feed_include::ChangeFeedInclude;
 use crate::sql::{language::Language, Algorithm};
 
 /// A location in the source passed to the lexer.
@@ -224,6 +225,7 @@ pub enum NumberKind {
 pub enum TokenKind {
 	Keyword(Keyword),
 	Algorithm(Algorithm),
+	ChangeFeedInclude(ChangeFeedInclude),
 	Language(Language),
 	Distance(DistanceKind),
 	Operator(Operator),
@@ -383,6 +385,7 @@ impl TokenKind {
 			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
+			TokenKind::ChangeFeedInclude(_) => "change feed include",
 		}
 	}
 }
