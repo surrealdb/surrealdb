@@ -7,11 +7,15 @@ mod isready;
 mod ml;
 mod sql;
 mod start;
+#[cfg(test)]
+mod test;
 mod upgrade;
 mod validate;
 pub(crate) mod validator;
 mod version;
+mod version_client;
 
+use crate::cli::version_client::VersionClient;
 use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use backup::BackupCommandArguments;
@@ -21,6 +25,8 @@ use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
+use once_cell::sync::Lazy;
+use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
 use std::ops::Deref;
@@ -91,7 +97,19 @@ pub async fn init() -> ExitCode {
 	// Parse the CLI arguments
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
-	check_upgrade().await;
+	let client = Box::new(version_client::new(Some(Duration::from_millis(500))));
+	if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
+		match opt_version {
+			None => {
+				warn!("A new version of SurrealDB may be available.");
+			}
+			Some(new_version) => {
+				warn!("A new version of SurrealDB is available: {}", new_version);
+			}
+		}
+		// TODO ansi_term crate?
+		warn!("You can upgrade using the {} command", "surreal upgrade");
+	}
 	// After version warning we can run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
@@ -130,18 +148,24 @@ pub async fn init() -> ExitCode {
 	}
 }
 
-/// Check if there is a newer version and warn the user that they should upgrade
-async fn check_upgrade() {
-	if let Ok(version) = upgrade::fetch("latest", Some(Duration::from_millis(500))).await {
+/// Check if there is a newer version
+/// Ok = No upgrade needed
+/// Err = Upgrade needed, returns the new version if it is available
+async fn check_upgrade(
+	client: &Box<dyn VersionClient>,
+	pkg_version: &str,
+) -> Result<(), Option<Version>> {
+	if let Ok(version) = client.fetch("latest").await {
 		// Request was successful, compare against current
-		let old_version = upgrade::parse_version(PKG_VERSION.deref()).unwrap();
+		let old_version = upgrade::parse_version(pkg_version).unwrap();
 		let new_version = upgrade::parse_version(&version).unwrap();
 		if old_version < new_version {
-			warn!("A new version of SurrealDB is available: {}", new_version);
-			warn!("You can upgrade using the {} command", "surreal upgrade");
+			Err(Some(new_version))
 		}
 	} else {
 		// Request failed, check against date
 		// TODO: We don't have an "expiry" set per-version, so this is a todo
+		// It would return Err(None) if the version is too old
 	}
+	Ok(())
 }

@@ -1,3 +1,5 @@
+use crate::cli::version_client;
+use crate::cli::version_client::VersionClient;
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
@@ -36,18 +38,19 @@ impl UpgradeCommandArguments {
 		let beta = "beta";
 		// Convert the version to lowercase, if supplied
 		let version = self.version.as_deref().map(str::to_ascii_lowercase);
+		let client = version_client::new(None);
 
 		if self.nightly || version.as_deref() == Some(nightly) {
 			Ok(Cow::Borrowed(nightly))
 		} else if self.beta || version.as_deref() == Some(beta) {
-			fetch(beta, None).await
+			client.fetch(beta).await
 		} else if let Some(version) = version {
 			// Parse the version string to make sure it's valid, return an error if not
 			let version = parse_version(&version)?;
 			// Return the version, ensuring it's prefixed by `v`
 			Ok(Cow::Owned(format!("v{version}")))
 		} else {
-			fetch("latest", None).await
+			client.fetch("latest").await
 		}
 	}
 }
@@ -78,6 +81,7 @@ pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
 }
 
 pub(crate) async fn fetch(version: &str, timeout: Option<Duration>) -> Result<Cow<'_, str>, Error> {
+	let client = version_client::new(None);
 	let mut client = reqwest::Client::builder();
 	if let Some(timeout) = timeout {
 		client = client.timeout(timeout);
