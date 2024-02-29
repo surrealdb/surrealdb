@@ -10,6 +10,9 @@ on:
   pull_request:
   merge_group:
 
+env:
+  RUSTFLAGS: -D warnings
+
 defaults:
   run:
     shell: bash
