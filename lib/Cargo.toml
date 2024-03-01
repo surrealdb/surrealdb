@@ -53,7 +53,6 @@ rustls = [
     "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
 ml = ["surrealdb-core/ml"]
-ml2 = ["surrealdb-core/ml2"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
 sql2 = ["surrealdb-core/sql2"]
