@@ -635,7 +635,7 @@ where
 	/// let created: Option<Person> = result.take(0)?;
 	///
 	/// // Get all of the results from the second query
-	/// let people: Vec<Person> = result.take(1)?; 
+	/// let people: Vec<Person> = result.take(1)?;
 	///
 	/// #[derive(serde::Deserialize)]
 	/// struct Country {
@@ -644,7 +644,7 @@ where
 	///
 	/// // The .take() method can be used for error handling
 	///
-	/// // If the table has no defined schema, this query will 
+	/// // If the table has no defined schema, this query will
 	/// // create a `country` on the SurrealDB side, but...
 	/// let mut result = db
 	/// 	.query("CREATE country")
