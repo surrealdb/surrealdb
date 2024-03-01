@@ -639,7 +639,7 @@ where
 	///
 	/// #[derive(serde::Deserialize)]
 	/// struct Country {
-	/// 	name: String
+	///     name: String
 	/// }
 	///
 	/// // The .take() method can be used for error handling
@@ -647,13 +647,13 @@ where
 	/// // If the table has no defined schema, this query will
 	/// // create a `country` on the SurrealDB side, but...
 	/// let mut result = db
-	/// 	.query("CREATE country")
-	/// 	.await?;
+	///     .query("CREATE country")
+	///     .await?;
 	///
 	/// // It won't deserialize into a Country struct
 	/// if let Err(e) = result.take::<Option<Country>>(0) {
-	/// 	println!("Failed to make a country: {e:#?}");
-	/// 	assert!(e.to_string().contains("missing field `name`"));
+	///     println!("Failed to make a country: {e:#?}");
+	///     assert!(e.to_string().contains("missing field `name`"));
 	/// }
 	/// #
 	/// # Ok(())
