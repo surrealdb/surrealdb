@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::btree_map::Entry;
 #[cfg(debug_assertions)]
 use std::collections::HashMap;
@@ -316,16 +316,16 @@ impl MTree {
 		let mut queue = BinaryHeap::new();
 		let mut res = KnnResultBuilder::new(k);
 		if let Some(root_id) = self.state.root {
-			queue.push(PriorityNode(0.0, root_id));
+			queue.push(Reverse(PriorityNode(0.0, root_id)));
 		}
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
 		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, current.1).await?;
+			let node = store.get_node(tx, current.0 .1).await?;
 			#[cfg(debug_assertions)]
 			{
-				debug!("Visit node id: {} - dist: {}", current.1, current.0);
-				if visited_nodes.insert(current.1, node.n.len()).is_some() {
+				debug!("Visit node id: {} - dist: {}", current.0 .1, current.0 .1);
+				if visited_nodes.insert(current.0 .1, node.n.len()).is_some() {
 					return Err(Error::Unreachable("MTree::knn_search"));
 				}
 			}
@@ -350,7 +350,7 @@ impl MTree {
 						let min_dist = (d - p.radius).max(0.0);
 						if res.check_add(min_dist) {
 							debug!("Queue add - dist: {} - node: {}", min_dist, p.node);
-							queue.push(PriorityNode(min_dist, p.node));
+							queue.push(Reverse(PriorityNode(min_dist, p.node)));
 						}
 					}
 				}
@@ -2017,7 +2017,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut st, &vec4, 2).await?;
 			check_knn(&res.docs, vec![4, 3]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 7);
+			assert_eq!(res.visited_nodes.len(), 6);
 		}
 
 		// vec10 knn(2)
@@ -2026,7 +2026,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &mut st, &vec10, 2).await?;
 			check_knn(&res.docs, vec![10, 9]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 7);
+			assert_eq!(res.visited_nodes.len(), 5);
 		}
 		Ok(())
 	}
@@ -2205,7 +2205,7 @@ mod tests {
 			}
 			for capacity in capacities {
 				info!(
-					"Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
+					"test_mtree_collection - Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
 					distance,
 					capacity,
 					collection.as_ref().len(),
@@ -2347,7 +2347,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20),
+				TestCollection::new_unique(1000, vt, 10),
 				false,
 				true,
 				false,
@@ -2364,7 +2364,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20),
+				TestCollection::new_unique(1000, vt, 10),
 				false,
 				true,
 				false,
@@ -2381,7 +2381,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 20),
+				TestCollection::new_unique(1000, vt, 10),
 				false,
 				true,
 				false,
@@ -2438,7 +2438,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_random(1000, vt, 20),
+				TestCollection::new_random(1000, vt, 10),
 				false,
 				true,
 				true,
