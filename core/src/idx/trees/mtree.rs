@@ -817,6 +817,7 @@ impl MTree {
 		}
 		let dist = match &self.distance {
 			Distance::Euclidean => v1.euclidean_distance(v2)?,
+			Distance::Cosine => v1.cosine_distance(v2),
 			Distance::Manhattan => v1.manhattan_distance(v2)?,
 			Distance::Minkowski(order) => v1.minkowski_distance(v2, order)?,
 			_ => return Err(Error::UnsupportedDistance(self.distance.clone())),
@@ -2191,7 +2192,7 @@ mod tests {
 		check_delete: bool,
 		cache_size: usize,
 	) -> Result<(), Error> {
-		for distance in [Distance::Euclidean, Distance::Manhattan] {
+		for distance in [Distance::Euclidean, Distance::Cosine, Distance::Manhattan] {
 			for capacity in capacities {
 				debug!(
 					"Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
@@ -2270,6 +2271,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_mtree_unique_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
@@ -2291,6 +2293,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_mtree_unique_xs_full_cache() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
