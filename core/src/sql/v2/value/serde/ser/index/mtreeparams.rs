@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::index::{Distance, MTreeParams, VectorType};
+use crate::sql::index::{Distance, Distance1, MTreeParams, VectorType};
 use crate::sql::value::serde::ser;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -66,6 +66,9 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 			"dimension" => {
 				self.dimension = value.serialize(ser::primitive::u16::Serializer.wrap())?;
 			}
+			"_distance" => {
+				self.distance = value.serialize(ser::distance::Serializer.wrap())?;
+			}
 			"distance" => {
 				self.distance = value.serialize(ser::distance::Serializer.wrap())?;
 			}
@@ -94,6 +97,7 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(MTreeParams {
 			dimension: self.dimension,
+			_distance: Distance1::Euclidean,
 			distance: self.distance,
 			vector_type: self.vector_type,
 			capacity: self.capacity,
@@ -108,6 +112,7 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 fn mtree_params() {
 	let params = MTreeParams {
 		dimension: 1,
+		_distance: Default::default(),
 		distance: Default::default(),
 		vector_type: Default::default(),
 		capacity: 2,

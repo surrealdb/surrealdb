@@ -1,5 +1,3 @@
-mod error;
-mod person;
 use axum_example::create_router;
 use std::env;
 use surrealdb::engine::any;

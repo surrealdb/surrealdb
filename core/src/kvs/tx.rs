@@ -1,30 +1,13 @@
-use super::kv::Add;
-use super::kv::Convert;
-use super::Key;
-use super::Val;
-use crate::cf;
-use crate::dbs::node::ClusterMembership;
-use crate::dbs::node::Timestamp;
-use crate::err::Error;
-use crate::idg::u32::U32;
-use crate::key::error::KeyCategory;
-use crate::key::key_req::KeyRequirements;
-use crate::kvs::cache::Cache;
-use crate::kvs::cache::Entry;
-use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::{LqEntry, LqValue};
-use crate::kvs::Check;
-use crate::sql;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::thing::Thing;
-use crate::sql::Strand;
-use crate::sql::Value;
-use crate::vs::Oracle;
-use crate::vs::Versionstamp;
+use std::borrow::Cow;
+use std::fmt;
+use std::fmt::Debug;
+use std::ops::Range;
+use std::sync::Arc;
+
 use channel::{Receiver, Sender};
 use futures::lock::Mutex;
+use uuid::Uuid;
+
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
@@ -40,12 +23,33 @@ use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::DefineUserStatement;
 use sql::statements::LiveStatement;
-use std::borrow::Cow;
-use std::fmt;
-use std::fmt::Debug;
-use std::ops::Range;
-use std::sync::Arc;
-use uuid::Uuid;
+
+use crate::cf;
+use crate::dbs::node::ClusterMembership;
+use crate::dbs::node::Timestamp;
+use crate::err::Error;
+use crate::idg::u32::U32;
+use crate::key::error::KeyCategory;
+use crate::key::key_req::KeyRequirements;
+use crate::kvs::cache::Cache;
+use crate::kvs::cache::Entry;
+use crate::kvs::clock::SizedClock;
+use crate::kvs::lq_structs::{LqEntry, LqValue, TrackedResult};
+use crate::kvs::Check;
+use crate::sql;
+use crate::sql::paths::EDGE;
+use crate::sql::paths::IN;
+use crate::sql::paths::OUT;
+use crate::sql::thing::Thing;
+use crate::sql::Strand;
+use crate::sql::Value;
+use crate::vs::Oracle;
+use crate::vs::Versionstamp;
+
+use super::kv::Add;
+use super::kv::Convert;
+use super::Key;
+use super::Val;
 
 const LQ_CAPACITY: usize = 100;
 
@@ -324,17 +328,19 @@ impl Transaction {
 		}
 	}
 
-	#[allow(unused)]
-	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
-		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
+	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
+	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
+		let mut lq: Vec<TrackedResult> = Vec::with_capacity(LQ_CAPACITY);
 		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
-			lq.push(l);
+			lq.push(TrackedResult::LiveQuery(l));
 		}
 		lq
 	}
 
 	/// Sends a live query to the transaction which is forwarded only once committed
 	/// And removed once a transaction is aborted
+	// allow(dead_code) because this is used in v2, but not v1
+	#[allow(dead_code)]
 	pub(crate) fn pre_commit_register_live_query(
 		&mut self,
 		lq_entry: LqEntry,
@@ -3132,7 +3138,7 @@ mod tests {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tx_test {
-	use crate::kvs::lq_structs::LqEntry;
+	use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -3170,6 +3176,6 @@ mod tx_test {
 		// Verify data
 		let live_queries = tx.consume_pending_live_queries();
 		assert_eq!(live_queries.len(), 1);
-		assert_eq!(live_queries[0], lq_entry);
+		assert_eq!(live_queries[0], TrackedResult::LiveQuery(lq_entry));
 	}
 }
