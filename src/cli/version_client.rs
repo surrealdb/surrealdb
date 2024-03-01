@@ -1,17 +1,20 @@
+#[allow(unused_imports)]
+// This is used in format! macro
+use crate::cli::upgrade::ROOT;
 use crate::err::Error;
-use pprof::Error::IoError;
 use reqwest::Client;
 use std::borrow::Cow;
+#[cfg(test)]
 use std::collections::BTreeMap;
-use std::future::Future;
+use std::io::Error as IoError;
 use std::io::ErrorKind;
 use std::time::Duration;
 
 pub(crate) trait VersionClient {
-	async fn fetch(&self, version: &str) -> Result<Cow<'_, str>, Error>;
+	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>, Error>;
 }
 
-struct ReqwestVersionClient {
+pub(crate) struct ReqwestVersionClient {
 	client: Client,
 }
 
@@ -35,7 +38,7 @@ pub(crate) fn new(timeout: Option<Duration>) -> Result<ReqwestVersionClient, Err
 // }
 
 impl VersionClient for ReqwestVersionClient {
-	async fn fetch(&self, version: &str) -> Result<Cow<'_, str>, Error> {
+	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>, Error> {
 		let request = self.client.get(format!("{ROOT}/{version}.txt")).build().unwrap();
 		let response = self.client.execute(request).await?;
 		if !response.status().is_success() {
@@ -55,11 +58,8 @@ pub(crate) struct MapVersionClient {
 
 #[cfg(test)]
 impl VersionClient for MapVersionClient {
-	async fn fetch(&self, version: &str) -> Result<Cow<'_, str>, Error> {
+	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>, Error> {
 		let found = self.fetch_mock.get(version).unwrap();
-		match found {
-			Ok(s) => Ok(Cow::Borrowed(s)),
-			Err(e) => return Err((*e).clone()),
-		}
+		found().map(Cow::Owned)
 	}
 }

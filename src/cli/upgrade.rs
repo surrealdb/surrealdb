@@ -10,10 +10,9 @@ use std::io::{Error as IoError, ErrorKind};
 use std::ops::Deref;
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
 use surrealdb::env::{arch, os};
 
-const ROOT: &str = "https://download.surrealdb.com";
+pub(crate) const ROOT: &str = "https://download.surrealdb.com";
 const BETA: &str = "beta";
 
 #[derive(Args, Debug)]
@@ -44,7 +43,8 @@ impl UpgradeCommandArguments {
 		if self.nightly || version.as_deref() == Some(nightly) {
 			Ok(Cow::Borrowed(nightly))
 		} else if self.beta || version.as_deref() == Some(beta) {
-			client.fetch(BETA).await
+			let a = client.fetch(BETA).await;
+			a
 		} else if let Some(version) = version {
 			// Parse the version string to make sure it's valid, return an error if not
 			let version = parse_version(&version)?;

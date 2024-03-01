@@ -25,7 +25,6 @@ use export::ExportCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
-use once_cell::sync::Lazy;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
@@ -160,7 +159,7 @@ async fn check_upgrade<C: VersionClient>(
 		let old_version = upgrade::parse_version(pkg_version).unwrap();
 		let new_version = upgrade::parse_version(&version).unwrap();
 		if old_version < new_version {
-			Err(Some(new_version))
+			return Err(Some(new_version));
 		}
 	} else {
 		// Request failed, check against date

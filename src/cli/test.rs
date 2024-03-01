@@ -2,15 +2,16 @@ use crate::cli::check_upgrade;
 use crate::cli::version_client::MapVersionClient;
 use crate::err::Error;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 #[test_log::test(tokio::test)]
 pub async fn test_version_upgrade() {
-	let client = MapVersionClient {
-		fetch_mock: map!(
-			"latest".to_string() => || -> Result<String, Error>{Ok("1.0.0".to_string())}
-			,
-		),
+	let mut client = MapVersionClient {
+		fetch_mock: BTreeMap::new(),
 	};
+	client
+		.fetch_mock
+		.insert("latest".to_string(), || -> Result<String, Error> { Ok("1.0.0".to_string()) });
 	check_upgrade(&client, "1.0.0")
 		.await
 		.expect("Expected the versions to be the same and not require an upgrade");
