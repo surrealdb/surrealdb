@@ -29,14 +29,6 @@ pub(crate) fn new(timeout: Option<Duration>) -> Result<ReqwestVersionClient, Err
 	})
 }
 
-// impl ReqwestVersionClient {
-// 	fn bla(&self)  {
-// 		let a =self.fetch("str");
-// 		let a = Box::new(a);
-// 		return a;
-// 	}
-// }
-
 impl VersionClient for ReqwestVersionClient {
 	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>, Error> {
 		let request = self.client.get(format!("{ROOT}/{version}.txt")).build().unwrap();
