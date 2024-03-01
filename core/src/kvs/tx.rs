@@ -2595,6 +2595,7 @@ impl Transaction {
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
 	// you must call the `complete_changes` function and then commit the transaction.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn record_change(
 		&mut self,
 		ns: &str,

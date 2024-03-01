@@ -60,6 +60,7 @@ impl Writer {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn update(
 		&mut self,
 		ns: &str,
