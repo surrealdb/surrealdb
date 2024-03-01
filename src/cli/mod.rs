@@ -79,7 +79,16 @@ enum Commands {
 }
 
 pub async fn init() -> ExitCode {
+	// Start a new CPU profiler
+	#[cfg(feature = "performance-profiler")]
+	let guard = pprof::ProfilerGuardBuilder::default()
+		.frequency(1000)
+		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
+		.build()
+		.unwrap();
+	// Parse the CLI arguments
 	let args = Cli::parse();
+	// Run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
 		Commands::Backup(args) => backup::init(args).await,
@@ -92,6 +101,23 @@ pub async fn init() -> ExitCode {
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 	};
+	// Save the flamegraph and profile
+	#[cfg(feature = "performance-profiler")]
+	if let Ok(report) = guard.report().build() {
+		// Import necessary traits
+		use pprof::protos::Message;
+		use std::io::Write;
+		// Output a flamegraph
+		let file = std::fs::File::create("flamegraph.svg").unwrap();
+		report.flamegraph(file).unwrap();
+		// Output a pprof
+		let mut file = std::fs::File::create("profile.pb").unwrap();
+		let profile = report.pprof().unwrap();
+		let mut content = Vec::new();
+		profile.encode(&mut content).unwrap();
+		file.write_all(&content).unwrap();
+	};
+	// Error and exit the programme
 	if let Err(e) = output {
 		error!("{}", e);
 		ExitCode::FAILURE
