@@ -14,6 +14,8 @@ use surrealdb::env::{arch, os};
 
 pub(crate) const ROOT: &str = "https://download.surrealdb.com";
 const BETA: &str = "beta";
+const LATEST: &str = "latest";
+const NIGHTLY: &str = "nightly";
 
 #[derive(Args, Debug)]
 pub struct UpgradeCommandArguments {
@@ -34,24 +36,21 @@ pub struct UpgradeCommandArguments {
 impl UpgradeCommandArguments {
 	/// Get the version string to download based on the user preference
 	async fn version(&self) -> Result<Cow<'_, str>, Error> {
-		let nightly = "nightly";
-		let beta = "beta";
 		// Convert the version to lowercase, if supplied
 		let version = self.version.as_deref().map(str::to_ascii_lowercase);
 		let client = version_client::new(None)?;
 
-		if self.nightly || version.as_deref() == Some(nightly) {
-			Ok(Cow::Borrowed(nightly))
-		} else if self.beta || version.as_deref() == Some(beta) {
-			let a = client.fetch(BETA).await;
-			a
+		if self.nightly || version.as_deref() == Some(NIGHTLY) {
+			Ok(Cow::Borrowed(NIGHTLY))
+		} else if self.beta || version.as_deref() == Some(BETA) {
+			client.fetch(BETA).await
 		} else if let Some(version) = version {
 			// Parse the version string to make sure it's valid, return an error if not
 			let version = parse_version(&version)?;
 			// Return the version, ensuring it's prefixed by `v`
 			Ok(Cow::Owned(format!("v{version}")))
 		} else {
-			client.fetch("latest").await
+			client.fetch(LATEST).await
 		}
 	}
 }
