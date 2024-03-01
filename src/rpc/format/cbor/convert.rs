@@ -1,17 +1,17 @@
 use ciborium::Value as Data;
-use surrealdb::sql::Geometry;
+use geo::{LineString, Point, Polygon};
+use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use std::collections::BTreeMap;
+use std::iter::once;
 use std::ops::Deref;
 use surrealdb::sql::Datetime;
 use surrealdb::sql::Duration;
+use surrealdb::sql::Geometry;
 use surrealdb::sql::Id;
 use surrealdb::sql::Number;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
-use std::iter::once;
-use geo::{LineString, Point, Polygon};
-use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 
 const TAG_DATETIME: u64 = 0;
 const TAG_NONE: u64 = 6;
@@ -169,7 +169,7 @@ impl TryFrom<Cbor> for Value {
 								})
 								.collect::<Result<Vec<LineString>, &str>>()?;
 
-							let first = match lines.get(0) {
+							let first = match lines.first() {
 								Some(v) => v,
 								_ => return Err("Expected a CBOR array with at least two Geometry Line values")
 							};
@@ -292,34 +292,34 @@ impl TryFrom<Value> for Cbor {
 						Id::String(v) => Data::Text(v),
 						Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
-						Id::Generate(_) => return Err("Cannot encode an ungenerated Record ID into CBOR"),
+						Id::Generate(_) => {
+							return Err("Cannot encode an ungenerated Record ID into CBOR")
+						}
 					},
 				])),
 			))),
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
 			Value::Geometry(v) => Ok(Cbor(encode_geometry(v))),
 			// We shouldn't reach here
-			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value")
+			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value"),
 		}
 	}
 }
 
 fn encode_geometry(v: Geometry) -> Data {
 	match v {
-		Geometry::Point(v) => Data::Tag(TAG_GEOMETRY_POINT, Box::new(
-			Data::Array(vec![
+		Geometry::Point(v) => Data::Tag(
+			TAG_GEOMETRY_POINT,
+			Box::new(Data::Array(vec![
 				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
 				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
-			])
-		)),
+			])),
+		),
 		Geometry::Line(v) => {
-			let data = v
-				.points()
-				.map(|v| encode_geometry(v.into()))
-				.collect::<Vec<Data>>();
+			let data = v.points().map(|v| encode_geometry(v.into())).collect::<Vec<Data>>();
 
 			Data::Tag(TAG_GEOMETRY_LINE, Box::new(Data::Array(data)))
-		},
+		}
 		Geometry::Polygon(v) => {
 			let data = once(v.exterior())
 				.chain(v.interiors())
@@ -327,38 +327,26 @@ fn encode_geometry(v: Geometry) -> Data {
 				.collect::<Vec<Data>>();
 
 			Data::Tag(TAG_GEOMETRY_POLYGON, Box::new(Data::Array(data)))
-		},
+		}
 		Geometry::MultiPoint(v) => {
-			let data = v
-				.iter()
-				.map(|v| encode_geometry(v.clone().into()))
-				.collect::<Vec<Data>>();
+			let data = v.iter().map(|v| encode_geometry((*v).into())).collect::<Vec<Data>>();
 
 			Data::Tag(TAG_GEOMETRY_MULTIPOINT, Box::new(Data::Array(data)))
-		},
+		}
 		Geometry::MultiLine(v) => {
-			let data = v
-				.iter()
-				.map(|v| encode_geometry(v.clone().into()))
-				.collect::<Vec<Data>>();
+			let data = v.iter().map(|v| encode_geometry(v.clone().into())).collect::<Vec<Data>>();
 
 			Data::Tag(TAG_GEOMETRY_MULTILINE, Box::new(Data::Array(data)))
-		},
+		}
 		Geometry::MultiPolygon(v) => {
-			let data = v
-				.iter()
-				.map(|v| encode_geometry(v.clone().into()))
-				.collect::<Vec<Data>>();
+			let data = v.iter().map(|v| encode_geometry(v.clone().into())).collect::<Vec<Data>>();
 
 			Data::Tag(TAG_GEOMETRY_MULTIPOLYGON, Box::new(Data::Array(data)))
-		},
+		}
 		Geometry::Collection(v) => {
-			let data = v
-				.iter()
-				.map(|v| encode_geometry(v.clone()))
-				.collect::<Vec<Data>>();
+			let data = v.iter().map(|v| encode_geometry(v.clone())).collect::<Vec<Data>>();
 
 			Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data)))
-		},
+		}
 	}
 }
