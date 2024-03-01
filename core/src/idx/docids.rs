@@ -1,10 +1,10 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::TrieKeys;
-use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
+use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::{IndexStores, TreeNodeProvider};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
-use crate::kvs::{Key, Transaction, TransactionType};
-use revision::revisioned;
+use crate::kvs::{Key, Transaction, TransactionType, Val};
+use revision::{revisioned, Revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
@@ -157,7 +157,63 @@ struct State {
 	next_doc_id: DocId,
 }
 
-impl VersionedSerdeState for State {}
+impl VersionedSerdeState for State {
+	fn try_from_val(val: Val) -> Result<Self, Error> {
+		match Self::deserialize_revisioned(&mut val.as_slice()) {
+			Ok(r) => Ok(r),
+			// If it fails here, there is the chance it was an old version of BState
+			// that included the #[serde[skip]] updated parameter
+			Err(e) => match State1skip::deserialize_revisioned(&mut val.as_slice()) {
+				Ok(b_old) => Ok(b_old.into()),
+				Err(_) => match State1::deserialize_revisioned(&mut val.as_slice()) {
+					Ok(b_old) => Ok(b_old.into()),
+					// Otherwise we return the initial error
+					Err(_) => Err(Error::Revision(e)),
+				},
+			},
+		}
+	}
+}
+
+#[derive(Serialize, Deserialize)]
+#[revisioned(revision = 1)]
+struct State1 {
+	btree: BState1,
+	available_ids: Option<RoaringTreemap>,
+	next_doc_id: DocId,
+}
+
+impl From<State1> for State {
+	fn from(s: State1) -> Self {
+		Self {
+			btree: s.btree.into(),
+			available_ids: s.available_ids,
+			next_doc_id: s.next_doc_id,
+		}
+	}
+}
+
+impl VersionedSerdeState for State1 {}
+
+#[derive(Serialize, Deserialize)]
+#[revisioned(revision = 1)]
+struct State1skip {
+	btree: BState1skip,
+	available_ids: Option<RoaringTreemap>,
+	next_doc_id: DocId,
+}
+
+impl From<State1skip> for State {
+	fn from(s: State1skip) -> Self {
+		Self {
+			btree: s.btree.into(),
+			available_ids: s.available_ids,
+			next_doc_id: s.next_doc_id,
+		}
+	}
+}
+
+impl VersionedSerdeState for State1skip {}
 
 impl State {
 	fn new(default_btree_order: u32) -> Self {
