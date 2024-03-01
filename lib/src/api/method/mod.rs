@@ -635,7 +635,26 @@ where
 	/// let created: Option<Person> = result.take(0)?;
 	///
 	/// // Get all of the results from the second query
-	/// let people: Vec<Person> = result.take(1)?;
+	/// let people: Vec<Person> = result.take(1)?; 
+	///
+	/// #[derive(serde::Deserialize)]
+	/// struct Country {
+	/// 	name: String
+	/// }
+	///
+	/// // The .take() method can be used for error handling
+	///
+	/// // If the table has no defined schema, this query will 
+	/// // create a `country` on the SurrealDB side, but...
+	/// let mut result = db
+	/// 	.query("CREATE country")
+	/// 	.await?;
+	///
+	/// // It won't deserialize into a Country struct
+	/// if let Err(e) = result.take::<Option<Country>>(0) {
+	/// 	println!("Failed to make a country: {e:#?}");
+	/// 	assert!(e.to_string().contains("missing field `name`"));
+	/// }
 	/// #
 	/// # Ok(())
 	/// # }
