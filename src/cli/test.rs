@@ -1,7 +1,6 @@
 use crate::cli::check_upgrade;
 use crate::cli::version_client::MapVersionClient;
 use crate::err::Error;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 #[test_log::test(tokio::test)]
