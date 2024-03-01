@@ -332,7 +332,7 @@ impl Parser<'_> {
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
 		let expiry = self.next_token_value::<Duration>()?.0;
-		let mut store_original = if self.eat(t!("INCLUDE")) {
+		let store_original = if self.eat(t!("INCLUDE")) {
 			expected!(self, TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original));
 			true
 		} else {
@@ -375,13 +375,17 @@ impl Parser<'_> {
 	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
 		let dist = match self.next().kind {
 			TokenKind::Distance(x) => match x {
+				DistanceKind::Chebyshev => Distance::Chebyshev,
+				DistanceKind::Cosine => Distance::Cosine,
 				DistanceKind::Euclidean => Distance::Euclidean,
-				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Hamming => Distance::Hamming,
+				DistanceKind::Jaccard => Distance::Jaccard,
+				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Minkowski => {
 					let distance = self.next_token_value()?;
 					Distance::Minkowski(distance)
 				}
+				DistanceKind::Pearson => Distance::Pearson,
 			},
 			x => unexpected!(self, x, "a distance measure"),
 		};
