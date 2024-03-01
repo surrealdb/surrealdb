@@ -14,6 +14,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::error::Db as DbError;
+use crate::opt::WaitFor;
 use flume::Receiver;
 use std::collections::HashSet;
 use std::future::Future;
@@ -22,6 +23,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::watch;
 
 impl crate::api::Connection for Any {}
 
@@ -188,6 +190,7 @@ impl Connection for Any {
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
 				engine: PhantomData,
 			})
 		})

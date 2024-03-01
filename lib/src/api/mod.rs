@@ -11,6 +11,7 @@ mod conn;
 
 pub use method::query::Response;
 use semver::Version;
+use tokio::sync::watch;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
@@ -28,9 +29,13 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use self::opt::EndpointKind;
+use self::opt::WaitFor;
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
+
+// Channel for waiters
+type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
 const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0, <2.0.0", "20230701.55918b7c");
 const REVISION_SUPPORTED_SERVER_VERSION: Version = Version::new(1, 2, 0);
@@ -47,6 +52,7 @@ pub struct Connect<C: Connection, Response> {
 	address: Result<Endpoint>,
 	capacity: usize,
 	client: PhantomData<C>,
+	waiter: Arc<Waiter>,
 	response_type: PhantomData<Response>,
 }
 
@@ -109,6 +115,8 @@ where
 					client = Client::connect(endpoint, self.capacity).await?;
 				}
 			}
+			// Both ends of the channel are still alive at this point
+			client.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(client)
 		})
 	}
@@ -129,10 +137,7 @@ where
 			}
 			let mut endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
-			let mut client = Surreal {
-				router: Client::connect(endpoint.clone(), self.capacity).await?.router,
-				engine: PhantomData::<Client>,
-			};
+			let mut client = Client::connect(endpoint.clone(), self.capacity).await?;
 			if endpoint_kind.is_remote() {
 				let mut version = client.version().await?;
 				// we would like to be able to connect to pre-releases too
@@ -148,6 +153,8 @@ where
 				Arc::into_inner(client.router).expect("new connection to have no references");
 			let router = cell.into_inner().expect("router to be set");
 			self.router.set(router).map_err(|_| Error::AlreadyConnected)?;
+			// Both ends of the channel are still alive at this point
+			self.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(())
 		})
 	}
@@ -162,6 +169,7 @@ pub(crate) enum ExtraFeatures {
 /// A database client instance for embedded or remote databases
 pub struct Surreal<C: Connection> {
 	router: Arc<OnceLock<Router>>,
+	waiter: Arc<Waiter>,
 	engine: PhantomData<C>,
 }
 
@@ -199,6 +207,7 @@ where
 	fn clone(&self) -> Self {
 		Self {
 			router: self.router.clone(),
+			waiter: self.waiter.clone(),
 			engine: self.engine,
 		}
 	}

@@ -20,6 +20,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
+use crate::opt::WaitFor;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -41,6 +42,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -154,6 +156,7 @@ impl Connection for Client {
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
 				engine: PhantomData,
 			})
 		})

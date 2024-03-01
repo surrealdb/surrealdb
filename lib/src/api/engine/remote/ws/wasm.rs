@@ -18,6 +18,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
+use crate::opt::WaitFor;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -42,6 +43,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
@@ -94,6 +96,7 @@ impl Connection for Client {
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
 				engine: PhantomData,
 			})
 		})

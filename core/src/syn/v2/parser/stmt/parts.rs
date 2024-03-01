@@ -375,13 +375,17 @@ impl Parser<'_> {
 	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
 		let dist = match self.next().kind {
 			TokenKind::Distance(x) => match x {
+				DistanceKind::Chebyshev => Distance::Chebyshev,
+				DistanceKind::Cosine => Distance::Cosine,
 				DistanceKind::Euclidean => Distance::Euclidean,
-				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Hamming => Distance::Hamming,
+				DistanceKind::Jaccard => Distance::Jaccard,
+				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Minkowski => {
 					let distance = self.next_token_value()?;
 					Distance::Minkowski(distance)
 				}
+				DistanceKind::Pearson => Distance::Pearson,
 			},
 			x => unexpected!(self, x, "a distance measure"),
 		};
