@@ -15,15 +15,15 @@ struct ReqwestVersionClient {
 	client: Client,
 }
 
-pub(crate) fn new(timeout: Option<Duration>) -> ReqwestVersionClient {
+pub(crate) fn new(timeout: Option<Duration>) -> Result<ReqwestVersionClient, Error> {
 	let mut client = Client::builder();
 	if let Some(timeout) = timeout {
 		client = client.timeout(timeout);
 	}
 	let client = client.build()?;
-	ReqwestVersionClient {
+	Ok(ReqwestVersionClient {
 		client,
-	}
+	})
 }
 
 // impl ReqwestVersionClient {
@@ -50,7 +50,7 @@ impl VersionClient for ReqwestVersionClient {
 
 #[cfg(test)]
 pub(crate) struct MapVersionClient {
-	pub(crate) fetch_mock: BTreeMap<String, Result<String, Error>>,
+	pub(crate) fetch_mock: BTreeMap<String, fn() -> Result<String, Error>>,
 }
 
 #[cfg(test)]

@@ -97,7 +97,7 @@ pub async fn init() -> ExitCode {
 	// Parse the CLI arguments
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
-	let client = Box::new(version_client::new(Some(Duration::from_millis(500))));
+	let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
 	if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
 		match opt_version {
 			None => {
@@ -151,8 +151,8 @@ pub async fn init() -> ExitCode {
 /// Check if there is a newer version
 /// Ok = No upgrade needed
 /// Err = Upgrade needed, returns the new version if it is available
-async fn check_upgrade(
-	client: &Box<dyn VersionClient>,
+async fn check_upgrade<C: VersionClient>(
+	client: &C,
 	pkg_version: &str,
 ) -> Result<(), Option<Version>> {
 	if let Ok(version) = client.fetch("latest").await {

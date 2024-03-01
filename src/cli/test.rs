@@ -1,13 +1,23 @@
 use crate::cli::check_upgrade;
 use crate::cli::version_client::MapVersionClient;
+use crate::err::Error;
 use std::borrow::Cow;
 
 #[test_log::test(tokio::test)]
 pub async fn test_version_upgrade() {
 	let client = MapVersionClient {
 		fetch_mock: map!(
-			"latest".to_string() => Ok("1.0.0".to_string()),
+			"latest".to_string() => || -> Result<String, Error>{Ok("1.0.0".to_string())}
+			,
 		),
 	};
-	check_upgrade(&client, "latest").await;
+	check_upgrade(&client, "1.0.0")
+		.await
+		.expect("Expected the versions to be the same and not require an upgrade");
+	check_upgrade(&client, "0.9.0")
+		.await
+		.expect_err("Expected the versions to be different and require an upgrade");
+	check_upgrade(&client, "1.1.0")
+		.await
+		.expect("Expected the versions to be illogical, and not require and upgrade");
 }

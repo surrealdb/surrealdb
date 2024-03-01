@@ -14,6 +14,7 @@ use std::time::Duration;
 use surrealdb::env::{arch, os};
 
 const ROOT: &str = "https://download.surrealdb.com";
+const BETA: &str = "beta";
 
 #[derive(Args, Debug)]
 pub struct UpgradeCommandArguments {
@@ -38,12 +39,12 @@ impl UpgradeCommandArguments {
 		let beta = "beta";
 		// Convert the version to lowercase, if supplied
 		let version = self.version.as_deref().map(str::to_ascii_lowercase);
-		let client = version_client::new(None);
+		let client = version_client::new(None)?;
 
 		if self.nightly || version.as_deref() == Some(nightly) {
 			Ok(Cow::Borrowed(nightly))
 		} else if self.beta || version.as_deref() == Some(beta) {
-			client.fetch(beta).await
+			client.fetch(BETA).await
 		} else if let Some(version) = version {
 			// Parse the version string to make sure it's valid, return an error if not
 			let version = parse_version(&version)?;
@@ -78,24 +79,6 @@ pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
 			"Unsupported version `{version}`. Please specify a full version, like `v1.2.1`."
 		))),
 	}
-}
-
-pub(crate) async fn fetch(version: &str, timeout: Option<Duration>) -> Result<Cow<'_, str>, Error> {
-	let client = version_client::new(None);
-	let mut client = reqwest::Client::builder();
-	if let Some(timeout) = timeout {
-		client = client.timeout(timeout);
-	}
-	let client = client.build()?;
-	let request = client.get(format!("{ROOT}/{version}.txt")).build().unwrap();
-	let response = client.execute(request).await?;
-	if !response.status().is_success() {
-		return Err(Error::Io(IoError::new(
-			ErrorKind::Other,
-			format!("received status {} when fetching version", response.status()),
-		)));
-	}
-	Ok(Cow::Owned(response.text().await?.trim().to_owned()))
 }
 
 pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
