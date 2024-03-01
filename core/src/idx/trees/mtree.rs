@@ -25,6 +25,7 @@ use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::{Distance, MTreeParams, VectorType};
 use crate::sql::{Array, Object, Thing, Value};
+
 pub(crate) struct MTreeIndex {
 	state_key: Key,
 	dim: usize,
@@ -491,7 +492,7 @@ impl MTree {
 	}
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(? Send))]
 	async fn insert_at_node(
 		&mut self,
 		tx: &mut Transaction,
@@ -877,7 +878,7 @@ impl MTree {
 	}
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(? Send))]
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_at_node(
 		&mut self,
@@ -1407,7 +1408,9 @@ impl Display for MTreeNode {
 		}
 	}
 }
+
 trait NodeVectors: Sized {
+	#[allow(dead_code)]
 	fn len(&self) -> usize;
 
 	fn get_objects(&self) -> Vec<SharedVector>;
