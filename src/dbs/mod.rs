@@ -244,7 +244,7 @@ pub async fn init(
 	debug!("Server capabilities: {caps}");
 
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let mut dbs = Datastore::new(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
@@ -253,6 +253,11 @@ pub async fn init(
 		.with_auth_enabled(auth_enabled)
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
+	if let Some(engine_options) = opt.engine {
+		dbs = dbs.with_engine_options(engine_options);
+	}
+	// Make immutable
+	let dbs = dbs;
 
 	dbs.bootstrap().await?;
 
