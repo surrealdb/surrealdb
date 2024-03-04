@@ -1,6 +1,6 @@
 //! Contains parsing code for smaller common parts of statements.
 
-use crate::sql::ChangeFeedInclude;
+use crate::sql::change_feed_include::ChangeFeedInclude;
 use crate::{
 	sql::{
 		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Field,
