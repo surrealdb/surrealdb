@@ -52,7 +52,7 @@ impl Lexer<'_> {
 		match self.reader.peek() {
 			Some(b'd' | b'f') => {
 				// not an integer but parse anyway for error reporting.
-				return self.lex_suffix(true);
+				return self.lex_suffix(false, true);
 			}
 			Some(x) if x.is_ascii_alphabetic() => return Err(self.invalid_suffix()),
 			_ => {}
@@ -101,7 +101,7 @@ impl Lexer<'_> {
 						return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
 					}
 				}
-				b'f' | b'd' => return self.lex_suffix(true),
+				b'f' | b'd' => return self.lex_suffix(false, true),
 				// Oxc2 is the start byte of 'µ'
 				0xc2 | b'n' | b'u' | b'm' | b'h' | b'w' | b'y' | b's' => {
 					// duration suffix, switch to lexing duration.
@@ -136,7 +136,7 @@ impl Lexer<'_> {
 	}
 
 	/// Lex a number suffix, either 'f' or 'dec'.
-	fn lex_suffix(&mut self, can_be_duration: bool) -> Result<Token, Error> {
+	fn lex_suffix(&mut self, had_exponent: bool, can_be_duration: bool) -> Result<Token, Error> {
 		match self.reader.peek() {
 			Some(b'f') => {
 				// float suffix
@@ -169,7 +169,11 @@ impl Lexer<'_> {
 					Err(self.invalid_suffix())
 				} else {
 					self.string = Some(mem::take(&mut self.scratch));
-					Ok(self.finish_token(TokenKind::Number(NumberKind::Decimal)))
+					if had_exponent {
+						Ok(self.finish_token(TokenKind::Number(NumberKind::ScientificDecimal)))
+					} else {
+						Ok(self.finish_token(TokenKind::Number(NumberKind::Decimal)))
+					}
 				}
 			}
 			_ => unreachable!(),
@@ -200,7 +204,7 @@ impl Lexer<'_> {
 				b'_' => {
 					self.reader.next();
 				}
-				b'f' | b'd' => return self.lex_suffix(false),
+				b'f' | b'd' => return self.lex_suffix(false, false),
 				b'a'..=b'z' | b'A'..=b'Z' => {
 					// invalid token, random identifier characters immediately after number.
 					self.scratch.clear();
@@ -237,7 +241,7 @@ impl Lexer<'_> {
 				Some(b'_') => {
 					self.reader.next();
 				}
-				Some(b'f' | b'd') => return self.lex_suffix(false),
+				Some(b'f' | b'd') => return self.lex_suffix(true, false),
 				_ => {
 					if atleast_one {
 						let kind = if had_mantissa {

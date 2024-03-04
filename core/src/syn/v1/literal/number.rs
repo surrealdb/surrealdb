@@ -49,14 +49,21 @@ fn not_nan(i: &str) -> IResult<&str, Number> {
 				.map_err(Err::Failure)?;
 			Number::from(float)
 		}
-		Suffix::Decimal => Number::from(
+		Suffix::Decimal => Number::from(if v.contains(['e', 'E']) {
+			Decimal::from_scientific(v)
+				.map_err(|e| ParseError::ParseDecimal {
+					tried: v,
+					error: e,
+				})
+				.map_err(Err::Failure)?
+		} else {
 			Decimal::from_str(v)
 				.map_err(|e| ParseError::ParseDecimal {
 					tried: v,
 					error: e,
 				})
-				.map_err(Err::Failure)?,
-		),
+				.map_err(Err::Failure)?
+		}),
 	};
 	Ok((i, number))
 }

@@ -217,6 +217,8 @@ pub enum NumberKind {
 	Integer,
 	// A number with a decimal postfix.
 	Decimal,
+	// A number with a decimal postfix.
+	ScientificDecimal,
 	// A number with a float postfix.
 	Float,
 	// A number with a `.3` part.
