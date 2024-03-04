@@ -102,7 +102,7 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 mod tests {
 
 	use super::*;
-	use crate::sql::index::{Distance, MTreeParams, SearchParams, VectorType};
+	use crate::sql::index::{Distance, Distance1, MTreeParams, SearchParams, VectorType};
 	use crate::sql::Ident;
 	use crate::sql::Idiom;
 	use crate::sql::Idioms;
@@ -225,6 +225,7 @@ mod tests {
 				index: Index::MTree(MTreeParams {
 					dimension: 4,
 					vector_type: VectorType::F64,
+					_distance: Distance1::Euclidean,
 					distance: Distance::Euclidean,
 					capacity: 40,
 					doc_ids_order: 100,
