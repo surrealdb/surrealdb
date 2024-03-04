@@ -69,11 +69,12 @@ impl Default for DatabaseMutation {
 pub struct ChangeSet(pub [u8; 10], pub DatabaseMutation);
 
 impl TableMutation {
+	/// Convert a stored change feed table mutation (record change) into a
+	/// Value that can be used in the storage of change feeds and their transmission to consumers
 	pub fn into_value(self) -> Value {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
-				// if true { panic!("The previous value is {:?},     {:?}", _thing, v); }
 				h.insert("update".to_string(), v);
 				h
 			}
@@ -83,14 +84,15 @@ impl TableMutation {
 				h
 			}
 			TableMutation::SetWithDiff(_thing, current, operations) => {
-				// TODO
-				// TODO -- Figure this out
-				// TODO
 				h.insert("original".to_string(), current);
 				h.insert(
 					"update".to_string(),
 					Value::Array(Array(
-						operations.into_iter().map(|x| Value::Object(Object::from(x))).collect(),
+						operations
+							.clone()
+							.into_iter()
+							.map(|x| Value::Object(Object::from(x)))
+							.collect(),
 					)),
 				);
 				h
@@ -239,7 +241,6 @@ mod tests {
 				vec![
 					TableMutation::SetWithDiff(
 						Thing::from(("mytb".to_string(), "tobie".to_string())),
-						Value::None,
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
@@ -247,10 +248,13 @@ mod tests {
 							),
 							("note", Value::from("surreal")),
 						]))),
+						vec![Operation::Add {
+							path: "/temp".into(),
+							value: Value::from(true),
+						}],
 					),
 					TableMutation::SetWithDiff(
 						Thing::from(("mytb".to_string(), "tobie".to_string())),
-						Value::Strand(Strand::from("this would normally be an object")),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
@@ -261,6 +265,9 @@ mod tests {
 							),
 							("note", Value::from("surreal")),
 						]))),
+						vec![Operation::Remove {
+							path: "/temp".into(),
+						}],
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
 					TableMutation::Def(DefineTableStatement {
