@@ -752,12 +752,6 @@ pub enum Error {
 	#[error("The password did not verify")]
 	InvalidPass,
 
-	/// The session has expired either because the token used
-	/// to establish it has expired or because an expiration
-	/// was explicitly defined when establishing it
-	#[error("The session has expired")]
-	ExpiredSession,
-
 	/// There was an error with authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
@@ -785,6 +779,12 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	/// The session has expired either because the token used
+	/// to establish it has expired or because an expiration
+	/// was explicitly defined when establishing it
+	#[error("The session has expired")]
+	ExpiredSession,
 
 	/// The session has an invalid duration
 	#[error("The session has an invalid duration")]
