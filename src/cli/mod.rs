@@ -56,9 +56,9 @@ struct Cli {
 	#[command(subcommand)]
 	command: Commands,
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
-	#[arg(env = "SURREAL_CALL_HOME", long)]
+	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
 	#[arg(default_value_t = true)]
-	call_home: bool,
+	online_version_check: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -100,7 +100,7 @@ pub async fn init() -> ExitCode {
 	// Parse the CLI arguments
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
-	if args.call_home {
+	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
 		if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
 			match opt_version {
