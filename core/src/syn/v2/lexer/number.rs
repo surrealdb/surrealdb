@@ -90,7 +90,7 @@ impl Lexer<'_> {
 					// scientific notation
 					self.reader.next();
 					self.scratch.push('e');
-					return self.lex_exponent(true);
+					return self.lex_exponent(false);
 				}
 				b'.' => {
 					// mantissa
