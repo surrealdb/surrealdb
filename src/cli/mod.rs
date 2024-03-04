@@ -55,6 +55,10 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 struct Cli {
 	#[command(subcommand)]
 	command: Commands,
+	#[arg(help = "Whether to allow web check for client version upgrades at start")]
+	#[arg(env = "SURREAL_CALL_HOME", long)]
+	#[arg(default_value_t = true)]
+	call_home: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -96,18 +100,20 @@ pub async fn init() -> ExitCode {
 	// Parse the CLI arguments
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
-	let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
-	if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
-		match opt_version {
-			None => {
-				warn!("A new version of SurrealDB may be available.");
+	if args.call_home {
+		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
+		if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
+			match opt_version {
+				None => {
+					warn!("A new version of SurrealDB may be available.");
+				}
+				Some(new_version) => {
+					warn!("A new version of SurrealDB is available: {}", new_version);
+				}
 			}
-			Some(new_version) => {
-				warn!("A new version of SurrealDB is available: {}", new_version);
-			}
+			// TODO ansi_term crate?
+			warn!("You can upgrade using the {} command", "surreal upgrade");
 		}
-		// TODO ansi_term crate?
-		warn!("You can upgrade using the {} command", "surreal upgrade");
 	}
 	// After version warning we can run the respective command
 	let output = match args.command {
