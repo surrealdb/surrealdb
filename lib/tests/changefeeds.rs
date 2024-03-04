@@ -10,7 +10,6 @@ use surrealdb::sql::Value;
 use surrealdb_core::fflags::FFLAGS;
 
 mod helpers;
-mod parse;
 
 #[tokio::test]
 async fn database_change_feeds() -> Result<(), Error> {
