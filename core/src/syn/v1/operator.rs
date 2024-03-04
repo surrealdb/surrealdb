@@ -164,7 +164,7 @@ pub fn knn(i: &str) -> IResult<&str, Operator> {
 			cut(|i| {
 				let (i, k) = u32(i)?;
 				let (i, dist) = opt(knn_distance)(i)?;
-				let (i, _) = char("|>")(i)?;
+				let (i, _) = tag("|>")(i)?;
 				Ok((i, Operator::Knn(k, dist)))
 			})(i)
 		},
