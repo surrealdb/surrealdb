@@ -1145,3 +1145,51 @@ async fn select_unique_contains() -> Result<(), Error> {
 
 	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
 }
+
+#[tokio::test]
+async fn select_with_datetime_value() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = "
+		DEFINE FIELD created_at ON TABLE test_user TYPE datetime;
+		DEFINE INDEX createdAt ON TABLE test_user COLUMNS created_at;
+		LET $now = '2023-12-25T17:13:01.940183014Z';
+		CREATE test_user:1 CONTENT { created_at: $now };
+		SELECT * FROM test_user WHERE created_at = $now EXPLAIN;
+		SELECT * FROM test_user WHERE created_at;";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 6);
+	skip_ok(&mut res, 4)?;
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'createdAt',
+							operator: '=',
+							value: '2023-12-25T17:13:01.940183014Z'
+						},
+						table: 'test_user'
+					},
+					operation: 'Iterate Index'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+        			"created_at": "2023-12-25T17:13:01.940183014Z",
+        			"id": "test_user:1"
+    			}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
