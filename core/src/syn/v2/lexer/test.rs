@@ -129,7 +129,7 @@ fn numbers() {
 			t!("+"),
 			TokenKind::Number(NumberKind::Float),
 			t!("+"),
-			TokenKind::Number(NumberKind::ScientificDecimal),
+			TokenKind::Number(NumberKind::DecimalExponent),
 			t!("+"),
 		]
 	}

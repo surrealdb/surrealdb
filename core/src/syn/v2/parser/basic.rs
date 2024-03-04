@@ -230,7 +230,7 @@ impl TokenValue for Number {
 				})?;
 				Ok(Number::Decimal(x))
 			}
-			TokenKind::Number(NumberKind::ScientificDecimal) => {
+			TokenKind::Number(NumberKind::DecimalExponent) => {
 				let source = parser.lexer.string.take().unwrap();
 				// As far as I can tell this will never fail for valid integers.
 				let x = rust_decimal::Decimal::from_scientific(&source).map_err(|error| {
