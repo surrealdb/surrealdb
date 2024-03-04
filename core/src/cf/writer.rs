@@ -286,7 +286,7 @@ mod tests {
 						true => vec![TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "A".to_string())),
 							Value::None,
-							Value::from("a"),
+							vec![],
 						)],
 						false => vec![TableMutation::Set(
 							Thing::from(("mytb".to_string(), "A".to_string())),
@@ -303,7 +303,7 @@ mod tests {
 						true => vec![TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "C".to_string())),
 							Value::None,
-							Value::from("c"),
+							vec![],
 						)],
 						false => vec![TableMutation::Set(
 							Thing::from(("mytb".to_string(), "C".to_string())),
@@ -321,12 +321,12 @@ mod tests {
 							TableMutation::SetWithDiff(
 								Thing::from(("mytb".to_string(), "B".to_string())),
 								Value::None,
-								Value::from("b"),
+								vec![],
 							),
 							TableMutation::SetWithDiff(
 								Thing::from(("mytb".to_string(), "C".to_string())),
 								Value::None,
-								Value::from("c2"),
+								vec![],
 							),
 						],
 						false => vec![
