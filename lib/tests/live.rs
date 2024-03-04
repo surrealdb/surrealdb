@@ -1,13 +1,11 @@
-mod parse;
-use parse::Parse;
 mod helpers;
+mod parse;
+
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
 use surrealdb_core::fflags::FFLAGS;
-
-// RUST_LOG=trace cargo test -p surrealdb --features kv-mem --test live -- --nocapture
 
 #[tokio::test]
 async fn live_query_sends_registered_lq_details() -> Result<(), Error> {

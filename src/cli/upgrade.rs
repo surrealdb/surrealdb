@@ -1,3 +1,5 @@
+use crate::cli::version_client;
+use crate::cli::version_client::VersionClient;
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
@@ -10,7 +12,10 @@ use std::path::Path;
 use std::process::Command;
 use surrealdb::env::{arch, os};
 
-const ROOT: &str = "https://download.surrealdb.com";
+pub(crate) const ROOT: &str = "https://download.surrealdb.com";
+const BETA: &str = "beta";
+const LATEST: &str = "latest";
+const NIGHTLY: &str = "nightly";
 
 #[derive(Args, Debug)]
 pub struct UpgradeCommandArguments {
@@ -31,27 +36,26 @@ pub struct UpgradeCommandArguments {
 impl UpgradeCommandArguments {
 	/// Get the version string to download based on the user preference
 	async fn version(&self) -> Result<Cow<'_, str>, Error> {
-		let nightly = "nightly";
-		let beta = "beta";
 		// Convert the version to lowercase, if supplied
 		let version = self.version.as_deref().map(str::to_ascii_lowercase);
+		let client = version_client::new(None)?;
 
-		if self.nightly || version.as_deref() == Some(nightly) {
-			Ok(Cow::Borrowed(nightly))
-		} else if self.beta || version.as_deref() == Some(beta) {
-			fetch(beta).await
+		if self.nightly || version.as_deref() == Some(NIGHTLY) {
+			Ok(Cow::Borrowed(NIGHTLY))
+		} else if self.beta || version.as_deref() == Some(BETA) {
+			client.fetch(BETA).await
 		} else if let Some(version) = version {
 			// Parse the version string to make sure it's valid, return an error if not
 			let version = parse_version(&version)?;
 			// Return the version, ensuring it's prefixed by `v`
 			Ok(Cow::Owned(format!("v{version}")))
 		} else {
-			fetch("latest").await
+			client.fetch(LATEST).await
 		}
 	}
 }
 
-fn parse_version(input: &str) -> Result<Version, Error> {
+pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
 	// Remove the `v` prefix, if supplied
 	let version = input.strip_prefix('v').unwrap_or(input);
 	// Parse the version
@@ -74,17 +78,6 @@ fn parse_version(input: &str) -> Result<Version, Error> {
 			"Unsupported version `{version}`. Please specify a full version, like `v1.2.1`."
 		))),
 	}
-}
-
-async fn fetch(version: &str) -> Result<Cow<'_, str>, Error> {
-	let response = reqwest::get(format!("{ROOT}/{version}.txt")).await?;
-	if !response.status().is_success() {
-		return Err(Error::Io(IoError::new(
-			ErrorKind::Other,
-			format!("received status {} when fetching version", response.status()),
-		)));
-	}
-	Ok(Cow::Owned(response.text().await?.trim().to_owned()))
 }
 
 pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {

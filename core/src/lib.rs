@@ -37,6 +37,7 @@ pub mod kvs;
 #[cfg(any(feature = "ml", feature = "ml2", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;
+pub mod options;
 #[doc(hidden)]
 pub mod syn;
 

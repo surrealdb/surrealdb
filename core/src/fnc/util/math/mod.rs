@@ -11,7 +11,6 @@ pub mod midhinge;
 pub mod mode;
 pub mod nearestrank;
 pub mod percentile;
-pub mod quartile;
 pub mod spread;
 pub mod top;
 pub mod trimean;
