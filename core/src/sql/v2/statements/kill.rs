@@ -3,7 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
-use crate::kvs::lq_structs::LqEntry;
+use crate::kvs::lq_structs::{KillEntry, LqEntry, TrackedResult};
 use crate::sql::Uuid;
 use crate::sql::Value;
 use derive::Store;
@@ -61,13 +61,11 @@ impl KillStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		if FFLAGS.change_feed_live_queries.enabled() {
-			let Value::Uuid(live_id) = self.id;
-			run.pre_commit_register_live_query(LqEntry {
-				live_id,
-				ns: "".to_string(),
-				db: "".to_string(),
-				stm: Default::default(),
-			});
+			run.pre_commit_register_async_event(TrackedResult::KillQuery(KillEntry {
+				live_id: live_query_id,
+				ns: opt.ns().to_string(),
+				db: opt.db().to_string(),
+			}))?;
 		} else {
 			// Fetch the live query key
 			let key = crate::key::node::lq::new(opt.id()?, live_query_id.0, opt.ns(), opt.db());
@@ -109,5 +107,19 @@ impl KillStatement {
 impl fmt::Display for KillStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "KILL {}", self.id)
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::sql::statements::KillStatement;
+	use crate::sql::{Ident, Param, Statement, Value};
+	use crate::syn::v2::parser::mac::test_parse;
+
+	#[test_log::test(tokio::test)]
+	async fn kill_handles_uuid() {
+		let res =
+			test_parse!(parse_stmt, r#"KILL "8f92f057-c739-4bf2-9d0c-a74d01299efc""#).unwrap();
+		res.compute()
 	}
 }

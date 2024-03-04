@@ -25,7 +25,7 @@ async fn live_queries_sent_to_tx_are_received() {
 			auth: None,
 		},
 	};
-	tx.pre_commit_register_live_query(lq_entry.clone()).unwrap();
+	tx.pre_commit_register_async_event(lq_entry.clone()).unwrap();
 
 	tx.commit().await.unwrap();
 

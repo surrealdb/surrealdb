@@ -1029,12 +1029,16 @@ impl Datastore {
 		}
 	}
 
-	/// Add live queries to track on the datastore
+	/// Add and kill live queries being track on the datastore
 	/// These get polled by the change feed tick
-	pub(crate) async fn track_live_queries(&self, lqs: &Vec<TrackedResult>) -> Result<(), Error> {
+	pub(crate) async fn adapt_tracked_live_queries(
+		&self,
+		lqs: &Vec<TrackedResult>,
+	) -> Result<(), Error> {
 		// Lock the local live queries
 		let mut lq_map = self.local_live_queries.write().await;
 		let mut cf_watermarks = self.cf_watermarks.write().await;
+		let mut watermarks_to_check: Vec<LqIndexKey> = vec![];
 		for lq in lqs {
 			match lq {
 				TrackedResult::LiveQuery(lq) => {
@@ -1052,8 +1056,64 @@ impl Datastore {
 					// We insert the current watermark.
 					cf_watermarks.entry(selector).or_insert_with(Versionstamp::default);
 				}
-				TrackedResult::KillQuery(_lq) => {
-					unimplemented!("Cannot kill queries yet")
+				TrackedResult::KillQuery(kill_entry) => {
+					let found: Option<(LqIndexKey, LqIndexValue)> = lq_map
+						.iter_mut()
+						.filter(|(k, _)| {
+							// Get all the live queries in the ns/db pair. We don't know table
+							k.selector.ns == kill_entry.ns && k.selector.db == kill_entry.db
+						})
+						.filter_map(|(k, v)| {
+							let count_before = v.len();
+							let index = v.iter().position(|a| a.stm.id == kill_entry.live_id);
+							match index {
+								Some(i) => {
+									let v = v.remove(i);
+									/// Sadly we do need to clone out of mutable reference, because of Strings
+									Some((k.clone(), v))
+								}
+								None => None,
+							}
+						})
+						.next();
+					match found {
+						None => {
+							// TODO(SUR-336): Make Live Query ID validation available at statement level, perhaps via transaction
+							trace!(
+								"Could not find live query {:?} to kill in ns/db pair {:?}",
+								&kill_entry,
+								&kill_entry.ns
+							);
+						}
+						Some(found) => {
+							trace!(
+								"Killed live query {:?} with found key {:?} and found value {:?}",
+								&kill_entry,
+								&found.0,
+								&found.1
+							);
+							// Check if we need to remove the LQ key from tracking
+							let empty = match lq_map.get(&found.0) {
+								None => false,
+								Some(v) => v.is_empty(),
+							};
+							if empty {
+								trace!("Removing live query index key {:?}", &found.0);
+								lq_map.remove(&found.0);
+							}
+							// Now add the LQ to tracked watermarks
+							watermarks_to_check.push(found.0.clone());
+						}
+					};
+				}
+			}
+		}
+		// Now check if we can stop tracking watermarks
+		for watermark in watermarks_to_check {
+			if let Some(lq) = lq_map.get(&watermark) {
+				if lq.is_empty() {
+					trace!("Removing watermark for {:?}", watermark);
+					cf_watermarks.remove(&watermark.selector);
 				}
 			}
 		}
@@ -1205,7 +1265,8 @@ impl Datastore {
 			_ => unreachable!(),
 		};
 
-		let (send, recv): (Sender<LqEntry>, Receiver<LqEntry>) = channel::bounded(LQ_CHANNEL_SIZE);
+		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
+			channel::bounded(LQ_CHANNEL_SIZE);
 
 		#[allow(unreachable_code)]
 		Ok(Transaction {
@@ -1214,7 +1275,7 @@ impl Datastore {
 			cf: cf::Writer::new(),
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
-			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
+			prepared_async_events: (Arc::new(send), Arc::new(recv)),
 			engine_options: self.engine_options,
 		})
 	}
@@ -1312,7 +1373,7 @@ impl Datastore {
 		match res {
 			Ok((responses, lives)) => {
 				// Register live queries
-				self.track_live_queries(&lives).await?;
+				self.adapt_tracked_live_queries(&lives).await?;
 				Ok(responses)
 			}
 			Err(e) => Err(e),

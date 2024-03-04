@@ -70,6 +70,7 @@ impl serde::ser::SerializeStruct for SerializeKillStatement {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::err::Error::KillStatement;
 
 	#[test]
 	fn default() {

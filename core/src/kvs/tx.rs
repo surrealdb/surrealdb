@@ -91,7 +91,7 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
-	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
+	pub(super) prepared_async_events: (Arc<Sender<TrackedResult>>, Arc<Receiver<TrackedResult>>),
 	pub(super) engine_options: EngineOptions,
 }
 
@@ -331,23 +331,23 @@ impl Transaction {
 
 	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
 	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
-		let mut lq: Vec<TrackedResult> =
+		let mut tracked_results: Vec<TrackedResult> =
 			Vec::with_capacity(self.engine_options.new_live_queries_per_transaction as usize);
-		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
-			lq.push(TrackedResult::LiveQuery(l));
+		while let Ok(tracked_result) = self.prepared_async_events.1.try_recv() {
+			tracked_results.push(tracked_result);
 		}
-		lq
+		tracked_results
 	}
 
-	/// Sends a live query to the transaction which is forwarded only once committed
-	/// And removed once a transaction is aborted
+	/// Sends an async operation, such as a new live query, to the transaction which is forwarded
+	/// only once committed and removed once a transaction is aborted
 	// allow(dead_code) because this is used in v2, but not v1
 	#[allow(dead_code)]
-	pub(crate) fn pre_commit_register_live_query(
+	pub(crate) fn pre_commit_register_async_event(
 		&mut self,
-		lq_entry: LqEntry,
+		lq_entry: TrackedResult,
 	) -> Result<(), Error> {
-		self.prepared_live_queries.0.try_send(lq_entry).map_err(|_send_err| {
+		self.prepared_async_events.0.try_send(lq_entry).map_err(|_send_err| {
 			Error::Internal("Prepared lq failed to add lq to channel".to_string())
 		})
 	}
@@ -3171,7 +3171,7 @@ mod tx_test {
 				auth: None,
 			},
 		};
-		tx.pre_commit_register_live_query(lq_entry.clone()).unwrap();
+		tx.pre_commit_register_async_event(lq_entry.clone()).unwrap();
 
 		tx.commit().await.unwrap();
 
