@@ -4,8 +4,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use test_log::test;
-use tokio_stream::iter;
-use futures::StreamExt;
 
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
@@ -1168,15 +1166,14 @@ async fn session_expiration_operations() {
 		socket.send_request("kill", json!(["tester"])),
 	];
 	// Futures are executed sequentially as some operations rely on the previous state
-	let stream = iter(operations_ko);
-	stream.for_each_concurrent(1, |operation| async {
+	for operation in operations_ko {
 		let res = operation.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
 		assert!(res.is_object(), "result: {:?}", res);
 		let res = res.as_object().unwrap();
 		assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
-	}).await;
+	};
 
 	// Test operations that SHOULD work with an expired session
 	let operations_ok = vec![
@@ -1186,8 +1183,7 @@ async fn session_expiration_operations() {
 		socket.send_request("invalidate", json!([])),
 	];
 	// Futures are executed sequentially as some operations rely on the previous state
-	let stream = iter(operations_ok);
-	stream.for_each_concurrent(1, |operation| async {
+	for operation in operations_ok {
 		let res = operation.await;
 		assert!(res.is_ok(), "result: {:?}", res);
 		let res = res.unwrap();
@@ -1195,7 +1191,7 @@ async fn session_expiration_operations() {
 		let res = res.as_object().unwrap();
 		// Verify response contains no error
 		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
-	}).await;
+	};
 
 	// Test operations that SHOULD work with an expired session
 	// These operations will refresh the session expiration
