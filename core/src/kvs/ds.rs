@@ -36,6 +36,7 @@ use crate::kvs::lq_structs::{
 	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
 };
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::options::EngineOptions;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
@@ -49,8 +50,6 @@ const LQ_CHANNEL_SIZE: usize = 100;
 
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
-// In the future we will have proper pagination
-const TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION: u32 = 1000;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -72,6 +71,7 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
+	engine_options: EngineOptions,
 	// The versionstamp oracle for this datastore.
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
@@ -353,6 +353,7 @@ impl Datastore {
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Capabilities::default(),
+			engine_options: EngineOptions::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
 			index_stores: IndexStores::default(),
@@ -407,6 +408,12 @@ impl Datastore {
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
+		self
+	}
+
+	/// Set the engine options for the datastore
+	pub fn with_engine_options(mut self, engine_options: EngineOptions) -> Self {
+		self.engine_options = engine_options;
 		self
 	}
 
@@ -875,7 +882,7 @@ impl Datastore {
 				// That is an improvement though
 				Some(&selector.tb),
 				ShowSince::versionstamp(vs),
-				Some(TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION),
+				Some(self.engine_options.live_query_catchup_size),
 			)
 			.await?;
 			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
@@ -1209,6 +1216,7 @@ impl Datastore {
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
 			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
+			engine_options: self.engine_options,
 		})
 	}
 

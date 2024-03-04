@@ -36,6 +36,7 @@ use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
 use crate::kvs::lq_structs::{LqEntry, LqValue, TrackedResult};
 use crate::kvs::Check;
+use crate::options::EngineOptions;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -50,8 +51,6 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
-
-const LQ_CAPACITY: usize = 100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -93,6 +92,7 @@ pub struct Transaction {
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
 	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
+	pub(super) engine_options: EngineOptions,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -331,7 +331,8 @@ impl Transaction {
 
 	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
 	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
-		let mut lq: Vec<TrackedResult> = Vec::with_capacity(LQ_CAPACITY);
+		let mut lq: Vec<TrackedResult> =
+			Vec::with_capacity(self.engine_options.new_live_queries_per_transaction as usize);
 		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
 			lq.push(TrackedResult::LiveQuery(l));
 		}
