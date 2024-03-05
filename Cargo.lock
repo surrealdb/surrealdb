@@ -3187,9 +3187,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "0.8.10"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f3d0b296e374a4e6f3c7b0a1f5a51d748a0d34c85e7dc48fc3fa9a87657fe09"
+checksum = "a4a650543ca06a924e8b371db273b2756685faae30f8487da1b56505a8f78b0c"
 dependencies = [
  "libc",
  "log",
@@ -5539,8 +5539,7 @@ dependencies = [
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
  "surrealkv",
- "surrealml-core 0.0.7",
- "surrealml-core 0.0.8",
+ "surrealml-core",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5636,21 +5635,6 @@ dependencies = [
  "sha2",
  "tokio",
  "vart",
-]
-
-[[package]]
-name = "surrealml-core"
-version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3614a87a606d39a6152a82452a1aa8946d985465c425972a2ef13e078c6df59a"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-util",
- "ndarray",
- "once_cell",
- "ort",
- "regex",
 ]
 
 [[package]]
