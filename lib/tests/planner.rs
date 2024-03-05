@@ -1154,20 +1154,18 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD created_at ON TABLE test_user TYPE datetime;
 		DEFINE INDEX createdAt ON TABLE test_user COLUMNS created_at;
-		LET $now = '2023-12-25T17:13:01.940183014Z';
+		LET $now = d'2023-12-25T17:13:01.940183014Z';
 		CREATE test_user:1 CONTENT { created_at: $now };
 		SELECT * FROM test_user WHERE created_at = $now EXPLAIN;
-		SELECT * FROM test_user WHERE created_at ='2023-12-25T17:13:01.940183014Z' EXPLAIN;
 		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z' EXPLAIN;
 		SELECT * FROM test_user WHERE created_at = $now;
-		SELECT * FROM test_user WHERE created_at = '2023-12-25T17:13:01.940183014Z';
 		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z';";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 
-	assert_eq!(res.len(), 10);
+	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 4)?;
 
-	for _ in 0..3 {
+	for _ in 0..2 {
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
 			r#"[
@@ -1187,13 +1185,13 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 
-	for _ in 0..3 {
+	for _ in 0..2 {
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
 			r#"[
 				{
         			"created_at": "2023-12-25T17:13:01.940183014Z",
-        			"id": "test_user:1"
+        			"id": test_user:1
     			}
 			]"#,
 		);
@@ -1210,19 +1208,16 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX sessionUid ON sessions FIELDS sessionUid;
 		CREATE sessions:1 CONTENT { sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' };
-		SELECT * FROM sessions WHERE sessionUid = '00ad70db-f435-442e-9012-1cd853102084' EXPLAIN;
 		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084' EXPLAIN;
-		SELECT * FROM sessions WHERE sessionUid = '00ad70db-f435-442e-9012-1cd853102084';
 		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084';";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 4);
 	skip_ok(&mut res, 2)?;
 
-	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r#"[
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
 				{
 					detail: {
 						plan: {
@@ -1235,21 +1230,19 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 					operation: 'Iterate Index'
 				}
 			]"#,
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
-	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			r#"[
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
 				{
-               		"id": "sessions:1",
+               		"id": sessions:1,
  					"sessionUid": "00ad70db-f435-442e-9012-1cd853102084"
     			}
 			]"#,
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
 	Ok(())
 }
