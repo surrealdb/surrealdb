@@ -249,9 +249,6 @@ impl<'a> Executor<'a> {
 					stm.name.0.make_ascii_uppercase();
 					// Process the option
 					opt = match stm.name.0.as_str() {
-						"FIELDS" => opt.with_fields(stm.what),
-						"EVENTS" => opt.with_events(stm.what),
-						"TABLES" => opt.with_tables(stm.what),
 						"IMPORT" => opt.with_import(stm.what),
 						"FORCE" => opt.with_force(Some(Force::All)),
 						_ => break,

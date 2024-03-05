@@ -88,12 +88,6 @@ impl DefineTableStatement {
 			drop(run);
 			// Force queries to run
 			let opt = &opt.new_with_force(Some(Force::Table(Arc::new([dt]))));
-			// Don't process field queries
-			let opt = &opt.new_with_fields(false);
-			// Don't process event queries
-			let opt = &opt.new_with_events(false);
-			// Don't process index queries
-			let opt = &opt.new_with_indexes(false);
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				println!("{}", v);

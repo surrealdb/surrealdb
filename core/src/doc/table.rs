@@ -37,8 +37,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check tables
-		if !opt.tables {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
 		// Collect foreign tables or skip

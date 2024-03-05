@@ -21,8 +21,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check indexes
-		if !opt.indexes {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
 		// Collect indexes or skip

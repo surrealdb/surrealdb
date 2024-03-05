@@ -70,12 +70,6 @@ impl DefineIndexStatement {
 		drop(run);
 		// Force queries to run
 		let opt = &opt.new_with_force(Some(Force::Index(Arc::new([self.clone()]))));
-		// Don't process field queries
-		let opt = &opt.new_with_fields(false);
-		// Don't process event queries
-		let opt = &opt.new_with_events(false);
-		// Don't process table queries
-		let opt = &opt.new_with_tables(false);
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),

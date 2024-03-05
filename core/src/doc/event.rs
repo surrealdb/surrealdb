@@ -14,8 +14,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check events
-		if !opt.events {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
 		// Check if forced

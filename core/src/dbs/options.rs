@@ -37,13 +37,7 @@ pub struct Options {
 	/// Should we error if tables don't exist?
 	pub strict: bool,
 	/// Should we process field queries?
-	pub fields: bool,
-	/// Should we process event queries?
-	pub events: bool,
-	/// Should we process table queries?
-	pub tables: bool,
-	/// Should we process index queries?
-	pub indexes: bool,
+	pub import: bool,
 	/// Should we process function futures?
 	pub futures: bool,
 	/// Should we process variable field projections?
@@ -79,10 +73,7 @@ impl Options {
 			perms: true,
 			force: None,
 			strict: false,
-			fields: true,
-			events: true,
-			tables: true,
-			indexes: true,
+			import: true,
 			futures: false,
 			projections: false,
 			auth_enabled: true,
@@ -179,27 +170,9 @@ impl Options {
 		self
 	}
 
-	/// Specify if we should process fields
-	pub fn with_fields(mut self, fields: bool) -> Self {
-		self.fields = fields;
-		self
-	}
-
-	/// Specify if we should process event queries
-	pub fn with_events(mut self, events: bool) -> Self {
-		self.events = events;
-		self
-	}
-
-	/// Specify if we should process table queries
-	pub fn with_tables(mut self, tables: bool) -> Self {
-		self.tables = tables;
-		self
-	}
-
-	/// Specify if we should process index queries
-	pub fn with_indexes(mut self, indexes: bool) -> Self {
-		self.indexes = indexes;
+	/// Specify if we are currently importing data
+	pub fn with_import(mut self, import: bool) -> Self {
+		self.import = import;
 		self
 	}
 
@@ -212,14 +185,6 @@ impl Options {
 	/// Specify if we should process field projections
 	pub fn with_projections(mut self, projections: bool) -> Self {
 		self.projections = projections;
-		self
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn with_import(mut self, import: bool) -> Self {
-		self.fields = !import;
-		self.events = !import;
-		self.tables = !import;
 		self
 	}
 
@@ -279,7 +244,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_fields(&self, fields: bool) -> Self {
+	pub fn new_with_import(&self, import: bool) -> Self {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
@@ -287,49 +252,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			fields,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_events(&self, events: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			events,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_tables(&self, tables: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			tables,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_indexes(&self, indexes: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			indexes,
+			import,
 			..*self
 		}
 	}
@@ -358,22 +281,6 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			projections,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_import(&self, import: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			fields: !import,
-			events: !import,
-			tables: !import,
 			..*self
 		}
 	}
