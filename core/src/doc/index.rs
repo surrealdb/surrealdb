@@ -27,10 +27,10 @@ impl<'a> Document<'a> {
 		}
 		// Collect indexes or skip
 		let ixs = match &opt.force {
-			Some(Force::Index(ix)) => ix.clone(),
-			Some(Force::All) => self.ix(opt, txn).await?,
+			Force::Index(ix) => ix.clone(),
+			Force::All => self.ix(opt, txn).await?,
 			_ if self.changed() => self.ix(opt, txn).await?,
-			_ => return Ok(())
+			_ => return Ok(()),
 		};
 		// Check if the table is a view
 		if self.tb(opt, txn).await?.drop {
@@ -47,7 +47,7 @@ impl<'a> Document<'a> {
 			let n = build_opt_values(ctx, opt, txn, ix, &self.current).await?;
 
 			// Update the index entries
-			if o != n {
+			if opt.force.is_forced() || o != n {
 				// Store all the variable and parameters required by the index operation
 				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
 

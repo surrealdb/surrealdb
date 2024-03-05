@@ -43,10 +43,10 @@ impl<'a> Document<'a> {
 		}
 		// Collect foreign tables or skip
 		let fts = match &opt.force {
-			Some(Force::Table(tb)) => tb.clone(),
-			Some(Force::All) => self.ft(opt, txn).await?,
+			Force::Table(tb) => tb.clone(),
+			Force::All => self.ft(opt, txn).await?,
 			_ if self.changed() => self.ft(opt, txn).await?,
-			_ => return Ok(())
+			_ => return Ok(()),
 		};
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);

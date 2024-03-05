@@ -87,7 +87,7 @@ impl DefineTableStatement {
 			// Release the transaction
 			drop(run);
 			// Force queries to run
-			let opt = &opt.new_with_force(Some(Force::Table(Arc::new([dt]))));
+			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Process the view data

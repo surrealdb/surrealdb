@@ -13,11 +13,11 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::ctx::Context;
 use crate::dbs::response::Response;
+use crate::dbs::Force;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::dbs::Transaction;
-use crate::dbs::Force;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
@@ -250,7 +250,11 @@ impl<'a> Executor<'a> {
 					// Process the option
 					opt = match stm.name.0.as_str() {
 						"IMPORT" => opt.with_import(stm.what),
-						"FORCE" => opt.with_force(Some(Force::All)),
+						"FORCE" => opt.with_force(if stm.what {
+							Force::All
+						} else {
+							Force::None
+						}),
 						_ => break,
 					};
 					// Continue

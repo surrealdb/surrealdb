@@ -69,7 +69,7 @@ impl DefineIndexStatement {
 		// Release the transaction
 		drop(run);
 		// Force queries to run
-		let opt = &opt.new_with_force(Some(Force::Index(Arc::new([self.clone()]))));
+		let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),

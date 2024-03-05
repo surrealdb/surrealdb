@@ -3,7 +3,9 @@ use crate::cnf;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
-use crate::sql::{Base, statements::define::DefineIndexStatement, statements::define::DefineTableStatement};
+use crate::sql::{
+	statements::define::DefineIndexStatement, statements::define::DefineTableStatement, Base,
+};
 use channel::Sender;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -31,7 +33,7 @@ pub struct Options {
 	/// Whether live queries are allowed?
 	pub live: bool,
 	/// Should we force tables/events to re-run?
-	pub force: Option<Force>,
+	pub force: Force,
 	/// Should we run permissions checks?
 	pub perms: bool,
 	/// Should we error if tables don't exist?
@@ -51,8 +53,18 @@ pub struct Options {
 #[derive(Clone, Debug)]
 pub enum Force {
 	All,
+	None,
 	Table(Arc<[DefineTableStatement]>),
 	Index(Arc<[DefineIndexStatement]>),
+}
+
+impl Force {
+	pub fn is_forced(&self) -> bool {
+		match self {
+			Force::None => false,
+			_ => true,
+		}
+	}
 }
 
 impl Default for Options {
@@ -71,7 +83,7 @@ impl Options {
 			dive: 0,
 			live: false,
 			perms: true,
-			force: None,
+			force: Force::All,
 			strict: false,
 			import: true,
 			futures: false,
@@ -159,7 +171,7 @@ impl Options {
 	}
 
 	/// Specify wether tables/events should re-run
-	pub fn with_force(mut self, force: Option<Force>) -> Self {
+	pub fn with_force(mut self, force: Force) -> Self {
 		self.force = force;
 		self
 	}
@@ -217,7 +229,7 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_force(&self, force: Option<Force>) -> Self {
+	pub fn new_with_force(&self, force: Force) -> Self {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
