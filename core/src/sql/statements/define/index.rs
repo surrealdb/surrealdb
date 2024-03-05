@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -8,6 +8,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -68,7 +69,7 @@ impl DefineIndexStatement {
 		// Release the transaction
 		drop(run);
 		// Force queries to run
-		let opt = &opt.new_with_force(true);
+		let opt = &opt.new_with_force(Some(Force::Index(Arc::new([self.clone()]))));
 		// Don't process field queries
 		let opt = &opt.new_with_fields(false);
 		// Don't process event queries

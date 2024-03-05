@@ -19,7 +19,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Check if forced
-		if !opt.force && !self.changed() {
+		if opt.force.is_none() && !self.changed() {
 			return Ok(());
 		}
 		// Don't run permissions

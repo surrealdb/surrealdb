@@ -5,7 +5,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -87,15 +87,13 @@ impl DefineTableStatement {
 			// Release the transaction
 			drop(run);
 			// Force queries to run
-			let opt = &opt.new_with_force(true);
+			let opt = &opt.new_with_force(Some(Force::Table(Arc::new([dt]))));
 			// Don't process field queries
 			let opt = &opt.new_with_fields(false);
 			// Don't process event queries
 			let opt = &opt.new_with_events(false);
 			// Don't process index queries
 			let opt = &opt.new_with_indexes(false);
-			// Don't process index queries
-			let opt = &opt.clone().with_limited_fts(vec![dt.name.to_string()]);
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				println!("{}", v);

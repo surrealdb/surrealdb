@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Statement;
+use crate::dbs::{Force, Statement};
 use crate::dbs::{Options, Transaction};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -25,10 +25,13 @@ impl<'a> Document<'a> {
 		if !opt.indexes {
 			return Ok(());
 		}
-		// Check if forced
-		if !opt.force && !self.changed() {
-			return Ok(());
-		}
+		// Collect indexes or skip
+		let ixs = match &opt.force {
+			Some(Force::Index(ix)) => ix.clone(),
+			Some(Force::All) => self.ix(opt, txn).await?,
+			_ if self.changed() => self.ix(opt, txn).await?,
+			_ => return Ok(())
+		};
 		// Check if the table is a view
 		if self.tb(opt, txn).await?.drop {
 			return Ok(());
@@ -36,7 +39,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Loop through all index statements
-		for ix in self.ix(opt, txn).await?.iter() {
+		for ix in ixs.iter() {
 			// Calculate old values
 			let o = build_opt_values(ctx, opt, txn, ix, &self.initial).await?;
 
@@ -44,7 +47,7 @@ impl<'a> Document<'a> {
 			let n = build_opt_values(ctx, opt, txn, ix, &self.current).await?;
 
 			// Update the index entries
-			if opt.force || o != n {
+			if o != n {
 				// Store all the variable and parameters required by the index operation
 				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
 

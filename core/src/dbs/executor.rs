@@ -17,6 +17,7 @@ use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
 use crate::dbs::Transaction;
+use crate::dbs::Force;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
@@ -252,7 +253,7 @@ impl<'a> Executor<'a> {
 						"EVENTS" => opt.with_events(stm.what),
 						"TABLES" => opt.with_tables(stm.what),
 						"IMPORT" => opt.with_import(stm.what),
-						"FORCE" => opt.with_force(stm.what),
+						"FORCE" => opt.with_force(Some(Force::All)),
 						_ => break,
 					};
 					// Continue

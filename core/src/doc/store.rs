@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if forced
-		if !opt.force && !self.changed() {
+		if opt.force.is_none() && !self.changed() {
 			return Ok(());
 		}
 		// Check if the table is a view

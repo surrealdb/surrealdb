@@ -21,7 +21,7 @@ impl<'a> Document<'a> {
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if forced
-		if !opt.force && !self.changed() {
+		if opt.force.is_none() && !self.changed() {
 			return Ok(());
 		}
 		// Clone transaction
