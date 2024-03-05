@@ -244,7 +244,7 @@ impl Lexer<'_> {
 		}
 		self.reader.next();
 		loop {
-			match dbg!(self.reader.peek()) {
+			match self.reader.peek() {
 				Some(x @ b'0'..=b'9') => {
 					self.reader.next();
 					self.scratch.push(x as char);
