@@ -494,7 +494,7 @@ mod tests {
             (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at database level should not be able to set options on another namespace even if the database name matches"),
             (Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at database level should not be able to set options on its database"),
         ];
-		let statement = "OPTION FIELDS = false";
+		let statement = "OPTION IMPORT = false";
 
 		for test in tests.iter() {
 			let (session, should_succeed, msg) = test;
