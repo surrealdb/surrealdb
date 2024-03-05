@@ -10,13 +10,13 @@ pub enum ChangeFeedInclude {
 	Original,
 }
 
-impl Default for crate::sql::change_feed_include::ChangeFeedInclude {
+impl Default for crate::sql::changefeed_include::ChangeFeedInclude {
 	fn default() -> Self {
 		Self::Original
 	}
 }
 
-impl fmt::Display for crate::sql::change_feed_include::ChangeFeedInclude {
+impl fmt::Display for crate::sql::changefeed_include::ChangeFeedInclude {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
 			Self::Original => "Original",
