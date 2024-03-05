@@ -86,7 +86,7 @@ fn suffix(i: &str) -> IResult<&str, Suffix> {
 }
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
-	let (i, v) = dbg!(i64(dbg!(i)))?;
+	let (i, v) = i64(i)?;
 	let (i, _) = ending(i)?;
 	Ok((i, v))
 }
