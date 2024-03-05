@@ -663,8 +663,16 @@ criteria = "safe-to-deploy"
 version = "0.27.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.geo]]
+version = "0.28.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.geo-types]]
 version = "0.7.12"
+criteria = "safe-to-deploy"
+
+[[exemptions.geo-types]]
+version = "0.7.13"
 criteria = "safe-to-deploy"
 
 [[exemptions.geographiclib-rs]]
