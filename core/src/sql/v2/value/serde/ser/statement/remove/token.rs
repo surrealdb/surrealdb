@@ -57,7 +57,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveTokenStatement {
 				self.base = value.serialize(ser::base::Serializer.wrap())?;
 			}
 			"if_exists" => {
-				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
+				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!(
