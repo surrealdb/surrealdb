@@ -1691,9 +1691,9 @@ mod tests {
 		// Insert single element
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec1.clone(), 1).await?;
+			t.insert(&mut tx, (&mut st), vec1.clone(), 1).await?;
 			assert_eq!(t.state.root, Some(0));
-			check_leaf_write(&mut tx, &mut &mut st, 0, |m| {
+			check_leaf_write(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 1);
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 			})
@@ -1714,7 +1714,7 @@ mod tests {
 		let vec2 = new_vec(2, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec2.clone(), 2).await?;
+			t.insert(&mut tx, (&mut st), vec2.clone(), 2).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec1 knn
@@ -1745,7 +1745,7 @@ mod tests {
 		// insert new doc to existing vector
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec2.clone(), 3).await?;
+			t.insert(&mut tx, (&mut st), vec2.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec2 knn
@@ -1769,7 +1769,7 @@ mod tests {
 		let vec3 = new_vec(3, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec3.clone(), 3).await?;
+			t.insert(&mut tx, (&mut st), vec3.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec3 knn
@@ -1794,7 +1794,7 @@ mod tests {
 		let vec4 = new_vec(4, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec4.clone(), 4).await?;
+			t.insert(&mut tx, (&mut st), vec4.clone(), 4).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec4 knn
@@ -1830,7 +1830,7 @@ mod tests {
 		let vec6 = new_vec(6, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec6.clone(), 6).await?;
+			t.insert(&mut tx, (&mut st), vec6.clone(), 6).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec6 knn
@@ -1869,7 +1869,7 @@ mod tests {
 		let vec8 = new_vec(8, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec8.clone(), 8).await?;
+			t.insert(&mut tx, (&mut st), vec8.clone(), 8).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1908,7 +1908,7 @@ mod tests {
 		let vec9 = new_vec(9, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec9.clone(), 9).await?;
+			t.insert(&mut tx, (&mut st), vec9.clone(), 9).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1948,7 +1948,7 @@ mod tests {
 		let vec10 = new_vec(10, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, &mut &mut st, vec10.clone(), 10).await?;
+			t.insert(&mut tx, (&mut st), vec10.clone(), 10).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -2042,7 +2042,7 @@ mod tests {
 			{
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
-				t.insert(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?;
+				t.insert(&mut tx, (&mut st), obj.clone(), *doc_id).await?;
 				finish_operation(t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
@@ -2067,7 +2067,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 			for (doc_id, obj) in collection.as_ref() {
-				t.insert(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?;
+				t.insert(&mut tx, (&mut st), obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			finish_operation(t, tx, st, true).await?;
@@ -2089,9 +2089,9 @@ mod tests {
 			{
 				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Write, cache_size).await;
+					new_operation(ds, t, TransactionType::Write, cache_size).await;
 				assert!(
-					t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
+					t.delete(&mut tx, (&mut st), obj.clone(), *doc_id).await?,
 					"Delete failed: {} {:?}",
 					doc_id,
 					obj
@@ -2100,13 +2100,13 @@ mod tests {
 			}
 			{
 				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Read, cache_size).await;
+					new_operation(ds, t, TransactionType::Read, cache_size).await;
 				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
 				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
 				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Read, cache_size).await;
+					new_operation(ds, t, TransactionType::Read, cache_size).await;
 				check_tree_properties(&mut tx, &mut st, t).await?;
 			}
 		}
@@ -2647,7 +2647,7 @@ mod tests {
 							panic!("Leaf object already exists: {:?}", o);
 						}
 						if let Some(center) = center.as_ref() {
-							let pd = t.calculate_distance(center, &o)?;
+							let pd = t.calculate_distance(center, o)?;
 							debug!("calc_dist: {:?} {:?} = {}", center, &o, pd);
 							assert_eq!(pd, p.parent_dist, "Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}", p.parent_dist, t.distance, pd, node_id, o, center);
 						}

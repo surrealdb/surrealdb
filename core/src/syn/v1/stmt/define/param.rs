@@ -98,6 +98,6 @@ mod tests {
 		let sql = "PARAM test";
 		let res = param(sql);
 
-		assert_eq!(res.is_err(), true)
+		assert!(res.is_err())
 	}
 }

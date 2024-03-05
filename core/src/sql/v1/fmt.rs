@@ -153,11 +153,11 @@ thread_local! {
 	// `thread_local!` so all accesses can use `Ordering::Relaxed`.
 
 	/// Whether pretty-printing.
-	static PRETTY: AtomicBool = AtomicBool::new(false);
+	static PRETTY: AtomicBool = const { AtomicBool::new(false) };
 	/// The current level of indentation, in units of tabs.
-	static INDENT: AtomicU32 = AtomicU32::new(0);
+	static INDENT: AtomicU32 = const { AtomicU32::new(0) };
 	/// Whether the next formatting action should be preceded by a newline and indentation.
-	static NEW_LINE: AtomicBool = AtomicBool::new(false);
+	static NEW_LINE: AtomicBool = const { AtomicBool::new(false) };
 }
 
 /// An adapter that, if enabled, adds pretty print formatting.

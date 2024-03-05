@@ -2877,19 +2877,19 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		let enc: Vec<u8> = Value::None.try_into().unwrap();
+		let enc: Vec<u8> = Value::None.into();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Null.try_into().unwrap();
+		let enc: Vec<u8> = Value::Null.into();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Bool(true).try_into().unwrap();
+		let enc: Vec<u8> = Value::Bool(true).into();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::Bool(false).try_into().unwrap();
+		let enc: Vec<u8> = Value::Bool(false).into();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::from("test").try_into().unwrap();
+		let enc: Vec<u8> = Value::from("test").into();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").try_into().unwrap();
+		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").into();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").try_into().unwrap();
+		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").into();
 		assert_eq!(27, enc.len());
 	}
 
@@ -2901,8 +2901,8 @@ mod tests {
 		let res = Value::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let enc: Vec<u8> = val.try_into().unwrap();
-		let dec: Value = enc.try_into().unwrap();
+		let enc: Vec<u8> = val.into();
+		let dec: Value = enc.into();
 		assert_eq!(res, dec);
 	}
 }

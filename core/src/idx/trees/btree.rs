@@ -1530,7 +1530,7 @@ mod tests {
 				st,
 				tx,
 				check_generation,
-				format!("Insert CLRS example"),
+				"Insert CLRS example".to_string(),
 			)
 			.await?;
 		}
@@ -1646,7 +1646,7 @@ mod tests {
 				st,
 				tx,
 				check_generation,
-				format!("Insert CLRS example"),
+				"Insert CLRS example".to_string(),
 			)
 			.await?;
 		}
@@ -1663,7 +1663,7 @@ mod tests {
 			{
 				let (mut tx, mut st) =
 					new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
-				assert!(t.delete(&mut tx, &mut &mut st, key.into()).await?.is_some());
+				assert!(t.delete(&mut tx, (&mut st), key.into()).await?.is_some());
 				expected_keys.remove(key);
 				let (_, tree_keys) = check_btree_properties(&t, &mut tx, &mut st).await?;
 				assert_eq!(expected_keys, tree_keys);

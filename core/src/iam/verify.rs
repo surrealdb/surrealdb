@@ -1154,7 +1154,7 @@ mod tests {
 		// Test with custom user numeric identifiers of varying sizes
 		//
 		{
-			let ids = vec!["1", "2", "100", "10000000"];
+			let ids = ["1", "2", "100", "10000000"];
 			for id in ids.iter() {
 				let resource_id = format!("user:{id}");
 				// Prepare the claims object
@@ -1181,7 +1181,7 @@ mod tests {
 		// Test with custom user string identifiers of varying lengths
 		//
 		{
-			let ids = vec!["username", "username1", "username10", "username100"];
+			let ids = ["username", "username1", "username10", "username100"];
 			for id in ids.iter() {
 				let resource_id = format!("user:{id}");
 				// Prepare the claims object
@@ -1208,7 +1208,7 @@ mod tests {
 		// Test with custom user string identifiers of varying lengths with special characters
 		//
 		{
-			let ids = vec!["user.name", "user.name1", "user.name10", "user.name100"];
+			let ids = ["user.name", "user.name1", "user.name10", "user.name100"];
 			for id in ids.iter() {
 				// Enclose special characters in "⟨brackets⟩"
 				let resource_id = format!("user:⟨{id}⟩");
@@ -1340,7 +1340,7 @@ mod tests {
 			let string_claim = tk.get("string_claim").unwrap();
 			assert_eq!(*string_claim, Value::Strand("test".into()));
 			let bool_claim = tk.get("bool_claim").unwrap();
-			assert_eq!(*bool_claim, Value::Bool(true.into()));
+			assert_eq!(*bool_claim, Value::Bool(true));
 			let int_claim = tk.get("int_claim").unwrap();
 			assert_eq!(*int_claim, Value::Number(123456.into()));
 			let float_claim = tk.get("float_claim").unwrap();

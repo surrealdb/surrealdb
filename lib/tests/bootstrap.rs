@@ -103,7 +103,7 @@ async fn bootstrap_removes_unreachable_node_live_queries() -> Result<(), Error> 
 	let res = tx.scan_ndlq(valid_data.node_id.as_ref().unwrap(), 1000).await.unwrap();
 	tx.commit().await.unwrap();
 	assert_eq!(res.len(), 1, "We expect the node to be available");
-	let tested_entry = res.get(0).unwrap();
+	let tested_entry = res.first().unwrap();
 	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
 
 	Ok(())
@@ -152,7 +152,7 @@ async fn bootstrap_removes_unreachable_table_live_queries() -> Result<(), Error>
 	tx.commit().await.unwrap();
 
 	assert_eq!(res.len(), 1, "Expected 1 table live query: {:?}", res);
-	let tested_entry = res.get(0).unwrap();
+	let tested_entry = res.first().unwrap();
 	assert_eq!(tested_entry.lq, valid_data.live_query_id.unwrap());
 	Ok(())
 }

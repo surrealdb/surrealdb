@@ -107,6 +107,6 @@ mod tests {
 		let sql = "EVENT test ON test";
 		let res = event(sql);
 
-		assert_eq!(res.is_err(), true)
+		assert!(res.is_err())
 	}
 }

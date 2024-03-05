@@ -246,6 +246,6 @@ mod tests {
 		let sql = "INDEX test ON test";
 		let res = index(sql);
 
-		assert_eq!(res.is_err(), true)
+		assert!(res.is_err())
 	}
 }
