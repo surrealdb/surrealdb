@@ -915,7 +915,7 @@ pub enum Error {
 	EvNotFound {
 		value: String,
 	},
-  
+
 	/// The session has expired either because the token used
 	/// to establish it has expired or because an expiration
 	/// was explicitly defined when establishing it
