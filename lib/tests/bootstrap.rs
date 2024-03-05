@@ -76,6 +76,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 				return Ok(());
 			}
 			err = Some(res);
+			tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 		}
 		err.unwrap()
 	};
