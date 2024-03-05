@@ -34,8 +34,9 @@ use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::{LqEntry, LqValue};
+use crate::kvs::lq_structs::{LqEntry, LqValue, TrackedResult};
 use crate::kvs::Check;
+use crate::options::EngineOptions;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -50,8 +51,6 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
-
-const LQ_CAPACITY: usize = 100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -93,6 +92,7 @@ pub struct Transaction {
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
 	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
+	pub(super) engine_options: EngineOptions,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -112,6 +112,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Transaction),
 }
+
 #[derive(Copy, Clone)]
 pub enum TransactionType {
 	Read,
@@ -328,17 +329,20 @@ impl Transaction {
 		}
 	}
 
-	#[allow(unused)]
-	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
-		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
+	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
+	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
+		let mut lq: Vec<TrackedResult> =
+			Vec::with_capacity(self.engine_options.new_live_queries_per_transaction as usize);
 		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
-			lq.push(l);
+			lq.push(TrackedResult::LiveQuery(l));
 		}
 		lq
 	}
 
 	/// Sends a live query to the transaction which is forwarded only once committed
 	/// And removed once a transaction is aborted
+	// allow(dead_code) because this is used in v2, but not v1
+	#[allow(dead_code)]
 	pub(crate) fn pre_commit_register_live_query(
 		&mut self,
 		lq_entry: LqEntry,
@@ -3220,7 +3224,7 @@ mod tests {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tx_test {
-	use crate::kvs::lq_structs::LqEntry;
+	use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -3258,6 +3262,6 @@ mod tx_test {
 		// Verify data
 		let live_queries = tx.consume_pending_live_queries();
 		assert_eq!(live_queries.len(), 1);
-		assert_eq!(live_queries[0], lq_entry);
+		assert_eq!(live_queries[0], TrackedResult::LiveQuery(lq_entry));
 	}
 }

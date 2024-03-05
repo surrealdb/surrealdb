@@ -64,3 +64,17 @@ fn constant_mixedcase() {
 	let out = test_parse!(parse_value, r#" MaTh::Pi "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
 }
+
+#[test]
+fn scientific_decimal() {
+	let res = test_parse!(parse_value, r#" 9.7e-7dec "#).unwrap();
+	assert!(matches!(res, Value::Number(Number::Decimal(_))));
+	assert_eq!(res.to_string(), "0.00000097dec")
+}
+
+#[test]
+fn scientific_number() {
+	let res = test_parse!(parse_value, r#" 9.7e-5"#).unwrap();
+	assert!(matches!(res, Value::Number(Number::Float(_))));
+	assert_eq!(res.to_string(), "0.000097f")
+}
