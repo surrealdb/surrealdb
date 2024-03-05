@@ -8,6 +8,7 @@ pub use keyword::Keyword;
 mod mac;
 pub(crate) use mac::t;
 
+use crate::sql::change_feed_include::ChangeFeedInclude;
 use crate::sql::{language::Language, Algorithm};
 
 /// A location in the source passed to the lexer.
@@ -40,6 +41,14 @@ impl Span {
 		Span {
 			offset: start,
 			len,
+		}
+	}
+
+	// returns a zero-length span that starts after the current span.
+	pub fn after(self) -> Span {
+		Span {
+			offset: self.offset + self.len,
+			len: 0,
 		}
 	}
 }
@@ -124,42 +133,42 @@ pub enum Operator {
 impl Operator {
 	fn as_str(&self) -> &'static str {
 		match self {
-			Operator::Not => "'!'",
-			Operator::Add => "'+'",
-			Operator::Subtract => "'-'",
-			Operator::Divide => "'÷'",
-			Operator::Or => "'||'",
-			Operator::And => "'&&'",
-			Operator::Mult => "'×'",
-			Operator::LessEqual => "'<='",
-			Operator::GreaterEqual => "'>='",
-			Operator::Star => "'*'",
-			Operator::Power => "'**'",
-			Operator::Equal => "'='",
-			Operator::Exact => "'=='",
-			Operator::NotEqual => "'!='",
-			Operator::AllEqual => "'*='",
-			Operator::AnyEqual => "'?='",
-			Operator::Like => "'~'",
-			Operator::NotLike => "'!~'",
-			Operator::AllLike => "'*~'",
-			Operator::AnyLike => "'?~'",
-			Operator::Contains => "'∋'",
-			Operator::NotContains => "'∌'",
-			Operator::ContainsAll => "'⊇'",
-			Operator::ContainsAny => "'⊃'",
-			Operator::ContainsNone => "'⊅'",
-			Operator::Inside => "'∈'",
-			Operator::NotInside => "'∉'",
-			Operator::AllInside => "'⊆'",
-			Operator::AnyInside => "'⊂'",
-			Operator::NoneInside => "'⊄'",
-			Operator::Matches => "'@@'",
-			Operator::Inc => "'+='",
-			Operator::Dec => "'-='",
-			Operator::Ext => "'+?='",
-			Operator::Tco => "'?:'",
-			Operator::Nco => "'??'",
+			Operator::Not => "!",
+			Operator::Add => "+",
+			Operator::Subtract => "-",
+			Operator::Divide => "÷",
+			Operator::Or => "||",
+			Operator::And => "&&",
+			Operator::Mult => "×",
+			Operator::LessEqual => "<=",
+			Operator::GreaterEqual => ">=",
+			Operator::Star => "*",
+			Operator::Power => "**",
+			Operator::Equal => "=",
+			Operator::Exact => "==",
+			Operator::NotEqual => "!=",
+			Operator::AllEqual => "*=",
+			Operator::AnyEqual => "?=",
+			Operator::Like => "~",
+			Operator::NotLike => "!~",
+			Operator::AllLike => "*~",
+			Operator::AnyLike => "?~",
+			Operator::Contains => "∋",
+			Operator::NotContains => "∌",
+			Operator::ContainsAll => "⊇",
+			Operator::ContainsAny => "⊃",
+			Operator::ContainsNone => "⊅",
+			Operator::Inside => "∈",
+			Operator::NotInside => "∉",
+			Operator::AllInside => "⊆",
+			Operator::AnyInside => "⊂",
+			Operator::NoneInside => "⊄",
+			Operator::Matches => "@@",
+			Operator::Inc => "+=",
+			Operator::Dec => "-=",
+			Operator::Ext => "+?=",
+			Operator::Tco => "?:",
+			Operator::Nco => "??",
 		}
 	}
 }
@@ -177,19 +186,27 @@ pub enum Delim {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum DistanceKind {
+	Chebyshev,
+	Cosine,
 	Euclidean,
-	Manhattan,
 	Hamming,
+	Jaccard,
+	Manhattan,
 	Minkowski,
+	Pearson,
 }
 
 impl DistanceKind {
 	pub fn as_str(&self) -> &'static str {
 		match self {
+			DistanceKind::Chebyshev => "CHEBYSHEV",
+			DistanceKind::Cosine => "COSINE",
 			DistanceKind::Euclidean => "EUCLIDEAN",
-			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Hamming => "HAMMING",
+			DistanceKind::Jaccard => "JACCARD",
+			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Minkowski => "MINKOWSKI",
+			DistanceKind::Pearson => "PEARSON",
 		}
 	}
 }
@@ -200,6 +217,8 @@ pub enum NumberKind {
 	Integer,
 	// A number with a decimal postfix.
 	Decimal,
+	// A number with a decimal postfix.
+	DecimalExponent,
 	// A number with a float postfix.
 	Float,
 	// A number with a `.3` part.
@@ -216,6 +235,7 @@ pub enum NumberKind {
 pub enum TokenKind {
 	Keyword(Keyword),
 	Algorithm(Algorithm),
+	ChangeFeedInclude(ChangeFeedInclude),
 	Language(Language),
 	Distance(DistanceKind),
 	Operator(Operator),
@@ -308,11 +328,31 @@ impl TokenKind {
 		)
 	}
 
+	fn algorithm_as_str(algo: Algorithm) -> &'static str {
+		match algo {
+			Algorithm::EdDSA => "EDDSA",
+			Algorithm::Es256 => "ES256",
+			Algorithm::Es384 => "ES384",
+			Algorithm::Es512 => "ES512",
+			Algorithm::Hs256 => "HS256",
+			Algorithm::Hs384 => "HS384",
+			Algorithm::Hs512 => "HS512",
+			Algorithm::Ps256 => "PS256",
+			Algorithm::Ps384 => "PS384",
+			Algorithm::Ps512 => "PS512",
+			Algorithm::Rs256 => "RS256",
+			Algorithm::Rs384 => "RS384",
+			Algorithm::Rs512 => "RS512",
+			#[cfg(feature = "sql2")]
+			Algorithm::Jwks => "JWKS",
+		}
+	}
+
 	pub fn as_str(&self) -> &'static str {
 		match *self {
 			TokenKind::Keyword(x) => x.as_str(),
 			TokenKind::Operator(x) => x.as_str(),
-			TokenKind::Algorithm(_) => todo!(),
+			TokenKind::Algorithm(x) => Self::algorithm_as_str(x),
 			TokenKind::Language(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
@@ -335,26 +375,27 @@ impl TokenKind {
 			TokenKind::Number(_) => "a number",
 			TokenKind::Identifier => "an identifier",
 			TokenKind::Regex => "a regex",
-			TokenKind::LeftChefron => "'<'",
-			TokenKind::RightChefron => "'>'",
-			TokenKind::Star => "'*'",
-			TokenKind::Dollar => "'$'",
-			TokenKind::Question => "'?'",
-			TokenKind::ArrowRight => "'->'",
-			TokenKind::ArrowLeft => "'<-'",
-			TokenKind::BiArrow => "'<->'",
-			TokenKind::ForwardSlash => "'/'",
-			TokenKind::Dot => "'.'",
-			TokenKind::DotDot => "'..'",
-			TokenKind::DotDotDot => "'...'",
-			TokenKind::SemiColon => "';'",
-			TokenKind::PathSeperator => "'::'",
-			TokenKind::Colon => "':'",
-			TokenKind::Comma => "','",
-			TokenKind::Vert => "'|'",
-			TokenKind::At => "'@'",
+			TokenKind::LeftChefron => "<",
+			TokenKind::RightChefron => ">",
+			TokenKind::Star => "*",
+			TokenKind::Dollar => "$",
+			TokenKind::Question => "?",
+			TokenKind::ArrowRight => "->",
+			TokenKind::ArrowLeft => "<-",
+			TokenKind::BiArrow => "<->",
+			TokenKind::ForwardSlash => "/",
+			TokenKind::Dot => ".",
+			TokenKind::DotDot => "..",
+			TokenKind::DotDotDot => "...",
+			TokenKind::SemiColon => ";",
+			TokenKind::PathSeperator => "::",
+			TokenKind::Colon => ":",
+			TokenKind::Comma => ",",
+			TokenKind::Vert => "|",
+			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
+			TokenKind::ChangeFeedInclude(_) => "change feed include",
 		}
 	}
 }

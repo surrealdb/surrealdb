@@ -859,6 +859,13 @@ impl From<rocksdb::Error> for Error {
 	}
 }
 
+#[cfg(feature = "kv-surrealkv")]
+impl From<surrealkv::Error> for Error {
+	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
 impl From<channel::RecvError> for Error {
 	fn from(e: channel::RecvError) -> Error {
 		Error::Channel(e.to_string())

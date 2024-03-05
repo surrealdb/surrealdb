@@ -14,6 +14,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::error::Db as DbError;
+use crate::opt::WaitFor;
 use flume::Receiver;
 use std::collections::HashSet;
 use std::future::Future;
@@ -22,6 +23,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::watch;
 
 impl crate::api::Connection for Any {}
 
@@ -120,6 +122,21 @@ impl Connection for Any {
 					.into());
 				}
 
+				EndpointKind::SurrealKV => {
+					#[cfg(feature = "kv-surrealkv")]
+					{
+						features.insert(ExtraFeatures::LiveQueries);
+						engine::local::wasm::router(address, conn_tx, route_rx);
+						conn_rx.into_recv_async().await??;
+					}
+
+					#[cfg(not(feature = "kv-surrealkv"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
+				}
+
 				EndpointKind::TiKv => {
 					#[cfg(feature = "kv-tikv")]
 					{
@@ -151,9 +168,9 @@ impl Connection for Any {
 					#[cfg(feature = "protocol-ws")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						let mut address = address;
-						address.url = address.url.join(engine::remote::ws::PATH)?;
-						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
+						let mut endpoint = address;
+						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
+						engine::remote::ws::wasm::router(endpoint, capacity, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??;
 					}
 
@@ -173,6 +190,7 @@ impl Connection for Any {
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
 				engine: PhantomData,
 			})
 		})

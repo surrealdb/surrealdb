@@ -15,22 +15,10 @@ defaults:
     shell: bash
 
 jobs:
-  # TODO: Do not run it on CI because it's very slow right now.
-  # Build the Docker image but don't push it.
-  # docker:
-  #   uses: ./.github/workflows/reusable_docker.yml
-  #   with:
-  #     git-ref: ${{ github.ref }}
-  #     tag-prefix: ${{ github.head_ref || github.ref_name }}
-  #     build: true
-  #     push: false
-  #   secrets: inherit
-
   format:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -55,7 +43,6 @@ jobs:
     name: Check workspace
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -83,7 +70,6 @@ jobs:
     name: Check dependencies
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -94,7 +80,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny
+        run: cargo install --debug --locked cargo-deny@0.14.11
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet
@@ -123,7 +109,6 @@ jobs:
     name: Check Wasm
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -148,7 +133,6 @@ jobs:
     name: Check clippy
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -177,7 +161,6 @@ jobs:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -210,12 +193,10 @@ jobs:
           ps auxf
           cat /tmp/surrealdb.log || true
 
-
   http-server:
     name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -243,11 +224,10 @@ jobs:
     name: ML integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.74.1
+          toolchain: 1.75.0
 
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -271,7 +251,6 @@ jobs:
     name: WebSocket integration tests
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -297,9 +276,8 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "arm64", "builder"]
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -316,17 +294,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-
-      - name: Free up some disk space
-        run: |
-          (set -x; df -h)
-          # Free up some disk space by removing unused files
-          (set -x; sudo rm -rf /imagegeneration || true)
-          (set -x; sudo rm -rf /opt/az || true)
-          (set -x; sudo rm -rf /opt/hostedtoolcache || true)
-          (set -x; sudo rm -rf /opt/google || true)
-          (set -x; sudo rm -rf /opt/pipx || true)
-          (set -x; df -h)
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -348,9 +315,8 @@ jobs:
 
   test-parser:
     name: Test workspace with experimental parser
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "arm64", "builder"]
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -391,7 +357,6 @@ jobs:
     name: WebSocket engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -428,7 +393,6 @@ jobs:
     name: HTTP engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -465,7 +429,6 @@ jobs:
     name: Any engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -502,7 +465,6 @@ jobs:
     name: Memory engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -526,7 +488,6 @@ jobs:
     name: File engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -550,7 +511,6 @@ jobs:
     name: RocksDB engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -574,7 +534,6 @@ jobs:
     name: SpeeDB engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -595,10 +554,9 @@ jobs:
         run: cargo make ci-api-integration-speedb
 
   tikv-engine:
-     name: TiKV engine
-     runs-on: ubuntu-latest
-     steps:
-
+    name: TiKV engine
+    runs-on: ubuntu-latest
+    steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -642,7 +600,6 @@ jobs:
     name: FoundationDB engine
     runs-on: ubuntu-latest
     steps:
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -675,3 +632,60 @@ jobs:
           df -h
           ps auxf
           cat /tmp/surrealdb.log || true
+
+  surrealkv-engine:
+    name: SurrealKV engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test surrealkv engine
+        run: cargo make ci-api-integration-surrealkv
+
+      - name: Debug info
+        if: always()
+        run: |
+          set -x
+          free -m
+          df -h
+          ps auxf
+          cat /tmp/surrealdb.log || true
+
+  db-upgrade:
+    name: Database Upgrade from previous versions
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test upgrade
+        run: cargo make ci-database-upgrade
+

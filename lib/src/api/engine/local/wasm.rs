@@ -17,6 +17,7 @@ use crate::fflags::FFLAGS;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
+use crate::opt::WaitFor;
 use flume::Receiver;
 use flume::Sender;
 use futures::future::Either;
@@ -34,6 +35,8 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Duration;
+use surrealdb_core::dbs::Options;
+use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
 use wasmtimer::tokio::MissedTickBehavior;
@@ -72,6 +75,7 @@ impl Connection for Db {
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
 				engine: PhantomData,
 			})
 		})
@@ -246,8 +250,9 @@ fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Re
 
 			let mut stream = streams.merge();
 
+			let opt = Options::default();
 			while let Some(Some(_)) = stream.next().await {
-				match kvs.process_lq_notifications().await {
+				match kvs.process_lq_notifications(&opt).await {
 					Ok(()) => trace!("Live Query poll ran successfully"),
 					Err(error) => error!("Error running live query poll: {error}"),
 				}

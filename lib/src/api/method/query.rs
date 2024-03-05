@@ -106,6 +106,7 @@ where
 											rx: Some(rx),
 											client: Surreal {
 												router: self.client.router.clone(),
+												waiter: self.client.waiter.clone(),
 												engine: PhantomData,
 											},
 											response_type: PhantomData,
@@ -128,6 +129,7 @@ where
 			}
 			response.client = Surreal {
 				router: self.client.router.clone(),
+				waiter: self.client.waiter.clone(),
 				engine: PhantomData,
 			};
 			Ok(response)
@@ -420,7 +422,7 @@ impl Response {
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some((_, Err(error))) = self.results.remove(&key) {
+			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
 				errors.insert(key, error);
 			}
 		}
@@ -451,7 +453,7 @@ impl Response {
 			}
 		}
 		if let Some(key) = first_error {
-			if let Some((_, Err(error))) = self.results.remove(&key) {
+			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
 				return Err(error);
 			}
 		}
@@ -579,7 +581,7 @@ impl WithStats<Response> {
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some((stats, Err(error))) = self.0.results.remove(&key) {
+			if let Some((stats, Err(error))) = self.0.results.swap_remove(&key) {
 				errors.insert(key, (stats, error));
 			}
 		}
@@ -880,7 +882,7 @@ mod tests {
 		else {
 			panic!("silently dropping records not allowed");
 		};
-		let records = map.remove(&0).unwrap().1.unwrap();
+		let records = map.swap_remove(&0).unwrap().1.unwrap();
 		assert_eq!(records, vec![true, false].into());
 	}
 

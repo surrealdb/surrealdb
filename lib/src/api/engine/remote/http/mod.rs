@@ -7,7 +7,7 @@ pub(crate) mod wasm;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
-#[cfg(feature = "ml")]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
@@ -104,6 +104,7 @@ impl Surreal<Client> {
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
+			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
@@ -218,7 +219,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 }
 
 async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
-	if let Some((_stats, result)) = query(request).await?.results.remove(&0) {
+	if let Some((_stats, result)) = query(request).await?.results.swap_remove(&0) {
 		let value = result?;
 		match one {
 			true => match value {
@@ -524,7 +525,7 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
 			let path = match param.ml_config {
-				#[cfg(feature = "ml")]
+				#[cfg(any(feature = "ml", feature = "ml2"))]
 				Some(MlConfig::Export {
 					name,
 					version,
@@ -542,7 +543,7 @@ async fn router(
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Import => {
 			let path = match param.ml_config {
-				#[cfg(feature = "ml")]
+				#[cfg(any(feature = "ml", feature = "ml2"))]
 				Some(MlConfig::Import) => base_url.join("ml/import")?,
 				_ => base_url.join(Method::Import.as_str())?,
 			};
@@ -585,7 +586,7 @@ async fn router(
 		}
 		Method::Unset => {
 			if let [Value::Strand(Strand(key))] = &params[..1] {
-				vars.remove(key);
+				vars.swap_remove(key);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}

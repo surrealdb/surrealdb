@@ -163,6 +163,7 @@ fn statements() -> Vec<Statement> {
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(60) * 10,
+				store_original: false,
 			}),
 		})),
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
@@ -235,6 +236,7 @@ fn statements() -> Vec<Statement> {
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
+				store_original: false,
 			}),
 			comment: None,
 		})),
@@ -309,6 +311,7 @@ fn statements() -> Vec<Statement> {
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
+				_distance: Default::default(),
 				capacity: 6,
 				doc_ids_order: 7,
 				doc_ids_cache: 8,

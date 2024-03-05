@@ -6,7 +6,8 @@ use crate::ctx::context;
 
 use crate::dbs::{Options, Session};
 use crate::iam::{Auth, Role};
-use crate::kvs::{LockType::*, LqType, TransactionType::*};
+use crate::kvs::lq_structs::{LqValue, UnreachableLqType};
+use crate::kvs::{LockType::*, TransactionType::*};
 use crate::sql;
 use crate::sql::statements::LiveStatement;
 use crate::sql::Value::Table;
@@ -334,14 +335,14 @@ async fn test_asymmetric_difference() {
 	let lq2 = Uuid::parse_str("acf60c04-5819-4a23-9874-aeb0ae1be425").unwrap();
 	let lq3 = Uuid::parse_str("5d591ae7-db79-4e4f-aa02-a83a4a25ce3f").unwrap();
 	let left_set = BTreeSet::from_iter(vec![
-		LqType::Nd(LqValue {
+		UnreachableLqType::Nd(LqValue {
 			nd: nd1.into(),
 			ns: ns1.to_string(),
 			db: db1.to_string(),
 			tb: tb1.to_string(),
 			lq: lq1.into(),
 		}),
-		LqType::Nd(LqValue {
+		UnreachableLqType::Nd(LqValue {
 			nd: nd2.into(),
 			ns: ns2.to_string(),
 			db: db2.to_string(),
@@ -351,14 +352,14 @@ async fn test_asymmetric_difference() {
 	]);
 
 	let right_set = BTreeSet::from_iter(vec![
-		LqType::Tb(LqValue {
+		UnreachableLqType::Tb(LqValue {
 			nd: nd2.into(),
 			ns: ns2.to_string(),
 			db: db2.to_string(),
 			tb: tb2.to_string(),
 			lq: lq2.into(),
 		}),
-		LqType::Tb(LqValue {
+		UnreachableLqType::Tb(LqValue {
 			nd: nd3.into(),
 			ns: ns3.to_string(),
 			db: db3.to_string(),

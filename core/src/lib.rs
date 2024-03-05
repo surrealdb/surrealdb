@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate tracing;
+extern crate core;
 
 #[macro_use]
 mod mac;
@@ -33,9 +34,10 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(any(feature = "ml", feature = "jwks"))]
+#[cfg(any(feature = "ml", feature = "ml2", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;
+pub mod options;
 #[doc(hidden)]
 pub mod syn;
 
@@ -48,7 +50,12 @@ pub mod channel {
 	pub use channel::Sender;
 }
 
-#[cfg(feature = "ml")]
+#[cfg(all(feature = "ml", not(feature = "ml2")))]
 #[cfg(not(target_arch = "wasm32"))]
 #[doc(hidden)]
-pub use surrealml_core as ml;
+pub use surrealml_core1 as ml;
+
+#[cfg(feature = "ml2")]
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use surrealml_core2 as ml;
