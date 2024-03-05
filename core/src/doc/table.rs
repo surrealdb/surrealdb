@@ -41,9 +41,17 @@ impl<'a> Document<'a> {
 		if opt.import {
 			return Ok(());
 		}
+		println!("FR {:?}", opt.force);
 		// Collect foreign tables or skip
 		let fts = match &opt.force {
-			Force::Table(tb) => tb.clone(),
+			Force::Table(tb) if tb.first().is_some_and(|tb| tb.view.as_ref().is_some_and(|v| {
+				let id = match self.id {
+					Some(id) => id.tb.clone(),
+					_ => return false,
+				};
+
+				v.what.iter().find(|p| p.0 == id).is_some()
+			})) => tb.clone(),
 			Force::All => self.ft(opt, txn).await?,
 			_ if self.changed() => self.ft(opt, txn).await?,
 			_ => return Ok(()),
@@ -62,6 +70,7 @@ impl<'a> Document<'a> {
 		};
 		// Loop through all foreign table statements
 		for ft in fts.iter() {
+			println!("FT {:?}", ft);
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
 			// Check if there is a GROUP BY clause
@@ -96,7 +105,7 @@ impl<'a> Document<'a> {
 						Some(cond) => {
 							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
-									if act != Action::Create {
+									if opt.force.is_none() && act != Action::Create {
 										// Delete the old value
 										let act = Action::Delete;
 										// Modify the value in the table
@@ -126,7 +135,7 @@ impl<'a> Document<'a> {
 									}
 								}
 								_ => {
-									if act != Action::Create {
+									if opt.force.is_none() && act != Action::Create {
 										// Update the new value
 										let act = Action::Update;
 										// Modify the value in the table
@@ -145,7 +154,7 @@ impl<'a> Document<'a> {
 						}
 						// No WHERE clause is specified
 						None => {
-							if act != Action::Create {
+							if opt.force.is_none() && act != Action::Create {
 								// Delete the old value
 								let act = Action::Delete;
 								// Modify the value in the table
