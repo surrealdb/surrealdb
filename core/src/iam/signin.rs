@@ -129,19 +129,32 @@ pub async fn sc(
 								// Create the authentication key
 								let key = EncodingKey::from_secret(sv.code.as_ref());
 								// Create the authentication claim
+								let exp = Some(
+									match sv.session {
+										Some(v) => {
+											// The defined session duration must be valid
+											match Duration::from_std(v.0) {
+												// The resulting session expiration must be valid
+												Ok(d) => match Utc::now().checked_add_signed(d) {
+													Some(exp) => exp,
+													None => {
+														return Err(Error::InvalidSessionExpiration)
+													}
+												},
+												Err(_) => {
+													return Err(Error::InvalidSessionDuration)
+												}
+											}
+										}
+										_ => Utc::now() + Duration::hours(1),
+									}
+									.timestamp(),
+								);
 								let val = Claims {
 									iss: Some(SERVER_NAME.to_owned()),
 									iat: Some(Utc::now().timestamp()),
 									nbf: Some(Utc::now().timestamp()),
-									exp: Some(
-										match sv.session {
-											Some(v) => {
-												Utc::now() + Duration::from_std(v.0).unwrap()
-											}
-											_ => Utc::now() + Duration::hours(1),
-										}
-										.timestamp(),
-									),
+									exp,
 									ns: Some(ns.to_owned()),
 									db: Some(db.to_owned()),
 									sc: Some(sc.to_owned()),
@@ -158,6 +171,7 @@ pub async fn sc(
 								session.db = Some(db.to_owned());
 								session.sc = Some(sc.to_owned());
 								session.sd = Some(Value::from(rid.to_owned()));
+								session.exp = exp;
 								session.au = Arc::new(Auth::new(Actor::new(
 									rid.to_string(),
 									Default::default(),
@@ -208,11 +222,12 @@ pub async fn db(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
+			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				exp,
 				ns: Some(ns.to_owned()),
 				db: Some(db.to_owned()),
 				id: Some(user),
@@ -226,6 +241,7 @@ pub async fn db(
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
+			session.exp = exp;
 			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 			// Check the authentication token
 			match enc {
@@ -259,11 +275,12 @@ pub async fn ns(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
+			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				exp,
 				ns: Some(ns.to_owned()),
 				id: Some(user),
 				..Claims::default()
@@ -275,6 +292,7 @@ pub async fn ns(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
+			session.exp = exp;
 			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 			// Check the authentication token
 			match enc {
@@ -308,11 +326,12 @@ pub async fn root(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
+			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				exp,
 				id: Some(user),
 				..Claims::default()
 			};
@@ -322,6 +341,7 @@ pub async fn root(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into());
+			session.exp = exp;
 			session.au = Arc::new((&u, Level::Root).into());
 			// Check the authentication token
 			match enc {

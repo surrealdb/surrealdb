@@ -128,6 +128,10 @@ pub enum Operator {
 	Tco,
 	/// `??`
 	Nco,
+	/// `<|`
+	KnnOpen,
+	/// `|>`
+	KnnClose,
 }
 
 impl Operator {
@@ -169,6 +173,8 @@ impl Operator {
 			Operator::Ext => "+?=",
 			Operator::Tco => "?:",
 			Operator::Nco => "??",
+			Operator::KnnOpen => "<|",
+			Operator::KnnClose => "|>",
 		}
 	}
 }
