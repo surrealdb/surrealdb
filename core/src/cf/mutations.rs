@@ -21,7 +21,7 @@ pub enum TableMutation {
 	Del(Thing),
 	Def(DefineTableStatement),
 	#[revision(start = 2)]
-	// Includes the previous value that may be None
+	// Includes the ID, current value, and changes that were applied
 	SetWithDiff(Thing, Value, Vec<Operation>),
 }
 
@@ -249,8 +249,8 @@ mod tests {
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Add {
-							path: "/temp".into(),
-							value: Value::from(true),
+							path: "/note".into(),
+							value: Value::from("surreal"),
 						}],
 					),
 					TableMutation::SetWithDiff(
@@ -281,7 +281,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"original":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/temp`","value":true}]},{"original":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
+			r#"{"changes":[{"original":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"original":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
 		);
 	}
 }

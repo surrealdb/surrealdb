@@ -1023,8 +1023,7 @@ impl Datastore {
 			TableMutation::Def(_) => None,
 			TableMutation::SetWithDiff(id, new, _operations) => {
 				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
-				// TODO(SUR-328): set previous value
-				warn!("We don't support applying patches as that was always on the user; This is behind a fflag");
+				// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 				Some(doc)
 			}
 		}
