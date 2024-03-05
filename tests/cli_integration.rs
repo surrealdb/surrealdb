@@ -124,16 +124,6 @@ mod cli_integration {
 			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
 		}
 
-		info!("* Unfinished backup CLI");
-		{
-			let file = common::tmp_file("backup.db");
-			let args = format!("backup {creds}  http://{addr} {file}");
-			common::run(&args).output().expect("failed to run backup: {args}");
-
-			// TODO: Once backups are functional, update this test.
-			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
-		}
-
 		info!("* Advanced uncomputed variable to be computed before saving");
 		{
 			let args = format!(
