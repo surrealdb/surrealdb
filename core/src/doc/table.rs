@@ -323,8 +323,6 @@ impl<'a> Document<'a> {
 	}
 	/// Increment or decrement the field in the foreign table
 	fn chg(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
-		println!("key {} act {:?} val {}", key, act, val);
-		// println!("Custom backtrace: {}", Backtrace::force_capture());
 		ops.push((
 			key,
 			match act {

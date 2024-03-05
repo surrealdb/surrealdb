@@ -90,7 +90,6 @@ impl DefineTableStatement {
 			let opt = &opt.new_with_force(Some(Force::Table(Arc::new([dt]))));
 			// Process each foreign table
 			for v in view.what.0.iter() {
-				println!("{}", v);
 				// Process the view data
 				let stm = UpdateStatement {
 					what: Values(vec![Value::Table(v.clone())]),
@@ -98,12 +97,6 @@ impl DefineTableStatement {
 				};
 				stm.compute(ctx, opt, txn, doc).await?;
 			}
-			// let stm = UpdateStatement {
-			// 	what: Values(vec![Value::Table(dt.name.into())]),
-			// 	data: Some(dt.data(ctx, opt, txn, Action::Update, &tb.expr).await?),
-			// 	..UpdateStatement::default()
-			// };
-			// stm.compute(ctx, opt, txn, doc).await?;
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
 		}
