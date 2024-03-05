@@ -1682,8 +1682,8 @@ mod tests {
 		let vec1 = new_vec(1, VectorType::F64, 1);
 		// First the index is empty
 		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
+			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
+			let res = t.knn_search(&mut tx, &st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 0);
@@ -1691,7 +1691,7 @@ mod tests {
 		// Insert single element
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec1.clone(), 1).await?;
+			t.insert(&mut tx, &mut st, vec1.clone(), 1).await?;
 			assert_eq!(t.state.root, Some(0));
 			check_leaf_write(&mut tx, &mut st, 0, |m| {
 				assert_eq!(m.len(), 1);
@@ -1703,7 +1703,7 @@ mod tests {
 		// Check KNN
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
+			let res = t.knn_search(&mut tx, &st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
@@ -1714,13 +1714,13 @@ mod tests {
 		let vec2 = new_vec(2, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec2.clone(), 2).await?;
+			t.insert(&mut tx, &mut st, vec2.clone(), 2).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec1 knn
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec1, 10).await?;
+			let res = t.knn_search(&mut tx, &st, &vec1, 10).await?;
 			check_knn(&res.docs, vec![1, 2]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
@@ -1735,8 +1735,8 @@ mod tests {
 		}
 		// vec2 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec2, 10).await?;
+			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
+			let res = t.knn_search(&mut tx, &st, &vec2, 10).await?;
 			check_knn(&res.docs, vec![2, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
@@ -1745,13 +1745,13 @@ mod tests {
 		// insert new doc to existing vector
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec2.clone(), 3).await?;
+			t.insert(&mut tx, &mut st, vec2.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec2 knn
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec2, 10).await?;
+			let res = t.knn_search(&mut tx, &st, &vec2, 10).await?;
 			check_knn(&res.docs, vec![2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
@@ -1769,13 +1769,13 @@ mod tests {
 		let vec3 = new_vec(3, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec3.clone(), 3).await?;
+			t.insert(&mut tx, &mut st, vec3.clone(), 3).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec3 knn
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec3, 10).await?;
+			let res = t.knn_search(&mut tx, &st, &vec3, 10).await?;
 			check_knn(&res.docs, vec![3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 1);
@@ -1794,13 +1794,13 @@ mod tests {
 		let vec4 = new_vec(4, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec4.clone(), 4).await?;
+			t.insert(&mut tx, &mut st, vec4.clone(), 4).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec4 knn
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec4, 10).await?;
+			let res = t.knn_search(&mut tx, &st, &vec4, 10).await?;
 			check_knn(&res.docs, vec![4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 3);
@@ -1830,13 +1830,13 @@ mod tests {
 		let vec6 = new_vec(6, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec6.clone(), 6).await?;
+			t.insert(&mut tx, &mut st, vec6.clone(), 6).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		// vec6 knn
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec6, 10).await?;
+			let res = t.knn_search(&mut tx, &st, &vec6, 10).await?;
 			check_knn(&res.docs, vec![6, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 3);
@@ -1869,7 +1869,7 @@ mod tests {
 		let vec8 = new_vec(8, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec8.clone(), 8).await?;
+			t.insert(&mut tx, &mut st, vec8.clone(), 8).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1908,7 +1908,7 @@ mod tests {
 		let vec9 = new_vec(9, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec9.clone(), 9).await?;
+			t.insert(&mut tx, &mut st, vec9.clone(), 9).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -1948,7 +1948,7 @@ mod tests {
 		let vec10 = new_vec(10, VectorType::F64, 1);
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			t.insert(&mut tx, (&mut st), vec10.clone(), 10).await?;
+			t.insert(&mut tx, &mut st, vec10.clone(), 10).await?;
 			finish_operation(&mut t, tx, st, true).await?;
 		}
 		{
@@ -2004,16 +2004,16 @@ mod tests {
 
 		// vec8 knn
 		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec8, 20).await?;
+			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
+			let res = t.knn_search(&mut tx, &st, &vec8, 20).await?;
 			check_knn(&res.docs, vec![8, 9, 6, 10, 4, 3, 2, 3, 1]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 7);
 		}
 		// vec4 knn(2)
 		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec4, 2).await?;
+			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
+			let res = t.knn_search(&mut tx, &st, &vec4, 2).await?;
 			check_knn(&res.docs, vec![4, 3]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 7);
@@ -2021,8 +2021,8 @@ mod tests {
 
 		// vec10 knn(2)
 		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &mut st, &vec10, 2).await?;
+			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
+			let res = t.knn_search(&mut tx, &st, &vec10, 2).await?;
 			check_knn(&res.docs, vec![10, 9]);
 			#[cfg(debug_assertions)]
 			assert_eq!(res.visited_nodes.len(), 7);
@@ -2042,7 +2042,7 @@ mod tests {
 			{
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
-				t.insert(&mut tx, (&mut st), obj.clone(), *doc_id).await?;
+				t.insert(&mut tx, &mut st, obj.clone(), *doc_id).await?;
 				finish_operation(t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
@@ -2067,7 +2067,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 			for (doc_id, obj) in collection.as_ref() {
-				t.insert(&mut tx, (&mut st), obj.clone(), *doc_id).await?;
+				t.insert(&mut tx, &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			finish_operation(t, tx, st, true).await?;
@@ -2091,7 +2091,7 @@ mod tests {
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
 				assert!(
-					t.delete(&mut tx, (&mut st), obj.clone(), *doc_id).await?,
+					t.delete(&mut tx, &mut st, obj.clone(), *doc_id).await?,
 					"Delete failed: {} {:?}",
 					doc_id,
 					obj
@@ -2099,9 +2099,8 @@ mod tests {
 				finish_operation(t, tx, st, true).await?;
 			}
 			{
-				let (mut st, mut tx) =
-					new_operation(ds, t, TransactionType::Read, cache_size).await;
-				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
+				let (st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
+				let res = t.knn_search(&mut tx, &st, obj, 1).await?;
 				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
@@ -2126,7 +2125,7 @@ mod tests {
 		let max_knn = 20.max(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
-				let res = t.knn_search(&mut tx, &mut st, obj, knn).await?;
+				let res = t.knn_search(&mut tx, &st, obj, knn).await?;
 				if collection.is_unique() {
 					assert!(
 						res.docs.contains(doc_id),
@@ -2161,9 +2160,9 @@ mod tests {
 		map: &HashMap<DocId, SharedVector>,
 		cache_size: usize,
 	) -> Result<(), Error> {
-		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
+		let (st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
 		for obj in map.values() {
-			let res = t.knn_search(&mut tx, &mut st, obj, map.len()).await?;
+			let res = t.knn_search(&mut tx, &st, obj, map.len()).await?;
 			assert_eq!(
 				map.len(),
 				res.docs.len(),

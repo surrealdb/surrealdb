@@ -247,8 +247,7 @@ mod tests {
 	use super::*;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
-	use crate::sql::value::Value;
-	use crate::syn::Parse;
+	use crate::syn::Parse as _;
 
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());

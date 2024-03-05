@@ -24,9 +24,9 @@ impl ser::Serializer for Serializer {
 	const EXPECTED: &'static str = "a struct `DateTime<Utc>`";
 
 	#[inline]
-	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+	fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
 	where
-		T: Display,
+		T: Display + ?Sized,
 	{
 		value.to_string().parse().map_err(Error::custom)
 	}
@@ -48,7 +48,6 @@ impl ser::Serializer for Serializer {
 mod tests {
 	use super::*;
 	use ser::Serializer as _;
-	use serde::Serialize;
 
 	#[test]
 	fn now() {
