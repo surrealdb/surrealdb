@@ -779,6 +779,20 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	/// The session has expired either because the token used
+	/// to establish it has expired or because an expiration
+	/// was explicitly defined when establishing it
+	#[error("The session has expired")]
+	ExpiredSession,
+
+	/// The session has an invalid duration
+	#[error("The session has an invalid duration")]
+	InvalidSessionDuration,
+
+	/// The session has an invalid expiration
+	#[error("The session has an invalid expiration")]
+	InvalidSessionExpiration,
 }
 
 impl From<Error> for String {
