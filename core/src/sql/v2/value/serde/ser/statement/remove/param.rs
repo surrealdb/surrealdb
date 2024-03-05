@@ -52,7 +52,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveParamStatement {
 				self.name = Ident(value.serialize(ser::string::Serializer.wrap())?);
 			}
 			"if_exists" => {
-				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
+				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!(
