@@ -18,8 +18,8 @@ impl<'a> Document<'a> {
 		if opt.import {
 			return Ok(());
 		}
-		// Check if forced
-		if opt.force.is_none() && !self.changed() {
+		// Check if changed
+		if !self.changed() {
 			return Ok(());
 		}
 		// Don't run permissions
