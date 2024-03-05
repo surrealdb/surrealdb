@@ -59,6 +59,13 @@ pub enum Force {
 }
 
 impl Force {
+	pub fn is_none(&self) -> bool {
+		match self {
+			Force::None => true,
+			_ => true,
+		}
+	}
+
 	pub fn is_forced(&self) -> bool {
 		match self {
 			Force::None => false,
@@ -85,7 +92,7 @@ impl Options {
 			perms: true,
 			force: Force::All,
 			strict: false,
-			import: true,
+			import: false,
 			futures: false,
 			projections: false,
 			auth_enabled: true,
