@@ -330,6 +330,8 @@ impl Transaction {
 	}
 
 	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
+	/// This function does not check that a transaction was committed, but the intention is to consume from this
+	/// only once the transaction is committed
 	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
 		let mut tracked_results: Vec<TrackedResult> =
 			Vec::with_capacity(self.engine_options.new_live_queries_per_transaction as usize);
@@ -3171,7 +3173,7 @@ mod tx_test {
 				auth: None,
 			},
 		};
-		tx.pre_commit_register_async_event(lq_entry.clone()).unwrap();
+		tx.pre_commit_register_async_event(TrackedResult::LiveQuery(lq_entry.clone())).unwrap();
 
 		tx.commit().await.unwrap();
 

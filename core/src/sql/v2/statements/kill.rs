@@ -1,3 +1,9 @@
+use std::fmt;
+
+use derive::Store;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -6,10 +12,6 @@ use crate::fflags::FFLAGS;
 use crate::kvs::lq_structs::{KillEntry, LqEntry, TrackedResult};
 use crate::sql::Uuid;
 use crate::sql::Value;
-use derive::Store;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -42,19 +44,30 @@ impl KillStatement {
 					Ok(id) => Uuid(id),
 					_ => {
 						return Err(Error::KillStatement {
-							value: self.id.to_string(),
+							value:
+								"KILL received a parameter that could not be converted to a UUID"
+									.to_string(),
 						});
 					}
 				},
 				_ => {
 					return Err(Error::KillStatement {
-						value: self.id.to_string(),
+						value: "KILL received a parameter that was not expected".to_string(),
+					});
+				}
+			},
+			Value::Strand(maybe_id) => match uuid::Uuid::try_parse(&maybe_id) {
+				Ok(id) => Uuid(id),
+				_ => {
+					return Err(Error::KillStatement {
+						value: "KILL received a Strand that could not be converted to a UUID"
+							.to_string(),
 					});
 				}
 			},
 			_ => {
 				return Err(Error::KillStatement {
-					value: self.id.to_string(),
+					value: "Unhandled type for KILL statement".to_string(),
 				});
 			}
 		};
@@ -94,7 +107,7 @@ impl KillStatement {
 				},
 				None => {
 					return Err(Error::KillStatement {
-						value: self.id.to_string(),
+						value: "KILL statement uuid did not exist".to_string(),
 					});
 				}
 			}
@@ -112,14 +125,46 @@ impl fmt::Display for KillStatement {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::statements::KillStatement;
-	use crate::sql::{Ident, Param, Statement, Value};
-	use crate::syn::v2::parser::mac::test_parse;
+	use std::str::FromStr;
+
+	use crate::ctx::Context;
+	use crate::dbs::Options;
+	use crate::fflags::FFLAGS;
+	use crate::kvs::lq_structs::{KillEntry, TrackedResult};
+	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::sql::Uuid;
 
 	#[test_log::test(tokio::test)]
-	async fn kill_handles_uuid() {
-		let res =
-			test_parse!(parse_stmt, r#"KILL "8f92f057-c739-4bf2-9d0c-a74d01299efc""#).unwrap();
-		res.compute()
+	async fn kill_handles_uuid_event_registration() {
+		if !FFLAGS.change_feed_live_queries.enabled() {
+			return;
+		}
+		let mut parser = crate::syn::v2::parser::Parser::new(
+			r#"KILL u'8f92f057-c739-4bf2-9d0c-a74d01299efc'"#.as_bytes(),
+		);
+		let res = parser.parse_statement().unwrap();
+		let ctx = Context::default();
+		let opt = Options::new()
+			.with_id(uuid::Uuid::from_str("8c41d9f7-a627-40f7-86f5-59d56cd765c6").unwrap())
+			.with_live(true)
+			.with_db(Some("database".into()))
+			.with_ns(Some("namespace".into()));
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx =
+			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
+		res.compute(&ctx, &opt, &tx, None).await.unwrap();
+
+		let mut tx = tx.lock().await;
+		tx.commit().await.unwrap();
+
+		// Validate sent
+		assert_eq!(
+			tx.consume_pending_live_queries(),
+			vec![TrackedResult::KillQuery(KillEntry {
+				live_id: Uuid::from_str("8f92f057-c739-4bf2-9d0c-a74d01299efc").unwrap(),
+				ns: "namespace".to_string(),
+				db: "database".to_string(),
+			})]
+		);
 	}
 }
