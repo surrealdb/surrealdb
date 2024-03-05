@@ -36,6 +36,7 @@ use crate::kvs::lq_structs::{
 	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
 };
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::options::EngineOptions;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
@@ -49,8 +50,6 @@ const LQ_CHANNEL_SIZE: usize = 100;
 
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
-// In the future we will have proper pagination
-const TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION: u32 = 1000;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -72,6 +71,7 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
+	engine_options: EngineOptions,
 	// The versionstamp oracle for this datastore.
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
@@ -353,6 +353,7 @@ impl Datastore {
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Capabilities::default(),
+			engine_options: EngineOptions::default(),
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
 			index_stores: IndexStores::default(),
@@ -407,6 +408,12 @@ impl Datastore {
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
+		self
+	}
+
+	/// Set the engine options for the datastore
+	pub fn with_engine_options(mut self, engine_options: EngineOptions) -> Self {
+		self.engine_options = engine_options;
 		self
 	}
 
@@ -830,18 +837,18 @@ impl Datastore {
 	) -> Result<Option<Versionstamp>, Error> {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		match self.save_timestamp_for_versionstamp_impl(ts, &mut tx).await {
-			Ok(vs) => Ok(vs),
-			Err(e) => {
-				match tx.cancel().await {
-					Ok(_) => {
-						Err(e)
-					}
-					Err(txe) => {
-						Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
-					}
-				}
-			}
-		}
+            Ok(vs) => Ok(vs),
+            Err(e) => {
+                match tx.cancel().await {
+                    Ok(_) => {
+                        Err(e)
+                    }
+                    Err(txe) => {
+                        Err(Error::Tx(format!("Error saving timestamp for versionstamp: {:?} and error cancelling transaction: {:?}", e, txe)))
+                    }
+                }
+            }
+        }
 	}
 
 	/// Poll change feeds for live query notifications
@@ -875,7 +882,7 @@ impl Datastore {
 				// That is an improvement though
 				Some(&selector.tb),
 				ShowSince::versionstamp(vs),
-				Some(TEMPORARY_LQ_CF_BATCH_SIZE_TILL_WE_HAVE_PAGINATION),
+				Some(self.engine_options.live_query_catchup_size),
 			)
 			.await?;
 			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
@@ -1079,13 +1086,13 @@ impl Datastore {
 		let mut tx = self.transaction(Write, Optimistic).await?;
 		if let Err(e) = self.garbage_collect_stale_change_feeds_impl(ts, &mut tx).await {
 			return match tx.cancel().await {
-				Ok(_) => {
-					Err(e)
-				}
-				Err(txe) => {
-					Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
-				}
-			};
+                Ok(_) => {
+                    Err(e)
+                }
+                Err(txe) => {
+                    Err(Error::Tx(format!("Error garbage collecting stale change feeds: {:?} and error cancelling transaction: {:?}", e, txe)))
+                }
+            };
 		}
 		Ok(())
 	}
@@ -1208,6 +1215,7 @@ impl Datastore {
 			vso: self.versionstamp_oracle.clone(),
 			clock: self.clock.clone(),
 			prepared_live_queries: (Arc::new(send), Arc::new(recv)),
+			engine_options: self.engine_options,
 		})
 	}
 
@@ -1264,6 +1272,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
@@ -1336,6 +1348,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
@@ -1415,6 +1431,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -1493,6 +1513,10 @@ impl Datastore {
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
@@ -1509,6 +1533,10 @@ impl Datastore {
 	/// Checks the required permissions level for this session
 	#[instrument(level = "debug", skip(self, sess))]
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<(), Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {

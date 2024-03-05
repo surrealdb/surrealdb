@@ -80,7 +80,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny
+        run: cargo install --debug --locked cargo-deny@0.14.11
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet
@@ -664,3 +664,28 @@ jobs:
           df -h
           ps auxf
           cat /tmp/surrealdb.log || true
+
+  db-upgrade:
+    name: Database Upgrade from previous versions
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75.0
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-make
+        run: cargo install --debug --locked cargo-make
+
+      - name: Test upgrade
+        run: cargo make ci-database-upgrade
+

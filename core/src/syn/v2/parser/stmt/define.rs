@@ -665,6 +665,7 @@ impl Parser<'_> {
 
 					res.index = Index::MTree(crate::sql::index::MTreeParams {
 						dimension,
+						_distance: Default::default(),
 						distance,
 						capacity,
 						doc_ids_order,
