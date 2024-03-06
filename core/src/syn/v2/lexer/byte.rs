@@ -170,6 +170,10 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					t!("||")
 				}
+				Some(b'>') => {
+					self.reader.next();
+					t!("|>")
+				}
 				_ => t!("|"),
 			},
 			b'&' => match self.reader.peek() {
@@ -226,6 +230,10 @@ impl<'a> Lexer<'a> {
 				Some(b'=') => {
 					self.reader.next();
 					t!("<=")
+				}
+				Some(b'|') => {
+					self.reader.next();
+					t!("<|")
 				}
 				Some(b'-') => {
 					self.reader.next();
