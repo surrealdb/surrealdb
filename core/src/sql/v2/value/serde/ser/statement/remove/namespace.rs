@@ -36,6 +36,7 @@ impl ser::Serializer for Serializer {
 #[derive(Default)]
 pub struct SerializeRemoveNamespaceStatement {
 	name: Ident,
+	if_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeRemoveNamespaceStatement {
@@ -50,6 +51,9 @@ impl serde::ser::SerializeStruct for SerializeRemoveNamespaceStatement {
 			"name" => {
 				self.name = Ident(value.serialize(ser::string::Serializer.wrap())?);
 			}
+			"if_exists" => {
+				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?;
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `RemoveNamespaceStatement::{key}`"
@@ -62,6 +66,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveNamespaceStatement {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(RemoveNamespaceStatement {
 			name: self.name,
+			if_exists: self.if_exists,
 		})
 	}
 }
