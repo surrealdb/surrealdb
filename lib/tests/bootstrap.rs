@@ -71,7 +71,6 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 		for _ in 0..5 {
 			let mut tx = dbs.transaction(Write, Optimistic).await.unwrap();
 			let res = try_validate(&mut tx, &bad_node).await;
-			tx.cancel().await.unwrap();
 			if res.is_ok() {
 				return Ok(());
 			}
