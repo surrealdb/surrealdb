@@ -947,6 +947,10 @@ criteria = "safe-to-deploy"
 version = "0.8.10"
 criteria = "safe-to-deploy"
 
+[[exemptions.mio]]
+version = "0.8.11"
+criteria = "safe-to-deploy"
+
 [[exemptions.nanoid]]
 version = "0.4.0"
 criteria = "safe-to-deploy"
