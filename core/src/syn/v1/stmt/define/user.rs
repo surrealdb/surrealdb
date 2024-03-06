@@ -15,12 +15,20 @@ use nom::{
 	branch::alt,
 	bytes::complete::tag_no_case,
 	combinator::cut,
+	combinator::opt,
 	multi::{many0, separated_list1},
+	sequence::tuple,
 	Err,
 };
 
 pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 	let (i, _) = tag_no_case("USER")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, base, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -38,6 +46,12 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 		base,
 		vec!["Viewer".into()], // New users get the viewer role by default
 	);
+
+	#[cfg(feature = "sql2")]
+	if if_not_exists.is_some() {
+		res.if_not_exists = true;
+	};
+
 	// Assign any defined options
 	for opt in opts {
 		match opt {
