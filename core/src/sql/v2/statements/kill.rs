@@ -9,7 +9,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
-use crate::kvs::lq_structs::{KillEntry, LqEntry, TrackedResult};
+use crate::kvs::lq_structs::{KillEntry, TrackedResult};
 use crate::sql::Uuid;
 use crate::sql::Value;
 
@@ -56,7 +56,7 @@ impl KillStatement {
 					});
 				}
 			},
-			Value::Strand(maybe_id) => match uuid::Uuid::try_parse(&maybe_id) {
+			Value::Strand(maybe_id) => match uuid::Uuid::try_parse(maybe_id) {
 				Ok(id) => Uuid(id),
 				_ => {
 					return Err(Error::KillStatement {

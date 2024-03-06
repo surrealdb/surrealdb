@@ -33,7 +33,7 @@ use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::lq_structs::{
-	LqEntry, LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
+	LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
 };
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::options::EngineOptions;
@@ -1064,12 +1064,11 @@ impl Datastore {
 							k.selector.ns == kill_entry.ns && k.selector.db == kill_entry.db
 						})
 						.filter_map(|(k, v)| {
-							let count_before = v.len();
 							let index = v.iter().position(|a| a.stm.id == kill_entry.live_id);
 							match index {
 								Some(i) => {
 									let v = v.remove(i);
-									/// Sadly we do need to clone out of mutable reference, because of Strings
+									// Sadly we do need to clone out of mutable reference, because of Strings
 									Some((k.clone(), v))
 								}
 								None => None,

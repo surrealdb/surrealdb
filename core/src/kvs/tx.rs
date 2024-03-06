@@ -34,7 +34,7 @@ use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::{LqEntry, LqValue, TrackedResult};
+use crate::kvs::lq_structs::{LqValue, TrackedResult};
 use crate::kvs::Check;
 use crate::options::EngineOptions;
 use crate::sql;
