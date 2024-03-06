@@ -1257,20 +1257,24 @@ async fn select_with_in_operator() -> Result<(), Error> {
 		CREATE user:1 CONTENT { email: 'a@b' };
 		CREATE user:2 CONTENT { email: 'c@d' };
 		SELECT * FROM user WHERE email IN ['a@b', 'e@f'] EXPLAIN;
-		SELECT * FROM user WHERE email IN ['a@b', 'e@f'];";
+		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'] EXPLAIN;
+		SELECT * FROM user WHERE email IN ['a@b', 'e@f'];
+		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'];
+		";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 7);
 	skip_ok(&mut res, 3)?;
 
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		r#"[
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
 				{
 					detail: {
 						plan: {
 							index: 'user_email_idx',
-							operator: 'in',
+							operator: 'union',
 							value: ['a@b', 'e@f']
 						},
 						table: 'user'
@@ -1278,19 +1282,22 @@ async fn select_with_in_operator() -> Result<(), Error> {
 					operation: 'Iterate Index'
 				}
 			]"#,
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
 
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		r#"[
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
 				{
                		'id': user:1,
  					'email': 'a@b'
     			}
 			]"#,
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
 
 	Ok(())
 }
