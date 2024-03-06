@@ -41,30 +41,52 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 
 pub fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveAnalyzerStatement {
 			name,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveDatabaseStatement {
 			name,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 	let (i, _) = tag_no_case("EVENT")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -77,12 +99,20 @@ pub fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 		RemoveEventStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	let (i, _) = tag_no_case("FIELD")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(idiom::local)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -95,12 +125,20 @@ pub fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 		RemoveFieldStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
 	let (i, name) = ident_path(i)?;
@@ -115,12 +153,20 @@ pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 		i,
 		RemoveFunctionStatement {
 			name,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 	let (i, _) = tag_no_case("INDEX")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -133,24 +179,40 @@ pub fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 		RemoveIndexStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveNamespaceStatement {
 			name,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 	let (i, _) = tag_no_case("PARAM")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = cut(char('$'))(i)?;
 	let (i, name) = cut(ident)(i)?;
@@ -158,32 +220,42 @@ pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 		i,
 		RemoveParamStatement {
 			name,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = cut(ident)(i)?;
-	Ok((
-		i,
-		RemoveScopeStatement {
-			name,
-		},
-	))
-}
-
-pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
-	let (i, _) = tag_no_case("TABLE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = cut(ident)(i)?;
 	#[cfg(feature = "sql2")]
 	let (i, if_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
 		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
 	)))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = cut(ident)(i)?;
+	Ok((
+		i,
+		RemoveScopeStatement {
+			name,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
+		},
+	))
+}
+
+pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
+	let (i, _) = tag_no_case("TABLE")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = cut(ident)(i)?;
 	Ok((
 		i,
 		RemoveTableStatement {
@@ -196,6 +268,12 @@ pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 
 pub fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -207,12 +285,20 @@ pub fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 		RemoveTokenStatement {
 			name,
 			base,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
 
 pub fn user(i: &str) -> IResult<&str, RemoveUserStatement> {
 	let (i, _) = tag_no_case("USER")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -224,6 +310,8 @@ pub fn user(i: &str) -> IResult<&str, RemoveUserStatement> {
 		RemoveUserStatement {
 			name,
 			base,
+			#[cfg(feature = "sql2")]
+			if_exists: if_exists.is_some(),
 		},
 	))
 }
@@ -238,9 +326,149 @@ mod tests {
 	fn check_remove_serialize() {
 		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
 			name: Ident::from("test"),
+			#[cfg(feature = "sql2")]
+			if_exists: false,
 		});
 		let enc: Vec<u8> = stm.into();
+		#[cfg(not(feature = "sql2"))]
 		assert_eq!(9, enc.len());
+		#[cfg(feature = "sql2")]
+		assert_eq!(10, enc.len());
+	}
+
+	/// REMOVE ANALYZER tests
+
+	#[test]
+	fn remove_analyzer() {
+		let sql = "REMOVE ANALYZER test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE ANALYZER test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_analyzer_if_exists() {
+		let sql = "REMOVE ANALYZER IF EXISTS test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE ANALYZER IF EXISTS test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_analyzer_if() {
+		let sql = "REMOVE ANALYZER IF test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE DATABASE tests
+
+	#[test]
+	fn remove_database() {
+		let sql = "REMOVE DATABASE test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE DATABASE test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_database_if_exists() {
+		let sql = "REMOVE DATABASE IF EXISTS test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE DATABASE IF EXISTS test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_database_if() {
+		let sql = "REMOVE DATABASE IF test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE EVENT tests
+
+	#[test]
+	fn remove_event() {
+		let sql = "REMOVE EVENT test ON test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE EVENT test ON test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_event_if_exists() {
+		let sql = "REMOVE EVENT IF EXISTS test ON test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE EVENT IF EXISTS test ON test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_event_if() {
+		let sql = "REMOVE EVENT IF test ON test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE FIELD tests
+
+	#[test]
+	fn remove_field() {
+		let sql = "REMOVE FIELD test ON test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE FIELD test ON test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_field_if_exists() {
+		let sql = "REMOVE FIELD IF EXISTS test ON test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE FIELD IF EXISTS test ON test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_field_if() {
+		let sql = "REMOVE FIELD IF test ON test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE FUNCTION tests
+
+	#[test]
+	fn remove_function() {
+		let sql = "REMOVE FUNCTION fn::test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE FUNCTION fn::test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_function_if_exists() {
+		let sql = "REMOVE FUNCTION IF EXISTS fn::test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE FUNCTION IF EXISTS fn::test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_function_if() {
+		let sql = "REMOVE FUNCTION IF fn::test";
+		let res = remove(sql);
+		assert!(res.is_err());
 	}
 
 	#[test]
@@ -250,6 +478,116 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE FUNCTION fn::foo::bar::baz::bac", format!("{}", out))
 	}
+
+	/// REMOVE INDEX tests
+
+	#[test]
+	fn remove_index() {
+		let sql = "REMOVE INDEX test ON test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE INDEX test ON test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_index_if_exists() {
+		let sql = "REMOVE INDEX IF EXISTS test ON test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE INDEX IF EXISTS test ON test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_index_if() {
+		let sql = "REMOVE INDEX IF test ON test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE NAMESPACE tests
+
+	#[test]
+	fn remove_namespace() {
+		let sql = "REMOVE NAMESPACE test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE NAMESPACE test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_namespace_if_exists() {
+		let sql = "REMOVE NAMESPACE IF EXISTS test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE NAMESPACE IF EXISTS test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_namespace_if() {
+		let sql = "REMOVE NAMESPACE IF test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE PARAM tests
+
+	#[test]
+	fn remove_param() {
+		let sql = "REMOVE PARAM $test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE PARAM $test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_param_if_exists() {
+		let sql = "REMOVE PARAM IF EXISTS $test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE PARAM IF EXISTS $test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_param_if() {
+		let sql = "REMOVE PARAM IF $test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE SCOPE tests
+
+	#[test]
+	fn remove_scope() {
+		let sql = "REMOVE SCOPE test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE SCOPE test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_scope_if_exists() {
+		let sql = "REMOVE SCOPE IF EXISTS test";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE SCOPE IF EXISTS test", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_scope_if() {
+		let sql = "REMOVE SCOPE IF test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE TABLE tests
 
 	#[test]
 	fn remove_table() {
@@ -262,16 +600,70 @@ mod tests {
 	#[test]
 	#[cfg(feature = "sql2")]
 	fn remove_table_if_exists() {
-		let sql = "REMOVE TABLE test IF EXISTS";
+		let sql = "REMOVE TABLE IF EXISTS test";
 		let res = remove(sql);
 		let out = res.unwrap().1;
-		assert_eq!("REMOVE TABLE test IF EXISTS", format!("{}", out))
+		assert_eq!("REMOVE TABLE IF EXISTS test", format!("{}", out))
 	}
 
 	#[test]
 	#[cfg(feature = "sql2")]
 	fn remove_table_if() {
-		let sql = "REMOVE TABLE test IF";
+		let sql = "REMOVE TABLE IF test";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE TOKEN tests
+
+	#[test]
+	fn remove_token() {
+		let sql = "REMOVE TOKEN test ON NAMESPACE";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE TOKEN test ON NAMESPACE", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_token_if_exists() {
+		let sql = "REMOVE TOKEN IF EXISTS test ON NAMESPACE";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE TOKEN IF EXISTS test ON NAMESPACE", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_token_if() {
+		let sql = "REMOVE TOKEN IF test ON NAMESPACE";
+		let res = remove(sql);
+		assert!(res.is_err());
+	}
+
+	/// REMOVE USER tests
+
+	#[test]
+	fn remove_user() {
+		let sql = "REMOVE USER test ON ROOT";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE USER test ON ROOT", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_user_if_exists() {
+		let sql = "REMOVE USER IF EXISTS test ON ROOT";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE USER IF EXISTS test ON ROOT", format!("{}", out))
+	}
+
+	#[test]
+	#[cfg(feature = "sql2")]
+	fn remove_user_if() {
+		let sql = "REMOVE USER IF test ON ROOT";
 		let res = remove(sql);
 		assert!(res.is_err());
 	}
