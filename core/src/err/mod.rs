@@ -916,20 +916,6 @@ pub enum Error {
 		db: String,
 	},
 
-	/// The requested field does not exist
-	#[error("The field '{value}' does not exist")]
-	#[cfg(feature = "sql2")]
-	FdNotFound {
-		value: String,
-	},
-
-	/// The requested event does not exist
-	#[error("The event '{value}' does not exist")]
-	#[cfg(feature = "sql2")]
-	EvNotFound {
-		value: String,
-	},
-
 	/// The session has expired either because the token used
 	/// to establish it has expired or because an expiration
 	/// was explicitly defined when establishing it
