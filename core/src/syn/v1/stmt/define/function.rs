@@ -15,10 +15,10 @@ use nom::{
 	bytes::complete::{tag, tag_no_case},
 	character::complete::char,
 	combinator::cut,
-	combinator::opt,
 	multi::many0,
-	sequence::tuple,
 };
+#[cfg(feature = "sql2")]
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
