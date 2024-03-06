@@ -1246,3 +1246,51 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_with_in_operator() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = "
+		DEFINE INDEX user_email_idx ON user FIELDS email;
+		CREATE user:1 CONTENT { email: 'a@b' };
+		CREATE user:2 CONTENT { email: 'c@d' };
+		SELECT * FROM user WHERE email IN ['a@b', 'e@f'] EXPLAIN;
+		SELECT * FROM user WHERE email IN ['a@b', 'e@f'];";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 5);
+	skip_ok(&mut res, 3)?;
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'user_email_idx',
+							operator: 'in',
+							value: ['a@b', 'e@f']
+						},
+						table: 'user'
+					},
+					operation: 'Iterate Index'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+               		'id': user:1,
+ 					'email': 'a@b'
+    			}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	Ok(())
+}
