@@ -128,11 +128,11 @@ mod test {
 			return;
 		}
 		let res = KillStatement {
-			id: Uuid::from_str("889757b3-2040-4da3-9ad6-47fe65bd2fb6").unwrap(),
+			id: Uuid::from_str("889757b3-2040-4da3-9ad6-47fe65bd2fb6").unwrap().into(),
 		};
 		let ctx = Context::default();
 		let opt = Options::new()
-			.with_id(uuid::Uuid::from_str("8c41d9f7-a627-40f7-86f5-59d56cd765c6").unwrap())
+			.with_id(uuid::Uuid::from_str("55a85e9c-7cd1-49cb-a8f7-41124d8fdaf8").unwrap())
 			.with_live(true)
 			.with_db(Some("database".into()))
 			.with_ns(Some("namespace".into()));
