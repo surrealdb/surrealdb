@@ -105,8 +105,6 @@ mod tests {
 	use crate::sql::index::{Distance, Distance1, MTreeParams, SearchParams, VectorType};
 	use crate::sql::Ident;
 	use crate::sql::Idiom;
-	use crate::sql::Idioms;
-	use crate::sql::Index;
 	use crate::sql::Part;
 	use crate::sql::Scoring;
 

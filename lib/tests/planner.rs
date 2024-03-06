@@ -1160,7 +1160,7 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z' EXPLAIN;
 		SELECT * FROM test_user WHERE created_at = $now;
 		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z';";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 4)?;
@@ -1210,7 +1210,7 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 		CREATE sessions:1 CONTENT { sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' };
 		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084' EXPLAIN;
 		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084';";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 4);
 	skip_ok(&mut res, 2)?;

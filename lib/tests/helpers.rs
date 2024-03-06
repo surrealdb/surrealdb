@@ -18,7 +18,7 @@ pub async fn iam_run_case(
 	prepare: &str,
 	test: &str,
 	check: &str,
-	check_expected_result: &Vec<&str>,
+	check_expected_result: &[&str],
 	ds: &Datastore,
 	sess: &Session,
 	should_succeed: bool,
