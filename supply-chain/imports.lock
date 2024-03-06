@@ -150,13 +150,6 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealml-core]]
-version = "0.0.7"
-when = "2024-01-22"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealml-core]]
 version = "0.0.8"
 when = "2024-01-26"
 user-id = 145457
@@ -625,10 +618,7 @@ criteria = "safe-to-deploy"
 version = "0.1.0"
 notes = "No unsafe usage or ambient capabilities, sane build script"
 
-[[audits.fermyon.audits.oorandom]]
-who = "Radu Matei <radu.matei@fermyon.com>"
-criteria = "safe-to-run"
-version = "11.1.3"
+[audits.fermyon.audits]
 
 [[audits.google.audits.async-stream]]
 who = "Tyler Mandry <tmandry@google.com>"

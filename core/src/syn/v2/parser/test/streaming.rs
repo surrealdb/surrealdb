@@ -312,6 +312,7 @@ fn statements() -> Vec<Statement> {
 				dimension: 4,
 				_distance: Default::default(),
 				distance: Distance::Minkowski(Number::Int(5)),
+				_distance: Default::default(),
 				capacity: 6,
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
@@ -589,6 +590,7 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
 			name: Ident("foo::bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Remove(RemoveStatement::Field(RemoveFieldStatement {
 			name: Idiom(vec![
@@ -597,6 +599,7 @@ fn statements() -> Vec<Statement> {
 				Part::Index(Number::Int(10)),
 			]),
 			what: Ident("bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Update(UpdateStatement {
 			only: true,

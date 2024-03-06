@@ -128,6 +128,10 @@ pub enum Operator {
 	Tco,
 	/// `??`
 	Nco,
+	/// `<|`
+	KnnOpen,
+	/// `|>`
+	KnnClose,
 }
 
 impl Operator {
@@ -169,6 +173,8 @@ impl Operator {
 			Operator::Ext => "+?=",
 			Operator::Tco => "?:",
 			Operator::Nco => "??",
+			Operator::KnnOpen => "<|",
+			Operator::KnnClose => "|>",
 		}
 	}
 }
@@ -217,6 +223,8 @@ pub enum NumberKind {
 	Integer,
 	// A number with a decimal postfix.
 	Decimal,
+	// A number with a decimal postfix.
+	DecimalExponent,
 	// A number with a float postfix.
 	Float,
 	// A number with a `.3` part.

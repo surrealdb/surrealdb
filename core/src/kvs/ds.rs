@@ -1333,6 +1333,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Vec<Response>, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
@@ -1405,6 +1409,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
@@ -1484,6 +1492,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 	) -> Result<Value, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -1562,6 +1574,10 @@ impl Datastore {
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
@@ -1578,6 +1594,10 @@ impl Datastore {
 	/// Checks the required permissions level for this session
 	#[instrument(level = "debug", skip(self, sess))]
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<(), Error> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {

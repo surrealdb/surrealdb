@@ -916,3 +916,519 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	server.finish();
 	Ok(())
 }
+
+#[test(tokio::test)]
+async fn session_expiration() {
+	// Setup database server
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Setup the scope
+	socket
+		.send_message_query(
+			r#"
+			DEFINE SCOPE scope SESSION 1s
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			;"#,
+		)
+		.await.unwrap();
+	// Create resource that requires a scope session to query
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE test SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+			;"#,
+		)
+		.await.unwrap();
+	socket
+		.send_message_query(
+			r#"
+			CREATE test:1 SET working = "yes"
+			;"#,
+		)
+		.await.unwrap();
+	// Send SIGNUP command
+	let res = socket
+		.send_request(
+			"signup",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+	// Authenticate using the token, which will expire soon
+	socket.send_request("authenticate", json!([res,])).await.unwrap();
+	// Check if the session is now authenticated
+	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
+	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
+	// Wait two seconds for token to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// Check that the session has expired and queries fail
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	// Sign in again using the same session
+	let res = socket
+		.send_request(
+			"signin",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Check that the session is now valid again and queries succeed
+	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
+	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
+	// Test passed
+	server.finish();
+}
+
+#[test(tokio::test)]
+async fn session_expiration_operations() {
+	// Setup database server
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	// We store the root token to test reauthentication later
+	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Setup the scope
+	socket
+		.send_message_query(
+			r#"
+			DEFINE SCOPE scope SESSION 1s
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			;"#,
+		)
+		.await.unwrap();
+	// Create resource that requires a scope session to query
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE test SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+			;"#,
+		)
+		.await.unwrap();
+	socket
+		.send_message_query(
+			r#"
+			CREATE test:1 SET working = "yes"
+			;"#,
+		)
+		.await.unwrap();
+	// Send SIGNUP command
+	let res = socket
+		.send_request(
+			"signup",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+	// Authenticate using the token, which will expire soon
+	socket.send_request("authenticate", json!([res,])).await.unwrap();
+	// Check if the session is now authenticated
+	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
+	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
+	// Wait two seconds for the session to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// Check if the session is now expired
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	// Test operations that SHOULD NOT work with an expired session
+	let operations_ko = vec![
+		socket.send_request("let", json!(["let_var", "let_value",])),
+		socket.send_request("set", json!(["set_var", "set_value",])),
+		socket.send_request("info", json!([])),
+		socket.send_request("select", json!(["tester",])),
+		socket
+			.send_request(
+				"insert",
+				json!([
+					"tester",
+					{
+						"name": "foo",
+						"value": "bar",
+					}
+				]),
+			),
+		socket
+			.send_request(
+				"create",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+		socket
+			.send_request(
+				"update",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+		socket
+			.send_request(
+				"merge",
+				json!([
+					"tester",
+					{
+						"value": "bar",
+					}
+				]),
+			),
+		socket
+			.send_request(
+				"patch",
+				json!([
+					"tester:id",
+					[
+						{
+							"op": "add",
+							"path": "value",
+							"value": "bar"
+						},
+						{
+							"op": "remove",
+							"path": "name",
+						}
+					]
+				]),
+			),
+		socket.send_request("delete", json!(["tester"])),
+		socket.send_request("live", json!(["tester"])),
+		socket.send_request("kill", json!(["tester"])),
+	];
+	// Futures are executed sequentially as some operations rely on the previous state
+	for operation in operations_ko {
+		let res = operation.await;
+		assert!(res.is_ok(), "result: {:?}", res);
+		let res = res.unwrap();
+		assert!(res.is_object(), "result: {:?}", res);
+		let res = res.as_object().unwrap();
+		assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	};
+
+	// Test operations that SHOULD work with an expired session
+	let operations_ok = vec![
+		socket.send_request("use", json!([NS, DB])),
+		socket.send_request("ping", json!([])),
+		socket.send_request("version", json!([])),
+		socket.send_request("invalidate", json!([])),
+	];
+	// Futures are executed sequentially as some operations rely on the previous state
+	for operation in operations_ok {
+		let res = operation.await;
+		assert!(res.is_ok(), "result: {:?}", res);
+		let res = res.unwrap();
+		assert!(res.is_object(), "result: {:?}", res);
+		let res = res.as_object().unwrap();
+		// Verify response contains no error
+		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	};
+
+	// Test operations that SHOULD work with an expired session
+	// These operations will refresh the session expiration
+	let res = socket
+			.send_request(
+				"signup",
+				json!([{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "another@email.com",
+					"pass": "pass",
+				}]),
+			)
+			.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Wait two seconds for the session to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// The session must be expired now or we fail the test
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	let res = socket
+		.send_request(
+			"signin",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "another@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Wait two seconds for the session to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// The session must be expired now or we fail the test
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+
+	// This needs to be last operation as the session will no longer expire afterwards
+	let res = socket.send_request("authenticate", json!([root_token,])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+
+	// Test passed
+	server.finish();
+}
+
+#[test(tokio::test)]
+async fn session_reauthentication() {
+	// Setup database server
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection and store the root level token
+	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Check that we have root access
+	socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Setup the scope
+	socket
+		.send_message_query(
+			r#"
+			DEFINE SCOPE scope SESSION 1h
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			;"#,
+		)
+		.await.unwrap();
+	// Create resource that requires a scope session to query
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE test SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+			;"#,
+		)
+		.await.unwrap();
+	socket
+		.send_message_query(
+			r#"
+			CREATE test:1 SET working = "yes"
+			;"#,
+		)
+		.await.unwrap();
+	// Send SIGNUP command
+	let res = socket
+		.send_request(
+			"signup",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+	// Authenticate using the scope token
+	socket.send_request("authenticate", json!([res,])).await.unwrap();
+	// Check that we do not have root access
+	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "ERR", "result: {:?}", res);
+	assert_eq!(
+		res[0]["result"], "IAM error: Not enough permissions to perform this action",
+		"result: {:?}",
+		res
+	);
+	// Check if the session is authenticated for the scope
+	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
+	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
+	// Authenticate using the root token
+	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
+	// Check that we have root access again
+	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
+	// Test passed
+	server.finish();
+}
+
+#[test(tokio::test)]
+async fn session_reauthentication_expired() {
+	// Setup database server
+	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection and store the root level token
+	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Check that we have root access
+	socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Setup the scope
+	socket
+		.send_message_query(
+			r#"
+			DEFINE SCOPE scope SESSION 1s
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			;"#,
+		)
+		.await.unwrap();
+	// Create resource that requires a scope session to query
+	socket
+		.send_message_query(
+			r#"
+			DEFINE TABLE test SCHEMALESS
+				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+			;"#,
+		)
+		.await.unwrap();
+	socket
+		.send_message_query(
+			r#"
+			CREATE test:1 SET working = "yes"
+			;"#,
+		)
+		.await.unwrap();
+	// Send SIGNUP command
+	let res = socket
+		.send_request(
+			"signup",
+			json!(
+				[{
+					"ns": NS,
+					"db": DB,
+					"sc": "scope",
+					"email": "email@email.com",
+					"pass": "pass",
+				}]
+			),
+		)
+		.await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	// Verify response contains no error
+	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Verify it returns a token
+	assert!(res["result"].is_string(), "result: {:?}", res);
+	let res = res["result"].as_str().unwrap();
+	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
+	// Authenticate using the scope token, which will expire soon
+	socket.send_request("authenticate", json!([res,])).await.unwrap();
+	// Wait two seconds for token to expire
+	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+	// Verify that the session has expired
+	let res = socket.send_request("query", json!(["SELECT VALUE working FROM test:1",])).await;
+	assert!(res.is_ok(), "result: {:?}", res);
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {:?}", res);
+	let res = res.as_object().unwrap();
+	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	// Authenticate using the root token, which has not expired yet
+	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
+	// Check that we have root access and the session is not expired
+	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
+	// Test passed
+	server.finish();
+}
