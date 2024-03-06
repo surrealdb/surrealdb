@@ -99,8 +99,8 @@ impl KillStatement {
 				}
 			}
 			// Return the query id
-			Ok(Value::None)
 		}
+		Ok(Value::None)
 	}
 }
 
