@@ -110,8 +110,6 @@ impl Vector {
 		}
 	}
 
-	// TODO: Remove once used
-	#[allow(dead_code)]
 	fn dot<T>(a: &[T], b: &[T]) -> f64
 	where
 		T: Mul<Output = T> + Copy + ToFloat,
@@ -119,8 +117,6 @@ impl Vector {
 		a.iter().zip(b.iter()).map(|(&x, &y)| x.to_float() * y.to_float()).sum::<f64>()
 	}
 
-	// TODO: Remove once used
-	#[allow(dead_code)]
 	fn magnitude<T>(v: &[T]) -> f64
 	where
 		T: ToFloat + Copy,
@@ -134,8 +130,6 @@ impl Vector {
 			.sqrt()
 	}
 
-	// TODO: Remove once used
-	#[allow(dead_code)]
 	fn normalize<T>(v: &[T]) -> Vec<f64>
 	where
 		T: ToFloat + Copy,
@@ -148,8 +142,6 @@ impl Vector {
 		}
 	}
 
-	// TODO: Remove once used
-	#[allow(dead_code)]
 	fn cosine<T>(a: &[T], b: &[T]) -> f64
 	where
 		T: ToFloat + Mul<Output = T> + Copy,
@@ -166,8 +158,6 @@ impl Vector {
 		1.0 - s
 	}
 
-	// TODO: Remove once used
-	#[allow(dead_code)]
 	pub(crate) fn cosine_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
 			(Self::F64(a), Self::F64(b)) => Self::cosine(a, b),
