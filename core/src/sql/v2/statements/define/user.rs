@@ -16,7 +16,7 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineUserStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -24,6 +24,8 @@ pub struct DefineUserStatement {
 	pub code: String,
 	pub roles: Vec<Ident>,
 	pub comment: Option<Strand>,
+	#[revision(start = 2)]
+	pub if_not_exists: bool,
 }
 
 impl From<(Base, &str, &str)> for DefineUserStatement {
@@ -42,6 +44,7 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 				.collect::<String>(),
 			roles: vec!["owner".into()],
 			comment: None,
+			if_not_exists: false,
 		}
 	}
 }
@@ -89,9 +92,23 @@ impl DefineUserStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
+				// Check if user already exists
+				if self.if_not_exists && run.get_root_user(&self.name).await.is_ok() {
+					return Err(Error::UserRootAlreadyExists {
+						value: self.name.to_string(),
+					});
+				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
-				run.set(key, self).await?;
+				run.set(
+					key,
+					DefineUserStatement {
+						// Don't persist the "IF NOT EXISTS" clause to schema
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -100,10 +117,25 @@ impl DefineUserStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
+				// Check if user already exists
+				if self.if_not_exists && run.get_ns_user(opt.ns(), &self.name).await.is_ok() {
+					return Err(Error::UserNsAlreadyExists {
+						value: self.name.to_string(),
+						ns: opt.ns().into(),
+					});
+				}
 				// Process the statement
 				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
-				run.set(key, self).await?;
+				run.set(
+					key,
+					DefineUserStatement {
+						// Don't persist the "IF NOT EXISTS" clause to schema
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -112,11 +144,29 @@ impl DefineUserStatement {
 				let mut run = txn.lock().await;
 				// Clear the cache
 				run.clear_cache();
+				// Check if user already exists
+				if self.if_not_exists
+					&& run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok()
+				{
+					return Err(Error::UserDbAlreadyExists {
+						value: self.name.to_string(),
+						ns: opt.ns().into(),
+						db: opt.db().into(),
+					});
+				}
 				// Process the statement
 				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);
 				run.add_ns(opt.ns(), opt.strict).await?;
 				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-				run.set(key, self).await?;
+				run.set(
+					key,
+					DefineUserStatement {
+						// Don't persist the "IF NOT EXISTS" clause to schema
+						if_not_exists: false,
+						..self.clone()
+					},
+				)
+				.await?;
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -128,9 +178,13 @@ impl DefineUserStatement {
 
 impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE USER")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
 		write!(
 			f,
-			"DEFINE USER {} ON {} PASSHASH {} ROLES {}",
+			" {} ON {} PASSHASH {} ROLES {}",
 			self.name,
 			self.base,
 			quote_str(&self.hash),
