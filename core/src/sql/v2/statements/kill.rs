@@ -124,6 +124,7 @@ impl fmt::Display for KillStatement {
 }
 
 #[cfg(test)]
+#[cfg(feature = "sql2")]
 mod test {
 	use std::str::FromStr;
 
@@ -132,17 +133,17 @@ mod test {
 	use crate::fflags::FFLAGS;
 	use crate::kvs::lq_structs::{KillEntry, TrackedResult};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::Uuid;
+	use crate::sql::statements::KillStatement;
+	use crate::sql::v2::uuid::Uuid;
 
 	#[test_log::test(tokio::test)]
 	async fn kill_handles_uuid_event_registration() {
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			return;
 		}
-		let mut parser = crate::syn::v2::parser::Parser::new(
-			r#"KILL u'8f92f057-c739-4bf2-9d0c-a74d01299efc'"#.as_bytes(),
-		);
-		let res = parser.parse_statement().unwrap();
+		let res = KillStatement {
+			id: Uuid::from_str("8f92f057-c739-4bf2-9d0c-a74d01299efc").unwrap().into(),
+		};
 		let ctx = Context::default();
 		let opt = Options::new()
 			.with_id(uuid::Uuid::from_str("8c41d9f7-a627-40f7-86f5-59d56cd765c6").unwrap())
