@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 /// Configuration for the engine behaviour
 /// The defaults are optimal so please only modify these if you know deliberately why you are modifying them.
 #[derive(Clone, Copy, Debug)]
@@ -6,6 +8,7 @@ pub struct EngineOptions {
 	pub new_live_queries_per_transaction: u32,
 	/// The size of batches being requested per update in order to catch up a live query
 	pub live_query_catchup_size: u32,
+	pub tick_interval: Duration,
 }
 
 impl Default for EngineOptions {

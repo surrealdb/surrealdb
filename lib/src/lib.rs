@@ -168,6 +168,10 @@ pub mod error {
 	pub use crate::err::Error as Db;
 }
 
+pub mod tasks {
+	pub use crate::api::engine::tasks::start_tasks;
+}
+
 /// The action performed on a record
 ///
 /// This is used in live query notifications.
