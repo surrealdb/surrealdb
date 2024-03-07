@@ -248,8 +248,7 @@ async fn fetch_jwks_from_cache(
 	url: &str,
 ) -> Option<JwksCacheEntry> {
 	let path = cache_key_from_url(url);
-	let cache_clone = Arc::clone(cache);
-	let cache = cache_clone.read().await;
+	let cache = cache.read().await;
 
 	cache.get(&path).cloned()
 }
@@ -265,8 +264,7 @@ async fn store_jwks_in_cache(
 		time: Utc::now(),
 	};
 	let path = cache_key_from_url(url);
-	let cache_clone = Arc::clone(cache);
-	let mut cache = cache_clone.write().await;
+	let mut cache = cache.write().await;
 
 	cache.insert(path, entry)
 }
