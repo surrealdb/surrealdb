@@ -259,14 +259,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Compute the value with the params
 				match kvs.evaluate(pc, &sess, None).await {
 					Ok(val) => match val.record() {
-						Some(rid) => { id = rid.into(); },
+						Some(rid) => {
+							id = rid.into();
+						}
 						_ => return Err(Error::InvalidAuth),
-					}
-					Err(e) => return match e {
-						Error::Thrown(_) => Err(e),
-						e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
-						_ => Err(Error::InvalidAuth),
 					},
+					Err(e) => {
+						return match e {
+							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+							_ => Err(Error::InvalidAuth),
+						}
+					}
 				}
 			}
 			// Log the success
@@ -316,14 +320,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Compute the value with the params
 				match kvs.evaluate(pc, &sess, None).await {
 					Ok(val) => match val.record() {
-						Some(rid) => { id = rid; },
+						Some(rid) => {
+							id = rid;
+						}
 						_ => return Err(Error::InvalidAuth),
-					}
-					Err(e) => return match e {
-						Error::Thrown(_) => Err(e),
-						e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
-						_ => Err(Error::InvalidAuth),
 					},
+					Err(e) => {
+						return match e {
+							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+							_ => Err(Error::InvalidAuth),
+						}
+					}
 				}
 			}
 			// Log the success

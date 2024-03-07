@@ -75,7 +75,7 @@ fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
 		scope_signin,
 		scope_comment,
 		#[cfg(feature = "sql2")]
-		scope_process
+		scope_process,
 	))(i)
 }
 
