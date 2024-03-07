@@ -18,6 +18,7 @@ use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
+use crate::tasks::start_tasks;
 use flume::Receiver;
 use flume::Sender;
 use futures::future::Either;
@@ -36,7 +37,9 @@ use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Duration;
 use surrealdb_core::dbs::Options;
+use surrealdb_core::options::EngineOptions;
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
 use wasmtimer::tokio::MissedTickBehavior;
@@ -151,9 +154,12 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		run_maintenance(kvs.clone(), tick_interval, maintenance_rx);
+		let mut opt = EngineOptions::default();
+		opt.tick_interval = tick_interval;
+		let opt = opt;
+		let ct = CancellationToken::new();
+		start_tasks(&opt, ct.clone(), kvs.clone());
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
@@ -202,61 +208,6 @@ pub(crate) fn router(
 		}
 
 		// Stop maintenance tasks
-		let _ = maintenance_tx.into_send_async(()).await;
+		ct.cancel();
 	});
-}
-
-fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
-	// Some classic ownership shenanigans
-	let kvs_two = kvs.clone();
-	let stop_signal_two = stop_signal.clone();
-
-	// Spawn the ticker, which is used for tracking versionstamps and heartbeats across databases
-	spawn_local(async move {
-		let mut interval = time::interval(tick_interval);
-		// Don't bombard the database if we miss some ticks
-		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-		// Delay sending the first tick
-		interval.tick().await;
-
-		let ticker = IntervalStream::new(interval);
-
-		let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
-
-		let mut stream = streams.merge();
-
-		while let Some(Some(_)) = stream.next().await {
-			match kvs.tick().await {
-				Ok(()) => trace!("Node agent tick ran successfully"),
-				Err(error) => error!("Error running node agent tick: {error}"),
-			}
-		}
-	});
-
-	if FFLAGS.change_feed_live_queries.enabled() {
-		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
-		spawn_local(async move {
-			let kvs = kvs_two;
-			let stop_signal = stop_signal_two;
-			let mut interval = time::interval(tick_interval);
-			// Don't bombard the database if we miss some ticks
-			interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-			// Delay sending the first tick
-			interval.tick().await;
-
-			let ticker = IntervalStream::new(interval);
-
-			let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
-
-			let mut stream = streams.merge();
-
-			let opt = Options::default();
-			while let Some(Some(_)) = stream.next().await {
-				match kvs.process_lq_notifications(&opt).await {
-					Ok(()) => trace!("Live Query poll ran successfully"),
-					Err(error) => error!("Error running live query poll: {error}"),
-				}
-			}
-		})
-	}
 }

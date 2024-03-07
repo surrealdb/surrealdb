@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
+use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
@@ -184,13 +185,13 @@ pub async fn init(
 	dbs::init(dbs).await?;
 	// Start the node agent
 	let tasks = surrealdb::tasks::start_tasks(
-		&config::CF.get().unwrap().engine.unwrap(),
+		&config::CF.get().unwrap().engine.unwrap_or(EngineOptions::default()),
 		ct.clone(),
-		DB.get().unwrap(),
-	)
-	.await;
+		DB.get().unwrap().clone(),
+	);
 	// Start the web server
 	net::init(ct).await?;
+	ct.cancel();
 	// Wait for the node agent to stop
 	if let Err(e) = tasks.nd.await {
 		error!("Node agent failed while running: {}", e);

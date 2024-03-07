@@ -165,7 +165,7 @@ pub(crate) fn router(
 		opt.tick_interval = tick_interval;
 		// Make immutable
 		let opt = opt;
-		start_tasks(&opt, ct, &kvs);
+		start_tasks(&opt, ct.clone(), kvs.clone());
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
@@ -215,11 +215,5 @@ pub(crate) fn router(
 
 		// Stop maintenance tasks
 		ct.cancel();
-		let _ = maintenance_tx.into_send_async(()).await;
 	});
-}
-
-fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, ct: CancellationToken) {
-	trace!("Starting maintenance");
-	// Some classic ownership shenanigans
 }
