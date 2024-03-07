@@ -252,7 +252,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(pc) = ds.process {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-				sess.sd = Some(id.clone().into());
+				sess.sd = Some(id.clone());
 				sess.tk = Some(value.clone());
 				sess.ip = session.ip.clone();
 				sess.or = session.or.clone();
