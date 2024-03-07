@@ -1,9 +1,10 @@
 use crate::ctx::Canceller;
 use crate::ctx::Context;
+use crate::dbs::collector::{Collector, CollectorAPI};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
-use crate::dbs::explanation::Explanation;
+use crate::dbs::plan::Plan;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
@@ -67,8 +68,7 @@ pub(crate) struct Iterator {
 	// Iterator runtime error
 	error: Option<Error>,
 	// Iterator output results
-	// TODO: Should be stored on disk / (mmap?)
-	results: Vec<Value>,
+	results: Collector,
 	// Iterator input values
 	entries: Vec<Iterable>,
 }
@@ -80,7 +80,7 @@ impl Clone for Iterator {
 			limit: self.limit,
 			start: self.start,
 			error: None,
-			results: vec![],
+			results: self.results.new_instance(),
 			entries: self.entries.clone(),
 		}
 	}
@@ -300,9 +300,9 @@ impl Iterator {
 		// Process the query START clause
 		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
-		let (do_iterate, mut explanation) = Explanation::new(ctx, stm.explain(), &self.entries);
+		let mut plan = Plan::new(ctx, stm, &self.entries);
 
-		if do_iterate {
+		if plan.do_iterate {
 			// Process prepared values
 			if let Some(qp) = ctx.get_query_planner() {
 				while let Some(s) = qp.next_iteration_stage().await {
@@ -329,7 +329,7 @@ impl Iterator {
 			// Process any LIMIT clause
 			self.output_limit(ctx, opt, txn, stm).await?;
 
-			if let Some(e) = &mut explanation {
+			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
 				self.results.clear();
 			} else {
@@ -339,12 +339,12 @@ impl Iterator {
 		}
 
 		// Output the explanation if any
-		if let Some(e) = explanation {
+		if let Some(e) = plan.explanation {
 			e.output(&mut self.results);
 		}
 
 		// Output the results
-		Ok(mem::take(&mut self.results).into())
+		Ok(self.results.take().into())
 	}
 
 	#[inline]
@@ -387,7 +387,7 @@ impl Iterator {
 			// Loop over each split clause
 			for split in splits.iter() {
 				// Get the query result
-				let res = mem::take(&mut self.results);
+				let res = self.results.take();
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
@@ -432,7 +432,7 @@ impl Iterator {
 				// Create the new grouped collection
 				let mut grp: BTreeMap<Array, Array> = BTreeMap::new();
 				// Get the query result
-				let res = mem::take(&mut self.results);
+				let res = self.results.take();
 				// Loop over each value
 				for obj in res {
 					// Create a new column set
@@ -547,7 +547,7 @@ impl Iterator {
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = self.start {
-			self.results = mem::take(&mut self.results).into_iter().skip(v).collect();
+			self.results.skip(v);
 		}
 		Ok(())
 	}
@@ -561,7 +561,7 @@ impl Iterator {
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = self.limit {
-			self.results = mem::take(&mut self.results).into_iter().take(v).collect();
+			self.results.skip(v);
 		}
 		Ok(())
 	}

@@ -1,21 +1,21 @@
 use crate::ctx::Context;
-use crate::dbs::Iterable;
-use crate::sql::{Explain, Object, Value};
+use crate::dbs::collector::{Collector, CollectorAPI};
+use crate::dbs::{Iterable, Statement};
+use crate::sql::{Object, Value};
 use std::collections::HashMap;
 
-#[derive(Default)]
-pub(super) struct Explanation(Vec<ExplainItem>);
+pub(super) struct Plan {
+	pub(super) do_iterate: bool,
+	pub(super) load_records: bool,
+	pub(super) explanation: Option<Explanation>,
+}
 
-impl Explanation {
-	pub(super) fn new(
-		ctx: &Context<'_>,
-		e: Option<&Explain>,
-		iterables: &Vec<Iterable>,
-	) -> (bool, Option<Self>) {
-		match e {
+impl Plan {
+	pub(super) fn new(ctx: &Context<'_>, stm: &Statement<'_>, iterables: &Vec<Iterable>) -> Self {
+		let (do_iterate, explanation) = match stm.explain() {
 			None => (true, None),
 			Some(e) => {
-				let mut exp = Self::default();
+				let mut exp = Explanation::default();
 				for i in iterables {
 					exp.add_iter(ctx, i);
 				}
@@ -26,9 +26,19 @@ impl Explanation {
 				}
 				(e.0, Some(exp))
 			}
+		};
+		Self {
+			do_iterate,
+			load_records: true,
+			explanation,
 		}
 	}
+}
 
+#[derive(Default)]
+pub(super) struct Explanation(Vec<ExplainItem>);
+
+impl Explanation {
 	fn add_iter(&mut self, ctx: &Context<'_>, iter: &Iterable) {
 		self.0.push(ExplainItem::new_iter(ctx, iter));
 	}
@@ -41,7 +51,7 @@ impl Explanation {
 		self.0.push(ExplainItem::new_fallback(reason));
 	}
 
-	pub(super) fn output(self, results: &mut Vec<Value>) {
+	pub(super) fn output(self, results: &mut Collector) {
 		for e in self.0 {
 			results.push(e.into());
 		}
