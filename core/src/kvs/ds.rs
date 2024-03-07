@@ -26,6 +26,8 @@ use crate::dbs::{
 use crate::doc::Document;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
+#[cfg(feature = "jwks")]
+use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::hb::Hb;
@@ -87,6 +89,9 @@ pub struct Datastore {
 	clock: Arc<SizedClock>,
 	// The index store cache
 	index_stores: IndexStores,
+	#[cfg(feature = "jwks")]
+	// The JWKS object cache
+	jwks_cache: Arc<RwLock<JwksCache>>,
 }
 
 /// We always want to be circulating the live query information
@@ -359,6 +364,8 @@ impl Datastore {
 			index_stores: IndexStores::default(),
 			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
 			cf_watermarks: Arc::new(RwLock::new(BTreeMap::new())),
+			#[cfg(feature = "jwks")]
+			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 		})
 	}
 
@@ -436,6 +443,11 @@ impl Datastore {
 	#[cfg(feature = "jwks")]
 	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
 		self.capabilities.allows_network_target(net_target)
+	}
+
+	#[cfg(feature = "jwks")]
+	pub(crate) fn jwks_cache(&self) -> &Arc<RwLock<JwksCache>> {
+		&self.jwks_cache
 	}
 
 	/// Setup the initial credentials
