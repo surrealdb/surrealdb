@@ -253,6 +253,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.sd = Some(id.clone().into());
+				sess.tk = Some(value.clone());
 				sess.ip = session.ip.clone();
 				sess.or = session.or.clone();
 				// Compute the value with the params
@@ -309,6 +310,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.sd = Some(id.clone().into());
+				sess.tk = Some(value.clone());
 				sess.ip = session.ip.clone();
 				sess.or = session.or.clone();
 				// Compute the value with the params
