@@ -190,7 +190,7 @@ pub async fn init(
 		DB.get().unwrap().clone(),
 	);
 	// Start the web server
-	net::init(ct).await?;
+	net::init(ct.clone()).await?;
 	ct.cancel();
 	// Wait for the node agent to stop
 	if let Err(e) = tasks.nd.await {
