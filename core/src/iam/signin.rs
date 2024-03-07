@@ -11,6 +11,7 @@ use crate::sql::Value;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub async fn signin(
 	kvs: &Datastore,
@@ -155,6 +156,7 @@ pub async fn sc(
 									iat: Some(Utc::now().timestamp()),
 									nbf: Some(Utc::now().timestamp()),
 									exp,
+									jti: Some(Uuid::new_v4().to_string()),
 									ns: Some(ns.to_owned()),
 									db: Some(db.to_owned()),
 									sc: Some(sc.to_owned()),
@@ -228,6 +230,7 @@ pub async fn db(
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp,
+				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.to_owned()),
 				db: Some(db.to_owned()),
 				id: Some(user),
@@ -281,6 +284,7 @@ pub async fn ns(
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp,
+				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.to_owned()),
 				id: Some(user),
 				..Claims::default()
@@ -332,6 +336,7 @@ pub async fn root(
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
 				exp,
+				jti: Some(Uuid::new_v4().to_string()),
 				id: Some(user),
 				..Claims::default()
 			};
