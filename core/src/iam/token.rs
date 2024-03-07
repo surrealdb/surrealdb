@@ -89,7 +89,7 @@ impl From<Claims> for Value {
 			out.insert("exp".to_string(), exp.into());
 		}
 		// Add jti field if set
-		if let Some(jti) = v.exp {
+		if let Some(jti) = v.jti {
 			out.insert("jti".to_string(), jti.into());
 		}
 		// Add NS field if set
