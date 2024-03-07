@@ -157,7 +157,7 @@ thread_local! {
 	/// The current level of indentation, in units of tabs.
 	static INDENT: AtomicU32 = const { AtomicU32::new(0) };
 	/// Whether the next formatting action should be preceded by a newline and indentation.
-	static NEW_LINE: AtomicBool = const { AtomicBool::new(false) };
+	static NEW_LINE: AtomicBool = AtomicBool::new(false);
 }
 
 /// An adapter that, if enabled, adds pretty print formatting.
