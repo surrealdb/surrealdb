@@ -76,7 +76,7 @@ pub(super) async fn config(
 	kid: &str,
 	url: &str,
 ) -> Result<(DecodingKey, Validation), Error> {
-	// Retrieve JWKS cache from datastore
+	// Retrieve JWKS cache
 	let cache = kvs.jwks_cache();
 	// Attempt to fetch relevant JWK object either from local cache or remote location
 	let jwk = match fetch_jwks_from_cache(cache, url).await {
@@ -157,7 +157,7 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk,
 		return Err(Error::InvalidAuth); // Return opaque error
 	}
 
-	// Retrieve JWKS cache from datastore
+	// Retrieve JWKS cache
 	let cache = kvs.jwks_cache();
 	// Attempt to fetch JWKS object from remote location
 	match fetch_jwks_from_url(cache, url).await {
