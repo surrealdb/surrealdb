@@ -20,6 +20,7 @@ pub struct DefineScopeStatement {
 	pub session: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
+	pub process: Option<Value>,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
@@ -85,6 +86,9 @@ impl Display for DefineScopeStatement {
 		}
 		if let Some(ref v) = self.signin {
 			write!(f, " SIGNIN {v}")?
+		}
+		if let Some(ref v) = self.process {
+			write!(f, " PROCESS {v}")?
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?

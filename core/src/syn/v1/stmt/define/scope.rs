@@ -22,7 +22,10 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(scope_opts)(i)?;
+	#[cfg(not(feature = "sql2"))]
 	let (i, _) = expected("SESSION, SIGNUP, SIGNIN, or COMMENT", ending::query)(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, _) = expected("SESSION, SIGNUP, SIGNIN, PROCESS, or COMMENT", ending::query)(i)?;
 	// Create the base statement
 	let mut res = DefineScopeStatement {
 		name,
@@ -43,6 +46,10 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 			DefineScopeOption::Signin(v) => {
 				res.signin = Some(v);
 			}
+			#[cfg(feature = "sql2")]
+			DefineScopeOption::Process(v) => {
+				res.process = Some(v);
+			}
 			DefineScopeOption::Comment(v) => {
 				res.comment = Some(v);
 			}
@@ -56,11 +63,20 @@ enum DefineScopeOption {
 	Session(Duration),
 	Signup(Value),
 	Signin(Value),
+	#[cfg(feature = "sql2")]
+	Process(Value),
 	Comment(Strand),
 }
 
 fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
-	alt((scope_session, scope_signup, scope_signin, scope_comment))(i)
+	alt((
+		scope_session,
+		scope_signup,
+		scope_signin,
+		scope_comment,
+		#[cfg(feature = "sql2")]
+		scope_process
+	))(i)
 }
 
 fn scope_session(i: &str) -> IResult<&str, DefineScopeOption> {
@@ -85,6 +101,15 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(value)(i)?;
 	Ok((i, DefineScopeOption::Signin(v)))
+}
+
+#[cfg(feature = "sql2")]
+fn scope_process(i: &str) -> IResult<&str, DefineScopeOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PROCESS")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = cut(value)(i)?;
+	Ok((i, DefineScopeOption::Process(v)))
 }
 
 fn scope_comment(i: &str) -> IResult<&str, DefineScopeOption> {

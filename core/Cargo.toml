@@ -23,7 +23,7 @@ resolver = "2"
 
 [features]
 # Public features
-default = ["kv-mem"]
+default = ["kv-mem", "sql2"]
 kv-mem = ["dep:echodb", "tokio/time"]
 kv-indxdb = ["dep:indxdb"]
 kv-speedb = ["dep:speedb", "tokio/time"]

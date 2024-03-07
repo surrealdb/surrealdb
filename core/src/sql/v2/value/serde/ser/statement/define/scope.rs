@@ -43,6 +43,7 @@ pub struct SerializeDefineScopeStatement {
 	session: Option<Duration>,
 	signup: Option<Value>,
 	signin: Option<Value>,
+	process: Option<Value>,
 	comment: Option<Strand>,
 	if_not_exists: bool,
 }
@@ -72,6 +73,9 @@ impl serde::ser::SerializeStruct for SerializeDefineScopeStatement {
 			"signin" => {
 				self.signin = value.serialize(ser::value::opt::Serializer.wrap())?;
 			}
+			"process" => {
+				self.process = value.serialize(ser::value::opt::Serializer.wrap())?;
+			}
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
@@ -94,6 +98,7 @@ impl serde::ser::SerializeStruct for SerializeDefineScopeStatement {
 			session: self.session,
 			signup: self.signup,
 			signin: self.signin,
+			process: self.process,
 			comment: self.comment,
 			if_not_exists: self.if_not_exists,
 		})
