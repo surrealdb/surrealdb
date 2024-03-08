@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
+use crate::dbs::plan::Explanation;
 use crate::dbs::store::StoreCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
@@ -94,6 +95,18 @@ impl Results {
 			s.take_vec()
 		} else {
 			vec![]
+		}
+	}
+
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		match self {
+			Results::None => exp.add_collector("None", vec![]),
+			Results::Store(s) => {
+				s.explain(exp);
+			}
+			Results::Groups(g) => {
+				g.explain(exp);
+			}
 		}
 	}
 }

@@ -295,10 +295,10 @@ impl Iterator {
 		self.setup_limit(&cancel_ctx, opt, txn, stm).await?;
 		// Process the query START clause
 		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
-		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
-		let mut plan = Plan::new(ctx, stm, &self.entries);
-		// Prepare the results depending on grouping
+		// Prepare the results with possible optimisations on groups
 		self.results = self.results.prepare(stm);
+		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
+		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		if plan.do_iterate {
 			// Process prepared values
 			if let Some(qp) = ctx.get_query_planner() {

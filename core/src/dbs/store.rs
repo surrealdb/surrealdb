@@ -1,3 +1,4 @@
+use crate::dbs::plan::Explanation;
 use crate::sql::value::Value;
 use std::cmp::Ordering;
 use std::mem;
@@ -35,6 +36,10 @@ impl StoreCollector {
 	}
 	pub(super) fn take_store(&mut self) -> Self {
 		Self(self.take_vec())
+	}
+
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		exp.add_collector("Store", vec![]);
 	}
 }
 

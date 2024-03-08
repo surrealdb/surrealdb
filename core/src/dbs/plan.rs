@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::sql::{Object, Value};
 use std::collections::HashMap;
@@ -9,7 +10,12 @@ pub(super) struct Plan {
 }
 
 impl Plan {
-	pub(super) fn new(ctx: &Context<'_>, stm: &Statement<'_>, iterables: &Vec<Iterable>) -> Self {
+	pub(super) fn new(
+		ctx: &Context<'_>,
+		stm: &Statement<'_>,
+		iterables: &Vec<Iterable>,
+		results: &Results,
+	) -> Self {
 		let (do_iterate, explanation) = match stm.explain() {
 			None => (true, None),
 			Some(e) => {
@@ -22,6 +28,7 @@ impl Plan {
 						exp.add_fallback(reason.to_string());
 					}
 				}
+				results.explain(&mut exp);
 				(e.0, Some(exp))
 			}
 		};
@@ -44,6 +51,13 @@ impl Explanation {
 		self.0.push(ExplainItem::new_fetch(count));
 	}
 
+	pub(super) fn add_collector(
+		&mut self,
+		collector_type: &str,
+		details: Vec<(&'static str, Value)>,
+	) {
+		self.0.push(ExplainItem::new_collector(collector_type, details));
+	}
 	fn add_fallback(&mut self, reason: String) {
 		self.0.push(ExplainItem::new_fallback(reason));
 	}
@@ -88,7 +102,7 @@ impl ExplainItem {
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
 			Iterable::Defer(t) => Self {
-				name: "Iterate Thing".into(),
+				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::Thing(t.to_owned()))],
 			},
 			Iterable::Range(r) => Self {
@@ -123,6 +137,17 @@ impl ExplainItem {
 					details,
 				}
 			}
+		}
+	}
+
+	pub(super) fn new_collector(
+		collector_type: &str,
+		mut details: Vec<(&'static str, Value)>,
+	) -> ExplainItem {
+		details.insert(0, ("type", collector_type.into()));
+		Self {
+			name: "Collector".into(),
+			details,
 		}
 	}
 }

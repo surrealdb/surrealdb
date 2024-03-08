@@ -20,11 +20,12 @@ async fn select_aggregate() -> Result<(), Error> {
 		CREATE temperature:9 SET country = 'CHF', time = d'2023-01-01T08:00:00Z';
 		SELECT *, time::year(time) AS year FROM temperature;
 		SELECT count(), time::min(time) as min, time::max(time) as max, time::year(time) AS year, country FROM temperature GROUP BY country, year;
+		SELECT count(), time::min(time) as min, time::max(time) as max, time::year(time) AS year, country FROM temperature GROUP BY country, year EXPLAIN;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 11);
+	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -201,8 +202,8 @@ async fn select_aggregate() -> Result<(), Error> {
 				{
 					count: 1,
 					country: 'AUD',
-					max: '2021-01-01T08:00:00Z',
-					min: '2021-01-01T08:00:00Z',
+					max: d'2021-01-01T08:00:00Z',
+					min: d'2021-01-01T08:00:00Z',
 					year: 2021
 				},
 				{
@@ -243,6 +244,42 @@ async fn select_aggregate() -> Result<(), Error> {
 			]",
 	);
 	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'temperature'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						idioms: {
+							count: [
+								'count'
+							],
+							country: [
+								'first'
+							],
+							max: [
+								'time::max'
+							],
+							min: [
+								'time::min'
+							],
+							year: [
+								'array'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]",
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
 }

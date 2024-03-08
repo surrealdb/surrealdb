@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::plan::Explanation;
 use crate::dbs::store::StoreCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
@@ -183,6 +184,16 @@ impl GroupsCollector {
 		}
 		Ok(results)
 	}
+
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		let mut explain = BTreeMap::new();
+		let idioms: Vec<String> =
+			self.idioms.iter().cloned().map(|i| Value::from(i).to_string()).collect();
+		for (i, a) in idioms.into_iter().zip(&self.base) {
+			explain.insert(i, a.explain());
+		}
+		exp.add_collector("Group", vec![("idioms", explain.into())]);
+	}
 }
 
 impl Aggregator {
@@ -339,5 +350,37 @@ impl Aggregator {
 		} else {
 			Value::None
 		}
+	}
+
+	fn explain(&self) -> Value {
+		let mut collections: Vec<Value> = vec![];
+		if self.array.is_some() {
+			collections.push("array".into());
+		}
+		if self.first_val.is_some() {
+			collections.push("first".into());
+		}
+		if self.count.is_some() {
+			collections.push("count".into());
+		}
+		if self.math_mean.is_some() {
+			collections.push("math::mean".into());
+		}
+		if self.math_max.is_some() {
+			collections.push("math::max".into());
+		}
+		if self.math_min.is_some() {
+			collections.push("math::min".into());
+		}
+		if self.math_sum.is_some() {
+			collections.push("math::sun".into());
+		}
+		if self.time_max.is_some() {
+			collections.push("time::max".into());
+		}
+		if self.time_min.is_some() {
+			collections.push("time::min".into());
+		}
+		collections.into()
 	}
 }
