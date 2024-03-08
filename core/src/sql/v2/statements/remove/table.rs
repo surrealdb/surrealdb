@@ -26,52 +26,52 @@ impl RemoveTableStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-		// Claim transaction
-		let mut run = txn.lock().await;
-		// Remove the index stores
-		ctx.get_index_stores().table_removed(opt, &mut run, &self.name).await?;
-		// Clear the cache
-		run.clear_cache();
-		// Get the defined table
-		match run.get_tb(opt.ns(), opt.db(), &self.name).await {
-			Ok(tb) => {
-				// Delete the definition
-				let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
-				run.del(key).await?;
-				// Remove the resource data
-				let key = crate::key::table::all::new(opt.ns(), opt.db(), &self.name);
-				run.delp(key, u32::MAX).await?;
-				// Check if this is a foreign table
-				if let Some(view) = &tb.view {
-					// Process each foreign table
-					for v in view.what.0.iter() {
-						// Save the view config
-						let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, &self.name);
-						run.del(key).await?;
-					}
-				}
-				// Ok all good
-				Ok(Value::None)
-			}
-			Err(err) => {
-				if matches!(err, Error::TbNotFound { .. }) && self.if_exists {
-					Ok(Value::None)
-				} else {
-					Err(err)
+		match async {
+			// Allowed to run?
+			opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+			// Claim transaction
+			let mut run = txn.lock().await;
+			// Remove the index stores
+			ctx.get_index_stores().table_removed(opt, &mut run, &self.name).await?;
+			// Clear the cache
+			run.clear_cache();
+			// Get the defined table
+			let tb = run.get_tb(opt.ns(), opt.db(), &self.name).await?;
+			// Delete the definition
+			let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
+			run.del(key).await?;
+			// Remove the resource data
+			let key = crate::key::table::all::new(opt.ns(), opt.db(), &self.name);
+			run.delp(key, u32::MAX).await?;
+			// Check if this is a foreign table
+			if let Some(view) = &tb.view {
+				// Process each foreign table
+				for v in view.what.0.iter() {
+					// Save the view config
+					let key = crate::key::table::ft::new(opt.ns(), opt.db(), v, &self.name);
+					run.del(key).await?;
 				}
 			}
+			// Ok all good
+			Ok(Value::None)
+		}
+		.await
+		{
+			Err(Error::TbNotFound {
+				..
+			}) if self.if_exists => Ok(Value::None),
+			v => v,
 		}
 	}
 }
 
 impl Display for RemoveTableStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE TABLE {}", self.name)?;
+		write!(f, "REMOVE TABLE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
+		write!(f, " {}", self.name)?;
 		Ok(())
 	}
 }

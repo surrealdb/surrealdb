@@ -37,7 +37,7 @@ impl DefineDatabaseStatement {
 		// Process the statement
 		let key = crate::key::namespace::db::new(opt.ns(), &self.name);
 		let ns = run.add_ns(opt.ns(), opt.strict).await?;
-		// Set the id
+		// Store the db
 		if self.id.is_none() && ns.id.is_some() {
 			let mut db = self.clone();
 			db.id = Some(run.get_next_db_id(ns.id.unwrap()).await?);

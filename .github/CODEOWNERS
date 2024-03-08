@@ -8,6 +8,7 @@
 .dockerignore @surrealdb/ci
 build.rs @surrealdb/ci
 *.nix @surrealdb/ci
+flake.lock @surrealdb/ci
 /.cargo/ @surrealdb/ci
 /.config/ @surrealdb/ci
 /dev/ @surrealdb/ci

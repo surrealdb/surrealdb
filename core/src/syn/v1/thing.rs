@@ -9,7 +9,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::tag,
 	character::complete::char,
-	combinator::{cut, map, value},
+	combinator::{cut, map, opt, value},
 	sequence::delimited,
 	Err, Parser,
 };
@@ -67,7 +67,24 @@ pub fn thing_raw(i: &str) -> IResult<&str, Thing> {
 pub fn id(i: &str) -> IResult<&str, Id> {
 	alt((
 		map(integer, Id::Number),
-		map(ident_raw, Id::String),
+		map(
+			|i| {
+				let (i, _) = tag("+")(i)?;
+				ident_raw(i)
+			},
+			Id::String,
+		),
+		map(
+			|i| {
+				let (i, minus) = opt(tag("-"))(i)?;
+				let (i, mut res) = ident_raw(i)?;
+				if minus.is_some() {
+					res.insert(0, '-');
+				}
+				Ok((i, res))
+			},
+			Id::String,
+		),
 		map(object, Id::Object),
 		map(array, Id::Array),
 	))(i)
@@ -241,6 +258,64 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100"), out);
 		assert_eq!("⟨100⟩", format!("{}", out));
+	}
+
+	#[test]
+	fn thing_integer_min() {
+		let sql = format!("test:{}", i64::MIN);
+		let res = thing(&sql);
+		let (_, out) = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(i64::MIN),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_max() {
+		let sql = format!("test:{}", i64::MAX);
+		let res = thing(&sql);
+		let (_, out) = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(i64::MAX),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_more_then_max() {
+		let max_str = format!("{}", (i64::MAX as u64) + 1);
+		let sql = format!("test:{}", max_str);
+		let res = thing(&sql);
+		let (_, out) = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(max_str),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_more_then_min() {
+		let min_str = format!("-{}", (i64::MAX as u64) + 2);
+		let sql = format!("test:{}", min_str);
+		let res = thing(&sql);
+		let (_, out) = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(min_str),
+			}
+		);
 	}
 
 	#[test]

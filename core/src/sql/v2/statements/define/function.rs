@@ -14,13 +14,15 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineFunctionStatement {
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
 	pub block: Block,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
+	#[revision(start = 2)]
+	pub if_not_exists: bool,
 }
 
 impl DefineFunctionStatement {
@@ -38,11 +40,25 @@ impl DefineFunctionStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Check if function already exists
+		if self.if_not_exists && run.get_db_function(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			return Err(Error::FcAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
 		// Process the statement
 		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
+		run.set(
+			key,
+			DefineFunctionStatement {
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -50,7 +66,11 @@ impl DefineFunctionStatement {
 
 impl fmt::Display for DefineFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FUNCTION fn::{}(", self.name.0)?;
+		write!(f, "DEFINE FUNCTION")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " fn::{}(", self.name.0)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;

@@ -11,9 +11,17 @@ use crate::sql::{filter::Filter, statements::DefineAnalyzerStatement, Strand, To
 #[cfg(feature = "sql2")]
 use nom::bytes::complete::tag;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+#[cfg(feature = "sql2")]
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(analyzer_opts)(i)?;
@@ -21,6 +29,8 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	// Create the base statement
 	let mut res = DefineAnalyzerStatement {
 		name,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options

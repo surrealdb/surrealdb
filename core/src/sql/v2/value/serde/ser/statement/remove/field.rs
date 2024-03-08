@@ -38,6 +38,7 @@ impl ser::Serializer for Serializer {
 pub struct SerializeRemoveFieldStatement {
 	name: Idiom,
 	what: Ident,
+	if_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeRemoveFieldStatement {
@@ -55,6 +56,9 @@ impl serde::ser::SerializeStruct for SerializeRemoveFieldStatement {
 			"what" => {
 				self.what = Ident(value.serialize(ser::string::Serializer.wrap())?);
 			}
+			"if_exists" => {
+				self.if_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `RemoveFieldStatement::{key}`"
@@ -68,6 +72,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveFieldStatement {
 		Ok(RemoveFieldStatement {
 			name: self.name,
 			what: self.what,
+			if_exists: self.if_exists,
 		})
 	}
 }

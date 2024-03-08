@@ -6,7 +6,6 @@ mod cli_integration {
 	use common::Format;
 	use common::Socket;
 	use serde_json::json;
-	use std::fs;
 	use std::fs::File;
 	use std::time;
 	use surrealdb::fflags::FFLAGS;
@@ -122,16 +121,6 @@ mod cli_integration {
 			assert!(line1.starts_with("-- Query 1"));
 			assert!(line1.contains("execution time"));
 			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
-		}
-
-		info!("* Unfinished backup CLI");
-		{
-			let file = common::tmp_file("backup.db");
-			let args = format!("backup {creds}  http://{addr} {file}");
-			common::run(&args).output().expect("failed to run backup: {args}");
-
-			// TODO: Once backups are functional, update this test.
-			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
 		}
 
 		info!("* Advanced uncomputed variable to be computed before saving");
@@ -299,15 +288,6 @@ mod cli_integration {
 			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
 		}
 
-		info!("* Root user can do backups");
-		{
-			let file = common::tmp_file("backup.db");
-			let args = format!("backup {creds} http://{addr} {file}");
-			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run backup: {args}"));
-
-			// TODO: Once backups are functional, update this test.
-			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
-		}
 		server.finish()
 	}
 
@@ -616,18 +596,6 @@ mod cli_integration {
 			);
 		}
 
-		info!("* Can't do backups");
-		{
-			let args = format!("backup {creds} http://{addr}");
-			let output = common::run(&args).output();
-			// TODO(sgirones): Once backups are functional, update this test.
-			// assert!(
-			// 	output.unwrap_err().contains("Forbidden"),
-			// 	"anonymous user shouldn't be able to backup",
-			// 	output
-			// );
-			assert!(output.is_ok(), "anonymous user can do backups: {:?}", output);
-		}
 		server.finish();
 	}
 
