@@ -358,7 +358,7 @@ async fn define_statement_event() -> Result<(), Error> {
 	#[cfg(not(feature = "experimental-parser"))]
 	let val = Value::parse(
 		"{
-			events: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
+			events: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
 			fields: {},
 			tables: {},
 			indexes: {},
@@ -427,7 +427,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 	#[cfg(not(feature = "experimental-parser"))]
 	let val = Value::parse(
 		r#"{
-			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)" },
+			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, value = $after.email, action = $event)" },
 			fields: {},
 			tables: {},
 			indexes: {},
@@ -496,7 +496,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 	#[cfg(not(feature = "experimental-parser"))]
 	let val = Value::parse(
 		"{
-			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
+			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
 			fields: {},
 			tables: {},
 			indexes: {},
