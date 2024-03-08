@@ -321,10 +321,8 @@ impl Iterator {
 			self.results = self.results.group(ctx, opt, txn, stm).await?;
 			// Process any ORDER clause
 			self.output_order(ctx, opt, txn, stm).await?;
-			// Process any START clause
-			self.output_start(ctx, opt, txn, stm).await?;
-			// Process any LIMIT clause
-			self.output_limit(ctx, opt, txn, stm).await?;
+			// Process any START & LIMIT clause
+			self.results.start_limit(self.start.as_ref(), self.limit.as_ref());
 
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
@@ -455,34 +453,6 @@ impl Iterator {
 				}
 				Ordering::Equal
 			})
-		}
-		Ok(())
-	}
-
-	#[inline]
-	async fn output_start(
-		&mut self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
-		if let Some(v) = self.start {
-			self.results.skip(v);
-		}
-		Ok(())
-	}
-
-	#[inline]
-	async fn output_limit(
-		&mut self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
-		if let Some(v) = self.limit {
-			self.results.skip(v);
 		}
 		Ok(())
 	}

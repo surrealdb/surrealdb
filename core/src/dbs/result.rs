@@ -48,9 +48,14 @@ impl Results {
 		}
 	}
 
-	pub(super) fn skip(&mut self, start: usize) {
+	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
 		if let Results::Store(s) = self {
-			s.skip(start)
+			if let Some(&start) = start {
+				s.start(start);
+			}
+			if let Some(&limit) = limit {
+				s.limit(limit);
+			}
 		}
 	}
 

@@ -21,13 +21,13 @@ impl StoreCollector {
 		self.0.len()
 	}
 
-	pub(super) fn skip(&mut self, start: usize) {
+	pub(super) fn start(&mut self, start: usize) {
 		self.0 = mem::take(&mut self.0).into_iter().skip(start).collect();
 	}
-
-	pub(super) fn clear(&mut self) {
-		self.0.clear();
+	pub(super) fn limit(&mut self, limit: usize) {
+		self.0 = mem::take(&mut self.0).into_iter().take(limit).collect();
 	}
+
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
 		mem::take(&mut self.0)
 	}
