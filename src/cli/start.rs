@@ -8,7 +8,6 @@ use crate::dbs::{StartCommandDbsOptions, DB};
 use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
-use crate::node;
 use clap::Args;
 use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
@@ -185,7 +184,7 @@ pub async fn init(
 	dbs::init(dbs).await?;
 	// Start the node agent
 	let tasks = surrealdb::tasks::start_tasks(
-		&config::CF.get().unwrap().engine.unwrap_or(EngineOptions::default()),
+		&config::CF.get().unwrap().engine.unwrap_or_default(),
 		ct.clone(),
 		DB.get().unwrap().clone(),
 	);
