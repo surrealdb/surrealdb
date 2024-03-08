@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,7 +46,7 @@ impl CancellationToken {
 
 	pub fn cancel(&self) {
 		#[cfg(not(target_arch = "wasm32"))]
-		self.cancel();
+		self.inner.cancel();
 		#[cfg(target_arch = "wasm32")]
 		self.inner.store(true, Ordering::Relaxed);
 	}
@@ -57,7 +58,7 @@ impl CancellationToken {
 		return self.inner.load(Ordering::Relaxed);
 	}
 
-	pub async fn cancelled(&self) -> () {
+	pub async fn cancelled(&self) {
 		#[cfg(not(target_arch = "wasm32"))]
 		return self.inner.cancelled().await;
 		#[cfg(target_arch = "wasm32")]

@@ -1,3 +1,25 @@
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::future::Future;
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::sync::atomic::AtomicI64;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::task::Poll;
+
+use flume::Receiver;
+use flume::Sender;
+use futures::future::Either;
+use futures::stream::poll_fn;
+use futures::StreamExt;
+use futures_concurrency::stream::Merge as _;
+use tokio::sync::watch;
+use tokio::time::MissedTickBehavior;
+
+use surrealdb_core::options::EngineOptions;
+
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -13,34 +35,10 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
 use crate::engine::tasks::{start_tasks, CancellationToken};
-use crate::engine::IntervalStream;
-use crate::fflags::FFLAGS;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
-use flume::Sender;
-use flume::{Receiver, TryRecvError};
-use futures::future::Either;
-use futures::stream::poll_fn;
-use futures::StreamExt;
-use futures_concurrency::stream::Merge as _;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
-use std::task::Poll;
-use std::time::Duration;
-use surrealdb_core::dbs::Options;
-use surrealdb_core::options::EngineOptions;
-use tokio::sync::watch;
-use tokio::time;
-use tokio::time::MissedTickBehavior;
 
 impl crate::api::Connection for Db {}
 
@@ -160,10 +158,10 @@ pub(crate) fn router(
 
 		let ct = CancellationToken::new();
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		let mut opt = EngineOptions::default();
-		opt.tick_interval = tick_interval;
-		// Make immutable
-		let opt = opt;
+		let opt = EngineOptions {
+			tick_interval,
+			..Default::default()
+		};
 		start_tasks(&opt, ct.clone(), kvs.clone());
 
 		let mut notifications = kvs.notifications();
