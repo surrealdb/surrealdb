@@ -12,7 +12,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
-use crate::engine::tasks::start_tasks;
+use crate::engine::tasks::{start_tasks, CancellationToken};
 use crate::engine::IntervalStream;
 use crate::fflags::FFLAGS;
 use crate::iam::Level;
@@ -41,7 +41,6 @@ use surrealdb_core::options::EngineOptions;
 use tokio::sync::watch;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
-use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
 

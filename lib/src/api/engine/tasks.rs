@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 use surrealdb_core::dbs::Options;
 use surrealdb_core::fflags::FFLAGS;
@@ -19,12 +19,52 @@ use wasm_bindgen_futures::spawn_local as spawn_future;
 
 const LOG: &str = "surrealdb::node";
 
-/// Starts tasks that are required for the correct running of the engine
-pub fn start_tasks(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastore>) -> Tasks {
-	Tasks {
-		nd: init(opt, ct.clone(), dbs.clone()),
-		lq: live_query_change_feed(ct, dbs),
+#[derive(Clone)]
+#[doc(hidden)]
+/// CancellationToken is used as a shortcut for when we don't have access to tokio, such as in wasm
+/// it's public because it is required to access from CLI, but otherwise it is an internal component
+/// The intention is that it reflects tokio util cancellation token in behaviour
+pub struct CancellationToken {
+	#[cfg(not(target_arch = "wasm32"))]
+	inner: tokio_util::sync::CancellationToken,
+	#[cfg(target_arch = "wasm32")]
+	inner: Arc<AtomicBool>,
+}
+
+impl CancellationToken {
+	pub fn new() -> Self {
+		Self {
+			#[cfg(not(target_arch = "wasm32"))]
+			inner: tokio_util::sync::CancellationToken::new(),
+			#[cfg(target_arch = "wasm32")]
+			inner: Arc::new(AtomicBool::new(false)),
+		}
 	}
+
+	pub fn cancel(&self) {
+		#[cfg(not(target_arch = "wasm32"))]
+		self.cancel();
+		#[cfg(target_arch = "wasm32")]
+		self.inner.store(true, Ordering::Relaxed);
+	}
+
+	pub fn cancelled(&self) -> bool {
+		#[cfg(not(target_arch = "wasm32"))]
+		return self.inner.is_cancelled();
+		#[cfg(target_arch = "wasm32")]
+		return self.inner.load(Ordering::Relaxed);
+	}
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type FutureTask = JoinHandle<()>;
+#[cfg(target_arch = "wasm32")]
+/// This will be true if a task has completed
+type FutureTask = AtomicBool;
+
+pub struct Tasks {
+	pub nd: FutureTask,
+	pub lq: FutureTask,
 }
 
 impl Tasks {
@@ -44,15 +84,12 @@ impl Tasks {
 	}
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-type FutureTask = JoinHandle<()>;
-#[cfg(target_arch = "wasm32")]
-/// This will be true if a task has completed
-type FutureTask = AtomicBool;
-
-pub struct Tasks {
-	pub nd: FutureTask,
-	pub lq: FutureTask,
+/// Starts tasks that are required for the correct running of the engine
+pub fn start_tasks(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastore>) -> Tasks {
+	Tasks {
+		nd: init(opt, ct.clone(), dbs.clone()),
+		lq: live_query_change_feed(ct, dbs),
+	}
 }
 
 // The init starts a long-running thread for periodically calling Datastore.tick.
@@ -122,10 +159,10 @@ fn live_query_change_feed(ct: CancellationToken, kvs: Arc<Datastore>) -> FutureT
 
 #[cfg(test)]
 mod test {
+	use crate::engine::tasks::CancellationToken;
 	use crate::tasks::start_tasks;
 	use std::sync::Arc;
 	use surrealdb_core::options::EngineOptions;
-	use tokio_util::sync::CancellationToken;
 
 	#[test_log::test(tokio::test)]
 	#[cfg(feature = "kv-mem")]
