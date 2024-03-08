@@ -119,7 +119,7 @@ mod tests {
 			name: Ident::from("test"),
 			..Default::default()
 		});
-		let enc: Vec<u8> = stm.try_into().unwrap();
+		let enc: Vec<u8> = stm.into();
 		assert_eq!(12, enc.len());
 	}
 }

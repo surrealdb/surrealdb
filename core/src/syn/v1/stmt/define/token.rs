@@ -121,6 +121,6 @@ mod tests {
 		let sql = "TOKEN test ON test";
 		let res = token(sql);
 
-		assert_eq!(res.is_err(), true)
+		assert!(res.is_err())
 	}
 }

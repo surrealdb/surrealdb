@@ -18,7 +18,7 @@ pub async fn iam_run_case(
 	prepare: &str,
 	test: &str,
 	check: &str,
-	check_expected_result: &Vec<&str>,
+	check_expected_result: &[&str],
 	ds: &Datastore,
 	sess: &Session,
 	should_succeed: bool,
@@ -111,7 +111,7 @@ pub async fn iam_check_cases(
 		println!("* Testing '{test}' for '{level}Actor({role})' on '({ns}, {db})'");
 		let sess = Session::for_level(level.to_owned(), role.to_owned()).with_ns(ns).with_db(db);
 		let expected_result = if *should_succeed {
-			check_results.get(0).unwrap()
+			check_results.first().unwrap()
 		} else {
 			check_results.get(1).unwrap()
 		};
@@ -147,7 +147,7 @@ pub async fn iam_check_cases(
 			let expected_result = if auth_enabled {
 				check_results.get(1).unwrap()
 			} else {
-				check_results.get(0).unwrap()
+				check_results.first().unwrap()
 			};
 			iam_run_case(
 				prepare,

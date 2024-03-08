@@ -51,7 +51,6 @@ impl fmt::Display for SleepStatement {
 mod tests {
 	use super::*;
 	use crate::dbs::test::mock;
-	use crate::sql::{Duration, Value};
 	use std::time::{self, SystemTime};
 
 	#[tokio::test]

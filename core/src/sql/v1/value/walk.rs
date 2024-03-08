@@ -61,7 +61,6 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::sql::idiom::Idiom;
 	use crate::syn::Parse;
 
 	#[test]

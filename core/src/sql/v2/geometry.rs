@@ -10,7 +10,7 @@ use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::iter::{once, FromIterator};
+use std::iter::once;
 use std::{fmt, hash};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";

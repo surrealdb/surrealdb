@@ -612,9 +612,7 @@ impl serde::ser::SerializeStructVariant for SerializeStructVariant {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql;
 	use crate::sql::block::Entry;
-	use crate::sql::constant::Constant;
 	use crate::sql::statements::CreateStatement;
 	use crate::sql::*;
 	use ::serde::Serialize;

@@ -145,8 +145,8 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
 
-		let serialized: Vec<u8> = (&out).try_into().unwrap();
-		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
+		let serialized: Vec<u8> = (&out).into();
+		let deserialized = DefineTableStatement::from(&serialized);
 		assert_eq!(out, deserialized);
 	}
 }
