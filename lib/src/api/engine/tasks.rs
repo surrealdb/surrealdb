@@ -67,7 +67,7 @@ impl CancellationToken {
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
-	pub fn unwrap(self) -> tokio_util::sync::CancellationToken {
+	pub fn into_inner(self) -> tokio_util::sync::CancellationToken {
 		self.inner
 	}
 }
