@@ -10,7 +10,9 @@ use surrealdb_core::fflags::FFLAGS;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::Error as RootError;
+#[cfg(not(target_arch = "wasm32"))]
 use surrealdb_core::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn as spawn_future;
@@ -76,7 +78,7 @@ impl CancellationToken {
 type FutureTask = JoinHandle<()>;
 #[cfg(target_arch = "wasm32")]
 /// This will be true if a task has completed
-type FutureTask = AtomicBool;
+type FutureTask = Arc<AtomicBool>;
 
 pub struct Tasks {
 	pub nd: FutureTask,
@@ -84,7 +86,8 @@ pub struct Tasks {
 }
 
 impl Tasks {
-	async fn resolve(self) -> Result<(), RootError> {
+	#[cfg(not(target_arch = "wasm32"))]
+	pub async fn resolve(self) -> Result<(), RootError> {
 		#[cfg(not(target_arch = "wasm32"))]
 		{
 			self.nd.await.map_err(|e| {
@@ -117,9 +120,11 @@ pub fn start_tasks(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastor
 fn init(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastore>) -> FutureTask {
 	let tick_interval = opt.tick_interval;
 	info!(target: LOG, "Started node agent");
-	let completed_status = AtomicBool::new(false);
-
-	let fut = spawn_future(async move {
+	#[cfg(target_arch = "wasm32")]
+	let completed_status = Arc::new(AtomicBool::new(false));
+	#[cfg(target_arch = "wasm32")]
+	let ret_status = completed_status.clone();
+	let _fut = spawn_future(async move {
 		loop {
 			if let Err(e) = dbs.tick().await {
 				error!("Error running node agent tick: {}", e);
@@ -134,19 +139,24 @@ fn init(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastore>) -> Futu
 		}
 
 		info!(target: LOG, "Stopped node agent");
+		#[cfg(target_arch = "wasm32")]
 		completed_status.store(true, Ordering::Relaxed);
 	});
 	#[cfg(not(target_arch = "wasm32"))]
-	return fut;
+	return _fut;
 	#[cfg(target_arch = "wasm32")]
-	return completed_status;
+	return ret_status;
 }
 
 // Start live query on change feeds notification processing
 fn live_query_change_feed(ct: CancellationToken, kvs: Arc<Datastore>) -> FutureTask {
-	let completed_status = AtomicBool::new(false);
-	let fut = spawn_future(async move {
+	#[cfg(target_arch = "wasm32")]
+	let completed_status = Arc::new(AtomicBool::new(false));
+	#[cfg(target_arch = "wasm32")]
+	let ret_status = completed_status.clone();
+	let _fut = spawn_future(async move {
 		if !FFLAGS.change_feed_live_queries.enabled() {
+			// TODO verify test fails since return without completion
 			return;
 		}
 		let tick_interval = Duration::from_secs(1);
@@ -165,12 +175,13 @@ fn live_query_change_feed(ct: CancellationToken, kvs: Arc<Datastore>) -> FutureT
 			}
 		}
 		info!("Stopped live query node agent");
+		#[cfg(target_arch = "wasm32")]
 		completed_status.store(true, Ordering::Relaxed);
 	});
 	#[cfg(not(target_arch = "wasm32"))]
-	return fut;
+	return _fut;
 	#[cfg(target_arch = "wasm32")]
-	return completed_status;
+	return ret_status;
 }
 
 #[cfg(test)]

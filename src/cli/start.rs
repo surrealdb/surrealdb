@@ -191,16 +191,9 @@ pub async fn init(
 	);
 	// Start the web server
 	net::init(ct.clone().into_inner()).await?;
+	// Shutdown and stop closed tasks
 	ct.cancel();
-	// Wait for the node agent to stop
-	if let Err(e) = tasks.nd.await {
-		error!("Node agent failed while running: {}", e);
-		return Err(Error::NodeAgent);
-	}
-	if let Err(e) = tasks.lq.await {
-		error!("Live query change feed failed while running: {}", e);
-		return Err(Error::NodeAgent);
-	}
+	tasks.resolve().await?;
 	// All ok
 	Ok(())
 }

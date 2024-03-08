@@ -7,14 +7,12 @@ use crate::api::conn::Router;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::opt::Endpoint;
-use crate::api::CancellationToken;
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
-use crate::engine::IntervalStream;
-use crate::fflags::FFLAGS;
+use crate::engine::tasks::CancellationToken;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
@@ -36,13 +34,9 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
-use std::time::Duration;
-use surrealdb_core::dbs::Options;
 use surrealdb_core::options::EngineOptions;
 use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
-use wasmtimer::tokio as time;
-use wasmtimer::tokio::MissedTickBehavior;
 
 impl crate::api::Connection for Db {}
 
