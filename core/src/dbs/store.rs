@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::mem;
 
 #[derive(Default)]
+// TODO Use surreal-kv once the number of record reach a given threshold
 pub(super) struct StoreCollector(Vec<Value>);
 
 impl StoreCollector {
@@ -10,6 +11,7 @@ impl StoreCollector {
 		self.0.push(val);
 	}
 
+	// When surreal-kv will be used, the key will be used to sort the records in surreal-kv
 	pub(super) fn sort_by<F>(&mut self, compare: F)
 	where
 		F: FnMut(&Value, &Value) -> Ordering,

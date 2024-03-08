@@ -97,7 +97,7 @@ impl GroupsCollector {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		agrs: &mut Vec<Aggregator>,
+		agrs: &mut [Aggregator],
 		idioms: &[Idiom],
 		obj: Value,
 	) -> Result<(), Error> {
@@ -333,12 +333,10 @@ impl Aggregator {
 		// We return a clone because the same value may be returned for different groups
 		if let Some(v) = self.first_val.as_ref().cloned() {
 			Array::from(v).into()
+		} else if let Some(a) = self.array.as_ref().cloned() {
+			a.into()
 		} else {
-			if let Some(a) = self.array.as_ref().cloned() {
-				a.into()
-			} else {
-				Value::None
-			}
+			Value::None
 		}
 	}
 }
