@@ -13,10 +13,9 @@ use crate::{
 	syn::v1::ParseError,
 };
 use nom::Err;
-use nom::{
-	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
-	sequence::tuple,
-};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+#[cfg(feature = "sql2")]
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
@@ -122,6 +121,6 @@ mod tests {
 		let sql = "TOKEN test ON test";
 		let res = token(sql);
 
-		assert_eq!(res.is_err(), true)
+		assert!(res.is_err())
 	}
 }
