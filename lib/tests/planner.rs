@@ -1147,6 +1147,9 @@ async fn select_unique_contains() -> Result<(), Error> {
 }
 
 #[tokio::test]
+// This test checks that:
+// 1. Datetime are recognized by the query planner
+// 2. we can take the value store in a variable
 async fn select_with_datetime_value() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -1201,6 +1204,9 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 }
 
 #[tokio::test]
+// This test checks that:
+// 1. UUID are recognized by the query planner
+// 2. we can take the value from a object stored as a variable
 async fn select_with_uuid_value() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -1208,16 +1214,21 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX sessionUid ON sessions FIELDS sessionUid;
 		CREATE sessions:1 CONTENT { sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' };
+		LET $sess = { uuid: u'00ad70db-f435-442e-9012-1cd853102084' };
 		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084' EXPLAIN;
-		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084';";
+		SELECT * FROM sessions WHERE sessionUid = $sess.uuid EXPLAIN;
+		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084';
+		SELECT * FROM sessions WHERE sessionUid = $sess.uuid;
+	";
 	let mut res = dbs.execute(sql, &ses, None).await?;
 
-	assert_eq!(res.len(), 4);
-	skip_ok(&mut res, 2)?;
+	assert_eq!(res.len(), 7);
+	skip_ok(&mut res, 3)?;
 
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		r#"[
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
 				{
 					detail: {
 						plan: {
@@ -1230,19 +1241,77 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 					operation: 'Iterate Index'
 				}
 			]"#,
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
 
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		r#"[
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
 				{
                		"id": sessions:1,
  					"sessionUid": "00ad70db-f435-442e-9012-1cd853102084"
     			}
 			]"#,
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_in_operator() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = "
+		DEFINE INDEX user_email_idx ON user FIELDS email;
+		CREATE user:1 CONTENT { email: 'a@b' };
+		CREATE user:2 CONTENT { email: 'c@d' };
+		SELECT * FROM user WHERE email IN ['a@b', 'e@f'] EXPLAIN;
+		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'] EXPLAIN;
+		SELECT * FROM user WHERE email IN ['a@b', 'e@f'];
+		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'];
+		";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 7);
+	skip_ok(&mut res, 3)?;
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+					detail: {
+						plan: {
+							index: 'user_email_idx',
+							operator: 'union',
+							value: ['a@b', 'e@f']
+						},
+						table: 'user'
+					},
+					operation: 'Iterate Index'
+				}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+               		'id': user:1,
+ 					'email': 'a@b'
+    			}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
 
 	Ok(())
 }
