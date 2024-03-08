@@ -48,11 +48,27 @@ impl CancellationToken {
 		self.inner.store(true, Ordering::Relaxed);
 	}
 
-	pub fn cancelled(&self) -> bool {
+	pub fn is_cancelled(&self) -> bool {
 		#[cfg(not(target_arch = "wasm32"))]
 		return self.inner.is_cancelled();
 		#[cfg(target_arch = "wasm32")]
 		return self.inner.load(Ordering::Relaxed);
+	}
+
+	pub async fn cancelled(&self) -> () {
+		#[cfg(not(target_arch = "wasm32"))]
+		return self.inner.cancelled().await;
+		#[cfg(target_arch = "wasm32")]
+		{
+			while !self.inner.load(Ordering::Relaxed) {
+				tokio::task::yield_now().await;
+			}
+		}
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	pub fn unwrap(self) -> tokio_util::sync::CancellationToken {
+		self.inner
 	}
 }
 
