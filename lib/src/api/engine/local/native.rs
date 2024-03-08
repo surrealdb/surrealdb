@@ -16,7 +16,6 @@ use futures::stream::poll_fn;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge as _;
 use tokio::sync::watch;
-use tokio::time::MissedTickBehavior;
 
 use surrealdb_core::options::EngineOptions;
 

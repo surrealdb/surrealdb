@@ -1,4 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -72,6 +72,12 @@ impl CancellationToken {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn into_inner(self) -> tokio_util::sync::CancellationToken {
 		self.inner
+	}
+}
+
+impl Default for CancellationToken {
+	fn default() -> Self {
+		Self::new()
 	}
 }
 
