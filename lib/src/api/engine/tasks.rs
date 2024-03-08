@@ -206,6 +206,6 @@ mod test {
 		let dbs = Arc::new(surrealdb_core::kvs::Datastore::new("memory://").await.unwrap());
 		let val = start_tasks(&opt, ct.clone(), dbs.clone());
 		ct.cancel();
-		val.into().unwrap();
+		val.resolve().await.unwrap();
 	}
 }

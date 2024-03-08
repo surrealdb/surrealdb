@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
 use surrealdb::engine::tasks::CancellationToken;
-use surrealdb::options::EngineOptions;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
