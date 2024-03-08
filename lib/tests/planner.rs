@@ -210,6 +210,12 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'Store'
+				}},
+				operation: 'Collector'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -235,6 +241,12 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'Store'
+				}},
+				operation: 'Collector'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -249,6 +261,12 @@ const THREE_TABLE_EXPLAIN: &str = "[
 			table: 'person'
 		},
 		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			type: 'Store'
+		},
+		operation: 'Collector'
 	},
 	{
 		detail: {
@@ -294,6 +312,12 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				},
+				{
+					detail: {
 						count: 3
 					},
 					operation: 'Fetch'
@@ -311,6 +335,12 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 						table: 'person',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				},
 				{
 					detail: {
@@ -334,6 +364,12 @@ const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				},
+				{
+					detail: {
 						count: 1
 					},
 					operation: 'Fetch'
@@ -351,6 +387,12 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 			table: 'person'
 		},
 		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Store'
+		},
+		operation: 'Collector'
 	},
 	{
 		detail: {
@@ -384,6 +426,12 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 					operation: 'Iterate Index'
 				},
 				{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
+				},
+				{
 					detail: {
 						count: 2
 					},
@@ -413,6 +461,12 @@ async fn select_with_no_index_unary_operator() -> Result<(), Error> {
 						reason: 'WITH NOINDEX'
 					},
 					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 	);
@@ -441,6 +495,12 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 						reason: 'unary expressions not supported'
 					},
 					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 	);
@@ -525,6 +585,12 @@ const EXPLAIN_FROM_TO: &str = r"[
 				table: 'test'
 			},
 			operation: 'Iterate Index'
+		},
+		{
+			detail: {
+				type: 'Store'
+			},
+			operation: 'Collector'
 		}
 	]";
 
@@ -566,6 +632,12 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 				table: 'test'
 			},
 			operation: 'Iterate Index'
+		},
+		{
+			detail: {
+				type: 'Store'
+			},
+			operation: 'Collector'
 		}
 	]";
 
@@ -611,6 +683,12 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -656,6 +734,12 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -744,6 +828,12 @@ const EXPLAIN_LESS: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -779,6 +869,12 @@ const EXPLAIN_LESS_OR_EQUAL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -818,6 +914,12 @@ const EXPLAIN_MORE: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -853,6 +955,12 @@ const EXPLAIN_MORE_OR_EQUAL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -903,6 +1011,12 @@ async fn select_with_idiom_param_value() -> Result<(), Error> {
 						table: 'person'
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 	);
@@ -945,6 +1059,12 @@ const CONTAINS_TABLE_EXPLAIN: &str = r"[
 							reason: 'NO INDEX FOUND'
 						},
 						operation: 'Fallback'
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
 					}
 				]";
 
@@ -997,9 +1117,6 @@ async fn select_contains() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: '=',
@@ -1008,6 +1125,12 @@ async fn select_contains() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1037,9 +1160,6 @@ async fn select_contains_all() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: 'union',
@@ -1048,6 +1168,12 @@ async fn select_contains_all() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1077,9 +1203,6 @@ async fn select_contains_any() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: 'union',
@@ -1088,6 +1211,12 @@ async fn select_contains_any() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1124,9 +1253,6 @@ async fn select_unique_contains() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: '=',
@@ -1135,6 +1261,12 @@ async fn select_unique_contains() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1182,6 +1314,12 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 						table: 'test_user'
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 		);
@@ -1239,6 +1377,12 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 						table: 'sessions'
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 		);
@@ -1294,6 +1438,12 @@ async fn select_with_in_operator() -> Result<(), Error> {
 						table: 'user'
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 		);
