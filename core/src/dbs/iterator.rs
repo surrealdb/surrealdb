@@ -1,10 +1,10 @@
 use crate::ctx::Canceller;
 use crate::ctx::Context;
-use crate::dbs::collector::{Collector, CollectorAPI};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::Plan;
+use crate::dbs::result::Results;
 use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
@@ -12,17 +12,13 @@ use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::planner::executor::IteratorRef;
 use crate::idx::planner::IterationStage;
-use crate::sql::array::Array;
 use crate::sql::edges::Edges;
-use crate::sql::field::Field;
 use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::mem;
 
 #[derive(Clone)]
@@ -68,7 +64,7 @@ pub(crate) struct Iterator {
 	// Iterator runtime error
 	error: Option<Error>,
 	// Iterator output results
-	results: Collector,
+	results: Results,
 	// Iterator input values
 	entries: Vec<Iterable>,
 }
@@ -80,7 +76,7 @@ impl Clone for Iterator {
 			limit: self.limit,
 			start: self.start,
 			error: None,
-			results: self.results.new_instance(),
+			results: Results::default(),
 			entries: self.entries.clone(),
 		}
 	}
@@ -301,7 +297,8 @@ impl Iterator {
 		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries);
-
+		// Prepare the results depending on grouping
+		self.results = self.results.prepare(stm);
 		if plan.do_iterate {
 			// Process prepared values
 			if let Some(qp) = ctx.get_query_planner() {
@@ -321,7 +318,7 @@ impl Iterator {
 			// Process any SPLIT clause
 			self.output_split(ctx, opt, txn, stm).await?;
 			// Process any GROUP clause
-			self.output_group(ctx, opt, txn, stm).await?;
+			self.results = self.results.group(ctx, opt, txn, stm).await?;
 			// Process any ORDER clause
 			self.output_order(ctx, opt, txn, stm).await?;
 			// Process any START clause
@@ -331,20 +328,25 @@ impl Iterator {
 
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
-				self.results.clear();
 			} else {
 				// Process any FETCH clause
 				self.output_fetch(ctx, opt, txn, stm).await?;
 			}
 		}
 
+		// Extract the output from the result
+		let mut results = self.results.take();
+
 		// Output the explanation if any
 		if let Some(e) = plan.explanation {
-			e.output(&mut self.results);
+			results.clear();
+			for v in e.output() {
+				results.push(v)
+			}
 		}
 
 		// Output the results
-		Ok(self.results.take().into())
+		Ok(results.into())
 	}
 
 	#[inline]
@@ -401,7 +403,7 @@ impl Iterator {
 								// Set the value at the path
 								obj.set(ctx, opt, txn, split, val).await?;
 								// Add the object to the results
-								self.results.push(obj);
+								self.results.push(stm, obj);
 							}
 						}
 						_ => {
@@ -410,7 +412,7 @@ impl Iterator {
 							// Set the value at the path
 							obj.set(ctx, opt, txn, split, val).await?;
 							// Add the object to the results
-							self.results.push(obj);
+							self.results.push(stm, obj);
 						}
 					}
 				}
@@ -418,87 +420,6 @@ impl Iterator {
 		}
 		Ok(())
 	}
-
-	#[inline]
-	async fn output_group(
-		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		stm: &Statement<'_>,
-	) -> Result<(), Error> {
-		if let Some(fields) = stm.expr() {
-			if let Some(groups) = stm.group() {
-				// Create the new grouped collection
-				let mut grp: BTreeMap<Array, Array> = BTreeMap::new();
-				// Get the query result
-				let res = self.results.take();
-				// Loop over each value
-				for obj in res {
-					// Create a new column set
-					let mut arr = Array::with_capacity(groups.len());
-					// Loop over each group clause
-					for group in groups.iter() {
-						// Get the value at the path
-						let val = obj.pick(group);
-						// Set the value at the path
-						arr.push(val);
-					}
-					// Add to grouped collection
-					match grp.get_mut(&arr) {
-						Some(v) => v.push(obj),
-						None => {
-							grp.insert(arr, Array::from(obj));
-						}
-					}
-				}
-				// Loop over each grouped collection
-				for (_, vals) in grp {
-					// Create a new value
-					let mut obj = Value::base();
-					// Save the collected values
-					let vals = Value::from(vals);
-					// Loop over each group clause
-					for field in fields.other() {
-						// Process the field
-						if let Field::Single {
-							expr,
-							alias,
-						} = field
-						{
-							let idiom = alias
-								.as_ref()
-								.map(Cow::Borrowed)
-								.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
-							match expr {
-								Value::Function(f) if f.is_aggregate() => {
-									let x =
-										vals.all().get(ctx, opt, txn, None, idiom.as_ref()).await?;
-									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
-								}
-								_ => {
-									let x = vals.first();
-									let x = if let Some(alias) = alias {
-										let cur = (&x).into();
-										alias.compute(ctx, opt, txn, Some(&cur)).await?
-									} else {
-										let cur = (&x).into();
-										expr.compute(ctx, opt, txn, Some(&cur)).await?
-									};
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
-								}
-							}
-						}
-					}
-					// Add the object to the results
-					self.results.push(obj);
-				}
-			}
-		}
-		Ok(())
-	}
-
 	#[inline]
 	async fn output_order(
 		&mut self,
@@ -716,7 +637,7 @@ impl Iterator {
 				self.run.cancel();
 				return;
 			}
-			Ok(v) => self.results.push(v),
+			Ok(v) => self.results.push(stm, v),
 		}
 		// Check if we can exit
 		if stm.group().is_none() && stm.order().is_none() {

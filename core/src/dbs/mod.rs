@@ -29,7 +29,9 @@ pub mod capabilities;
 pub use self::capabilities::Capabilities;
 pub mod node;
 
-mod collector;
+mod group;
 mod processor;
+mod result;
+mod store;
 #[cfg(test)]
 pub(crate) mod test;

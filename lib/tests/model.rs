@@ -26,7 +26,7 @@ async fn model_count() -> Result<(), Error> {
 			count: 1000
 		}]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
 }
@@ -51,7 +51,7 @@ async fn model_range() -> Result<(), Error> {
 			count: 1000
 		}]",
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
 }

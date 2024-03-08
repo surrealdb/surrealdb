@@ -1,12 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::collector::{Collector, CollectorAPI};
 use crate::dbs::{Iterable, Statement};
 use crate::sql::{Object, Value};
 use std::collections::HashMap;
 
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,
-	pub(super) load_records: bool,
 	pub(super) explanation: Option<Explanation>,
 }
 
@@ -29,7 +27,6 @@ impl Plan {
 		};
 		Self {
 			do_iterate,
-			load_records: true,
 			explanation,
 		}
 	}
@@ -51,10 +48,8 @@ impl Explanation {
 		self.0.push(ExplainItem::new_fallback(reason));
 	}
 
-	pub(super) fn output(self, results: &mut Collector) {
-		for e in self.0 {
-			results.push(e.into());
-		}
+	pub(super) fn output(self) -> Vec<Value> {
+		self.0.into_iter().map(|e| e.into()).collect()
 	}
 }
 
