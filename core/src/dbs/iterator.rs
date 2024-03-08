@@ -401,7 +401,7 @@ impl Iterator {
 								// Set the value at the path
 								obj.set(ctx, opt, txn, split, val).await?;
 								// Add the object to the results
-								self.results.push(stm, obj);
+								self.results.push(ctx, opt, txn, stm, obj).await?;
 							}
 						}
 						_ => {
@@ -410,7 +410,7 @@ impl Iterator {
 							// Set the value at the path
 							obj.set(ctx, opt, txn, split, val).await?;
 							// Add the object to the results
-							self.results.push(stm, obj);
+							self.results.push(ctx, opt, txn, stm, obj).await?;
 						}
 					}
 				}
@@ -563,7 +563,7 @@ impl Iterator {
 				let aproc = async {
 					// Process all processed values
 					while let Ok(r) = vals.recv().await {
-						self.result(r, stm);
+						self.result(ctx, opt, txn, stm, r).await;
 					}
 					// Shutdown the executor
 					let _ = end.send(()).await;
@@ -592,11 +592,18 @@ impl Iterator {
 		// Process the document
 		let res = Document::process(ctx, opt, txn, stm, pro).await;
 		// Process the result
-		self.result(res, stm);
+		self.result(ctx, opt, txn, stm, res).await;
 	}
 
 	/// Accept a processed record result
-	fn result(&mut self, res: Result<Value, Error>, stm: &Statement<'_>) {
+	async fn result(
+		&mut self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		stm: &Statement<'_>,
+		res: Result<Value, Error>,
+	) {
 		// Process the result
 		match res {
 			Err(Error::Ignore) => {
@@ -607,7 +614,13 @@ impl Iterator {
 				self.run.cancel();
 				return;
 			}
-			Ok(v) => self.results.push(stm, v),
+			Ok(v) => {
+				if let Err(e) = self.results.push(ctx, opt, txn, stm, v).await {
+					self.error = Some(e);
+					self.run.cancel();
+					return;
+				}
+			}
 		}
 		// Check if we can exit
 		if stm.group().is_none() && stm.order().is_none() {

@@ -22,21 +22,29 @@ impl Default for Results {
 impl Results {
 	pub(super) fn prepare(&mut self, stm: &Statement<'_>) -> Self {
 		if stm.expr().is_some() && stm.group().is_some() {
-			Self::Groups(GroupsCollector::default())
+			Self::Groups(GroupsCollector::new(stm))
 		} else {
 			Self::Store(StoreCollector::default())
 		}
 	}
-	pub(super) fn push(&mut self, stm: &Statement<'_>, val: Value) {
+	pub(super) async fn push(
+		&mut self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		stm: &Statement<'_>,
+		val: Value,
+	) -> Result<(), Error> {
 		match self {
 			Results::None => {}
 			Results::Store(s) => {
 				s.push(val);
 			}
 			Results::Groups(g) => {
-				g.push(stm, val);
+				g.push(ctx, opt, txn, stm, val).await?;
 			}
 		}
+		Ok(())
 	}
 
 	pub(super) fn sort_by<F>(&mut self, compare: F)
