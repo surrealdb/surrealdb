@@ -84,7 +84,8 @@ impl GroupsCollector {
 			match self.grp.get_mut(&arr) {
 				Some(agr) => Self::pushes(ctx, opt, txn, agr, &self.idioms, obj).await?,
 				None => {
-					let mut agr = self.base.iter().map(|a| a.new_instance()).collect();
+					let mut agr: Vec<Aggregator> =
+						self.base.iter().map(|a| a.new_instance()).collect();
 					Self::pushes(ctx, opt, txn, &mut agr, &self.idioms, obj).await?;
 					self.grp.insert(arr, agr);
 				}
