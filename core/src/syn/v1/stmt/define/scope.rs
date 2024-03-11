@@ -47,8 +47,8 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 				res.signin = Some(v);
 			}
 			#[cfg(feature = "sql2")]
-			DefineScopeOption::Process(v) => {
-				res.process = Some(v);
+			DefineScopeOption::Authenticate(v) => {
+				res.authenticate = Some(v);
 			}
 			DefineScopeOption::Comment(v) => {
 				res.comment = Some(v);
@@ -64,7 +64,7 @@ enum DefineScopeOption {
 	Signup(Value),
 	Signin(Value),
 	#[cfg(feature = "sql2")]
-	Process(Value),
+	Authenticate(Value),
 	Comment(Strand),
 }
 
@@ -75,7 +75,7 @@ fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
 		scope_signin,
 		scope_comment,
 		#[cfg(feature = "sql2")]
-		scope_process,
+		scope_authenticate,
 	))(i)
 }
 
@@ -104,12 +104,12 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 }
 
 #[cfg(feature = "sql2")]
-fn scope_process(i: &str) -> IResult<&str, DefineScopeOption> {
+fn scope_authenticate(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("PROCESS")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(value)(i)?;
-	Ok((i, DefineScopeOption::Process(v)))
+	Ok((i, DefineScopeOption::Authenticate(v)))
 }
 
 fn scope_comment(i: &str) -> IResult<&str, DefineScopeOption> {

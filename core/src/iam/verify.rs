@@ -249,7 +249,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// PROCESS clause
 			#[cfg(feature = "sql2")]
-			if let Some(pc) = ds.process {
+			if let Some(pc) = ds.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.sd = Some(id.clone());
@@ -310,7 +310,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// PROCESS clause
 			#[cfg(feature = "sql2")]
-			if let Some(pc) = ds.process {
+			if let Some(pc) = ds.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.sd = Some(id.clone().into());
