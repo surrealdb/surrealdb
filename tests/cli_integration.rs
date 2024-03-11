@@ -79,7 +79,13 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			assert_eq!(
-				common::run(&args).input("CREATE thing:one;\n").output(),
+				common::run(&args)
+					.input("CREATE thing:one;\n")
+					.output()
+					.unwrap()
+					.replace("^┌.*$", "")
+					.replace("^└.*$", "")
+					.replace("│", ""),
 				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
 				"failed to send sql: {args}"
 			);
