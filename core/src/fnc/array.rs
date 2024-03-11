@@ -31,6 +31,20 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	}
 }
 
+pub fn like((array, value): (Array, Value)) -> Result<Value, Error> {
+	Ok(array.iter().any(|v| v.contains(&value)).into())
+}
+
+pub fn ilike((array, value): (Array, Value)) -> Result<Value, Error> {
+	Ok(array
+		.iter()
+		.any(|v| match v {
+			Value::Strand(v) => Value::from(v.to_lowercase()).contains(&value),
+			_ => value.contains(&value),
+		})
+		.into())
+}
+
 pub fn all((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.iter().all(Value::is_truthy).into())
 }
