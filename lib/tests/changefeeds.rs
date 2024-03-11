@@ -12,7 +12,7 @@ use surrealdb_core::kvs::Datastore;
 
 mod helpers;
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn database_change_feeds() -> Result<(), Error> {
 	let sql = "
 	    DEFINE DATABASE test CHANGEFEED 1h;
@@ -44,7 +44,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	dbs.tick_at(start_ts).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	dbs.tick_at(end_ts).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 3);
 	// DEFINE DATABASE
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -116,6 +116,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		cf_val_arr: &Value,
 	) -> Result<(), String> {
 		let res = &mut dbs.execute(sql2, ses, None).await?;
+		assert_eq!(res.len(), 3);
 		// UPDATE CONTENT
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
@@ -126,33 +127,38 @@ async fn database_change_feeds() -> Result<(), Error> {
 			}
 		]",
 		);
-		Some(tmp)
-			.filter(|x| *x != val)
-			.ok_or(Err(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val)))?;
+		Some(&tmp)
+			.filter(|x| *x == &val)
+			.map(|v| ())
+			.ok_or(format!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
 		let val = Value::parse("[]");
-		Some(tmp)
-			.filter(|x| *x != val)
-			.ok_or(Err(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val)))?;
+		Some(&tmp)
+			.filter(|x| *x == &val)
+			.map(|v| ())
+			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
-		Some(tmp)
-			.filter(|x| x != cf_val_arr)
-			.ok_or(Err(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val)))?;
+		Some(&tmp)
+			.filter(|x| *x == cf_val_arr)
+			.map(|v| ())
+			.ok_or(format!("Expected SHOW CHANGES value:\nleft: {}\nright: {}", tmp, cf_val_arr))?;
 		Ok(())
 	}
 
 	// Check the validation with repeats
-	for i in 0..5 {
+	let limit = 5;
+	for i in 0..limit {
 		let test_result = check_test(&dbs, sql2, &ses, &cf_val_arr).await;
 		match test_result {
 			Ok(_) => break,
 			Err(e) => {
-				if i == 4 {
+				if i == limit - 1 {
 					panic!("Failed after retries: {}", e);
 				}
-				tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+				println!("Failed after retry {}:\n{}", i, e);
+				tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 			}
 		}
 	}

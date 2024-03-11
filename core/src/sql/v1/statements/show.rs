@@ -59,6 +59,7 @@ impl ShowStatement {
 		let mut run = txn.lock().await;
 		// Process the show query
 		let tb = self.table.as_deref();
+		trace!("Reading changes for table {:?} since {:?}", tb, self.since);
 		let r = crate::cf::read(
 			&mut run,
 			opt.ns(),
