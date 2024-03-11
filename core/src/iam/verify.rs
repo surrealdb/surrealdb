@@ -1,3 +1,4 @@
+#[cfg(feature = "sql2")]
 use crate::cnf::INSECURE_FORWARD_SCOPE_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
@@ -235,6 +236,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
+			#[cfg(not(feature = "sql2"))]
+			let id = match id {
+				Some(id) => syn::thing(&id)?.into(),
+				None => Value::None,
+			};
+			#[cfg(feature = "sql2")]
 			let mut id = match id {
 				Some(id) => syn::thing(&id)?.into(),
 				None => Value::None,
@@ -242,6 +249,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
 			// Get the scope
+			#[cfg(feature = "sql2")]
 			let ds = tx.get_sc(&ns, &db, &sc).await?;
 			// Obtain the configuration with which to verify the token
 			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
@@ -302,13 +310,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
+			#[cfg(not(feature = "sql2"))]
+			let id = syn::thing(&id)?;
+			#[cfg(feature = "sql2")]
 			let mut id = syn::thing(&id)?;
 			// Get the scope
 			let ds = tx.get_sc(&ns, &db, &sc).await?;
 			let cf = config_alg(Algorithm::Hs512, ds.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
-			// PROCESS clause
+			// AUTHENTICATE clause
 			#[cfg(feature = "sql2")]
 			if let Some(pc) = ds.authenticate {
 				// Setup the system session for finding the signin record

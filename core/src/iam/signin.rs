@@ -126,6 +126,8 @@ pub async fn sc(
 						Ok(val) => match val.record() {
 							// There is a record returned
 							Some(rid) => {
+								#[cfg(feature = "sql2")]
+								let mut rid = rid;
 								// Create the authentication key
 								let key = EncodingKey::from_secret(sv.code.as_ref());
 								// Create the authentication claim
@@ -161,6 +163,32 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// AUTHENTICATE clause
+								#[cfg(feature = "sql2")]
+								if let Some(pc) = sv.authenticate {
+									// Setup the system session for finding the signin record
+									let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+									sess.sd = Some(rid.clone().into());
+									sess.tk = Some(val.clone().into());
+									sess.ip = session.ip.clone();
+									sess.or = session.or.clone();
+									// Compute the value with the params
+									match kvs.evaluate(pc, &sess, None).await {
+										Ok(val) => match val.record() {
+											Some(id) => {
+												rid = id;
+											}
+											_ => return Err(Error::InvalidAuth),
+										},
+										Err(e) => {
+											return match e {
+												Error::Thrown(_) => Err(e),
+												e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+												_ => Err(Error::InvalidAuth),
+											}
+										}
+									}
+								}
 								// Log the authenticated scope info
 								trace!("Signing in to scope `{}`", sc);
 								// Create the authentication token
