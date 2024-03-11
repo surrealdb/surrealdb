@@ -15,7 +15,7 @@ mod version;
 mod version_client;
 
 use crate::cli::version_client::VersionClient;
-use crate::cnf::{LOGO, PKG_VERSION};
+use crate::cnf::{DEBUG_BUILD_WARNING, LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use clap::{Parser, Subcommand};
 pub use config::CF;
@@ -97,6 +97,8 @@ pub async fn init() -> ExitCode {
 		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
 		.build()
 		.unwrap();
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}",);
 	// Parse the CLI arguments
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
