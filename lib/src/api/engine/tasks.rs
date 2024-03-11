@@ -192,6 +192,7 @@ fn live_query_change_feed(ct: CancellationToken, kvs: Arc<Datastore>) -> FutureT
 }
 
 #[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod test {
 	use crate::engine::tasks::CancellationToken;
 	use crate::tasks::start_tasks;
@@ -199,7 +200,6 @@ mod test {
 	use surrealdb_core::options::EngineOptions;
 
 	#[test_log::test(tokio::test)]
-	#[cfg(feature = "kv-mem")]
 	pub async fn tasks_complete() {
 		let ct = CancellationToken::new();
 		let opt = EngineOptions::default();
