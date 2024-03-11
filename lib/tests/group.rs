@@ -293,11 +293,12 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 		CREATE test:4 SET group = 2, one = 4.4, two = 3.0;
 		SELECT group, math::sum(one) AS one, math::sum(two) AS two, math::min(one) as min FROM test GROUP BY group;
 		SELECT group, math::sum(two) AS two, math::sum(one) AS one, math::max(two) as max, math::mean(one) as mean FROM test GROUP BY group;
+		SELECT group, math::sum(two) AS two, math::sum(one) AS one, math::max(two) as max, math::mean(one) as mean FROM test GROUP BY group EXPLAIN;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -391,6 +392,41 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'test'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						idioms: {
+							group: [
+								'first'
+							],
+							max: [
+								'math::max'
+							],
+							mean: [
+								'math::mean'
+							],
+							one: [
+								'math::sun'
+							],
+							two: [
+								'math::sun'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]",
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	Ok(())
 }
 
@@ -404,11 +440,12 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 		SELECT group, math::sum(math::floor(one)) AS one, math::sum(math::floor(two)) AS two FROM test GROUP BY group;
 		SELECT group, math::sum(math::round(one)) AS one, math::sum(math::round(two)) AS two FROM test GROUP BY group;
 		SELECT group, math::sum(math::ceil(one)) AS one, math::sum(math::ceil(two)) AS two FROM test GROUP BY group;
+		SELECT group, math::sum(math::ceil(one)) AS one, math::sum(math::ceil(two)) AS two FROM test GROUP BY group EXPLAIN;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
+	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -512,6 +549,36 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 		]",
 	);
 	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'test'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						idioms: {
+							group: [
+								'first'
+							],
+							one: [
+								'math::sun'
+							],
+							two: [
+								'math::sun'
+							]
+						},
+						type: 'Group'
+					},
+					operation: 'Collector'
+				}
+			]",
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
 }
