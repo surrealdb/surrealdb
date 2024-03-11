@@ -126,22 +126,22 @@ impl Expression {
 		let l = l.compute(ctx, opt, txn, doc).await?;
 		match o {
 			Operator::Or => {
-				if let true = l.is_truthy() {
+				if l.is_truthy() {
 					return Ok(l);
 				}
 			}
 			Operator::And => {
-				if let false = l.is_truthy() {
+				if !l.is_truthy() {
 					return Ok(l);
 				}
 			}
 			Operator::Tco => {
-				if let true = l.is_truthy() {
+				if l.is_truthy() {
 					return Ok(l);
 				}
 			}
 			Operator::Nco => {
-				if let true = l.is_some() {
+				if l.is_some() {
 					return Ok(l);
 				}
 			}

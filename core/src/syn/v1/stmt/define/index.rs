@@ -113,8 +113,6 @@ mod tests {
 	use crate::sql::index::{Distance, Distance1, MTreeParams, SearchParams, VectorType};
 	use crate::sql::Ident;
 	use crate::sql::Idiom;
-	use crate::sql::Idioms;
-	use crate::sql::Index;
 	use crate::sql::Part;
 	use crate::sql::Scoring;
 
@@ -264,6 +262,6 @@ mod tests {
 		let sql = "INDEX test ON test";
 		let res = index(sql);
 
-		assert_eq!(res.is_err(), true)
+		assert!(res.is_err())
 	}
 }
