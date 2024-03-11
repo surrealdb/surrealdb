@@ -925,7 +925,7 @@ async fn changefeed() {
 	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
-	let a = array.get(0).unwrap();
+	let a = array.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};

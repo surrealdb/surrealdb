@@ -50,17 +50,17 @@ impl serde::ser::SerializeMap for SerializeValueMap {
 	type Ok = BTreeMap<String, Value>;
 	type Error = Error;
 
-	fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+	fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
 	where
-		T: Serialize,
+		T: Serialize + ?Sized,
 	{
 		self.next_key = Some(key.serialize(ser::string::Serializer.wrap())?);
 		Ok(())
 	}
 
-	fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+	fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
 	where
-		T: Serialize,
+		T: Serialize + ?Sized,
 	{
 		match self.next_key.take() {
 			Some(key) => {

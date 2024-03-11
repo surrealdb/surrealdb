@@ -116,7 +116,6 @@ pub mod bcrypt {
 	use crate::err::Error;
 	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::sql::value::Value;
-	use bcrypt;
 	use bcrypt::HashParts;
 	use std::str::FromStr;
 

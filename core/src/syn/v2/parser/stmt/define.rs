@@ -40,22 +40,51 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
-		let comment = self.eat(t!("COMMENT")).then(|| self.next_token_value()).transpose()?;
-		Ok(DefineNamespaceStatement {
+		let mut res = DefineNamespaceStatement {
 			id: None,
 			name,
-			comment,
-		})
+			#[cfg(feature = "sql2")]
+			if_not_exists,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = Some(self.next_token_value()?);
+				}
+				_ => break,
+			}
+		}
+
+		Ok(res)
 	}
 
 	pub fn parse_define_database(&mut self) -> ParseResult<DefineDatabaseStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		let mut res = DefineDatabaseStatement {
-			id: None,
 			name,
-			comment: None,
-			changefeed: None,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
+			..Default::default()
 		};
 		loop {
 			match self.peek_kind() {
@@ -75,6 +104,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_function(&mut self) -> ParseResult<DefineFunctionStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.parse_custom_function_name()?;
 		let token = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
@@ -102,6 +139,8 @@ impl Parser<'_> {
 			name,
 			args,
 			block,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -123,6 +162,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_user(&mut self) -> ParseResult<DefineUserStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		let base = self.parse_base(false)?;
@@ -132,6 +179,11 @@ impl Parser<'_> {
 			base,
 			vec!["Viewer".into()], // New users get the viewer role by default
 		);
+
+		#[cfg(feature = "sql2")]
+		if if_not_exists {
+			res.if_not_exists = true;
+		}
 
 		loop {
 			match self.peek_kind() {
@@ -162,6 +214,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_token(&mut self) -> ParseResult<DefineTokenStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		let base = self.parse_base(true)?;
@@ -169,6 +229,8 @@ impl Parser<'_> {
 		let mut res = DefineTokenStatement {
 			name,
 			base,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -199,10 +261,20 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_scope(&mut self) -> ParseResult<DefineScopeStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		let mut res = DefineScopeStatement {
 			name,
 			code: DefineScopeStatement::random_code(),
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -232,10 +304,20 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_param(&mut self) -> ParseResult<DefineParamStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value::<Param>()?.0;
 
 		let mut res = DefineParamStatement {
 			name,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -260,10 +342,20 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_table(&mut self) -> ParseResult<DefineTableStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -315,6 +407,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_event(&mut self) -> ParseResult<DefineEventStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -323,6 +423,8 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -350,6 +452,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_field(&mut self) -> ParseResult<DefineFieldStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.parse_local_idiom()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -358,6 +468,8 @@ impl Parser<'_> {
 		let mut res = DefineFieldStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -405,6 +517,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_index(&mut self) -> ParseResult<DefineIndexStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -413,6 +533,8 @@ impl Parser<'_> {
 		let mut res = DefineIndexStatement {
 			name,
 			what,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 			..Default::default()
 		};
 
@@ -564,6 +686,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_analyzer(&mut self) -> ParseResult<DefineAnalyzerStatement> {
+		#[cfg(feature = "sql2")]
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
 		let name = self.next_token_value()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
@@ -572,6 +702,8 @@ impl Parser<'_> {
 			tokenizers: None,
 			filters: None,
 			comment: None,
+			#[cfg(feature = "sql2")]
+			if_not_exists,
 		};
 		loop {
 			match self.peek_kind() {

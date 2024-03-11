@@ -66,7 +66,6 @@ impl ser::Serializer for Serializer {
 mod tests {
 	use super::*;
 	use crate::sql::value::serde::ser::Serializer;
-	use serde::Serialize;
 
 	#[test]
 	fn distance_euclidean() {
