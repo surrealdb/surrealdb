@@ -119,6 +119,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("array::union") => PathKind::Function,
 		UniCase::ascii("array::sort::asc") => PathKind::Function,
 		UniCase::ascii("array::sort::desc") => PathKind::Function,
+		UniCase::ascii("array::ilike") => PathKind::Function,
+		UniCase::ascii("array::like") => PathKind::Function,
 		//
 		UniCase::ascii("object::entries") => PathKind::Function,
 		UniCase::ascii("object::from_entries") => PathKind::Function,

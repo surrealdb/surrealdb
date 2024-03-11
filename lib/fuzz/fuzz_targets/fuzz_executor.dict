@@ -190,6 +190,8 @@
 "array::sort::desc("
 "array::transpose("
 "array::union("
+"array::like("
+"array::ilike("
 "count("
 "crypto"
 "crypto::"
