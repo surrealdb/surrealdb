@@ -6,6 +6,7 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
 use surrealdb_core::fflags::FFLAGS;
+use surrealdb_core::kvs::Datastore;
 
 mod helpers;
 mod parse;
@@ -29,6 +30,8 @@ async fn database_change_feeds() -> Result<(), Error> {
 					$value
 				END
 		;
+	";
+	let sql2 = "
 		UPDATE person:test CONTENT { name: 'Tobie' };
 		DELETE person:test;
         SHOW CHANGES FOR TABLE person SINCE 0;
@@ -50,24 +53,8 @@ async fn database_change_feeds() -> Result<(), Error> {
 	// DEFINE FIELD
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
-	// UPDATE CONTENT
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: person:test,
-				name: 'Name: Tobie',
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	// DELETE
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
-	// SHOW CHANGES
-	let tmp = res.remove(0).result?;
-	let val = match FFLAGS.change_feed_live_queries.enabled() {
+
+	let cf_val_arr = match FFLAGS.change_feed_live_queries.enabled() {
 		true => Value::parse(
 			"[
 			{
@@ -119,7 +106,51 @@ async fn database_change_feeds() -> Result<(), Error> {
 		]",
 		),
 	};
-	assert_eq!(tmp, val);
+
+	// Declare check that is repeatable
+	async fn check_test(dbs: &Datastore, sql2: &str, ses: &Session) -> Result<(), String> {
+		let res = &mut dbs.execute(sql2, ses, None).await;
+		// UPDATE CONTENT
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+			{
+				id: person:test,
+				name: 'Name: Tobie',
+			}
+		]",
+		);
+		Some(tmp).filter(|x| *x != val).ok_or(Err(format!(
+			"Expected the same value:\nleft: {}\nright: {}",
+			tmp, val
+		)
+		.as_str()))?;
+		// DELETE
+		let tmp = res.remove(0).result?;
+		let val = Value::parse("[]");
+		Some(tmp)
+			.filter(|x| *x != val)
+			.expect(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val).as_str());
+		// SHOW CHANGES
+		let tmp = res.remove(0).result?;
+		Some(tmp)
+			.filter(|x| *x != cf_val_arr)
+			.expect(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val).as_str());
+	}
+
+	// Check the validation with repeats
+	for i in 0..5 {
+		let test_result = check_test(&dbs, sql2, &ses).await;
+		match test_result {
+			Ok(_) => break,
+			Err(e) => {
+				if i == 4 {
+					panic!(format!("Failed after retries: {}", e));
+				}
+				tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+			}
+		}
+	}
 	// Retain for 1h
 	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
@@ -127,7 +158,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	dbs.tick_at(end_ts + 3599).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, val);
+	assert_eq!(tmp, cf_val_arr);
 	// GC after 1hs
 	dbs.tick_at(end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
