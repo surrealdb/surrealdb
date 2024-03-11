@@ -1,5 +1,4 @@
 /// Debug purposes only. It may be used in logs. Not for key handling in implementation code.
-use crate::kvs::Key;
 
 /// Helpers for debugging keys
 
