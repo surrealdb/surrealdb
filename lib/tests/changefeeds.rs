@@ -125,26 +125,20 @@ async fn database_change_feeds() -> Result<(), Error> {
 			}
 		]",
 		);
-		Some(tmp).filter(|x| *x != val).ok_or(Err(format!(
-			"Expected the same value:\nleft: {}\nright: {}",
-			tmp, val
-		)
-		.as_str()))?;
+		Some(tmp)
+			.filter(|x| *x != val)
+			.ok_or(Err(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val)))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
 		let val = Value::parse("[]");
-		Some(tmp).filter(|x| *x != val).ok_or(Err(format!(
-			"Expected the same value:\nleft: {}\nright: {}",
-			tmp, val
-		)
-		.as_str()))?;
+		Some(tmp)
+			.filter(|x| *x != val)
+			.ok_or(Err(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val)))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
-		Some(tmp).filter(|x| x != cf_val_arr).ok_or(Err(format!(
-			"Expected the same value:\nleft: {}\nright: {}",
-			tmp, val
-		)
-		.as_str()))?;
+		Some(tmp)
+			.filter(|x| x != cf_val_arr)
+			.ok_or(Err(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val)))?;
 		Ok(())
 	}
 
