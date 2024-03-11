@@ -34,7 +34,7 @@ async fn database_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-db-cf").with_db("test-db-cf");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
@@ -166,7 +166,7 @@ async fn table_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
@@ -392,7 +392,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<(), Error> {
 	let db = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
