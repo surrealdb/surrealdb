@@ -40,13 +40,7 @@ impl GroupsCollector {
 				} = field
 				{
 					let idiom = alias.as_ref().cloned().unwrap_or_else(|| expr.to_idiom());
-					if let Some(agr) = idioms_agr.get_mut(&idiom) {
-						agr.prepare(expr);
-					} else {
-						let mut agr = Aggregator::default();
-						agr.prepare(expr);
-						idioms_agr.insert(idiom, agr);
-					}
+					idioms_agr.entry(idiom).or_default().prepare(expr);
 				}
 			}
 		}
