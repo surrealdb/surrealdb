@@ -1353,18 +1353,13 @@ async fn select_with_record_id_link() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
-				{
-					detail: {
-						plan: {
-							index: 't_name_search_idx',
-							operator: 'matches',
-							value: 'h''
+					{
+						detail: {
+							table: 'i'
 						},
-						table: 't'
-					},
-					operation: 'Iterate Index'
-				}
-			]"#,
+						operation: 'Iterate Table'
+					}
+				]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
