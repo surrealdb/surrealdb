@@ -160,49 +160,49 @@ impl Options {
 		self
 	}
 
-	///
+	/// Specify wether tables/events should re-run
 	pub fn with_force(mut self, force: bool) -> Self {
 		self.force = force;
 		self
 	}
 
-	///
+	/// Sepecify if we should error when a table does not exist
 	pub fn with_strict(mut self, strict: bool) -> Self {
 		self.strict = strict;
 		self
 	}
 
-	///
+	/// Specify if we should process fields
 	pub fn with_fields(mut self, fields: bool) -> Self {
 		self.fields = fields;
 		self
 	}
 
-	///
+	/// Specify if we should process event queries
 	pub fn with_events(mut self, events: bool) -> Self {
 		self.events = events;
 		self
 	}
 
-	///
+	/// Specify if we should process table queries
 	pub fn with_tables(mut self, tables: bool) -> Self {
 		self.tables = tables;
 		self
 	}
 
-	///
+	/// Specify if we should process index queries
 	pub fn with_indexes(mut self, indexes: bool) -> Self {
 		self.indexes = indexes;
 		self
 	}
 
-	///
+	/// Specify if we should process futures
 	pub fn with_futures(mut self, futures: bool) -> Self {
 		self.futures = futures;
 		self
 	}
 
-	///
+	/// Specify if we should process field projections
 	pub fn with_projections(mut self, projections: bool) -> Self {
 		self.projections = projections;
 		self

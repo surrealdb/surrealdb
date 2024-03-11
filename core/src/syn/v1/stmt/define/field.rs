@@ -20,6 +20,12 @@ use nom::{
 
 pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let (i, _) = tag_no_case("FIELD")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, what, opts)) = cut(|i| {
 		let (i, name) = idiom::local(i)?;
@@ -40,6 +46,8 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let mut res = DefineFieldStatement {
 		name,
 		what,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options

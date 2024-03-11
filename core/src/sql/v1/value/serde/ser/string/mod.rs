@@ -53,7 +53,6 @@ impl ser::Serializer for Serializer {
 mod tests {
 	use super::*;
 	use ser::Serializer as _;
-	use serde::Serialize;
 	use std::borrow::Cow;
 
 	#[test]
