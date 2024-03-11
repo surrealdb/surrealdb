@@ -97,10 +97,12 @@ pub async fn init() -> ExitCode {
 		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
 		.build()
 		.unwrap();
-	#[cfg(debug_assertions)]
-	println!("{DEBUG_BUILD_WARNING}",);
 	// Parse the CLI arguments
 	let args = Cli::parse();
+
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}");
+
 	// After parsing arguments, we check the version online
 	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
