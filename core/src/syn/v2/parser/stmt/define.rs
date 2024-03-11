@@ -296,6 +296,11 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.signin = Some(self.parse_value()?);
 				}
+				#[cfg(feature = "sql2")]
+				t!("AUTHENTICATE") => {
+					self.pop_peek();
+					res.authenticate = Some(self.parse_value()?);
+				}
 				_ => break,
 			}
 		}
