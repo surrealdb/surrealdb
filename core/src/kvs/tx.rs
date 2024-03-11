@@ -359,6 +359,7 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Del {:?}", sprint_key(&key));
 		match self {
@@ -457,6 +458,7 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Get {:?}", sprint_key(&key));
 		match self {
@@ -507,6 +509,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} => {:?}", sprint_key(&key), val);
 		match self {
@@ -558,8 +561,10 @@ impl Transaction {
 	#[allow(unused)]
 	pub async fn get_timestamp<K>(&mut self, key: K, lock: bool) -> Result<Versionstamp, Error>
 	where
-		K: Into<Key> + Debug + AsRef<[u8]>,
+		K: Into<Key> + Debug,
 	{
+		// We convert to byte slice as its easier at this level
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Get Timestamp {:?}", sprint_key(&key));
 		match self {
@@ -639,8 +644,6 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Set {:?} <ts> {:?} => {:?}", sprint_key(&prefix), sprint_key(&suffix), val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -813,7 +816,7 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
+		K: Into<Key> + From<Vec<u8>> + AsRef<[u8]> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", sprint_key(&page.range.start), sprint_key(&page.range.end));
@@ -888,6 +891,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Putc {:?} if {:?} => {:?}", sprint_key(&key), chk, val);
 		match self {
@@ -938,6 +942,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Delc {:?} if {:?}", sprint_key(&key), chk);
 		match self {
@@ -992,10 +997,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Getr {:?}..{:?} (limit: {limit})", sprint_key(&rng.start), sprint_key(&rng.end));
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		#[cfg(debug_assertions)]
+		trace!("Getr {:?}..{:?} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let mut out: Vec<(Key, Val)> = vec![];
 		let mut next_page = Some(ScanPage {
 			range: beg..end,
@@ -1026,6 +1031,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let rng = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", sprint_key(&rng.start), sprint_key(&rng.end));
 		match self {
@@ -1083,9 +1092,9 @@ impl Transaction {
 		K: Into<Key> + Debug,
 	{
 		let beg: Key = key.into();
-		#[cfg(debug_assertions)]
-		trace!("Getp {:?} (limit: {limit})", sprint_key(&beg));
 		let end: Key = beg.clone().add(0xff);
+		#[cfg(debug_assertions)]
+		trace!("Getp {:?}-{:?} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let mut out: Vec<(Key, Val)> = vec![];
 		// Start processing
 		let mut next_page = Some(ScanPage {
@@ -1116,10 +1125,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Delp {:?} (limit: {limit})", sprint_key(&key));
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
+		#[cfg(debug_assertions)]
+		trace!("Delp {:?}-{:?} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let min = beg.clone();
 		let max = end.clone();
 		self.delr(min..max, limit).await?;
