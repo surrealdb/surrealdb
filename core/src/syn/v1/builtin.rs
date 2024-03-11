@@ -172,6 +172,8 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			remove => { fn },
 			reverse => { fn },
 			slice => { fn },
+			like => { fn },
+			ilike => { fn },
 			// says that sort is also itself a function
 			sort(func) => {
 				asc => {fn },

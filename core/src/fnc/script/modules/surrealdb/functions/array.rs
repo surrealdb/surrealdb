@@ -45,6 +45,8 @@ impl_module_def!(
 	"remove" => run,
 	"reverse" => run,
 	"slice" => run,
+	"like" => run,
+	"ilike" => run,
 	"sort" => (sort::Package),
 	"transpose" => run,
 	"union" => run
