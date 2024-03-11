@@ -162,16 +162,7 @@ impl GroupsCollector {
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 								_ => {
-									let vals = agr.take();
-									let x = vals.first();
-									// TODO Check why this seems to not be required anymore
-									// let x = if let Some(alias) = alias {
-									// 	let cur = (&x).into();
-									// 	alias.compute(ctx, opt, txn, Some(&cur)).await?
-									// } else {
-									// 	let cur = (&x).into();
-									// 	expr.compute(ctx, opt, txn, Some(&cur)).await?
-									// };
+									let x = agr.take().first();
 									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 							}
