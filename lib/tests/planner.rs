@@ -1315,3 +1315,57 @@ async fn select_with_in_operator() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_with_record_id_link() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = "
+		DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
+		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'h';
+		CREATE i:A SET t = t:1;
+		SELECT * FROM i WHERE t.name = 'h';
+		SELECT * FROM i WHERE t.name @@ 'h';
+		SELECT * FROM i WHERE t.name @@ 'h' EXPLAIN;
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 9);
+	skip_ok(&mut res, 6)?;
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+					"id": "i:A",
+					"t": "t:1"
+				}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 't_name_search_idx',
+							operator: 'matches',
+							value: 'h''
+						},
+						table: 't'
+					},
+					operation: 'Iterate Index'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
