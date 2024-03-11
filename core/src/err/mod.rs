@@ -6,6 +6,8 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+#[cfg(feature = "sql2")]
+use crate::sql::TableType;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
@@ -514,10 +516,12 @@ pub enum Error {
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Table is {}a relation, but record {thing} is {}a relation", if *relation { "not " } else { "" }, if *relation { "" } else { "not " })]
+	#[cfg(feature = "sql2")]
+	#[error("Found record: `{thing}` which is {}a relation, but expected a `target_type`", if *relation { "not " } else { "" })]
 	TableCheck {
 		thing: String,
 		relation: bool,
+		target_type: TableType,
 	},
 
 	/// The specified field did not conform to the field type check

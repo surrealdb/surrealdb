@@ -23,6 +23,7 @@ impl<'a> Document<'a> {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: false,
+						target_type: tb.table_type.clone(),
 					});
 				}
 			}
@@ -31,6 +32,7 @@ impl<'a> Document<'a> {
 					return Err(Error::TableCheck {
 						thing: rid.to_string(),
 						relation: true,
+						target_type: tb.table_type.clone(),
 					});
 				}
 			}
