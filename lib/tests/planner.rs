@@ -1312,6 +1312,38 @@ async fn select_with_in_operator() -> Result<(), Error> {
 		);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = r#"
+		DEFINE INDEX apprenantUid ON apprenants FIELDS apprenantUid UNIQUE;
+		CREATE apprenants:1 CONTENT { apprenantUid: "00013483-fedd-43e3-a94e-80728d896f6e" };
+		SELECT * FROM apprenants WHERE apprenantUid in [];
+		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e"];
+	"#;
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 4);
+	skip_ok(&mut res, 2)?;
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[]"#);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e'
+			}
+		]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	Ok(())
 }
