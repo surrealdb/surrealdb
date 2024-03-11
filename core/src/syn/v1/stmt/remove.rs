@@ -329,7 +329,7 @@ mod tests {
 			#[cfg(feature = "sql2")]
 			if_exists: false,
 		});
-		let enc: Vec<u8> = stm.try_into().unwrap();
+		let enc: Vec<u8> = stm.into();
 		#[cfg(not(feature = "sql2"))]
 		assert_eq!(9, enc.len());
 		#[cfg(feature = "sql2")]

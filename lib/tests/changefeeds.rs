@@ -471,7 +471,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
-	let a = array.get(0).unwrap();
+	let a = array.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -647,7 +647,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	};
 	assert_eq!(array.len(), 4);
 	// UPDATE user:amos
-	let a = array.get(0).unwrap();
+	let a = array.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};

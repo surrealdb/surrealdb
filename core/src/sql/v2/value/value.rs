@@ -27,7 +27,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
-use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -2785,7 +2784,6 @@ impl TryNeg for Value {
 mod tests {
 
 	use super::*;
-	use crate::sql::uuid::Uuid;
 	use crate::syn::Parse;
 
 	#[test]

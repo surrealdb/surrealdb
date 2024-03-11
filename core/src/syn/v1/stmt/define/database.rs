@@ -7,10 +7,9 @@ use super::super::super::{
 	IResult,
 };
 use crate::sql::{statements::DefineDatabaseStatement, ChangeFeed, Strand};
-use nom::{
-	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
-	sequence::tuple,
-};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+#[cfg(feature = "sql2")]
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
@@ -82,8 +81,8 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
 
-		let serialized: Vec<u8> = (&out).try_into().unwrap();
-		let deserialized = DefineDatabaseStatement::try_from(&serialized).unwrap();
+		let serialized: Vec<u8> = (&out).into();
+		let deserialized = DefineDatabaseStatement::from(&serialized);
 		assert_eq!(out, deserialized);
 	}
 }
