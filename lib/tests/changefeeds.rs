@@ -108,8 +108,13 @@ async fn database_change_feeds() -> Result<(), Error> {
 	};
 
 	// Declare check that is repeatable
-	async fn check_test(dbs: &Datastore, sql2: &str, ses: &Session) -> Result<(), String> {
-		let res = &mut dbs.execute(sql2, ses, None).await;
+	async fn check_test(
+		dbs: &Datastore,
+		sql2: &str,
+		ses: &Session,
+		cf_val_arr: &Value,
+	) -> Result<(), String> {
+		let res = &mut dbs.execute(sql2, ses, None).await?;
 		// UPDATE CONTENT
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
@@ -128,24 +133,29 @@ async fn database_change_feeds() -> Result<(), Error> {
 		// DELETE
 		let tmp = res.remove(0).result?;
 		let val = Value::parse("[]");
-		Some(tmp)
-			.filter(|x| *x != val)
-			.expect(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val).as_str());
+		Some(tmp).filter(|x| *x != val).ok_or(Err(format!(
+			"Expected the same value:\nleft: {}\nright: {}",
+			tmp, val
+		)
+		.as_str()))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
-		Some(tmp)
-			.filter(|x| *x != cf_val_arr)
-			.expect(format!("Expected the same value:\nleft: {}\nright: {}", tmp, val).as_str());
+		Some(tmp).filter(|x| x != cf_val_arr).ok_or(Err(format!(
+			"Expected the same value:\nleft: {}\nright: {}",
+			tmp, val
+		)
+		.as_str()))?;
+		Ok(())
 	}
 
 	// Check the validation with repeats
 	for i in 0..5 {
-		let test_result = check_test(&dbs, sql2, &ses).await;
+		let test_result = check_test(&dbs, sql2, &ses, &cf_val_arr).await;
 		match test_result {
 			Ok(_) => break,
 			Err(e) => {
 				if i == 4 {
-					panic!(format!("Failed after retries: {}", e));
+					panic!("Failed after retries: {}", e);
 				}
 				tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 			}
