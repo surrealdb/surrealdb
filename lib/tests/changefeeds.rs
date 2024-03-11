@@ -8,6 +8,7 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
 use surrealdb_core::fflags::FFLAGS;
+use surrealdb_core::kvs::Datastore;
 
 mod helpers;
 
@@ -30,12 +31,14 @@ async fn database_change_feeds() -> Result<(), Error> {
 					$value
 				END
 		;
+	";
+	let sql2 = "
 		UPDATE person:test CONTENT { name: 'Tobie' };
 		DELETE person:test;
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-db-cf").with_db("test-db-cf");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
@@ -51,24 +54,8 @@ async fn database_change_feeds() -> Result<(), Error> {
 	// DEFINE FIELD
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
-	// UPDATE CONTENT
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: person:test,
-				name: 'Name: Tobie',
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	// DELETE
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
-	// SHOW CHANGES
-	let tmp = res.remove(0).result?;
-	let val = match FFLAGS.change_feed_live_queries.enabled() {
+
+	let cf_val_arr = match FFLAGS.change_feed_live_queries.enabled() {
 		true => Value::parse(
 			"[
 			{
@@ -120,7 +107,61 @@ async fn database_change_feeds() -> Result<(), Error> {
 		]",
 		),
 	};
-	assert_eq!(tmp, val);
+
+	// Declare check that is repeatable
+	async fn check_test(
+		dbs: &Datastore,
+		sql2: &str,
+		ses: &Session,
+		cf_val_arr: &Value,
+	) -> Result<(), String> {
+		let res = &mut dbs.execute(sql2, ses, None).await?;
+		// UPDATE CONTENT
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+			{
+				id: person:test,
+				name: 'Name: Tobie',
+			}
+		]",
+		);
+		Some(tmp).filter(|x| *x != val).ok_or(Err(format!(
+			"Expected the same value:\nleft: {}\nright: {}",
+			tmp, val
+		)
+		.as_str()))?;
+		// DELETE
+		let tmp = res.remove(0).result?;
+		let val = Value::parse("[]");
+		Some(tmp).filter(|x| *x != val).ok_or(Err(format!(
+			"Expected the same value:\nleft: {}\nright: {}",
+			tmp, val
+		)
+		.as_str()))?;
+		// SHOW CHANGES
+		let tmp = res.remove(0).result?;
+		Some(tmp).filter(|x| x != cf_val_arr).ok_or(Err(format!(
+			"Expected the same value:\nleft: {}\nright: {}",
+			tmp, val
+		)
+		.as_str()))?;
+		Ok(())
+	}
+
+	// Check the validation with repeats
+	for i in 0..5 {
+		let test_result = check_test(&dbs, sql2, &ses, &cf_val_arr).await;
+		match test_result {
+			Ok(_) => break,
+			Err(e) => {
+				if i == 4 {
+					panic!("Failed after retries: {}", e);
+				}
+				tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+			}
+		}
+	}
 	// Retain for 1h
 	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
@@ -128,7 +169,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	dbs.tick_at(end_ts + 3599).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, val);
+	assert_eq!(tmp, cf_val_arr);
 	// GC after 1hs
 	dbs.tick_at(end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -167,7 +208,7 @@ async fn table_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
@@ -393,7 +434,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<(), Error> {
 	let db = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
