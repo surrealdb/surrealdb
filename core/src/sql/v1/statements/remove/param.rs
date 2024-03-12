@@ -39,6 +39,6 @@ impl RemoveParamStatement {
 
 impl Display for RemoveParamStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE PARAM {}", self.name)
+		write!(f, "REMOVE PARAM ${}", self.name)
 	}
 }

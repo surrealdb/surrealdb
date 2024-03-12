@@ -151,11 +151,13 @@ fn statements() -> Vec<Statement> {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Namespace(DefineNamespaceStatement {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
 			id: None,
@@ -165,12 +167,14 @@ fn statements() -> Vec<Statement> {
 				expiry: std::time::Duration::from_secs(60) * 10,
 				store_original: false,
 			}),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: None,
 			changefeed: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Function(DefineFunctionStatement {
 			name: Ident("foo::bar".to_string()),
@@ -184,6 +188,7 @@ fn statements() -> Vec<Statement> {
 			})]),
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Token(DefineTokenStatement {
 			name: Ident("a".to_string()),
@@ -191,6 +196,7 @@ fn statements() -> Vec<Statement> {
 			kind: Algorithm::EdDSA,
 			code: "foo".to_string(),
 			comment: Some(Strand("bar".to_string())),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Param(DefineParamStatement {
 			name: Ident("a".to_string()),
@@ -204,6 +210,7 @@ fn statements() -> Vec<Statement> {
 			)),
 			comment: None,
 			permissions: Permission::Specific(Value::Null),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Table(DefineTableStatement {
 			id: None,
@@ -239,6 +246,7 @@ fn statements() -> Vec<Statement> {
 				store_original: false,
 			}),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
@@ -246,6 +254,7 @@ fn statements() -> Vec<Statement> {
 			when: Value::Null,
 			then: Values(vec![Value::Null, Value::None]),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Field(DefineFieldStatement {
 			name: Idiom(vec![
@@ -271,6 +280,7 @@ fn statements() -> Vec<Statement> {
 				select: Permission::Full,
 			},
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -296,6 +306,7 @@ fn statements() -> Vec<Statement> {
 				terms_cache: 8,
 			}),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -303,6 +314,7 @@ fn statements() -> Vec<Statement> {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))])]),
 			index: Index::Uniq,
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -310,6 +322,7 @@ fn statements() -> Vec<Statement> {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))])]),
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
+				_distance: Default::default(),
 				distance: Distance::Minkowski(Number::Int(5)),
 				_distance: Default::default(),
 				capacity: 6,
@@ -319,6 +332,7 @@ fn statements() -> Vec<Statement> {
 				vector_type: VectorType::F64,
 			}),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Analyzer(DefineAnalyzerStatement {
 			name: Ident("ana".to_owned()),
@@ -338,6 +352,7 @@ fn statements() -> Vec<Statement> {
 			]),
 			function: Some(Ident("foo::bar".to_string())),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Delete(DeleteStatement {
 			only: true,
@@ -589,6 +604,7 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
 			name: Ident("foo::bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Remove(RemoveStatement::Field(RemoveFieldStatement {
 			name: Idiom(vec![
@@ -597,6 +613,7 @@ fn statements() -> Vec<Statement> {
 				Part::Index(Number::Int(10)),
 			]),
 			what: Ident("bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Update(UpdateStatement {
 			only: true,

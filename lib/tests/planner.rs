@@ -210,6 +210,12 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'Store'
+				}},
+				operation: 'Collector'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -235,6 +241,12 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
+					type: 'Store'
+				}},
+				operation: 'Collector'
+			}},
+			{{
+				detail: {{
 					count: {fetch_count}
 				}},
 				operation: 'Fetch'
@@ -249,6 +261,12 @@ const THREE_TABLE_EXPLAIN: &str = "[
 			table: 'person'
 		},
 		operation: 'Iterate Table'
+	},
+	{
+		detail: {
+			type: 'Store'
+		},
+		operation: 'Collector'
 	},
 	{
 		detail: {
@@ -294,6 +312,12 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				},
+				{
+					detail: {
 						count: 3
 					},
 					operation: 'Fetch'
@@ -311,6 +335,12 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 						table: 'person',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				},
 				{
 					detail: {
@@ -334,6 +364,12 @@ const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				},
+				{
+					detail: {
 						count: 1
 					},
 					operation: 'Fetch'
@@ -351,6 +387,12 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 			table: 'person'
 		},
 		operation: 'Iterate Index'
+	},
+	{
+		detail: {
+			type: 'Store'
+		},
+		operation: 'Collector'
 	},
 	{
 		detail: {
@@ -384,6 +426,12 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 					operation: 'Iterate Index'
 				},
 				{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
+				},
+				{
 					detail: {
 						count: 2
 					},
@@ -413,6 +461,12 @@ async fn select_with_no_index_unary_operator() -> Result<(), Error> {
 						reason: 'WITH NOINDEX'
 					},
 					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 	);
@@ -441,6 +495,12 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 						reason: 'unary expressions not supported'
 					},
 					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 	);
@@ -525,6 +585,12 @@ const EXPLAIN_FROM_TO: &str = r"[
 				table: 'test'
 			},
 			operation: 'Iterate Index'
+		},
+		{
+			detail: {
+				type: 'Store'
+			},
+			operation: 'Collector'
 		}
 	]";
 
@@ -566,6 +632,12 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 				table: 'test'
 			},
 			operation: 'Iterate Index'
+		},
+		{
+			detail: {
+				type: 'Store'
+			},
+			operation: 'Collector'
 		}
 	]";
 
@@ -611,6 +683,12 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -656,6 +734,12 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -744,6 +828,12 @@ const EXPLAIN_LESS: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -779,6 +869,12 @@ const EXPLAIN_LESS_OR_EQUAL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -818,6 +914,12 @@ const EXPLAIN_MORE: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -853,6 +955,12 @@ const EXPLAIN_MORE_OR_EQUAL: &str = r"[
 					table: 'test'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]";
 
@@ -903,6 +1011,12 @@ async fn select_with_idiom_param_value() -> Result<(), Error> {
 						table: 'person'
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]"#,
 	);
@@ -945,6 +1059,12 @@ const CONTAINS_TABLE_EXPLAIN: &str = r"[
 							reason: 'NO INDEX FOUND'
 						},
 						operation: 'Fallback'
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
 					}
 				]";
 
@@ -997,9 +1117,6 @@ async fn select_contains() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: '=',
@@ -1008,6 +1125,12 @@ async fn select_contains() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1037,9 +1160,6 @@ async fn select_contains_all() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: 'union',
@@ -1048,6 +1168,12 @@ async fn select_contains_all() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1077,9 +1203,6 @@ async fn select_contains_any() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: 'union',
@@ -1088,6 +1211,12 @@ async fn select_contains_any() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1124,9 +1253,6 @@ async fn select_unique_contains() -> Result<(), Error> {
 	const INDEX_EXPLAIN: &str = r"[
 				{
 					detail: {
-						table: 'student'
-					},
-					detail: {
 						plan: {
 							index: 'subject_idx',
 							operator: '=',
@@ -1135,6 +1261,12 @@ async fn select_unique_contains() -> Result<(), Error> {
 						table: 'student',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				}
 			]";
 	const RESULT: &str = r"[
@@ -1144,4 +1276,255 @@ async fn select_unique_contains() -> Result<(), Error> {
 	]";
 
 	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
+}
+
+#[tokio::test]
+// This test checks that:
+// 1. Datetime are recognized by the query planner
+// 2. we can take the value store in a variable
+async fn select_with_datetime_value() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = "
+		DEFINE FIELD created_at ON TABLE test_user TYPE datetime;
+		DEFINE INDEX createdAt ON TABLE test_user COLUMNS created_at;
+		LET $now = d'2023-12-25T17:13:01.940183014Z';
+		CREATE test_user:1 CONTENT { created_at: $now };
+		SELECT * FROM test_user WHERE created_at = $now EXPLAIN;
+		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z' EXPLAIN;
+		SELECT * FROM test_user WHERE created_at = $now;
+		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z';";
+	let mut res = dbs.execute(sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 8);
+	skip_ok(&mut res, 4)?;
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+					detail: {
+						plan: {
+							index: 'createdAt',
+							operator: '=',
+							value: '2023-12-25T17:13:01.940183014Z'
+						},
+						table: 'test_user'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+        			"created_at": "2023-12-25T17:13:01.940183014Z",
+        			"id": test_user:1
+    			}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	Ok(())
+}
+
+#[tokio::test]
+// This test checks that:
+// 1. UUID are recognized by the query planner
+// 2. we can take the value from a object stored as a variable
+async fn select_with_uuid_value() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = "
+		DEFINE INDEX sessionUid ON sessions FIELDS sessionUid;
+		CREATE sessions:1 CONTENT { sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' };
+		LET $sess = { uuid: u'00ad70db-f435-442e-9012-1cd853102084' };
+		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084' EXPLAIN;
+		SELECT * FROM sessions WHERE sessionUid = $sess.uuid EXPLAIN;
+		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084';
+		SELECT * FROM sessions WHERE sessionUid = $sess.uuid;
+	";
+	let mut res = dbs.execute(sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 7);
+	skip_ok(&mut res, 3)?;
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+					detail: {
+						plan: {
+							index: 'sessionUid',
+							operator: '=',
+							value: '00ad70db-f435-442e-9012-1cd853102084'
+						},
+						table: 'sessions'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+               		"id": sessions:1,
+ 					"sessionUid": "00ad70db-f435-442e-9012-1cd853102084"
+    			}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_in_operator() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = "
+		DEFINE INDEX user_email_idx ON user FIELDS email;
+		CREATE user:1 CONTENT { email: 'a@b' };
+		CREATE user:2 CONTENT { email: 'c@d' };
+		SELECT * FROM user WHERE email IN ['a@b', 'e@f'] EXPLAIN;
+		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'] EXPLAIN;
+		SELECT * FROM user WHERE email IN ['a@b', 'e@f'];
+		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'];
+		";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 7);
+	skip_ok(&mut res, 3)?;
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+					detail: {
+						plan: {
+							index: 'user_email_idx',
+							operator: 'union',
+							value: ['a@b', 'e@f']
+						},
+						table: 'user'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	for _ in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+               		'id': user:1,
+ 					'email': 'a@b'
+    			}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = r#"
+		DEFINE INDEX apprenantUid ON apprenants FIELDS apprenantUid UNIQUE;
+		CREATE apprenants:1 CONTENT { apprenantUid: "00013483-fedd-43e3-a94e-80728d896f6e" };
+		SELECT apprenantUid FROM apprenants WHERE apprenantUid in [];
+		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e"];
+		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["99999999-aaaa-1111-8888-abcdef012345", "00013483-fedd-43e3-a94e-80728d896f6e"];
+		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e", "99999999-aaaa-1111-8888-abcdef012345"];
+		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["99999999-aaaa-1111-8888-abcdef012345", "00013483-fedd-43e3-a94e-80728d896f6e", "99999999-aaaa-1111-8888-abcdef012345"];
+		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e"] EXPLAIN;
+	"#;
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 8);
+	skip_ok(&mut res, 2)?;
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[]"#);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+
+	for _ in 0..4 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+			{
+				apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e'
+			}
+		]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				detail: {
+					plan: {
+						index: 'apprenantUid',
+						operator: 'union',
+						value: [
+							'00013483-fedd-43e3-a94e-80728d896f6e'
+						]
+					},
+					table: 'apprenants'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
+			}
+		]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
 }

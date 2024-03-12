@@ -34,7 +34,7 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(any(feature = "ml", feature = "ml2", feature = "jwks"))]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[doc(hidden)]
 pub mod obs;
 pub mod options;

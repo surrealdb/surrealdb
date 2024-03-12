@@ -1,5 +1,4 @@
 pub(crate) mod abstraction;
-mod backup;
 mod config;
 mod export;
 mod import;
@@ -16,9 +15,8 @@ mod version;
 mod version_client;
 
 use crate::cli::version_client::VersionClient;
-use crate::cnf::{LOGO, PKG_VERSION};
+use crate::cnf::{DEBUG_BUILD_WARNING, LOGO, PKG_VERSION};
 use crate::env::RELEASE;
-use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
 pub use config::CF;
 use export::ExportCommandArguments;
@@ -66,8 +64,10 @@ struct Cli {
 enum Commands {
 	#[command(about = "Start the database server")]
 	Start(StartCommandArguments),
+	/* Not implemented yet
 	#[command(about = "Backup data to or from an existing database")]
 	Backup(BackupCommandArguments),
+	*/
 	#[command(about = "Import a SurrealQL script into an existing database")]
 	Import(ImportCommandArguments),
 	#[command(about = "Export an existing database as a SurrealQL script")]
@@ -99,6 +99,10 @@ pub async fn init() -> ExitCode {
 		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
+
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}");
+
 	// After parsing arguments, we check the version online
 	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
@@ -118,7 +122,6 @@ pub async fn init() -> ExitCode {
 	// After version warning we can run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
-		Commands::Backup(args) => backup::init(args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
