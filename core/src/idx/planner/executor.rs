@@ -10,6 +10,7 @@ use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
+	UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -337,6 +338,9 @@ impl QueryExecutor {
 		match io.op() {
 			IndexOperator::Equality(value) => {
 				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)))
+			}
+			IndexOperator::Union(value) => {
+				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(opt, ix, value)))
 			}
 			_ => None,
 		}
