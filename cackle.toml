@@ -732,6 +732,10 @@ allow_unsafe = true
 
 [pkg.heapless]
 allow_unsafe = true
+build.allow_apis = [
+    "fs",
+    "process",
+]
 
 [pkg.vcpkg]
 from.build.allow_apis = [

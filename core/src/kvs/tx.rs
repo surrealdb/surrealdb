@@ -34,8 +34,9 @@ use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::{LqEntry, LqValue};
+use crate::kvs::lq_structs::{LqEntry, LqValue, TrackedResult};
 use crate::kvs::Check;
+use crate::options::EngineOptions;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -60,8 +61,6 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
-
-const LQ_CAPACITY: usize = 100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -103,6 +102,7 @@ pub struct Transaction {
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
 	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
+	pub(super) engine_options: EngineOptions,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -122,6 +122,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Transaction),
 }
+
 #[derive(Copy, Clone)]
 pub enum TransactionType {
 	Read,
@@ -338,17 +339,20 @@ impl Transaction {
 		}
 	}
 
-	#[allow(unused)]
-	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
-		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
+	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
+	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
+		let mut lq: Vec<TrackedResult> =
+			Vec::with_capacity(self.engine_options.new_live_queries_per_transaction as usize);
 		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
-			lq.push(l);
+			lq.push(TrackedResult::LiveQuery(l));
 		}
 		lq
 	}
 
 	/// Sends a live query to the transaction which is forwarded only once committed
 	/// And removed once a transaction is aborted
+	// allow(dead_code) because this is used in v2, but not v1
+	#[allow(dead_code)]
 	pub(crate) fn pre_commit_register_live_query(
 		&mut self,
 		lq_entry: LqEntry,
@@ -1914,6 +1918,36 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific function definition from a database.
+	#[cfg(feature = "sql2")]
+	pub async fn get_db_function(
+		&mut self,
+		ns: &str,
+		db: &str,
+		fc: &str,
+	) -> Result<DefineFunctionStatement, Error> {
+		let key = crate::key::database::fc::new(ns, db, fc);
+		let val = self.get(key).await?.ok_or(Error::FcNotFound {
+			value: fc.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific function definition from a database.
+	#[cfg(feature = "sql2")]
+	pub async fn get_db_param(
+		&mut self,
+		ns: &str,
+		db: &str,
+		pa: &str,
+	) -> Result<DefineParamStatement, Error> {
+		let key = crate::key::database::pa::new(ns, db, pa);
+		let val = self.get(key).await?.ok_or(Error::PaNotFound {
+			value: pa.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific scope definition.
 	pub async fn get_sc(
 		&mut self,
@@ -1985,6 +2019,60 @@ impl Transaction {
 		trace!("Getting lv ({:?}) {:?}", lv, crate::key::debug::sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
 			value: lv.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	#[cfg(feature = "sql2")]
+	pub async fn get_tb_event(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ev: &str,
+	) -> Result<DefineEventStatement, Error> {
+		let key = crate::key::table::ev::new(ns, db, tb, ev);
+		let key_enc = crate::key::table::ev::Ev::encode(&key)?;
+		trace!("Getting ev ({:?}) {:?}", ev, crate::key::debug::sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::EvNotFound {
+			value: ev.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	#[cfg(feature = "sql2")]
+	pub async fn get_tb_field(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		fd: &str,
+	) -> Result<DefineFieldStatement, Error> {
+		let key = crate::key::table::fd::new(ns, db, tb, fd);
+		let key_enc = crate::key::table::fd::Fd::encode(&key)?;
+		trace!("Getting fd ({:?}) {:?}", fd, crate::key::debug::sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::FdNotFound {
+			value: fd.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	#[cfg(feature = "sql2")]
+	pub async fn get_tb_index(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<DefineIndexStatement, Error> {
+		let key = crate::key::table::ix::new(ns, db, tb, ix);
+		let key_enc = crate::key::table::ix::Ix::encode(&key)?;
+		trace!("Getting ix ({:?}) {:?}", ix, crate::key::debug::sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::IxNotFound {
+			value: ix.to_string(),
 		})?;
 		Ok(val.into())
 	}
@@ -3191,7 +3279,7 @@ mod tests {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tx_test {
-	use crate::kvs::lq_structs::LqEntry;
+	use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -3229,6 +3317,6 @@ mod tx_test {
 		// Verify data
 		let live_queries = tx.consume_pending_live_queries();
 		assert_eq!(live_queries.len(), 1);
-		assert_eq!(live_queries[0], lq_entry);
+		assert_eq!(live_queries[0], TrackedResult::LiveQuery(lq_entry));
 	}
 }

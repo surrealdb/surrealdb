@@ -27,7 +27,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
-use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -495,6 +494,15 @@ impl From<Option<Value>> for Value {
 
 impl From<Option<String>> for Value {
 	fn from(v: Option<String>) -> Self {
+		match v {
+			Some(v) => Value::from(v),
+			None => Value::None,
+		}
+	}
+}
+
+impl From<Option<i64>> for Value {
+	fn from(v: Option<i64>) -> Self {
 		match v {
 			Some(v) => Value::from(v),
 			None => Value::None,
@@ -2776,7 +2784,6 @@ impl TryNeg for Value {
 mod tests {
 
 	use super::*;
-	use crate::sql::uuid::Uuid;
 	use crate::syn::Parse;
 
 	#[test]

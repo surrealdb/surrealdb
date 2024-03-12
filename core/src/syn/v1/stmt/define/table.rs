@@ -18,10 +18,16 @@ use crate::{
 
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 #[cfg(feature = "sql2")]
-use nom::{multi::separated_list1, Err};
+use nom::{multi::separated_list1, Err, combinator::opt, sequence::tuple};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(table_opts)(i)?;
@@ -36,6 +42,8 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 		// Default to ANY if not specified in the DEFINE statement
 		#[cfg(feature = "sql2")]
 		table_type: TableType::Any,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -251,8 +259,8 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
 
-		let serialized: Vec<u8> = (&out).try_into().unwrap();
-		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
+		let serialized: Vec<u8> = (&out).into();
+		let deserialized = DefineTableStatement::from(&serialized);
 		assert_eq!(out, deserialized);
 	}
 }

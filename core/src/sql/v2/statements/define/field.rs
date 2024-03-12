@@ -16,7 +16,7 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -29,6 +29,8 @@ pub struct DefineFieldStatement {
 	pub default: Option<Value>,
 	pub permissions: Permissions,
 	pub comment: Option<Strand>,
+	#[revision(start = 3)]
+	pub if_not_exists: bool,
 }
 
 impl DefineFieldStatement {
@@ -46,8 +48,16 @@ impl DefineFieldStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
-		// Process the statement
+		// Check if field already exists
 		let fd = self.name.to_string();
+		if self.if_not_exists && run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok()
+		{
+			return Err(Error::FdAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
+		// Process the statement
+		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 
@@ -76,6 +86,7 @@ impl DefineFieldStatement {
 				{
 					DefineFieldStatement {
 						kind: Some(cur_kind),
+						if_not_exists: false,
 						..existing.clone()
 					}
 				} else {
@@ -97,6 +108,15 @@ impl DefineFieldStatement {
 				}
 			}
 		}
+    
+    run.set(
+			key,
+			DefineFieldStatement {
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 
 		let new_tb =
 			match (self.name.to_string().as_str(), tb.table_type.clone(), self.kind.clone()) {
@@ -145,7 +165,7 @@ impl DefineFieldStatement {
 			run.clr(key).await?;
 		}
 
-		// Clear the cache
+    // Clear the cache
 		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Ok all good
@@ -155,7 +175,11 @@ impl DefineFieldStatement {
 
 impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
+		write!(f, "DEFINE FIELD")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {} ON {}", self.name, self.what)?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}

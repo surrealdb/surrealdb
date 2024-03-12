@@ -53,6 +53,12 @@ macro_rules! t {
 	(">") => {
 		$crate::syn::v2::token::TokenKind::RightChefron
 	};
+	("<|") => {
+		$crate::syn::v2::token::TokenKind::Operator($crate::syn::v2::token::Operator::KnnOpen)
+	};
+	("|>") => {
+		$crate::syn::v2::token::TokenKind::Operator($crate::syn::v2::token::Operator::KnnClose)
+	};
 
 	(";") => {
 		$crate::syn::v2::token::TokenKind::SemiColon
@@ -271,17 +277,23 @@ macro_rules! t {
 	};
 
 	// Distance
-	("EUCLIDEAN") => {
-		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Euclidean)
-	};
-	("MANHATTAN") => {
-		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Manhattan)
+	("CHEBYSHEV") => {
+		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Chebyshev)
 	};
 	("COSINE") => {
 		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Cosine)
 	};
+	("EUCLIDEAN") => {
+		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Euclidean)
+	};
 	("HAMMING") => {
 		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Hamming)
+	};
+	("JACCARD") => {
+		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Jaccard)
+	};
+	("MANHATTAN") => {
+		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Manhattan)
 	};
 	("MAHALANOBIS") => {
 		$crate::syn::v2::token::TokenKind::Distance(
@@ -290,6 +302,9 @@ macro_rules! t {
 	};
 	("MINKOWSKI") => {
 		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Minkowski)
+	};
+	("PEARSON") => {
+		$crate::syn::v2::token::TokenKind::Distance($crate::syn::v2::token::DistanceKind::Pearson)
 	};
 
 	($t:tt) => {

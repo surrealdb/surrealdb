@@ -8,6 +8,7 @@ pub use keyword::Keyword;
 mod mac;
 pub(crate) use mac::t;
 
+use crate::sql::change_feed_include::ChangeFeedInclude;
 use crate::sql::{language::Language, Algorithm};
 
 /// A location in the source passed to the lexer.
@@ -127,6 +128,10 @@ pub enum Operator {
 	Tco,
 	/// `??`
 	Nco,
+	/// `<|`
+	KnnOpen,
+	/// `|>`
+	KnnClose,
 }
 
 impl Operator {
@@ -168,6 +173,8 @@ impl Operator {
 			Operator::Ext => "+?=",
 			Operator::Tco => "?:",
 			Operator::Nco => "??",
+			Operator::KnnOpen => "<|",
+			Operator::KnnClose => "|>",
 		}
 	}
 }
@@ -185,19 +192,27 @@ pub enum Delim {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum DistanceKind {
+	Chebyshev,
+	Cosine,
 	Euclidean,
-	Manhattan,
 	Hamming,
+	Jaccard,
+	Manhattan,
 	Minkowski,
+	Pearson,
 }
 
 impl DistanceKind {
 	pub fn as_str(&self) -> &'static str {
 		match self {
+			DistanceKind::Chebyshev => "CHEBYSHEV",
+			DistanceKind::Cosine => "COSINE",
 			DistanceKind::Euclidean => "EUCLIDEAN",
-			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Hamming => "HAMMING",
+			DistanceKind::Jaccard => "JACCARD",
+			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Minkowski => "MINKOWSKI",
+			DistanceKind::Pearson => "PEARSON",
 		}
 	}
 }
@@ -208,6 +223,8 @@ pub enum NumberKind {
 	Integer,
 	// A number with a decimal postfix.
 	Decimal,
+	// A number with a decimal postfix.
+	DecimalExponent,
 	// A number with a float postfix.
 	Float,
 	// A number with a `.3` part.
@@ -224,6 +241,7 @@ pub enum NumberKind {
 pub enum TokenKind {
 	Keyword(Keyword),
 	Algorithm(Algorithm),
+	ChangeFeedInclude(ChangeFeedInclude),
 	Language(Language),
 	Distance(DistanceKind),
 	Operator(Operator),
@@ -383,6 +401,7 @@ impl TokenKind {
 			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
+			TokenKind::ChangeFeedInclude(_) => "change feed include",
 		}
 	}
 }

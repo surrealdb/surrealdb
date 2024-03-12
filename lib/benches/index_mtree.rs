@@ -148,11 +148,11 @@ async fn knn_lookup_objects(
 	let t = mtree();
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
-	let mut s = TreeStore::new(TreeNodeProvider::Debug, c, Read).await;
+	let s = TreeStore::new(TreeNodeProvider::Debug, c, Read).await;
 	for _ in 0..samples_size {
 		let object = random_object(&mut rng, vector_size).into();
 		// Insert the sample
-		t.knn_search(&mut tx, &mut s, &object, knn).await.unwrap();
+		t.knn_search(&mut tx, &s, &object, knn).await.unwrap();
 	}
 	tx.rollback_with_panic();
 }

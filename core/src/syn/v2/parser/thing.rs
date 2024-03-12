@@ -9,7 +9,7 @@ use crate::{
 		token::{t, NumberKind, TokenKind},
 	},
 };
-use std::ops::Bound;
+use std::{cmp::Ordering, ops::Bound};
 
 impl Parser<'_> {
 	pub fn parse_record_string(&mut self, double: bool) -> ParseResult<Thing> {
@@ -208,6 +208,34 @@ impl Parser<'_> {
 				let array = self.parse_array(token.span)?;
 				Ok(Id::Array(array))
 			}
+			t!("+") => {
+				self.peek();
+				self.no_whitespace()?;
+				expected!(self, TokenKind::Number(NumberKind::Integer));
+				let text = self.lexer.string.take().unwrap();
+				if let Ok(number) = text.parse() {
+					Ok(Id::Number(number))
+				} else {
+					Ok(Id::String(text))
+				}
+			}
+			t!("-") => {
+				self.peek();
+				self.no_whitespace()?;
+				expected!(self, TokenKind::Number(NumberKind::Integer));
+				let text = self.lexer.string.take().unwrap();
+				if let Ok(number) = text.parse::<u64>() {
+					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
+					// `-i64::MIN` doesn't fit in an i64
+					match number.cmp(&((i64::MAX as u64) + 1)) {
+						Ordering::Less => Ok(Id::Number(-(number as i64))),
+						Ordering::Equal => Ok(Id::Number(i64::MIN)),
+						Ordering::Greater => Ok(Id::String(format!("-{}", text))),
+					}
+				} else {
+					Ok(Id::String(text))
+				}
+			}
 			TokenKind::Number(NumberKind::Integer) => {
 				// Id handle numbers more loose then other parts of the code.
 				// If number can't fit in a i64 it will instead be parsed as a string.
@@ -247,8 +275,7 @@ mod tests {
 	use super::*;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
-	use crate::sql::value::Value;
-	use crate::syn::Parse;
+	use crate::syn::Parse as _;
 
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());
@@ -281,6 +308,64 @@ mod tests {
 			Thing {
 				tb: String::from("test"),
 				id: Id::from(1),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_min() {
+		let sql = format!("test:{}", i64::MIN);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(i64::MIN),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_max() {
+		let sql = format!("test:{}", i64::MAX);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(i64::MAX),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_more_then_max() {
+		let max_str = format!("{}", (i64::MAX as u64) + 1);
+		let sql = format!("test:{}", max_str);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(max_str),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer_more_then_min() {
+		let min_str = format!("-{}", (i64::MAX as u64) + 2);
+		let sql = format!("test:{}", min_str);
+		let res = thing(&sql);
+		let out = res.unwrap();
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(min_str),
 			}
 		);
 	}

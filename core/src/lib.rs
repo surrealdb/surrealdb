@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate tracing;
+extern crate core;
 
 #[macro_use]
 mod mac;
@@ -36,6 +37,7 @@ pub mod kvs;
 #[cfg(any(feature = "ml", feature = "ml2", feature = "jwks"))]
 #[doc(hidden)]
 pub mod obs;
+pub mod options;
 #[doc(hidden)]
 pub mod syn;
 

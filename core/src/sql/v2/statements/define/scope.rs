@@ -13,7 +13,7 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -21,6 +21,8 @@ pub struct DefineScopeStatement {
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub comment: Option<Strand>,
+	#[revision(start = 2)]
+	pub if_not_exists: bool,
 }
 
 impl DefineScopeStatement {
@@ -44,11 +46,25 @@ impl DefineScopeStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Check if scope already exists
+		if self.if_not_exists && run.get_sc(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			return Err(Error::ScAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
 		// Process the statement
 		let key = crate::key::database::sc::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
+		run.set(
+			key,
+			DefineScopeStatement {
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -56,7 +72,11 @@ impl DefineScopeStatement {
 
 impl Display for DefineScopeStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE SCOPE {}", self.name)?;
+		write!(f, "DEFINE SCOPE")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.session {
 			write!(f, " SESSION {v}")?
 		}

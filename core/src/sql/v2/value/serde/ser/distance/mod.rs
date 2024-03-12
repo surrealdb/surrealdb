@@ -29,9 +29,13 @@ impl ser::Serializer for Serializer {
 		variant: &'static str,
 	) -> Result<Self::Ok, Error> {
 		match variant {
+			"Chebyshev" => Ok(Distance::Chebyshev),
+			"Cosine" => Ok(Distance::Cosine),
 			"Euclidean" => Ok(Distance::Euclidean),
-			"Manhattan" => Ok(Distance::Manhattan),
 			"Hamming" => Ok(Distance::Hamming),
+			"Jaccard" => Ok(Distance::Jaccard),
+			"Manhattan" => Ok(Distance::Manhattan),
+			"Pearson" => Ok(Distance::Pearson),
 			variant => Err(Error::custom(format!("unexpected unit variant `{name}::{variant}`"))),
 		}
 	}
@@ -62,33 +66,21 @@ impl ser::Serializer for Serializer {
 mod tests {
 	use super::*;
 	use crate::sql::value::serde::ser::Serializer;
-	use serde::Serialize;
 
 	#[test]
 	fn distance_euclidean() {
-		let dist = Distance::Euclidean;
-		let serialized = dist.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(dist, serialized);
-	}
-
-	#[test]
-	fn distance_manhattan() {
-		let dist = Distance::Manhattan;
-		let serialized = dist.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(dist, serialized);
-	}
-
-	#[test]
-	fn distance_hamming() {
-		let dist = Distance::Hamming;
-		let serialized = dist.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(dist, serialized);
-	}
-
-	#[test]
-	fn distance_minkowski() {
-		let dist = Distance::Minkowski(7.into());
-		let serialized = dist.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(dist, serialized);
+		for dist in [
+			Distance::Chebyshev,
+			Distance::Cosine,
+			Distance::Euclidean,
+			Distance::Jaccard,
+			Distance::Hamming,
+			Distance::Manhattan,
+			Distance::Minkowski(7.into()),
+			Distance::Pearson,
+		] {
+			let serialized = dist.serialize(Serializer.wrap()).unwrap();
+			assert_eq!(dist, serialized, "{}", dist);
+		}
 	}
 }

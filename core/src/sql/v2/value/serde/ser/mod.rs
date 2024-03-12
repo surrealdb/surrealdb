@@ -264,9 +264,9 @@ trait Serializer: Sized {
 		Err(Self::unexpected("struct variant", Some(name)))
 	}
 
-	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+	fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
 	where
-		T: Display,
+		T: Display + ?Sized,
 	{
 		self.serialize_str(&value.to_string())
 	}
@@ -489,9 +489,9 @@ where
 	}
 
 	#[inline]
-	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+	fn collect_str<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
 	where
-		T: Display,
+		T: Display + ?Sized,
 	{
 		self.0.collect_str(value)
 	}

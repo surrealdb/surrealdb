@@ -8,9 +8,17 @@ use super::super::super::{
 };
 use crate::sql::{statements::DefineDatabaseStatement, ChangeFeed, Strand};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+#[cfg(feature = "sql2")]
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
+	#[cfg(feature = "sql2")]
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(database_opts)(i)?;
@@ -19,6 +27,8 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	// Create the base statement
 	let mut res = DefineDatabaseStatement {
 		name,
+		#[cfg(feature = "sql2")]
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -58,6 +68,7 @@ fn database_changefeed(i: &str) -> IResult<&str, DefineDatabaseOption> {
 	let (i, v) = changefeed(i)?;
 	Ok((i, DefineDatabaseOption::ChangeFeed(v)))
 }
+
 #[cfg(test)]
 mod tests {
 
@@ -70,8 +81,8 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
 
-		let serialized: Vec<u8> = (&out).try_into().unwrap();
-		let deserialized = DefineDatabaseStatement::try_from(&serialized).unwrap();
+		let serialized: Vec<u8> = (&out).into();
+		let deserialized = DefineDatabaseStatement::from(&serialized);
 		assert_eq!(out, deserialized);
 	}
 }
