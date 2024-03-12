@@ -49,7 +49,8 @@ pub trait CosineSimilarity {
 impl CosineSimilarity for Vec<Number> {
 	fn cosine_similarity(&self, other: &Self) -> Result<Number, Error> {
 		check_same_dimension("vector::similarity::cosine", self, other)?;
-		Ok(dot(self, other) / (self.magnitude() * other.magnitude()))
+		let d = dot(self, other);
+		Ok(d / (self.magnitude() * other.magnitude()))
 	}
 }
 

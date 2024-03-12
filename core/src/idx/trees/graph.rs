@@ -21,6 +21,7 @@ impl UndirectedGraph {
 		self.nodes.get(node)
 	}
 
+	#[cfg(test)]
 	pub(super) fn add_edge(&mut self, node1: ElementId, node2: ElementId) {
 		if node1 != node2 {
 			self.nodes.entry(node1).or_default().insert(node2);
