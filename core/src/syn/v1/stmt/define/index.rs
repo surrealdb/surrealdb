@@ -110,8 +110,9 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 mod tests {
 
 	use super::*;
-	use crate::sql::index::{Distance, HnswParams, Distance1, MTreeParams, SearchParams, VectorType};
-	use crate::sql::Ident;
+	use crate::sql::index::{
+		Distance, Distance1, HnswParams, MTreeParams, SearchParams, VectorType,
+	};
 	use crate::sql::Idiom;
 	use crate::sql::Part;
 	use crate::sql::Scoring;

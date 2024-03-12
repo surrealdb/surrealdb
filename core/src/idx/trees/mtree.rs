@@ -182,7 +182,7 @@ impl MTree {
 			queue.push(Reverse(PriorityNode {
 				dist: 0.0,
 				doc: root_id,
-			})));
+			}));
 		}
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
@@ -219,7 +219,7 @@ impl MTree {
 							queue.push(Reverse(PriorityNode {
 								dist: min_dist,
 								doc: p.node,
-							})));
+							}));
 						}
 					}
 				}
@@ -1873,9 +1873,8 @@ mod tests {
 		collection: &TestCollection,
 		cache_size: usize,
 	) -> Result<(), Error> {
-		let mut all_deleted = true;
 		for (doc_id, obj) in collection.as_ref() {
-			let deleted = {
+			{
 				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Write, cache_size).await;
@@ -1891,30 +1890,24 @@ mod tests {
 						"Delete failed - doc_id: {doc_id} - obj: {obj:?}",
 					);
 				};
-
 				finish_operation(t, tx, st, true).await?;
-			};
-			all_deleted = all_deleted && deleted;
-			if deleted {
-				let (st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
-				let res = t.knn_search(&mut tx, &st, obj, 1).await?;
-				let docs: Vec<DocId> = res.docs.into_iter().map(|(d, _)| d).collect();
-				assert!(!docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
-			} else {
-				// In v1.2.x deletion is experimental. Will be fixed in 1.3
-				warn!("Delete failed: {} {:?}", doc_id, obj);
 			}
 			{
 				let (mut st, mut tx) =
-					new_operation(ds, t, TransactionType::Read, cache_size).await;
+					new_operation(&ds, t, TransactionType::Read, cache_size).await;
+				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
+				let docs: Vec<DocId> = res.docs.into_iter().map(|(d, _)| d).collect();
+				assert!(!docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
+			}
+			{
+				let (mut st, mut tx) =
+					new_operation(&ds, t, TransactionType::Read, cache_size).await;
 				check_tree_properties(&mut tx, &mut st, t).await?;
 			}
 		}
 
-		if all_deleted {
-			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
-			check_tree_properties(&mut tx, &mut st, t).await?.check(0, 0, None, None, 0, 0);
-		}
+		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
+		check_tree_properties(&mut tx, &mut st, t).await?.check(0, 0, None, None, 0, 0);
 		Ok(())
 	}
 

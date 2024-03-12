@@ -264,6 +264,12 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 							table: 'pts',
 						},
 						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
 					}
 			]",
 	);

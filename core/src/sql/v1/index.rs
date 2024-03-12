@@ -69,20 +69,32 @@ pub struct MTreeParams {
 }
 
 impl MTreeParams {
-    fn convert_old_distance(
-        &mut self,
-        _revision: u16,
-        d1: Distance1,
-    ) -> Result<(), revision::Error> {
-        self.distance = match d1 {
-            Distance1::Euclidean => Distance::Euclidean,
-            Distance1::Manhattan => Distance::Manhattan,
-            Distance1::Cosine => Distance::Cosine,
-            Distance1::Hamming => Distance::Hamming,
-            Distance1::Minkowski(n) => Distance::Minkowski(n),
-        };
-        Ok(())
-    }
+	fn convert_old_distance(
+		&mut self,
+		_revision: u16,
+		d1: Distance1,
+	) -> Result<(), revision::Error> {
+		self.distance = match d1 {
+			Distance1::Euclidean => Distance::Euclidean,
+			Distance1::Manhattan => Distance::Manhattan,
+			Distance1::Cosine => Distance::Cosine,
+			Distance1::Hamming => Distance::Hamming,
+			Distance1::Minkowski(n) => Distance::Minkowski(n),
+		};
+		Ok(())
+	}
+}
+
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[revisioned(revision = 1)]
+pub enum Distance1 {
+	#[default]
+	Euclidean,
+	Manhattan,
+	Cosine,
+	Hamming,
+	Minkowski(Number),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
