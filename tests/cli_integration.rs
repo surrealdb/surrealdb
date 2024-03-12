@@ -10,7 +10,6 @@ mod cli_integration {
 	use std::fs::File;
 	use std::time;
 	use surrealdb::fflags::FFLAGS;
-	use surrealdb::sql::Value;
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::info;
