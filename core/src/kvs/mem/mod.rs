@@ -5,7 +5,7 @@ use crate::key::debug::sprint_key;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use crate::vs::{try_to_u64_be, u64_to_versionstamp, versionstamp_to_u64, Versionstamp};
+use crate::vs::{u64_to_versionstamp, versionstamp_to_u64, Versionstamp};
 use std::ops::Range;
 
 pub struct Datastore {
