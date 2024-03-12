@@ -666,7 +666,7 @@ mod cli_integration {
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
 					.output()
 					.unwrap();
-				let output = remove_debug_info(output);
+				let output = remove_debug_info(output).replace('\n', "");
 				let allowed = [
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ create: { id: thing:one } }], versionstamp: 2 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ create: { id: thing:one } }], versionstamp: 3 }]]",
@@ -675,14 +675,15 @@ mod cli_integration {
 				];
 				allowed
 					.into_iter()
-					.find(|case| *case == &output)
-					.expect(format!("Output didnt match an example output: {output}").as_str());
+					.find(|case| *case == output)
+					.ok_or(format!("Output didnt match an example output: {output}"))
+					.unwrap();
 			} else {
 				let output = common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
 					.output()
 					.unwrap();
-				let output = remove_debug_info(output).replace("\n", "");
+				let output = remove_debug_info(output).replace('\n', "");
 				let allowed = [
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
@@ -692,11 +693,12 @@ mod cli_integration {
 				allowed
 					.into_iter()
 					.find(|case| {
-						let a = *case == &output;
+						let a = *case == output;
 						println!("Comparing\n{case}\n{output}\n{a}");
 						a
 					})
-					.expect(format!("Output didnt match an example output: {output}").as_str());
+					.ok_or(format!("Output didnt match an example output: {output}"))
+					.unwrap();
 			}
 		};
 
