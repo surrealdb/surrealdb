@@ -63,7 +63,14 @@ impl DefineFieldStatement {
 
 		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
-		run.set(key, self).await?;
+		run.set(
+			key,
+			DefineFieldStatement {
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 
 		// find existing field definitions.
 		let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
@@ -108,15 +115,6 @@ impl DefineFieldStatement {
 				}
 			}
 		}
-
-		run.set(
-			key,
-			DefineFieldStatement {
-				if_not_exists: false,
-				..self.clone()
-			},
-		)
-		.await?;
 
 		let new_tb =
 			match (self.name.to_string().as_str(), tb.table_type.clone(), self.kind.clone()) {

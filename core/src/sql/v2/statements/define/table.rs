@@ -1,9 +1,3 @@
-use std::fmt::{self, Display, Write};
-
-use derive::Store;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
