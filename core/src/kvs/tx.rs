@@ -29,6 +29,7 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+use crate::key::debug::sprint_key;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::cache::Cache;
@@ -358,8 +359,9 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("Del {:?}", key);
+		trace!("Del {:?}", sprint_key(&key));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -405,10 +407,10 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + AsRef<[u8]>,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Exi {:?}", key);
+		trace!("Exi {:?}", sprint_key(&key));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -456,8 +458,9 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("Get {:?}", key);
+		trace!("Get {:?}", sprint_key(&key));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -506,8 +509,9 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("Set {:?} => {:?}", key, val);
+		trace!("Set {:?} => {:?}", sprint_key(&key), val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -559,8 +563,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		// We convert to byte slice as its easier at this level
+		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("Get Timestamp {:?}", key);
+		trace!("Get Timestamp {:?}", sprint_key(&key));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -638,8 +644,6 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -755,8 +759,12 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let rng = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
 		#[cfg(debug_assertions)]
-		trace!("Scan {:?} - {:?}", rng.start, rng.end);
+		trace!("Scan {:?} - {:?}", sprint_key(&rng.start), sprint_key(&rng.end));
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -808,10 +816,10 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
+		K: Into<Key> + From<Vec<u8>> + AsRef<[u8]> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
+		trace!("Scan {:?} - {:?}", sprint_key(&page.range.start), sprint_key(&page.range.end));
 		let range = page.range.clone();
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
@@ -883,8 +891,9 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
+		trace!("Putc {:?} if {:?} => {:?}", sprint_key(&key), chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -933,8 +942,9 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
-		trace!("Delc {:?} if {:?}", key, chk);
+		trace!("Delc {:?} if {:?}", sprint_key(&key), chk);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -987,10 +997,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		#[cfg(debug_assertions)]
+		trace!("Getr {:?}..{:?} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let mut out: Vec<(Key, Val)> = vec![];
 		let mut next_page = Some(ScanPage {
 			range: beg..end,
@@ -1021,8 +1031,12 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let rng = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
 		#[cfg(debug_assertions)]
-		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
+		trace!("Delr {:?}..{:?} (limit: {limit})", sprint_key(&rng.start), sprint_key(&rng.end));
 		match self {
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
@@ -1077,10 +1091,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Getp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
+		#[cfg(debug_assertions)]
+		trace!("Getp {:?}-{:?} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let mut out: Vec<(Key, Val)> = vec![];
 		// Start processing
 		let mut next_page = Some(ScanPage {
@@ -1111,10 +1125,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Delp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
+		#[cfg(debug_assertions)]
+		trace!("Delp {:?}-{:?} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let min = beg.clone();
 		let max = end.clone();
 		self.delr(min..max, limit).await?;
@@ -1342,7 +1356,7 @@ impl Transaction {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		#[cfg(debug_assertions)]
-		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}
 
@@ -2006,7 +2020,7 @@ impl Transaction {
 	) -> Result<LiveStatement, Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, *lv);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		trace!("Getting lv ({:?}) {:?}", lv, crate::key::debug::sprint_key(&key_enc));
+		trace!("Getting lv ({:?}) {:?}", lv, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
 			value: lv.to_string(),
 		})?;
@@ -2024,7 +2038,7 @@ impl Transaction {
 	) -> Result<DefineEventStatement, Error> {
 		let key = crate::key::table::ev::new(ns, db, tb, ev);
 		let key_enc = crate::key::table::ev::Ev::encode(&key)?;
-		trace!("Getting ev ({:?}) {:?}", ev, crate::key::debug::sprint_key(&key_enc));
+		trace!("Getting ev ({:?}) {:?}", ev, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::EvNotFound {
 			value: ev.to_string(),
 		})?;
@@ -2042,7 +2056,7 @@ impl Transaction {
 	) -> Result<DefineFieldStatement, Error> {
 		let key = crate::key::table::fd::new(ns, db, tb, fd);
 		let key_enc = crate::key::table::fd::Fd::encode(&key)?;
-		trace!("Getting fd ({:?}) {:?}", fd, crate::key::debug::sprint_key(&key_enc));
+		trace!("Getting fd ({:?}) {:?}", fd, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::FdNotFound {
 			value: fd.to_string(),
 		})?;
@@ -2060,7 +2074,7 @@ impl Transaction {
 	) -> Result<DefineIndexStatement, Error> {
 		let key = crate::key::table::ix::new(ns, db, tb, ix);
 		let key_enc = crate::key::table::ix::Ix::encode(&key)?;
-		trace!("Getting ix ({:?}) {:?}", ix, crate::key::debug::sprint_key(&key_enc));
+		trace!("Getting ix ({:?}) {:?}", ix, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::IxNotFound {
 			value: ix.to_string(),
 		})?;
