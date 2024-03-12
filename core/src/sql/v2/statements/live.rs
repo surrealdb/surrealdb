@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
 use crate::iam::Auth;
-use crate::kvs::lq_structs::LqEntry;
+use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 use derive::Store;
 use revision::revisioned;
@@ -103,12 +103,12 @@ impl LiveStatement {
 				match stm.what.compute(ctx, opt, txn, doc).await? {
 					Value::Table(_tb) => {
 						// Send the live query registration hook to the transaction pre-commit channel
-						run.pre_commit_register_live_query(LqEntry {
+						run.pre_commit_register_async_event(TrackedResult::LiveQuery(LqEntry {
 							live_id: stm.id,
 							ns: opt.ns().to_string(),
 							db: opt.db().to_string(),
 							stm,
-						})?;
+						}))?;
 					}
 					v => {
 						return Err(Error::LiveStatement {
@@ -134,7 +134,7 @@ impl LiveStatement {
 					v => {
 						return Err(Error::LiveStatement {
 							value: v.to_string(),
-						})
+						});
 					}
 				};
 				// Return the query id

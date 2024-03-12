@@ -72,7 +72,6 @@ impl serde::ser::SerializeTuple for SerializeCompactUuidTuple {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use serde::Serialize;
 
 	#[test]
 	fn nil() {

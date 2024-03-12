@@ -52,7 +52,13 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 							table: 'pts',
 						},
 						operation: 'Iterate Index'
-					}
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
+					},
 			]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
@@ -199,7 +205,13 @@ async fn select_where_brut_force_knn() -> Result<(), Error> {
 						reason: 'NO INDEX FOUND'
 					},
 					operation: 'Fallback'
-				}
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
+				},
 			]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));

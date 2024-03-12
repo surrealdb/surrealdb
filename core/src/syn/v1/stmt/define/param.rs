@@ -13,8 +13,10 @@ use crate::{
 };
 use nom::{
 	branch::alt, bytes::complete::tag_no_case, character::complete::char, combinator::cut,
-	combinator::opt, multi::many0, sequence::tuple, Err,
+	multi::many0, Err,
 };
+#[cfg(feature = "sql2")]
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 	let (i, _) = tag_no_case("PARAM")(i)?;
@@ -106,6 +108,6 @@ mod tests {
 		let sql = "PARAM test";
 		let res = param(sql);
 
-		assert_eq!(res.is_err(), true)
+		assert!(res.is_err())
 	}
 }

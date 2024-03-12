@@ -322,6 +322,7 @@ fn statements() -> Vec<Statement> {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))])]),
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
+				_distance: Default::default(),
 				distance: Distance::Minkowski(Number::Int(5)),
 				_distance: Default::default(),
 				capacity: 6,

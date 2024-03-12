@@ -8,12 +8,9 @@ use super::super::super::{
 #[cfg(feature = "sql2")]
 use crate::sql::Ident;
 use crate::sql::{filter::Filter, statements::DefineAnalyzerStatement, Strand, Tokenizer};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 #[cfg(feature = "sql2")]
-use nom::bytes::complete::tag;
-use nom::{
-	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
-	sequence::tuple,
-};
+use nom::{bytes::complete::tag, combinator::opt, sequence::tuple};
 
 pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	let (i, _) = tag_no_case("ANALYZER")(i)?;

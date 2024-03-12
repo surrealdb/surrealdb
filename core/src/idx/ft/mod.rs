@@ -862,9 +862,9 @@ mod tests {
 		content: &Value,
 	) {
 		let (ctx, opt, txn, mut fti) =
-			tx_fti(ds, TransactionType::Write, &az, btree_order, false).await;
-		fti.remove_document(&txn, &rid).await.unwrap();
-		fti.index_document(&ctx, &opt, &txn, &rid, vec![content.clone()]).await.unwrap();
+			tx_fti(ds, TransactionType::Write, az, btree_order, false).await;
+		fti.remove_document(&txn, rid).await.unwrap();
+		fti.index_document(&ctx, &opt, &txn, rid, vec![content.clone()]).await.unwrap();
 		finish(&txn, fti).await;
 	}
 

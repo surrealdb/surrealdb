@@ -278,7 +278,7 @@ mod tests {
 
 	use surrealdb::dbs::Session;
 	use surrealdb::iam::verify::verify_root_creds;
-	use surrealdb::kvs::{Datastore, LockType::*, TransactionType::*};
+	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 

@@ -9,10 +9,9 @@ use super::super::super::{
 use crate::sql::{
 	statements::DefineTableStatement, ChangeFeed, Permission, Permissions, Strand, View,
 };
-use nom::{
-	branch::alt, bytes::complete::tag_no_case, combinator::cut, combinator::opt, multi::many0,
-	sequence::tuple,
-};
+use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+#[cfg(feature = "sql2")]
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
@@ -146,8 +145,8 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(format!("DEFINE {sql}"), format!("{}", out));
 
-		let serialized: Vec<u8> = (&out).try_into().unwrap();
-		let deserialized = DefineTableStatement::try_from(&serialized).unwrap();
+		let serialized: Vec<u8> = (&out).into();
+		let deserialized = DefineTableStatement::from(&serialized);
 		assert_eq!(out, deserialized);
 	}
 }

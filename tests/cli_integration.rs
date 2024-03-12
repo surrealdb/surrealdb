@@ -2,6 +2,7 @@
 mod common;
 
 mod cli_integration {
+	use crate::remove_debug_info;
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use common::Format;
 	use common::Socket;
@@ -59,6 +60,14 @@ mod cli_integration {
 		assert!(common::run("version --turbo").output().is_err());
 	}
 
+	fn debug_builds_contain_debug_message(addr: &str, creds: &str, ns: &Ulid, db: &Ulid) {
+		info!("* Debug builds contain debug message");
+		let args =
+			format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome");
+		let res = common::run(&args).input("CREATE not_a_table:not_a_record;\n").output().unwrap();
+		assert!(res.contains("Debug builds are not intended for production use"));
+	}
+
 	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
@@ -73,16 +82,16 @@ mod cli_integration {
 		let ns = Ulid::new();
 		let db = Ulid::new();
 
+		#[cfg(debug_assertions)]
+		debug_builds_contain_debug_message(&addr, creds, &ns, &db);
+
 		info!("* Create a record");
 		{
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args).input("CREATE thing:one;\n").output(),
-				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output = common::run(&args).input("CREATE thing:one;\n").output().unwrap();
+			assert!(output.contains("[[{ id: thing:one }]]\n\n"), "failed to send sql: {args}");
 		}
 
 		info!("* Export to stdout");
@@ -117,8 +126,9 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db2} --pretty --hide-welcome"
 			);
 			let output = common::run(&args).input("SELECT * FROM thing;\n").output().unwrap();
+			let output = remove_debug_info(output);
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
-			assert!(line1.starts_with("-- Query 1"));
+			assert!(line1.starts_with("-- Query 1"), "Expected on {line1}, and rest was {rest}");
 			assert!(line1.contains("execution time"));
 			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
 		}
@@ -482,8 +492,9 @@ mod cli_integration {
 		// Commands with credentials for different auth levels
 		let (addr, server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
-		let ns = Ulid::new();
-		let db = Ulid::new();
+		// Prefix with 'a' so that we don't start with a number and cause a parsing error
+		let ns = format!("a{}", Ulid::new());
+		let db = format!("a{}", Ulid::new());
 
 		info!("* Create users with identical credentials at ROOT, NS and DB levels");
 		{
@@ -621,11 +632,10 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output(),
-				Ok("[NONE]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output =
+				common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output().unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(output, "[NONE]\n\n".to_owned(), "failed to send sql: {args}");
 		}
 
 		info!("* Create a record");
@@ -633,9 +643,14 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
+			let output = common::run(&args)
+				.input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
 			assert_eq!(
-				common::run(&args).input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n").output(),
-				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
+				output,
+				"[[{ id: thing:one }]]\n\n".to_owned(),
 				"failed to send sql: {args}"
 			);
 		}
@@ -646,20 +661,26 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			if FFLAGS.change_feed_live_queries.enabled() {
+				let output = common::run(&args)
+					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+					.output()
+					.unwrap();
+				let output = remove_debug_info(output);
 				assert_eq!(
-						common::run(&args)
-							.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-							.output(),
-						Ok("[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ create: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
-							.to_owned()),
+					output,
+						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ create: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
+							.to_owned(),
 						"failed to send sql: {args}");
 			} else {
+				let output = common::run(&args)
+					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+					.output()
+					.unwrap();
+				let output = remove_debug_info(output);
 				assert_eq!(
-						common::run(&args)
-							.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-							.output(),
-						Ok("[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
-							.to_owned()),
+					output,
+						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
+							.to_owned(),
 						"failed to send sql: {args}" );
 			}
 		};
@@ -671,13 +692,12 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args)
-					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-					.output(),
-				Ok("[[]]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output = common::run(&args)
+				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
 		}
 		server.finish()
 	}
@@ -1075,4 +1095,18 @@ mod cli_integration {
 			server.finish()
 		}
 	}
+}
+
+fn remove_debug_info(output: String) -> String {
+	// Look... sometimes you just gotta copy paste
+	let output_warning = "\
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        !!! THIS IS A DEBUG BUILD !!!                        │
+│        Debug builds are not intended for production use and include         │
+│       tooling and features that we would not recommend people run on        │
+│                                  live data.                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+";
+	// The last line in the above is important
+	output.replace(output_warning, "")
 }

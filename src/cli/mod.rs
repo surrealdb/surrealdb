@@ -15,7 +15,7 @@ mod version;
 mod version_client;
 
 use crate::cli::version_client::VersionClient;
-use crate::cnf::{LOGO, PKG_VERSION};
+use crate::cnf::{DEBUG_BUILD_WARNING, LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use clap::{Parser, Subcommand};
 pub use config::CF;
@@ -99,6 +99,10 @@ pub async fn init() -> ExitCode {
 		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
+
+	#[cfg(debug_assertions)]
+	println!("{DEBUG_BUILD_WARNING}");
+
 	// After parsing arguments, we check the version online
 	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
