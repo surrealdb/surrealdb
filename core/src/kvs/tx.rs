@@ -777,10 +777,8 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		#[cfg(debug_assertions)]
-		let (start_dbg, end_dbg) = (sprint_key(&rng.start), sprint_key(&rng.end));
-		#[cfg(debug_assertions)]
-		trace!("Scan (non-paged) {} - {}", start_dbg, end_dbg);
-		let v = match self {
+		trace!("Scan {} - {}", sprint_key(&rng.start), sprint_key(&rng.end));
+		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
@@ -818,17 +816,7 @@ impl Transaction {
 			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
-		};
-		#[cfg(debug_assertions)]
-		match &v {
-			Ok(vals) => {
-				trace!("Scan (non-paged) {} - {} found {} values", start_dbg, end_dbg, vals.len());
-			}
-			Err(e) => {
-				trace!("Scan (non-paged) {} - {} failed with error: {:?}", start_dbg, end_dbg, e);
-			}
-		};
-		v
+		}
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -844,9 +832,7 @@ impl Transaction {
 		K: Into<Key> + From<Vec<u8>> + AsRef<[u8]> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		let (start_dbg, end_dbg) = (sprint_key(&page.range.start), sprint_key(&page.range.end));
-		#[cfg(debug_assertions)]
-		trace!("Scan paged {} - {}", start_dbg, end_dbg);
+		trace!("Scan paged {} - {}", sprint_key(&page.range.start), sprint_key(&page.range.end));
 		let range = page.range.clone();
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
@@ -887,14 +873,6 @@ impl Transaction {
 			#[allow(unreachable_patterns)]
 			_ => Err(Error::MissingStorageEngine),
 		};
-		match &res {
-			Ok(vals) => {
-				trace!("Scan paged {} - {} found {} values", start_dbg, end_dbg, vals.len());
-			}
-			Err(e) => {
-				trace!("Scan paged {} - {} failed with error: {:?}", start_dbg, end_dbg, e);
-			}
-		}
 		// Construct next page
 		res.map(|tup_vec: Vec<(Key, Val)>| {
 			if tup_vec.len() < batch_limit as usize {
