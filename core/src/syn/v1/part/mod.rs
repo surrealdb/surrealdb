@@ -67,20 +67,10 @@ pub fn changefeed(i: &str) -> IResult<&str, ChangeFeed> {
 	let (i, _) = tag_no_case("CHANGEFEED")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(duration)(i)?;
-
-	let (i, store_original) = opt(|i| {
-		let (i, _) = shouldbespace(i)?;
-		let (i, _): (&str, &str) = tag_no_case("INCLUDE")(i)?;
-		let (i, _) = shouldbespace(i)?;
-		let (i, b): (&str, &str) = tag_no_case("ORIGINAL")(i)?;
-		Ok((i, b))
-	})(i)?;
-
 	Ok((
 		i,
 		ChangeFeed {
 			expiry: v.0,
-			store_original: store_original.is_some(),
 		},
 	))
 }
@@ -244,6 +234,7 @@ pub fn version(i: &str) -> IResult<&str, Version> {
 
 #[cfg(test)]
 mod tests {
+
 	use super::*;
 	use crate::sql::{Datetime, Idiom, Value};
 	use crate::syn::Parse;
@@ -265,23 +256,7 @@ mod tests {
 		assert_eq!(
 			out,
 			ChangeFeed {
-				expiry: time::Duration::from_secs(3600),
-				store_original: false,
-			}
-		);
-	}
-
-	#[test]
-	fn changefeed_include_original() {
-		let sql = "CHANGEFEED 1h INCLUDE ORIGINAL";
-		let res = changefeed(sql);
-		let out = res.unwrap().1;
-		assert_eq!("CHANGEFEED 1h INCLUDE ORIGINAL", format!("{}", out));
-		assert_eq!(
-			out,
-			ChangeFeed {
-				expiry: time::Duration::from_secs(3600),
-				store_original: true,
+				expiry: time::Duration::from_secs(3600)
 			}
 		);
 	}
@@ -368,7 +343,7 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
-			Fetchs(vec![Fetch(Idiom::parse("field")), Fetch(Idiom::parse("other.field"))])
+			Fetchs(vec![Fetch(Idiom::parse("field")), Fetch(Idiom::parse("other.field")),])
 		);
 		assert_eq!("FETCH field, other.field", format!("{}", out));
 	}

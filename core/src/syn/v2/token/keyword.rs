@@ -83,7 +83,6 @@ keyword! {
 	Group => "GROUP",
 	Highlights => "HIGHLIGHTS",
 	Ignore => "IGNORE",
-	Include => "INCLUDE",
 	Index => "INDEX",
 	Info => "INFO",
 	Insert => "INSERT",
