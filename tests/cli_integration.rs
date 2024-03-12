@@ -1,6 +1,3 @@
-use std::collections::BTreeMap;
-use surrealdb::sql::{Object, Value};
-
 // RUST_LOG=warn cargo make ci-cli-integration
 mod common;
 
