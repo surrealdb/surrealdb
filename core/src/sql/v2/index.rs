@@ -101,16 +101,16 @@ pub enum Distance1 {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 pub struct HnswParams {
-    pub dimension: u16,
-    pub distance: Distance,
-    pub vector_type: VectorType,
-    pub m: u16,
-    pub m0: u16,
-    pub ef_construction: u16,
-    pub heuristic: bool,
-    pub extend_candidates: bool,
-    pub keep_pruned_connections: bool,
-    pub ml: Number,
+	pub dimension: u16,
+	pub distance: Distance,
+	pub vector_type: VectorType,
+	pub m: u16,
+	pub m0: u16,
+	pub ef_construction: u16,
+	pub heuristic: bool,
+	pub extend_candidates: bool,
+	pub keep_pruned_connections: bool,
+	pub ml: Number,
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

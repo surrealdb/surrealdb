@@ -10,8 +10,7 @@ use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	MatchesThingIterator, ThingIterator, ThingsIterator, UniqueEqualThingIterator,
-	UniqueRangeThingIterator,
-	UniqueUnionThingIterator,
+	UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;

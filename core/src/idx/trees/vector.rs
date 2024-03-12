@@ -151,7 +151,7 @@ impl Vector {
 		}
 	}
 
-fn dot<T>(a: &[T], b: &[T]) -> f64
+	fn dot<T>(a: &[T], b: &[T]) -> f64
 	where
 		T: Mul<Output = T> + Copy + ToFloat,
 	{

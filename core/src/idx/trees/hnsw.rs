@@ -508,7 +508,7 @@ impl Hnsw {
 									dist: e_dist,
 									doc: e_id,
 								};
-								candidates.insert(pn.clone());
+								candidates.insert(pn);
 								w.insert(pn);
 								if w.len() > ef {
 									w.pop_last();
