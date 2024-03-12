@@ -24,7 +24,7 @@ use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -36,7 +36,7 @@ pub struct DefineTableStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
-	#[revision(start = 2)]
+	#[revision(start = 3)]
 	pub table_type: TableType,
 }
 
