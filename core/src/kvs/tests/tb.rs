@@ -72,7 +72,7 @@ async fn table_definitions_can_be_deleted() {
 		comment: None,
 		#[cfg(feature = "sql2")]
 		table_type: Default::default(),
-    #[cfg(feature = "sql2")]
+		#[cfg(feature = "sql2")]
 		if_not_exists: false,
 	};
 	tx.set(&key, &value).await.unwrap();

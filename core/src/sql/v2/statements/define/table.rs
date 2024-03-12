@@ -35,8 +35,8 @@ pub struct DefineTableStatement {
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
-  pub if_not_exists: bool,
-  #[revision(start = 2)]
+	pub if_not_exists: bool,
+	#[revision(start = 2)]
 	pub table_type: TableType,
 }
 

@@ -18,7 +18,7 @@ use crate::{
 
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
 #[cfg(feature = "sql2")]
-use nom::{multi::separated_list1, Err, combinator::opt, sequence::tuple};
+use nom::{combinator::opt, multi::separated_list1, sequence::tuple, Err};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;

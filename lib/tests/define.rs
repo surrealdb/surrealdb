@@ -2121,18 +2121,11 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 
 #[tokio::test]
 #[cfg(feature = "sql2")]
-async fn define_table_relation() -> Result<(), Error> {
-	let sql = "
-		DEFINE TABLE likes RELATION;
-		CREATE person:raphael, person:tobie;
-		RELATE person:raphael->likes->person:tobie;
-		CREATE likes:1;
-
 async fn redefining_existing_analyzer_should_not_error() -> Result<(), Error> {
-	let sql = "
+	let sql = r#"
 		DEFINE ANALYZER example_blank TOKENIZERS blank;
 		DEFINE ANALYZER example_blank TOKENIZERS blank;
-	";
+	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -2539,10 +2532,10 @@ async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(
 
 #[tokio::test]
 async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\";
-		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\";
-	";
+	let sql = r##"
+		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE "example";
+		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE "example";
+	"##;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -2560,10 +2553,10 @@ async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
 #[tokio::test]
 #[cfg(feature = "sql2")]
 async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE \"example\";
-		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE \"example\";
-	";
+	let sql = r#"
+		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE "example";
+		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE "example";
+	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -2580,10 +2573,10 @@ async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(
 
 #[tokio::test]
 async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER;
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER;
-	";
+	let sql = r#"
+		DEFINE USER example ON ROOT PASSWORD "example" ROLES OWNER;
+		DEFINE USER example ON ROOT PASSWORD "example" ROLES OWNER;
+	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -2601,10 +2594,10 @@ async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 #[tokio::test]
 #[cfg(feature = "sql2")]
 async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER;
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER;
-	";
+	let sql = r#"
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD "example" ROLES OWNER;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD "example" ROLES OWNER;
+	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -2615,6 +2608,35 @@ async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<()
 	//
 	let tmp = res.remove(0).result.unwrap_err();
 	assert!(matches!(tmp, Error::UserRootAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+#[cfg(feature = "sql2")]
+async fn define_table_relation() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE likes RELATION;
+		CREATE person:raphael, person:tobie;
+		RELATE person:raphael->likes->person:tobie;
+		CREATE likes:1;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
 	//
 	Ok(())
 }

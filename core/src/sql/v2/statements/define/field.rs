@@ -108,8 +108,8 @@ impl DefineFieldStatement {
 				}
 			}
 		}
-    
-    run.set(
+
+		run.set(
 			key,
 			DefineFieldStatement {
 				if_not_exists: false,
@@ -165,7 +165,7 @@ impl DefineFieldStatement {
 			run.clr(key).await?;
 		}
 
-    // Clear the cache
+		// Clear the cache
 		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
 		// Ok all good

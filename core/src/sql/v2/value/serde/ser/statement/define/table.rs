@@ -49,7 +49,7 @@ pub struct SerializeDefineTableStatement {
 	changefeed: Option<ChangeFeed>,
 	comment: Option<Strand>,
 	if_not_exists: bool,
-  table_type: TableType,
+	table_type: TableType,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
@@ -87,6 +87,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			}
 			"table_type" => {
 				self.table_type = value.serialize(ser::table_type::Serializer.wrap())?;
+			}
 			"if_not_exists" => {
 				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
 			}
