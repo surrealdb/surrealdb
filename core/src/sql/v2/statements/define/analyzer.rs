@@ -11,7 +11,7 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 pub struct DefineAnalyzerStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -19,6 +19,8 @@ pub struct DefineAnalyzerStatement {
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
+	#[revision(start = 3)]
+	pub if_not_exists: bool,
 }
 
 impl DefineAnalyzerStatement {
@@ -35,11 +37,26 @@ impl DefineAnalyzerStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Check if analyzer already exists
+		if self.if_not_exists && run.get_db_analyzer(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			return Err(Error::AzAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
 		// Process the statement
 		let key = crate::key::database::az::new(opt.ns(), opt.db(), &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
+		// Persist the definition
+		run.set(
+			key,
+			DefineAnalyzerStatement {
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Release the transaction
 		drop(run); // Do we really need this?
 		   // Ok all good
@@ -49,7 +66,11 @@ impl DefineAnalyzerStatement {
 
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYZER {}", self.name)?;
+		write!(f, "DEFINE ANALYZER")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {
 			write!(f, " FUNCTION fn::{i}")?
 		}

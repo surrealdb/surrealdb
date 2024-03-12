@@ -2,9 +2,9 @@ use bincode::Options;
 use bincode::Result;
 use serde::{Deserialize, Serialize};
 
-pub fn serialize<T: ?Sized>(value: &T) -> Result<Vec<u8>>
+pub fn serialize<T>(value: &T) -> Result<Vec<u8>>
 where
-	T: Serialize,
+	T: Serialize + ?Sized,
 {
 	bincode::options()
 		.with_no_limit()

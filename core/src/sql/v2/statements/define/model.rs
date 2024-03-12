@@ -14,18 +14,24 @@ use std::fmt::{self, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineModelStatement {
 	pub hash: String,
 	pub name: Ident,
 	pub version: String,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
+	#[revision(start = 2)]
+	pub if_not_exists: bool,
 }
 
 impl fmt::Display for DefineModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "DEFINE MODEL ml::{}<{}>", self.name, self.version)?;
+		write!(f, "DEFINE MODEL")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
 			write!(f, " COMMENT {}", comment)?;
 		}
@@ -55,11 +61,27 @@ impl DefineModelStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Check if model already exists
+		if self.if_not_exists
+			&& run.get_db_model(opt.ns(), opt.db(), &self.name, &self.version).await.is_ok()
+		{
+			return Err(Error::MlAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
 		// Process the statement
 		let key = crate::key::database::ml::new(opt.ns(), opt.db(), &self.name, &self.version);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
+		run.set(
+			key,
+			DefineModelStatement {
+				// Don't persist the "IF NOT EXISTS" clause to schema
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
 		// Store the model file
 		// TODO
 		// Ok all good

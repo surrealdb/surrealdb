@@ -18,6 +18,7 @@ pub(crate) enum ThingIterator {
 	IndexUnion(IndexUnionThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
+	UniqueUnion(UniqueUnionThingIterator),
 	Matches(MatchesThingIterator),
 	Knn(DocIdsIterator),
 	Things(ThingsIterator),
@@ -35,6 +36,7 @@ impl ThingIterator {
 			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
 			ThingIterator::IndexUnion(i) => i.next_batch(tx, size).await,
+			ThingIterator::UniqueUnion(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
 			ThingIterator::Things(i) => Ok(i.next_batch(size)),
@@ -367,6 +369,45 @@ impl UniqueRangeThingIterator {
 		}
 		self.done = true;
 		Ok(r)
+	}
+}
+
+pub(crate) struct UniqueUnionThingIterator {
+	keys: VecDeque<Key>,
+}
+
+impl UniqueUnionThingIterator {
+	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Self {
+		// We create a VecDeque to hold the key for each value in the array.
+		let keys: VecDeque<Key> =
+			a.0.iter()
+				.map(|v| {
+					let a = Array::from(v.clone());
+					let key = Index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &a, None).into();
+					key
+				})
+				.collect();
+		Self {
+			keys,
+		}
+	}
+
+	async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		let mut run = txn.lock().await;
+		let mut res = vec![];
+		while let Some(key) = self.keys.pop_front() {
+			if let Some(val) = run.get(key).await? {
+				res.push((val.into(), None));
+			}
+			if res.len() >= limit as usize {
+				return Ok(res);
+			}
+		}
+		Ok(res)
 	}
 }
 

@@ -83,26 +83,34 @@ pub(crate) struct LqIndexValue {
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone))]
 pub(crate) struct LqEntry {
-	#[allow(dead_code)]
 	pub(crate) live_id: Uuid,
-	#[allow(dead_code)]
 	pub(crate) ns: String,
-	#[allow(dead_code)]
 	pub(crate) db: String,
-	#[allow(dead_code)]
 	pub(crate) stm: LiveStatement,
 }
 
 /// This is a type representing information that is tracked outside of a datastore
 /// For example, live query IDs need to be tracked by websockets so they are closed correctly on closing a connection
-#[allow(dead_code)]
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Clone))]
 pub(crate) enum TrackedResult {
 	LiveQuery(LqEntry),
+	#[allow(dead_code)]
+	KillQuery(KillEntry),
+}
+
+/// KillEntry is a type that is used to hold the data necessary to kill a live query
+/// It is not used for any indexing
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Clone))]
+pub(crate) struct KillEntry {
+	pub(crate) live_id: Uuid,
+	pub(crate) ns: String,
+	pub(crate) db: String,
 }
 
 impl LqEntry {
 	/// Treat like an into from a borrow
-	#[allow(dead_code)]
 	pub(crate) fn as_key(&self) -> LqIndexKey {
 		let tb = self.stm.what.to_string();
 		LqIndexKey {
@@ -115,8 +123,6 @@ impl LqEntry {
 		}
 	}
 
-	/// Treat like an into from a borrow
-	#[allow(dead_code)]
 	pub(crate) fn as_value(&self) -> LqIndexValue {
 		LqIndexValue {
 			stm: self.stm.clone(),

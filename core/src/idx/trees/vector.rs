@@ -151,32 +151,7 @@ impl Vector {
 		}
 	}
 
-	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<(), Error> {
-		Self::check_expected_dimension(self.len(), expected_dim)
-	}
-
-	fn chebyshev<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: ToFloat,
-	{
-		a.iter()
-			.zip(b.iter())
-			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
-			.fold(f64::MIN, f64::max)
-	}
-
-	pub(crate) fn chebyshev_distance(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::chebyshev(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::chebyshev(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::chebyshev(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::chebyshev(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::chebyshev(a, b),
-			_ => f64::NAN,
-		}
-	}
-
-	fn dot<T>(a: &[T], b: &[T]) -> f64
+fn dot<T>(a: &[T], b: &[T]) -> f64
 	where
 		T: Mul<Output = T> + Copy + ToFloat,
 	{
@@ -231,6 +206,31 @@ impl Vector {
 			(Self::I64(a), Self::I64(b)) => Self::cosine(a, b),
 			(Self::I32(a), Self::I32(b)) => Self::cosine(a, b),
 			(Self::I16(a), Self::I16(b)) => Self::cosine(a, b),
+			_ => f64::NAN,
+		}
+	}
+
+	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<(), Error> {
+		Self::check_expected_dimension(self.len(), expected_dim)
+	}
+
+	fn chebyshev<T>(a: &[T], b: &[T]) -> f64
+	where
+		T: ToFloat,
+	{
+		a.iter()
+			.zip(b.iter())
+			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
+			.fold(f64::MIN, f64::max)
+	}
+
+	pub(crate) fn chebyshev_distance(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => Self::chebyshev(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::chebyshev(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::chebyshev(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::chebyshev(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::chebyshev(a, b),
 			_ => f64::NAN,
 		}
 	}

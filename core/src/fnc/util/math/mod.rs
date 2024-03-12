@@ -11,14 +11,13 @@ pub mod midhinge;
 pub mod mode;
 pub mod nearestrank;
 pub mod percentile;
-pub mod quartile;
 pub mod spread;
 pub mod top;
 pub mod trimean;
 pub mod variance;
 pub mod vector;
 
-pub trait ToFloat {
+pub(crate) trait ToFloat {
 	fn to_float(&self) -> f64;
 }
 

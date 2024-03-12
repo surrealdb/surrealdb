@@ -10,6 +10,7 @@ use crate::sql::Value;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub async fn signup(
 	kvs: &Datastore,
@@ -73,6 +74,7 @@ pub async fn sc(
 									iss: Some(SERVER_NAME.to_owned()),
 									iat: Some(Utc::now().timestamp()),
 									nbf: Some(Utc::now().timestamp()),
+									jti: Some(Uuid::new_v4().to_string()),
 									exp: Some(
 										match sv.session {
 											Some(v) => {

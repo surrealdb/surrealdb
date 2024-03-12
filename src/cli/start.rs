@@ -173,6 +173,7 @@ pub async fn init(
 		tick_interval,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
+		engine: None,
 	});
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
@@ -182,12 +183,18 @@ pub async fn init(
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
+	// This is equivalent to run_maintenance in native/wasm drivers
 	let nd = node::init(ct.clone());
+	let lq = node::live_query_change_feed(ct.clone());
 	// Start the web server
 	net::init(ct).await?;
 	// Wait for the node agent to stop
 	if let Err(e) = nd.await {
 		error!("Node agent failed while running: {}", e);
+		return Err(Error::NodeAgent);
+	}
+	if let Err(e) = lq.await {
+		error!("Live query change feed failed while running: {}", e);
 		return Err(Error::NodeAgent);
 	}
 	// All ok

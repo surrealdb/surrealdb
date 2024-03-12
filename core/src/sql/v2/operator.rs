@@ -142,9 +142,9 @@ impl fmt::Display for Operator {
 			}
 			Self::Knn(k, dist) => {
 				if let Some(d) = dist {
-					write!(f, "<{k},{d}>")
+					write!(f, "<|{k},{d}|>")
 				} else {
-					write!(f, "<{k}>")
+					write!(f, "<|{k}|>")
 				}
 			}
 			Self::Ann(k, ef) => {

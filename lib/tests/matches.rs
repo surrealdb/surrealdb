@@ -36,6 +36,12 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 							table: 'blog',
 						},
 						operation: 'Iterate Index'
+					},
+						{
+							detail: {
+								type: 'Store'
+							},
+							operation: 'Collector'
 					}
 			]",
 	);
@@ -80,6 +86,12 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 						table: 'blog',
 					},
 					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'Store'
+					},
+					operation: 'Collector'
 				},
 				{
 					detail: {
@@ -140,6 +152,12 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 							table: 'blog',
 						},
 						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
 					}
 			]",
 	);
@@ -209,6 +227,12 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 							table: 'blog',
 						},
 						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
 					}
 			]",
 	);
@@ -438,6 +462,12 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 					table: 'page'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]",
 	);

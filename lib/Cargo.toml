@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.3.0"
+version = "1.4.0"
 rust-version = "1.70.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -53,7 +53,6 @@ rustls = [
     "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
 ml = ["surrealdb-core/ml"]
-ml2 = ["surrealdb-core/ml2"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
 sql2 = ["surrealdb-core/sql2"]

@@ -43,6 +43,7 @@ pub struct SerializeDefineAnalyzerStatement {
 	tokenizers: Option<Vec<Tokenizer>>,
 	filters: Option<Vec<Filter>>,
 	comment: Option<Strand>,
+	if_not_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineAnalyzerStatement {
@@ -69,6 +70,9 @@ impl serde::ser::SerializeStruct for SerializeDefineAnalyzerStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
+			"if_not_exists" => {
+				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineAnalyzerStatement::{key}`"
@@ -85,6 +89,7 @@ impl serde::ser::SerializeStruct for SerializeDefineAnalyzerStatement {
 			tokenizers: self.tokenizers,
 			filters: self.filters,
 			comment: self.comment,
+			if_not_exists: self.if_not_exists,
 		})
 	}
 }

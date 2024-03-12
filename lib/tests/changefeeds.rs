@@ -1,12 +1,14 @@
-mod parse;
 use chrono::DateTime;
-use parse::Parse;
-mod helpers;
+
 use helpers::new_ds;
+use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
-use surrealdb_core::fflags::{FFlags, FFLAGS};
+use surrealdb_core::fflags::FFLAGS;
+
+mod helpers;
+mod parse;
 
 #[tokio::test]
 async fn database_change_feeds() -> Result<(), Error> {
@@ -438,7 +440,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
-	let a = array.get(0).unwrap();
+	let a = array.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -614,7 +616,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	};
 	assert_eq!(array.len(), 4);
 	// UPDATE user:amos
-	let a = array.get(0).unwrap();
+	let a = array.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
