@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+use surrealdb::sql::{Object, Value};
+
 // RUST_LOG=warn cargo make ci-cli-integration
 mod common;
 
 mod cli_integration {
-	use crate::remove_debug_info;
+	use crate::{objectify, remove_debug_info};
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use common::Format;
 	use common::Socket;
@@ -10,6 +13,7 @@ mod cli_integration {
 	use std::fs::File;
 	use std::time;
 	use surrealdb::fflags::FFLAGS;
+	use surrealdb::sql::Value;
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::info;
@@ -666,22 +670,20 @@ mod cli_integration {
 					.output()
 					.unwrap();
 				let output = remove_debug_info(output);
-				assert_eq!(
-					output,
-						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ create: { id: thing:one } }], versionstamp: 3 }]]\n\n"
-							.to_owned(),
-						"failed to send sql: {args}");
+				let actual = Value::from(output.as_str());
+				let expected = "[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ create: { id: thing:one } }], versionstamp: 3 }]]";
+				let expected = Value::from(expected);
+				assert_eq!(actual, expected, "failed to send sql: {args}");
 			} else {
 				let output = common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
 					.output()
 					.unwrap();
 				let output = remove_debug_info(output);
-				assert_eq!(
-					output,
-						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]\n\n"
-							.to_owned(),
-						"failed to send sql: {args}" );
+				let actual = Value::from(output.as_str());
+				let expected = "[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]";
+				let expected = Value::from(expected);
+				assert_eq!(actual, expected, "failed to send sql: {args}");
 			}
 		};
 
