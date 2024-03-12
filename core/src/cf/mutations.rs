@@ -174,7 +174,7 @@ mod tests {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
@@ -209,7 +209,7 @@ mod tests {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
