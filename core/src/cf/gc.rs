@@ -3,7 +3,7 @@ use crate::key::change;
 use crate::key::debug::sprint_key;
 use crate::kvs::Transaction;
 use crate::vs;
-use crate::vs::{conv, Versionstamp};
+use crate::vs::Versionstamp;
 use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.

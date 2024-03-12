@@ -138,6 +138,7 @@ pub fn to_u128_le(vs: [u8; 10]) -> u128 {
 	u128::from_be_bytes(buf)
 }
 
+#[cfg(test)]
 mod tests {
 	use crate::vs::{u64_to_versionstamp, versionstamp_to_u64};
 
