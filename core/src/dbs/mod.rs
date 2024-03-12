@@ -4,10 +4,10 @@
 //! and executors to process the operations. This module also gives a `context` to the transaction.
 mod distinct;
 mod executor;
-mod explanation;
 mod iterator;
 mod notification;
 mod options;
+mod plan;
 mod response;
 mod session;
 mod statement;
@@ -29,6 +29,9 @@ pub mod capabilities;
 pub use self::capabilities::Capabilities;
 pub mod node;
 
+mod group;
 mod processor;
+mod result;
+mod store;
 #[cfg(test)]
 pub(crate) mod test;

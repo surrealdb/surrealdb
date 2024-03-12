@@ -96,7 +96,17 @@ pub(crate) struct LqEntry {
 pub(crate) enum TrackedResult {
 	LiveQuery(LqEntry),
 	#[allow(dead_code)]
-	KillQuery(LqEntry),
+	KillQuery(KillEntry),
+}
+
+/// KillEntry is a type that is used to hold the data necessary to kill a live query
+/// It is not used for any indexing
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Clone))]
+pub(crate) struct KillEntry {
+	pub(crate) live_id: Uuid,
+	pub(crate) ns: String,
+	pub(crate) db: String,
 }
 
 impl LqEntry {
