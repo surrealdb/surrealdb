@@ -778,7 +778,7 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		let (start_dbg, end_dbg) = (sprint_key(&rng.start), sprint_key(&rng.end));
 		#[cfg(debug_assertions)]
-		trace!("Scan OUTSIDE {} - {}", start_dbg, end_dbg);
+		trace!("Scan (non-paged) {} - {}", start_dbg, end_dbg);
 		let v = match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -818,14 +818,13 @@ impl Transaction {
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		};
-		trace!("SCAN BEFORE RETURN");
 		#[cfg(debug_assertions)]
 		match &v {
 			Ok(vals) => {
-				trace!("Scan {} - {} found {} values", start_dbg, end_dbg, vals.len());
+				trace!("Scan (non-paged) {} - {} found {} values", start_dbg, end_dbg, vals.len());
 			}
 			Err(e) => {
-				trace!("Scan {} - {} failed with error: {:?}", start_dbg, end_dbg, e);
+				trace!("Scan (non-paged) {} - {} failed with error: {:?}", start_dbg, end_dbg, e);
 			}
 		};
 		v
@@ -846,7 +845,7 @@ impl Transaction {
 		#[cfg(debug_assertions)]
 		let (start_dbg, end_dbg) = (sprint_key(&page.range.start), sprint_key(&page.range.end));
 		#[cfg(debug_assertions)]
-		trace!("Scan PAGED {} - {}", start_dbg, end_dbg);
+		trace!("Scan paged {} - {}", start_dbg, end_dbg);
 		let range = page.range.clone();
 		let res = match self {
 			#[cfg(feature = "kv-mem")]
@@ -889,10 +888,10 @@ impl Transaction {
 		};
 		match &res {
 			Ok(vals) => {
-				trace!("Scan PAGED {} - {} found {} values", start_dbg, end_dbg, vals.len());
+				trace!("Scan paged {} - {} found {} values", start_dbg, end_dbg, vals.len());
 			}
 			Err(e) => {
-				trace!("Scan PAGED {} - {} failed with error: {:?}", start_dbg, end_dbg, e);
+				trace!("Scan paged {} - {} failed with error: {:?}", start_dbg, end_dbg, e);
 			}
 		}
 		// Construct next page
@@ -1115,6 +1114,7 @@ impl Transaction {
 			// Loop over results
 			for (k, _) in res.into_iter() {
 				// Delete
+				#[cfg(debug_assertions)]
 				trace!("Delr key {}", sprint_key(&k));
 				self.del(k).await?;
 			}
@@ -2922,6 +2922,7 @@ impl Transaction {
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
+		#[cfg(debug_assertions)]
 		trace!(
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
 			ts,
@@ -2935,7 +2936,6 @@ impl Transaction {
 		let ts_key = crate::key::database::ts::new(ns, db, ts);
 		let begin = ts_key.encode()?;
 		let end = crate::key::database::ts::suffix(ns, db);
-		self.print_all().await;
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {

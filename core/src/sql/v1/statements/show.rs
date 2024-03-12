@@ -51,7 +51,6 @@ impl ShowStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		trace!("Executing ShowStatement v1");
 		// Selected DB?
 		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
 		// Clone transaction
@@ -60,7 +59,6 @@ impl ShowStatement {
 		let mut run = txn.lock().await;
 		// Process the show query
 		let tb = self.table.as_deref();
-		trace!("Reading changes for table {:?} since {:?}", tb, self.since);
 		let r = crate::cf::read(
 			&mut run,
 			opt.ns(),

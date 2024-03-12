@@ -78,7 +78,7 @@ pub fn try_u128_to_versionstamp(v: u128) -> Result<[u8; 10], Error> {
 /// Take the most significant, time-based bytes and ignores the last 2 bytes
 #[doc(hidden)]
 pub fn versionstamp_to_u64(vs: &Versionstamp) -> u64 {
-	u64::from_be_bytes(vs[0..8].try_into().unwrap())
+	u64::from_be_bytes(vs[..8].try_into().unwrap())
 }
 // to_u128_be converts a 10-byte versionstamp to a u128 assuming big-endian.
 // This is handy for human comparing versionstamps.

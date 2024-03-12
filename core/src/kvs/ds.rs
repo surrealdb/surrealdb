@@ -1147,7 +1147,7 @@ impl Datastore {
 			let dbs = dbs.as_ref();
 			for db in dbs {
 				let db = db.name.as_str();
-				// TODO(phughk): This is incorrect, it's a [ns,db] to vs pair
+				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
 				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?);
 			}
 		}
