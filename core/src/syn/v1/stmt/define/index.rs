@@ -279,9 +279,11 @@ mod tests {
 					ml: Number::Float(0.40242960438184466),
 					heuristic: true,
 					extend_candidates: true,
-					keep_pruned_connections: true
+					keep_pruned_connections: true,
 				}),
 				comment: None,
+				#[cfg(feature = "sql2")]
+				if_not_exists: false
 			}
 		);
 		assert_eq!(
