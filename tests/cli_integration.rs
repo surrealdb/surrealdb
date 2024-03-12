@@ -668,7 +668,7 @@ mod cli_integration {
 				let output = remove_debug_info(output);
 				assert_eq!(
 					output,
-						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ create: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
+						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ create: { id: thing:one } }], versionstamp: 3 }]]\n\n"
 							.to_owned(),
 						"failed to send sql: {args}");
 			} else {
@@ -679,7 +679,7 @@ mod cli_integration {
 				let output = remove_debug_info(output);
 				assert_eq!(
 					output,
-						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
+						"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]\n\n"
 							.to_owned(),
 						"failed to send sql: {args}" );
 			}
