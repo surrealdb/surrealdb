@@ -1516,6 +1516,12 @@ async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
 					table: 'apprenants'
 				},
 				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
 			}
 		]"#,
 	);
