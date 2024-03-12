@@ -89,12 +89,20 @@ pub fn escape_key(s: &str) -> Cow<'_, str> {
 #[inline]
 /// Escapes an id if necessary
 pub fn escape_rid(s: &str) -> Cow<'_, str> {
+	#[cfg(feature = "experimental-parser")]
+	if let Some(x) = escape_reserved_keyword(s) {
+		return Cow::Owned(x);
+	}
 	escape_numeric(s, BRACKETL, BRACKETR, BRACKET_ESC)
 }
 
 #[inline]
 /// Escapes an ident if necessary
 pub fn escape_ident(s: &str) -> Cow<'_, str> {
+	#[cfg(feature = "experimental-parser")]
+	if let Some(x) = escape_reserved_keyword(s) {
+		return Cow::Owned(x);
+	}
 	escape_numeric(s, BACKTICK, BACKTICK, BACKTICK_ESC)
 }
 
@@ -134,6 +142,11 @@ pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str>
 		// No need to escape the value
 		_ => Cow::Borrowed(s),
 	}
+}
+
+#[cfg(feature = "experimental-parser")]
+pub fn escape_reserved_keyword(s: &str) -> Option<String> {
+	crate::syn::v2::could_be_reserved_keyword(s).then(|| format!("`{}`", s))
 }
 
 #[cfg(feature = "experimental-parser")]
