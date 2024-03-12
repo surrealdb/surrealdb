@@ -75,11 +75,14 @@ pub fn try_u128_to_versionstamp(v: u128) -> Result<[u8; 10], Error> {
 	Ok(buf)
 }
 
+/// Take the most significant, time-based bytes and ignores the last 2 bytes
+#[doc(hidden)]
 pub fn versionstamp_to_u64(vs: &Versionstamp) -> u64 {
-	u64::from_be_bytes(vs[..8].try_into().unwrap())
+	u64::from_be_bytes(vs[0..8].try_into().unwrap())
 }
 // to_u128_be converts a 10-byte versionstamp to a u128 assuming big-endian.
 // This is handy for human comparing versionstamps.
+// This is not the same as timestamp u64 representation as the tailing bytes are included
 #[allow(unused)]
 pub fn to_u128_be(vs: [u8; 10]) -> u128 {
 	let mut buf = [0; 16];
@@ -136,6 +139,8 @@ pub fn to_u128_le(vs: [u8; 10]) -> u128 {
 }
 
 mod tests {
+	use crate::vs::{u64_to_versionstamp, versionstamp_to_u64};
+
 	#[test]
 	fn try_to_u64_be() {
 		use super::*;
@@ -160,5 +165,21 @@ mod tests {
 		let v = u128::MAX >> 48;
 		let res = try_u128_to_versionstamp(v).unwrap();
 		assert_eq!(res, [255, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
+	}
+
+	#[test]
+	fn can_add_u64_conversion() {
+		let start = 5u64;
+		let vs = u64_to_versionstamp(start);
+		// The last 2 bytes are empty
+		assert_eq!("00000000000000050000", hex::encode(vs));
+		let mid = versionstamp_to_u64(&vs);
+		assert_eq!(start, mid);
+		let mid = mid + 1;
+		let vs = u64_to_versionstamp(mid);
+		// The last 2 bytes are empty
+		assert_eq!("00000000000000060000", hex::encode(vs));
+		let end = versionstamp_to_u64(&vs);
+		assert_eq!(end, 6);
 	}
 }

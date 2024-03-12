@@ -51,6 +51,7 @@ impl ShowStatement {
 		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		trace!("Executing ShowStatement v2");
 		// Selected DB?
 		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
 		// Clone transaction

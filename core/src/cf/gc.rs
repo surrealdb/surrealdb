@@ -1,8 +1,9 @@
 use crate::err::Error;
 use crate::key::change;
+use crate::key::debug::sprint_key;
 use crate::kvs::Transaction;
 use crate::vs;
-use crate::vs::Versionstamp;
+use crate::vs::{conv, Versionstamp};
 use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
@@ -26,11 +27,21 @@ pub async fn gc_ns(
 ) -> Result<(), Error> {
 	let dbs = tx.all_db(ns).await?;
 	let dbs = dbs.as_ref();
+	tx.print_all().await;
 	for db in dbs {
+		// We get the expiration of the change feed defined on the database
 		let db_cf_expiry = match &db.changefeed {
 			None => 0,
 			Some(cf) => cf.expiry.as_secs(),
 		};
+		#[cfg(debug_assertions)]
+		trace!(
+			"Performing garbage collection on ns {} db {} for ts {}. The cf expiration is {}",
+			ns,
+			db.name,
+			ts,
+			db_cf_expiry
+		);
 		let tbs = tx.all_tb(ns, db.name.as_str()).await?;
 		let tbs = tbs.as_ref();
 		let max_tb_cf_expiry = tbs.iter().fold(0, |acc, tb| match &tb.changefeed {
@@ -44,16 +55,26 @@ pub async fn gc_ns(
 			}
 		});
 		let cf_expiry = db_cf_expiry.max(max_tb_cf_expiry);
+		trace!("The new gc cf expiry is {} after maxing with table expiry {} and will be compared against {}", cf_expiry, max_tb_cf_expiry, ts);
 		if ts < cf_expiry {
 			continue;
 		}
+		// We only want to retain the expiry window, so we are going to delete everything before
 		let watermark_ts = ts - cf_expiry;
+		trace!("The watermark is {} after removing {cf_expiry} from {ts}", watermark_ts);
+		tx.print_all().await;
 		let watermark_vs =
 			tx.get_versionstamp_from_timestamp(watermark_ts, ns, db.name.as_str(), true).await?;
+		trace!(
+			"Before doing gc, timestamp {:?} had watermark versionstamp {:?}",
+			watermark_ts,
+			watermark_vs.as_ref().map(conv::versionstamp_to_u64)
+		);
 		if let Some(watermark_vs) = watermark_vs {
 			gc_db(tx, ns, db.name.as_str(), watermark_vs, limit).await?;
 		}
 	}
+	tx.print_all().await;
 	Ok(())
 }
 
@@ -67,6 +88,14 @@ pub async fn gc_db(
 ) -> Result<(), Error> {
 	let beg: Vec<u8> = change::prefix_ts(ns, db, vs::u64_to_versionstamp(0));
 	let end = change::prefix_ts(ns, db, watermark);
+	trace!(
+		"DB GC: ns: {}, db: {}, watermark: {:?}, prefix: {}, end: {}",
+		ns,
+		db,
+		watermark,
+		sprint_key(&beg),
+		sprint_key(&end)
+	);
 
 	let limit = limit.unwrap_or(100);
 
