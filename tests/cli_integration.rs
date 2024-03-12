@@ -18,7 +18,7 @@ mod cli_integration {
 	use super::common::{self, StartServerArguments, PASS, USER};
 
 	const ONE_SEC: time::Duration = time::Duration::new(1, 0);
-	const TWO_SECS: time::Duration = time::Duration::new(2, 0);
+	const THREE_SEC: time::Duration = time::Duration::new(3, 0);
 
 	#[test]
 	fn version_command() {
@@ -701,7 +701,7 @@ mod cli_integration {
 			}
 		};
 
-		sleep(TWO_SECS).await;
+		sleep(THREE_SEC).await;
 
 		info!("* Show changes after GC");
 		{
