@@ -12,7 +12,6 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
-use crate::engine::tasks::CancellationToken;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
@@ -36,6 +35,7 @@ use std::sync::OnceLock;
 use std::task::Poll;
 use surrealdb_core::options::EngineOptions;
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Db {}
@@ -154,7 +154,7 @@ pub(crate) fn router(
 			tick_interval,
 			..Default::default()
 		};
-		start_tasks(&opt, ct.clone(), kvs.clone());
+		let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
@@ -203,6 +203,10 @@ pub(crate) fn router(
 		}
 
 		// Stop maintenance tasks
+		task_chans.into_iter().for_each(|chan| {
+			let _ = chan.send(());
+		});
 		ct.cancel();
+		tasks.resolve().await.unwrap();
 	});
 }

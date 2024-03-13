@@ -33,7 +33,7 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
-use crate::engine::tasks::{start_tasks, CancellationToken};
+use crate::engine::tasks::start_tasks;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
@@ -155,13 +155,12 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let ct = CancellationToken::new();
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
 		let opt = EngineOptions {
 			tick_interval,
 			..Default::default()
 		};
-		start_tasks(&opt, ct.clone(), kvs.clone());
+		let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
@@ -210,6 +209,9 @@ pub(crate) fn router(
 		}
 
 		// Stop maintenance tasks
-		ct.cancel();
+		task_chans.into_iter().for_each(|chan| {
+			let _ = chan.send(());
+		});
+		tasks.resolve().await.unwrap();
 	});
 }

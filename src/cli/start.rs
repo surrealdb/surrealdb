@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
-use surrealdb::engine::tasks::CancellationToken;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -182,14 +182,16 @@ pub async fn init(
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
-	let tasks = surrealdb::tasks::start_tasks(
+	let (tasks, task_chans) = surrealdb::tasks::start_tasks(
 		&config::CF.get().unwrap().engine.unwrap_or_default(),
-		ct.clone(),
 		DB.get().unwrap().clone(),
 	);
 	// Start the web server
-	net::init(ct.clone().into_inner()).await?;
+	net::init(ct.clone()).await?;
 	// Shutdown and stop closed tasks
+	task_chans.into_iter().for_each(|chan| {
+		let _ = chan.send(());
+	});
 	ct.cancel();
 	tasks.resolve().await?;
 	// All ok
