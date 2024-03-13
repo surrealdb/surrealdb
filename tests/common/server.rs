@@ -34,8 +34,13 @@ impl Child {
 		self
 	}
 
-	pub fn finish(mut self) {
-		self.inner.take().unwrap().kill().unwrap();
+	pub fn finish(&mut self) -> Result<&mut Self, String> {
+		let a = self
+			.inner
+			.as_mut()
+			.map(|child| child.kill().map_err(|e| format!("failed to kill: {}", e)))
+			.unwrap_or(Err(format!("no inner")));
+		a.map(|ok| self)
 	}
 
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {

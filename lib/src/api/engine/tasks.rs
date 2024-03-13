@@ -1,3 +1,4 @@
+use flume::{Receiver, Sender};
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use surrealdb_core::fflags::FFLAGS;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 
+use crate::engine::IntervalStream;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::Error as RootError;
 #[cfg(not(target_arch = "wasm32"))]
@@ -22,35 +24,47 @@ use wasm_bindgen_futures::spawn_local as spawn_future;
 
 const LOG: &str = "surrealdb::node";
 
-#[derive(Clone)]
-#[doc(hidden)]
 /// CancellationToken is used as a shortcut for when we don't have access to tokio, such as in wasm
 /// it's public because it is required to access from CLI, but otherwise it is an internal component
 /// The intention is that it reflects tokio util cancellation token in behaviour
+#[derive(Clone)]
+#[doc(hidden)]
 pub struct CancellationToken {
 	#[cfg(not(target_arch = "wasm32"))]
 	inner: tokio_util::sync::CancellationToken,
 	#[cfg(target_arch = "wasm32")]
 	inner: Arc<AtomicBool>,
+	cancellation_sender: Sender<()>,
+	/// Cancellation receiver that can be turned into a stream where necessary
+	pub(crate) cancellation_receiver: Receiver<()>,
 }
 
 impl CancellationToken {
 	pub fn new() -> Self {
+		let (sender, receiver) = flume::bounded(1);
 		Self {
 			#[cfg(not(target_arch = "wasm32"))]
 			inner: tokio_util::sync::CancellationToken::new(),
 			#[cfg(target_arch = "wasm32")]
 			inner: Arc::new(AtomicBool::new(false)),
+			cancellation_sender: sender,
+			cancellation_receiver: receiver,
 		}
 	}
 
+	/// Orders to cancel
 	pub fn cancel(&self) {
+		if self.is_cancelled() {
+			return;
+		}
 		#[cfg(not(target_arch = "wasm32"))]
 		self.inner.cancel();
 		#[cfg(target_arch = "wasm32")]
 		self.inner.store(true, Ordering::Relaxed);
+		self.cancellation_sender.send(()).unwrap();
 	}
 
+	/// True if cancelled
 	pub fn is_cancelled(&self) -> bool {
 		#[cfg(not(target_arch = "wasm32"))]
 		return self.inner.is_cancelled();
@@ -58,6 +72,7 @@ impl CancellationToken {
 		return self.inner.load(Ordering::Relaxed);
 	}
 
+	/// Wait until cancelled
 	pub async fn cancelled(&self) {
 		#[cfg(not(target_arch = "wasm32"))]
 		return self.inner.cancelled().await;
@@ -132,6 +147,9 @@ fn init(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastore>) -> Futu
 	#[cfg(target_arch = "wasm32")]
 	let ret_status = completed_status.clone();
 	let _fut = spawn_future(async move {
+		let ticker = interval_ticker(tick_interval).await;
+		let streams = (ticker.map(Some), ct.cancellation_receiver.into_stream().map(|_| None));
+		let streams = streams.merge();
 		loop {
 			if let Err(e) = dbs.tick().await {
 				error!("Error running node agent tick: {}", e);
@@ -141,7 +159,7 @@ fn init(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastore>) -> Futu
 					info!(target: LOG, "Gracefully stopping node agent");
 					break;
 				}
-				_ = tokio::time::sleep(tick_interval) => {}
+				_ = tokio::time::sleep(ticker) => {}
 			}
 		}
 
@@ -164,6 +182,8 @@ fn live_query_change_feed(ct: CancellationToken, kvs: Arc<Datastore>) -> FutureT
 	let _fut = spawn_future(async move {
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			// TODO verify test fails since return without completion
+			#[cfg(target_arch = "wasm32")]
+			completed_status.store(true, Ordering::Relaxed);
 			return;
 		}
 		let tick_interval = Duration::from_secs(1);
@@ -189,6 +209,19 @@ fn live_query_change_feed(ct: CancellationToken, kvs: Arc<Datastore>) -> FutureT
 	return _fut;
 	#[cfg(target_arch = "wasm32")]
 	return ret_status;
+}
+
+async fn interval_ticker(interval: Duration) -> IntervalStream {
+	#[cfg(not(target_arch = "wasm32"))]
+	use tokio::{time, time::MissedTickBehavior};
+	#[cfg(target_arch = "wasm32")]
+	use wasmtimer::{tokio as time, MissedTickBehavior};
+
+	let mut interval = time::interval(interval);
+	// Don't bombard the database if we miss some ticks
+	interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+	interval.tick().await;
+	IntervalStream::new(interval)
 }
 
 #[cfg(test)]

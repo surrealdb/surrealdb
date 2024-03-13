@@ -8,7 +8,6 @@ mod cli_integration {
 	use common::Socket;
 	use serde_json::json;
 	use std::fs::File;
-	use std::rc::Rc;
 	use std::time;
 	use std::time::Duration;
 	use surrealdb::fflags::FFLAGS;
@@ -71,7 +70,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn all_commands() {
+	async fn all_commands() -> () {
 		// Commands without credentials when auth is disabled, should succeed
 		let (addr, _server) = common::start_server(StartServerArguments {
 			auth: false,
@@ -240,7 +239,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn start_tls() {
+	async fn start_tls() -> () {
 		let (_, server) = common::start_server(StartServerArguments {
 			tls: true,
 			wait_is_ready: false,
@@ -257,9 +256,9 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn with_root_auth() {
+	async fn with_root_auth() -> () {
 		// Commands with credentials when auth is enabled, should succeed
-		let (addr, server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -300,13 +299,13 @@ mod cli_integration {
 			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
 		}
 
-		server.finish()
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
-	async fn with_auth_level() {
+	async fn with_auth_level() -> () {
 		// Commands with credentials for different auth levels
-		let (addr, server) = common::start_server_with_auth_level().await.unwrap();
+		let (addr, mut server) = common::start_server_with_auth_level().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let ns = Ulid::new();
 		let db = Ulid::new();
@@ -485,14 +484,14 @@ mod cli_integration {
 				output
 			);
 		}
-		server.finish();
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
 	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
-	async fn without_auth_level() {
+	async fn without_auth_level() -> () {
 		// Commands with credentials for different auth levels
-		let (addr, server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		// Prefix with 'a' so that we don't start with a number and cause a parsing error
 		let ns = format!("a{}", Ulid::new());
@@ -553,13 +552,13 @@ mod cli_integration {
 				output
 			);
 		}
-		server.finish()
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
 	async fn with_anon_auth() {
 		// Commands without credentials when auth is enabled, should fail
-		let (addr, server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = ""; // Anonymous user
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -608,8 +607,7 @@ mod cli_integration {
 				output
 			);
 		}
-
-		server.finish();
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -681,7 +679,7 @@ mod cli_integration {
 					.unwrap();
 			} else {
 				let output = common::run(&args)
-					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+					.input("/* Expecting changes to exist before removal */ SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
 					.output()
 					.unwrap();
 				let output = remove_debug_info(output).replace('\n', "");
@@ -710,7 +708,7 @@ mod cli_integration {
 		let args =
 			format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome");
 		let output = common::run(&args)
-			.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+			.input("/* Expecting changes to be removed */ SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
 			.output()
 			.unwrap();
 		let output = remove_debug_info(output);
@@ -718,9 +716,11 @@ mod cli_integration {
 		// sleep(Duration::from_secs(60 * 60 * 24)).await;
 		// }
 		let mut server = server;
-		println!("{}", server.output().unwrap_or_else(|e| e));
+		println!(
+			"LOOK AT THIS\n\n\n{}\n\n\nSTOP LOOKING",
+			server.finish().unwrap().output().unwrap_or_else(|e| e)
+		);
 		assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
-		server.finish()
 	}
 
 	#[test]
@@ -859,7 +859,7 @@ mod cli_integration {
 		let _ =
 			futures::future::join(async { send_future.await.unwrap_err() }, signal_send_fut).await;
 
-		server.finish()
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -868,7 +868,7 @@ mod cli_integration {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "".to_owned(),
 				..Default::default()
 			})
@@ -895,13 +895,13 @@ mod cli_integration {
 				"unexpected output: {output:?}"
 			);
 
-			server.finish();
+			server.finish().unwrap();
 		}
 
 		// Deny all, denies all users to execute functions and access any network address
 		info!("* When all capabilities are denied");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-all".to_owned(),
 				..Default::default()
 			})
@@ -927,13 +927,13 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		// When all capabilities are allowed, anyone (including non-authenticated users) can execute functions and access any network address
 		info!("* When all capabilities are allowed");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--allow-all".to_owned(),
 				..Default::default()
 			})
@@ -953,12 +953,12 @@ mod cli_integration {
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
 
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		info!("* When scripting is denied");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-scripting".to_owned(),
 				..Default::default()
 			})
@@ -977,12 +977,12 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		info!("* When net is denied and function is enabled");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-net 127.0.0.1 --allow-funcs http::get".to_owned(),
 				..Default::default()
 			})
@@ -1003,12 +1003,12 @@ mod cli_integration {
 				),
 				"unexpected output: {output:?}"
 			);
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		info!("* When net is enabled for an IP and also denied for a specific port that doesn't match");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--allow-net 127.0.0.1 --deny-net 127.0.0.1:80 --allow-funcs http::get"
 					.to_owned(),
 				..Default::default()
@@ -1024,12 +1024,12 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		info!("* When a function family is denied");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-funcs http".to_owned(),
 				..Default::default()
 			})
@@ -1047,12 +1047,12 @@ mod cli_integration {
 				output.contains("Function 'http::get' is not allowed"),
 				"unexpected output: {output:?}"
 			);
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		info!("* When auth is enabled and guest access is allowed");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				auth: true,
 				args: "--allow-guests".to_owned(),
 				..Default::default()
@@ -1068,12 +1068,12 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		info!("* When auth is enabled and guest access is denied");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				auth: true,
 				args: "--deny-guests".to_owned(),
 				..Default::default()
@@ -1092,12 +1092,12 @@ mod cli_integration {
 				output.contains("Not enough permissions to perform this action"),
 				"unexpected output: {output:?}"
 			);
-			server.finish()
+			server.finish().unwrap();
 		}
 
 		info!("* When auth is disabled, guest access is always allowed");
 		{
-			let (addr, server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				auth: false,
 				args: "--deny-guests".to_owned(),
 				..Default::default()
@@ -1113,7 +1113,7 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
-			server.finish()
+			server.finish().unwrap();
 		}
 	}
 }
