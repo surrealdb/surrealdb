@@ -639,6 +639,7 @@ impl Parser<'_> {
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
 					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
+					let vector_type = self.try_parse_vector_type()?.unwrap_or(VectorType::F64);
 					let capacity = self
 						.eat(t!("CAPACITY"))
 						.then(|| self.next_token_value())
@@ -671,7 +672,51 @@ impl Parser<'_> {
 						doc_ids_order,
 						doc_ids_cache,
 						mtree_cache,
-						vector_type: VectorType::F64,
+						vector_type,
+					})
+				}
+				t!("HNSW") => {
+					self.pop_peek();
+					expected!(self, t!("DIMENSION"));
+					let dimension = self.next_token_value()?;
+					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
+					let vector_type = self.try_parse_vector_type()?.unwrap_or(VectorType::F64);
+					let m = self
+						.eat(t!("M"))
+						.then(|| self.next_token_value())
+						.transpose()?
+						.unwrap_or(12);
+					let m0 = self
+						.eat(t!("M0"))
+						.then(|| self.next_token_value())
+						.transpose()?
+						.unwrap_or(m * 2);
+					let ml = self
+						.eat(t!("ML"))
+						.then(|| self.next_token_value())
+						.transpose()?
+						.unwrap_or(1.0 / (m as f64).ln())
+						.into();
+					let ef_construction = self
+						.eat(t!("EFC"))
+						.then(|| self.next_token_value())
+						.transpose()?
+						.unwrap_or(150);
+					let heuristic = self.eat(t!("HEURISTIC"));
+					let extend_candidates = self.eat(t!("EXTEND_CANDIDATES"));
+					let keep_pruned_connections = self.eat(t!("KEEP_PRUNED_CONNECTIONS"));
+
+					res.index = Index::Hnsw(crate::sql::index::HnswParams {
+						dimension,
+						distance,
+						vector_type,
+						m,
+						m0,
+						ef_construction,
+						heuristic,
+						extend_candidates,
+						keep_pruned_connections,
+						ml,
 					})
 				}
 				t!("COMMENT") => {

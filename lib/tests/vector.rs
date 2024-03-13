@@ -155,7 +155,7 @@ async fn index_embedding() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_brut_force_knn() -> Result<(), Error> {
+async fn select_where_brute_force_knn() -> Result<(), Error> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
@@ -226,8 +226,8 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 		CREATE pts:3 SET point = [8,9,10,11];
 		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4;
 		LET $pt = [2,3,4,5];
-		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point knn<2,100> $pt;
-		SELECT id FROM pts WHERE point knn<2,100> $pt EXPLAIN;
+		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,100|> $pt;
+		SELECT id FROM pts WHERE point <|2,100|> $pt EXPLAIN;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
