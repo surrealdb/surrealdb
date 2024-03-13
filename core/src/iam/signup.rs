@@ -166,7 +166,7 @@ mod tests {
 							pass: crypto::argon2::generate($pass)
 						}
 					);
-			"#,
+				"#,
 				&sess,
 				None,
 			)
@@ -230,7 +230,7 @@ mod tests {
 							pass: crypto::argon2::generate($pass)
 						}
 					);
-			"#,
+				"#,
 				&sess,
 				None,
 			)

@@ -387,11 +387,12 @@ mod tests {
 							pass: crypto::argon2::generate($pass)
 						}
 					);
-					CREATE user:test CONTENT {
-						name: 'user',
-						pass: crypto::argon2::generate('pass')
-					}
-			"#,
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
 				&sess,
 				None,
 			)
@@ -455,11 +456,12 @@ mod tests {
 							pass: crypto::argon2::generate($pass)
 						}
 					);
-					CREATE user:test CONTENT {
-						name: 'user',
-						pass: crypto::argon2::generate('pass')
-					}
-			"#,
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
 				&sess,
 				None,
 			)
