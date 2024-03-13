@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 use tokio::time;
+use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
 
 pub const USER: &str = "root";
@@ -58,8 +59,8 @@ impl Child {
 
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
-	pub fn output(mut self) -> Result<String, String> {
-		let status = self.inner.take().unwrap().wait().unwrap();
+	pub fn output(&mut self) -> Result<String, String> {
+		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
 
 		let mut buf = self.stdout();
 		buf.push_str(&self.stderr());

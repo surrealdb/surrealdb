@@ -8,7 +8,9 @@ mod cli_integration {
 	use common::Socket;
 	use serde_json::json;
 	use std::fs::File;
+	use std::rc::Rc;
 	use std::time;
+	use std::time::Duration;
 	use surrealdb::fflags::FFLAGS;
 	use test_log::test;
 	use tokio::time::sleep;
@@ -17,8 +19,8 @@ mod cli_integration {
 
 	use super::common::{self, StartServerArguments, PASS, USER};
 
-	const ONE_SEC: time::Duration = time::Duration::new(1, 0);
-	const THREE_SEC: time::Duration = time::Duration::new(3, 0);
+	const ONE_SEC: Duration = Duration::new(1, 0);
+	const THREE_SEC: Duration = Duration::new(3, 0);
 
 	#[test]
 	fn version_command() {
@@ -704,17 +706,20 @@ mod cli_integration {
 		sleep(THREE_SEC).await;
 
 		info!("* Show changes after GC");
-		{
-			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
-			);
-			let output = common::run(&args)
-				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-				.output()
-				.unwrap();
-			let output = remove_debug_info(output);
-			assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
-		}
+		// {
+		let args =
+			format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome");
+		let output = common::run(&args)
+			.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+			.output()
+			.unwrap();
+		let output = remove_debug_info(output);
+		// println!("\n\n\nNOW\n\n\n{args}\n\n");
+		// sleep(Duration::from_secs(60 * 60 * 24)).await;
+		// }
+		let mut server = server;
+		println!("{}", server.output().unwrap_or_else(|e| e));
+		assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
 		server.finish()
 	}
 
