@@ -244,7 +244,7 @@ pub async fn db(
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			// TODO(gguillemas): Enforce session expiration once token expiration is configurable.
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
 			session.exp = None;
 			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 			// Check the authentication token
@@ -297,7 +297,7 @@ pub async fn ns(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
-			// TODO(gguillemas): Enforce session expiration once token expiration is configurable.
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
 			session.exp = None;
 			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 			// Check the authentication token
@@ -348,7 +348,7 @@ pub async fn root(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into());
-			// TODO(gguillemas): Enforce session expiration once token expiration is configurable.
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
 			session.exp = None;
 			session.au = Arc::new((&u, Level::Root).into());
 			// Check the authentication token

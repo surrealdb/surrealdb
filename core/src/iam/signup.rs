@@ -96,7 +96,7 @@ pub async fn sc(
 									iat: Some(Utc::now().timestamp()),
 									nbf: Some(Utc::now().timestamp()),
 									jti: Some(Uuid::new_v4().to_string()),
-									exp: exp,
+									exp,
 									ns: Some(ns.to_owned()),
 									db: Some(db.to_owned()),
 									sc: Some(sc.to_owned()),
