@@ -1,7 +1,10 @@
-use flume::{Receiver, Sender};
+use futures::{Stream, StreamExt};
+use futures_concurrency::stream::{IntoStream, Merge};
+use std::pin::Pin;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,6 +22,7 @@ use crate::Error as RootError;
 use surrealdb_core::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn as spawn_future;
+use tokio::sync::watch::{Receiver, Ref, Sender};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn_future;
 
@@ -30,25 +34,21 @@ const LOG: &str = "surrealdb::node";
 #[derive(Clone)]
 #[doc(hidden)]
 pub struct CancellationToken {
+	id: uuid::Uuid,
 	#[cfg(not(target_arch = "wasm32"))]
 	inner: tokio_util::sync::CancellationToken,
 	#[cfg(target_arch = "wasm32")]
 	inner: Arc<AtomicBool>,
-	cancellation_sender: Sender<()>,
-	/// Cancellation receiver that can be turned into a stream where necessary
-	pub(crate) cancellation_receiver: Receiver<()>,
 }
 
 impl CancellationToken {
 	pub fn new() -> Self {
-		let (sender, receiver) = flume::bounded(1);
 		Self {
+			id: uuid::Uuid::new_v4(),
 			#[cfg(not(target_arch = "wasm32"))]
 			inner: tokio_util::sync::CancellationToken::new(),
 			#[cfg(target_arch = "wasm32")]
 			inner: Arc::new(AtomicBool::new(false)),
-			cancellation_sender: sender,
-			cancellation_receiver: receiver,
 		}
 	}
 
@@ -61,7 +61,6 @@ impl CancellationToken {
 		self.inner.cancel();
 		#[cfg(target_arch = "wasm32")]
 		self.inner.store(true, Ordering::Relaxed);
-		self.cancellation_sender.send(()).unwrap();
 	}
 
 	/// True if cancelled
@@ -87,6 +86,24 @@ impl CancellationToken {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn into_inner(self) -> tokio_util::sync::CancellationToken {
 		self.inner
+	}
+}
+
+impl Stream for CancellationToken {
+	type Item = ();
+
+	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		trace!("Cancellation token {} has been polled", self.id);
+		match self.is_cancelled() {
+			true => {
+				println!("Cancellation token {} has sent ready poll response", self.id);
+				Poll::Ready(Some(()))
+			}
+			false => {
+				println!("Cancellation token {} has sent pending poll response", self.id);
+				Poll::Pending
+			}
+		}
 	}
 }
 
@@ -148,18 +165,13 @@ fn init(opt: &EngineOptions, ct: CancellationToken, dbs: Arc<Datastore>) -> Futu
 	let ret_status = completed_status.clone();
 	let _fut = spawn_future(async move {
 		let ticker = interval_ticker(tick_interval).await;
-		let streams = (ticker.map(Some), ct.cancellation_receiver.into_stream().map(|_| None));
-		let streams = streams.merge();
-		loop {
+		let streams = (ticker.map(Some), ct.map(|_| None));
+		let mut streams = streams.merge();
+
+		while let Some(_) = streams.next().await {
 			if let Err(e) = dbs.tick().await {
 				error!("Error running node agent tick: {}", e);
-			}
-			tokio::select! {
-				_ = ct.cancelled() => {
-					info!(target: LOG, "Gracefully stopping node agent");
-					break;
-				}
-				_ = tokio::time::sleep(ticker) => {}
+				break;
 			}
 		}
 
@@ -187,18 +199,15 @@ fn live_query_change_feed(ct: CancellationToken, kvs: Arc<Datastore>) -> FutureT
 			return;
 		}
 		let tick_interval = Duration::from_secs(1);
+		let ticker = interval_ticker(tick_interval).await;
+		let streams = (ticker.map(Some), ct.map(|_| None));
+		let mut streams = streams.merge();
 
 		let opt = Options::default();
-		loop {
+		while let Some(_) = streams.next().await {
 			if let Err(e) = kvs.process_lq_notifications(&opt).await {
-				error!("Error running node agent live query tick: {}", e);
-			}
-			tokio::select! {
-				  _ = ct.cancelled() => {
-					   info!(target: LOG, "Gracefully stopping live query node agent");
-					   break;
-				  }
-				  _ = tokio::time::sleep(tick_interval) => {}
+				error!("Error running node agent tick: {}", e);
+				break;
 			}
 		}
 		info!("Stopped live query node agent");
