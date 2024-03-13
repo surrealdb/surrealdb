@@ -70,20 +70,33 @@ pub async fn sc(
 								// Create the authentication key
 								let key = EncodingKey::from_secret(sv.code.as_ref());
 								// Create the authentication claim
+								let exp = Some(
+									match sv.session {
+										Some(v) => {
+											// The defined session duration must be valid
+											match Duration::from_std(v.0) {
+												// The resulting session expiration must be valid
+												Ok(d) => match Utc::now().checked_add_signed(d) {
+													Some(exp) => exp,
+													None => {
+														return Err(Error::InvalidSessionExpiration)
+													}
+												},
+												Err(_) => {
+													return Err(Error::InvalidSessionDuration)
+												}
+											}
+										}
+										_ => Utc::now() + Duration::hours(1),
+									}
+									.timestamp(),
+								);
 								let val = Claims {
 									iss: Some(SERVER_NAME.to_owned()),
 									iat: Some(Utc::now().timestamp()),
 									nbf: Some(Utc::now().timestamp()),
 									jti: Some(Uuid::new_v4().to_string()),
-									exp: Some(
-										match sv.session {
-											Some(v) => {
-												Utc::now() + Duration::from_std(v.0).unwrap()
-											}
-											_ => Utc::now() + Duration::hours(1),
-										}
-										.timestamp(),
-									),
+									exp,
 									ns: Some(ns.to_owned()),
 									db: Some(db.to_owned()),
 									sc: Some(sc.to_owned()),
@@ -100,6 +113,7 @@ pub async fn sc(
 								session.db = Some(db.to_owned());
 								session.sc = Some(sc.to_owned());
 								session.sd = Some(Value::from(rid.to_owned()));
+								session.exp = exp;
 								session.au = Arc::new(Auth::new(Actor::new(
 									rid.to_string(),
 									Default::default(),
@@ -125,5 +139,124 @@ pub async fn sc(
 			}
 		}
 		_ => Err(Error::NoScopeFound),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::iam::Role;
+	use std::collections::HashMap;
+
+	#[tokio::test]
+	async fn test_scope_signup() {
+		// Test with valid parameters
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE SCOPE user SESSION 1h
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					);
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+			let res = sc(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signup: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert!(sess.au.id().starts_with("user:"));
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			// Scope users should not have roles.
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Expiration should always be set for tokens issued by SurrealDB
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to follow scope duration"
+			);
+		}
+
+		// Test with invalid parameters
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE SCOPE user SESSION 1h
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					);
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			// Password is missing
+			vars.insert("user", "user".into());
+			let res = sc(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_err(), "Unexpected successful signup: {:?}", res);
+		}
 	}
 }
