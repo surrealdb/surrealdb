@@ -362,3 +362,285 @@ pub async fn root(
 		_ => Err(Error::InvalidAuth),
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::iam::Role;
+
+	#[tokio::test]
+	async fn test_signin_db() {
+		//
+		// Test without roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = db(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+				.await
+				.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = db(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+		}
+
+		// Test invalid password
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = db(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				"invalid".to_string(),
+			)
+			.await;
+
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_signin_ns() {
+		//
+		// Test without roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = ns(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+				.await
+				.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = ns(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+		}
+
+		// Test invalid password
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = ns(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"user".to_string(),
+				"invalid".to_string(),
+			)
+			.await;
+
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_signin_root() {
+		//
+		// Test without roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner();
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = root(
+				&ds,
+				&mut sess,
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_root());
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+		}
+
+		//
+		// Test with roles defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner();
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+				.await
+				.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = root(
+				&ds,
+				&mut sess,
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_root());
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
+			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+		}
+
+		// Test invalid password
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass'", &sess, None).await.unwrap();
+
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = root(
+				&ds,
+				&mut sess,
+				"user".to_string(),
+				"invalid".to_string(),
+			)
+			.await;
+
+			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
+		}
+	}
+}
