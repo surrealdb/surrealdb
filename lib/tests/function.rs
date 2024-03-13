@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb_core::sql::{self, Number, Value};
+use surrealdb::sql::{self, Number, Value};
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<(), Error> {
 	let db = new_ds().await?;
