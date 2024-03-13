@@ -1,6 +1,6 @@
 use flume::Sender;
-use futures::{Stream, StreamExt};
-use futures_concurrency::stream::{IntoStream, Merge};
+use futures::StreamExt;
+use futures_concurrency::stream::Merge;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -21,7 +21,6 @@ use crate::Error as RootError;
 use surrealdb_core::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn as spawn_future;
-use tokio::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn_future;
 
