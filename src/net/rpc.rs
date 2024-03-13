@@ -1,30 +1,48 @@
+use std::collections::BTreeMap;
+
 use crate::cnf;
+use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
+use crate::rpc::failure::Failure;
 use crate::rpc::format::Format;
 use crate::rpc::format::PROTOCOLS;
+use crate::rpc::request::Request;
 use crate::rpc::WEBSOCKETS;
 use axum::routing::get;
+use axum::routing::post;
+use axum::TypedHeader;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
 	Extension, Router,
 };
+use bytes::Bytes;
 use http::HeaderValue;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
+use surrealdb::rpc::method::Method;
+use surrealdb::sql::Array;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
+
+use super::headers::Accept;
+use super::headers::ContentType;
+use super::output;
+
+use surrealdb::rpc::context::RpcContext;
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
 	B: HttpBody + Send + 'static,
+	B::Data: Send,
+	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
-	Router::new().route("/rpc", get(handler))
+	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
 }
 
-async fn handler(
+async fn get_handler(
 	ws: WebSocketUpgrade,
 	Extension(id): Extension<RequestId>,
 	Extension(sess): Extension<Session>,
@@ -75,4 +93,49 @@ async fn handle_socket(ws: WebSocket, sess: Session, id: Uuid) {
 	let rpc = Connection::new(id, sess, format);
 	// Serve the socket connection requests
 	Connection::serve(rpc, ws).await;
+}
+
+async fn post_handler(
+	Extension(session): Extension<Session>,
+	output: Option<TypedHeader<Accept>>,
+	content_type: TypedHeader<ContentType>,
+	body: Bytes,
+) -> Result<impl IntoResponse, impl IntoResponse> {
+	let kvs = DB.get().unwrap();
+
+	let mut rpc_ctx = RpcContext {
+		session,
+		kvs,
+		vars: BTreeMap::new(),
+		lq_handler: None,
+	};
+
+	let req: Request = match *content_type {
+		ContentType::ApplicationJson => surrealdb::sql::value(
+			std::str::from_utf8(&body).map_err(|e| Error::Other(e.to_string()))?,
+		)?
+		.try_into()
+		.or(Err(Error::Other("Error:".to_string())))?,
+		ContentType::ApplicationCbor => todo!(),
+		ContentType::ApplicationPack => todo!(),
+		_ => return Err(Error::InvalidType),
+	};
+
+	// let method = Method::parse("info");
+	let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
+
+	match res {
+		Ok(res) => match output.as_deref() {
+			// Simple serialization
+			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
+			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
+			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
+			// Internal serialization
+			Some(Accept::Surrealdb) => Ok(output::full(&res)),
+			// An incorrect content-type was requested
+			_ => Err(Error::InvalidType),
+		},
+		// There was an error when executing the query
+		Err(err) => Err(Error::from(err)),
+	}
 }

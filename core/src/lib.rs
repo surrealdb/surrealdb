@@ -12,6 +12,7 @@ mod exe;
 mod fnc;
 mod vs;
 
+pub mod rpc;
 pub mod sql;
 
 #[doc(hidden)]
