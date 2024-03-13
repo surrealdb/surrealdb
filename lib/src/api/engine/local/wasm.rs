@@ -207,6 +207,5 @@ pub(crate) fn router(
 			let _ = chan.send(());
 		});
 		ct.cancel();
-		tasks.resolve().await.unwrap();
 	});
 }

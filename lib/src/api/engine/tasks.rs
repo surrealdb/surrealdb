@@ -154,7 +154,7 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 	#[cfg(not(target_arch = "wasm32"))]
 	use tokio::{time, time::MissedTickBehavior};
 	#[cfg(target_arch = "wasm32")]
-	use wasmtimer::{tokio as time, MissedTickBehavior};
+	use wasmtimer::{tokio as time, tokio::MissedTickBehavior};
 
 	let mut interval = time::interval(interval);
 	// Don't bombard the database if we miss some ticks
