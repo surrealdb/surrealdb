@@ -484,14 +484,9 @@ mod tests {
 				ns: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = ns(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"user".to_string(),
-				"pass".to_string(),
-			)
-			.await;
+			let res =
+				ns(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
+					.await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
@@ -519,14 +514,9 @@ mod tests {
 				ns: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = ns(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"user".to_string(),
-				"pass".to_string(),
-			)
-			.await;
+			let res =
+				ns(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
+					.await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
@@ -548,14 +538,9 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = ns(
-				&ds,
-				&mut sess,
-				"test".to_string(),
-				"user".to_string(),
-				"invalid".to_string(),
-			)
-			.await;
+			let res =
+				ns(&ds, &mut sess, "test".to_string(), "user".to_string(), "invalid".to_string())
+					.await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
@@ -575,13 +560,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = root(
-				&ds,
-				&mut sess,
-				"user".to_string(),
-				"pass".to_string(),
-			)
-			.await;
+			let res = root(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			assert_eq!(sess.au.id(), "user");
@@ -606,13 +585,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = root(
-				&ds,
-				&mut sess,
-				"user".to_string(),
-				"pass".to_string(),
-			)
-			.await;
+			let res = root(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			assert_eq!(sess.au.id(), "user");
@@ -632,13 +605,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = root(
-				&ds,
-				&mut sess,
-				"user".to_string(),
-				"invalid".to_string(),
-			)
-			.await;
+			let res = root(&ds, &mut sess, "user".to_string(), "invalid".to_string()).await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}
