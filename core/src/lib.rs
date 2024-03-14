@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "ci", deny(warnings))]
+
 #[macro_use]
 extern crate tracing;
 extern crate core;

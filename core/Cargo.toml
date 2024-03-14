@@ -53,6 +53,7 @@ experimental-parser = ["dep:phf", "dep:unicase"]
 sql2 = []
 # Private features
 kv-fdb = ["tokio/time"]
+ci = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

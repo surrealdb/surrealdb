@@ -444,6 +444,8 @@ async fn export(
 	chn: channel::Sender<Vec<u8>>,
 	ml_config: Option<MlConfig>,
 ) -> Result<()> {
+	use tracing::trace;
+
 	match ml_config {
 		#[cfg(any(feature = "ml", feature = "ml2"))]
 		Some(MlConfig::Export {

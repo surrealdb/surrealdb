@@ -1279,19 +1279,21 @@ impl Datastore {
 			_ => unreachable!(),
 		};
 
-		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
-			channel::bounded(LQ_CHANNEL_SIZE);
-
 		#[allow(unreachable_code)]
-		Ok(Transaction {
-			inner,
-			cache: super::cache::Cache::default(),
-			cf: cf::Writer::new(),
-			vso: self.versionstamp_oracle.clone(),
-			clock: self.clock.clone(),
-			prepared_async_events: (Arc::new(send), Arc::new(recv)),
-			engine_options: self.engine_options,
-		})
+		{
+			let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
+				channel::bounded(LQ_CHANNEL_SIZE);
+
+			Ok(Transaction {
+				inner,
+				cache: super::cache::Cache::default(),
+				cf: cf::Writer::new(),
+				vso: self.versionstamp_oracle.clone(),
+				clock: self.clock.clone(),
+				prepared_async_events: (Arc::new(send), Arc::new(recv)),
+				engine_options: self.engine_options,
+			})
+		}
 	}
 
 	/// Parse and execute an SQL query
