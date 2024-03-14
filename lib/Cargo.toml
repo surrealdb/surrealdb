@@ -59,6 +59,7 @@ sql2 = ["surrealdb-core/sql2"]
 parser2 = ["surrealdb-core/experimental-parser"]
 # Private features
 kv-fdb = ["tokio/time"]
+ci = ["surrealdb-core/ci"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
