@@ -39,8 +39,8 @@ impl Child {
 			.inner
 			.as_mut()
 			.map(|child| child.kill().map_err(|e| format!("failed to kill: {}", e)))
-			.unwrap_or(Err(format!("no inner")));
-		a.map(|ok| self)
+			.unwrap_or(Err("no inner".to_string()));
+		a.map(|_ok| self)
 	}
 
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
