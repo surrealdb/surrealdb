@@ -13,6 +13,7 @@ pub mod any;
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
+#[doc(hidden)]
 pub mod tasks;
 
 use crate::sql::statements::CreateStatement;
