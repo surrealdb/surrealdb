@@ -36,6 +36,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::headers::{DB, ID, NS};
+use surrealdb::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -60,14 +61,16 @@ const LOG: &str = "surrealdb::net";
 #[derive(Clone)]
 struct AppState {
 	client_ip: client_ip::ClientIp,
+	datastore: Arc<Datastore>,
 }
 
-pub async fn init(ct: CancellationToken) -> Result<(), Error> {
+pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
 	let app_state = AppState {
 		client_ip: opt.client_ip,
+		datastore: ds.clone(),
 	};
 
 	// Specify headers to be obfuscated from all requests/responses
@@ -176,7 +179,8 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 	// Setup the graceful shutdown handler
 	let shutdown_handler = graceful_shutdown(ct.clone(), handle.clone());
 	// Spawn a task to handle notifications
-	tokio::spawn(async move { notifications(ct.clone()).await });
+	let _ds = ds.clone();
+	tokio::spawn(async move { notifications(_ds, ct.clone()).await });
 	// If a certificate and key are specified then setup TLS
 	if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// Configure certificate and private key used by https

@@ -1,7 +1,6 @@
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
 use crate::cnf::{WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY};
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::args::Take;
 use crate::rpc::failure::Failure;
@@ -22,6 +21,7 @@ use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::QueryType;
 use surrealdb::dbs::Response;
 use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
@@ -36,6 +36,7 @@ use uuid::Uuid;
 pub struct Connection {
 	pub(crate) id: Uuid,
 	pub(crate) format: Format,
+	pub(crate) datastore: Arc<Datastore>,
 	pub(crate) session: Session,
 	pub(crate) vars: BTreeMap<String, Value>,
 	pub(crate) limiter: Arc<Semaphore>,
@@ -45,13 +46,19 @@ pub struct Connection {
 
 impl Connection {
 	/// Instantiate a new RPC
-	pub fn new(id: Uuid, mut session: Session, format: Format) -> Arc<RwLock<Connection>> {
+	pub fn new(
+		id: Uuid,
+		ds: Arc<Datastore>,
+		mut session: Session,
+		format: Format,
+	) -> Arc<RwLock<Connection>> {
 		// Enable real-time mode
 		session.rt = true;
 		// Create and store the RPC connection
 		Arc::new(RwLock::new(Connection {
 			id,
 			format,
+			datastore: ds,
 			session,
 			vars: BTreeMap::new(),
 			limiter: Arc::new(Semaphore::new(*WEBSOCKET_MAX_CONCURRENT_REQUESTS)),
@@ -111,7 +118,8 @@ impl Connection {
 		});
 
 		// Garbage collect queries
-		if let Err(e) = DB.get().unwrap().garbage_collect_dead_session(gc.as_slice()).await {
+		if let Err(e) = rpc.read().await.datastore.garbage_collect_dead_session(gc.as_slice()).await
+		{
 			error!("Failed to garbage collect dead sessions: {:?}", e);
 		}
 
@@ -492,16 +500,14 @@ impl Connection {
 	}
 
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
-		let kvs = DB.get().unwrap();
-		surrealdb::iam::signup::signup(kvs, &mut self.session, vars)
+		surrealdb::iam::signup::signup(&self.datastore, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
 	}
 
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
-		let kvs = DB.get().unwrap();
-		surrealdb::iam::signin::signin(kvs, &mut self.session, vars)
+		surrealdb::iam::signin::signin(&self.datastore, &mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
@@ -513,8 +519,7 @@ impl Connection {
 	}
 
 	async fn authenticate(&mut self, token: Strand) -> Result<Value, Error> {
-		let kvs = DB.get().unwrap();
-		surrealdb::iam::verify::token(kvs, &mut self.session, &token.0).await?;
+		surrealdb::iam::verify::token(&self.datastore, &mut self.session, &token.0).await?;
 		Ok(Value::None)
 	}
 
@@ -523,12 +528,10 @@ impl Connection {
 	// ------------------------------
 
 	async fn info(&self) -> Result<Value, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, None).await?;
+		let mut res = self.datastore.execute(sql, &self.session, None).await?;
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
@@ -540,15 +543,13 @@ impl Connection {
 	// ------------------------------
 
 	async fn set(&mut self, key: Strand, val: Value) -> Result<Value, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
 		// Specify the query parameters
 		let var = Some(map! {
 			key.0.clone() => Value::None,
 			=> &self.vars
 		});
 		// Compute the specified parameter
-		match kvs.compute(val, &self.session, var).await? {
+		match self.datastore.compute(val, &self.session, var).await? {
 			// Remove the variable if undefined
 			Value::None => self.vars.remove(&key.0),
 			// Store the variable if defined
@@ -612,8 +613,7 @@ impl Connection {
 	async fn select(&self, what: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
+
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $what";
 		// Specify the query parameters
@@ -622,7 +622,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = self.datastore.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -639,8 +639,7 @@ impl Connection {
 	async fn insert(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
+
 		// Specify the SQL query string
 		let sql = "INSERT INTO $what $data RETURN AFTER";
 		// Specify the query parameters
@@ -650,7 +649,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = self.datastore.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -667,8 +666,7 @@ impl Connection {
 	async fn create(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
+
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"CREATE $what RETURN AFTER"
@@ -682,7 +680,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = self.datastore.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -699,8 +697,7 @@ impl Connection {
 	async fn update(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
+
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"UPDATE $what RETURN AFTER"
@@ -714,7 +711,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = self.datastore.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -731,8 +728,7 @@ impl Connection {
 	async fn merge(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
+
 		// Specify the SQL query string
 		let sql = if data.is_none_or_null() {
 			"UPDATE $what RETURN AFTER"
@@ -746,7 +742,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = self.datastore.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -763,8 +759,7 @@ impl Connection {
 	async fn patch(&self, what: Value, data: Value, diff: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
+
 		// Specify the SQL query string
 		let sql = match diff.is_true() {
 			true => "UPDATE $what PATCH $data RETURN DIFF",
@@ -777,7 +772,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = self.datastore.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -794,8 +789,7 @@ impl Connection {
 	async fn delete(&self, what: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
-		// Get a database reference
-		let kvs = DB.get().unwrap();
+
 		// Specify the SQL query string
 		let sql = "DELETE $what RETURN BEFORE";
 		// Specify the query parameters
@@ -804,7 +798,7 @@ impl Connection {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = self.datastore.execute(sql, &self.session, var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -819,14 +813,12 @@ impl Connection {
 	// ------------------------------
 
 	async fn query(&self, sql: Value) -> Result<Vec<Response>, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
 		// Specify the query parameters
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
 		let res = match sql {
-			Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
-			Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
+			Value::Query(sql) => self.datastore.process(sql, &self.session, var).await?,
+			Value::Strand(sql) => self.datastore.execute(&sql, &self.session, var).await?,
 			_ => unreachable!(),
 		};
 
@@ -839,14 +831,12 @@ impl Connection {
 	}
 
 	async fn query_with(&self, sql: Value, mut vars: Object) -> Result<Vec<Response>, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
 		// Specify the query parameters
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
 		let res = match sql {
-			Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
-			Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
+			Value::Query(sql) => self.datastore.process(sql, &self.session, var).await?,
+			Value::Strand(sql) => self.datastore.execute(&sql, &self.session, var).await?,
 			_ => unreachable!(),
 		};
 		// Post-process hooks for web layer

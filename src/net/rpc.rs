@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::cnf;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
@@ -13,8 +15,11 @@ use axum::{
 use http::HeaderValue;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
+
+use super::AppState;
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -26,6 +31,7 @@ where
 
 async fn handler(
 	ws: WebSocketUpgrade,
+	Extension(state): Extension<AppState>,
 	Extension(id): Extension<RequestId>,
 	Extension(sess): Extension<Session>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -59,10 +65,10 @@ async fn handler(
 		// Set the maximum WebSocket message size
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Handle the WebSocket upgrade and process messages
-		.on_upgrade(move |socket| handle_socket(socket, sess, id)))
+		.on_upgrade(move |socket| handle_socket(socket, state.datastore, sess, id)))
 }
 
-async fn handle_socket(ws: WebSocket, sess: Session, id: Uuid) {
+async fn handle_socket(ws: WebSocket, ds: Arc<Datastore>, sess: Session, id: Uuid) {
 	// Check if there is a WebSocket protocol specified
 	let format = match ws.protocol().map(HeaderValue::to_str) {
 		// Any selected protocol will always be a valie value
@@ -72,7 +78,7 @@ async fn handle_socket(ws: WebSocket, sess: Session, id: Uuid) {
 	};
 	//
 	// Create a new connection instance
-	let rpc = Connection::new(id, sess, format);
+	let rpc = Connection::new(id, ds, sess, format);
 	// Serve the socket connection requests
 	Connection::serve(rpc, ws).await;
 }

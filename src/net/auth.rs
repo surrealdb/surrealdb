@@ -15,7 +15,7 @@ use surrealdb::{
 };
 use tower_http::auth::AsyncAuthorizeRequest;
 
-use crate::{dbs::DB, err::Error};
+use crate::err::Error;
 
 use super::{
 	client_ip::ExtractClientIP,
@@ -76,8 +76,6 @@ where
 }
 
 async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
-	let kvs = DB.get().unwrap();
-
 	let or = if let Ok(or) = parts.extract::<TypedHeader<Origin>>().await {
 		if !or.is_null() {
 			Some(or.to_string())
@@ -139,9 +137,9 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {
-		if kvs.is_auth_level_enabled() {
+		if state.datastore.is_auth_level_enabled() {
 			basic(
-				kvs,
+				&state.datastore,
 				&mut session,
 				au.username(),
 				au.password(),
@@ -150,13 +148,13 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 			)
 			.await?;
 		} else {
-			basic_legacy(kvs, &mut session, au.username(), au.password()).await?;
+			basic_legacy(&state.datastore, &mut session, au.username(), au.password()).await?;
 		}
 	};
 
 	// If Token authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await {
-		token(kvs, &mut session, au.token()).await?;
+		token(&state.datastore, &mut session, au.token()).await?;
 	};
 
 	Ok(session)

@@ -5,7 +5,6 @@ pub mod format;
 pub mod request;
 pub mod response;
 
-use crate::dbs::DB;
 use crate::rpc::connection::Connection;
 use crate::rpc::response::success;
 use crate::telemetry::metrics::ws::NotificationContext;
@@ -14,6 +13,7 @@ use opentelemetry::Context as TelemetryContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb::kvs::Datastore;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -32,9 +32,9 @@ pub(crate) static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(WebSockets::default);
 pub(crate) static LIVE_QUERIES: Lazy<LiveQueries> = Lazy::new(LiveQueries::default);
 
 /// Performs notification delivery to the WebSockets
-pub(crate) async fn notifications(canceller: CancellationToken) {
+pub(crate) async fn notifications(ds: Arc<Datastore>, canceller: CancellationToken) {
 	// Listen to the notifications channel
-	if let Some(channel) = DB.get().unwrap().notifications() {
+	if let Some(channel) = ds.notifications() {
 		// Loop continuously
 		loop {
 			tokio::select! {

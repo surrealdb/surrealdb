@@ -1,13 +1,9 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-use std::sync::OnceLock;
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
-
-pub static DB: OnceLock<Datastore> = OnceLock::new();
-
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
 	#[arg(help = "Whether strict mode is enabled on this database instance")]
@@ -215,7 +211,7 @@ pub async fn init(
 		auth_level_enabled,
 		caps,
 	}: StartCommandDbsOptions,
-) -> Result<(), Error> {
+) -> Result<Datastore, Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Log specified strict mode
@@ -265,11 +261,8 @@ pub async fn init(
 		dbs.setup_initial_creds(user, opt.pass.as_ref().unwrap()).await?;
 	}
 
-	// Store database instance
-	let _ = DB.set(dbs);
-
 	// All ok
-	Ok(())
+	Ok(dbs)
 }
 
 #[cfg(test)]
