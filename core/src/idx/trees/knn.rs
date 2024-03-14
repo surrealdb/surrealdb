@@ -676,7 +676,7 @@ pub(super) mod tests {
 		pub(in crate::idx::trees) fn new(dist: &Distance, dim: usize) -> Self {
 			match dist {
 				Distance::Jaccard => Self::Int(0, (dim * 3) as i64),
-				Distance::Hamming => Self::Int(0, 1),
+				Distance::Hamming => Self::Int(0, 2),
 				_ => Self::Float(-20.0, 20.0),
 			}
 		}

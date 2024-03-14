@@ -275,30 +275,24 @@ impl Vector {
 	}
 
 	fn jaccard_f64(a: &[f64], b: &[f64]) -> f64 {
-		let set_a: HashSet<u64> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
-		let set_b: HashSet<u64> = HashSet::from_iter(b.iter().map(|f| f.to_bits()));
-		let intersection_size = set_a.intersection(&set_b).count() as f64;
-		let union_size = set_a.union(&set_b).count() as f64;
-		intersection_size / union_size
+		let mut union: HashSet<u64> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
+		let intersection_size = b.iter().filter(|n| !union.insert(n.to_bits())).count() as f64;
+		intersection_size / union.len() as f64
 	}
 
 	fn jaccard_f32(a: &[f32], b: &[f32]) -> f64 {
-		let set_a: HashSet<u32> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
-		let set_b: HashSet<u32> = HashSet::from_iter(b.iter().map(|f| f.to_bits()));
-		let intersection_size = set_a.intersection(&set_b).count() as f64;
-		let union_size = set_a.union(&set_b).count() as f64;
-		intersection_size / union_size
+		let mut union: HashSet<u32> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
+		let intersection_size = b.iter().filter(|n| !union.insert(n.to_bits())).count() as f64;
+		intersection_size / union.len() as f64
 	}
 
 	fn jaccard_integers<T>(a: &[T], b: &[T]) -> f64
 	where
 		T: Eq + Hash,
 	{
-		let set_a: HashSet<&T> = HashSet::from_iter(a.iter());
-		let set_b: HashSet<&T> = HashSet::from_iter(b.iter());
-		let intersection_size = set_a.intersection(&set_b).count() as f64;
-		let union_size = set_a.union(&set_b).count() as f64;
-		intersection_size / union_size
+		let mut union: HashSet<&T> = HashSet::from_iter(a.iter());
+		let intersection_size = b.iter().filter(|n| !union.insert(n)).count() as f64;
+		intersection_size / union.len() as f64
 	}
 
 	pub(crate) fn jaccard_similarity(&self, other: &Self) -> f64 {
@@ -396,23 +390,39 @@ impl Distance {
 #[cfg(test)]
 mod tests {
 	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
+	use crate::idx::trees::vector::Vector;
 	use crate::sql::index::{Distance, VectorType};
+	use crate::sql::Array;
 
-	fn test_distance(dist: Distance, size: usize, dim: usize) {
+	fn test_distance(dist: Distance, a1: &[f64], a2: &[f64], res: f64) {
+		// Convert the arrays to Vec<Number>
+		let mut v1 = vec![];
+		a1.iter().for_each(|&n| v1.push(n.into()));
+		let mut v2 = vec![];
+		a2.iter().for_each(|&n| v2.push(n.into()));
+
+		// Check the generic distance implementation
+		assert_eq!(dist.compute(&v1, &v2).unwrap(), res.into());
+
+		// Check the "Vector" optimised implementations
+		for t in [VectorType::F64] {
+			let v1 = Vector::try_from_array(t, Array::from(v1.clone())).unwrap();
+			let v2 = Vector::try_from_array(t, Array::from(v2.clone())).unwrap();
+			assert_eq!(dist.calculate(&v1, &v2), res);
+		}
+	}
+
+	fn test_distance_collection(dist: Distance, size: usize, dim: usize) {
 		let mut rng = get_seed_rnd();
-		let mut coll = Vec::with_capacity(size);
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
 			let gen = RandomItemGenerator::new(&dist, dim);
-			for _ in 0..size {
+			let mut num_zero = 0;
+			for i in 0..size {
 				let v1 = new_random_vec(&mut rng, vt, dim, &gen);
 				let v2 = new_random_vec(&mut rng, vt, dim, &gen);
-				coll.push((v1, v2));
-			}
-			let mut num_zero = 0;
-			for (i, (v1, v2)) in coll.iter().enumerate() {
-				let d = dist.calculate(v1, v2);
+				let d = dist.calculate(&v1, &v2);
 				assert!(
 					d.is_finite() && !d.is_nan(),
 					"i: {i} - vt: {vt} - v1: {v1:?} - v2: {v2:?}"
@@ -430,39 +440,52 @@ mod tests {
 
 	#[test]
 	fn test_distance_chebyshev() {
-		test_distance(Distance::Chebyshev, 2000, 1536);
+		test_distance_collection(Distance::Chebyshev, 2000, 1536);
+		test_distance(Distance::Chebyshev, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 1.0);
 	}
 
 	#[test]
 	fn test_distance_cosine() {
-		test_distance(Distance::Cosine, 2000, 1536);
+		test_distance_collection(Distance::Cosine, 2000, 1536);
+		test_distance(Distance::Cosine, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 0.007416666029069652);
 	}
 
 	#[test]
 	fn test_distance_euclidean() {
-		test_distance(Distance::Euclidean, 2000, 1536);
+		test_distance_collection(Distance::Euclidean, 2000, 1536);
+		test_distance(Distance::Euclidean, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 1.7320508075688772);
 	}
 
 	#[test]
 	fn test_distance_hamming() {
-		test_distance(Distance::Hamming, 2000, 1536);
+		test_distance_collection(Distance::Hamming, 2000, 1536);
+		test_distance(Distance::Hamming, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 3.0);
 	}
 
 	#[test]
 	fn test_distance_jaccard() {
-		test_distance(Distance::Jaccard, 1000, 1536);
+		test_distance_collection(Distance::Jaccard, 1000, 768);
+		test_distance(Distance::Jaccard, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 0.5);
 	}
 	#[test]
 	fn test_distance_manhattan() {
-		test_distance(Distance::Manhattan, 2000, 1536);
+		test_distance_collection(Distance::Manhattan, 2000, 1536);
+		test_distance(Distance::Manhattan, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 3.0);
 	}
 	#[test]
 	fn test_distance_minkowski() {
-		test_distance(Distance::Minkowski(2.into()), 2000, 1536);
+		test_distance_collection(Distance::Minkowski(3.into()), 2000, 1536);
+		test_distance(
+			Distance::Minkowski(3.into()),
+			&[1.0, 2.0, 3.0],
+			&[2.0, 3.0, 4.0],
+			1.4422495703074083,
+		);
 	}
 
 	#[test]
 	fn test_distance_pearson() {
-		test_distance(Distance::Pearson, 2000, 1536);
+		test_distance_collection(Distance::Pearson, 2000, 1536);
+		test_distance(Distance::Pearson, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 1.0);
 	}
 }
