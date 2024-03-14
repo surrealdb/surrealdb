@@ -44,6 +44,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::watch;
+use tracing::{error, trace, warn};
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;

@@ -24,6 +24,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
+use tracing::trace;
 use url::Url;
 use wasm_bindgen_futures::spawn_local;
 

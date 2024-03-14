@@ -37,6 +37,7 @@ use std::task::Poll;
 use std::time::Duration;
 use surrealdb_core::dbs::Options;
 use tokio::sync::watch;
+use tracing::{error, trace, warn};
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
 use wasmtimer::tokio::MissedTickBehavior;
