@@ -1,4 +1,3 @@
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
@@ -14,6 +13,7 @@ use surrealdb::sql::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::headers::Accept;
+use super::AppState;
 
 const MAX: usize = 1024; // 1 KiB
 
@@ -48,19 +48,20 @@ where
 }
 
 async fn handler(
+	Extension(state): Extension<AppState>,
 	Extension(mut session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-	// Get a database reference
-	let kvs = DB.get().unwrap();
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match surrealdb::iam::signup::signup(kvs, &mut session, vars).await.map_err(Error::from)
+			match surrealdb::iam::signup::signup(&state.datastore, &mut session, vars)
+				.await
+				.map_err(Error::from)
 			{
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {

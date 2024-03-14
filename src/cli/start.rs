@@ -13,6 +13,7 @@ use clap::Args;
 use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
 use tokio_util::sync::CancellationToken;
@@ -180,14 +181,14 @@ pub async fn init(
 	let ct = CancellationToken::new();
 	// Initiate environment
 	env::init().await?;
-	// Start the kvs server
-	dbs::init(dbs).await?;
+	// Start the datastore
+	let ds = Arc::new(dbs::init(dbs).await?);
 	// Start the node agent
 	// This is equivalent to run_maintenance in native/wasm drivers
-	let nd = node::init(ct.clone());
-	let lq = node::live_query_change_feed(ct.clone());
+	let nd = node::init(ds.clone(), ct.clone());
+	let lq = node::live_query_change_feed(ds.clone(), ct.clone());
 	// Start the web server
-	net::init(ct).await?;
+	net::init(ds, ct).await?;
 	// Wait for the node agent to stop
 	if let Err(e) = nd.await {
 		error!("Node agent failed while running: {}", e);

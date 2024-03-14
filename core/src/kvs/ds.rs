@@ -835,7 +835,6 @@ impl Datastore {
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
-		trace!("Ticking at timestamp {}", ts);
 		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
 		// TODO Add LQ GC
@@ -844,7 +843,6 @@ impl Datastore {
 	}
 
 	// save_timestamp_for_versionstamp saves the current timestamp for the each database's current versionstamp.
-	// Note: the returned VS is flawed, as there are multiple {ts: vs} mappings per (ns, db)
 	pub(crate) async fn save_timestamp_for_versionstamp(
 		&self,
 		ts: u64,
@@ -904,7 +902,7 @@ impl Datastore {
 				trace!(
 					"There were no changes in the change feed for {:?} from versionstamp {:?}",
 					selector,
-					conv::versionstamp_to_u64(vs)
+					vs
 				)
 			}
 			if let Some(change_set) = res.last() {
@@ -1147,7 +1145,6 @@ impl Datastore {
 			let dbs = dbs.as_ref();
 			for db in dbs {
 				let db = db.name.as_str();
-				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
 				vs = Some(tx.set_timestamp_for_versionstamp(ts, ns, db, true).await?);
 			}
 		}
