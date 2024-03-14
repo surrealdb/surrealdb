@@ -180,7 +180,7 @@ mod test {
 	pub async fn tasks_complete() {
 		let opt = EngineOptions::default();
 		let dbs = Arc::new(surrealdb_core::kvs::Datastore::new("memory").await.unwrap());
-		let (val, mut chans) = start_tasks(&opt, dbs.clone());
+		let (val, chans) = start_tasks(&opt, dbs.clone());
 		for chan in chans {
 			chan.send(()).unwrap();
 		}
