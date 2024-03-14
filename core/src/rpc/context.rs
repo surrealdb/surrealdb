@@ -18,31 +18,32 @@ pub struct RpcContext<'a> {
 }
 
 impl<'a> RpcContext<'a> {
-	pub async fn execute(&mut self, method: Method, params: Array) -> Result<Data, Error> {
+	pub async fn execute(&mut self, method: Method, params: Array) -> Result<Value, Error> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
-			Method::Info => self.info().await.map(Into::into),
-			Method::Use => self.yuse(params).await.map(Into::into),
-			Method::Signup => self.signup(params).await.map(Into::into),
-			Method::Signin => self.signin(params).await.map(Into::into),
-			Method::Invalidate => self.invalidate().await.map(Into::into),
-			Method::Authenticate => self.authenticate(params).await.map(Into::into),
+			Method::Info => self.info().await,
+			Method::Use => self.yuse(params).await,
+			Method::Signup => self.signup(params).await,
+			Method::Signin => self.signin(params).await,
+			Method::Invalidate => self.invalidate().await,
+			Method::Authenticate => self.authenticate(params).await,
 			Method::Kill => todo!(),
 			Method::Live => todo!(),
-			Method::Set => self.set(params).await.map(Into::into),
-			Method::Unset => self.unset(params).await.map(Into::into),
-			Method::Select => self.select(params).await.map(Into::into),
-			Method::Insert => self.insert(params).await.map(Into::into),
-			Method::Create => self.create(params).await.map(Into::into),
-			Method::Update => self.update(params).await.map(Into::into),
-			Method::Merge => self.merge(params).await.map(Into::into),
-			Method::Patch => self.patch(params).await.map(Into::into),
-			Method::Delete => self.delete(params).await.map(Into::into),
+			Method::Set => self.set(params).await,
+			Method::Unset => self.unset(params).await,
+			Method::Select => self.select(params).await,
+			Method::Insert => self.insert(params).await,
+			Method::Create => self.create(params).await,
+			Method::Update => self.update(params).await,
+			Method::Merge => self.merge(params).await,
+			Method::Patch => self.patch(params).await,
+			Method::Delete => self.delete(params).await,
 			Method::Version => todo!(),
 			Method::Query => todo!(),
 			Method::Relate => todo!(),
 			Method::Unknown => todo!(),
 		}
+		.map(Into::into)
 	}
 }
 
@@ -246,7 +247,7 @@ impl<'a> RpcContext<'a> {
 	// ------------------------------
 
 	async fn create(&self, params: Array) -> Result<Value, Error> {
-		let Ok((what, data)) = params.needs_two() else {
+		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(Error::Thrown("Invalid Params".to_string()));
 		};
 		// Return a single result?

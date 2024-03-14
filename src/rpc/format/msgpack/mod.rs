@@ -7,7 +7,7 @@ use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 
-pub fn req(msg: Message) -> Result<Request, Failure> {
+pub fn req_ws(msg: Message) -> Result<Request, Failure> {
 	match msg {
 		Message::Text(val) => {
 			surrealdb::sql::value(&val).map_err(|_| Failure::PARSE_ERROR)?.try_into()
@@ -20,7 +20,7 @@ pub fn req(msg: Message) -> Result<Request, Failure> {
 	}
 }
 
-pub fn res(res: Response) -> Result<(usize, Message), Failure> {
+pub fn res_ws(res: Response) -> Result<(usize, Message), Failure> {
 	// Convert the response into a value
 	let val: Pack = res.into_value().try_into()?;
 	// Create a new vector for encoding output

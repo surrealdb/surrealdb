@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ops::Deref;
 
 use crate::cnf;
 use crate::dbs::DB;
@@ -8,6 +9,7 @@ use crate::rpc::failure::Failure;
 use crate::rpc::format::Format;
 use crate::rpc::format::PROTOCOLS;
 use crate::rpc::request::Request;
+use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::WEBSOCKETS;
 use axum::routing::get;
 use axum::routing::post;
@@ -101,6 +103,14 @@ async fn post_handler(
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
+	// let out_fmt: Option<Format> = output.map(|h| &*h).map(|a: &Accept| a.into());
+	let fmt: Format = content_type.deref().into();
+	let out_fmt: Option<Format> = output.as_deref().map(Into::into);
+	if let Some(out_fmt) = out_fmt {
+		if fmt != out_fmt {
+			return Err(Error::InvalidType);
+		}
+	}
 	let kvs = DB.get().unwrap();
 
 	let mut rpc_ctx = RpcContext {
@@ -110,32 +120,31 @@ async fn post_handler(
 		lq_handler: None,
 	};
 
-	let req: Request = match *content_type {
-		ContentType::ApplicationJson => surrealdb::sql::value(
-			std::str::from_utf8(&body).map_err(|e| Error::Other(e.to_string()))?,
-		)?
-		.try_into()
-		.or(Err(Error::Other("Error:".to_string())))?,
-		ContentType::ApplicationCbor => todo!(),
-		ContentType::ApplicationPack => todo!(),
-		_ => return Err(Error::InvalidType),
-	};
+	// let req: Request = match *content_type {
+	// 	ContentType::ApplicationJson => surrealdb::sql::value(
+	// 		std::str::from_utf8(&body).map_err(|e| Error::Other(e.to_string()))?,
+	// 	)?
+	// 	.try_into()
+	// 	.or(Err(Error::Other("Error:".to_string())))?,
+	// 	ContentType::ApplicationCbor => todo!(),
+	// 	ContentType::ApplicationPack => todo!(),
+	// 	_ => return Err(Error::InvalidType),
+	// };
+
+	let req = fmt.req_http(&body).unwrap();
 
 	// let method = Method::parse("info");
 	let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
+	// let res = in_fmt.res_http(res);
 
-	match res {
-		Ok(res) => match output.as_deref() {
-			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res))),
-			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
-			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
-			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(output::full(&res)),
-			// An incorrect content-type was requested
-			_ => Err(Error::InvalidType),
-		},
-		// There was an error when executing the query
-		Err(err) => Err(Error::from(err)),
+	match fmt {
+		// Simple serialization
+		Format::Json => Ok(output::json(&output::simplify(res))),
+		Format::Cbor => Ok(output::cbor(&output::simplify(res))),
+		Format::Msgpack => Ok(output::pack(&output::simplify(res))),
+		// Internal serialization
+		Format::Bincode => Ok(output::full(&res)),
+		// An incorrect content-type was requested
+		_ => Err(Error::InvalidType),
 	}
 }

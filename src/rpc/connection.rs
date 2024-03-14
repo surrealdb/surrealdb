@@ -295,7 +295,7 @@ impl Connection {
 			let req_cx = RequestContext::default();
 			let otel_cx = Arc::new(TelemetryContext::new().with_value(req_cx.clone()));
 			// Parse the RPC request structure
-			match fmt.req(msg) {
+			match fmt.req_ws(msg) {
 				Ok(req) => {
 					// Now that we know the method, we can update the span and create otel context
 					span.record("rpc.method", &req.method);

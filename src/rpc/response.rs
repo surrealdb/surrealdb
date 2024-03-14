@@ -111,7 +111,7 @@ impl Response {
 			span.record("rpc.error_message", err.message.as_ref());
 		}
 		// Process the response for the format
-		let (len, msg) = fmt.res(self).unwrap();
+		let (len, msg) = fmt.res_ws(self).unwrap();
 		// Send the message to the write channel
 		if chn.send(msg).await.is_ok() {
 			record_rpc(cx.as_ref(), len, is_error);
