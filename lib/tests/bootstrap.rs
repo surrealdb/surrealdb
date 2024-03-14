@@ -49,7 +49,7 @@ async fn bootstrap_removes_unreachable_nodes() -> Result<(), Error> {
 	dbs.bootstrap().await.unwrap();
 
 	// Declare a function that will assert
-	async fn try_validate(tx: &mut Transaction, bad_node: &uuid::Uuid) -> Result<(), String> {
+	async fn try_validate(mut tx: &mut Transaction, bad_node: &uuid::Uuid) -> Result<(), String> {
 		let res = tx.scan_nd(1000).await.map_err(|e| e.to_string())?;
 		tx.commit().await.map_err(|e| e.to_string())?;
 		for node in &res {
