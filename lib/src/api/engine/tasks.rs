@@ -24,7 +24,6 @@ use tokio::spawn as spawn_future;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn_future;
 
-const LOG: &str = "surrealdb::node";
 const TASK_COUNT: usize = 2;
 
 #[cfg(not(target_arch = "wasm32"))]
