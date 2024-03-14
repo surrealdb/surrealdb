@@ -123,9 +123,6 @@ compile_error!(
 	"`kv-surrealkv` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
 );
 
-#[macro_use]
-extern crate tracing;
-
 mod api;
 
 #[doc(inline)]

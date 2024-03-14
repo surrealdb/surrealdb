@@ -39,6 +39,8 @@ use surrealdb_core::dbs::Options;
 use tokio::sync::watch;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
+use tracing::warn;
+use tracing::{error, trace};
 
 impl crate::api::Connection for Db {}
 

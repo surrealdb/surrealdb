@@ -54,6 +54,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use tracing::{error, trace, warn};
 use trice::Instant;
 
 type WsResult<T> = std::result::Result<T, WsError>;

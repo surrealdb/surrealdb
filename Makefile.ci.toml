@@ -11,13 +11,13 @@ args = ["check", "--locked", "--workspace"]
 category = "CI - CHECK"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["check", "--locked", "--package", "surrealdb", "--features", "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks", "--target", "wasm32-unknown-unknown"]
+args = ["check", "--locked", "--package", "surrealdb", "--features", "ci,protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks", "--target", "wasm32-unknown-unknown"]
 
 [tasks.ci-clippy]
 category = "CI - CHECK"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--features", "ci,storage-mem,storage-rocksdb,storage-speedb,storage-tikv,storage-fdb,scripting,http,jwks", "--tests", "--benches", "--examples", "--bins", "--", "-D", "warnings"]
 
 #
 # Integration Tests

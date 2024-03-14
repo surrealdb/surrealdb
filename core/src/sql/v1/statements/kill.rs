@@ -137,7 +137,7 @@ mod test {
 			.with_db(Some("database".into()))
 			.with_ns(Some("namespace".into()));
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx =
+		let tx =
 			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
 		res.compute(&ctx, &opt, &tx, None).await.unwrap();
 
