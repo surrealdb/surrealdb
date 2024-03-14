@@ -94,8 +94,8 @@ pub(crate) struct LqEntry {
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone))]
 pub(crate) enum TrackedResult {
+	#[cfg_attr(not(feature = "sql2"), allow(dead_code))]
 	LiveQuery(LqEntry),
-	#[allow(dead_code)]
 	KillQuery(KillEntry),
 }
 
