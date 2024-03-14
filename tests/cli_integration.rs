@@ -239,7 +239,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn start_tls() -> () {
+	async fn start_tls() {
 		let (_, server) = common::start_server(StartServerArguments {
 			tls: true,
 			wait_is_ready: false,
@@ -256,7 +256,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn with_root_auth() -> () {
+	async fn with_root_auth() {
 		// Commands with credentials when auth is enabled, should succeed
 		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");

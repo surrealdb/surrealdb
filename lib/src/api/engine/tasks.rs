@@ -58,17 +58,14 @@ pub struct Tasks {
 impl Tasks {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub async fn resolve(self) -> Result<(), RootError> {
-		#[cfg(not(target_arch = "wasm32"))]
-		{
-			self.nd.await.map_err(|e| {
-				error!("Node agent task failed: {}", e);
-				RootError::Db(Error::NodeAgent("node task failed and has been logged"))
-			})?;
-			self.lq.await.map_err(|e| {
-				error!("Live query task failed: {}", e);
-				RootError::Db(Error::NodeAgent("live query task failed and has been logged"))
-			})?;
-		}
+		self.nd.await.map_err(|e| {
+			error!("Node agent task failed: {}", e);
+			RootError::Db(Error::NodeAgent("node task failed and has been logged"))
+		})?;
+		self.lq.await.map_err(|e| {
+			error!("Live query task failed: {}", e);
+			RootError::Db(Error::NodeAgent("live query task failed and has been logged"))
+		})?;
 		Ok(())
 	}
 }
@@ -77,7 +74,7 @@ impl Tasks {
 pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [Sender<()>; 2]) {
 	let nd = init(opt, dbs.clone());
 	let lq = live_query_change_feed(opt, dbs);
-	let mut cancellation_channels = [nd.1, lq.1];
+	let cancellation_channels = [nd.1, lq.1];
 	(
 		Tasks {
 			nd: nd.0,
