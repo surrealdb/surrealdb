@@ -98,7 +98,7 @@
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(test, deny(warnings))]
+#![cfg_attr(any(test, feature = "ci"), deny(warnings))]
 
 #[cfg(all(not(surrealdb_unstable), feature = "parser2"))]
 compile_error!(
