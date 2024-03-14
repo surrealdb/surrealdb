@@ -1,5 +1,4 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::output;
 use axum::extract::{BodyStream, DefaultBodyLimit, Path};
@@ -41,15 +40,14 @@ where
 
 /// This endpoint allows the user to import a model into the database.
 async fn import(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	mut stream: BodyStream,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-	// Get the datastore reference
-	let db = DB.get().unwrap();
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
-	db.check(&session, Edit, Model.on_db(&nsv, &dbv))?;
+	state.datastore.check(&session, Edit, Model.on_db(&nsv, &dbv))?;
 	// Create a new buffer
 	let mut buffer = Vec::new();
 	// Load all the uploaded file chunks
@@ -74,36 +72,37 @@ async fn import(
 	// Insert the file data in to the store
 	surrealdb::obs::put(&path, data).await?;
 	// Insert the model in to the database
-	db.process(
-		DefineStatement::Model(DefineModelStatement {
-			hash,
-			name: file.header.name.to_string().into(),
-			version: file.header.version.to_string(),
-			comment: Some(file.header.description.to_string().into()),
-			..Default::default()
-		})
-		.into(),
-		&session,
-		None,
-	)
-	.await?;
+	state
+		.datastore
+		.process(
+			DefineStatement::Model(DefineModelStatement {
+				hash,
+				name: file.header.name.to_string().into(),
+				version: file.header.version.to_string(),
+				comment: Some(file.header.description.to_string().into()),
+				..Default::default()
+			})
+			.into(),
+			&session,
+			None,
+		)
+		.await?;
 	//
 	Ok(output::none())
 }
 
 /// This endpoint allows the user to export a model from the database.
 async fn export(
+	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	Path((name, version)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, Error> {
-	// Get the datastore reference
-	let db = DB.get().unwrap();
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
-	db.check(&session, View, Model.on_db(&nsv, &dbv))?;
+	state.datastore.check(&session, View, Model.on_db(&nsv, &dbv))?;
 	// Start a new readonly transaction
-	let mut tx = db.transaction(Read, Optimistic).await?;
+	let mut tx = state.datastore.transaction(Read, Optimistic).await?;
 	// Attempt to get the model definition
 	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
 	// Calculate the path of the model file
