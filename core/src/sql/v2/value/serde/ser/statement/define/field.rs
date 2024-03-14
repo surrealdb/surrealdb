@@ -50,6 +50,7 @@ pub struct SerializeDefineFieldStatement {
 	default: Option<Value>,
 	permissions: Permissions,
 	comment: Option<Strand>,
+	if_not_exists: bool,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineFieldStatement {
@@ -91,6 +92,9 @@ impl serde::ser::SerializeStruct for SerializeDefineFieldStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
+			"if_not_exists" => {
+				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
+			}
 			key => {
 				return Err(Error::custom(format!(
 					"unexpected field `DefineFieldStatement::{key}`"
@@ -112,6 +116,7 @@ impl serde::ser::SerializeStruct for SerializeDefineFieldStatement {
 			default: self.default,
 			permissions: self.permissions,
 			comment: self.comment,
+			if_not_exists: self.if_not_exists,
 		})
 	}
 }

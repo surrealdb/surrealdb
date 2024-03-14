@@ -13,11 +13,16 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 
 ";
 
+pub const DEBUG_BUILD_WARNING: &str = "\
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        !!! THIS IS A DEBUG BUILD !!!                        │
+│        Debug builds are not intended for production use and include         │
+│       tooling and features that we would not recommend people run on        │
+│                                  live data.                                 │
+└─────────────────────────────────────────────────────────────────────────────┘";
+
 /// The publicly visible name of the server
 pub const PKG_NAME: &str = "surrealdb";
-
-/// The publicly visible user-agent of the command-line tool
-pub const SERVER_AGENT: &str = concat!("SurrealDB ", env!("CARGO_PKG_VERSION"));
 
 /// The public endpoint for the administration interface
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";

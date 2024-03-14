@@ -110,7 +110,7 @@ impl Parser<'_> {
 			| t!("INTERSECTS")
 			| t!("NOT")
 			| t!("IN")
-			| t!("KNN") => Some((9, 10)),
+			| t!("<|") => Some((9, 10)),
 
 			t!("+") | t!("-") => Some((11, 12)),
 			t!("*") | t!("×") | t!("/") | t!("÷") => Some((13, 14)),
@@ -263,11 +263,10 @@ impl Parser<'_> {
 				Operator::NotInside
 			}
 			t!("IN") => Operator::Inside,
-			t!("KNN") => {
-				let start = expected!(self, t!("<")).span;
+			t!("<|") => {
 				let amount = self.next_token_value()?;
 				let dist = self.eat(t!(",")).then(|| self.parse_distance()).transpose()?;
-				self.expect_closing_delimiter(t!(">"), start)?;
+				self.expect_closing_delimiter(t!("|>"), token.span)?;
 				Operator::Knn(amount, dist)
 			}
 

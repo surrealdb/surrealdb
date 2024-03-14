@@ -1,3 +1,9 @@
+use std::fmt::{self, Display, Write};
+
+use derive::Store;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -9,14 +15,10 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
-use derive::Store;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -26,6 +28,8 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
+	#[revision(start = 2)]
+	pub if_not_exists: bool,
 }
 
 impl DefineTableStatement {
@@ -42,19 +46,29 @@ impl DefineTableStatement {
 		let mut run = txn.lock().await;
 		// Clear the cache
 		run.clear_cache();
+		// Check if table already exists
+		if self.if_not_exists && run.get_tb(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			return Err(Error::TbAlreadyExists {
+				value: self.name.to_string(),
+			});
+		}
 		// Process the statement
 		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);
 		let ns = run.add_ns(opt.ns(), opt.strict).await?;
 		let db = run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		let dt = if self.id.is_none() && ns.id.is_some() && db.id.is_some() {
-			let mut tb = self.clone();
-			tb.id = Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?);
-			run.set(key, &tb).await?;
-			tb
+			DefineTableStatement {
+				id: Some(run.get_next_tb_id(ns.id.unwrap(), db.id.unwrap()).await?),
+				if_not_exists: false,
+				..self.clone()
+			}
 		} else {
-			run.set(key, self).await?;
-			self.to_owned()
+			DefineTableStatement {
+				if_not_exists: false,
+				..self.clone()
+			}
 		};
+		run.set(key, &dt).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
 			// Remove the table data
@@ -98,7 +112,11 @@ impl DefineTableStatement {
 
 impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TABLE {}", self.name)?;
+		write!(f, "DEFINE TABLE")?;
+		if self.if_not_exists {
+			write!(f, " IF NOT EXISTS")?
+		}
+		write!(f, " {}", self.name)?;
 		if self.drop {
 			f.write_str(" DROP")?;
 		}

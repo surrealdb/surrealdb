@@ -16,6 +16,11 @@ use lexer::Lexer;
 use parser::{ParseError, ParseErrorKind, Parser};
 use reblessive::Stack;
 
+/// Takes a string and returns if it could be a reserved keyword in certain contexts.
+pub fn could_be_reserved_keyword(s: &str) -> bool {
+	lexer::keywords::could_be_reserved(s)
+}
+
 /// Parses a SurrealQL [`Query`]
 ///
 /// During query parsing, the total depth of calls to parse values (including arrays, expressions,

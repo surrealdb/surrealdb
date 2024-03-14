@@ -33,7 +33,7 @@ mod function;
 mod idiom;
 mod json;
 mod kind;
-mod mac;
+pub(crate) mod mac;
 mod object;
 mod prime;
 mod stmt;

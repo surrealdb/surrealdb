@@ -31,6 +31,17 @@ pub enum Function {
 	// Add new variants here
 }
 
+pub(crate) enum OptimisedAggregate {
+	None,
+	Count,
+	MathMax,
+	MathMin,
+	MathSum,
+	MathMean,
+	TimeMax,
+	TimeMin,
+}
+
 impl PartialOrd for Function {
 	#[inline]
 	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
@@ -140,6 +151,18 @@ impl Function {
 			Self::Normal(f, _) if f == "time::max" => true,
 			Self::Normal(f, _) if f == "time::min" => true,
 			_ => false,
+		}
+	}
+	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
+		match self {
+			Self::Normal(f, _) if f == "count" => OptimisedAggregate::Count,
+			Self::Normal(f, _) if f == "math::max" => OptimisedAggregate::MathMax,
+			Self::Normal(f, _) if f == "math::mean" => OptimisedAggregate::MathMean,
+			Self::Normal(f, _) if f == "math::min" => OptimisedAggregate::MathMin,
+			Self::Normal(f, _) if f == "math::sum" => OptimisedAggregate::MathSum,
+			Self::Normal(f, _) if f == "time::max" => OptimisedAggregate::TimeMax,
+			Self::Normal(f, _) if f == "time::min" => OptimisedAggregate::TimeMin,
+			_ => OptimisedAggregate::None,
 		}
 	}
 }

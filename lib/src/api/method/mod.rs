@@ -55,6 +55,7 @@ pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
+use tokio::sync::watch;
 pub use unset::Unset;
 pub use update::Update;
 pub use use_db::UseDb;
@@ -72,6 +73,7 @@ use crate::api::Connection;
 use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
+use crate::opt::WaitFor;
 use crate::sql::to_value;
 use crate::sql::Value;
 use serde::Serialize;
@@ -228,6 +230,7 @@ where
 	pub fn init() -> Self {
 		Self {
 			router: Arc::new(OnceLock::new()),
+			waiter: Arc::new(watch::channel(None)),
 			engine: PhantomData,
 		}
 	}
@@ -258,6 +261,7 @@ where
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
+			waiter: Arc::new(watch::channel(None)),
 			response_type: PhantomData,
 		}
 	}
@@ -632,6 +636,25 @@ where
 	///
 	/// // Get all of the results from the second query
 	/// let people: Vec<Person> = result.take(1)?;
+	///
+	/// #[derive(serde::Deserialize)]
+	/// struct Country {
+	///     name: String
+	/// }
+	///
+	/// // The .take() method can be used for error handling
+	///
+	/// // If the table has no defined schema, this query will
+	/// // create a `country` on the SurrealDB side, but...
+	/// let mut result = db
+	///     .query("CREATE country")
+	///     .await?;
+	///
+	/// // It won't deserialize into a Country struct
+	/// if let Err(e) = result.take::<Option<Country>>(0) {
+	///     println!("Failed to make a country: {e:#?}");
+	///     assert!(e.to_string().contains("missing field `name`"));
+	/// }
 	/// #
 	/// # Ok(())
 	/// # }
@@ -974,6 +997,21 @@ where
 		Health {
 			client: Cow::Borrowed(self),
 		}
+	}
+
+	/// Wait for the selected event to happen before proceeding
+	pub async fn wait_for(&self, event: WaitFor) {
+		let mut rx = self.waiter.0.subscribe();
+		rx.wait_for(|current| match current {
+			// The connection hasn't been initialised yet.
+			None => false,
+			// The connection has been initialised. Only the connection even matches.
+			Some(WaitFor::Connection) => matches!(event, WaitFor::Connection),
+			// The database has been selected. Connection and database events both match.
+			Some(WaitFor::Database) => matches!(event, WaitFor::Connection | WaitFor::Database),
+		})
+		.await
+		.ok();
 	}
 
 	/// Dumps the database contents to a file
