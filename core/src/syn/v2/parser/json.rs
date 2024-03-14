@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{Array, Ident, Object, Strand, Value},
@@ -13,7 +13,7 @@ use crate::{
 use super::{ParseResult, Parser};
 
 impl Parser<'_> {
-	pub async fn parse_json(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_json(&mut self, mut ctx: Stk) -> ParseResult<Value> {
 		let token = self.next();
 		match token.kind {
 			t!("NULL") => Ok(Value::Null),
@@ -39,7 +39,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_json_object(&mut self, ctx: &mut Ctx<'_>, start: Span) -> ParseResult<Object> {
+	async fn parse_json_object(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object> {
 		let mut obj = BTreeMap::new();
 		loop {
 			if self.eat(t!("}")) {
@@ -57,7 +57,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_json_array(&mut self, ctx: &mut Ctx<'_>, start: Span) -> ParseResult<Array> {
+	async fn parse_json_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
 		let mut array = Vec::new();
 		loop {
 			if self.eat(t!("]")) {

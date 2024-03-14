@@ -26,6 +26,7 @@ use crate::{
 	syn::v2::parser::{Parser, PartialResult},
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use reblessive::Stack;
 
 static SOURCE: &str = r#"
 	ANALYZE INDEX b on a;
@@ -639,6 +640,7 @@ fn test_streaming() {
 	let source_bytes = SOURCE.as_bytes();
 	let mut source_start = 0;
 	let mut parser = Parser::new(&[]);
+	let mut stack = Stack::new();
 
 	for i in 0..source_bytes.len() {
 		let partial_source = &source_bytes[source_start..i];
@@ -646,7 +648,7 @@ fn test_streaming() {
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
-		match parser.parse_partial_statement() {
+		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
 			PartialResult::Pending {
 				..
 			} => {
@@ -676,6 +678,6 @@ fn test_streaming() {
 		"failed to parse at {}\nAt statement {}\n\n{:?}",
 		src,
 		expected[current_stmt],
-		parser.parse_partial_statement()
+		stack.enter(|stk| parser.parse_partial_statement(stk)).finish()
 	);
 }

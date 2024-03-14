@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{Function, Ident, Model},
@@ -14,7 +14,7 @@ impl Parser<'_> {
 	/// Parse a custom function function call
 	///
 	/// Expects `fn` to already be called.
-	pub async fn parse_custom_function(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Function> {
+	pub async fn parse_custom_function(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
@@ -43,7 +43,7 @@ impl Parser<'_> {
 	/// Parse a model invocation
 	///
 	/// Expects `ml` to already be called.
-	pub async fn parse_model(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Model> {
+	pub async fn parse_model(&mut self, ctx: &mut Stk) -> ParseResult<Model> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {

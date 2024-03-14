@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{statements::InsertStatement, Data, Value},
@@ -9,10 +9,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub(crate) async fn parse_insert_stmt(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<InsertStatement> {
+	pub(crate) async fn parse_insert_stmt(&mut self, mut ctx: Stk) -> ParseResult<InsertStatement> {
 		let ignore = self.eat(t!("IGNORE"));
 		expected!(self, t!("INTO"));
 		let next = self.next();
@@ -85,7 +82,7 @@ impl Parser<'_> {
 		})
 	}
 
-	async fn parse_insert_update(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Data> {
+	async fn parse_insert_update(&mut self, ctx: &mut Stk) -> ParseResult<Data> {
 		expected!(self, t!("DUPLICATE"));
 		expected!(self, t!("KEY"));
 		expected!(self, t!("UPDATE"));

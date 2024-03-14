@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{statements::RelateStatement, Subquery, Value},
@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_relate_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<RelateStatement> {
+	pub async fn parse_relate_stmt(&mut self, mut ctx: Stk) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
 		let (kind, from, with) = ctx.run(|ctx| self.parse_relation(ctx)).await?;
 		let uniq = self.eat(t!("UNIQUE"));
@@ -34,7 +34,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_relation(&mut self, mut ctx: Ctx<'_>) -> ParseResult<(Value, Value, Value)> {
+	pub async fn parse_relation(&mut self, mut ctx: Stk) -> ParseResult<(Value, Value, Value)> {
 		let first = self.parse_relate_value(&mut ctx).await?;
 		let is_o = match self.next().kind {
 			t!("->") => true,
@@ -55,7 +55,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_value(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
@@ -90,7 +90,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_thing_or_table(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		if self.peek_token_at(1).kind == t!(":") {
 			self.parse_thing(ctx).await.map(Value::Thing)
 		} else {

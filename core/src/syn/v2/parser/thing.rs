@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
@@ -14,11 +14,7 @@ use crate::{
 use std::ops::Bound;
 
 impl Parser<'_> {
-	pub async fn parse_record_string(
-		&mut self,
-		ctx: &mut Ctx<'_>,
-		double: bool,
-	) -> ParseResult<Thing> {
+	pub async fn parse_record_string(&mut self, ctx: &mut Stk, double: bool) -> ParseResult<Thing> {
 		let thing = self.parse_thing(ctx).await?;
 		// can't have any tokens in the buffer, since the next token must be produced by a specific
 		// call.
@@ -43,7 +39,7 @@ impl Parser<'_> {
 
 	pub async fn parse_thing_or_range(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		ident: String,
 	) -> ParseResult<Value> {
 		expected!(self, t!(":"));
@@ -136,7 +132,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_range(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Range> {
+	pub async fn parse_range(&mut self, mut ctx: Stk) -> ParseResult<Range> {
 		let tb = self.next_token_value::<Ident>()?.0;
 
 		expected!(self, t!(":"));
@@ -193,14 +189,14 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_thing(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Thing> {
+	pub async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
 		self.parse_thing_from_ident(ctx, ident).await
 	}
 
 	pub async fn parse_thing_from_ident(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		ident: String,
 	) -> ParseResult<Thing> {
 		expected!(self, t!(":"));
@@ -215,7 +211,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_id(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Id> {
+	pub async fn parse_id(&mut self, mut ctx: Stk) -> ParseResult<Id> {
 		let token = self.next();
 		match token.kind {
 			t!("{") => {

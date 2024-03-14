@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::Kind,
@@ -15,14 +15,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub async fn parse_kind(&mut self, ctx: &mut Ctx<'_>, delim: Span) -> ParseResult<Kind> {
+	pub async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
 		let kind = ctx.wrap(|ctx| self.parse_inner_kind(ctx)).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub async fn parse_inner_kind(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Kind> {
+	pub async fn parse_inner_kind(&mut self, mut ctx: Stk) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
 				self.pop_peek();
@@ -59,7 +59,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a single kind which is not any, option, or either.
-	async fn parse_concrete_kind(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Kind> {
+	async fn parse_concrete_kind(&mut self, mut ctx: Stk) -> ParseResult<Kind> {
 		match self.next().kind {
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NULL") => Ok(Kind::Null),

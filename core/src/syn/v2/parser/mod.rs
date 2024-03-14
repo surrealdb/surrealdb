@@ -44,7 +44,7 @@ mod token_buffer;
 pub mod test;
 
 pub use error::{IntErrorKind, ParseError, ParseErrorKind};
-use reblessive::{Ctx, Stack};
+use reblessive::{Stack, Stk};
 
 /// The result returned by most parser function.
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -239,13 +239,13 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub async fn parse_query(&mut self, ctx: Ctx<'_>) -> ParseResult<sql::Query> {
+	pub async fn parse_query(&mut self, ctx: Stk) -> ParseResult<sql::Query> {
 		let statements = self.parse_stmt_list(ctx).await?;
 		Ok(sql::Query(statements))
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, ctx: Ctx<'_>) -> ParseResult<sql::Statement> {
+	pub async fn parse_statement(&mut self, ctx: Stk) -> ParseResult<sql::Statement> {
 		self.parse_stmt(ctx).await
 	}
 
@@ -253,10 +253,7 @@ impl<'a> Parser<'a> {
 	///
 	/// This will try to parse a statement if a full statement can be parsed from the buffer parser
 	/// is operating on.
-	pub async fn parse_partial_statement(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> PartialResult<sql::Statement> {
+	pub async fn parse_partial_statement(&mut self, mut ctx: Stk) -> PartialResult<sql::Statement> {
 		while self.eat(t!(";")) {}
 
 		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;

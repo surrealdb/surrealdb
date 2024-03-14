@@ -1,6 +1,6 @@
 //! Contains parsing code for smaller common parts of statements.
 
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{
@@ -21,7 +21,7 @@ use crate::{
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub async fn try_parse_data(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Data>> {
+	pub async fn try_parse_data(&mut self, ctx: &mut Stk) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
@@ -64,7 +64,7 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement output if the next token is `return`.
-	pub async fn try_parse_output(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Output>> {
+	pub async fn try_parse_output(&mut self, ctx: &mut Stk) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
@@ -103,7 +103,7 @@ impl Parser<'_> {
 		Ok(Some(Timeout(duration)))
 	}
 
-	pub async fn try_parse_fetch(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Fetchs>> {
+	pub async fn try_parse_fetch(&mut self, ctx: &mut Stk) -> ParseResult<Option<Fetchs>> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
@@ -111,7 +111,7 @@ impl Parser<'_> {
 		Ok(Some(Fetchs(v)))
 	}
 
-	pub async fn try_parse_condition(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Cond>> {
+	pub async fn try_parse_condition(&mut self, ctx: &mut Stk) -> ParseResult<Option<Cond>> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
@@ -215,7 +215,7 @@ impl Parser<'_> {
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
 	pub async fn parse_permission(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		mut ctx: Stk,
 		permissive: bool,
 	) -> ParseResult<Permissions> {
 		match self.next().kind {
@@ -247,7 +247,7 @@ impl Parser<'_> {
 	/// Expects the parser to just have eaten the `FOR` keyword.
 	pub async fn parse_specific_permission(
 		&mut self,
-		ctx: Ctx<'_>,
+		ctx: Stk,
 		permissions: &mut Permissions,
 	) -> ParseResult<()> {
 		let mut select = false;
@@ -298,7 +298,7 @@ impl Parser<'_> {
 	/// # Parser State
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`, `UPDATE` or `DELETE`.
-	pub async fn parse_permission_value(&mut self, ctx: Ctx<'_>) -> ParseResult<Permission> {
+	pub async fn parse_permission_value(&mut self, ctx: Stk) -> ParseResult<Permission> {
 		match self.next().kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
@@ -351,7 +351,7 @@ impl Parser<'_> {
 	/// # Parse State
 	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
 	/// parens. Expects the next keyword to be `SELECT`.
-	pub async fn parse_view(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<View> {
+	pub async fn parse_view(&mut self, ctx: &mut Stk) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;
 		let fields = self.parse_fields(ctx).await?;

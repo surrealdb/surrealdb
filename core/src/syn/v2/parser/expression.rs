@@ -1,6 +1,6 @@
 //! This module defines the pratt parser for operators.
 
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use super::mac::unexpected;
 use super::ParseError;
@@ -17,7 +17,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a table, see [`parse_value_field`] for parsing loose idents as fields
-	pub async fn parse_value(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_value(&mut self, mut ctx: Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
 		let res = self.pratt_parse_expr(&mut ctx, 0).await;
@@ -30,7 +30,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a field, see [`parse_value`] for parsing loose idents as table
-	pub async fn parse_value_field(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_value_field(&mut self, mut ctx: Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
 		let res = self.pratt_parse_expr(&mut ctx, 0).await;
@@ -128,7 +128,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_prefix_op(&mut self, ctx: &mut Ctx<'_>, min_bp: u8) -> ParseResult<Value> {
+	async fn parse_prefix_op(&mut self, ctx: &mut Stk, min_bp: u8) -> ParseResult<Value> {
 		const I64_ABS_MAX: u64 = 9223372036854775808;
 
 		let token = self.next();
@@ -200,7 +200,7 @@ impl Parser<'_> {
 
 	async fn parse_infix_op(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		min_bp: u8,
 		lhs: Value,
 	) -> ParseResult<Value> {
@@ -285,7 +285,7 @@ impl Parser<'_> {
 
 	/// The pratt parsing loop.
 	/// Parses expression according to binding power.
-	async fn pratt_parse_expr(&mut self, ctx: &mut Ctx<'_>, min_bp: u8) -> ParseResult<Value> {
+	async fn pratt_parse_expr(&mut self, ctx: &mut Stk, min_bp: u8) -> ParseResult<Value> {
 		let peek = self.peek();
 		let mut lhs = if let Some(((), r_bp)) = self.prefix_binding_power(peek.kind) {
 			self.parse_prefix_op(ctx, r_bp).await?

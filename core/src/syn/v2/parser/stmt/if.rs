@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::statements::IfelseStatement,
@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_if_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<IfelseStatement> {
+	pub async fn parse_if_stmt(&mut self, mut ctx: Stk) -> ParseResult<IfelseStatement> {
 		let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 
 		let mut res = IfelseStatement {
@@ -41,7 +41,7 @@ impl Parser<'_> {
 
 	async fn parse_worded_tail(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {
@@ -69,7 +69,7 @@ impl Parser<'_> {
 
 	async fn parse_bracketed_tail(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		res: &mut IfelseStatement,
 	) -> ParseResult<()> {
 		loop {

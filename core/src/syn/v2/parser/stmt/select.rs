@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{
@@ -16,10 +16,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub(crate) async fn parse_select_stmt(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<SelectStatement> {
+	pub(crate) async fn parse_select_stmt(&mut self, mut ctx: Stk) -> ParseResult<SelectStatement> {
 		let before = self.peek().span;
 		let expr = self.parse_fields(&mut ctx).await?;
 		let fields_span = before.covers(self.last_span());
@@ -206,7 +203,7 @@ impl Parser<'_> {
 		})
 	}
 
-	async fn try_parse_limit(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Limit>> {
+	async fn try_parse_limit(&mut self, ctx: &mut Stk) -> ParseResult<Option<Limit>> {
 		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
@@ -215,7 +212,7 @@ impl Parser<'_> {
 		Ok(Some(Limit(value)))
 	}
 
-	async fn try_parse_start(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Option<Start>> {
+	async fn try_parse_start(&mut self, ctx: &mut Stk) -> ParseResult<Option<Start>> {
 		if !self.eat(t!("START")) {
 			return Ok(None);
 		}

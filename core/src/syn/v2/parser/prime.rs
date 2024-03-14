@@ -1,5 +1,5 @@
 use geo::Point;
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
@@ -21,7 +21,7 @@ impl Parser<'_> {
 	/// Parse a what primary.
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
-	pub async fn parse_what_primary(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
 			TokenKind::Duration => {
 				let duration = self.next_token_value()?;
@@ -116,7 +116,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse an expressions
-	pub async fn parse_idiom_expression(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		let value = match token.kind {
 			t!("NONE") => {
@@ -296,7 +296,7 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the starting `[` to already be eaten and its span passed as an argument.
-	pub async fn parse_array(&mut self, ctx: &mut Ctx<'_>, start: Span) -> ParseResult<Array> {
+	pub async fn parse_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
 		let mut values = Vec::new();
 		loop {
 			if self.eat(t!("]")) {
@@ -332,7 +332,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_full_subquery(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Subquery> {
+	pub async fn parse_full_subquery(&mut self, ctx: &mut Stk) -> ParseResult<Subquery> {
 		let peek = self.peek();
 		match peek.kind {
 			t!("(") => {
@@ -351,7 +351,7 @@ impl Parser<'_> {
 
 	pub async fn parse_inner_subquery_or_coordinate(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		start: Span,
 	) -> ParseResult<Value> {
 		let peek = self.peek();
@@ -487,7 +487,7 @@ impl Parser<'_> {
 
 	pub async fn parse_inner_subquery(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		start: Option<Span>,
 	) -> ParseResult<Subquery> {
 		let peek = self.peek();
@@ -578,7 +578,7 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
 	/// matches.
-	pub async fn parse_legacy_strand(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Value> {
+	pub async fn parse_legacy_strand(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let text = self.lexer.string.take().unwrap();
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx).await {
 			return Ok(Value::Thing(x));
@@ -592,7 +592,7 @@ impl Parser<'_> {
 		Ok(Value::Strand(Strand(text)))
 	}
 
-	async fn parse_script(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<Function> {
+	async fn parse_script(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {

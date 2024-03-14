@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{
@@ -23,7 +23,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_define_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<DefineStatement> {
+	pub async fn parse_define_stmt(&mut self, mut ctx: Stk) -> ParseResult<DefineStatement> {
 		match self.next().kind {
 			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
@@ -82,7 +82,7 @@ impl Parser<'_> {
 
 	pub async fn parse_define_function(
 		&mut self,
-		mut ctx: Ctx<'_>,
+		mut ctx: Stk,
 	) -> ParseResult<DefineFunctionStatement> {
 		let name = self.parse_custom_function_name()?;
 		let token = expected!(self, t!("(")).span;
@@ -207,10 +207,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_scope(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<DefineScopeStatement> {
+	pub async fn parse_define_scope(&mut self, mut ctx: Stk) -> ParseResult<DefineScopeStatement> {
 		let name = self.next_token_value()?;
 		let mut res = DefineScopeStatement {
 			name,
@@ -243,10 +240,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_param(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<DefineParamStatement> {
+	pub async fn parse_define_param(&mut self, mut ctx: Stk) -> ParseResult<DefineParamStatement> {
 		let name = self.next_token_value::<Param>()?.0;
 
 		let mut res = DefineParamStatement {
@@ -274,10 +268,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_table(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<DefineTableStatement> {
+	pub async fn parse_define_table(&mut self, mut ctx: Stk) -> ParseResult<DefineTableStatement> {
 		let name = self.next_token_value()?;
 		let mut res = DefineTableStatement {
 			name,
@@ -332,10 +323,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_event(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<DefineEventStatement> {
+	pub async fn parse_define_event(&mut self, mut ctx: Stk) -> ParseResult<DefineEventStatement> {
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -370,10 +358,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_field(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<DefineFieldStatement> {
+	pub async fn parse_define_field(&mut self, mut ctx: Stk) -> ParseResult<DefineFieldStatement> {
 		let name = self.parse_local_idiom()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));

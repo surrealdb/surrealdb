@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::{
 	sql::{Block, Geometry, Object, Strand, Value},
@@ -19,7 +19,7 @@ impl Parser<'_> {
 	/// Either a block statemnt, a object or geometry.
 	pub(super) async fn parse_object_like(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		start: Span,
 	) -> ParseResult<Value> {
 		if self.eat(t!("}")) {
@@ -40,11 +40,7 @@ impl Parser<'_> {
 	///
 	/// This function tries to match an object to an geometry like object and if it is unable
 	/// fallsback to parsing normal objects.
-	async fn parse_object_or_geometry(
-		&mut self,
-		ctx: &mut Ctx<'_>,
-		start: Span,
-	) -> ParseResult<Value> {
+	async fn parse_object_or_geometry(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
 		expected!(self, t!(":"));
@@ -420,7 +416,7 @@ impl Parser<'_> {
 
 	async fn parse_geometry_after_type<F, Fm, R>(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		start: Span,
 		key: String,
 		strand: Strand,
@@ -565,7 +561,7 @@ impl Parser<'_> {
 
 	async fn parse_object_from_key(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		key: String,
 		mut map: BTreeMap<String, Value>,
 		start: Span,
@@ -585,17 +581,13 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the first `{` to already have been eaten.
-	pub(super) async fn parse_object(
-		&mut self,
-		ctx: &mut Ctx<'_>,
-		start: Span,
-	) -> ParseResult<Object> {
+	pub(super) async fn parse_object(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object> {
 		self.parse_object_from_map(ctx, BTreeMap::new(), start).await
 	}
 
 	async fn parse_object_from_map(
 		&mut self,
-		ctx: &mut Ctx<'_>,
+		ctx: &mut Stk,
 		mut map: BTreeMap<String, Value>,
 		start: Span,
 	) -> ParseResult<Object> {
@@ -620,11 +612,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the starting `{` to have already been eaten and its span to be handed to this
 	/// functions as the `start` parameter.
-	pub(super) async fn parse_block(
-		&mut self,
-		ctx: &mut Ctx<'_>,
-		start: Span,
-	) -> ParseResult<Block> {
+	pub(super) async fn parse_block(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
 			while self.eat(t!(";")) {}
@@ -644,7 +632,7 @@ impl Parser<'_> {
 
 	/// Parse a single entry in the object, i.e. `field: value + 1` in the object `{ field: value +
 	/// 1 }`
-	async fn parse_object_entry(&mut self, ctx: &mut Ctx<'_>) -> ParseResult<(String, Value)> {
+	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
 		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;

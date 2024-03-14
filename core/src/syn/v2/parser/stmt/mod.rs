@@ -1,4 +1,4 @@
-use reblessive::Ctx;
+use reblessive::Stk;
 
 use crate::sql::block::Entry;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
@@ -35,7 +35,7 @@ mod select;
 mod update;
 
 impl Parser<'_> {
-	pub async fn parse_stmt_list(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Statements> {
+	pub async fn parse_stmt_list(&mut self, mut ctx: Stk) -> ParseResult<Statements> {
 		let mut res = Vec::new();
 		loop {
 			match self.peek_kind() {
@@ -91,7 +91,7 @@ impl Parser<'_> {
 		)
 	}
 
-	pub(super) async fn parse_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Statement> {
+	pub(super) async fn parse_stmt(&mut self, mut ctx: Stk) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
 			t!("ANALYZE") => {
@@ -206,7 +206,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(super) async fn parse_entry(&mut self, mut ctx: Ctx<'_>) -> ParseResult<Entry> {
+	pub(super) async fn parse_entry(&mut self, mut ctx: Stk) -> ParseResult<Entry> {
 		let token = self.peek();
 		match token.kind {
 			t!("BREAK") => {
@@ -392,7 +392,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `FOR` to already be consumed.
-	pub async fn parse_for_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<ForeachStatement> {
+	pub async fn parse_for_stmt(&mut self, mut ctx: Stk) -> ParseResult<ForeachStatement> {
 		let param = self.next_token_value()?;
 		expected!(self, t!("IN"));
 		let range = ctx.run(|ctx| self.parse_value(ctx)).await?;
@@ -457,7 +457,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `LIVE` to already be consumed.
-	pub(crate) async fn parse_live_stmt(&mut self, mut ctx: Ctx<'_>) -> ParseResult<LiveStatement> {
+	pub(crate) async fn parse_live_stmt(&mut self, mut ctx: Stk) -> ParseResult<LiveStatement> {
 		expected!(self, t!("SELECT"));
 
 		let expr = match self.peek_kind() {
@@ -503,10 +503,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `RETURN` to already be consumed.
-	pub(crate) async fn parse_return_stmt(
-		&mut self,
-		mut ctx: Ctx<'_>,
-	) -> ParseResult<OutputStatement> {
+	pub(crate) async fn parse_return_stmt(&mut self, mut ctx: Stk) -> ParseResult<OutputStatement> {
 		let what = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		let fetch = self.try_parse_fetch(&mut ctx).await?;
 		Ok(OutputStatement {
@@ -524,7 +521,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
-	pub(crate) async fn parse_let_stmt(&mut self, ctx: Ctx<'_>) -> ParseResult<SetStatement> {
+	pub(crate) async fn parse_let_stmt(&mut self, ctx: Stk) -> ParseResult<SetStatement> {
 		let name = self.next_token_value::<Param>()?.0 .0;
 		expected!(self, t!("="));
 		let what = self.parse_value(ctx).await?;
@@ -584,7 +581,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `THROW` to already be consumed.
-	pub(crate) async fn parse_throw_stmt(&mut self, ctx: Ctx<'_>) -> ParseResult<ThrowStatement> {
+	pub(crate) async fn parse_throw_stmt(&mut self, ctx: Stk) -> ParseResult<ThrowStatement> {
 		let error = self.parse_value_field(ctx).await?;
 		Ok(ThrowStatement {
 			error,
