@@ -3693,7 +3693,7 @@ async fn function_parse_is_latitude() -> Result<(), Error> {
 #[tokio::test]
 async fn function_parse_is_longitude() -> Result<(), Error> {
 	let sql = r#"
-		RETURN string::is::longitude("-0.136439");
+		RETURN string::is::longitude("-90.136439");
 		RETURN string::is::longitude("this is a test!");
 	"#;
 	let dbs = new_ds().await?;
