@@ -209,9 +209,11 @@ pub(crate) fn router(
 		}
 
 		// Stop maintenance tasks
-		task_chans.into_iter().for_each(|chan| {
-			let _ = chan.send(());
-		});
+		for chan in task_chans {
+			if let Err(e) = chan.send(()) {
+				error!("Error sending shutdown signal to task: {}", e);
+			}
+		}
 		tasks.resolve().await.unwrap();
 	});
 }

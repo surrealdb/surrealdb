@@ -24,8 +24,6 @@ use tokio::spawn as spawn_future;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn_future;
 
-const TASK_COUNT: usize = 2;
-
 #[cfg(not(target_arch = "wasm32"))]
 type FutureTask = JoinHandle<()>;
 #[cfg(target_arch = "wasm32")]
@@ -76,12 +74,10 @@ impl Tasks {
 }
 
 /// Starts tasks that are required for the correct running of the engine
-pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, Vec<Sender<()>>) {
-	let mut cancellation_channels = Vec::with_capacity(TASK_COUNT);
+pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, [Sender<()>; 2]) {
 	let nd = init(opt, dbs.clone());
 	let lq = live_query_change_feed(opt, dbs);
-	cancellation_channels.push(nd.1);
-	cancellation_channels.push(lq.1);
+	let mut cancellation_channels = [nd.1, lq.1];
 	(
 		Tasks {
 			nd: nd.0,
@@ -207,7 +203,7 @@ mod test {
 		let opt = EngineOptions::default();
 		let dbs = Arc::new(surrealdb_core::kvs::Datastore::new("memory").await.unwrap());
 		let (val, mut chans) = start_tasks(&opt, dbs.clone());
-		for chan in chans.drain(..) {
+		for chan in chans {
 			chan.send(()).unwrap();
 		}
 		val.resolve().await.unwrap();
