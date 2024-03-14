@@ -33,6 +33,26 @@ type FutureTask = JoinHandle<()>;
 /// This will be true if a task has completed
 type FutureTask = Arc<AtomicBool>;
 
+/// LoggingLifecycle is used to create log messages upon creation, and log messages when it is dropped
+struct LoggingLifecycle {
+	identifier: String,
+}
+
+impl LoggingLifecycle {
+	fn new(identifier: String) -> Self {
+		debug!("Started {}", identifier);
+		Self {
+			identifier,
+		}
+	}
+}
+
+impl Drop for LoggingLifecycle {
+	fn drop(&mut self) {
+		debug!("Stopped {}", self.identifier);
+	}
+}
+
 pub struct Tasks {
 	pub nd: FutureTask,
 	pub lq: FutureTask,
@@ -60,7 +80,7 @@ impl Tasks {
 pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, Vec<Sender<()>>) {
 	let mut cancellation_channels = Vec::with_capacity(TASK_COUNT);
 	let nd = init(opt, dbs.clone());
-	let lq = live_query_change_feed(dbs);
+	let lq = live_query_change_feed(opt, dbs);
 	cancellation_channels.push(nd.1);
 	cancellation_channels.push(lq.1);
 	(
@@ -79,8 +99,9 @@ pub fn start_tasks(opt: &EngineOptions, dbs: Arc<Datastore>) -> (Tasks, Vec<Send
 // This function needs to be called before after the dbs::init and before the net::init functions.
 // It needs to be before net::init because the net::init function blocks until the web server stops.
 fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
+	let _init = LoggingLifecycle::new("node agent initialisation".to_string());
 	let tick_interval = opt.tick_interval;
-	info!(target: LOG, "Started node agent");
+	trace!("Ticker interval is {:?}", tick_interval);
 	#[cfg(target_arch = "wasm32")]
 	let completed_status = Arc::new(AtomicBool::new(false));
 	#[cfg(target_arch = "wasm32")]
@@ -90,8 +111,15 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let (tx, rx) = flume::bounded(1);
 
 	let _fut = spawn_future(async move {
+		let _lifecycle = LoggingLifecycle::new("heartbeat task".to_string());
 		let ticker = interval_ticker(tick_interval).await;
-		let streams = (ticker.map(Some), rx.into_stream().map(|_| None));
+		let streams = (
+			ticker.map(|i| {
+				trace!("Node agent tick: {:?}", i);
+				Some(i)
+			}),
+			rx.into_stream().map(|_| None),
+		);
 		let mut streams = streams.merge();
 
 		while let Some(Some(_)) = streams.next().await {
@@ -101,7 +129,6 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 			}
 		}
 
-		info!(target: LOG, "Stopped node agent");
 		#[cfg(target_arch = "wasm32")]
 		completed_status.store(true, Ordering::Relaxed);
 	});
@@ -112,7 +139,8 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 }
 
 // Start live query on change feeds notification processing
-fn live_query_change_feed(kvs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
+fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
+	let tick_interval = opt.tick_interval;
 	#[cfg(target_arch = "wasm32")]
 	let completed_status = Arc::new(AtomicBool::new(false));
 	#[cfg(target_arch = "wasm32")]
@@ -122,25 +150,30 @@ fn live_query_change_feed(kvs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let (tx, rx) = flume::bounded(1);
 
 	let _fut = spawn_future(async move {
+		let _lifecycle = LoggingLifecycle::new("live query agent task".to_string());
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			// TODO verify test fails since return without completion
 			#[cfg(target_arch = "wasm32")]
 			completed_status.store(true, Ordering::Relaxed);
 			return;
 		}
-		let tick_interval = Duration::from_secs(1);
 		let ticker = interval_ticker(tick_interval).await;
-		let streams = (ticker.map(Some), rx.into_stream().map(|_| None));
+		let streams = (
+			ticker.map(|i| {
+				trace!("Live query agent tick: {:?}", i);
+				Some(i)
+			}),
+			rx.into_stream().map(|_| None),
+		);
 		let mut streams = streams.merge();
 
 		let opt = Options::default();
 		while let Some(Some(_)) = streams.next().await {
-			if let Err(e) = kvs.process_lq_notifications(&opt).await {
+			if let Err(e) = dbs.process_lq_notifications(&opt).await {
 				error!("Error running node agent tick: {}", e);
 				break;
 			}
 		}
-		info!("Stopped live query node agent");
 		#[cfg(target_arch = "wasm32")]
 		completed_status.store(true, Ordering::Relaxed);
 	});

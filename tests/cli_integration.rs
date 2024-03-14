@@ -613,7 +613,7 @@ mod cli_integration {
 	#[test(tokio::test)]
 	async fn node() {
 		// Commands without credentials when auth is disabled, should succeed
-		let (addr, server) = common::start_server(StartServerArguments {
+		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
 			tls: false,
 			wait_is_ready: true,
@@ -679,7 +679,7 @@ mod cli_integration {
 					.unwrap();
 			} else {
 				let output = common::run(&args)
-					.input("/* Expecting changes to exist before removal */ SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
 					.output()
 					.unwrap();
 				let output = remove_debug_info(output).replace('\n', "");
@@ -704,23 +704,18 @@ mod cli_integration {
 		sleep(THREE_SEC).await;
 
 		info!("* Show changes after GC");
-		// {
-		let args =
-			format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome");
-		let output = common::run(&args)
-			.input("/* Expecting changes to be removed */ SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-			.output()
-			.unwrap();
-		let output = remove_debug_info(output);
-		// println!("\n\n\nNOW\n\n\n{args}\n\n");
-		// sleep(Duration::from_secs(60 * 60 * 24)).await;
-		// }
-		let mut server = server;
-		println!(
-			"LOOK AT THIS\n\n\n{}\n\n\nSTOP LOOKING",
-			server.finish().unwrap().output().unwrap_or_else(|e| e)
-		);
-		assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
+		{
+			let args = format!(
+				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+			);
+			let output = common::run(&args)
+				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
+		}
+		server.finish().unwrap();
 	}
 
 	#[test]

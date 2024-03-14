@@ -35,7 +35,6 @@ use std::sync::OnceLock;
 use std::task::Poll;
 use surrealdb_core::options::EngineOptions;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Db {}
@@ -148,7 +147,6 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let ct = CancellationToken::new();
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
 		let opt = EngineOptions {
 			tick_interval,
@@ -206,6 +204,5 @@ pub(crate) fn router(
 		task_chans.into_iter().for_each(|chan| {
 			let _ = chan.send(());
 		});
-		ct.cancel();
 	});
 }
