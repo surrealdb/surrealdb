@@ -21,6 +21,8 @@ use surrealdb::ml::storage::surml_file::SurMlFile;
 use surrealdb::sql::statements::{DefineModelStatement, DefineStatement};
 use tower_http::limit::RequestBodyLimitLayer;
 
+use super::AppState;
+
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
 /// The router definition for the ML API endpoints.
