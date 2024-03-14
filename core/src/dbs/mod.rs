@@ -30,6 +30,8 @@ pub use self::capabilities::Capabilities;
 pub mod node;
 
 mod group;
+#[doc(hidden)]
+pub mod lifecycle;
 mod processor;
 mod result;
 mod store;

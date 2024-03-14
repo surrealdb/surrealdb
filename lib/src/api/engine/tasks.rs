@@ -5,6 +5,7 @@ use futures_concurrency::stream::Merge;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb_core::dbs::lifecycle::LoggingLifecycle;
 
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
@@ -29,26 +30,6 @@ type FutureTask = JoinHandle<()>;
 #[cfg(target_arch = "wasm32")]
 /// This will be true if a task has completed
 type FutureTask = Arc<AtomicBool>;
-
-/// LoggingLifecycle is used to create log messages upon creation, and log messages when it is dropped
-struct LoggingLifecycle {
-	identifier: String,
-}
-
-impl LoggingLifecycle {
-	fn new(identifier: String) -> Self {
-		debug!("Started {}", identifier);
-		Self {
-			identifier,
-		}
-	}
-}
-
-impl Drop for LoggingLifecycle {
-	fn drop(&mut self) {
-		debug!("Stopped {}", self.identifier);
-	}
-}
 
 pub struct Tasks {
 	pub nd: FutureTask,
@@ -191,7 +172,7 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod test {
-	use crate::tasks::start_tasks;
+	use crate::engine::tasks::start_tasks;
 	use std::sync::Arc;
 	use surrealdb_core::options::EngineOptions;
 
