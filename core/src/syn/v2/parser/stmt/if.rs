@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_if_stmt(&mut self, mut ctx: Stk) -> ParseResult<IfelseStatement> {
+	pub async fn parse_if_stmt(&mut self, ctx: &mut Stk) -> ParseResult<IfelseStatement> {
 		let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 
 		let mut res = IfelseStatement {
@@ -26,12 +26,12 @@ impl Parser<'_> {
 				let body = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				self.eat(t!(";"));
 				res.exprs.push((condition, body));
-				self.parse_worded_tail(&mut ctx, &mut res).await?;
+				self.parse_worded_tail(ctx, &mut res).await?;
 			}
 			t!("{") => {
-				let body = self.parse_block(&mut ctx, next.span).await?;
+				let body = self.parse_block(ctx, next.span).await?;
 				res.exprs.push((condition, body.into()));
-				self.parse_bracketed_tail(&mut ctx, &mut res).await?;
+				self.parse_bracketed_tail(ctx, &mut res).await?;
 			}
 			x => unexpected!(self, x, "THEN or '{'"),
 		}

@@ -12,13 +12,13 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub async fn parse_relate_stmt(&mut self, mut ctx: Stk) -> ParseResult<RelateStatement> {
+	pub async fn parse_relate_stmt(&mut self, stk: &mut Stk) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let (kind, from, with) = ctx.run(|ctx| self.parse_relation(ctx)).await?;
+		let (kind, from, with) = stk.run(|stk| self.parse_relation(stk)).await?;
 		let uniq = self.eat(t!("UNIQUE"));
 
-		let data = self.try_parse_data(&mut ctx).await?;
-		let output = self.try_parse_output(&mut ctx).await?;
+		let data = self.try_parse_data(stk).await?;
+		let output = self.try_parse_output(stk).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(RelateStatement {
@@ -34,20 +34,20 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_relation(&mut self, mut ctx: Stk) -> ParseResult<(Value, Value, Value)> {
-		let first = self.parse_relate_value(&mut ctx).await?;
+	pub async fn parse_relation(&mut self, stk: &mut Stk) -> ParseResult<(Value, Value, Value)> {
+		let first = self.parse_relate_value(stk).await?;
 		let is_o = match self.next().kind {
 			t!("->") => true,
 			t!("<-") => false,
 			x => unexpected!(self, x, "a relation arrow"),
 		};
-		let kind = self.parse_thing_or_table(&mut ctx).await?;
+		let kind = self.parse_thing_or_table(stk).await?;
 		if is_o {
 			expected!(self, t!("->"))
 		} else {
 			expected!(self, t!("<-"))
 		};
-		let second = self.parse_relate_value(&mut ctx).await?;
+		let second = self.parse_relate_value(stk).await?;
 		if is_o {
 			Ok((kind, first, second))
 		} else {

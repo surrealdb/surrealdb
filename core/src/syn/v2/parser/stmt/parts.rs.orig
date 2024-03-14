@@ -1,12 +1,16 @@
 //! Contains parsing code for smaller common parts of statements.
 
+<<<<<<< HEAD
 use reblessive::Stk;
 
+=======
+use crate::sql::change_feed_include::ChangeFeedInclude;
+>>>>>>> upstream/main
 use crate::{
 	sql::{
-		change_feed_include::ChangeFeedInclude, changefeed::ChangeFeed, index::Distance, Base,
-		Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Tables, Timeout, Value, View,
+		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Field,
+		Fields, Group, Groups, Ident, Idiom, Output, Permission, Permissions, Tables, Timeout,
+		Value, View,
 	},
 	syn::v2::{
 		parser::{
@@ -215,7 +219,7 @@ impl Parser<'_> {
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
 	pub async fn parse_permission(
 		&mut self,
-		stk: &mut Stk,
+		mut ctx: Stk,
 		permissive: bool,
 	) -> ParseResult<Permissions> {
 		match self.next().kind {
@@ -227,10 +231,10 @@ impl Parser<'_> {
 				} else {
 					Permissions::none()
 				};
-				stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+				ctx.run(|ctx| self.parse_specific_permission(ctx, &mut permission)).await?;
 				self.eat(t!(","));
 				while self.eat(t!("FOR")) {
-					stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
+					ctx.run(|ctx| self.parse_specific_permission(ctx, &mut permission)).await?;
 					self.eat(t!(","));
 				}
 				Ok(permission)
@@ -247,7 +251,7 @@ impl Parser<'_> {
 	/// Expects the parser to just have eaten the `FOR` keyword.
 	pub async fn parse_specific_permission(
 		&mut self,
-		stk: &mut Stk,
+		ctx: Stk,
 		permissions: &mut Permissions,
 	) -> ParseResult<()> {
 		let mut select = false;
@@ -276,7 +280,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let permission_value = self.parse_permission_value(stk).await?;
+		let permission_value = self.parse_permission_value(ctx).await?;
 		if select {
 			permissions.select = permission_value.clone();
 		}
@@ -298,11 +302,11 @@ impl Parser<'_> {
 	/// # Parser State
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`, `UPDATE` or `DELETE`.
-	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
+	pub async fn parse_permission_value(&mut self, ctx: Stk) -> ParseResult<Permission> {
 		match self.next().kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
-			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field(stk).await?)),
+			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field(ctx).await?)),
 			x => unexpected!(self, x, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}
@@ -359,10 +363,10 @@ impl Parser<'_> {
 	/// # Parse State
 	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
 	/// parens. Expects the next keyword to be `SELECT`.
-	pub async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
+	pub async fn parse_view(&mut self, ctx: &mut Stk) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;
-		let fields = self.parse_fields(stk).await?;
+		let fields = self.parse_fields(ctx).await?;
 		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
 		let mut from = vec![self.next_token_value()?];
@@ -370,7 +374,7 @@ impl Parser<'_> {
 			from.push(self.next_token_value()?);
 		}
 
-		let cond = self.try_parse_condition(stk).await?;
+		let cond = self.try_parse_condition(ctx).await?;
 		let group = self.try_parse_group(&fields, fields_span)?;
 
 		Ok(View {
@@ -387,9 +391,9 @@ impl Parser<'_> {
 				DistanceKind::Chebyshev => Distance::Chebyshev,
 				DistanceKind::Cosine => Distance::Cosine,
 				DistanceKind::Euclidean => Distance::Euclidean,
-				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Hamming => Distance::Hamming,
 				DistanceKind::Jaccard => Distance::Jaccard,
+				DistanceKind::Manhattan => Distance::Manhattan,
 				DistanceKind::Minkowski => {
 					let distance = self.next_token_value()?;
 					Distance::Minkowski(distance)

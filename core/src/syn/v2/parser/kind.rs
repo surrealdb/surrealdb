@@ -16,13 +16,13 @@ impl Parser<'_> {
 	/// # Parser State
 	/// expects the first `<` to already be eaten
 	pub async fn parse_kind(&mut self, ctx: &mut Stk, delim: Span) -> ParseResult<Kind> {
-		let kind = ctx.wrap(|ctx| self.parse_inner_kind(ctx)).await?;
+		let kind = self.parse_inner_kind(ctx).await?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub async fn parse_inner_kind(&mut self, mut ctx: Stk) -> ParseResult<Kind> {
+	pub async fn parse_inner_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
 				self.pop_peek();
@@ -59,7 +59,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a single kind which is not any, option, or either.
-	async fn parse_concrete_kind(&mut self, mut ctx: Stk) -> ParseResult<Kind> {
+	async fn parse_concrete_kind(&mut self, ctx: &mut Stk) -> ParseResult<Kind> {
 		match self.next().kind {
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NULL") => Ok(Kind::Null),
@@ -185,7 +185,7 @@ mod tests {
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
-		stack.run(|mut ctx| parser.parse_inner_kind(ctx)).finish()
+		stack.enter(|ctx| parser.parse_inner_kind(ctx)).finish()
 	}
 
 	#[test]

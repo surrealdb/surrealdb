@@ -13,19 +13,19 @@ use crate::{
 use super::{ParseResult, Parser};
 
 impl Parser<'_> {
-	pub async fn parse_json(&mut self, mut ctx: Stk) -> ParseResult<Value> {
+	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.next();
 		match token.kind {
 			t!("NULL") => Ok(Value::Null),
 			t!("true") => Ok(Value::Bool(true)),
 			t!("false") => Ok(Value::Bool(false)),
-			t!("{") => self.parse_json_object(&mut ctx, token.span).await.map(Value::Object),
-			t!("[") => self.parse_json_array(&mut ctx, token.span).await.map(Value::Array),
+			t!("{") => self.parse_json_object(ctx, token.span).await.map(Value::Object),
+			t!("[") => self.parse_json_array(ctx, token.span).await.map(Value::Array),
 			TokenKind::Duration => self.token_value(token).map(Value::Duration),
 			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
 			TokenKind::Strand => {
 				if self.legacy_strands {
-					self.parse_legacy_strand(&mut ctx).await
+					self.parse_legacy_strand(ctx).await
 				} else {
 					Ok(Value::Strand(Strand(self.lexer.string.take().unwrap())))
 				}
@@ -34,7 +34,7 @@ impl Parser<'_> {
 			TokenKind::Uuid => self.token_value(token).map(Value::Uuid),
 			_ => {
 				let ident = self.token_value::<Ident>(token)?.0;
-				self.parse_thing_from_ident(&mut ctx, ident).await.map(Value::Thing)
+				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)
 			}
 		}
 	}

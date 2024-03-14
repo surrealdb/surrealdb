@@ -9,7 +9,10 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub(crate) async fn parse_insert_stmt(&mut self, mut ctx: Stk) -> ParseResult<InsertStatement> {
+	pub(crate) async fn parse_insert_stmt(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<InsertStatement> {
 		let ignore = self.eat(t!("IGNORE"));
 		expected!(self, t!("INTO"));
 		let next = self.next();
@@ -28,7 +31,7 @@ impl Parser<'_> {
 		let data = match self.peek_kind() {
 			t!("(") => {
 				let start = self.pop_peek().span;
-				let fields = self.parse_idiom_list(&mut ctx).await?;
+				let fields = self.parse_idiom_list(ctx).await?;
 				self.expect_closing_delimiter(t!(")"), start)?;
 				expected!(self, t!("VALUES"));
 
@@ -64,11 +67,11 @@ impl Parser<'_> {
 		};
 
 		let update = if self.eat(t!("ON")) {
-			Some(self.parse_insert_update(&mut ctx).await?)
+			Some(self.parse_insert_update(ctx).await?)
 		} else {
 			None
 		};
-		let output = self.try_parse_output(&mut ctx).await?;
+		let output = self.try_parse_output(ctx).await?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(InsertStatement {

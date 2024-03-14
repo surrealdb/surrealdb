@@ -27,7 +27,7 @@ fn parse_large_depth_object() {
 		.with_query_recursion_limit(100000)
 		.with_object_recursion_limit(100000);
 	let mut stack = Stack::new();
-	let query = stack.run(|ctx| parser.parse_query(ctx)).finish().unwrap();
+	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
 	let Query(Statements(stmts)) = query;
 	let Statement::Value(Value::Object(ref object)) = stmts[0] else {
 		panic!()
@@ -59,7 +59,7 @@ fn parse_large_depth_record_id() {
 		.with_query_recursion_limit(100000)
 		.with_object_recursion_limit(100000);
 	let mut stack = Stack::new();
-	let query = stack.run(|ctx| parser.parse_query(ctx)).finish().unwrap();
+	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
 	let Query(Statements(stmts)) = query;
 	let Statement::Value(Value::Thing(ref thing)) = stmts[0] else {
 		panic!()

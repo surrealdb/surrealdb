@@ -16,13 +16,16 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub(crate) async fn parse_select_stmt(&mut self, mut ctx: Stk) -> ParseResult<SelectStatement> {
+	pub(crate) async fn parse_select_stmt(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<SelectStatement> {
 		let before = self.peek().span;
-		let expr = self.parse_fields(&mut ctx).await?;
+		let expr = self.parse_fields(stk).await?;
 		let fields_span = before.covers(self.last_span());
 
 		let omit = if self.eat(t!("OMIT")) {
-			Some(Idioms(self.parse_idiom_list(&mut ctx).await?))
+			Some(Idioms(self.parse_idiom_list(stk).await?))
 		} else {
 			None
 		};
@@ -31,27 +34,27 @@ impl Parser<'_> {
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![ctx.run(|ctx| self.parse_value(ctx)).await?];
+		let mut what = vec![stk.run(|ctx| self.parse_value(ctx)).await?];
 		while self.eat(t!(",")) {
-			what.push(ctx.run(|ctx| self.parse_value(ctx)).await?);
+			what.push(stk.run(|ctx| self.parse_value(ctx)).await?);
 		}
 		let what = Values(what);
 
 		let with = self.try_parse_with()?;
-		let cond = self.try_parse_condition(&mut ctx).await?;
+		let cond = self.try_parse_condition(stk).await?;
 		let split = self.try_parse_split(&expr, fields_span)?;
 		let group = self.try_parse_group(&expr, fields_span)?;
 		let order = self.try_parse_orders(&expr, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
-			let start = self.try_parse_start(&mut ctx).await?;
-			let limit = self.try_parse_limit(&mut ctx).await?;
+			let start = self.try_parse_start(stk).await?;
+			let limit = self.try_parse_limit(stk).await?;
 			(limit, start)
 		} else {
-			let limit = self.try_parse_limit(&mut ctx).await?;
-			let start = self.try_parse_start(&mut ctx).await?;
+			let limit = self.try_parse_limit(stk).await?;
+			let start = self.try_parse_start(stk).await?;
 			(limit, start)
 		};
-		let fetch = self.try_parse_fetch(&mut ctx).await?;
+		let fetch = self.try_parse_fetch(stk).await?;
 		let version = self.try_parse_version()?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));

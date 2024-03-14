@@ -69,7 +69,7 @@ macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
 		let mut parser = $crate::syn::v2::parser::Parser::new($t.as_bytes());
 		let mut stack = reblessive::Stack::new();
-		stack.run(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
+		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
 	}};
 }
 

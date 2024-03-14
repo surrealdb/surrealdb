@@ -12,9 +12,9 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the next tokens to be of a field set.
-	pub async fn parse_fields(&mut self, mut ctx: &mut Stk) -> ParseResult<Fields> {
+	pub async fn parse_fields(&mut self, ctx: &mut Stk) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
-			let expr = ctx.run(|mut ctx| self.parse_value_field(ctx)).await?;
+			let expr = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 			let alias = if self.eat(t!("AS")) {
 				Some(self.parse_plain_idiom(ctx).await?)
 			} else {
@@ -68,7 +68,7 @@ impl Parser<'_> {
 	/// parsing. Graphs inside a plain idioms will remain a normal graph production.
 	pub(crate) async fn parse_remaining_idiom(
 		&mut self,
-		mut ctx: &mut Stk,
+		stk: &mut Stk,
 		start: Vec<Part>,
 	) -> ParseResult<Idiom> {
 		let mut res = start;
@@ -84,22 +84,22 @@ impl Parser<'_> {
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
-					let part = self.parse_bracket_part(ctx, span).await?;
+					let part = self.parse_bracket_part(stk, span).await?;
 					res.push(part)
 				}
 				t!("->") => {
 					self.pop_peek();
-					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
+					let graph = stk.run(|stk| self.parse_graph(stk, Dir::Out)).await?;
 					res.push(Part::Graph(graph))
 				}
 				t!("<->") => {
 					self.pop_peek();
-					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
+					let graph = stk.run(|stk| self.parse_graph(stk, Dir::Both)).await?;
 					res.push(Part::Graph(graph))
 				}
 				t!("<-") => {
 					self.pop_peek();
-					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
+					let graph = stk.run(|stk| self.parse_graph(stk, Dir::In)).await?;
 					res.push(Part::Graph(graph))
 				}
 				t!("..") => {
@@ -426,7 +426,7 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at the field like part
 	/// of the graph
-	pub async fn parse_graph(&mut self, mut ctx: Stk, dir: Dir) -> ParseResult<Graph> {
+	pub async fn parse_graph(&mut self, ctx: &mut Stk, dir: Dir) -> ParseResult<Graph> {
 		match self.peek_kind() {
 			t!("?") => {
 				self.pop_peek();
@@ -455,9 +455,9 @@ impl Parser<'_> {
 					x => unexpected!(self, x, "`?` or an identifier"),
 				};
 
-				let cond = self.try_parse_condition(&mut ctx).await?;
+				let cond = self.try_parse_condition(ctx).await?;
 				let alias = if self.eat(t!("AS")) {
-					Some(self.parse_plain_idiom(&mut ctx).await?)
+					Some(self.parse_plain_idiom(ctx).await?)
 				} else {
 					None
 				};

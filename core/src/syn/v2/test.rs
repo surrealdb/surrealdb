@@ -19,7 +19,7 @@ impl Parse<Self> for Array {
 		let start = parser.peek().span;
 		assert!(parser.eat(t!("[")));
 		stack
-			.run(|mut ctx| async move { parser.parse_array(&mut ctx, start).await })
+			.enter(|mut ctx| async move { parser.parse_array(&mut ctx, start).await })
 			.finish()
 			.unwrap()
 	}
@@ -56,7 +56,7 @@ impl Parse<Self> for Expression {
 	fn parse(val: &str) -> Self {
 		let mut parser = Parser::new(val.as_bytes());
 		let mut stack = Stack::new();
-		let value = stack.run(|ctx| parser.parse_value_field(ctx)).finish().unwrap();
+		let value = stack.enter(|ctx| parser.parse_value_field(ctx)).finish().unwrap();
 		if let Value::Expression(x) = value {
 			return *x;
 		}

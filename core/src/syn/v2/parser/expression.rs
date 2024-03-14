@@ -17,10 +17,10 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a table, see [`parse_value_field`] for parsing loose idents as fields
-	pub async fn parse_value(&mut self, mut ctx: Stk) -> ParseResult<Value> {
+	pub async fn parse_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
-		let res = self.pratt_parse_expr(&mut ctx, 0).await;
+		let res = self.pratt_parse_expr(ctx, 0).await;
 		self.table_as_field = old;
 		res
 	}
@@ -30,10 +30,10 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
 	/// idents as a field, see [`parse_value`] for parsing loose idents as table
-	pub async fn parse_value_field(&mut self, mut ctx: Stk) -> ParseResult<Value> {
+	pub async fn parse_value_field(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
-		let res = self.pratt_parse_expr(&mut ctx, 0).await;
+		let res = self.pratt_parse_expr(ctx, 0).await;
 		self.table_as_field = old;
 		res
 	}
@@ -138,9 +138,7 @@ impl Parser<'_> {
 			t!("!") => Operator::Not,
 			t!("<") => {
 				let kind = self.parse_kind(ctx, token.span).await?;
-				let value = ctx
-					.run(|mut ctx| async move { self.pratt_parse_expr(&mut ctx, min_bp).await })
-					.await?;
+				let value = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 				let cast = Cast(kind, value);
 				return Ok(Value::Cast(Box::new(cast)));
 			}
@@ -171,8 +169,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let v =
-			ctx.run(|mut ctx| async move { self.pratt_parse_expr(&mut ctx, min_bp).await }).await?;
+		let v = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
 		// HACK: For compatiblity with the old parser apply + and - operator immediately if the
 		// left value is a number.
@@ -273,8 +270,7 @@ impl Parser<'_> {
 			// should be unreachable as we previously check if the token was a prefix op.
 			x => unreachable!("found non-operator token {x:?}"),
 		};
-		let rhs =
-			ctx.run(|mut ctx| async move { self.pratt_parse_expr(&mut ctx, min_bp).await }).await?;
+		let rhs = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 		Ok(Value::Expression(Box::new(Expression::Binary {
 			l: lhs,
 			o: operator,
