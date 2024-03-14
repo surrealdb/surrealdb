@@ -19,7 +19,7 @@ mod cli_integration {
 	use super::common::{self, StartServerArguments, PASS, USER};
 
 	const ONE_SEC: Duration = Duration::new(1, 0);
-	const THREE_SEC: Duration = Duration::new(3, 0);
+	const TWO_SECS: Duration = Duration::new(2, 0);
 
 	#[test]
 	fn version_command() {
@@ -70,7 +70,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn all_commands() -> () {
+	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
 		let (addr, _server) = common::start_server(StartServerArguments {
 			auth: false,
@@ -303,7 +303,7 @@ mod cli_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn with_auth_level() -> () {
+	async fn with_auth_level() {
 		// Commands with credentials for different auth levels
 		let (addr, mut server) = common::start_server_with_auth_level().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
@@ -489,7 +489,7 @@ mod cli_integration {
 
 	#[test(tokio::test)]
 	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
-	async fn without_auth_level() -> () {
+	async fn without_auth_level() {
 		// Commands with credentials for different auth levels
 		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
@@ -701,7 +701,7 @@ mod cli_integration {
 			}
 		};
 
-		sleep(THREE_SEC).await;
+		sleep(TWO_SECS).await;
 
 		info!("* Show changes after GC");
 		{
