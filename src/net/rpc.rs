@@ -115,10 +115,10 @@ async fn post_handler(
 		lq_handler: None,
 	};
 
-	match fmt.req_http(&body) {
+	match fmt.req_http(body) {
 		Ok(req) => {
 			let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
-			Ok(fmt.res_http(res.into_response(None)))
+			fmt.res_http(res.into_response(None)).map_err(Error::from)
 		}
 		Err(err) => Err(Error::from(err)),
 	}

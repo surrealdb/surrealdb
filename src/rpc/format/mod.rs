@@ -5,11 +5,11 @@ pub mod msgpack;
 mod revision;
 
 use crate::net::headers::{Accept, ContentType};
-use crate::net::output::Output;
 use crate::rpc::failure::Failure;
 use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
+use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use surrealdb::rpc::RpcError;
 
@@ -100,25 +100,25 @@ impl Format {
 		.map_err(Into::into)
 	}
 	/// Process a request using the specified format
-	pub fn req_http(&self, body: &Bytes) -> Result<Request, RpcError> {
+	pub fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
-			Self::Json => json::req_http(body),
-			Self::Cbor => todo!(),
-			Self::Msgpack => todo!(),
-			Self::Bincode => todo!(),
-			Self::Revision => todo!(),
+			Self::Json => json::req_http(&body),
+			Self::Cbor => cbor::req_http(body),
+			Self::Msgpack => msgpack::req_http(body),
+			Self::Bincode => bincode::req_http(&body),
+			Self::Revision => revision::req_http(body),
 		}
 	}
 	/// Process a response using the specified format
-	pub fn res_http(&self, res: Response) -> axum::response::Response {
+	pub fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
 			Self::Json => json::res_http(res),
-			Self::Cbor => todo!(),
-			Self::Msgpack => todo!(),
-			Self::Bincode => todo!(),
-			Self::Revision => todo!(),
+			Self::Cbor => cbor::res_http(res),
+			Self::Msgpack => msgpack::res_http(res),
+			Self::Bincode => bincode::res_http(res),
+			Self::Revision => revision::res_http(res),
 		}
 	}
 }

@@ -2,6 +2,7 @@ use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use axum::response::IntoResponse;
+use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::StatusCode;
 use surrealdb::rpc::RpcError;
@@ -31,11 +32,11 @@ pub fn req_http(val: &Bytes) -> Result<Request, RpcError> {
 		.try_into()
 }
 
-pub fn res_http(res: Response) -> axum::response::Response {
+pub fn res_http(res: Response) -> Result<AxumResponse, RpcError> {
 	// Convert the response into simplified JSON
 	let val = res.into_json();
 	// Serialize the response with simplified type information
 	let res = serde_json::to_string(&val).unwrap();
 	// Return the message length, and message as binary
-	(StatusCode::OK, res).into_response()
+	Ok((StatusCode::OK, res).into_response())
 }
