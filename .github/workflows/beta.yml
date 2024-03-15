@@ -130,7 +130,7 @@ jobs:
         if: ${{ steps.bump.outputs.beta-num == '1' }}
         id: pr
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
           set -x
           url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
@@ -142,5 +142,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
         run: |
           set -x
-          gh pr review ${{ steps.pr.outputs.url }} --approve
           gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash
