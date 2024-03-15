@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	dbs::{Response, Session},
-	err::Error,
+	dbs::Session,
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{param, Array, Object, Value},
+	sql::{Array, Value},
 };
 
 use super::{method::Method, response::Data, rpc_error::RpcError};

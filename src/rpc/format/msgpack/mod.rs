@@ -1,26 +1,26 @@
 mod convert;
 
 pub use convert::Pack;
+use surrealdb::rpc::RpcError;
 
-use crate::rpc::failure::Failure;
 use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 
-pub fn req_ws(msg: Message) -> Result<Request, Failure> {
+pub fn req_ws(msg: Message) -> Result<Request, RpcError> {
 	match msg {
 		Message::Text(val) => {
-			surrealdb::sql::value(&val).map_err(|_| Failure::PARSE_ERROR)?.try_into()
+			surrealdb::sql::value(&val).map_err(|_| RpcError::ParseError)?.try_into()
 		}
 		Message::Binary(val) => rmpv::decode::read_value(&mut val.as_slice())
-			.map_err(|_| Failure::PARSE_ERROR)
+			.map_err(|_| RpcError::ParseError)
 			.map(Pack)?
 			.try_into(),
-		_ => Err(Failure::INVALID_REQUEST),
+		_ => Err(RpcError::InvalidRequest),
 	}
 }
 
-pub fn res_ws(res: Response) -> Result<(usize, Message), Failure> {
+pub fn res_ws(res: Response) -> Result<(usize, Message), RpcError> {
 	// Convert the response into a value
 	let val: Pack = res.into_value().try_into()?;
 	// Create a new vector for encoding output

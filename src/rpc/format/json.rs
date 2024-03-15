@@ -1,22 +1,22 @@
-use crate::rpc::failure::Failure;
 use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use http::StatusCode;
+use surrealdb::rpc::RpcError;
 use surrealdb::sql;
 
-pub fn req_ws(msg: Message) -> Result<Request, Failure> {
+pub fn req_ws(msg: Message) -> Result<Request, RpcError> {
 	match msg {
 		Message::Text(val) => {
-			surrealdb::sql::value(&val).map_err(|_| Failure::PARSE_ERROR)?.try_into()
+			surrealdb::sql::value(&val).map_err(|_| RpcError::ParseError)?.try_into()
 		}
-		_ => Err(Failure::INVALID_REQUEST),
+		_ => Err(RpcError::InvalidRequest),
 	}
 }
 
-pub fn res_ws(res: Response) -> Result<(usize, Message), Failure> {
+pub fn res_ws(res: Response) -> Result<(usize, Message), RpcError> {
 	// Convert the response into simplified JSON
 	let val = res.into_json();
 	// Serialize the response with simplified type information
@@ -25,9 +25,9 @@ pub fn res_ws(res: Response) -> Result<(usize, Message), Failure> {
 	Ok((res.len(), Message::Text(res)))
 }
 
-pub fn req_http(val: &Bytes) -> Result<Request, Failure> {
-	sql::value(std::str::from_utf8(&val).or(Err(Failure::PARSE_ERROR))?)
-		.or(Err(Failure::PARSE_ERROR))?
+pub fn req_http(val: &Bytes) -> Result<Request, RpcError> {
+	sql::value(std::str::from_utf8(&val).or(Err(RpcError::ParseError))?)
+		.or(Err(RpcError::ParseError))?
 		.try_into()
 }
 

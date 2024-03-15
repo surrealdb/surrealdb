@@ -5,10 +5,8 @@ use crate::cnf;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
-use crate::rpc::failure::Failure;
 use crate::rpc::format::Format;
 use crate::rpc::format::PROTOCOLS;
-use crate::rpc::request::Request;
 use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::WEBSOCKETS;
 use axum::routing::get;
@@ -24,13 +22,11 @@ use http::HeaderValue;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::rpc::method::Method;
-use surrealdb::sql::Array;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
 use super::headers::Accept;
 use super::headers::ContentType;
-use super::output;
 
 use surrealdb::rpc::context::RpcContext;
 
@@ -103,7 +99,6 @@ async fn post_handler(
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-	// let out_fmt: Option<Format> = output.map(|h| &*h).map(|a: &Accept| a.into());
 	let fmt: Format = content_type.deref().into();
 	let out_fmt: Option<Format> = output.as_deref().map(Into::into);
 	if let Some(out_fmt) = out_fmt {
@@ -120,21 +115,14 @@ async fn post_handler(
 		lq_handler: None,
 	};
 
-	// let req: Request = match *content_type {
-	// 	ContentType::ApplicationJson => surrealdb::sql::value(
-	// 		std::str::from_utf8(&body).map_err(|e| Error::Other(e.to_string()))?,
-	// 	)?
-	// 	.try_into()
-	// 	.or(Err(Error::Other("Error:".to_string())))?,
-	// 	ContentType::ApplicationCbor => todo!(),
-	// 	ContentType::ApplicationPack => todo!(),
-	// 	_ => return Err(Error::InvalidType),
-	// };
+	match fmt.req_http(&body) {
+		Ok(req) => {
+			let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
+			Ok(fmt.res_http(res.into_response(None)))
+		}
+		Err(err) => Err(Error::from(err)),
+	}
 
-	let req = fmt.req_http(&body).unwrap();
-
-	// let method = Method::parse("info");
-	let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
-	let res = res.into_response(None);
-	Ok(fmt.res_http(res))
+	// let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
+	// Ok(fmt.res_http(res.into_response(None)))
 }

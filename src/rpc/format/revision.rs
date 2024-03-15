@@ -1,20 +1,20 @@
-use crate::rpc::failure::Failure;
 use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use revision::Revisioned;
+use surrealdb::rpc::RpcError;
 use surrealdb::sql::Value;
 
-pub fn req_ws(msg: Message) -> Result<Request, Failure> {
+pub fn req_ws(msg: Message) -> Result<Request, RpcError> {
 	match msg {
 		Message::Binary(val) => Value::deserialize_revisioned(&mut val.as_slice())
-			.map_err(|_| Failure::PARSE_ERROR)?
+			.map_err(|_| RpcError::ParseError)?
 			.try_into(),
-		_ => Err(Failure::INVALID_REQUEST),
+		_ => Err(RpcError::InvalidRequest),
 	}
 }
 
-pub fn res_ws(res: Response) -> Result<(usize, Message), Failure> {
+pub fn res_ws(res: Response) -> Result<(usize, Message), RpcError> {
 	// Serialize the response with full internal type information
 	let mut buf = Vec::new();
 	res.serialize_revisioned(&mut buf).unwrap();

@@ -2,6 +2,7 @@ use crate::rpc::failure::Failure;
 use crate::rpc::format::cbor::Cbor;
 use crate::rpc::format::msgpack::Pack;
 use once_cell::sync::Lazy;
+use surrealdb::rpc::RpcError;
 use surrealdb::sql::Part;
 use surrealdb::sql::{Array, Value};
 
@@ -16,22 +17,22 @@ pub struct Request {
 }
 
 impl TryFrom<Cbor> for Request {
-	type Error = Failure;
-	fn try_from(val: Cbor) -> Result<Self, Failure> {
-		<Cbor as TryInto<Value>>::try_into(val).map_err(|_| Failure::INVALID_REQUEST)?.try_into()
+	type Error = RpcError;
+	fn try_from(val: Cbor) -> Result<Self, RpcError> {
+		<Cbor as TryInto<Value>>::try_into(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
 	}
 }
 
 impl TryFrom<Pack> for Request {
-	type Error = Failure;
-	fn try_from(val: Pack) -> Result<Self, Failure> {
-		<Pack as TryInto<Value>>::try_into(val).map_err(|_| Failure::INVALID_REQUEST)?.try_into()
+	type Error = RpcError;
+	fn try_from(val: Pack) -> Result<Self, RpcError> {
+		<Pack as TryInto<Value>>::try_into(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
 	}
 }
 
 impl TryFrom<Value> for Request {
-	type Error = Failure;
-	fn try_from(val: Value) -> Result<Self, Failure> {
+	type Error = RpcError;
+	fn try_from(val: Value) -> Result<Self, RpcError> {
 		// Fetch the 'id' argument
 		let id = match val.pick(&*ID) {
 			v if v.is_none() => None,
@@ -40,12 +41,12 @@ impl TryFrom<Value> for Request {
 			v if v.is_number() => Some(v),
 			v if v.is_strand() => Some(v),
 			v if v.is_datetime() => Some(v),
-			_ => return Err(Failure::INVALID_REQUEST),
+			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'method' argument
 		let method = match val.pick(&*METHOD) {
 			Value::Strand(v) => v.to_raw(),
-			_ => return Err(Failure::INVALID_REQUEST),
+			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'params' argument
 		let params = match val.pick(&*PARAMS) {

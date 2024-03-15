@@ -11,6 +11,7 @@ use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use bytes::Bytes;
+use surrealdb::rpc::RpcError;
 
 pub const PROTOCOLS: [&str; 5] = [
 	"json",     // For basic JSON serialisation
@@ -84,6 +85,7 @@ impl Format {
 			Self::Bincode => bincode::req_ws(msg),
 			Self::Revision => revision::req_ws(msg),
 		}
+		.map_err(Into::into)
 	}
 	/// Process a response using the specified format
 	pub fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
@@ -95,9 +97,10 @@ impl Format {
 			Self::Bincode => bincode::res_ws(res),
 			Self::Revision => revision::res_ws(res),
 		}
+		.map_err(Into::into)
 	}
 	/// Process a request using the specified format
-	pub fn req_http(&self, body: &Bytes) -> Result<Request, Failure> {
+	pub fn req_http(&self, body: &Bytes) -> Result<Request, RpcError> {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
 			Self::Json => json::req_http(body),

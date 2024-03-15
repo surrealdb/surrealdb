@@ -23,3 +23,20 @@ impl From<err::Error> for RpcError {
 		RpcError::InternalError(e)
 	}
 }
+
+impl From<&str> for RpcError {
+	fn from(e: &str) -> Self {
+		RpcError::Thrown(e.to_string())
+	}
+}
+
+impl From<RpcError> for err::Error {
+	fn from(value: RpcError) -> Self {
+		use err::Error;
+		match value {
+			RpcError::InternalError(e) => e,
+			RpcError::Thrown(e) => Error::Thrown(e),
+			_ => Error::Thrown(value.to_string()),
+		}
+	}
+}
