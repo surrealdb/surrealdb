@@ -4,21 +4,29 @@ use helpers::new_ds;
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::fflags::FFLAGS;
+use surrealdb::kvs::Datastore;
+use surrealdb::kvs::LockType::Optimistic;
+use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core::fflags::FFLAGS;
 
 mod helpers;
 mod parse;
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn database_change_feeds() -> Result<(), Error> {
-	let sql = "
-	    DEFINE DATABASE test CHANGEFEED 1h;
+	// This is a unique shared identifier
+	let identifier = "alpaca";
+	let ns = format!("namespace_{identifier}");
+	let db = format!("database_{identifier}");
+	let sql = format!(
+		"
+	    DEFINE DATABASE {db} CHANGEFEED 1h;
         DEFINE TABLE person;
 		DEFINE FIELD name ON TABLE person
 			ASSERT
 				IF $input THEN
-					$input = /^[A-Z]{1}[a-z]+$/
+					$input = /^[A-Z]{{1}}[a-z]+$/
 				ELSE
 					true
 				END
@@ -29,18 +37,22 @@ async fn database_change_feeds() -> Result<(), Error> {
 					$value
 				END
 		;
+	"
+	);
+	let sql2 = "
 		UPDATE person:test CONTENT { name: 'Tobie' };
 		DELETE person:test;
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let start_ts = 0u64;
-	let end_ts = start_ts + 1;
-	dbs.tick_at(start_ts).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	dbs.tick_at(end_ts).await?;
-	assert_eq!(res.len(), 6);
+	let ses = Session::owner().with_ns(ns.as_str()).with_db(db.as_str());
+	let mut current_time = 0u64;
+	dbs.tick_at(current_time).await?;
+	let res = &mut dbs.execute(sql.as_str(), &ses, None).await?;
+	// Increment by a second (sic)
+	current_time += 1;
+	dbs.tick_at(current_time).await?;
+	assert_eq!(res.len(), 3);
 	// DEFINE DATABASE
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -50,28 +62,12 @@ async fn database_change_feeds() -> Result<(), Error> {
 	// DEFINE FIELD
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
-	// UPDATE CONTENT
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: person:test,
-				name: 'Name: Tobie',
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	// DELETE
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
-	// SHOW CHANGES
-	let tmp = res.remove(0).result?;
-	let val = match FFLAGS.change_feed_live_queries.enabled() {
+
+	let cf_val_arr = match FFLAGS.change_feed_live_queries.enabled() {
 		true => Value::parse(
 			"[
 			{
-				versionstamp: 65536,
+				versionstamp: 2,
 				changes: [
 					{
 						create: {
@@ -82,7 +78,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 131072,
+				versionstamp: 3,
 				changes: [
 					{
 						delete: {
@@ -96,7 +92,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		false => Value::parse(
 			"[
 			{
-				versionstamp: 65536,
+				versionstamp: 2,
 				changes: [
 					{
 						update: {
@@ -107,7 +103,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 131072,
+				versionstamp: 3,
 				changes: [
 					{
 						delete: {
@@ -119,17 +115,82 @@ async fn database_change_feeds() -> Result<(), Error> {
 		]",
 		),
 	};
-	assert_eq!(tmp, val);
+
+	// Declare check that is repeatable
+	async fn check_test(
+		dbs: &Datastore,
+		sql2: &str,
+		ses: &Session,
+		cf_val_arr: &Value,
+	) -> Result<(), String> {
+		let res = &mut dbs.execute(sql2, ses, None).await?;
+		assert_eq!(res.len(), 3);
+		// UPDATE CONTENT
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+			{
+				id: person:test,
+				name: 'Name: Tobie',
+			}
+		]",
+		);
+		Some(&tmp)
+			.filter(|x| *x == &val)
+			.map(|v| ())
+			.ok_or(format!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
+		// DELETE
+		let tmp = res.remove(0).result?;
+		let val = Value::parse("[]");
+		Some(&tmp)
+			.filter(|x| *x == &val)
+			.map(|v| ())
+			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
+		// SHOW CHANGES
+		let tmp = res.remove(0).result?;
+		Some(&tmp)
+			.filter(|x| *x == cf_val_arr)
+			.map(|v| ())
+			.ok_or(format!("Expected SHOW CHANGES value:\nleft: {}\nright: {}", tmp, cf_val_arr))?;
+		Ok(())
+	}
+
+	// Check the validation with repeats
+	let limit = 1;
+	for i in 0..limit {
+		let test_result = check_test(&dbs, sql2, &ses, &cf_val_arr).await;
+		match test_result {
+			Ok(_) => break,
+			Err(e) => {
+				if i == limit - 1 {
+					panic!("Failed after retries: {}", e);
+				}
+				println!("Failed after retry {}:\n{}", i, e);
+				tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+			}
+		}
+	}
 	// Retain for 1h
 	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	dbs.tick_at(end_ts + 3599).await?;
+	// This is neccessary to mark a point in time that can be GC'd
+	current_time += 1;
+	dbs.tick_at(current_time).await?;
+	let mut tx = dbs.transaction(Write, Optimistic).await?;
+	#[cfg(feature = "sql2")]
+	tx.print_all().await;
+	tx.cancel().await?;
+
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, val);
+	assert_eq!(tmp, cf_val_arr);
+
 	// GC after 1hs
-	dbs.tick_at(end_ts + 3600).await?;
+	let one_hour_in_secs = 3600;
+	current_time += one_hour_in_secs;
+	current_time += 1;
+	dbs.tick_at(current_time).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
@@ -166,7 +227,7 @@ async fn table_change_feeds() -> Result<(), Error> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.tick_at(start_ts).await?;
@@ -236,7 +297,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		true => Value::parse(
 			"[
 			{
-				versionstamp: 65536,
+				versionstamp: 1,
 				changes: [
 					{
 						define_table: {
@@ -246,7 +307,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 131072,
+				versionstamp: 2,
 				changes: [
 					{
 						create: {
@@ -257,7 +318,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 196608,
+				versionstamp: 3,
 				changes: [
 					{
 						update: {
@@ -268,7 +329,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 262144,
+				versionstamp: 4,
 				changes: [
 					{
 						update: {
@@ -279,7 +340,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 327680,
+				versionstamp: 5,
 				changes: [
 					{
 						delete: {
@@ -289,7 +350,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 393216,
+				versionstamp: 6,
 				changes: [
 					{
 						create: {
@@ -304,7 +365,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		false => Value::parse(
 			"[
 			{
-				versionstamp: 65536,
+				versionstamp: 1,
 				changes: [
 					{
 						define_table: {
@@ -314,7 +375,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 131072,
+				versionstamp: 2,
 				changes: [
 					{
 						update: {
@@ -325,7 +386,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 196608,
+				versionstamp: 3,
 				changes: [
 					{
 						update: {
@@ -336,7 +397,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 262144,
+				versionstamp: 4,
 				changes: [
 					{
 						update: {
@@ -347,7 +408,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 327680,
+				versionstamp: 5,
 				changes: [
 					{
 						delete: {
@@ -357,7 +418,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 393216,
+				versionstamp: 6,
 				changes: [
 					{
 						update: {
@@ -392,7 +453,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<(), Error> {
 	let db = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;

@@ -4,8 +4,8 @@ mod parse;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::fflags::FFLAGS;
 use surrealdb::sql::Value;
-use surrealdb_core::fflags::FFLAGS;
 
 #[tokio::test]
 async fn live_query_sends_registered_lq_details() -> Result<(), Error> {

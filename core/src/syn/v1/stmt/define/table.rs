@@ -10,12 +10,10 @@ use crate::sql::{
 	statements::DefineTableStatement, ChangeFeed, Permission, Permissions, Strand, View,
 };
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
-#[cfg(feature = "sql2")]
 use nom::{combinator::opt, sequence::tuple};
 
 pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -32,7 +30,6 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let mut res = DefineTableStatement {
 		name,
 		permissions: Permissions::none(),
-		#[cfg(feature = "sql2")]
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};

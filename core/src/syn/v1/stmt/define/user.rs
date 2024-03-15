@@ -18,12 +18,10 @@ use nom::{
 	multi::{many0, separated_list1},
 	Err,
 };
-#[cfg(feature = "sql2")]
 use nom::{combinator::opt, sequence::tuple};
 
 pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 	let (i, _) = tag_no_case("USER")(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -47,7 +45,6 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 		vec!["Viewer".into()], // New users get the viewer role by default
 	);
 
-	#[cfg(feature = "sql2")]
 	if if_not_exists.is_some() {
 		res.if_not_exists = true;
 	};
