@@ -1,4 +1,4 @@
-#[cfg(all(not(feature = "jwks"), feature = "sql2"))]
+#[cfg(not(feature = "jwks"))]
 use super::super::super::error::ParseError::Expected;
 use super::super::super::{
 	comment::shouldbespace,
@@ -14,12 +14,10 @@ use crate::{
 };
 use nom::Err;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
-#[cfg(feature = "sql2")]
 use nom::{combinator::opt, sequence::tuple};
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -40,7 +38,6 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let mut res = DefineTokenStatement {
 		name,
 		base,
-		#[cfg(feature = "sql2")]
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
@@ -48,7 +45,7 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	for opt in opts {
 		match opt {
 			DefineTokenOption::Type(v) => {
-				#[cfg(all(not(feature = "jwks"), feature = "sql2"))]
+				#[cfg(not(feature = "jwks"))]
 				if matches!(v, Algorithm::Jwks) {
 					return Err(Err::Error(Expected {
 						tried: i,

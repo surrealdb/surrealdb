@@ -21,7 +21,6 @@ impl Parser<'_> {
 	pub fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
 		let res = match self.next().kind {
 			t!("NAMESPACE") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -32,12 +31,10 @@ impl Parser<'_> {
 
 				RemoveStatement::Namespace(RemoveNamespaceStatement {
 					name,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("DATABASE") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -48,12 +45,10 @@ impl Parser<'_> {
 
 				RemoveStatement::Database(RemoveDatabaseStatement {
 					name,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("FUNCTION") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -68,12 +63,10 @@ impl Parser<'_> {
 
 				RemoveStatement::Function(RemoveFunctionStatement {
 					name,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("TOKEN") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -87,12 +80,10 @@ impl Parser<'_> {
 				RemoveStatement::Token(crate::sql::statements::RemoveTokenStatement {
 					name,
 					base,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("SCOPE") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -103,12 +94,10 @@ impl Parser<'_> {
 
 				RemoveStatement::Scope(RemoveScopeStatement {
 					name,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("PARAM") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -119,12 +108,10 @@ impl Parser<'_> {
 
 				RemoveStatement::Param(RemoveParamStatement {
 					name: name.0,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("TABLE") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -135,12 +122,10 @@ impl Parser<'_> {
 
 				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("EVENT") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -155,12 +140,10 @@ impl Parser<'_> {
 				RemoveStatement::Event(RemoveEventStatement {
 					name,
 					what: table,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("FIELD") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -175,12 +158,10 @@ impl Parser<'_> {
 				RemoveStatement::Field(RemoveFieldStatement {
 					name: idiom,
 					what: table,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("INDEX") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -195,12 +176,10 @@ impl Parser<'_> {
 				RemoveStatement::Index(RemoveIndexStatement {
 					name,
 					what,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("ANALYZER") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -211,12 +190,10 @@ impl Parser<'_> {
 
 				RemoveStatement::Analyzer(RemoveAnalyzerStatement {
 					name,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
 			t!("USER") => {
-				#[cfg(feature = "sql2")]
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
 					true
@@ -230,7 +207,6 @@ impl Parser<'_> {
 				RemoveStatement::User(RemoveUserStatement {
 					name,
 					base,
-					#[cfg(feature = "sql2")]
 					if_exists,
 				})
 			}
