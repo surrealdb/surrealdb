@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	dbs::Session,
+	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Value},
+	sql::{Array, Uuid, Value},
 };
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
@@ -13,40 +13,52 @@ pub struct RpcContext<'a> {
 	pub vars: BTreeMap<String, Value>,
 	pub session: Session,
 	pub kvs: &'a Datastore,
-	pub lq_handler: Option<()>,
+	pub lq_handler: Option<Box<dyn LqHandler + Send + Sync>>,
+}
+
+pub trait LqHandler {
+	fn live(&self, lqid: &Uuid);
+	fn kill(&self, lqid: &Uuid);
 }
 
 impl<'a> RpcContext<'a> {
 	pub async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
-			Method::Info => self.info().await,
-			Method::Use => self.yuse(params).await,
-			Method::Signup => self.signup(params).await,
-			Method::Signin => self.signin(params).await,
-			Method::Invalidate => self.invalidate().await,
-			Method::Authenticate => self.authenticate(params).await,
+			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
+			Method::Use => self.yuse(params).await.map(Into::into).map_err(Into::into),
+			Method::Signup => self.signup(params).await.map(Into::into).map_err(Into::into),
+			Method::Signin => self.signin(params).await.map(Into::into).map_err(Into::into),
+			Method::Invalidate => self.invalidate().await.map(Into::into).map_err(Into::into),
+			Method::Authenticate => {
+				self.authenticate(params).await.map(Into::into).map_err(Into::into)
+			}
 			Method::Kill => todo!(),
 			Method::Live => todo!(),
-			Method::Set => self.set(params).await,
-			Method::Unset => self.unset(params).await,
-			Method::Select => self.select(params).await,
-			Method::Insert => self.insert(params).await,
-			Method::Create => self.create(params).await,
-			Method::Update => self.update(params).await,
-			Method::Merge => self.merge(params).await,
-			Method::Patch => self.patch(params).await,
-			Method::Delete => self.delete(params).await,
+			Method::Set => self.set(params).await.map(Into::into).map_err(Into::into),
+			Method::Unset => self.unset(params).await.map(Into::into).map_err(Into::into),
+			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
+			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
+			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
+			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
+			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
+			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
 			Method::Version => todo!(),
-			Method::Query => todo!(),
+			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => todo!(),
 			Method::Unknown => todo!(),
 		}
-		.map(Into::into)
-		.map_err(Into::into)
+		// .map(Into::into)
+		// .map_err(Into::into)
 	}
 }
-
+macro_rules! mrg {
+	($($m:expr, $x:expr)+) => {{
+		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
+		$($m)+
+	}};
+}
 impl<'a> RpcContext<'a> {
 	// ------------------------------
 	// Methods for authentication
@@ -405,66 +417,60 @@ impl<'a> RpcContext<'a> {
 	// Methods for querying
 	// ------------------------------
 
-	// async fn query(&self, sql: Value) -> Result<Vec<Response>, RpcError> {
-	// 	// Get a database reference
-	// 	let kvs = DB.get().unwrap();
-	// 	// Specify the query parameters
-	// 	let var = Some(self.vars.clone());
-	// 	// Execute the query on the database
-	// 	let res = match sql {
-	// 		Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
-	// 		Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
-	// 		_ => unreachable!(),
-	// 	};
+	async fn query(&mut self, params: Array) -> Result<Vec<Response>, RpcError> {
+		let Ok((query, o)) = params.needs_one_or_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+		if !(query.is_query() || query.is_strand()) {
+			return Err(RpcError::InvalidParams);
+		}
+		let o = match o {
+			Value::Object(v) => Some(v),
+			Value::None | Value::Null => None,
+			_ => return Err(RpcError::InvalidParams),
+		};
 
-	// 	// Post-process hooks for web layer
-	// 	for response in &res {
-	// 		self.handle_live_query_results(response).await;
-	// 	}
-	// 	// Return the result to the client
-	// 	Ok(res)
-	// }
+		// Specify the query parameters
+		let var = match o {
+			Some(mut v) => Some(mrg! {v.0, &self.vars}),
+			None => Some(self.vars.clone()),
+		};
 
-	// async fn query_with(&self, sql: Value, mut vars: Object) -> Result<Vec<Response>, RpcError> {
-	// 	// Get a database reference
-	// 	let kvs = DB.get().unwrap();
-	// 	// Specify the query parameters
-	// 	let var = Some(mrg! { vars.0, &self.vars });
-	// 	// Execute the query on the database
-	// 	let res = match sql {
-	// 		Value::Query(sql) => kvs.process(sql, &self.session, var).await?,
-	// 		Value::Strand(sql) => kvs.execute(&sql, &self.session, var).await?,
-	// 		_ => unreachable!(),
-	// 	};
-	// 	// Post-process hooks for web layer
-	// 	for response in &res {
-	// 		self.handle_live_query_results(response).await;
-	// 	}
-	// 	// Return the result to the client
-	// 	Ok(res)
-	// }
+		// Execute the query on the database
+		let res = match query {
+			Value::Query(sql) => self.kvs.process(sql, &self.session, var).await?,
+			Value::Strand(sql) => self.kvs.execute(&sql, &self.session, var).await?,
+			_ => unreachable!(),
+		};
+
+		// Post-process hooks for web layer
+		for response in &res {
+			self.handle_live_query_results(response).await;
+		}
+		// Return the result to the client
+		Ok(res)
+	}
 
 	// ------------------------------
 	// Private methods
 	// ------------------------------
 
-	// async fn handle_live_query_results(&self, res: &Response) {
-	// 	match &res.query_type {
-	// 		QueryType::Live => {
-	// 			if let Ok(Value::Uuid(lqid)) = &res.result {
-	// 				// Match on Uuid type
-	// 				LIVE_QUERIES.write().await.insert(lqid.0, self.id);
-	// 				trace!("Registered live query {} on websocket {}", lqid, self.id);
-	// 			}
-	// 		}
-	// 		QueryType::Kill => {
-	// 			if let Ok(Value::Uuid(lqid)) = &res.result {
-	// 				if let Some(id) = LIVE_QUERIES.write().await.remove(&lqid.0) {
-	// 					trace!("Unregistered live query {} on websocket {}", lqid, id);
-	// 				}
-	// 			}
-	// 		}
-	// 		_ => {}
-	// 	}
-	// }
+	async fn handle_live_query_results(&self, res: &Response) {
+		let Some(ref handler) = self.lq_handler else {
+			return;
+		};
+		match &res.query_type {
+			QueryType::Live => {
+				if let Ok(Value::Uuid(lqid)) = &res.result {
+					handler.live(lqid);
+				}
+			}
+			QueryType::Kill => {
+				if let Ok(Value::Uuid(lqid)) = &res.result {
+					handler.kill(lqid);
+				}
+			}
+			_ => {}
+		}
+	}
 }

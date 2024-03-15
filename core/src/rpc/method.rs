@@ -59,6 +59,7 @@ impl Method {
 impl Method {
 	pub fn to_str(&self) -> &str {
 		match self {
+			Self::Unknown => "unknown",
 			Self::Ping => "ping",
 			Self::Info => "info",
 			Self::Use => "use",
@@ -80,16 +81,12 @@ impl Method {
 			Self::Version => "version",
 			Self::Query => "query",
 			Self::Relate => "relate",
-			Self::Unknown => "unknown",
 		}
 	}
 }
 
 impl Method {
 	pub fn is_valid(&self) -> bool {
-		match self {
-			Self::Unknown => false,
-			_ => true,
-		}
+		!matches!(self, Self::Unknown)
 	}
 }

@@ -1,4 +1,3 @@
-use crate::rpc::failure::Failure;
 use crate::rpc::format::cbor::Cbor;
 use crate::rpc::format::msgpack::Pack;
 use once_cell::sync::Lazy;
