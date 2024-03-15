@@ -553,7 +553,7 @@ pub(super) mod tests {
 		for (i, line_result) in reader.lines().enumerate() {
 			let line = line_result?;
 			let array = Array::parse(&line);
-			let vec = Arc::new(Vector::try_from_array(t, array)?);
+			let vec = Arc::new(Vector::try_from_array(t, &array)?);
 			res.push((i as DocId, vec));
 		}
 		Ok(res)
@@ -561,10 +561,10 @@ pub(super) mod tests {
 
 	pub(in crate::idx::trees) fn new_vec(mut n: i64, t: VectorType, dim: usize) -> SharedVector {
 		let mut vec = Vector::new(t, dim);
-		vec.add(Number::Int(n));
+		vec.add(&Number::Int(n));
 		for _ in 1..dim {
 			n += 1;
-			vec.add(Number::Int(n));
+			vec.add(&Number::Int(n));
 		}
 		Arc::new(vec)
 	}
@@ -577,7 +577,7 @@ pub(super) mod tests {
 	) -> SharedVector {
 		let mut vec = Vector::new(t, dim);
 		for _ in 0..dim {
-			vec.add(gen.generate(rng));
+			vec.add(&gen.generate(rng));
 		}
 		if vec.is_null() {
 			// Some similarities (cosine) is undefined for null vector.

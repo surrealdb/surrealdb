@@ -1363,8 +1363,8 @@ mod tests {
 
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
 		let mut vec = Vector::new(VectorType::I16, 2);
-		vec.add(x.into());
-		vec.add(y.into());
+		vec.add(&x.into());
+		vec.add(&y.into());
 		Arc::new(vec)
 	}
 

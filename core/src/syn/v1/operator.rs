@@ -59,7 +59,6 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::Like, char('~')),
 			matches,
 			knn,
-			ann,
 		)),
 		alt((
 			value(Operator::LessThanOrEqual, tag("<=")),
@@ -67,7 +66,6 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::MoreThanOrEqual, tag(">=")),
 			value(Operator::MoreThan, char('>')),
 			knn,
-			ann,
 		)),
 		alt((
 			value(Operator::Pow, tag("**")),
@@ -156,30 +154,31 @@ pub fn knn(i: &str) -> IResult<&str, Operator> {
 		|i| {
 			let (i, _) = opt(tag_no_case("knn"))(i)?;
 			let (i, _) = char('<')(i)?;
-			let (i, k) = u32(i)?;
-			let (i, dist) = opt(knn_distance)(i)?;
+			let (i, op) = alt((inner_ann, inner_knn))(i)?;
 			let (i, _) = char('>')(i)?;
-			Ok((i, Operator::Knn(k, dist)))
+			Ok((i, op))
 		},
 		|i| {
 			let (i, _) = tag("<|")(i)?;
 			cut(|i| {
-				let (i, k) = u32(i)?;
-				let (i, dist) = opt(knn_distance)(i)?;
+				let (i, op) = alt((inner_ann, inner_knn))(i)?;
 				let (i, _) = tag("|>")(i)?;
-				Ok((i, Operator::Knn(k, dist)))
+				Ok((i, op))
 			})(i)
 		},
 	))(i)
 }
 
-pub fn ann(i: &str) -> IResult<&str, Operator> {
-	let (i, _) = opt(tag_no_case("knn"))(i)?;
-	let (i, _) = char('<')(i)?;
+fn inner_knn(i: &str) -> IResult<&str, Operator> {
+	let (i, k) = u32(i)?;
+	let (i, dist) = opt(knn_distance)(i)?;
+	Ok((i, Operator::Knn(k, dist)))
+}
+
+fn inner_ann(i: &str) -> IResult<&str, Operator> {
 	let (i, k) = u32(i)?;
 	let (i, _) = char(',')(i)?;
 	let (i, ef) = u32(i)?;
-	let (i, _) = char('>')(i)?;
 	Ok((i, Operator::Ann(k, ef)))
 }
 
@@ -279,7 +278,7 @@ mod tests {
 
 	#[test]
 	fn test_ann() {
-		let res = ann("<5,10>");
+		let res = knn("<5,10>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<5,10>", format!("{}", out));
