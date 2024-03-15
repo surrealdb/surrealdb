@@ -102,11 +102,11 @@ jobs:
             # Bump the crate version
             sed -i "s#^version = \".*\"#version = \"${version}\"#" Cargo.toml
             sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-            sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
+            sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"${major}\"#" Cargo.toml
-            sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"${major}\"#" lib/Cargo.toml
+            sed -i "s#surrealdb-core = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
 
             # Update Cargo.lock without updating dependency versions
             cargo check --no-default-features --features storage-mem
@@ -140,7 +140,7 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"=${currentVersion}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${betaVersion}\"#" lib/Cargo.toml
+            sed -i "s#surrealdb-core = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core = { version = \"=2.0.0-${betaVersion}\"#" lib/Cargo.toml
           else
             git checkout -b releases/beta
             major=$(echo $currentVersion | tr "." "\n" | sed -n 1p)
@@ -149,13 +149,13 @@ jobs:
 
             # Update dependency versions
             sed -i "s#surrealdb = { version = \"${major}\"#surrealdb = { version = \"=${betaVersion}\"#" Cargo.toml
-            sed -i "s#surrealdb-core = { version = \"${major}\"#surrealdb-core = { version = \"=${betaVersion}\"#" lib/Cargo.toml
+            sed -i "s#surrealdb-core = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core = { version = \"=2.0.0-${betaVersion}\"#" lib/Cargo.toml
           fi
 
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${betaVersion}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${betaVersion}\"#" core/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -593,8 +593,8 @@ jobs:
 
           # Update crate version
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"=${currentVersion}\"#surrealdb-core = { version = \"=${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
 
       - name: Patch nightly crate version
         if: ${{ inputs.environment == 'nightly' }}
@@ -611,8 +611,8 @@ jobs:
 
           # Update the version to a nightly one
           sed -i "s#^version = \".*\"#version = \"${version}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${version}\"#" core/Cargo.toml
-          sed -i "s#surrealdb-core = { version = \"${major}\"#surrealdb-core = { version = \"=${version}\"#" lib/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${version}\"#" core/Cargo.toml
+          sed -i "s#surrealdb-core = { version = \"=2.0.0-${currentVersion}\"#surrealdb-core = { version = \"=2.0.0-${version}\"#" lib/Cargo.toml
 
       - name: Patch crate name and description
         if: ${{ inputs.environment == 'nightly' || inputs.environment == 'beta' }}
