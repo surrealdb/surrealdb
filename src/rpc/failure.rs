@@ -61,6 +61,7 @@ impl From<RpcError> for Failure {
 			RpcError::InvalidParams => Failure::INVALID_PARAMS,
 			RpcError::InternalError(_) => Failure::INTERNAL_ERROR,
 			RpcError::Thrown(_) => Failure::custom(err.to_string()),
+			_ => Failure::custom(err.to_string()),
 		}
 	}
 }

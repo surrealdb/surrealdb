@@ -4,7 +4,7 @@ use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Uuid, Value},
+	sql::{Array, Object, Uuid, Value},
 };
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
@@ -33,8 +33,8 @@ impl<'a> RpcContext<'a> {
 			Method::Authenticate => {
 				self.authenticate(params).await.map(Into::into).map_err(Into::into)
 			}
-			Method::Kill => todo!(),
-			Method::Live => todo!(),
+			Method::Kill => self.kill(params).await.map(Into::into).map_err(Into::into),
+			Method::Live => self.live(params).await.map(Into::into).map_err(Into::into),
 			Method::Set => self.set(params).await.map(Into::into).map_err(Into::into),
 			Method::Unset => self.unset(params).await.map(Into::into).map_err(Into::into),
 			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
@@ -65,7 +65,7 @@ impl<'a> RpcContext<'a> {
 	// ------------------------------
 
 	async fn yuse(&mut self, params: Array) -> Result<Value, RpcError> {
-		let (ns, db) = params.needs_two().or(Err(RpcError::InvalidParams))?;
+		let (ns, db) = params.needs_two()?;
 		if let Value::Strand(ns) = ns {
 			self.session.ns = Some(ns.0);
 		}
@@ -158,44 +158,41 @@ impl<'a> RpcContext<'a> {
 	// Methods for live queries
 	// ------------------------------
 
-	// async fn kill(&self, id: Value) -> Result<Value, RpcError> {
-	// 	// Specify the SQL query string
-	// 	let sql = "KILL $id";
-	// 	// Specify the query parameters
-	// 	let var = map! {
-	// 		String::from("id") => id,
-	// 		=> &self.vars
-	// 	};
-	// 	// Execute the query on the database
-	// 	let mut res = self.query_with(Value::from(sql), Object::from(var)).await?;
-	// 	// Extract the first query result
-	// 	let response = res.remove(0);
-	// 	match response.result {
-	// 		Ok(v) => Ok(v),
-	// 		Err(e) => Err(Error::from(e)),
-	// 	}
-	// }
+	async fn kill(&mut self, params: Array) -> Result<Value, RpcError> {
+		let id = params.needs_one()?;
+		// Specify the SQL query string
+		let sql = "KILL $id";
+		// Specify the query parameters
+		let var = map! {
+			String::from("id") => id,
+			=> &self.vars
+		};
+		// Execute the query on the database
+		// let mut res = self.query_with(Value::from(sql), Object::from(var)).await?;
+		let mut res = self.query_inner(Value::from(sql), Some(var)).await?;
+		// Extract the first query result
+		let response = res.remove(0);
+		response.result.map_err(Into::into)
+	}
 
-	// async fn live(&self, tb: Value, diff: Value) -> Result<Value, RpcError> {
-	// 	// Specify the SQL query string
-	// 	let sql = match diff.is_true() {
-	// 		true => "LIVE SELECT DIFF FROM $tb",
-	// 		false => "LIVE SELECT * FROM $tb",
-	// 	};
-	// 	// Specify the query parameters
-	// 	let var = map! {
-	// 		String::from("tb") => tb.could_be_table(),
-	// 		=> &self.vars
-	// 	};
-	// 	// Execute the query on the database
-	// 	let mut res = self.query_with(Value::from(sql), Object::from(var)).await?;
-	// 	// Extract the first query result
-	// 	let response = res.remove(0);
-	// 	match response.result {
-	// 		Ok(v) => Ok(v),
-	// 		Err(e) => Err(Error::from(e)),
-	// 	}
-	// }
+	async fn live(&mut self, params: Array) -> Result<Value, RpcError> {
+		let (tb, diff) = params.needs_one_or_two()?;
+		// Specify the SQL query string
+		let sql = match diff.is_true() {
+			true => "LIVE SELECT DIFF FROM $tb",
+			false => "LIVE SELECT * FROM $tb",
+		};
+		// Specify the query parameters
+		let var = map! {
+			String::from("tb") => tb.could_be_table(),
+			=> &self.vars
+		};
+		// Execute the query on the database
+		let mut res = self.query_inner(Value::from(sql), Some(var)).await?;
+		// Extract the first query result
+		let response = res.remove(0);
+		response.result.map_err(Into::into)
+	}
 
 	// ------------------------------
 	// Methods for selecting
@@ -424,6 +421,7 @@ impl<'a> RpcContext<'a> {
 		if !(query.is_query() || query.is_strand()) {
 			return Err(RpcError::InvalidParams);
 		}
+
 		let o = match o {
 			Value::Object(v) => Some(v),
 			Value::None | Value::Null => None,
@@ -431,29 +429,42 @@ impl<'a> RpcContext<'a> {
 		};
 
 		// Specify the query parameters
-		let var = match o {
+		let vars = match o {
 			Some(mut v) => Some(mrg! {v.0, &self.vars}),
 			None => Some(self.vars.clone()),
 		};
-
-		// Execute the query on the database
-		let res = match query {
-			Value::Query(sql) => self.kvs.process(sql, &self.session, var).await?,
-			Value::Strand(sql) => self.kvs.execute(&sql, &self.session, var).await?,
-			_ => unreachable!(),
-		};
-
-		// Post-process hooks for web layer
-		for response in &res {
-			self.handle_live_query_results(response).await;
-		}
-		// Return the result to the client
-		Ok(res)
+		self.query_inner(query, vars).await
 	}
 
 	// ------------------------------
 	// Private methods
 	// ------------------------------
+
+	async fn query_inner(
+		&mut self,
+		query: Value,
+		vars: Option<BTreeMap<String, Value>>,
+	) -> Result<Vec<Response>, RpcError> {
+		// If no live query handler force realtime off
+		if self.lq_handler.is_none() && self.session.rt {
+			self.session.rt = false;
+		}
+		// Execute the query on the database
+		let res = match query {
+			Value::Query(sql) => self.kvs.process(sql, &self.session, vars).await?,
+			Value::Strand(sql) => self.kvs.execute(&sql, &self.session, vars).await?,
+			_ => unreachable!(),
+		};
+
+		// Post-process hooks for web layer
+		for response in &res {
+			// This error should be unreachable because we shouldn't proceed if there's no handler
+			self.handle_live_query_results(response).await;
+			info!("response: {response:?}");
+		}
+		// Return the result to the client
+		Ok(res)
+	}
 
 	async fn handle_live_query_results(&self, res: &Response) {
 		let Some(ref handler) = self.lq_handler else {

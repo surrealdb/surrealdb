@@ -3,6 +3,7 @@ use thiserror::Error;
 use crate::err;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RpcError {
 	#[error("Parse error")]
 	ParseError,
@@ -14,13 +15,19 @@ pub enum RpcError {
 	InvalidParams,
 	#[error("Internal error: {0}")]
 	InternalError(err::Error),
+	#[error("Live Query was made, but is not supported")]
+	LqNotSuported,
 	#[error("Error: {0}")]
 	Thrown(String),
 }
 
 impl From<err::Error> for RpcError {
 	fn from(e: err::Error) -> Self {
-		RpcError::InternalError(e)
+		use err::Error;
+		match e {
+			Error::RealtimeDisabled => RpcError::LqNotSuported,
+			_ => RpcError::InternalError(e),
+		}
 	}
 }
 
@@ -36,6 +43,7 @@ impl From<RpcError> for err::Error {
 		match value {
 			RpcError::InternalError(e) => e,
 			RpcError::Thrown(e) => Error::Thrown(e),
+
 			_ => Error::Thrown(value.to_string()),
 		}
 	}
