@@ -8,7 +8,7 @@ use crate::{
 	sql::{param, Array, Object, Value},
 };
 
-use super::{method::Method, response::Data};
+use super::{method::Method, response::Data, rpc_error::RpcError};
 
 pub struct RpcContext<'a> {
 	pub vars: BTreeMap<String, Value>,
@@ -18,7 +18,7 @@ pub struct RpcContext<'a> {
 }
 
 impl<'a> RpcContext<'a> {
-	pub async fn execute(&mut self, method: Method, params: Array) -> Result<Value, Error> {
+	pub async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
 			Method::Info => self.info().await,
@@ -44,6 +44,7 @@ impl<'a> RpcContext<'a> {
 			Method::Unknown => todo!(),
 		}
 		.map(Into::into)
+		.map_err(Into::into)
 	}
 }
 
@@ -52,8 +53,8 @@ impl<'a> RpcContext<'a> {
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse(&mut self, params: Array) -> Result<Value, Error> {
-		let (ns, db) = params.needs_two().or(Err(Error::Thrown("Invalid Params".to_string())))?;
+	async fn yuse(&mut self, params: Array) -> Result<Value, RpcError> {
+		let (ns, db) = params.needs_two().or(Err(RpcError::InvalidParams))?;
 		if let Value::Strand(ns) = ns {
 			self.session.ns = Some(ns.0);
 		}
@@ -63,9 +64,9 @@ impl<'a> RpcContext<'a> {
 		Ok(Value::None)
 	}
 
-	async fn signup(&mut self, params: Array) -> Result<Value, Error> {
+	async fn signup(&mut self, params: Array) -> Result<Value, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		crate::iam::signup::signup(self.kvs, &mut self.session, v)
 			.await
@@ -73,9 +74,9 @@ impl<'a> RpcContext<'a> {
 			.map_err(Into::into)
 	}
 
-	async fn signin(&mut self, params: Array) -> Result<Value, Error> {
+	async fn signin(&mut self, params: Array) -> Result<Value, RpcError> {
 		let Ok(Value::Object(v)) = params.needs_one() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		crate::iam::signin::signin(self.kvs, &mut self.session, v)
 			.await
@@ -83,14 +84,14 @@ impl<'a> RpcContext<'a> {
 			.map_err(Into::into)
 	}
 
-	async fn invalidate(&mut self) -> Result<Value, Error> {
+	async fn invalidate(&mut self) -> Result<Value, RpcError> {
 		crate::iam::clear::clear(&mut self.session)?;
 		Ok(Value::None)
 	}
 
-	async fn authenticate(&mut self, params: Array) -> Result<Value, Error> {
+	async fn authenticate(&mut self, params: Array) -> Result<Value, RpcError> {
 		let Ok(Value::Strand(token)) = params.needs_one() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		crate::iam::verify::token(self.kvs, &mut self.session, &token.0).await?;
 		Ok(Value::None)
@@ -100,7 +101,7 @@ impl<'a> RpcContext<'a> {
 	// Methods for identification
 	// ------------------------------
 
-	async fn info(&self) -> Result<Value, Error> {
+	async fn info(&self) -> Result<Value, RpcError> {
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
@@ -115,9 +116,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for setting variables
 	// ------------------------------
 
-	async fn set(&mut self, params: Array) -> Result<Value, Error> {
+	async fn set(&mut self, params: Array) -> Result<Value, RpcError> {
 		let Ok((Value::Strand(key), val)) = params.needs_one_or_two() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Specify the query parameters
 		let var = Some(map! {
@@ -134,9 +135,9 @@ impl<'a> RpcContext<'a> {
 		Ok(Value::Null)
 	}
 
-	async fn unset(&mut self, params: Array) -> Result<Value, Error> {
+	async fn unset(&mut self, params: Array) -> Result<Value, RpcError> {
 		let Ok(Value::Strand(key)) = params.needs_one() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		self.vars.remove(&key.0);
 		Ok(Value::Null)
@@ -146,7 +147,7 @@ impl<'a> RpcContext<'a> {
 	// Methods for live queries
 	// ------------------------------
 
-	// async fn kill(&self, id: Value) -> Result<Value, Error> {
+	// async fn kill(&self, id: Value) -> Result<Value, RpcError> {
 	// 	// Specify the SQL query string
 	// 	let sql = "KILL $id";
 	// 	// Specify the query parameters
@@ -164,7 +165,7 @@ impl<'a> RpcContext<'a> {
 	// 	}
 	// }
 
-	// async fn live(&self, tb: Value, diff: Value) -> Result<Value, Error> {
+	// async fn live(&self, tb: Value, diff: Value) -> Result<Value, RpcError> {
 	// 	// Specify the SQL query string
 	// 	let sql = match diff.is_true() {
 	// 		true => "LIVE SELECT DIFF FROM $tb",
@@ -189,9 +190,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for selecting
 	// ------------------------------
 
-	async fn select(&self, params: Array) -> Result<Value, Error> {
+	async fn select(&self, params: Array) -> Result<Value, RpcError> {
 		let Ok(what) = params.needs_one() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing();
@@ -217,9 +218,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for inserting
 	// ------------------------------
 
-	async fn insert(&self, params: Array) -> Result<Value, Error> {
+	async fn insert(&self, params: Array) -> Result<Value, RpcError> {
 		let Ok((what, data)) = params.needs_two() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing();
@@ -246,9 +247,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for creating
 	// ------------------------------
 
-	async fn create(&self, params: Array) -> Result<Value, Error> {
+	async fn create(&self, params: Array) -> Result<Value, RpcError> {
 		let Ok((what, data)) = params.needs_one_or_two() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing();
@@ -279,9 +280,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for updating
 	// ------------------------------
 
-	async fn update(&self, params: Array) -> Result<Value, Error> {
+	async fn update(&self, params: Array) -> Result<Value, RpcError> {
 		let Ok((what, data)) = params.needs_two() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing();
@@ -312,9 +313,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for merging
 	// ------------------------------
 
-	async fn merge(&self, params: Array) -> Result<Value, Error> {
+	async fn merge(&self, params: Array) -> Result<Value, RpcError> {
 		let Ok((what, data)) = params.needs_two() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing();
@@ -345,9 +346,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for patching
 	// ------------------------------
 
-	async fn patch(&self, params: Array) -> Result<Value, Error> {
+	async fn patch(&self, params: Array) -> Result<Value, RpcError> {
 		let Ok((what, data, diff)) = params.needs_one_two_or_three() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing();
@@ -377,9 +378,9 @@ impl<'a> RpcContext<'a> {
 	// Methods for deleting
 	// ------------------------------
 
-	async fn delete(&self, params: Array) -> Result<Value, Error> {
+	async fn delete(&self, params: Array) -> Result<Value, RpcError> {
 		let Ok(what) = params.needs_one() else {
-			return Err(Error::Thrown("Invalid Params".to_string()));
+			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
 		let one = what.is_thing();
@@ -405,7 +406,7 @@ impl<'a> RpcContext<'a> {
 	// Methods for querying
 	// ------------------------------
 
-	// async fn query(&self, sql: Value) -> Result<Vec<Response>, Error> {
+	// async fn query(&self, sql: Value) -> Result<Vec<Response>, RpcError> {
 	// 	// Get a database reference
 	// 	let kvs = DB.get().unwrap();
 	// 	// Specify the query parameters
@@ -425,7 +426,7 @@ impl<'a> RpcContext<'a> {
 	// 	Ok(res)
 	// }
 
-	// async fn query_with(&self, sql: Value, mut vars: Object) -> Result<Vec<Response>, Error> {
+	// async fn query_with(&self, sql: Value, mut vars: Object) -> Result<Vec<Response>, RpcError> {
 	// 	// Get a database reference
 	// 	let kvs = DB.get().unwrap();
 	// 	// Specify the query parameters

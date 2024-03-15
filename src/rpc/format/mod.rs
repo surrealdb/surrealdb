@@ -108,10 +108,10 @@ impl Format {
 		}
 	}
 	/// Process a response using the specified format
-	pub fn res_http(&self, res: Response) -> Result<Output, Failure> {
+	pub fn res_http(&self, res: Response) -> axum::response::Response {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
-			Self::Json => todo!(),
+			Self::Json => json::res_http(res),
 			Self::Cbor => todo!(),
 			Self::Msgpack => todo!(),
 			Self::Bincode => todo!(),

@@ -135,16 +135,6 @@ async fn post_handler(
 
 	// let method = Method::parse("info");
 	let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
-	// let res = in_fmt.res_http(res);
-
-	match fmt {
-		// Simple serialization
-		Format::Json => Ok(output::json(&output::simplify(res))),
-		Format::Cbor => Ok(output::cbor(&output::simplify(res))),
-		Format::Msgpack => Ok(output::pack(&output::simplify(res))),
-		// Internal serialization
-		Format::Bincode => Ok(output::full(&res)),
-		// An incorrect content-type was requested
-		_ => Err(Error::InvalidType),
-	}
+	let res = res.into_response(None);
+	Ok(fmt.res_http(res))
 }

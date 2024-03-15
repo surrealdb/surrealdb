@@ -1,5 +1,6 @@
 #[non_exhaustive]
 pub enum Method {
+	Unknown,
 	Ping,
 	Info,
 	Use,
@@ -21,7 +22,6 @@ pub enum Method {
 	Version,
 	Query,
 	Relate,
-	Unknown,
 }
 
 impl Method {

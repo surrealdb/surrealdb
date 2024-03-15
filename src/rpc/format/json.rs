@@ -2,7 +2,9 @@ use crate::rpc::failure::Failure;
 use crate::rpc::request::Request;
 use crate::rpc::response::Response;
 use axum::extract::ws::Message;
+use axum::response::IntoResponse;
 use bytes::Bytes;
+use http::StatusCode;
 use surrealdb::sql;
 
 pub fn req_ws(msg: Message) -> Result<Request, Failure> {
@@ -27,4 +29,13 @@ pub fn req_http(val: &Bytes) -> Result<Request, Failure> {
 	sql::value(std::str::from_utf8(&val).or(Err(Failure::PARSE_ERROR))?)
 		.or(Err(Failure::PARSE_ERROR))?
 		.try_into()
+}
+
+pub fn res_http(res: Response) -> axum::response::Response {
+	// Convert the response into simplified JSON
+	let val = res.into_json();
+	// Serialize the response with simplified type information
+	let res = serde_json::to_string(&val).unwrap();
+	// Return the message length, and message as binary
+	(StatusCode::OK, res).into_response()
 }

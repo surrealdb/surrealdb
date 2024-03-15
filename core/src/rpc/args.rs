@@ -1,18 +1,20 @@
 use crate::sql::Array;
 use crate::sql::Value;
 
+use super::rpc_error::RpcError;
+
 pub trait Take {
-	fn needs_one(self) -> Result<Value, ()>;
-	fn needs_two(self) -> Result<(Value, Value), ()>;
-	fn needs_one_or_two(self) -> Result<(Value, Value), ()>;
-	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), ()>;
+	fn needs_one(self) -> Result<Value, RpcError>;
+	fn needs_two(self) -> Result<(Value, Value), RpcError>;
+	fn needs_one_or_two(self) -> Result<(Value, Value), RpcError>;
+	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), RpcError>;
 }
 
 impl Take for Array {
 	/// Convert the array to one argument
-	fn needs_one(self) -> Result<Value, ()> {
+	fn needs_one(self) -> Result<Value, RpcError> {
 		if self.len() != 1 {
-			return Err(());
+			return Err(RpcError::InvalidParams);
 		}
 		let mut x = self.into_iter();
 		match x.next() {
@@ -21,9 +23,9 @@ impl Take for Array {
 		}
 	}
 	/// Convert the array to two arguments
-	fn needs_two(self) -> Result<(Value, Value), ()> {
+	fn needs_two(self) -> Result<(Value, Value), RpcError> {
 		if self.len() != 2 {
-			return Err(());
+			return Err(RpcError::InvalidParams);
 		}
 		let mut x = self.into_iter();
 		match (x.next(), x.next()) {
@@ -33,9 +35,9 @@ impl Take for Array {
 		}
 	}
 	/// Convert the array to two arguments
-	fn needs_one_or_two(self) -> Result<(Value, Value), ()> {
+	fn needs_one_or_two(self) -> Result<(Value, Value), RpcError> {
 		if self.is_empty() && self.len() > 2 {
-			return Err(());
+			return Err(RpcError::InvalidParams);
 		}
 		let mut x = self.into_iter();
 		match (x.next(), x.next()) {
@@ -45,9 +47,9 @@ impl Take for Array {
 		}
 	}
 	/// Convert the array to three arguments
-	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), ()> {
+	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), RpcError> {
 		if self.is_empty() && self.len() > 3 {
-			return Err(());
+			return Err(RpcError::InvalidParams);
 		}
 		let mut x = self.into_iter();
 		match (x.next(), x.next(), x.next()) {

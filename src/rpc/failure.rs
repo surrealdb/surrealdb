@@ -3,6 +3,7 @@ use revision::revisioned;
 use revision::Revisioned;
 use serde::Serialize;
 use std::borrow::Cow;
+use surrealdb::rpc::RpcError;
 use surrealdb::sql::Value;
 
 #[derive(Clone, Debug, Serialize)]
@@ -48,6 +49,19 @@ impl From<&str> for Failure {
 impl From<Error> for Failure {
 	fn from(err: Error) -> Self {
 		Failure::custom(err.to_string())
+	}
+}
+
+impl From<RpcError> for Failure {
+	fn from(err: RpcError) -> Self {
+		match err {
+			RpcError::ParseError => Failure::PARSE_ERROR,
+			RpcError::InvalidRequest => Failure::INVALID_REQUEST,
+			RpcError::MethodNotFound => Failure::METHOD_NOT_FOUND,
+			RpcError::InvalidParams => Failure::INVALID_PARAMS,
+			RpcError::InternalError(_) => Failure::INTERNAL_ERROR,
+			RpcError::Thrown(_) => Failure::custom(err.to_string()),
+		}
 	}
 }
 
