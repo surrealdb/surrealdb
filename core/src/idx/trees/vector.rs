@@ -83,16 +83,16 @@ impl Vector {
 		}
 	}
 
-	pub(super) fn try_from_value(t: VectorType, d: usize, v: Value) -> Result<Self, Error> {
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self, Error> {
 		let mut vec = Vector::new(t, d);
 		vec.check_vector_value(v)?;
 		Ok(vec)
 	}
 
-	fn check_vector_value(&mut self, value: Value) -> Result<(), Error> {
+	fn check_vector_value(&mut self, value: &Value) -> Result<(), Error> {
 		match value {
 			Value::Array(a) => {
-				for v in a {
+				for v in a.0.iter() {
 					self.check_vector_value(v)?;
 				}
 				Ok(())
@@ -105,9 +105,9 @@ impl Vector {
 		}
 	}
 
-	pub(super) fn try_from_array(t: VectorType, a: Array) -> Result<Self, Error> {
+	pub fn try_from_array(t: VectorType, a: &Array) -> Result<Self, Error> {
 		let mut vec = Vector::new(t, a.len());
-		for v in a.0 {
+		for v in &a.0 {
 			if let Value::Number(n) = v {
 				vec.add(n);
 			} else {
@@ -120,7 +120,7 @@ impl Vector {
 		Ok(vec)
 	}
 
-	pub(super) fn add(&mut self, n: Number) {
+	pub(super) fn add(&mut self, n: &Number) {
 		match self {
 			Self::F64(v) => v.push(n.to_float()),
 			Self::F32(v) => v.push(n.to_float() as f32),
@@ -406,8 +406,8 @@ mod tests {
 
 		// Check the "Vector" optimised implementations
 		for t in [VectorType::F64] {
-			let v1 = Vector::try_from_array(t, Array::from(v1.clone())).unwrap();
-			let v2 = Vector::try_from_array(t, Array::from(v2.clone())).unwrap();
+			let v1 = Vector::try_from_array(t, &Array::from(v1.clone())).unwrap();
+			let v2 = Vector::try_from_array(t, &Array::from(v2.clone())).unwrap();
 			assert_eq!(dist.calculate(&v1, &v2), res);
 		}
 	}

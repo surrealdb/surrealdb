@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(crate) struct HnswIndex {
+pub struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
 	hnsw: Hnsw,
@@ -24,7 +24,7 @@ pub(crate) struct HnswIndex {
 }
 
 impl HnswIndex {
-	pub(crate) fn new(p: &HnswParams) -> Self {
+	pub fn new(p: &HnswParams) -> Self {
 		Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
@@ -34,11 +34,7 @@ impl HnswIndex {
 		}
 	}
 
-	pub(crate) async fn index_document(
-		&mut self,
-		rid: &Thing,
-		content: Vec<Value>,
-	) -> Result<(), Error> {
+	pub async fn index_document(&mut self, rid: &Thing, content: &Vec<Value>) -> Result<(), Error> {
 		// Resolve the doc_id
 		let doc_id = self.docs.resolve(rid);
 		// Index the values
@@ -86,7 +82,7 @@ impl HnswIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		rid: &Thing,
-		content: Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.docs.remove(rid) {
 			for v in content {
@@ -100,9 +96,9 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	pub(crate) async fn knn_search(
+	pub async fn knn_search(
 		&self,
-		a: Array,
+		a: &Array,
 		n: usize,
 		ef: usize,
 	) -> Result<VecDeque<(Thing, f64)>, Error> {

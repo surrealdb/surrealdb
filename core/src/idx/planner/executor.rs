@@ -140,7 +140,7 @@ impl InnerQueryExecutor {
 						if let IndexOperator::Knn(a, k) = io.op() {
 							let mut tx = txn.lock().await;
 							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
-								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
+								MtEntry::new(&mut tx, mt, a, *k).await?
 							} else {
 								let ikb = IndexKeyBase::new(opt, idx_def);
 								let mt = MTreeIndex::new(
@@ -151,7 +151,7 @@ impl InnerQueryExecutor {
 									TransactionType::Read,
 								)
 								.await?;
-								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
+								let entry = MtEntry::new(&mut tx, &mt, a, *k).await?;
 								mt_map.insert(ix_ref, mt);
 								entry
 							};
@@ -161,12 +161,11 @@ impl InnerQueryExecutor {
 					Index::Hnsw(p) => {
 						if let IndexOperator::Ann(a, n, ef) = io.op() {
 							let entry = if let Some(hnsw) = hnsw_map.get(&ix_ref).cloned() {
-								HnswEntry::new(hnsw, a.clone(), *n, *ef).await?
+								HnswEntry::new(hnsw, a, *n, *ef).await?
 							} else {
 								let hnsw =
 									ctx.get_index_stores().get_index_hnsw(opt, idx_def, p).await;
-								let entry =
-									HnswEntry::new(hnsw.clone(), a.clone(), *n, *ef).await?;
+								let entry = HnswEntry::new(hnsw.clone(), a, *n, *ef).await?;
 								hnsw_map.insert(ix_ref, hnsw);
 								entry
 							};
@@ -580,7 +579,7 @@ impl MtEntry {
 	async fn new(
 		tx: &mut kvs::Transaction,
 		mt: &MTreeIndex,
-		a: Array,
+		a: &Array,
 		k: u32,
 	) -> Result<Self, Error> {
 		let res = mt.knn_search(tx, a, k as usize).await?;
@@ -597,7 +596,7 @@ pub(super) struct HnswEntry {
 }
 
 impl HnswEntry {
-	async fn new(h: SharedHnswIndex, a: Array, n: usize, ef: usize) -> Result<Self, Error> {
+	async fn new(h: SharedHnswIndex, a: &Array, n: usize, ef: usize) -> Result<Self, Error> {
 		let res = h.read().await.knn_search(a, n, ef).await?;
 		Ok(Self {
 			res,

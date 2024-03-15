@@ -5476,6 +5476,7 @@ dependencies = [
  "criterion",
  "dmp",
  "env_logger",
+ "flate2",
  "flume",
  "futures",
  "futures-concurrency",

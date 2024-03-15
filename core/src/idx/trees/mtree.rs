@@ -75,7 +75,7 @@ impl MTreeIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
@@ -95,7 +95,7 @@ impl MTreeIndex {
 	pub(crate) async fn knn_search(
 		&self,
 		tx: &mut Transaction,
-		a: Array,
+		a: &Array,
 		k: usize,
 	) -> Result<VecDeque<(DocId, f64)>, Error> {
 		// Extract the vector
@@ -112,7 +112,7 @@ impl MTreeIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(tx, rid.into()).await? {
 			// Lock the index
