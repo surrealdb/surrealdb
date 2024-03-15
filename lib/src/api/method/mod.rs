@@ -137,9 +137,10 @@ where
 	/// Initialises a new unconnected instance of the client
 	///
 	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// ensures that a single database instance is available across very large or complicated
-	/// applications. With the singleton, only one connection to the database is instantiated,
-	/// and the database connection does not have to be shared across components or controllers.
+	/// pattern in the example below ensures that a single database instance is available
+	/// across very large or complicated applications. With the singleton, only one connection
+	/// to the database is instantiated, and the database connection does not have to be shared
+	/// across components or controllers.
 	///
 	/// # Examples
 	///
@@ -148,7 +149,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::engine::remote::ws::Ws;
@@ -159,7 +159,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: &'static str,
 	/// }
 	///
 	/// #[tokio::main]
@@ -179,7 +179,7 @@ where
 	///     // Create or update a specific record
 	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
 	///         .content(Person {
-	///             name: "Tobie".into(),
+	///             name: "Tobie",
 	///         }).await?;
 	///
 	///     Ok(())
@@ -191,7 +191,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
@@ -201,7 +200,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: &'static str,
 	/// }
 	///
 	/// #[tokio::main]
@@ -221,7 +220,7 @@ where
 	///     // Create or update a specific record
 	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
 	///         .content(Person {
-	///             name: "Tobie".into(),
+	///             name: "Tobie",
 	///         }).await?;
 	///
 	///     Ok(())
@@ -320,9 +319,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: &'static str,
+	///     last: &'static str,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -360,9 +359,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: &'static str,
+	///     last: &'static str,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -402,9 +401,9 @@ where
 	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: &'static str,
+	///     password: &'static str,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -536,9 +535,9 @@ where
 	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: &'static str,
+	///     password: &'static str,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -734,8 +733,8 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///
@@ -790,8 +789,8 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///
