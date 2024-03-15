@@ -1939,7 +1939,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific function definition from a database.
-	#[cfg(feature = "sql2")]
 	pub async fn get_db_function(
 		&mut self,
 		ns: &str,
@@ -1954,7 +1953,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific function definition from a database.
-	#[cfg(feature = "sql2")]
 	pub async fn get_db_param(
 		&mut self,
 		ns: &str,
@@ -2045,7 +2043,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an event for a table.
-	#[cfg(feature = "sql2")]
 	pub async fn get_tb_event(
 		&mut self,
 		ns: &str,
@@ -2064,7 +2061,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an event for a table.
-	#[cfg(feature = "sql2")]
 	pub async fn get_tb_field(
 		&mut self,
 		ns: &str,
@@ -2083,7 +2079,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an event for a table.
-	#[cfg(feature = "sql2")]
 	pub async fn get_tb_index(
 		&mut self,
 		ns: &str,

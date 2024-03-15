@@ -17,12 +17,10 @@ use nom::{
 	combinator::cut,
 	multi::many0,
 };
-#[cfg(feature = "sql2")]
 use nom::{combinator::opt, sequence::tuple};
 
 pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -55,7 +53,6 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 		name,
 		args,
 		block,
-		#[cfg(feature = "sql2")]
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};

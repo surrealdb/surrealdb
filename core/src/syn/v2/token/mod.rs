@@ -371,7 +371,6 @@ impl TokenKind {
 			Algorithm::Rs256 => "RS256",
 			Algorithm::Rs384 => "RS384",
 			Algorithm::Rs512 => "RS512",
-			#[cfg(feature = "sql2")]
 			Algorithm::Jwks => "JWKS",
 		}
 	}
