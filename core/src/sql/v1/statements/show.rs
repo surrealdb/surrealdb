@@ -71,8 +71,8 @@ impl ShowStatement {
 		.await?;
 		// Return the changes
 		let mut a = Vec::<Value>::new();
-		for r in r.iter() {
-			let v: Value = r.clone().into_value();
+		for r in r.into_iter() {
+			let v: Value = r.into_value();
 			a.push(v);
 		}
 		let v: Value = Value::Array(crate::sql::array::Array(a));

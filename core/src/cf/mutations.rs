@@ -4,7 +4,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Operation;
-use crate::vs::to_u128_be;
+use crate::vs::versionstamp_to_u64;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -125,7 +125,7 @@ impl DatabaseMutation {
 impl ChangeSet {
 	pub fn into_value(self) -> Value {
 		let mut m = BTreeMap::<String, Value>::new();
-		let vs = to_u128_be(self.0);
+		let vs = versionstamp_to_u64(&self.0);
 		m.insert("versionstamp".to_string(), Value::from(vs));
 		m.insert("changes".to_string(), self.1.into_value());
 		let so: Object = m.into();
@@ -195,7 +195,7 @@ mod tests {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
@@ -230,7 +230,7 @@ mod tests {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
