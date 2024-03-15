@@ -7,12 +7,12 @@ use std::io::{BufRead, BufReader};
 use std::time::Duration;
 use surrealdb::idx::trees::hnsw::HnswIndex;
 use surrealdb::sql::index::Distance;
-use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::sql::index::{HnswParams, VectorType};
-use surrealdb_core::sql::{Array, Id, Thing, Value};
-use surrealdb_core::syn::value;
+use surrealdb_core2::dbs::Session;
+use surrealdb_core2::err::Error;
+use surrealdb_core2::kvs::Datastore;
+use surrealdb_core2::sql::index::{HnswParams, VectorType};
+use surrealdb_core2::sql::{Array, Id, Thing, Value};
+use surrealdb_core2::syn::value;
 use tokio::runtime::{Builder, Runtime};
 use tracing::info;
 
