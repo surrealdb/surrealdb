@@ -1,3 +1,5 @@
+#[cfg(feature = "sql2")]
+use crate::cnf::INSECURE_FORWARD_SCOPE_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
@@ -203,7 +205,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
-	let value = token_data.claims.clone().into();
+	let value: Value = token_data.claims.clone().into();
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -234,16 +236,51 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
+			#[cfg(not(feature = "sql2"))]
 			let id = match id {
+				Some(id) => syn::thing(&id)?.into(),
+				None => Value::None,
+			};
+			#[cfg(feature = "sql2")]
+			let mut id = match id {
 				Some(id) => syn::thing(&id)?.into(),
 				None => Value::None,
 			};
 			// Get the scope token
 			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
+			// Get the scope
+			#[cfg(feature = "sql2")]
+			let ds = tx.get_sc(&ns, &db, &sc).await?;
 			// Obtain the configuration with which to verify the token
 			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// PROCESS clause
+			#[cfg(feature = "sql2")]
+			if let Some(pc) = ds.authenticate {
+				// Setup the system session for finding the signin record
+				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				sess.sd = Some(id.clone());
+				sess.tk = Some(value.clone());
+				sess.ip = session.ip.clone();
+				sess.or = session.or.clone();
+				// Compute the value with the params
+				match kvs.evaluate(pc, &sess, None).await {
+					Ok(val) => match val.record() {
+						Some(rid) => {
+							id = rid.into();
+						}
+						_ => return Err(Error::InvalidAuth),
+					},
+					Err(e) => {
+						return match e {
+							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+							_ => Err(Error::InvalidAuth),
+						}
+					}
+				}
+			}
 			// Log the success
 			debug!("Authenticated to scope `{}` with token `{}`", sc, tk);
 			// Set the session
@@ -273,12 +310,41 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
+			#[cfg(not(feature = "sql2"))]
 			let id = syn::thing(&id)?;
+			#[cfg(feature = "sql2")]
+			let mut id = syn::thing(&id)?;
 			// Get the scope
-			let de = tx.get_sc(&ns, &db, &sc).await?;
-			let cf = config_alg(Algorithm::Hs512, de.code)?;
+			let ds = tx.get_sc(&ns, &db, &sc).await?;
+			let cf = config_alg(Algorithm::Hs512, ds.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
+			// AUTHENTICATE clause
+			#[cfg(feature = "sql2")]
+			if let Some(pc) = ds.authenticate {
+				// Setup the system session for finding the signin record
+				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				sess.sd = Some(id.clone().into());
+				sess.tk = Some(value.clone());
+				sess.ip = session.ip.clone();
+				sess.or = session.or.clone();
+				// Compute the value with the params
+				match kvs.evaluate(pc, &sess, None).await {
+					Ok(val) => match val.record() {
+						Some(rid) => {
+							id = rid;
+						}
+						_ => return Err(Error::InvalidAuth),
+					},
+					Err(e) => {
+						return match e {
+							Error::Thrown(_) => Err(e),
+							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+							_ => Err(Error::InvalidAuth),
+						}
+					}
+				}
+			}
 			// Log the success
 			debug!("Authenticated to scope `{}`", sc);
 			// Set the session

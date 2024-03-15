@@ -13,13 +13,15 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
 	pub session: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
+	#[revision(start = 3)]
+	pub authenticate: Option<Value>,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
@@ -85,6 +87,9 @@ impl Display for DefineScopeStatement {
 		}
 		if let Some(ref v) = self.signin {
 			write!(f, " SIGNIN {v}")?
+		}
+		if let Some(ref v) = self.authenticate {
+			write!(f, " AUTHENTICATE {v}")?
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
