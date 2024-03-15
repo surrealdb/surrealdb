@@ -34,11 +34,11 @@
 //!     marketing: bool,
 //! }
 //!
-//! // Install at https://surrealdb.com/install 
+//! // Install at https://surrealdb.com/install
 //! // and use `surreal start --user root --pass root`
 //! // to start a working database to take the following queries
 
-//! // See the results via `surreal sql --ns namespace --db database --pretty` 
+//! // See the results via `surreal sql --ns namespace --db database --pretty`
 //! // or https://surrealist.app/
 //! // followed by the query `SELECT * FROM person;`
 
