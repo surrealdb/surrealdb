@@ -1,24 +1,3 @@
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::sync::atomic::AtomicI64;
-use std::sync::Arc;
-use std::sync::OnceLock;
-use std::task::Poll;
-
-use flume::Receiver;
-use flume::Sender;
-use futures::future::Either;
-use futures::stream::poll_fn;
-use futures::StreamExt;
-use futures_concurrency::stream::Merge as _;
-use tokio::sync::watch;
-
-use surrealdb_core::options::EngineOptions;
-
 use crate::api::conn::Connection;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
@@ -32,12 +11,34 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Options;
 use crate::dbs::Session;
 use crate::engine::tasks::start_tasks;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
+use crate::options::EngineOptions;
+use flume::Receiver;
+use flume::Sender;
+use futures::future::Either;
+use futures::stream::poll_fn;
+use futures::StreamExt;
+use futures_concurrency::stream::Merge as _;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::future::Future;
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::sync::atomic::AtomicI64;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::task::Poll;
+use std::time::Duration;
+use tokio::sync::watch;
+use tokio::time;
+use tokio::time::MissedTickBehavior;
 
 impl crate::api::Connection for Db {}
 

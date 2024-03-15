@@ -4,11 +4,11 @@ use helpers::new_ds;
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::fflags::FFLAGS;
+use surrealdb::kvs::Datastore;
+use surrealdb::kvs::LockType::Optimistic;
+use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core::fflags::FFLAGS;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::kvs::LockType::Optimistic;
-use surrealdb_core::kvs::TransactionType::Write;
 
 mod helpers;
 mod parse;
@@ -178,6 +178,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	current_time += 1;
 	dbs.tick_at(current_time).await?;
 	let mut tx = dbs.transaction(Write, Optimistic).await?;
+	#[cfg(feature = "sql2")]
 	tx.print_all().await;
 	tx.cancel().await?;
 

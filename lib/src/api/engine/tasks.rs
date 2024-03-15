@@ -1,3 +1,4 @@
+use crate::dbs::lifecycle::LoggingLifecycle;
 use flume::Sender;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge;
@@ -5,21 +6,20 @@ use futures_concurrency::stream::Merge;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb_core::dbs::lifecycle::LoggingLifecycle;
 
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
 
-use surrealdb_core::dbs::Options;
-use surrealdb_core::fflags::FFLAGS;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::options::EngineOptions;
+use crate::dbs::Options;
+use crate::fflags::FFLAGS;
+use crate::kvs::Datastore;
+use crate::options::EngineOptions;
 
 use crate::engine::IntervalStream;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::Error as RootError;
+use crate::err::Error;
 #[cfg(not(target_arch = "wasm32"))]
-use surrealdb_core::err::Error;
+use crate::Error as RootError;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn as spawn_future;
 #[cfg(target_arch = "wasm32")]
@@ -173,13 +173,14 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 #[cfg(feature = "kv-mem")]
 mod test {
 	use crate::engine::tasks::start_tasks;
+	use crate::kvs::Datastore;
+	use crate::options::EngineOptions;
 	use std::sync::Arc;
-	use surrealdb_core::options::EngineOptions;
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete() {
 		let opt = EngineOptions::default();
-		let dbs = Arc::new(surrealdb_core::kvs::Datastore::new("memory").await.unwrap());
+		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
 		let (val, chans) = start_tasks(&opt, dbs.clone());
 		for chan in chans {
 			chan.send(()).unwrap();
