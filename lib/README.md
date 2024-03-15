@@ -39,30 +39,38 @@ This library enables simple and advanced querying of an embedded or remote datab
 ```rust
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::borrow::Cow;
 use surrealdb::sql;
 use surrealdb::sql::Thing;
 use surrealdb::Surreal;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
+use surrealdb::Error as SurrealError;
 
 #[derive(Serialize, Deserialize)]
 struct Name {
-    first: Cow<'static, str>,
-    last: Cow<'static, str>,
+    first: String,
+    last: String,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Person {
     #[serde(skip_serializing)]
     id: Option<Thing>,
-    title: Cow<'static, str>,
+    title: String,
     name: Name,
     marketing: bool,
 }
 
+// Install at https://surrealdb.com/install 
+// and use `surreal start --user root --pass root`
+// to start a working database to take the following queries
+// 
+// See the results via `surreal sql --ns namespace --db database --pretty` 
+// or https://surrealist.app/
+// followed by the query `SELECT * FROM person;`
+
 #[tokio::main]
-async fn main() -> surrealdb::Result<()> {
+async fn main() -> Result<(), SurrealError> {
     let db = Surreal::new::<Ws>("localhost:8000").await?;
 
     // Signin as a namespace, database, or root user
@@ -113,7 +121,7 @@ async fn main() -> surrealdb::Result<()> {
     let people: Vec<Person> = db.select("person").await?;
 
     // Perform a custom advanced query
-    let sql = r#"
+    let query = r#"
         SELECT marketing, count()
         FROM type::table($table)
         GROUP BY marketing
@@ -123,7 +131,7 @@ async fn main() -> surrealdb::Result<()> {
         .bind(("table", "person"))
         .await?;
 
-    // Delete all people upto but not including Jaime
+    // Delete all people up to but not including Jaime
     let people: Vec<Person> = db.delete("person").range(.."jaime").await?;
 
     // Delete all people
