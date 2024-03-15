@@ -1,5 +1,5 @@
 /// Configuration for the engine behaviour
-/// 
+///
 /// The defaults are optimal so please only modify these if you know deliberately why you are modifying them.
 #[derive(Clone, Copy, Debug)]
 pub struct EngineOptions {
