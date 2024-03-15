@@ -1,6 +1,6 @@
 // Tests common to all protocols and storage engines
 
-use surrealdb_core::fflags::FFLAGS;
+use surrealdb::fflags::FFLAGS;
 
 static PERMITS: Semaphore = Semaphore::const_new(1);
 
