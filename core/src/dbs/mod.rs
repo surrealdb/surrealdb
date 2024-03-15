@@ -14,6 +14,7 @@ mod statement;
 mod transaction;
 mod variables;
 
+pub use self::lifecycle::*;
 pub use self::notification::*;
 pub use self::options::*;
 pub use self::response::*;

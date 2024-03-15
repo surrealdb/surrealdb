@@ -156,11 +156,19 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		let opt = EngineOptions {
-			tick_interval,
-			..Default::default()
+		#[cfg(feature = "sql2")]
+		let opt = {
+			let tick_interval = address
+				.config
+				.tick_interval
+				.unwrap_or(crate::api::engine::local::DEFAULT_TICK_INTERVAL);
+			EngineOptions {
+				tick_interval,
+				..Default::default()
+			}
 		};
+		#[cfg(not(feature = "sql2"))]
+		let opt = EngineOptions::default();
 		let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();
