@@ -275,7 +275,6 @@ mod tests {
 					keep_pruned_connections: true,
 				}),
 				comment: None,
-				#[cfg(feature = "sql2")]
 				if_not_exists: false
 			}
 		);

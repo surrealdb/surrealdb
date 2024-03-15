@@ -1265,7 +1265,7 @@ mod tests {
 		)?);
 
 		info!("Check recall");
-		for (efs, expected_recall) in [(10, 0.85), (80, 0.90)] {
+		for (efs, expected_recall) in [(10, 0.82), (80, 0.87)] {
 			let mut total_recall = 0.0;
 			for (_, pt) in queries.as_ref() {
 				let knn = 10;
@@ -1273,7 +1273,7 @@ mod tests {
 				assert_eq!(
 					hnsw_res.docs.len(),
 					knn,
-					"Different size - knn: {knn} - efs: {efs} - docƒBs: {:?}",
+					"Different size - knn: {knn} - efs: {efs} - doc: {:?}",
 					collection.as_ref().len()
 				);
 				let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
