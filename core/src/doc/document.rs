@@ -133,6 +133,7 @@ impl<'a> Document<'a> {
 				// We can create the table automatically
 				run.add_and_cache_ns(opt.ns(), opt.strict).await?;
 				run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
+				// TODO: should there be TableType as param here?
 				run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
 			}
 			// There was an error

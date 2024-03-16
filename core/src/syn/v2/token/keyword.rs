@@ -123,6 +123,7 @@ keyword! {
 	Punct => "PUNCT",
 	Readonly => "READONLY",
 	Relate => "RELATE",
+	Relation => "RELATION",
 	Remove => "REMOVE",
 	Replace => "REPLACE",
 	Return => "RETURN",
@@ -151,6 +152,7 @@ keyword! {
 	Timeout => "TIMEOUT",
 	Tokenizers => "TOKENIZERS",
 	Token => "TOKEN",
+	To => "TO",
 	Transaction => "TRANSACTION",
 	True => "true",
 	Type => "TYPE",
@@ -185,6 +187,8 @@ keyword! {
 	ContainsNot => "CONTAINSNOT",
 	Contains => "CONTAINS",
 	In => "IN",
+	Out => "OUT"
+	Normal => "NORMAL",
 
 	Any => "ANY",
 	Array => "ARRAY",
