@@ -2,6 +2,7 @@ use crate::key::database::tb;
 use crate::key::database::tb::Tb;
 use crate::kvs::ScanPage;
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::TableType;
 
 #[tokio::test]
 #[serial]
@@ -14,7 +15,9 @@ async fn table_definitions_can_be_scanned() {
 
 	// Create a table definition
 	let namespace = "test_namespace";
-	let database = "test_database";
+	let database = "t
+use crate::sql::TableType;
+use crate::sql::TableType;est_database";
 	let table = "test_table";
 	let key = Tb::new(namespace, database, table);
 	let value = DefineTableStatement {
@@ -71,6 +74,7 @@ async fn table_definitions_can_be_deleted() {
 		changefeed: None,
 		comment: None,
 		if_not_exists: false,
+		table_type: TableType::Any,
 	};
 	tx.set(&key, &value).await.unwrap();
 
