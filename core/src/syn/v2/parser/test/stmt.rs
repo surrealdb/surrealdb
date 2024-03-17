@@ -327,7 +327,7 @@ fn parse_define_table() {
 			}),
 			comment: None,
 			if_not_exists: false,
-			table_type: TableType::Normal,
+			table_type: TableType::Any,
 		}))
 	);
 }
