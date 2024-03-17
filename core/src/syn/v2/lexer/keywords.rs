@@ -191,6 +191,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("THEN") => TokenKind::Keyword(Keyword::Then),
 	UniCase::ascii("THROW") => TokenKind::Keyword(Keyword::Throw),
 	UniCase::ascii("TIMEOUT") => TokenKind::Keyword(Keyword::Timeout),
+	UniCase::ascii("TO") => TokenKind::Keyword(Keyword::To),
 	UniCase::ascii("TOKENIZERS") => TokenKind::Keyword(Keyword::Tokenizers),
 	UniCase::ascii("TOKEN") => TokenKind::Keyword(Keyword::Token),
 	UniCase::ascii("TRANSACTION") => TokenKind::Keyword(Keyword::Transaction),
@@ -227,6 +228,8 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("CONTAINSNOT") => TokenKind::Keyword(Keyword::ContainsNot),
 	UniCase::ascii("CONTAINS") => TokenKind::Keyword(Keyword::Contains),
 	UniCase::ascii("IN") => TokenKind::Keyword(Keyword::In),
+	UniCase::ascii("OUT") => TokenKind::Keyword(Keyword::Out),
+	UniCase::ascii("NORMAL") => TokenKind::Keyword(Keyword::Normal),
 
 	UniCase::ascii("ANY") => TokenKind::Keyword(Keyword::Any),
 	UniCase::ascii("ARRAY") => TokenKind::Keyword(Keyword::Array),
