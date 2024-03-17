@@ -57,7 +57,6 @@ impl DefineFieldStatement {
 			});
 		}
 		// Process the statement
-		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 

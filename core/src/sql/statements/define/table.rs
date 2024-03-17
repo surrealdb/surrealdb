@@ -147,9 +147,6 @@ impl Display for DefineTableStatement {
 			write!(f, " IF NOT EXISTS")?
 		}
 		write!(f, " {}", self.name)?;
-		if self.drop {
-			f.write_str(" DROP")?;
-		}
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -167,6 +164,9 @@ impl Display for DefineTableStatement {
 			TableType::Any => {
 				f.write_str(" ANY")?;
 			}
+		}
+		if self.drop {
+			f.write_str(" DROP")?;
 		}
 		f.write_str(if self.full {
 			" SCHEMAFULL"
