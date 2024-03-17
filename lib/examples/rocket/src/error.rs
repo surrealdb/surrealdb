@@ -12,9 +12,7 @@ pub enum Error {
 
 impl<'r> Responder<'r, 'static> for Error {
     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
-        // Use Rocket's `Json` for the error message to properly format and set the Content-Type
         let error_message = json!({ "error": self.to_string() });
-        // Use `Json` directly to respond, which sets the appropriate Content-Type header for JSON responses
         Response::build()
             .status(Status::InternalServerError)
             .header(rocket::http::ContentType::JSON)

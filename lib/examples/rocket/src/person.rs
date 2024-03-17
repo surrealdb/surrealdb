@@ -2,11 +2,8 @@ use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::State;
 use rocket::response::status::Custom;
 use rocket::http::Status;
-use std::sync::Arc;
 use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
-use crate::error::Error; // Ensure this is correctly imported
-use rocket::response::status;
 
 #[derive(Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
@@ -49,19 +46,6 @@ pub async fn update(
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(Json)
 }
-
-#[delete("/person/<id>")]
-pub async fn delete(
-    db: &Db,
-    id: String,
-) -> Result<status::Custom<Json<&str>>, Custom<String>> {
-    db.delete((PERSON, &*id)).await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        // Return a simple confirmation message upon successful deletion
-        .map(|_| Custom(Status::Ok, Json("Deleted")))
-}
-
-
 
 #[get("/people")]
 pub async fn list(

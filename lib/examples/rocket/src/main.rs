@@ -6,7 +6,6 @@ use surrealdb::Surreal;
 use std::env;
 use std::sync::Arc;
 use surrealdb::engine::any;
-use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 mod error;
 mod person;
@@ -17,7 +16,7 @@ struct Person {
     name: String,
 }
 
-type Db = State<Surreal<Any>>;
+type Db = Arc<Surreal<any::Any>>;
 
 async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
     let endpoint = env::var("SURREALDB_ENDPOINT").unwrap_or_else(|_| "memory".to_owned());
@@ -31,7 +30,7 @@ async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
 
     db.use_ns("namespace").use_db("database").await?;
 
-    Ok(db)
+    Ok(Arc::new(db))
 }
 
 async fn setup_rocket() -> Result<Rocket<Build>, Box<dyn std::error::Error>> {
@@ -44,7 +43,6 @@ async fn setup_rocket() -> Result<Rocket<Build>, Box<dyn std::error::Error>> {
                 person::create,
                 person::read,
                 person::update,
-                person::delete,
                 person::list
             ],
         );
