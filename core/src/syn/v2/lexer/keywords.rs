@@ -25,7 +25,6 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("OPTION"),
 	UniCase::ascii("RETURN"),
 	UniCase::ascii("RELATE"),
-	UniCase::ascii("RELATION"),
 	UniCase::ascii("REMOVE"),
 	UniCase::ascii("SELECT"),
 	UniCase::ascii("LET"),
