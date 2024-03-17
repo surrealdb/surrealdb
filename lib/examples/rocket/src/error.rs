@@ -11,19 +11,22 @@ pub enum Error {
 }
 
 impl<'r> Responder<'r, 'static> for Error {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
-        let error_message = json!({ "error": self.to_string() });
-        Response::build()
-            .status(Status::InternalServerError)
-            .header(rocket::http::ContentType::JSON)
-            .sized_body(error_message.to_string().len(), std::io::Cursor::new(error_message.to_string()))
-            .ok()
-    }
+	fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
+		let error_message = json!({ "error": self.to_string() });
+		Response::build()
+			.status(Status::InternalServerError)
+			.header(rocket::http::ContentType::JSON)
+			.sized_body(
+				error_message.to_string().len(),
+				std::io::Cursor::new(error_message.to_string()),
+			)
+			.ok()
+	}
 }
 
 impl From<surrealdb::Error> for Error {
-    fn from(error: surrealdb::Error) -> Self {
-        eprintln!("{error}");
-        Self::Db
-    }
+	fn from(error: surrealdb::Error) -> Self {
+		eprintln!("{error}");
+		Self::Db
+	}
 }
