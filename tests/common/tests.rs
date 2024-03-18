@@ -899,6 +899,8 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res.as_object().unwrap();
 	// Verify response contains no error
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Authenticate the connection
+	socket_expiring_auth.send_message_signin(USER, PASS, None, None, None).await?;
 	// Send LIVE command
 	let res = socket_expiring_auth.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
