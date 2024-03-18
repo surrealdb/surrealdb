@@ -4,17 +4,17 @@ use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
 use crate::cnf::LOGO;
 use crate::dbs;
-use crate::dbs::StartCommandDbsOptions;
+use crate::dbs::{StartCommandDbsOptions, DB};
 use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
-use crate::node;
 use clap::Args;
 use opentelemetry::Context as TelemetryContext;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::engine::any::IntoEndpoint;
+use surrealdb::engine::tasks::start_tasks;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Args, Debug)]
@@ -183,20 +183,21 @@ pub async fn init(
 	// Start the kvs server
 	dbs::init(dbs).await?;
 	// Start the node agent
-	// This is equivalent to run_maintenance in native/wasm drivers
-	let nd = node::init(ct.clone());
-	let lq = node::live_query_change_feed(ct.clone());
+	let (tasks, task_chans) = start_tasks(
+		#[cfg(feature = "sql2")]
+		&config::CF.get().unwrap().engine.unwrap_or_default(),
+		DB.get().unwrap().clone(),
+	);
 	// Start the web server
-	net::init(ct).await?;
-	// Wait for the node agent to stop
-	if let Err(e) = nd.await {
-		error!("Node agent failed while running: {}", e);
-		return Err(Error::NodeAgent);
-	}
-	if let Err(e) = lq.await {
-		error!("Live query change feed failed while running: {}", e);
-		return Err(Error::NodeAgent);
-	}
+	net::init(ct.clone()).await?;
+	// Shutdown and stop closed tasks
+	task_chans.into_iter().for_each(|chan| {
+		if let Err(e) = chan.send(()) {
+			error!("Failed to send shutdown signal to task: {}", e);
+		}
+	});
+	ct.cancel();
+	tasks.resolve().await?;
 	// All ok
 	Ok(())
 }

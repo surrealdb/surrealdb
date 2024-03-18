@@ -293,14 +293,14 @@ async fn database_change_feeds() -> Result<(), Error> {
 		);
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
 		let val = Value::parse("[]");
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
@@ -308,7 +308,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.iter()
 			.find(|x| *x == &tmp)
 			// We actually dont want to capture if its found
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected SHOW CHANGES value not found:\n{}", tmp))?;
 		Ok(())
 	}
