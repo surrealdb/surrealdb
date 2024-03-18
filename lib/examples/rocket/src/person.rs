@@ -1,5 +1,5 @@
 use std::sync::Arc;
-
+use rocket::{post,get, delete, put};
 use rocket::http::Status;
 use rocket::response::status::Custom;
 use rocket::serde::{json::Json, Deserialize, Serialize};
