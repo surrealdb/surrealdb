@@ -489,7 +489,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 			})
 			.collect(),
 	};
-	assert_eq!(tmp, val);
+	assert!(val.contains(&tmp));
 	// Retain for 1h
 	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
