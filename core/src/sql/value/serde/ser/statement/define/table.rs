@@ -110,7 +110,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			permissions: self.permissions,
 			changefeed: self.changefeed,
 			comment: self.comment,
-			table_type: self.table_type,
+			kind: self.table_type,
 			if_not_exists: self.if_not_exists,
 		})
 	}

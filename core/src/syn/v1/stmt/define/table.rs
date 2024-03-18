@@ -37,7 +37,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 		name,
 		permissions: Permissions::none(),
 		// Default to ANY if not specified in the DEFINE statement
-		table_type: TableType::Any,
+		kind: TableType::Any,
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
@@ -66,7 +66,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 				res.permissions = v;
 			}
 			DefineTableOption::TableType(t) => {
-				res.table_type = t;
+				res.kind = t;
 			}
 		}
 	}

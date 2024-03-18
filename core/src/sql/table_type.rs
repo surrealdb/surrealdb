@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-use super::Kind;
+use super::{Kind, Table};
 
 /// The type of records stored by a table
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
@@ -23,10 +23,10 @@ impl Display for TableType {
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
-				if let Some(kind) = &rel.from {
+				if let Some(Kind::Record(kind)) = &rel.from {
 					write!(f, " IN {}", get_tables_from_kind(kind))?;
 				}
-				if let Some(kind) = &rel.to {
+				if let Some(Kind::Record(kind)) = &rel.to {
 					write!(f, " OUT {}", get_tables_from_kind(kind))?;
 				}
 			}
@@ -38,11 +38,8 @@ impl Display for TableType {
 	}
 }
 
-fn get_tables_from_kind(kind: &Kind) -> String {
-	let Kind::Record(tables) = kind else {
-		panic!()
-	};
-	tables.iter().map(ToString::to_string).collect::<Vec<_>>().join(" | ")
+fn get_tables_from_kind(tables: &[Table]) -> String {
+	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
