@@ -341,7 +341,7 @@ impl Parser<'_> {
 			name,
 			permissions: Permissions::none(),
 			// Default to ANY if not specified in the DEFINE statement
-			table_type: TableType::Any,
+			kind: TableType::Any,
 			if_not_exists,
 			..Default::default()
 		};
@@ -358,22 +358,22 @@ impl Parser<'_> {
 				}
 				t!("RELATION") => {
 					self.pop_peek();
-					res.table_type = TableType::Relation(self.parse_relation_schema()?);
+					res.kind = TableType::Relation(self.parse_relation_schema()?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
 					match self.peek_kind() {
 						t!("NORMAL") => {
 							self.pop_peek();
-							res.table_type = TableType::Normal;
+							res.kind = TableType::Normal;
 						}
 						t!("RELATION") => {
 							self.pop_peek();
-							res.table_type = TableType::Relation(self.parse_relation_schema()?);
+							res.kind = TableType::Relation(self.parse_relation_schema()?);
 						}
 						t!("ANY") => {
 							self.pop_peek();
-							res.table_type = TableType::Any;
+							res.kind = TableType::Any;
 						}
 						x => unexpected!(self, x, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
