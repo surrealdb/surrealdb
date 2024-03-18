@@ -1,19 +1,15 @@
+use crate::Db;
 use rocket::http::Status;
 use rocket::response::status::Custom;
 use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::State;
 use rocket::{delete, get, post, put};
-use std::sync::Arc;
-use surrealdb::engine::any::Any;
-use surrealdb::Surreal;
 
 #[derive(Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
 pub struct Person {
 	name: String,
 }
-
-type Db = Arc<Surreal<Any>>;
 
 const PERSON: &str = "person";
 
