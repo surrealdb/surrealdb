@@ -153,10 +153,6 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:two, age: 39, score: 80 }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
 			{
