@@ -72,7 +72,6 @@ impl<'a> Document<'a> {
 		};
 		// Loop through all foreign table statements
 		for ft in fts.iter() {
-			println!("FT {:?}", ft);
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
 			// Check if there is a GROUP BY clause
