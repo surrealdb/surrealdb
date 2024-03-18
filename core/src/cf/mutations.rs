@@ -3,7 +3,7 @@ use crate::sql::object::Object;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::vs::{to_u128_be, versionstamp_to_u64};
+use crate::vs::to_u128_be;
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
