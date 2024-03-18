@@ -51,7 +51,7 @@ pub async fn read(db: &State<Db>, id: String) -> Result<Json<Option<Person>>, Cu
 // curl -X PUT -H "Content-Type: application/json" -d '{"name":"Jane Doe"}' http://localhost:8080/person/1
 #[put("/person/<id>", data = "<person_data>")]
 pub async fn update(
-	db:  &State<Db>,
+	db: &State<Db>,
 	id: String,
 	person_data: Json<Person>,
 ) -> Result<Json<Option<Person>>, Custom<String>> {
