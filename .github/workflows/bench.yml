@@ -70,7 +70,7 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Save results as artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ github.job }}-comparison.txt
           path: bench-results/${{ github.job }}-comparison.txt
@@ -198,7 +198,7 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Save results as artifact
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-comparison.txt
           path: bench-results/${{ matrix.target }}-comparison.txt

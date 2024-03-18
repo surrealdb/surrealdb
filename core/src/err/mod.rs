@@ -321,7 +321,6 @@ pub enum Error {
 
 	/// The requested event does not exist
 	#[error("The event '{value}' does not exist")]
-	#[cfg(feature = "sql2")]
 	EvNotFound {
 		value: String,
 	},
@@ -334,7 +333,6 @@ pub enum Error {
 
 	/// The requested field does not exist
 	#[error("The field '{value}' does not exist")]
-	#[cfg(feature = "sql2")]
 	FdNotFound {
 		value: String,
 	},
@@ -796,112 +794,96 @@ pub enum Error {
 
 	/// The requested analyzer already exists
 	#[error("The analyzer '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	AzAlreadyExists {
 		value: String,
 	},
 
 	/// The requested database already exists
 	#[error("The database '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	DbAlreadyExists {
 		value: String,
 	},
 
 	/// The requested event already exists
 	#[error("The event '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	EvAlreadyExists {
 		value: String,
 	},
 
 	/// The requested field already exists
 	#[error("The field '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	FdAlreadyExists {
 		value: String,
 	},
 
 	/// The requested function already exists
 	#[error("The function 'fn::{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	FcAlreadyExists {
 		value: String,
 	},
 
 	/// The requested index already exists
 	#[error("The index '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	IxAlreadyExists {
 		value: String,
 	},
 
 	/// The requested model already exists
 	#[error("The model '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	MlAlreadyExists {
 		value: String,
 	},
 
 	/// The requested namespace already exists
 	#[error("The namespace '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	NsAlreadyExists {
 		value: String,
 	},
 
 	/// The requested param already exists
 	#[error("The param '${value}' already exists")]
-	#[cfg(feature = "sql2")]
 	PaAlreadyExists {
 		value: String,
 	},
 
 	/// The requested scope already exists
 	#[error("The scope '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	ScAlreadyExists {
 		value: String,
 	},
 
 	/// The requested table already exists
 	#[error("The table '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	TbAlreadyExists {
 		value: String,
 	},
 
 	/// The requested namespace token already exists
 	#[error("The namespace token '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	NtAlreadyExists {
 		value: String,
 	},
 
 	/// The requested database token already exists
 	#[error("The database token '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	DtAlreadyExists {
 		value: String,
 	},
 
 	/// The requested scope token already exists
 	#[error("The scope token '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	StAlreadyExists {
 		value: String,
 	},
 
 	/// The requested user already exists
 	#[error("The user '{value}' already exists")]
-	#[cfg(feature = "sql2")]
 	UserRootAlreadyExists {
 		value: String,
 	},
 
 	/// The requested namespace user already exists
 	#[error("The user '{value}' already exists in the namespace '{ns}'")]
-	#[cfg(feature = "sql2")]
 	UserNsAlreadyExists {
 		value: String,
 		ns: String,
@@ -909,7 +891,6 @@ pub enum Error {
 
 	/// The requested database user already exists
 	#[error("The user '{value}' already exists in the database '{db}'")]
-	#[cfg(feature = "sql2")]
 	UserDbAlreadyExists {
 		value: String,
 		ns: String,
