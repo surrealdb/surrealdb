@@ -8,7 +8,6 @@ use surrealdb::engine::any;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 
-
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
 pub struct Person {

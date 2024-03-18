@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use rocket::{post,get, delete, put};
 use rocket::http::Status;
 use rocket::response::status::Custom;
 use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::State;
+use rocket::{delete, get, post, put};
+use std::sync::Arc;
 use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
 
