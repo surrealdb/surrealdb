@@ -34,7 +34,7 @@ mod lives; // Processes any live queries relevant for this document
 mod merge; // Merges any field changes for an INSERT statement
 mod pluck; // Pulls the projected expressions from the document
 mod purge; // Deletes this document, and any edges or indexes
-mod relation;
+mod relation; // Checks whether the record is the right kind for the table
 mod reset; // Resets internal fields which were set for this document
 mod store; // Writes the document content to the storage engine
 mod table; // Processes any foreign tables relevant for this document
