@@ -43,6 +43,12 @@ pub mod options;
 pub mod syn;
 
 #[doc(hidden)]
+pub mod test_helpers {
+	pub use crate::vs::conv::to_u128_be;
+	pub use crate::vs::generate_versionstamp_sequences;
+}
+
+#[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
 	pub use channel::bounded;

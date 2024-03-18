@@ -10,6 +10,7 @@ use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
 use surrealdb_core2::sql::Array;
+use surrealdb_core2::test_helpers::{generate_versionstamp_sequences, to_u128_be};
 
 mod helpers;
 mod parse;
@@ -64,214 +65,77 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
 
-	generate_versionstamp_sequences([0; 10], 1).collect::<Vec<_>>();
+	// Two timestamps
+	let first_timestamp = generate_versionstamp_sequences([0; 10], 3);
+	let second_timestamp =
+		first_timestamp.map(|vs| (vs, generate_versionstamp_sequences(vs, 2).next().unwrap()));
 
 	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
 	{
-		true => vec![
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 262144,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-		],
-		false => vec![
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 262144,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-		],
+		true => second_timestamp
+			.map(|(vs1, vs2)| {
+				let vs1 = to_u128_be(vs1);
+				let vs2 = to_u128_be(vs2);
+				Value::parse(format!(
+					r#"[
+					 {{
+						 versionstamp: {},
+						 changes: [
+							 {{
+								  create: {{
+									  id: person:test,
+									  name: 'Name: Tobie'
+								  }}
+							 }}
+						 ]
+					 }},
+					 {{
+						 versionstamp: {},
+						 changes: [
+							 {{
+								  delete: {{
+									  id: person:test
+								  }}
+							 }}
+						 ]
+					 }}
+				]"#,
+					vs1, vs2
+				))
+			})
+			.collect(),
+		false => second_timestamp
+			.map(|(vs1, vs2)| {
+				let vs1 = to_u128_be(vs1);
+				let vs2 = to_u128_be(vs2);
+				Value::parse(format!(
+					r#"[
+					 {{
+						 versionstamp: {},
+						 changes: [
+							 {{
+								  update: {{
+									  id: person:test,
+									  name: 'Name: Tobie'
+								  }}
+							 }}
+						 ]
+					 }},
+					 {{
+						 versionstamp: {},
+						 changes: [
+							 {{
+								  delete: {{
+									  id: person:test
+								  }}
+							 }}
+						 ]
+					 }}
+				]"#,
+					vs1, vs2
+				))
+			})
+			.collect(),
 	};
 
 	// Declare check that is repeatable

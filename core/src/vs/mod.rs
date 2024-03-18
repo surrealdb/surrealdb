@@ -15,7 +15,6 @@ pub(crate) mod oracle;
 pub use self::conv::*;
 pub use self::oracle::*;
 use futures::StreamExt;
-use std::collections::binary_heap::Iter;
 
 /// Generate S-tuples of valid, sequenced versionstamps within range.
 /// The limit is used, because these are combinatorics - without an upper bound, combinations aren't possible.
