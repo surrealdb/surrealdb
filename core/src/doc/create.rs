@@ -17,7 +17,7 @@ impl<'a> Document<'a> {
 		self.relation(ctx, opt, txn, stm).await?;
 		// Alter record data
 		self.alter(ctx, opt, txn, stm).await?;
-		//Merge fields data
+		// Merge fields data
 		self.field(ctx, opt, txn, stm).await?;
 		// Reset fields data
 		self.reset(ctx, opt, txn, stm).await?;
