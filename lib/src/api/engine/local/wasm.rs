@@ -11,7 +11,6 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Options;
 use crate::dbs::Session;
 use crate::engine::tasks::start_tasks;
 use crate::iam::Level;
@@ -153,7 +152,7 @@ pub(crate) fn router(
 			tick_interval,
 			..Default::default()
 		};
-		let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
+		let (_tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {

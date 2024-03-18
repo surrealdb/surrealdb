@@ -16,6 +16,7 @@ use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
+#[cfg(feature = "sql2")]
 use crate::options::EngineOptions;
 use flume::Receiver;
 use flume::Sender;
@@ -162,9 +163,11 @@ pub(crate) fn router(
 				..Default::default()
 			}
 		};
-		#[cfg(not(feature = "sql2"))]
-		let opt = EngineOptions::default();
-		let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
+		let (tasks, task_chans) = start_tasks(
+			#[cfg(feature = "sql2")]
+			&opt,
+			kvs.clone(),
+		);
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
