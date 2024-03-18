@@ -21,6 +21,7 @@ mod cnf;
 mod dbs;
 mod env;
 mod err;
+mod gql;
 mod mem;
 mod net;
 mod node;
