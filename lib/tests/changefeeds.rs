@@ -137,20 +137,20 @@ async fn database_change_feeds() -> Result<(), Error> {
 		);
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
 		let val = Value::parse("[]");
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
 		Some(&tmp)
 			.filter(|x| *x == cf_val_arr)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected SHOW CHANGES value:\nleft: {}\nright: {}", tmp, cf_val_arr))?;
 		Ok(())
 	}
