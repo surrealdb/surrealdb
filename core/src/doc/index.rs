@@ -25,6 +25,8 @@ impl<'a> Document<'a> {
 		if opt.import {
 			return Ok(());
 		}
+		// Was this force targeted at a specific index?
+		let targeted_force = matches!(opt.force, Force::Index(_));
 		// Collect indexes or skip
 		let ixs = match &opt.force {
 			Force::Index(ix) if ix.first().is_some_and(|ix| {
@@ -54,7 +56,7 @@ impl<'a> Document<'a> {
 			let n = build_opt_values(ctx, opt, txn, ix, &self.current).await?;
 
 			// Update the index entries
-			if opt.force.is_forced() || o != n {
+			if targeted_force || o != n {
 				// Store all the variable and parameters required by the index operation
 				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
 
