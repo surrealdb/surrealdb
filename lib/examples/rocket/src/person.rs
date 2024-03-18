@@ -30,6 +30,14 @@ pub async fn create(
 		.map_err(|e| Custom(Status::InternalServerError, e.to_string()))
 		.map(Json)
 }
+// curl -X DELETE http://localhost:8080/person/1
+#[delete("/person/<id>")]
+pub async fn delete(db: &State<Db>, id: String) -> Result<Json<Option<Person>>, Custom<String>> {
+	db.delete((PERSON, &*id))
+		.await
+		.map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+		.map(Json)
+}
 
 // curl -X GET http://localhost:8080/person/1
 #[get("/person/<id>")]

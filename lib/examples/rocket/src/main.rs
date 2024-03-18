@@ -2,7 +2,6 @@
 extern crate rocket;
 
 use rocket::serde::{Deserialize, Serialize};
-use rocket::{Build, Rocket, State};
 use std::env;
 use std::sync::Arc;
 use surrealdb::engine::any;
@@ -34,11 +33,9 @@ async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
 	Ok(Arc::new(db))
 }
 
-
-
 #[launch]
 async fn rocket()  -> _ {
 	let db_conn = create_db_connection().await.unwrap();
 	 rocket::build()
-		.mount("/", routes![person::create,person::read, person::update, person::list]).manage(db_conn)
+		.mount("/", routes![person::create,person::read, person::update, person::delete, person::list]).manage(db_conn)
 }
