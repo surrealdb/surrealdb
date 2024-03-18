@@ -67,7 +67,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		true => Value::parse(
 			"[
 			{
-				versionstamp: 2,
+				versionstamp: 65536,
 				changes: [
 					{
 						create: {
@@ -78,7 +78,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 131072,
 				changes: [
 					{
 						delete: {
@@ -92,7 +92,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		false => Value::parse(
 			"[
 			{
-				versionstamp: 2,
+				versionstamp: 65536,
 				changes: [
 					{
 						update: {
@@ -103,7 +103,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 131072,
 				changes: [
 					{
 						delete: {
@@ -297,7 +297,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		true => Value::parse(
 			"[
 			{
-				versionstamp: 1,
+				versionstamp: 65536,
 				changes: [
 					{
 						define_table: {
@@ -307,7 +307,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 2,
+				versionstamp: 131072,
 				changes: [
 					{
 						create: {
@@ -318,7 +318,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 196608,
 				changes: [
 					{
 						update: {
@@ -329,7 +329,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 4,
+				versionstamp: 262144,
 				changes: [
 					{
 						update: {
@@ -340,7 +340,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 5,
+				versionstamp: 327680,
 				changes: [
 					{
 						delete: {
@@ -350,7 +350,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 6,
+				versionstamp: 393216,
 				changes: [
 					{
 						create: {
@@ -365,7 +365,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		false => Value::parse(
 			"[
 			{
-				versionstamp: 1,
+				versionstamp: 65536,
 				changes: [
 					{
 						define_table: {
@@ -375,7 +375,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 2,
+				versionstamp: 131072,
 				changes: [
 					{
 						update: {
@@ -386,7 +386,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 196608,
 				changes: [
 					{
 						update: {
@@ -397,7 +397,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 4,
+				versionstamp: 262144,
 				changes: [
 					{
 						update: {
@@ -408,7 +408,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 5,
+				versionstamp: 327680,
 				changes: [
 					{
 						delete: {
@@ -418,7 +418,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 6,
+				versionstamp: 393216,
 				changes: [
 					{
 						update: {
