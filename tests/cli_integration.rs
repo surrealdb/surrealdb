@@ -660,7 +660,6 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			// TODO cli integrations doesnt have access... include!(path) ?
 			if FFLAGS.change_feed_live_queries.enabled() {
 				let output = common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")

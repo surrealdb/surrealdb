@@ -317,143 +317,177 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let _tmp = res.remove(0).result?;
 	// SHOW CHANGES
 	let tmp = res.remove(0).result?;
-	let val = match FFLAGS.change_feed_live_queries.enabled() {
-		true => Value::parse(
-			"[
-			{
-				versionstamp: 65536,
+	let how_many_heartbeat_skip = 3;
+	// If you want to write a macro, you are welcome to
+	let first = generate_versionstamp_sequences([0; 10], how_many_heartbeat_skip);
+	let second = first.flat_map(|vs1| {
+		generate_versionstamp_sequences(vs1, how_many_heartbeat_skip).skip(1).map(|vs2| (vs1, vs2))
+	});
+	let third = second.flat_map(|(vs1, vs2)| {
+		generate_versionstamp_sequences(vs2, how_many_heartbeat_skip)
+			.skip(1)
+			.map(move |vs3| (vs1, vs2, vs3))
+	});
+	let fourth = third.flat_map(|(vs1, vs2, vs3)| {
+		generate_versionstamp_sequences(vs3, how_many_heartbeat_skip)
+			.skip(1)
+			.map(move |vs4| (vs1, vs2, vs3, vs4))
+	});
+	let fifth = fourth.flat_map(|(vs1, vs2, vs3, vs4)| {
+		generate_versionstamp_sequences(vs4, how_many_heartbeat_skip)
+			.skip(1)
+			.map(move |vs5| (vs1, vs2, vs3, vs4, vs5))
+	});
+	let sixth = fifth.flat_map(|(vs1, vs2, vs3, vs4, vs5)| {
+		generate_versionstamp_sequences(vs5, how_many_heartbeat_skip)
+			.skip(1)
+			.map(move |vs6| (vs1, vs2, vs3, vs4, vs5, vs6))
+	});
+	let val: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled() {
+		true => sixth
+			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
+				Value::parse(format!(
+					r#"[
+			{{
+				versionstamp: {vs1},
 				changes: [
-					{
-						define_table: {
+					{{
+						define_table: {{
 							name: 'person'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 131072,
+			}},
+			{{
+				versionstamp: {vs2},
 				changes: [
-					{
-						create: {
+					{{
+						create: {{
 							id: person:test,
 							name: 'Name: Tobie'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 196608,
+			}},
+			{{
+				versionstamp: {vs3},
 				changes: [
-					{
-						update: {
+					{{
+						update: {{
 							id: person:test,
 							name: 'Name: Jaime'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 262144,
+			}},
+			{{
+				versionstamp: {vs4},
 				changes: [
-					{
-						update: {
+					{{
+						update: {{
 							id: person:test,
 							name: 'Name: Tobie'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 327680,
+			}},
+			{{
+				versionstamp: {vs5},
 				changes: [
-					{
-						delete: {
+					{{
+						delete: {{
 							id: person:test
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 393216,
+			}},
+			{{
+				versionstamp: {vs6},
 				changes: [
-					{
-						create: {
+					{{
+						create: {{
 							id: person:1000,
 							name: 'Name: Yusuke'
-						}
-					}
+						}}
+					}}
 				]
-			}
-		]",
-		),
-		false => Value::parse(
-			"[
-			{
-				versionstamp: 65536,
+			}}
+		]"#,
+				))
+			})
+			.collect(),
+		false => sixth
+			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
+				Value::parse(format!(
+					r#"[
+			{{
+				versionstamp: {vs1},
 				changes: [
-					{
-						define_table: {
+					{{
+						define_table: {{
 							name: 'person'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 131072,
+			}},
+			{{
+				versionstamp: {vs2},
 				changes: [
-					{
-						update: {
+					{{
+						update: {{
 							id: person:test,
 							name: 'Name: Tobie'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 196608,
+			}},
+			{{
+				versionstamp: {vs3},
 				changes: [
-					{
-						update: {
+					{{
+						update: {{
 							id: person:test,
 							name: 'Name: Jaime'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 262144,
+			}},
+			{{
+				versionstamp: {vs4},
 				changes: [
-					{
-						update: {
+					{{
+						update: {{
 							id: person:test,
 							name: 'Name: Tobie'
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 327680,
+			}},
+			{{
+				versionstamp: {vs5},
 				changes: [
-					{
-						delete: {
+					{{
+						delete: {{
 							id: person:test
-						}
-					}
+						}}
+					}}
 				]
-			},
-			{
-				versionstamp: 393216,
+			}},
+			{{
+				versionstamp: {vs6},
 				changes: [
-					{
-						update: {
+					{{
+						update: {{
 							id: person:1000,
 							name: 'Name: Yusuke'
-						}
-					}
+						}}
+					}}
 				]
-			}
-		]",
-		),
+			}}
+		]"#
+				))
+			})
+			.collect(),
 	};
 	assert_eq!(tmp, val);
 	// Retain for 1h
