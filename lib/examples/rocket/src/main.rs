@@ -34,17 +34,11 @@ async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
 	Ok(Arc::new(db))
 }
 
-async fn setup_rocket() -> Result<Rocket<Build>, Box<dyn std::error::Error>> {
-	let db_conn = create_db_connection().await?;
-	let rocket = rocket::build()
-		.manage(db_conn)
-		.mount("/", routes![person::create, person::read, person::update, person::list]);
-	Ok(rocket)
-}
 
-#[rocket::main]
-async fn main() {
-	if let Err(e) = setup_rocket().await {
-		println!("Failed to launch Rocket: {}", e);
-	}
+
+#[launch]
+async fn rocket()  -> _ {
+	let db_conn = create_db_connection().await.unwrap();
+	 rocket::build()
+		.mount("/", routes![person::create,person::read, person::update, person::list]).manage(db_conn)
 }
