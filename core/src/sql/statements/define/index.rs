@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -8,6 +8,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::sync::Arc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -50,13 +51,7 @@ impl DefineIndexStatement {
 		// Release the transaction
 		drop(run);
 		// Force queries to run
-		let opt = &opt.new_with_force(true);
-		// Don't process field queries
-		let opt = &opt.new_with_fields(false);
-		// Don't process event queries
-		let opt = &opt.new_with_events(false);
-		// Don't process table queries
-		let opt = &opt.new_with_tables(false);
+		let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
