@@ -64,6 +64,8 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
 
+	generate_versionstamp_sequences([0; 10], 1).collect::<Vec<_>>();
+
 	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
 	{
 		true => vec![
