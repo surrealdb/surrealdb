@@ -60,17 +60,11 @@ pub enum Force {
 
 impl Force {
 	pub fn is_none(&self) -> bool {
-		match self {
-			Force::None => true,
-			_ => true,
-		}
+		matches!(self, Force::None)
 	}
 
 	pub fn is_forced(&self) -> bool {
-		match self {
-			Force::None => false,
-			_ => true,
-		}
+		!matches!(self, Force::None)
 	}
 }
 
