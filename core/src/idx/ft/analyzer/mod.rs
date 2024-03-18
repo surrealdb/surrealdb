@@ -9,7 +9,6 @@ use crate::idx::ft::terms::{TermId, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
-#[cfg(feature = "sql2")]
 use crate::sql::{Function, Strand};
 use async_recursion::async_recursion;
 use filter::Filter;
@@ -20,7 +19,6 @@ mod filter;
 mod tokenizer;
 
 pub(crate) struct Analyzer {
-	#[cfg(feature = "sql2")]
 	function: Option<String>,
 	tokenizers: Option<Vec<SqlTokenizer>>,
 	filters: Option<Vec<Filter>>,
@@ -29,7 +27,6 @@ pub(crate) struct Analyzer {
 impl From<DefineAnalyzerStatement> for Analyzer {
 	fn from(az: DefineAnalyzerStatement) -> Self {
 		Self {
-			#[cfg(feature = "sql2")]
 			function: az.function.map(|i| i.0),
 			tokenizers: az.tokenizers,
 			filters: Filter::from(az.filters),
@@ -198,7 +195,6 @@ impl Analyzer {
 		txn: &Transaction,
 		mut input: String,
 	) -> Result<Tokens, Error> {
-		#[cfg(feature = "sql2")]
 		if let Some(function_name) = self.function.clone() {
 			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
 			let val = fns.compute(ctx, opt, txn, None).await?;

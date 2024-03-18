@@ -15,12 +15,10 @@ use nom::{
 	branch::alt, bytes::complete::tag_no_case, character::complete::char, combinator::cut,
 	multi::many0, Err,
 };
-#[cfg(feature = "sql2")]
 use nom::{combinator::opt, sequence::tuple};
 
 pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 	let (i, _) = tag_no_case("PARAM")(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -34,7 +32,6 @@ pub fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 	// Create the base statement
 	let mut res = DefineParamStatement {
 		name,
-		#[cfg(feature = "sql2")]
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
