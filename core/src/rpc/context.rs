@@ -65,8 +65,8 @@ impl<'a> RpcContext<'a> {
 			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
 			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
-			Method::Relate => todo!(),
-			Method::Unknown => todo!(),
+			Method::Unknown => Err(RpcError::MethodNotFound),
+			_ => Err(RpcError::MethodNotFound),
 		}
 	}
 }
