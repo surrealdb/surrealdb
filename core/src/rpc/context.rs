@@ -4,21 +4,37 @@ use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Object, Uuid, Value},
+	sql::{Array, Uuid, Value},
 };
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
 
 pub struct RpcContext<'a> {
-	pub vars: BTreeMap<String, Value>,
-	pub session: Session,
 	pub kvs: &'a Datastore,
+	pub session: Session,
+	pub vars: BTreeMap<String, Value>,
 	pub lq_handler: Option<Box<dyn LqHandler + Send + Sync>>,
 }
 
 pub trait LqHandler {
 	fn live(&self, lqid: &Uuid);
 	fn kill(&self, lqid: &Uuid);
+}
+
+impl<'a> RpcContext<'a> {
+	pub fn new(
+		kvs: &'a Datastore,
+		session: Session,
+		vars: BTreeMap<String, Value>,
+		lq_handler: Option<Box<dyn LqHandler + Send + Sync>>,
+	) -> Self {
+		Self {
+			kvs,
+			session,
+			vars,
+			lq_handler,
+		}
+	}
 }
 
 impl<'a> RpcContext<'a> {
