@@ -90,7 +90,7 @@ impl Options {
 			dive: 0,
 			live: false,
 			perms: true,
-			force: Force::All,
+			force: Force::None,
 			strict: false,
 			import: false,
 			futures: false,
