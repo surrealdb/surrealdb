@@ -64,8 +64,9 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
 
-	let potential_show_changes_values = match FFLAGS.change_feed_live_queries.enabled() {
-		true => Value::Array(Array(vec![
+	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
+	{
+		true => vec![
 			Value::parse(
 				"[
 			{
@@ -166,8 +167,8 @@ async fn database_change_feeds() -> Result<(), Error> {
 			}
 		]",
 			),
-		])),
-		false => Value::Array(Array(vec![
+		],
+		false => vec![
 			Value::parse(
 				"[
 			{
@@ -268,7 +269,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 			}
 		]",
 			),
-		])),
+		],
 	};
 
 	// Declare check that is repeatable
@@ -276,7 +277,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		dbs: &Datastore,
 		sql2: &str,
 		ses: &Session,
-		cf_val_arr: &Value,
+		cf_val_arr: &Vec<Value>,
 	) -> Result<(), String> {
 		let res = &mut dbs.execute(sql2, ses, None).await?;
 		assert_eq!(res.len(), 3);
@@ -303,10 +304,12 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
-		Some(&tmp)
-			.filter(|x| *x == cf_val_arr)
+		cf_val_arr
+			.iter()
+			.find(|x| *x == &tmp)
+			// We actually dont want to capture if its found
 			.map(|v| ())
-			.ok_or(format!("Expected SHOW CHANGES value:\nleft: {}\nright: {}", tmp, cf_val_arr))?;
+			.ok_or(format!("Expected SHOW CHANGES value not found:\n{}", tmp))?;
 		Ok(())
 	}
 
