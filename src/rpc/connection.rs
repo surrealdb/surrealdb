@@ -1,4 +1,6 @@
-use crate::cnf::{WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY};
+use crate::cnf::{
+	PKG_NAME, PKG_VERSION, WEBSOCKET_MAX_CONCURRENT_REQUESTS, WEBSOCKET_PING_FREQUENCY,
+};
 use crate::dbs::DB;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::Format;
@@ -341,7 +343,13 @@ impl Connection {
 		let mut conn = rpc.write().await;
 		// hack shouldn't be kept
 		let vars = mem::take(&mut conn.vars);
-		let mut rpc_ctx = RpcContext::new(DB.get().unwrap(), conn.session.clone(), vars, None);
+		let mut rpc_ctx = RpcContext::new(
+			DB.get().unwrap(),
+			conn.session.clone(),
+			vars,
+			None,
+			format!("{PKG_NAME}-{}", *PKG_VERSION),
+		);
 
 		let res = rpc_ctx.execute(method, params).await.map_err(Into::into);
 

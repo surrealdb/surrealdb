@@ -13,6 +13,7 @@ pub struct RpcContext<'a> {
 	pub kvs: &'a Datastore,
 	pub session: Session,
 	pub vars: BTreeMap<String, Value>,
+	pub version: String,
 	pub lq_handler: Option<Box<dyn LqHandler + Send + Sync>>,
 }
 
@@ -27,12 +28,14 @@ impl<'a> RpcContext<'a> {
 		session: Session,
 		vars: BTreeMap<String, Value>,
 		lq_handler: Option<Box<dyn LqHandler + Send + Sync>>,
+		version: String,
 	) -> Self {
 		Self {
 			kvs,
 			session,
 			vars,
 			lq_handler,
+			version,
 		}
 	}
 }
@@ -60,13 +63,11 @@ impl<'a> RpcContext<'a> {
 			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
 			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
 			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
-			Method::Version => todo!(),
+			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => todo!(),
 			Method::Unknown => todo!(),
 		}
-		// .map(Into::into)
-		// .map_err(Into::into)
 	}
 }
 macro_rules! mrg {
@@ -424,6 +425,17 @@ impl<'a> RpcContext<'a> {
 		};
 		// Return the result to the client
 		Ok(res)
+	}
+
+	// ------------------------------
+	// Methods for getting info
+	// ------------------------------
+
+	async fn version(&mut self, params: Array) -> Result<Value, RpcError> {
+		match params.len() {
+			0 => Ok(self.version.clone().into()),
+			_ => Err(RpcError::InvalidParams),
+		}
 	}
 
 	// ------------------------------

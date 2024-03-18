@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 
 use crate::cnf;
+use crate::cnf::PKG_NAME;
+use crate::cnf::PKG_VERSION;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
@@ -113,6 +115,7 @@ async fn post_handler(
 		kvs,
 		vars: BTreeMap::new(),
 		lq_handler: None,
+		version: format!("{PKG_NAME}-{}", *PKG_VERSION),
 	};
 
 	match fmt.req_http(body) {
