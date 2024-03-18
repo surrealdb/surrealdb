@@ -16,8 +16,6 @@ use crate::options::EngineOptions;
 
 use crate::engine::IntervalStream;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::err::Error;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::Error as RootError;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn as spawn_future;

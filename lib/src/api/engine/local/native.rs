@@ -5,13 +5,11 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
-use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Options;
 use crate::dbs::Session;
 use crate::engine::tasks::start_tasks;
 use crate::iam::Level;
@@ -35,10 +33,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
-use std::time::Duration;
 use tokio::sync::watch;
-use tokio::time;
-use tokio::time::MissedTickBehavior;
 
 impl crate::api::Connection for Db {}
 
