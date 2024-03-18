@@ -89,4 +89,16 @@ impl Method {
 	pub fn is_valid(&self) -> bool {
 		!matches!(self, Self::Unknown)
 	}
+
+	pub fn needs_mut(&self) -> bool {
+		matches!(
+			self,
+			Self::Use
+				| Self::Signup | Self::Signin
+				| Self::Invalidate
+				| Self::Authenticate
+				| Self::Set | Self::Unset
+				| Self::Query
+		)
+	}
 }

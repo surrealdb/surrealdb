@@ -24,13 +24,14 @@ use http::HeaderValue;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::rpc::method::Method;
+use surrealdb::rpc::BasicRpcContext;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
 use super::headers::Accept;
 use super::headers::ContentType;
 
-use surrealdb::rpc::context::RpcContext;
+use surrealdb::rpc::rpc_context::RpcContext;
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
@@ -110,13 +111,16 @@ async fn post_handler(
 	}
 	let kvs = DB.get().unwrap();
 
-	let mut rpc_ctx = RpcContext {
-		session,
-		kvs,
-		vars: BTreeMap::new(),
-		lq_handler: None,
-		version: format!("{PKG_NAME}-{}", *PKG_VERSION),
-	};
+	let mut rpc_ctx =
+		BasicRpcContext::new(kvs, session, BTreeMap::new(), format!("{PKG_NAME}-{}", *PKG_VERSION));
+
+	//  {
+	// 	session,
+	// 	kvs,
+	// 	vars: BTreeMap::new(),
+	// 	lq_handler: None,
+	// 	version: format!("{PKG_NAME}-{}", *PKG_VERSION),
+	// };
 
 	match fmt.req_http(body) {
 		Ok(req) => {

@@ -15,13 +15,14 @@ use futures_util::{SinkExt, StreamExt};
 use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
-use std::mem;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::Session;
+use surrealdb::kvs::Datastore;
+use surrealdb::rpc::args::Take;
 use surrealdb::rpc::method::Method;
-use surrealdb::rpc::Data;
 use surrealdb::rpc::RpcContext;
+use surrealdb::rpc::{Data, RpcError};
 use surrealdb::sql::Array;
 use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
@@ -340,21 +341,83 @@ impl Connection {
 			return Err(Failure::METHOD_NOT_FOUND);
 		}
 
-		let mut conn = rpc.write().await;
-		// hack shouldn't be kept
-		let vars = mem::take(&mut conn.vars);
-		let mut rpc_ctx = RpcContext::new(
-			DB.get().unwrap(),
-			conn.session.clone(),
-			vars,
-			None,
-			format!("{PKG_NAME}-{}", *PKG_VERSION),
-		);
-
-		let res = rpc_ctx.execute(method, params).await.map_err(Into::into);
-
-		mem::swap(&mut conn.vars, &mut rpc_ctx.vars);
+		// if the write lock is a bottleneck then execute could be refactored into execute_mut and execute
+		let res = rpc.write().await.execute(method, params).await.map_err(Into::into);
 
 		res
+	}
+}
+
+impl RpcContext for Connection {
+	fn kvs(&self) -> &Datastore {
+		DB.get().unwrap()
+	}
+
+	fn session(&self) -> &Session {
+		&self.session
+	}
+
+	fn session_mut(&mut self) -> &mut Session {
+		&mut self.session
+	}
+
+	fn vars(&self) -> &BTreeMap<String, Value> {
+		&self.vars
+	}
+
+	fn vars_mut(&mut self) -> &mut BTreeMap<String, Value> {
+		&mut self.vars
+	}
+
+	fn version_data(&self) -> impl Into<Data> {
+		format!("{PKG_NAME}-{}", *PKG_VERSION)
+	}
+
+	const LQ_SUPPORT: bool = true;
+
+	async fn handle_live(&self, lqid: &Uuid) {
+		LIVE_QUERIES.write().await.insert(lqid.clone(), self.id);
+		trace!("Registered live query {} on websocket {}", lqid, self.id);
+	}
+
+	async fn handle_kill(&self, lqid: &Uuid) {
+		if let Some(id) = LIVE_QUERIES.write().await.remove(lqid) {
+			trace!("Unregistered live query {} on websocket {}", lqid, id);
+		}
+	}
+
+	// reimplimentaions
+
+	async fn signup(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok(Value::Object(v)) = params.needs_one() else {
+			return Err(RpcError::InvalidParams);
+		};
+		let out: Result<Value, RpcError> =
+			surrealdb::iam::signup::signup(DB.get().unwrap(), &mut self.session, v)
+				.await
+				.map(Into::into)
+				.map_err(Into::into);
+
+		out
+	}
+
+	async fn signin(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok(Value::Object(v)) = params.needs_one() else {
+			return Err(RpcError::InvalidParams);
+		};
+		let out: Result<Value, RpcError> =
+			surrealdb::iam::signin::signin(DB.get().unwrap(), &mut self.session, v)
+				.await
+				.map(Into::into)
+				.map_err(Into::into);
+		out
+	}
+
+	async fn authenticate(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok(Value::Strand(token)) = params.needs_one() else {
+			return Err(RpcError::InvalidParams);
+		};
+		surrealdb::iam::verify::token(DB.get().unwrap(), &mut self.session, &token.0).await?;
+		Ok(Value::None)
 	}
 }
