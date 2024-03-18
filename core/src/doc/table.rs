@@ -41,7 +41,8 @@ impl<'a> Document<'a> {
 		if opt.import {
 			return Ok(());
 		}
-		println!("FR {:?}", opt.force);
+		// Was this force targeted at a specific foreign table?
+		let targeted_force = matches!(opt.force, Force::Table(_));
 		// Collect foreign tables or skip
 		let fts = match &opt.force {
 			Force::Table(tb) if tb.first().is_some_and(|tb| tb.view.as_ref().is_some_and(|v| {
@@ -105,7 +106,7 @@ impl<'a> Document<'a> {
 						Some(cond) => {
 							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
-									if act != Action::Create {
+									if !targeted_force && act != Action::Create {
 										// Delete the old value
 										let act = Action::Delete;
 										// Modify the value in the table
@@ -135,7 +136,7 @@ impl<'a> Document<'a> {
 									}
 								}
 								_ => {
-									if act != Action::Create {
+									if !targeted_force && act != Action::Create {
 										// Update the new value
 										let act = Action::Update;
 										// Modify the value in the table
@@ -154,7 +155,7 @@ impl<'a> Document<'a> {
 						}
 						// No WHERE clause is specified
 						None => {
-							if act != Action::Create {
+							if !targeted_force && act != Action::Create {
 								// Delete the old value
 								let act = Action::Delete;
 								// Modify the value in the table
