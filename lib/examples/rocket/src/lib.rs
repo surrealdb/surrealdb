@@ -1,4 +1,5 @@
-
+mod error;
+pub mod person;
 
 use rocket::serde::{Deserialize, Serialize};
 use std::env;
@@ -6,8 +7,7 @@ use std::sync::Arc;
 use surrealdb::engine::any;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
-mod error;
-mod person;
+
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]

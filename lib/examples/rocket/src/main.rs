@@ -1,7 +1,9 @@
-use rocket::create_db_connection;
-
 #[macro_use]
 extern crate rocket;
+
+use rocket_example::person;
+use rocket_example::create_db_connection;
+
 
 #[launch]
 async fn rocket() -> _ {
