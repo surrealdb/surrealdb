@@ -9,6 +9,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
+use surrealdb_core2::sql::Array;
 
 mod helpers;
 mod parse;
@@ -63,9 +64,10 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
 
-	let cf_val_arr = match FFLAGS.change_feed_live_queries.enabled() {
-		true => Value::parse(
-			"[
+	let potential_show_changes_values = match FFLAGS.change_feed_live_queries.enabled() {
+		true => Value::Array(Array(vec![
+			Value::parse(
+				"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -88,9 +90,86 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-		),
-		false => Value::parse(
-			"[
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 65536,
+				changes: [
+					{
+						create: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						create: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						create: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 262144,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+		])),
+		false => Value::Array(Array(vec![
+			Value::parse(
+				"[
 			{
 				versionstamp: 65536,
 				changes: [
@@ -113,7 +192,83 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-		),
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 65536,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 262144,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+		])),
 	};
 
 	// Declare check that is repeatable
@@ -158,7 +313,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	// Check the validation with repeats
 	let limit = 1;
 	for i in 0..limit {
-		let test_result = check_test(&dbs, sql2, &ses, &cf_val_arr).await;
+		let test_result = check_test(&dbs, sql2, &ses, &potential_show_changes_values).await;
 		match test_result {
 			Ok(_) => break,
 			Err(e) => {
@@ -184,7 +339,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, cf_val_arr);
+	assert_eq!(tmp, potential_show_changes_values);
 
 	// GC after 1hs
 	let one_hour_in_secs = 3600;
