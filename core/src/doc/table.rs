@@ -45,14 +45,15 @@ impl<'a> Document<'a> {
 		let targeted_force = matches!(opt.force, Force::Table(_));
 		// Collect foreign tables or skip
 		let fts = match &opt.force {
-			Force::Table(tb) if tb.first().is_some_and(|tb| tb.view.as_ref().is_some_and(|v| {
-				let id = match self.id {
-					Some(id) => id.tb.clone(),
-					_ => return false,
-				};
-
-				v.what.iter().find(|p| p.0 == id).is_some()
-			})) => tb.clone(),
+			Force::Table(tb)
+				if tb.first().is_some_and(|tb| {
+					tb.view.as_ref().is_some_and(|v| {
+						self.id.is_some_and(|id| v.what.iter().find(|p| p.0 == id.tb).is_some())
+					})
+				}) =>
+			{
+				tb.clone()
+			}
 			Force::All => self.ft(opt, txn).await?,
 			_ if self.changed() => self.ft(opt, txn).await?,
 			_ => return Ok(()),

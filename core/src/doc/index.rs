@@ -29,14 +29,11 @@ impl<'a> Document<'a> {
 		let targeted_force = matches!(opt.force, Force::Index(_));
 		// Collect indexes or skip
 		let ixs = match &opt.force {
-			Force::Index(ix) if ix.first().is_some_and(|ix| {
-				let id = match self.id {
-					Some(id) => id.tb.clone(),
-					_ => return false,
-				};
-
-				ix.what.0 == id
-			}) => ix.clone(),
+			Force::Index(ix)
+				if ix.first().is_some_and(|ix| self.id.is_some_and(|id| ix.what.0 == id.tb)) =>
+			{
+				ix.clone()
+			}
 			Force::All => self.ix(opt, txn).await?,
 			_ if self.changed() => self.ix(opt, txn).await?,
 			_ => return Ok(()),
