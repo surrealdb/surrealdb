@@ -93,7 +93,7 @@ args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "
 category = "LOCAL USAGE"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable" }
-args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--conn", "ws://0.0.0.0:8000", "--multi", "--pretty", "${@}"]
+args = ["run", "--no-default-features", "--features", "${DEV_FEATURES}", "--", "sql", "--pretty", "${@}"]
 
 # Quick
 [tasks.quick]

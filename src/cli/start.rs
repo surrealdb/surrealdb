@@ -184,7 +184,6 @@ pub async fn init(
 	dbs::init(dbs).await?;
 	// Start the node agent
 	let (tasks, task_chans) = start_tasks(
-		#[cfg(feature = "sql2")]
 		&config::CF.get().unwrap().engine.unwrap_or_default(),
 		DB.get().unwrap().clone(),
 	);

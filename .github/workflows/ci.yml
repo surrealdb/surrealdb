@@ -97,6 +97,8 @@ jobs:
         run: cargo vet
 
       - name: Check dependencies for unauthorized access
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo acl -n
 
       - name: Dependency check failure

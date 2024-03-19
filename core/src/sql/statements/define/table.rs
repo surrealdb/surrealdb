@@ -1,9 +1,3 @@
-use std::fmt::{self, Display, Write};
-
-use derive::Store;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
@@ -17,9 +11,17 @@ use crate::sql::{
 };
 use std::sync::Arc;
 
+use crate::sql::{Idiom, Kind, Part, Table, TableType};
+use derive::Store;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Write};
+
+use super::DefineFieldStatement;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -31,6 +33,8 @@ pub struct DefineTableStatement {
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+	#[revision(start = 3)]
+	pub kind: TableType,
 }
 
 impl DefineTableStatement {
@@ -69,6 +73,36 @@ impl DefineTableStatement {
 				..self.clone()
 			}
 		};
+		if let TableType::Relation(rel) = &self.kind {
+			let tb: &str = &self.name;
+			let in_kind = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+			let out_kind = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+			let in_key = crate::key::table::fd::new(opt.ns(), opt.db(), tb, "in");
+			let out_key = crate::key::table::fd::new(opt.ns(), opt.db(), tb, "out");
+			run.set(
+				in_key,
+				DefineFieldStatement {
+					name: Idiom(vec![Part::from("in")]),
+					what: tb.into(),
+					kind: Some(in_kind),
+					..Default::default()
+				},
+			)
+			.await?;
+			run.set(
+				out_key,
+				DefineFieldStatement {
+					name: Idiom(vec![Part::from("out")]),
+					what: tb.into(),
+					kind: Some(out_kind),
+					..Default::default()
+				},
+			)
+			.await?;
+		}
+
+		let tb_key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.name);
+		run.clr(tb_key).await?;
 		run.set(key, &dt).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
@@ -100,9 +134,28 @@ impl DefineTableStatement {
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
 		}
+
 		// Ok all good
 		Ok(Value::None)
 	}
+}
+
+impl DefineTableStatement {
+	pub fn is_relation(&self) -> bool {
+		matches!(self.kind, TableType::Relation(_))
+	}
+
+	pub fn allows_relation(&self) -> bool {
+		matches!(self.kind, TableType::Relation(_) | TableType::Any)
+	}
+
+	pub fn allows_normal(&self) -> bool {
+		matches!(self.kind, TableType::Normal | TableType::Any)
+	}
+}
+
+fn get_tables_from_kind(tables: &[Table]) -> String {
+	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
 }
 
 impl Display for DefineTableStatement {
@@ -112,6 +165,24 @@ impl Display for DefineTableStatement {
 			write!(f, " IF NOT EXISTS")?
 		}
 		write!(f, " {}", self.name)?;
+		write!(f, " TYPE")?;
+		match &self.kind {
+			TableType::Normal => {
+				f.write_str(" NORMAL")?;
+			}
+			TableType::Relation(rel) => {
+				f.write_str(" RELATION")?;
+				if let Some(Kind::Record(kind)) = &rel.from {
+					write!(f, " IN {}", get_tables_from_kind(kind))?;
+				}
+				if let Some(Kind::Record(kind)) = &rel.to {
+					write!(f, " OUT {}", get_tables_from_kind(kind))?;
+				}
+			}
+			TableType::Any => {
+				f.write_str(" ANY")?;
+			}
+		}
 		if self.drop {
 			f.write_str(" DROP")?;
 		}
