@@ -66,9 +66,11 @@ async fn database_change_feeds() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 
 	// Two timestamps
-	let first_timestamp = generate_versionstamp_sequences([0; 10]);
-	let second_timestamp =
-		first_timestamp.map(|vs| (vs, generate_versionstamp_sequences(vs).next().unwrap()));
+	let variance = 4;
+	let first_timestamp = generate_versionstamp_sequences([0; 10]).take(variance);
+	let second_timestamp = first_timestamp.flat_map(|vs1| {
+		generate_versionstamp_sequences(vs1).skip(1).take(variance).map(move |vs2| (vs1, vs2))
+	});
 
 	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
 	{
@@ -78,29 +80,10 @@ async fn database_change_feeds() -> Result<(), Error> {
 				let vs2 = to_u128_be(vs2);
 				Value::parse(
 					format!(
-						r#"[
-					 {{
-						 versionstamp: {},
-						 changes: [
-							 {{
-								  create: {{
-									  id: person:test,
-									  name: 'Name: Tobie'
-								  }}
-							 }}
-						 ]
-					 }},
-					 {{
-						 versionstamp: {},
-						 changes: [
-							 {{
-								  delete: {{
-									  id: person:test
-								  }}
-							 }}
-						 ]
-					 }}
-				]"#,
+						r#"[ 
+						{{ versionstamp: {}, changes: [ {{ create: {{ id: person:test, name: 'Name: Tobie' }} }} ] }}, 
+						{{ versionstamp: {}, changes: [ {{ delete: {{ id: person:test }} }} ] }}
+						]"#,
 						vs1, vs2
 					)
 					.as_str(),
@@ -113,29 +96,10 @@ async fn database_change_feeds() -> Result<(), Error> {
 				let vs2 = to_u128_be(vs2);
 				Value::parse(
 					format!(
-						r#"[
-					 {{
-						 versionstamp: {},
-						 changes: [
-							 {{
-								  update: {{
-									  id: person:test,
-									  name: 'Name: Tobie'
-								  }}
-							 }}
-						 ]
-					 }},
-					 {{
-						 versionstamp: {},
-						 changes: [
-							 {{
-								  delete: {{
-									  id: person:test
-								  }}
-							 }}
-						 ]
-					 }}
-				]"#,
+						r#"[ 
+						{{ versionstamp: {}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }}, 
+						{{ versionstamp: {}, changes: [ {{ delete: {{ id: person:test }} }} ] }} 
+						]"#,
 						vs1, vs2
 					)
 					.as_str(),
@@ -181,7 +145,15 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.find(|x| *x == &tmp)
 			// We actually dont want to capture if its found
 			.map(|_v| ())
-			.ok_or(format!("Expected SHOW CHANGES value not found:\n{}", tmp))?;
+			.ok_or(format!(
+				"Expected SHOW CHANGES value not found:\n{}\nin:\n{}",
+				tmp,
+				cf_val_arr
+					.iter()
+					.map(|vs| vs.to_string())
+					.reduce(|left, right| format!("{}\n{}", left, right))
+					.unwrap()
+			))?;
 		Ok(())
 	}
 
@@ -224,7 +196,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
-	assert!(val.contains(&tmp));
+	assert_eq!(val, tmp);
 	//
 	Ok(())
 }
