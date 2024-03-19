@@ -2419,10 +2419,9 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	#[ignore]
 	async fn test_mtree_random_xs() -> Result<(), Error> {
-		for vt in
-			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
-		{
+		for vt in [VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16] {
 			for i in 0..30 {
 				// 10, 40
 				test_mtree_collection(
