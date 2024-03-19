@@ -342,9 +342,7 @@ impl Connection {
 		}
 
 		// if the write lock is a bottleneck then execute could be refactored into execute_mut and execute
-		let res = rpc.write().await.execute(method, params).await.map_err(Into::into);
-
-		res
+		rpc.write().await.execute(method, params).await.map_err(Into::into)
 	}
 }
 
@@ -376,7 +374,7 @@ impl RpcContext for Connection {
 	const LQ_SUPPORT: bool = true;
 
 	async fn handle_live(&self, lqid: &Uuid) {
-		LIVE_QUERIES.write().await.insert(lqid.clone(), self.id);
+		LIVE_QUERIES.write().await.insert(*lqid, self.id);
 		trace!("Registered live query {} on websocket {}", lqid, self.id);
 	}
 

@@ -28,7 +28,7 @@ pub fn res_ws(res: Response) -> Result<(usize, Message), RpcError> {
 }
 
 pub fn req_http(val: &Bytes) -> Result<Request, RpcError> {
-	deserialize::<Value>(&val).map_err(|_| RpcError::ParseError)?.try_into()
+	deserialize::<Value>(val).map_err(|_| RpcError::ParseError)?.try_into()
 }
 
 pub fn res_http(res: Response) -> Result<AxumResponse, RpcError> {
