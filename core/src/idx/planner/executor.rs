@@ -433,6 +433,7 @@ impl QueryExecutor {
 		None
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn highlight(
 		&self,
 		txn: &Transaction,
