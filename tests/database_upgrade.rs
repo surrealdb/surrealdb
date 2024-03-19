@@ -161,7 +161,7 @@ mod database_upgrade {
 
 	// Set of QUERY and RESULT to check for Full Text Search
 	const CHECK_FTS: [Check; 1] = [(
-		"SELECT name,search::highlight('<em>','</em>', 1) FROM account WHERE name @1@ 'Tobie'",
+		"SELECT search::highlight('<em>','</em>', 1) AS name FROM account WHERE name @1@ 'Tobie'",
 		Expected::One("{\"name\":\"<em>Tobie</em>\"}"),
 	)];
 
