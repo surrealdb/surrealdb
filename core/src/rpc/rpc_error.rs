@@ -13,7 +13,7 @@ pub enum RpcError {
 	MethodNotFound,
 	#[error("Invalid params")]
 	InvalidParams,
-	#[error("Internal error: {0}")]
+	#[error("There was a problem with the database: {0}")]
 	InternalError(err::Error),
 	#[error("Live Query was made, but is not supported")]
 	LqNotSuported,
