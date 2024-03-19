@@ -258,7 +258,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
