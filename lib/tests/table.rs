@@ -106,3 +106,65 @@ async fn define_foreign_table() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn define_foreign_table_no_doubles() -> Result<(), Error> {
+	// From: https://github.com/surrealdb/surrealdb/issues/3556
+	let sql = "
+		CREATE happy:1 SET year=2024, month=1, day=1;
+		CREATE happy:2 SET year=2024, month=1, day=1;
+		CREATE happy:3 SET year=2024, month=1, day=1;
+		DEFINE TABLE monthly AS SELECT count() as activeRounds, year, month FROM happy GROUP BY year, month;
+		DEFINE TABLE daily AS SELECT count() as activeRounds, year, month, day FROM happy GROUP BY year, month, day;
+		SELECT * FROM monthly;
+		SELECT * FROM daily;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: monthly:[2024, 1],
+				activeRounds: 3,
+				year: 2024,
+				month: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: daily:[2024, 1, 1],
+				activeRounds: 3,
+				year: 2024,
+				month: 1,
+				day: 1,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

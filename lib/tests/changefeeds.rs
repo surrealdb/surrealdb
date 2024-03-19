@@ -6,11 +6,11 @@ use helpers::new_ds;
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::fflags::FFLAGS;
+use surrealdb::kvs::Datastore;
+use surrealdb::kvs::LockType::Optimistic;
+use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core::fflags::FFLAGS;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::kvs::LockType::Optimistic;
-use surrealdb_core::kvs::TransactionType::Write;
 
 mod helpers;
 
@@ -138,20 +138,20 @@ async fn database_change_feeds() -> Result<(), Error> {
 		);
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
 		let val = Value::parse("[]");
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
 		Some(&tmp)
 			.filter(|x| *x == cf_val_arr)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected SHOW CHANGES value:\nleft: {}\nright: {}", tmp, cf_val_arr))?;
 		Ok(())
 	}
@@ -179,6 +179,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	current_time += 1;
 	dbs.tick_at(current_time).await?;
 	let mut tx = dbs.transaction(Write, Optimistic).await?;
+	#[cfg(feature = "sql2")]
 	tx.print_all().await;
 	tx.cancel().await?;
 

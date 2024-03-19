@@ -20,8 +20,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check if forced
-		if !opt.force && !self.changed() {
+		// Check if changed
+		if !self.changed() {
 			return Ok(());
 		}
 		// Clone transaction

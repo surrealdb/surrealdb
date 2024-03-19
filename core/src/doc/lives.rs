@@ -27,8 +27,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check if forced
-		if !opt.force && !self.changed() {
+		// Check if changed
+		if !self.changed() {
 			return Ok(());
 		}
 		// Under the new mechanism, live query notifications only come from polling the change feed
