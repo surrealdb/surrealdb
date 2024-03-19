@@ -1,3 +1,4 @@
+use crate::sql::{table_type, TableType};
 use crate::{
 	sql::{
 		filter::Filter,
@@ -9,7 +10,7 @@ use crate::{
 			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
 		},
 		tokenizer::Tokenizer,
-		Ident, Idioms, Index, Param, Permissions, Scoring, Strand, Values,
+		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, Values,
 	},
 	syn::v2::{
 		parser::{
@@ -352,6 +353,28 @@ impl Parser<'_> {
 				t!("DROP") => {
 					self.pop_peek();
 					res.drop = true;
+				}
+				t!("RELATION") => {
+					self.pop_peek();
+					res.kind = TableType::Relation(self.parse_relation_schema()?);
+				}
+				t!("TYPE") => {
+					self.pop_peek();
+					match self.peek_kind() {
+						t!("NORMAL") => {
+							self.pop_peek();
+							res.kind = TableType::Normal;
+						}
+						t!("RELATION") => {
+							self.pop_peek();
+							res.kind = TableType::Relation(self.parse_relation_schema()?);
+						}
+						t!("ANY") => {
+							self.pop_peek();
+							res.kind = TableType::Any;
+						}
+						x => unexpected!(self, x, "`NORMAL`, `RELATION`, or `ANY`"),
+					}
 				}
 				t!("SCHEMALESS") => {
 					self.pop_peek();
@@ -764,5 +787,36 @@ impl Parser<'_> {
 			}
 		}
 		Ok(res)
+	}
+
+	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {
+		let mut res = table_type::Relation {
+			from: None,
+			to: None,
+		};
+		loop {
+			match self.peek_kind() {
+				t!("FROM") => {
+					self.pop_peek();
+					let from = self.parse_tables()?;
+					res.from = Some(from);
+				}
+				t!("TO") => {
+					self.pop_peek();
+					let to = self.parse_tables()?;
+					res.to = Some(to);
+				}
+				_ => break,
+			}
+		}
+		Ok(res)
+	}
+
+	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
+		let mut names = vec![self.next_token_value()?];
+		while self.eat(t!("|")) {
+			names.push(self.next_token_value()?);
+		}
+		Ok(Kind::Record(names))
 	}
 }
