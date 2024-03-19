@@ -96,21 +96,16 @@ impl Method {
 
 	// should be the same as execute_immut
 	pub fn can_be_immut(&self) -> bool {
-		match self {
-			Method::Ping => true,
-			Method::Info => true,
-			Method::Select => true,
-			Method::Insert => true,
-			Method::Create => true,
-			Method::Update => true,
-			Method::Merge => true,
-			Method::Patch => true,
-			Method::Delete => true,
-			Method::Version => true,
-			Method::Query => true,
-			Method::Relate => true,
-			Method::Unknown => true,
-			_ => false,
-		}
+		matches!(
+			self,
+			Method::Ping
+				| Method::Info | Method::Select
+				| Method::Insert | Method::Create
+				| Method::Update | Method::Merge
+				| Method::Patch | Method::Delete
+				| Method::Version
+				| Method::Query | Method::Relate
+				| Method::Unknown
+		)
 	}
 }

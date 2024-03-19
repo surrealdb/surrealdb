@@ -15,8 +15,6 @@ mod vs;
 pub mod sql;
 
 #[doc(hidden)]
-pub mod rpc;
-#[doc(hidden)]
 pub mod cnf;
 #[doc(hidden)]
 pub mod dbs;
@@ -41,6 +39,8 @@ pub mod kvs;
 pub mod obs;
 #[doc(hidden)]
 pub mod options;
+#[doc(hidden)]
+pub mod rpc;
 #[doc(hidden)]
 pub mod syn;
 
