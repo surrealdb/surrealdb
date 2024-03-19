@@ -135,6 +135,17 @@ impl From<surrealdb::error::Db> for Error {
 	}
 }
 
+impl From<surrealdb::rpc::RpcError> for Error {
+	fn from(value: surrealdb::rpc::RpcError) -> Self {
+		use surrealdb::rpc::RpcError;
+		match value {
+			RpcError::InternalError(e) => Error::Db(surrealdb::Error::Db(e)),
+			RpcError::Thrown(e) => Error::Other(e),
+			_ => Error::Other(value.to_string()),
+		}
+	}
+}
+
 impl Serialize for Error {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
