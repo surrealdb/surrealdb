@@ -66,8 +66,8 @@ impl Default for DatabaseMutation {
 }
 
 // Change is a set of mutations made to a table at the specific timestamp.
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 pub struct ChangeSet(pub [u8; 10], pub DatabaseMutation);
 
 impl TableMutation {
