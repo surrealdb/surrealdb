@@ -86,7 +86,8 @@ jobs:
           set -x
 
           # Retrieve just released version
-          betaVersion=$(taplo get -f lib/Cargo.toml "package.version")
+          betaVersion=$(taplo get -f Cargo.toml "package.version")
+          echo "current-version=${betaVersion}" >> $GITHUB_OUTPUT
           major=$(echo $betaVersion | tr "." "\n" | sed -n 1p)
           minor=$(echo $betaVersion | tr "." "\n" | sed -n 2p)
           betaNum=$(echo $betaVersion | tr "." "\n" | sed -n 4p)
@@ -109,7 +110,10 @@ jobs:
           # Bump the crate version
           sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" Cargo.toml
           sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" lib/Cargo.toml
-          sed -i "s#^version = \".*\"#version = \"${{ steps.bump.outputs.version }}\"#" core/Cargo.toml
+          sed -i "s#^version = \".*\"#version = \"2.0.0-${{ steps.bump.outputs.version }}\"#" core/Cargo.toml
+
+          # Update dependency versions
+          sed -i "s#surrealdb-core2 = { version = \"=2.0.0-${{ steps.bump.outputs.current-version }}\"#surrealdb-core2 = { version = \"=2.0.0-${{ steps.bump.outputs.core-version }}\"#" lib/Cargo.toml
 
           # Update Cargo.lock without updating dependency versions
           cargo check --no-default-features --features storage-mem
@@ -130,7 +134,7 @@ jobs:
         if: ${{ steps.bump.outputs.beta-num == '1' }}
         id: pr
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
           set -x
           url=$(gh pr create --base main --title "Bump version to v${{ steps.bump.outputs.version }}" --body "Update main version")
@@ -142,5 +146,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }} # Need the custom user token here so we can approve and merge the PR
         run: |
           set -x
-          gh pr review ${{ steps.pr.outputs.url }} --approve
           gh pr merge ${{ steps.pr.outputs.url }} --delete-branch --admin --squash

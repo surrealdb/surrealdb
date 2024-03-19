@@ -13,6 +13,8 @@ pub(crate) enum Kvs {
 	Tikv,
 	#[allow(dead_code)]
 	Fdb,
+	#[allow(dead_code)]
+	SurrealKV,
 }
 
 // This type is unsused when no store is enabled.
@@ -61,6 +63,7 @@ mod mem {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
+	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -109,6 +112,7 @@ mod rocksdb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
+	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-speedb")]
@@ -155,6 +159,7 @@ mod speedb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
+	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -202,6 +207,7 @@ mod tikv {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
+	include!("tx_test.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -249,4 +255,55 @@ mod fdb {
 	include!("ndlq.rs");
 	include!("tblq.rs");
 	include!("tbnt.rs");
+	include!("tx_test.rs");
+}
+
+#[cfg(feature = "kv-surrealkv")]
+mod surrealkv {
+
+	use crate::kvs::tests::{ClockType, Kvs};
+	use crate::kvs::Datastore;
+	use crate::kvs::LockType;
+	use crate::kvs::Transaction;
+	use crate::kvs::TransactionType;
+	use serial_test::serial;
+	use temp_dir::TempDir;
+
+	async fn new_ds(node_id: Uuid, clock_override: ClockType) -> (Datastore, Kvs) {
+		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+		(
+			Datastore::new_full(format!("surrealkv:{path}").as_str(), Some(clock_override))
+				.await
+				.unwrap()
+				.with_node_id(sql::Uuid::from(node_id)),
+			Kvs::SurrealKV,
+		)
+	}
+
+	async fn new_tx(write: TransactionType, lock: LockType) -> Transaction {
+		// Shared node id for one-off transactions
+		// We should delete this, node IDs should be known.
+		let new_tx_uuid = Uuid::parse_str("22358e5e-87bd-4040-8c63-01db896191ab").unwrap();
+		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+		let (ds, _) = new_ds(new_tx_uuid, clock).await;
+		ds.transaction(write, lock).await.unwrap()
+	}
+
+	include!("raw.rs");
+	include!("cluster_init.rs");
+	include!("hb.rs");
+	include!("helper.rs");
+	include!("lq.rs");
+	include!("nq.rs");
+	include!("snapshot.rs");
+	include!("tb.rs");
+	include!("multireader.rs");
+	include!("multiwriter_different_keys.rs");
+	include!("multiwriter_same_keys_allow.rs");
+	include!("timestamp_to_versionstamp.rs");
+	include!("nd.rs");
+	include!("ndlq.rs");
+	include!("tblq.rs");
+	include!("tbnt.rs");
+	include!("tx_test.rs");
 }

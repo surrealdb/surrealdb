@@ -90,6 +90,7 @@ use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(feature = "sql2")]
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
@@ -100,6 +101,7 @@ use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
+#[cfg(feature = "sql2")]
 const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// In-memory database
@@ -168,7 +170,7 @@ pub struct Mem;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::File;
 ///
-/// let db = Surreal::new::<File>("temp.db").await?;
+/// let db = Surreal::new::<File>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -183,7 +185,7 @@ pub struct Mem;
 /// use surrealdb::engine::local::File;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<File>(("temp.db", config)).await?;
+/// let db = Surreal::new::<File>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -204,7 +206,7 @@ pub struct File;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::RocksDb;
 ///
-/// let db = Surreal::new::<RocksDb>("temp.db").await?;
+/// let db = Surreal::new::<RocksDb>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -219,7 +221,7 @@ pub struct File;
 /// use surrealdb::engine::local::RocksDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<RocksDb>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -240,7 +242,7 @@ pub struct RocksDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::SpeeDb;
 ///
-/// let db = Surreal::new::<SpeeDb>("temp.db").await?;
+/// let db = Surreal::new::<SpeeDb>("path/to/database-folder").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -255,7 +257,7 @@ pub struct RocksDb;
 /// use surrealdb::engine::local::SpeeDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<SpeeDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<SpeeDb>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -276,7 +278,7 @@ pub struct SpeeDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::IndxDb;
 ///
-/// let db = Surreal::new::<IndxDb>("MyDatabase").await?;
+/// let db = Surreal::new::<IndxDb>("DatabaseName").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -291,7 +293,7 @@ pub struct SpeeDb;
 /// use surrealdb::engine::local::IndxDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<IndxDb>(("MyDatabase", config)).await?;
+/// let db = Surreal::new::<IndxDb>(("DatabaseName", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -348,7 +350,7 @@ pub struct TiKv;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::FDb;
 ///
-/// let db = Surreal::new::<FDb>("fdb.cluster").await?;
+/// let db = Surreal::new::<FDb>("path/to/fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -363,7 +365,7 @@ pub struct TiKv;
 /// use surrealdb::engine::local::FDb;
 ///
 /// let config = Config::default().strict();
-/// let db = Surreal::new::<FDb>(("fdb.cluster", config)).await?;
+/// let db = Surreal::new::<FDb>(("path/to/fdb.cluster", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -371,6 +373,11 @@ pub struct TiKv;
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb")))]
 #[derive(Debug)]
 pub struct FDb;
+
+#[cfg(feature = "kv-surrealkv")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
+#[derive(Debug)]
+pub struct SurrealKV;
 
 /// An embedded database
 #[derive(Debug, Clone)]
@@ -387,6 +394,7 @@ impl Surreal<Db> {
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
+			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}

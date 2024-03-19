@@ -1,12 +1,12 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
 
-pub static DB: OnceLock<Datastore> = OnceLock::new();
+pub static DB: OnceLock<Arc<Datastore>> = OnceLock::new();
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -244,7 +244,7 @@ pub async fn init(
 	debug!("Server capabilities: {caps}");
 
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let mut dbs = Datastore::new(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
@@ -253,6 +253,11 @@ pub async fn init(
 		.with_auth_enabled(auth_enabled)
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
+	if let Some(engine_options) = opt.engine {
+		dbs = dbs.with_engine_options(engine_options);
+	}
+	// Make immutable
+	let dbs = dbs;
 
 	dbs.bootstrap().await?;
 
@@ -261,7 +266,7 @@ pub async fn init(
 	}
 
 	// Store database instance
-	let _ = DB.set(dbs);
+	let _ = DB.set(Arc::new(dbs));
 
 	// All ok
 	Ok(())
@@ -273,7 +278,7 @@ mod tests {
 
 	use surrealdb::dbs::Session;
 	use surrealdb::iam::verify::verify_root_creds;
-	use surrealdb::kvs::{Datastore, LockType::*, TransactionType::*};
+	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 

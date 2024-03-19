@@ -6,6 +6,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::TableType;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
@@ -319,9 +320,21 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested event does not exist
+	#[error("The event '{value}' does not exist")]
+	EvNotFound {
+		value: String,
+	},
+
 	/// The requested function does not exist
 	#[error("The function 'fn::{value}' does not exist")]
 	FcNotFound {
+		value: String,
+	},
+
+	/// The requested field does not exist
+	#[error("The field '{value}' does not exist")]
+	FdNotFound {
 		value: String,
 	},
 
@@ -511,6 +524,14 @@ pub enum Error {
 		thing: Thing,
 		index: String,
 		value: String,
+	},
+
+	/// The specified table is not configured for the type of record being added
+	#[error("Found record: `{thing}` which is {}a relation, but expected a `target_type`", if *relation { "not " } else { "" })]
+	TableCheck {
+		thing: String,
+		relation: bool,
+		target_type: TableType,
 	},
 
 	/// The specified field did not conform to the field type check
@@ -779,6 +800,129 @@ pub enum Error {
 	/// The db is running without an available storage engine
 	#[error("The db is running without an available storage engine")]
 	MissingStorageEngine,
+
+	/// The requested analyzer already exists
+	#[error("The analyzer '{value}' already exists")]
+	AzAlreadyExists {
+		value: String,
+	},
+
+	/// The requested database already exists
+	#[error("The database '{value}' already exists")]
+	DbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested event already exists
+	#[error("The event '{value}' already exists")]
+	EvAlreadyExists {
+		value: String,
+	},
+
+	/// The requested field already exists
+	#[error("The field '{value}' already exists")]
+	FdAlreadyExists {
+		value: String,
+	},
+
+	/// The requested function already exists
+	#[error("The function 'fn::{value}' already exists")]
+	FcAlreadyExists {
+		value: String,
+	},
+
+	/// The requested index already exists
+	#[error("The index '{value}' already exists")]
+	IxAlreadyExists {
+		value: String,
+	},
+
+	/// The requested model already exists
+	#[error("The model '{value}' already exists")]
+	MlAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace already exists
+	#[error("The namespace '{value}' already exists")]
+	NsAlreadyExists {
+		value: String,
+	},
+
+	/// The requested param already exists
+	#[error("The param '${value}' already exists")]
+	PaAlreadyExists {
+		value: String,
+	},
+
+	/// The requested scope already exists
+	#[error("The scope '{value}' already exists")]
+	ScAlreadyExists {
+		value: String,
+	},
+
+	/// The requested table already exists
+	#[error("The table '{value}' already exists")]
+	TbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace token already exists
+	#[error("The namespace token '{value}' already exists")]
+	NtAlreadyExists {
+		value: String,
+	},
+
+	/// The requested database token already exists
+	#[error("The database token '{value}' already exists")]
+	DtAlreadyExists {
+		value: String,
+	},
+
+	/// The requested scope token already exists
+	#[error("The scope token '{value}' already exists")]
+	StAlreadyExists {
+		value: String,
+	},
+
+	/// The requested user already exists
+	#[error("The user '{value}' already exists")]
+	UserRootAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace user already exists
+	#[error("The user '{value}' already exists in the namespace '{ns}'")]
+	UserNsAlreadyExists {
+		value: String,
+		ns: String,
+	},
+
+	/// The requested database user already exists
+	#[error("The user '{value}' already exists in the database '{db}'")]
+	UserDbAlreadyExists {
+		value: String,
+		ns: String,
+		db: String,
+	},
+
+	/// The session has expired either because the token used
+	/// to establish it has expired or because an expiration
+	/// was explicitly defined when establishing it
+	#[error("The session has expired")]
+	ExpiredSession,
+
+	/// The session has an invalid duration
+	#[error("The session has an invalid duration")]
+	InvalidSessionDuration,
+
+	/// The session has an invalid expiration
+	#[error("The session has an invalid expiration")]
+	InvalidSessionExpiration,
+
+	/// A node task has failed
+	#[error("A node task has failed: {0}")]
+	NodeAgent(&'static str),
 }
 
 impl From<Error> for String {
@@ -855,6 +999,13 @@ impl From<speedb::Error> for Error {
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-surrealkv")]
+impl From<surrealkv::Error> for Error {
+	fn from(e: surrealkv::Error) -> Error {
 		Error::Tx(e.to_string())
 	}
 }

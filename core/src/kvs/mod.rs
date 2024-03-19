@@ -17,13 +17,16 @@ mod ds;
 mod fdb;
 mod indxdb;
 mod kv;
-mod mem;
+// pub(crate) for tests
+pub(crate) mod mem;
 mod rocksdb;
 mod speedb;
+mod surrealkv;
 mod tikv;
 mod tx;
 
 mod clock;
+pub(crate) mod lq_structs;
 #[cfg(test)]
 #[cfg(any(
 	feature = "kv-mem",
@@ -31,7 +34,8 @@ mod clock;
 	feature = "kv-speedb",
 	feature = "kv-indxdb",
 	feature = "kv-tikv",
-	feature = "kv-fdb"
+	feature = "kv-fdb",
+	feature = "kv-surrealkv"
 ))]
 mod tests;
 

@@ -1,5 +1,7 @@
 // Tests common to all protocols and storage engines
 
+use surrealdb::fflags::FFLAGS;
+
 static PERMITS: Semaphore = Semaphore::const_new(1);
 
 #[test_log::test(tokio::test)]
@@ -923,7 +925,7 @@ async fn changefeed() {
 	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
-	let a = array.get(0).unwrap();
+	let a = array.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -953,20 +955,40 @@ async fn changefeed() {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
-		{
-			update: {
-				id: user:amos,
-				name: 'Amos'
-			}
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					r#"[
+				 {
+					  create: {
+						  id: user:amos,
+						  name: 'Amos'
+					  }
+				 }
+			]"#
+				)
+				.unwrap()
+			);
 		}
-	]"
-		)
-		.unwrap()
-	);
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					r#"[
+				 {
+					  update: {
+						  id: user:amos,
+						  name: 'Amos'
+					  }
+				 }
+			]"#
+				)
+				.unwrap()
+			);
+		}
+	}
 	// UPDATE user:jane
 	let a = array.get(2).unwrap();
 	let Value::Object(a) = a else {
@@ -977,20 +999,40 @@ async fn changefeed() {
 	};
 	assert!(versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
-		{
-			update: {
-				id: user:jane,
-				name: 'Jane'
-			}
+	match FFLAGS.change_feed_live_queries.enabled() {
+		true => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
+					{
+						 create: {
+							 id: user:jane,
+							 name: 'Jane'
+						 }
+					}
+				]"
+				)
+				.unwrap()
+			);
 		}
-	]"
-		)
-		.unwrap()
-	);
+		false => {
+			assert_eq!(
+				changes,
+				surrealdb::sql::value(
+					"[
+					{
+						 update: {
+							 id: user:jane,
+							 name: 'Jane'
+						 }
+					}
+				]"
+				)
+				.unwrap()
+			);
+		}
+	}
 	// UPDATE user:amos
 	let a = array.get(3).unwrap();
 	let Value::Object(a) = a else {

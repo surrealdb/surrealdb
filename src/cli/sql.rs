@@ -5,8 +5,7 @@ use crate::cli::abstraction::{
 use crate::cnf::PKG_VERSION;
 use crate::err::Error;
 use clap::Args;
-use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use futures_util::{SinkExt, StreamExt};
+use futures::StreamExt;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
@@ -151,10 +150,6 @@ pub async fn init(
 		);
 	}
 
-	// Set up the print job
-	let (tx, rx) = mpsc::unbounded();
-	tokio::spawn(printer(rx));
-
 	// Loop over each command-line input
 	loop {
 		// Prompt the user to input SQL and check the input.
@@ -179,6 +174,10 @@ pub async fn init(
 				break;
 			}
 		};
+		// Move on if the line is empty
+		if line.trim().is_empty() {
+			continue;
+		}
 		// Complete the request
 		match sql::parse(&line) {
 			Ok(query) => {
@@ -213,9 +212,9 @@ pub async fn init(
 				}
 				// Run the query provided
 				let result = client.query(query).with_stats().await;
-				let result = process(pretty, json, result, tx.clone());
+				let result = process(pretty, json, result);
 				let result_is_error = result.is_err();
-				tx.clone().send(result).await.expect("print job terminated unexpectedly");
+				print(result);
 				if result_is_error {
 					continue;
 				}
@@ -256,7 +255,6 @@ fn process(
 	pretty: bool,
 	json: bool,
 	res: surrealdb::Result<WithStats<Response>>,
-	mut tx: UnboundedSender<Result<String, Error>>,
 ) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
@@ -279,7 +277,7 @@ fn process(
 		let mut stream = match response.into_inner().stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
-				tx.send(Err(error.into())).await.ok();
+				print(Err(error.into()));
 				return;
 			}
 		};
@@ -325,9 +323,7 @@ fn process(
 					format!("-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}")
 				}
 			};
-			if tx.send(Ok(format!("\n{message}"))).await.is_err() {
-				return;
-			}
+			print(Ok(format!("\n{message}")));
 		}
 	});
 
@@ -374,15 +370,13 @@ fn process(
 	})
 }
 
-async fn printer(mut rx: UnboundedReceiver<Result<String, Error>>) {
-	while let Some(result) = rx.next().await {
-		match result {
-			Ok(v) => {
-				println!("{v}\n");
-			}
-			Err(e) => {
-				eprintln!("{e}\n");
-			}
+fn print(result: Result<String, Error>) {
+	match result {
+		Ok(v) => {
+			println!("{v}\n");
+		}
+		Err(e) => {
+			eprintln!("{e}\n");
 		}
 	}
 }
@@ -408,6 +402,8 @@ impl Validator for InputValidator {
 			Incomplete // The line was empty and we are in multi mode
 		} else if input.ends_with('\\') {
 			Incomplete // The line ends with a backslash
+		} else if input.is_empty() {
+			Valid(None) // Ignore empty lines
 		} else if let Err(e) = sql::parse(input) {
 			Invalid(Some(format!(" --< {e}")))
 		} else {

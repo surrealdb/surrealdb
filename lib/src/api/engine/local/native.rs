@@ -5,18 +5,19 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
-use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
-use crate::engine::IntervalStream;
-use crate::fflags::FFLAGS;
+use crate::engine::tasks::start_tasks;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
+use crate::opt::WaitFor;
+#[cfg(feature = "sql2")]
+use crate::options::EngineOptions;
 use flume::Receiver;
 use flume::Sender;
 use futures::future::Either;
@@ -33,9 +34,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
-use std::time::Duration;
-use tokio::time;
-use tokio::time::MissedTickBehavior;
+use tokio::sync::watch;
 
 impl crate::api::Connection for Db {}
 
@@ -72,6 +71,7 @@ impl Connection for Db {
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
 				engine: PhantomData,
 			})
 		})
@@ -152,9 +152,22 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
-		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		run_maintenance(kvs.clone(), tick_interval, maintenance_rx);
+		#[cfg(feature = "sql2")]
+		let opt = {
+			let tick_interval = address
+				.config
+				.tick_interval
+				.unwrap_or(crate::api::engine::local::DEFAULT_TICK_INTERVAL);
+			EngineOptions {
+				tick_interval,
+				..Default::default()
+			}
+		};
+		let (tasks, task_chans) = start_tasks(
+			#[cfg(feature = "sql2")]
+			&opt,
+			kvs.clone(),
+		);
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
@@ -203,60 +216,11 @@ pub(crate) fn router(
 		}
 
 		// Stop maintenance tasks
-		let _ = maintenance_tx.into_send_async(()).await;
-	});
-}
-
-fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
-	// Some classic ownership shenanigans
-	let kvs_two = kvs.clone();
-	let stop_signal_two = stop_signal.clone();
-
-	// Spawn the ticker, which is used for tracking versionstamps and heartbeats across databases
-	tokio::spawn(async move {
-		let mut interval = time::interval(tick_interval);
-		// Don't bombard the database if we miss some ticks
-		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-		// Delay sending the first tick
-		interval.tick().await;
-
-		let ticker = IntervalStream::new(interval);
-
-		let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
-
-		let mut stream = streams.merge();
-
-		while let Some(Some(_)) = stream.next().await {
-			match kvs.clone().tick().await {
-				Ok(()) => trace!("Node agent tick ran successfully"),
-				Err(error) => error!("Error running node agent tick: {error}"),
+		for chan in task_chans {
+			if let Err(e) = chan.send(()) {
+				error!("Error sending shutdown signal to task: {}", e);
 			}
 		}
+		tasks.resolve().await.unwrap();
 	});
-
-	if FFLAGS.change_feed_live_queries.enabled() {
-		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
-		tokio::spawn(async move {
-			let kvs = kvs_two;
-			let stop_signal = stop_signal_two;
-			let mut interval = time::interval(tick_interval);
-			// Don't bombard the database if we miss some ticks
-			interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-			// Delay sending the first tick
-			interval.tick().await;
-
-			let ticker = IntervalStream::new(interval);
-
-			let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
-
-			let mut stream = streams.merge();
-
-			while let Some(Some(_)) = stream.next().await {
-				match kvs.process_lq_notifications().await {
-					Ok(()) => trace!("Live Query poll ran successfully"),
-					Err(error) => error!("Error running live query poll: {error}"),
-				}
-			}
-		});
-	}
 }

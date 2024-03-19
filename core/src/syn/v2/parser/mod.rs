@@ -21,7 +21,6 @@ use crate::{
 	sql,
 	syn::v2::{
 		lexer::{Error as LexError, Lexer},
-		parser::mac::expected,
 		token::{t, Span, Token, TokenKind},
 	},
 };
@@ -34,7 +33,7 @@ mod function;
 mod idiom;
 mod json;
 mod kind;
-mod mac;
+pub(crate) mod mac;
 mod object;
 mod prime;
 mod stmt;
@@ -163,8 +162,13 @@ impl<'a> Parser<'a> {
 
 	/// Returns the span of the next token if it was already peeked, otherwise returns the token of
 	/// the last consumed token.
-	pub fn last_span(&mut self) -> Span {
+	pub fn recent_span(&mut self) -> Span {
 		self.token_buffer.first().map(|x| x.span).unwrap_or(self.last_span)
+	}
+
+	///  returns the token of the last consumed token.
+	pub fn last_span(&mut self) -> Span {
+		self.last_span
 	}
 
 	/// Eat the next token if it is of the given kind.
@@ -187,7 +191,7 @@ impl<'a> Parser<'a> {
 					expected: kind,
 					should_close,
 				},
-				self.last_span(),
+				self.recent_span(),
 			));
 		}
 		Ok(())
@@ -214,24 +218,8 @@ impl<'a> Parser<'a> {
 	///
 	/// This is the primary entry point of the parser.
 	pub fn parse_query(&mut self) -> ParseResult<sql::Query> {
-		// eat possible empty statements.
-		while self.eat(t!(";")) {}
-
-		let mut statements = vec![self.parse_stmt()?];
-
-		while self.eat(t!(";")) {
-			// eat possible empty statements.
-			while self.eat(t!(";")) {}
-
-			if let TokenKind::Eof = self.peek().kind {
-				break;
-			};
-
-			statements.push(self.parse_stmt()?);
-		}
-
-		expected!(self, TokenKind::Eof);
-		Ok(sql::Query(sql::Statements(statements)))
+		let statements = self.parse_stmt_list()?;
+		Ok(sql::Query(statements))
 	}
 
 	/// Parse a single statement.

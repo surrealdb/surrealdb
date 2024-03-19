@@ -118,6 +118,11 @@ compile_error!(
 	"`sql2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
 );
 
+#[cfg(all(not(surrealdb_unstable), feature = "kv-surrealkv"))]
+compile_error!(
+	"`kv-surrealkv` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
+);
+
 #[macro_use]
 extern crate tracing;
 
@@ -143,8 +148,12 @@ pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
 
+#[cfg(not(feature = "sql2"))]
 #[doc(inline)]
-pub use surrealdb_core::*;
+pub use surrealdb_core1::*;
+#[cfg(feature = "sql2")]
+#[doc(inline)]
+pub use surrealdb_core2::*;
 
 use uuid::Uuid;
 

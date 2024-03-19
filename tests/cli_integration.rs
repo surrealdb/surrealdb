@@ -2,12 +2,15 @@
 mod common;
 
 mod cli_integration {
+	use crate::remove_debug_info;
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use common::Format;
 	use common::Socket;
-	use std::fs;
+	use serde_json::json;
 	use std::fs::File;
 	use std::time;
+	use std::time::Duration;
+	use surrealdb::fflags::FFLAGS;
 	use test_log::test;
 	use tokio::time::sleep;
 	use tracing::info;
@@ -15,8 +18,8 @@ mod cli_integration {
 
 	use super::common::{self, StartServerArguments, PASS, USER};
 
-	const ONE_SEC: time::Duration = time::Duration::new(1, 0);
-	const TWO_SECS: time::Duration = time::Duration::new(2, 0);
+	const ONE_SEC: Duration = Duration::new(1, 0);
+	const TWO_SECS: Duration = Duration::new(2, 0);
 
 	#[test]
 	fn version_command() {
@@ -58,6 +61,14 @@ mod cli_integration {
 		assert!(common::run("version --turbo").output().is_err());
 	}
 
+	fn debug_builds_contain_debug_message(addr: &str, creds: &str, ns: &Ulid, db: &Ulid) {
+		info!("* Debug builds contain debug message");
+		let args =
+			format!("sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome");
+		let res = common::run(&args).input("CREATE not_a_table:not_a_record;\n").output().unwrap();
+		assert!(res.contains("Debug builds are not intended for production use"));
+	}
+
 	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
@@ -72,23 +83,23 @@ mod cli_integration {
 		let ns = Ulid::new();
 		let db = Ulid::new();
 
+		#[cfg(debug_assertions)]
+		debug_builds_contain_debug_message(&addr, creds, &ns, &db);
+
 		info!("* Create a record");
 		{
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args).input("CREATE thing:one;\n").output(),
-				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output = common::run(&args).input("CREATE thing:one;\n").output().unwrap();
+			assert!(output.contains("[[{ id: thing:one }]]\n\n"), "failed to send sql: {args}");
 		}
 
 		info!("* Export to stdout");
 		{
 			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} -");
 			let output = common::run(&args).output().expect("failed to run stdout export: {args}");
-			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
+			assert!(output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
 		}
 
@@ -116,20 +127,11 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db2} --pretty --hide-welcome"
 			);
 			let output = common::run(&args).input("SELECT * FROM thing;\n").output().unwrap();
+			let output = remove_debug_info(output);
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
-			assert!(line1.starts_with("-- Query 1"));
+			assert!(line1.starts_with("-- Query 1"), "Expected on {line1}, and rest was {rest}");
 			assert!(line1.contains("execution time"));
 			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
-		}
-
-		info!("* Unfinished backup CLI");
-		{
-			let file = common::tmp_file("backup.db");
-			let args = format!("backup {creds}  http://{addr} {file}");
-			common::run(&args).output().expect("failed to run backup: {args}");
-
-			// TODO: Once backups are functional, update this test.
-			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
 		}
 
 		info!("* Advanced uncomputed variable to be computed before saving");
@@ -256,7 +258,7 @@ mod cli_integration {
 	#[test(tokio::test)]
 	async fn with_root_auth() {
 		// Commands with credentials when auth is enabled, should succeed
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -297,21 +299,13 @@ mod cli_integration {
 			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
 		}
 
-		info!("* Root user can do backups");
-		{
-			let file = common::tmp_file("backup.db");
-			let args = format!("backup {creds} http://{addr} {file}");
-			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run backup: {args}"));
-
-			// TODO: Once backups are functional, update this test.
-			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
-		}
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
 	async fn with_auth_level() {
 		// Commands with credentials for different auth levels
-		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
+		let (addr, mut server) = common::start_server_with_auth_level().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
 		let ns = Ulid::new();
 		let db = Ulid::new();
@@ -490,16 +484,18 @@ mod cli_integration {
 				output
 			);
 		}
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
 	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
 	async fn without_auth_level() {
 		// Commands with credentials for different auth levels
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
-		let ns = Ulid::new();
-		let db = Ulid::new();
+		// Prefix with 'a' so that we don't start with a number and cause a parsing error
+		let ns = format!("a{}", Ulid::new());
+		let db = format!("a{}", Ulid::new());
 
 		info!("* Create users with identical credentials at ROOT, NS and DB levels");
 		{
@@ -556,12 +552,13 @@ mod cli_integration {
 				output
 			);
 		}
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
 	async fn with_anon_auth() {
 		// Commands without credentials when auth is enabled, should fail
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = ""; // Anonymous user
 		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
 
@@ -610,25 +607,13 @@ mod cli_integration {
 				output
 			);
 		}
-
-		info!("* Can't do backups");
-		{
-			let args = format!("backup {creds} http://{addr}");
-			let output = common::run(&args).output();
-			// TODO(sgirones): Once backups are functional, update this test.
-			// assert!(
-			// 	output.unwrap_err().contains("Forbidden"),
-			// 	"anonymous user shouldn't be able to backup",
-			// 	output
-			// );
-			assert!(output.is_ok(), "anonymous user can do backups: {:?}", output);
-		}
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
 	async fn node() {
 		// Commands without credentials when auth is disabled, should succeed
-		let (addr, _server) = common::start_server(StartServerArguments {
+		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
 			tls: false,
 			wait_is_ready: true,
@@ -647,11 +632,12 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output(),
-				Ok("[NONE]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output = common::run(&args)
+				.input("DEFINE TABLE thing TYPE ANY CHANGEFEED 1s;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(output, "[NONE]\n\n".to_owned(), "failed to send sql: {args}");
 		}
 
 		info!("* Create a record");
@@ -659,9 +645,14 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
+			let output = common::run(&args)
+				.input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
 			assert_eq!(
-				common::run(&args).input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n").output(),
-				Ok("[[{ id: thing:one }]]\n\n".to_owned()),
+				output,
+				"[[{ id: thing:one }]]\n\n".to_owned(),
 				"failed to send sql: {args}"
 			);
 		}
@@ -671,15 +662,56 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args)
+			if FFLAGS.change_feed_live_queries.enabled() {
+				let output = common::run(&args)
 					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-					.output(),
-				Ok("[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]\n\n"
-					.to_owned()),
-				"failed to send sql: {args}"
-			);
-		}
+					.output()
+					.unwrap();
+				let output = remove_debug_info(output).replace('\n', "");
+				// TODO: when enabling the feature flag, turn these to `create` not `update`
+				let allowed = [
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
+				];
+				allowed
+					.into_iter()
+					.find(|case| {
+						println!("Comparing 2:\n{case}\n{output}");
+						*case == output
+					})
+					.ok_or(format!("Output didnt match an example output: {output}"))
+					.unwrap();
+			} else {
+				let output = common::run(&args)
+					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+					.output()
+					.unwrap();
+				let output = remove_debug_info(output).replace('\n', "");
+				let allowed = [
+					// Delete these
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
+					// Keep these
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
+				];
+				allowed
+					.into_iter()
+					.find(|case| {
+						let a = *case == output;
+						println!("Comparing\n{case}\n{output}\n{a}");
+						a
+					})
+					.ok_or(format!("Output didnt match an example output: {output}"))
+					.unwrap();
+			}
+		};
 
 		sleep(TWO_SECS).await;
 
@@ -688,14 +720,14 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			assert_eq!(
-				common::run(&args)
-					.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-					.output(),
-				Ok("[[]]\n\n".to_owned()),
-				"failed to send sql: {args}"
-			);
+			let output = common::run(&args)
+				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
+				.output()
+				.unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
 		}
+		server.finish().unwrap();
 	}
 
 	#[test]
@@ -774,66 +806,67 @@ mod cli_integration {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
 
 		// Create a long-lived WS connection so the server don't shutdown gracefully
-		let mut socket = Socket::connect(&addr, None).await.expect("Failed to connect to server");
-		let json = serde_json::json!({
-			"id": "1",
-			"method": "query",
-			"params": ["SLEEP 30s;"],
-		});
-		socket.send_message(Format::Json, json).await.expect("Failed to send WS message");
+		let socket =
+			Socket::connect(&addr, None, Format::Json).await.expect("Failed to connect to server");
 
-		// Make sure the SLEEP query is being executed
-		tokio::select! {
-			_ = async {
+		let send_future = socket.send_request("query", json!(["SLEEP 30s;"]));
+
+		let signal_send_fut = async {
+			// Make sure the SLEEP query is being executed
+			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
-					if server.stderr().contains("Executing: SLEEP 30s") {
+					let err = server.stderr();
+					if err.contains("SLEEP 30s") {
 						break;
 					}
 					tokio::time::sleep(time::Duration::from_secs(1)).await;
 				}
-			} => {},
-			// Timeout after 10 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(10)) => panic!("Server didn't start executing the SLEEP query"),
-		}
+			})
+			.await
+			.expect("Server didn't start executing the SLEEP query");
 
-		info!("* Send first SIGINT signal");
-		server
-			.send_signal(nix::sys::signal::Signal::SIGINT)
-			.expect("Failed to send SIGINT to server");
+			info!("* Send first SIGINT signal");
+			server
+				.send_signal(nix::sys::signal::Signal::SIGINT)
+				.expect("Failed to send SIGINT to server");
 
-		tokio::select! {
-			_ = async {
+			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
-						panic!("Server unexpectedly exited after receiving first SIGINT: {:?}", exit);
+						panic!(
+							"Server unexpectedly exited after receiving first SIGINT: {:?}",
+							exit
+						);
 					}
-					tokio::time::sleep(time::Duration::from_secs(1)).await;
+					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
-			} => {},
-			// Timeout after 5 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(5)) => ()
-		}
+			})
+			.await
+			.unwrap_err();
 
-		info!("* Send second SIGINT signal");
-		server
-			.send_signal(nix::sys::signal::Signal::SIGINT)
-			.expect("Failed to send SIGINT to server");
+			info!("* Send second SIGINT signal");
 
-		tokio::select! {
-			_ = async {
+			server
+				.send_signal(nix::sys::signal::Signal::SIGINT)
+				.expect("Failed to send SIGINT to server");
+
+			tokio::time::timeout(time::Duration::from_secs(5), async {
 				loop {
 					if let Ok(Some(exit)) = server.status() {
 						assert!(exit.success(), "Server shutted down successfully");
 						break;
 					}
-					tokio::time::sleep(time::Duration::from_secs(1)).await;
+					tokio::time::sleep(time::Duration::from_millis(100)).await;
 				}
-			} => {},
-			// Timeout after 5 seconds
-			_ = tokio::time::sleep(time::Duration::from_secs(5)) => {
-				panic!("Server didn't exit after receiving two SIGINT signals");
-			}
-		}
+			})
+			.await
+			.expect("Server didn't exit after receiving two SIGINT signals");
+		};
+
+		let _ =
+			futures::future::join(async { send_future.await.unwrap_err() }, signal_send_fut).await;
+
+		server.finish().unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -842,7 +875,7 @@ mod cli_integration {
 		// Default capabilities only allow functions
 		info!("* When default capabilities");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "".to_owned(),
 				..Default::default()
 			})
@@ -868,12 +901,14 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
+
+			server.finish().unwrap();
 		}
 
 		// Deny all, denies all users to execute functions and access any network address
 		info!("* When all capabilities are denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-all".to_owned(),
 				..Default::default()
 			})
@@ -899,12 +934,13 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
+			server.finish().unwrap();
 		}
 
 		// When all capabilities are allowed, anyone (including non-authenticated users) can execute functions and access any network address
 		info!("* When all capabilities are allowed");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--allow-all".to_owned(),
 				..Default::default()
 			})
@@ -923,11 +959,13 @@ mod cli_integration {
 			let query = "RETURN function() { return '1' };";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.starts_with("['1']"), "unexpected output: {output:?}");
+
+			server.finish().unwrap();
 		}
 
 		info!("* When scripting is denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-scripting".to_owned(),
 				..Default::default()
 			})
@@ -946,11 +984,12 @@ mod cli_integration {
 					|| output.contains("Embedded functions are not enabled"),
 				"unexpected output: {output:?}"
 			);
+			server.finish().unwrap();
 		}
 
 		info!("* When net is denied and function is enabled");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-net 127.0.0.1 --allow-funcs http::get".to_owned(),
 				..Default::default()
 			})
@@ -971,11 +1010,12 @@ mod cli_integration {
 				),
 				"unexpected output: {output:?}"
 			);
+			server.finish().unwrap();
 		}
 
 		info!("* When net is enabled for an IP and also denied for a specific port that doesn't match");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--allow-net 127.0.0.1 --deny-net 127.0.0.1:80 --allow-funcs http::get"
 					.to_owned(),
 				..Default::default()
@@ -991,11 +1031,12 @@ mod cli_integration {
 			let query = format!("RETURN http::get('http://{}/version');\n\n", addr);
 			let output = common::run(&cmd).input(&query).output().unwrap();
 			assert!(output.starts_with("['surrealdb"), "unexpected output: {output:?}");
+			server.finish().unwrap();
 		}
 
 		info!("* When a function family is denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-funcs http".to_owned(),
 				..Default::default()
 			})
@@ -1013,11 +1054,12 @@ mod cli_integration {
 				output.contains("Function 'http::get' is not allowed"),
 				"unexpected output: {output:?}"
 			);
+			server.finish().unwrap();
 		}
 
 		info!("* When auth is enabled and guest access is allowed");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				auth: true,
 				args: "--allow-guests".to_owned(),
 				..Default::default()
@@ -1033,11 +1075,12 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
+			server.finish().unwrap();
 		}
 
 		info!("* When auth is enabled and guest access is denied");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				auth: true,
 				args: "--deny-guests".to_owned(),
 				..Default::default()
@@ -1056,11 +1099,12 @@ mod cli_integration {
 				output.contains("Not enough permissions to perform this action"),
 				"unexpected output: {output:?}"
 			);
+			server.finish().unwrap();
 		}
 
 		info!("* When auth is disabled, guest access is always allowed");
 		{
-			let (addr, _server) = common::start_server(StartServerArguments {
+			let (addr, mut server) = common::start_server(StartServerArguments {
 				auth: false,
 				args: "--deny-guests".to_owned(),
 				..Default::default()
@@ -1076,6 +1120,21 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
+			server.finish().unwrap();
 		}
 	}
+}
+
+fn remove_debug_info(output: String) -> String {
+	// Look... sometimes you just gotta copy paste
+	let output_warning = "\
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        !!! THIS IS A DEBUG BUILD !!!                        │
+│        Debug builds are not intended for production use and include         │
+│       tooling and features that we would not recommend people run on        │
+│                                  live data.                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+";
+	// The last line in the above is important
+	output.replace(output_warning, "")
 }

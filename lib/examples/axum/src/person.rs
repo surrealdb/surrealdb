@@ -4,12 +4,12 @@ use axum::extract::State;
 use axum::Json;
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb::engine::remote::ws::Client;
+use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
 
 const PERSON: &str = "person";
 
-type Db = State<Surreal<Client>>;
+type Db = State<Surreal<Any>>;
 
 #[derive(Serialize, Deserialize)]
 pub struct Person {
