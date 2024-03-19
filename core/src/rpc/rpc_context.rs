@@ -130,7 +130,7 @@ pub trait RpcContext {
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), None).await?;
+		let mut res = self.kvs().execute(sql, self.session(), None).await?;
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
@@ -151,7 +151,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Compute the specified parameter
-		match self.kvs().compute(val, &self.session(), var).await? {
+		match self.kvs().compute(val, self.session(), var).await? {
 			// Remove the variable if undefined
 			Value::None => self.vars_mut().remove(&key.0),
 			// Store the variable if defined
@@ -226,7 +226,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), var).await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -255,7 +255,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), var).await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -288,7 +288,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), var).await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -321,7 +321,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), var).await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -354,7 +354,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), var).await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -386,7 +386,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), var).await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -414,7 +414,7 @@ pub trait RpcContext {
 			=> &self.vars()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().execute(sql, &self.session(), var).await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		// Extract the first query result
 		let res = match one {
 			true => res.remove(0).result?.first(),
@@ -485,8 +485,8 @@ pub trait RpcContext {
 		}
 		// Execute the query on the database
 		let res = match query {
-			Value::Query(sql) => self.kvs().process(sql, &self.session(), vars).await?,
-			Value::Strand(sql) => self.kvs().execute(&sql, &self.session(), vars).await?,
+			Value::Query(sql) => self.kvs().process(sql, self.session(), vars).await?,
+			Value::Strand(sql) => self.kvs().execute(&sql, self.session(), vars).await?,
 			_ => unreachable!(),
 		};
 
