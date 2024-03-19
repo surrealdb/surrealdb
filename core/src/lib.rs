@@ -12,10 +12,10 @@ mod exe;
 mod fnc;
 mod vs;
 
-pub mod rpc;
-#[doc(hidden)]
 pub mod sql;
 
+#[doc(hidden)]
+pub mod rpc;
 #[doc(hidden)]
 pub mod cnf;
 #[doc(hidden)]
