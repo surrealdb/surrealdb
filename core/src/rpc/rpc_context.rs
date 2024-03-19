@@ -302,7 +302,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn update(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok((what, data)) = params.needs_two() else {
+		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
@@ -335,7 +335,7 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn merge(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok((what, data)) = params.needs_two() else {
+		let Ok((what, data)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Return a single result?
