@@ -85,7 +85,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
-			"table_type" => {
+			"kind" => {
 				self.kind = value.serialize(ser::table_type::Serializer.wrap())?;
 			}
 			"if_not_exists" => {
