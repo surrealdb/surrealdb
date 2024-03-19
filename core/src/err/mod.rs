@@ -910,6 +910,10 @@ pub enum Error {
 	/// The session has an invalid expiration
 	#[error("The session has an invalid expiration")]
 	InvalidSessionExpiration,
+
+	/// A node task has failed
+	#[error("A node task has failed: {0}")]
+	NodeAgent(&'static str),
 }
 
 impl From<Error> for String {
