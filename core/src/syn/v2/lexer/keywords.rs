@@ -1,5 +1,5 @@
 use crate::{
-	sql::changefeed_include::ChangeFeedInclude,
+	sql::change_feed_include::ChangeFeedInclude,
 	sql::{language::Language, Algorithm},
 	syn::v2::token::{DistanceKind, Keyword, TokenKind},
 };
