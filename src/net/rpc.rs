@@ -87,7 +87,7 @@ async fn handle_socket(ws: WebSocket, sess: Session, id: Uuid) {
 		// No protocol format was specified
 		_ => Format::None,
 	};
-	//
+	// Format::Unsupported is not in the PROTOCOLS list so cannot be the value of format here
 	// Create a new connection instance
 	let rpc = Connection::new(id, sess, format);
 	// Serve the socket connection requests
@@ -106,6 +106,9 @@ async fn post_handler(
 		if fmt != out_fmt {
 			return Err(Error::InvalidType);
 		}
+	}
+	if fmt == Format::Unsupported || fmt == Format::None {
+		return Err(Error::InvalidType);
 	}
 
 	let mut rpc_ctx = PostRpcContext::new(DB.get().unwrap(), session, BTreeMap::new());

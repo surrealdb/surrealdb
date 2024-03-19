@@ -23,12 +23,13 @@ pub const PROTOCOLS: [&str; 5] = [
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Format {
-	None,     // No format is specified yet
-	Json,     // For basic JSON serialisation
-	Cbor,     // For basic CBOR serialisation
-	Msgpack,  // For basic Msgpack serialisation
-	Bincode,  // For full internal serialisation
-	Revision, // For full versioned serialisation
+	None,        // No format is specified yet
+	Json,        // For basic JSON serialisation
+	Cbor,        // For basic CBOR serialisation
+	Msgpack,     // For basic Msgpack serialisation
+	Bincode,     // For full internal serialisation
+	Revision,    // For full versioned serialisation
+	Unsupported, // Unsupported format
 }
 
 impl From<&Accept> for Format {
@@ -38,7 +39,7 @@ impl From<&Accept> for Format {
 			Accept::ApplicationJson => Format::Json,
 			Accept::ApplicationCbor => Format::Cbor,
 			Accept::ApplicationPack => Format::Msgpack,
-			Accept::ApplicationOctetStream => todo!(),
+			Accept::ApplicationOctetStream => Format::Unsupported,
 			Accept::Surrealdb => Format::Bincode,
 		}
 	}
@@ -51,7 +52,7 @@ impl From<&ContentType> for Format {
 			ContentType::ApplicationJson => Format::Json,
 			ContentType::ApplicationCbor => Format::Cbor,
 			ContentType::ApplicationPack => Format::Msgpack,
-			ContentType::ApplicationOctetStream => todo!(),
+			ContentType::ApplicationOctetStream => Format::Unsupported,
 			ContentType::Surrealdb => Format::Bincode,
 		}
 	}
@@ -79,6 +80,7 @@ impl Format {
 	pub fn req_ws(&self, msg: Message) -> Result<Request, Failure> {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
+			Self::Unsupported => unreachable!(), // We should never arrive at this code
 			Self::Json => json::req_ws(msg),
 			Self::Cbor => cbor::req_ws(msg),
 			Self::Msgpack => msgpack::req_ws(msg),
@@ -91,6 +93,7 @@ impl Format {
 	pub fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
+			Self::Unsupported => unreachable!(), // We should never arrive at this code
 			Self::Json => json::res_ws(res),
 			Self::Cbor => cbor::res_ws(res),
 			Self::Msgpack => msgpack::res_ws(res),
@@ -103,6 +106,7 @@ impl Format {
 	pub fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
+			Self::Unsupported => unreachable!(), // We should never arrive at this code
 			Self::Json => json::req_http(&body),
 			Self::Cbor => cbor::req_http(body),
 			Self::Msgpack => msgpack::req_http(body),
@@ -114,6 +118,7 @@ impl Format {
 	pub fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
 		match self {
 			Self::None => unreachable!(), // We should never arrive at this code
+			Self::Unsupported => unreachable!(), // We should never arrive at this code
 			Self::Json => json::res_http(res),
 			Self::Cbor => cbor::res_http(res),
 			Self::Msgpack => msgpack::res_http(res),
