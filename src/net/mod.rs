@@ -1,12 +1,12 @@
 mod auth;
 pub mod client_ip;
 mod export;
-mod headers;
+pub(crate) mod headers;
 mod health;
 mod import;
 mod input;
 mod key;
-mod output;
+pub(crate) mod output;
 mod params;
 mod rpc;
 mod signals;
