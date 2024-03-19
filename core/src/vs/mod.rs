@@ -14,7 +14,6 @@ pub(crate) mod oracle;
 
 pub use self::conv::*;
 pub use self::oracle::*;
-use futures::StreamExt;
 
 /// Generate S-tuples of valid, sequenced versionstamps within range.
 /// The limit is used, because these are combinatorics - without an upper bound, combinations aren't possible.
@@ -35,9 +34,7 @@ impl Iterator for VersionstampSequence {
 	type Item = Versionstamp;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		if self.next_state.is_none() {
-			return None;
-		}
+		self.next_state?;
 		let returned_state = self.next_state.unwrap();
 		// Now calculate next
 		let mut next_state = self.next_state.unwrap();
@@ -49,8 +46,10 @@ impl Iterator for VersionstampSequence {
 		}
 		let (index_to_increase, _) = index_to_increase.unwrap();
 		next_state[index_to_increase] += 1;
-		for i in index_to_increase + 1..returned_state.len() - 2 {
-			next_state[i] = 0;
+		for next_state_byte in
+			next_state.iter_mut().take(returned_state.len() - 2).skip(index_to_increase + 1)
+		{
+			*next_state_byte = 0;
 		}
 		self.next_state = Some(next_state);
 		Some(returned_state)
@@ -59,7 +58,7 @@ impl Iterator for VersionstampSequence {
 
 #[cfg(test)]
 mod test {
-	use crate::vs::Versionstamp;
+	use crate::vs::{to_u128_be, Versionstamp};
 
 	#[test]
 	pub fn generate_one_vs() {
@@ -69,7 +68,7 @@ mod test {
 	}
 
 	#[test]
-	pub fn generate_two_vs() {
+	pub fn generate_two_vs_in_sequence() {
 		let vs =
 			super::generate_versionstamp_sequences([0, 0, 0, 0, 0, 0, 0, 1, 0, 0]).flat_map(|vs| {
 				let skip_because_first_is_equal = 1;
@@ -77,7 +76,7 @@ mod test {
 					.skip(skip_because_first_is_equal)
 					.map(move |vs2| (vs, vs2))
 			});
-		let versionstamps = vs.collect::<Vec<(Versionstamp, Versionstamp)>>();
+		let versionstamps = vs.take(4).collect::<Vec<(Versionstamp, Versionstamp)>>();
 
 		assert_eq!(
 			versionstamps.len(),
@@ -86,9 +85,13 @@ mod test {
 			versionstamps
 		);
 
-		let acceptable_values = [65536, 131072, 196608, 262144, 327680, 393216];
+		let acceptable_values = [65536u128, 131072, 196608, 262144, 327680, 393216];
 		for (first, second) in versionstamps {
 			assert!(first < second, "First: {:?}, Second: {:?}", first, second);
+			let first = to_u128_be(first);
+			let second = to_u128_be(second);
+			assert!(acceptable_values.contains(&first));
+			assert!(acceptable_values.contains(&second));
 		}
 	}
 
