@@ -141,10 +141,10 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_index(&ctx, opt, txn, stm, t, ir).await;
+							return self.process_index(&ctx, opt, txn, stm, &t, ir).await;
 						}
 					}
-					self.process_index(ctx, opt, txn, stm, t, ir).await?
+					self.process_index(ctx, opt, txn, stm, &t, ir).await?
 				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
@@ -556,7 +556,7 @@ impl<'a> Processor<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		table: Table,
+		table: &Table,
 		ir: IteratorRef,
 	) -> Result<(), Error> {
 		// Check that the table exists

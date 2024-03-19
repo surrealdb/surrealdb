@@ -1,16 +1,17 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
+use crate::idx::planner::executor::ExpressionKey;
 use crate::idx::planner::tree::{IndexRef, Node};
 use crate::sql::with::With;
 use crate::sql::{Array, Idiom, Object};
-use crate::sql::{Expression, Operator, Value};
+use crate::sql::{Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
 pub(super) struct PlanBuilder {
-	indexes: Vec<(Arc<Expression>, IndexOption)>,
+	indexes: Vec<(ExpressionKey, IndexOption)>,
 	range_queries: HashMap<IndexRef, RangeQueryBuilder>,
 	with_indexes: Vec<IndexRef>,
 	all_and: bool,
@@ -79,10 +80,11 @@ impl PlanBuilder {
 				right,
 				exp,
 			} => {
-				if self.all_and && Operator::Or.eq(exp.operator()) {
+				let op = exp.operator();
+				if self.all_and && Operator::Or.eq(op) {
 					self.all_and = false;
 				}
-				let is_bool = self.check_boolean_operator(exp.operator());
+				let is_bool = self.check_boolean_operator(op);
 				if let Some(io) = self.filter_index_option(io.as_ref()) {
 					self.add_index_option(exp.clone(), io);
 				} else if self.all_exp_with_index && !is_bool {
@@ -110,7 +112,7 @@ impl PlanBuilder {
 		}
 	}
 
-	fn add_index_option(&mut self, exp: Arc<Expression>, io: IndexOption) {
+	fn add_index_option(&mut self, exp: ExpressionKey, io: IndexOption) {
 		if let IndexOperator::RangePart(o, v) = io.op() {
 			match self.range_queries.entry(io.ix_ref()) {
 				Entry::Occupied(mut e) => {
@@ -129,8 +131,8 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
-	SingleIndex(Arc<Expression>, IndexOption),
-	MultiIndex(Vec<(Arc<Expression>, IndexOption)>),
+	SingleIndex(ExpressionKey, IndexOption),
+	MultiIndex(Vec<(ExpressionKey, IndexOption)>),
 	SingleIndexMultiExpression(IndexRef, RangeQueryBuilder),
 }
 
@@ -291,13 +293,13 @@ impl From<&RangeValue> for Value {
 
 #[derive(Default, Debug)]
 pub(super) struct RangeQueryBuilder {
-	pub(super) exps: HashSet<Arc<Expression>>,
+	pub(super) exps: HashSet<ExpressionKey>,
 	pub(super) from: RangeValue,
 	pub(super) to: RangeValue,
 }
 
 impl RangeQueryBuilder {
-	fn add(&mut self, exp: Arc<Expression>, op: &Operator, v: &Value) {
+	fn add(&mut self, exp: ExpressionKey, op: &Operator, v: &Value) {
 		match op {
 			Operator::LessThan => self.to.set_to(v),
 			Operator::LessThanOrEqual => self.to.set_to_inclusive(v),

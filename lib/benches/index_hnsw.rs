@@ -26,7 +26,6 @@ const M0: u16 = 48;
 const DIMENSION: u16 = 20;
 
 fn bench_hnsw_no_db(c: &mut Criterion) {
-	info!("Build data collection");
 	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz").unwrap();
 	let samples: Vec<(Thing, Vec<Value>)> =
 		samples.into_iter().map(|(r, a)| (r, vec![Value::Array(a)])).collect();
@@ -59,7 +58,6 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 }
 
 fn bench_hnsw_with_db(c: &mut Criterion) {
-	info!("Build data collection");
 	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz").unwrap();
 	let samples: Vec<String> =
 		samples.into_iter().map(|(r, a)| format!("CREATE {r} SET r={a} RETURN NONE;")).collect();
@@ -67,15 +65,15 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 	let session = &Session::owner().with_ns("ns").with_db("db");
 
 	// Indexing benchmark group
-	{
-		let mut group = get_group(c, "hnsw_with_db", samples.len(), 10);
-		let id = format!("insert len: {}", samples.len());
-
-		group.bench_function(id, |b| {
-			b.to_async(Runtime::new().unwrap()).iter(|| insert_objects_db(session, true, &samples));
-		});
-		group.finish();
-	}
+	// {
+	// 	let mut group = get_group(c, "hnsw_with_db", samples.len(), 10);
+	// 	let id = format!("insert len: {}", samples.len());
+	//
+	// 	group.bench_function(id, |b| {
+	// 		b.to_async(Runtime::new().unwrap()).iter(|| insert_objects_db(session, true, &samples));
+	// 	});
+	// 	group.finish();
+	// }
 
 	let b = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 	let ds = b.block_on(insert_objects_db(session, true, &samples));
@@ -232,5 +230,6 @@ async fn knn_lookup_objects_db(ds: &Datastore, session: &Session, selects: &[Str
 	}
 }
 
-criterion_group!(benches, bench_hnsw_no_db, bench_hnsw_with_db, bench_db_without_index);
+// criterion_group!(benches, bench_hnsw_no_db, bench_hnsw_with_db, bench_db_without_index);
+criterion_group!(benches, bench_hnsw_with_db);
 criterion_main!(benches);
