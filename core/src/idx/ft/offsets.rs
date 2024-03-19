@@ -59,15 +59,20 @@ impl Offsets {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Offset {
 	pub(super) index: u32,
+	// Start position of the original term
 	pub(super) start: Position,
+	// Start position of the generated term
+	pub(super) gen_start: Position,
+	// End position of the original term
 	pub(super) end: Position,
 }
 
 impl Offset {
-	pub(super) fn new(index: u32, start: Position, end: Position) -> Self {
+	pub(super) fn new(index: u32, start: Position, gen_start: Position, end: Position) -> Self {
 		Self {
 			index,
 			start,
+			gen_start,
 			end,
 		}
 	}
@@ -94,6 +99,7 @@ impl TryFrom<OffsetRecords> for Val {
 		// `starts` and `offsets` are likely to be ascending
 		for o in &offsets.0 {
 			decompressed.push(o.start);
+			decompressed.push(o.gen_start);
 			decompressed.push(o.end);
 		}
 		Ok(bincode::serialize(&decompressed)?)
@@ -109,17 +115,25 @@ impl TryFrom<Val> for OffsetRecords {
 		}
 		let decompressed: Vec<u32> = bincode::deserialize(&val)?;
 		let mut iter = decompressed.iter();
-		let s = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(1)"))?;
-		let mut indexes = Vec::with_capacity(s as usize);
-		for _ in 0..s {
+		let n_offsets = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(1)"))?;
+		// <= v1.4 the Offset contains only two field: start and end.
+		// We check the number of integers. If there is only 3 per offset this is the old format.
+		let without_gen_start = n_offsets * 3 + 1 == (decompressed.len() as u32);
+		let mut indexes = Vec::with_capacity(n_offsets as usize);
+		for _ in 0..n_offsets {
 			let index = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(2)"))?;
 			indexes.push(index);
 		}
-		let mut res = Vec::with_capacity(s as usize);
+		let mut res = Vec::with_capacity(n_offsets as usize);
 		for index in indexes {
 			let start = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(3)"))?;
-			let end = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(4)"))?;
-			res.push(Offset::new(index, start, end));
+			let gen_start = if without_gen_start {
+				start
+			} else {
+				*iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(4)"))?
+			};
+			let end = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(5)"))?;
+			res.push(Offset::new(index, start, gen_start, end));
 		}
 		Ok(OffsetRecords(res))
 	}
@@ -132,10 +146,28 @@ mod tests {
 
 	#[test]
 	fn test_offset_records() {
-		let o =
-			OffsetRecords(vec![Offset::new(0, 1, 2), Offset::new(0, 11, 22), Offset::new(1, 3, 4)]);
+		let o = OffsetRecords(vec![
+			Offset::new(0, 1, 2, 3),
+			Offset::new(0, 11, 13, 22),
+			Offset::new(1, 1, 3, 4),
+		]);
 		let v: Val = o.clone().try_into().unwrap();
 		let o2 = v.try_into().unwrap();
 		assert_eq!(o, o2)
+	}
+
+	#[test]
+	fn test_migrate_v1_offset_records() {
+		let decompressed = vec![3u32, 0, 0, 1, 1, 3, 11, 22, 1, 4];
+		let v = bincode::serialize(&decompressed).unwrap();
+		let o: OffsetRecords = v.try_into().unwrap();
+		assert_eq!(
+			o,
+			OffsetRecords(vec![
+				Offset::new(0, 1, 1, 3),
+				Offset::new(0, 11, 11, 22),
+				Offset::new(1, 1, 1, 4),
+			])
+		)
 	}
 }
