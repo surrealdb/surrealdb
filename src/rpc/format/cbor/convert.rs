@@ -1,7 +1,6 @@
 use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
-use std::collections::BTreeMap;
 use std::iter::once;
 use std::ops::Deref;
 use surrealdb::sql::Datetime;
@@ -94,35 +93,28 @@ impl TryFrom<Cbor> for Value {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid RecordID value"),
 						},
-						Data::Array(mut v) if v.len() == 2 => match (v.remove(0), v.remove(0)) {
-							(Data::Text(tb), Data::Text(id)) => {
-								Ok(Value::from(Thing::from((tb, id))))
+						Data::Array(mut v) if v.len() == 2 => {
+							let tb = match Value::try_from(Cbor(v.remove(0))) {
+								Ok(Value::Strand(tb)) => tb.0,
+								Ok(Value::Table(tb)) => tb.0,
+								_ => return Err("Expected the tb of a Record Id to be a String or Table value"),
+							};
+
+							match Value::try_from(Cbor(v.remove(0))) {
+								Ok(Value::Strand(id)) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								Ok(Value::Number(Number::Int(id))) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								Ok(Value::Array(id)) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								Ok(Value::Object(id)) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								_ => Err("Expected the id of a Record Id to be a String, Integer, Array or Object value"),
 							}
-							(Data::Text(tb), Data::Integer(id)) => {
-								Ok(Value::from(Thing::from((tb, Id::from(i128::from(id) as i64)))))
-							}
-							(Data::Text(tb), Data::Array(id)) => Ok(Value::from(Thing::from((
-								tb,
-								Id::from(
-									id.into_iter()
-										.map(|v| Value::try_from(Cbor(v)))
-										.collect::<Result<Vec<Value>, &str>>()?,
-								),
-							)))),
-							(Data::Text(tb), Data::Map(id)) => Ok(Value::from(Thing::from((
-								tb,
-								Id::from(
-									id.into_iter()
-										.map(|(k, v)| {
-											let k =
-												Value::try_from(Cbor(k)).map(|k| k.as_raw_string());
-											let v = Value::try_from(Cbor(v));
-											Ok((k?, v?))
-										})
-										.collect::<Result<BTreeMap<String, Value>, &str>>()?,
-								),
-							)))),
-							_ => Err("Expected a CBOR array with 2 elements, a text data type, and a valid ID type"),
 						},
 						_ => Err("Expected a CBOR text data type, or a CBOR array with 2 elements"),
 					},
@@ -131,10 +123,10 @@ impl TryFrom<Cbor> for Value {
 						Data::Text(v) => Ok(Value::Table(v.into())),
 						_ => Err("Expected a CBOR text data type"),
 					},
-					TAG_GEOMETRY_POINT => match v.deref() {
-						Data::Array(v) if v.len() == 2 => {
-							let x = Value::try_from(Cbor(v.clone().remove(0)))?;
-							let y = Value::try_from(Cbor(v.clone().remove(0)))?;
+					TAG_GEOMETRY_POINT => match *v {
+						Data::Array(mut v) if v.len() == 2 => {
+							let x = Value::try_from(Cbor(v.remove(0)))?;
+							let y = Value::try_from(Cbor(v.remove(0)))?;
 
 							match (x, y) {
 								(Value::Number(x), Value::Number(y)) => {
