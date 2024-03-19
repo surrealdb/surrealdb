@@ -15,8 +15,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check fields
-		if !opt.fields {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
 		// Get the record id

@@ -1,12 +1,12 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
 
-pub static DB: OnceLock<Datastore> = OnceLock::new();
+pub static DB: OnceLock<Arc<Datastore>> = OnceLock::new();
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -266,7 +266,7 @@ pub async fn init(
 	}
 
 	// Store database instance
-	let _ = DB.set(dbs);
+	let _ = DB.set(Arc::new(dbs));
 
 	// All ok
 	Ok(())
