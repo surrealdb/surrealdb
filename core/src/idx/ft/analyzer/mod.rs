@@ -41,7 +41,7 @@ impl Analyzer {
 		txn: &Transaction,
 		t: &Terms,
 		query_string: String,
-	) -> Result<Vec<Option<TermId>>, Error> {
+	) -> Result<Vec<Option<(TermId, u32)>>, Error> {
 		let tokens = self.generate_tokens(ctx, opt, txn, query_string).await?;
 		// We first collect every unique terms
 		// as it can contains duplicates
@@ -54,7 +54,7 @@ impl Analyzer {
 		let mut tx = txn.lock().await;
 		for term in terms {
 			let opt_term_id = t.get_term_id(&mut tx, tokens.get_token_string(term)?).await?;
-			res.push(opt_term_id);
+			res.push(opt_term_id.map(|tid| (tid, term.get_char_len())));
 		}
 		Ok(res)
 	}
@@ -233,6 +233,7 @@ mod tests {
 	use super::Analyzer;
 	use crate::ctx::Context;
 	use crate::dbs::{Options, Transaction};
+	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::{
 		sql::{statements::DefineStatement, Statement},
@@ -241,7 +242,7 @@ mod tests {
 	use futures::lock::Mutex;
 	use std::sync::Arc;
 
-	pub(super) async fn test_analyzer(def: &str, input: &str, expected: &[&str]) {
+	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
 		let txn: Transaction = Arc::new(Mutex::new(tx));
@@ -251,15 +252,24 @@ mod tests {
 			panic!()
 		};
 		let a: Analyzer = az.into();
-
 		let tokens = a
 			.generate_tokens(&Context::default(), &Options::default(), &txn, input.to_string())
 			.await
 			.unwrap();
+		tokens
+	}
+
+	pub(super) async fn test_analyzer(def: &str, input: &str, expected: &[&str]) {
+		let tokens = get_analyzer_tokens(def, input).await;
 		let mut res = vec![];
 		for t in tokens.list() {
 			res.push(tokens.get_token_string(t).unwrap());
 		}
 		assert_eq!(&res, expected);
+	}
+
+	pub(super) async fn test_analyzer_tokens(def: &str, input: &str, expected_tokens: &[Token]) {
+		let tokens = get_analyzer_tokens(def, input).await;
+		assert_eq!(tokens.list(), expected_tokens);
 	}
 }

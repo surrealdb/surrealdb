@@ -191,30 +191,86 @@ async fn select_where_matches_using_index_and_arrays_with_parallel() -> Result<(
 }
 
 #[tokio::test]
-async fn select_where_matches_highlight_edgengram() -> Result<(), Error> {
+async fn select_where_matches_partial_highlight() -> Result<(), Error> {
 	let sql = r"
 		CREATE blog:1 SET content = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,edgengram(2,100);
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'he';
+		SELECT id, search::highlight('<em>', '</em>', 1, false) AS content FROM blog WHERE content @1@ 'he';
+		SELECT id, search::highlight('<em>', '</em>', 1, true) AS content FROM blog WHERE content @1@ 'he';
+		SELECT id, search::offsets(1) AS content FROM blog WHERE content @1@ 'he';
+		SELECT id, search::offsets(1, false) AS content FROM blog WHERE content @1@ 'he';
+		SELECT id, search::offsets(1, true) AS content FROM blog WHERE content @1@ 'he';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 9);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	for _ in 0..3 {
+		let _ = res.remove(0).result?;
+	}
+	//
+	for i in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+			{
+				id: blog:1,
+				content: '<em>Hello</em> World!'
+			}
+		]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+	}
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
 			{
 				id: blog:1,
-				content: '<em>He</em> World!'
+				content: '<em>He</em>llo World!'
 			}
 		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	for i in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+					{
+						content: {
+							0: [
+								{
+									e: 5,
+									s: 0
+								}
+							]
+						},
+						id: blog:1
+					}
+				]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+	}
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+					{
+						content: {
+							0: [
+								{
+									e: 2,
+									s: 0
+								}
+							]
+						},
+						id: blog:1
+					}
+				]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
