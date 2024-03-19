@@ -17,6 +17,7 @@ macro_rules! mrg {
 	}};
 }
 
+#[allow(async_fn_in_trait)]
 pub trait RpcContext {
 	fn kvs(&self) -> &Datastore;
 	fn session(&self) -> &Session;
@@ -26,11 +27,11 @@ pub trait RpcContext {
 	fn version_data(&self) -> impl Into<Data>;
 
 	const LQ_SUPPORT: bool = false;
-	async fn handle_live(&self, _lqid: &Uuid) {
-		unreachable!()
+	fn handle_live(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
+		async { unreachable!() }
 	}
-	async fn handle_kill(&self, _lqid: &Uuid) {
-		unreachable!()
+	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
+		async { unreachable!() }
 	}
 
 	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
