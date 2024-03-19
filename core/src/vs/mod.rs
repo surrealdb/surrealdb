@@ -19,19 +19,15 @@ use futures::StreamExt;
 /// Generate S-tuples of valid, sequenced versionstamps within range.
 /// The limit is used, because these are combinatorics - without an upper bound, combinations aren't possible.
 #[doc(hidden)]
-pub fn generate_versionstamp_sequences(start: Versionstamp, limit: usize) -> VersionstampSequence {
+pub fn generate_versionstamp_sequences(start: Versionstamp) -> VersionstampSequence {
 	VersionstampSequence {
 		next_state: Some(start),
-		iterated: 0,
-		limit,
 	}
 }
 
 #[doc(hidden)]
 pub struct VersionstampSequence {
 	next_state: Option<Versionstamp>,
-	iterated: usize,
-	limit: usize,
 }
 
 #[doc(hidden)]
@@ -56,12 +52,7 @@ impl Iterator for VersionstampSequence {
 		for i in index_to_increase + 1..returned_state.len() - 2 {
 			next_state[i] = 0;
 		}
-		self.iterated += 1;
-		if self.iterated >= self.limit {
-			self.next_state = None;
-		} else {
-			self.next_state = Some(next_state);
-		}
+		self.next_state = Some(next_state);
 		Some(returned_state)
 	}
 }
@@ -72,19 +63,17 @@ mod test {
 
 	#[test]
 	pub fn generate_one_vs() {
-		let vs = super::generate_versionstamp_sequences([0; 10], 1).collect::<Vec<_>>();
+		let vs = super::generate_versionstamp_sequences([0; 10]).take(1).collect::<Vec<_>>();
 		assert_eq!(vs.len(), 1, "Should be 1, but was {:?}", vs);
 		assert_eq!(vs[0], [0; 10]);
 	}
 
 	#[test]
 	pub fn generate_two_vs() {
-		let limit = 2;
-		let vs = super::generate_versionstamp_sequences([0, 0, 0, 0, 0, 0, 0, 1, 0, 0], limit)
-			.flat_map(|vs| {
+		let vs =
+			super::generate_versionstamp_sequences([0, 0, 0, 0, 0, 0, 0, 1, 0, 0]).flat_map(|vs| {
 				let skip_because_first_is_equal = 1;
-				let adjusted_limit = limit + skip_because_first_is_equal;
-				super::generate_versionstamp_sequences(vs, adjusted_limit)
+				super::generate_versionstamp_sequences(vs)
 					.skip(skip_because_first_is_equal)
 					.map(move |vs2| (vs, vs2))
 			});
@@ -101,5 +90,12 @@ mod test {
 		for (first, second) in versionstamps {
 			assert!(first < second, "First: {:?}, Second: {:?}", first, second);
 		}
+	}
+
+	#[test]
+	pub fn iteration_stops_past_end() {
+		let mut iter = super::generate_versionstamp_sequences([255; 10]);
+		assert!(iter.next().is_some());
+		assert!(iter.next().is_none());
 	}
 }

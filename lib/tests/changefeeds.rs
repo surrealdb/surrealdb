@@ -66,9 +66,9 @@ async fn database_change_feeds() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 
 	// Two timestamps
-	let first_timestamp = generate_versionstamp_sequences([0; 10], 3);
+	let first_timestamp = generate_versionstamp_sequences([0; 10]);
 	let second_timestamp =
-		first_timestamp.map(|vs| (vs, generate_versionstamp_sequences(vs, 2).next().unwrap()));
+		first_timestamp.map(|vs| (vs, generate_versionstamp_sequences(vs).next().unwrap()));
 
 	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
 	{
@@ -319,30 +319,22 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let how_many_heartbeat_skip = 3;
 	// If you want to write a macro, you are welcome to
-	let first = generate_versionstamp_sequences([0; 10], how_many_heartbeat_skip);
-	let second = first.flat_map(|vs1| {
-		generate_versionstamp_sequences(vs1, how_many_heartbeat_skip).skip(1).map(|vs2| (vs1, vs2))
-	});
+	let first = generate_versionstamp_sequences([0; 10]);
+	let second =
+		first.flat_map(|vs1| generate_versionstamp_sequences(vs1).skip(1).map(|vs2| (vs1, vs2)));
 	let third = second.flat_map(|(vs1, vs2)| {
-		generate_versionstamp_sequences(vs2, how_many_heartbeat_skip)
-			.skip(1)
-			.map(move |vs3| (vs1, vs2, vs3))
+		generate_versionstamp_sequences(vs2).skip(1).map(move |vs3| (vs1, vs2, vs3))
 	});
 	let fourth = third.flat_map(|(vs1, vs2, vs3)| {
-		generate_versionstamp_sequences(vs3, how_many_heartbeat_skip)
-			.skip(1)
-			.map(move |vs4| (vs1, vs2, vs3, vs4))
+		generate_versionstamp_sequences(vs3).skip(1).map(move |vs4| (vs1, vs2, vs3, vs4))
 	});
 	let fifth = fourth.flat_map(|(vs1, vs2, vs3, vs4)| {
-		generate_versionstamp_sequences(vs4, how_many_heartbeat_skip)
-			.skip(1)
-			.map(move |vs5| (vs1, vs2, vs3, vs4, vs5))
+		generate_versionstamp_sequences(vs4).skip(1).map(move |vs5| (vs1, vs2, vs3, vs4, vs5))
 	});
 	let sixth = fifth.flat_map(|(vs1, vs2, vs3, vs4, vs5)| {
-		generate_versionstamp_sequences(vs5, how_many_heartbeat_skip)
-			.skip(1)
-			.map(move |vs6| (vs1, vs2, vs3, vs4, vs5, vs6))
+		generate_versionstamp_sequences(vs5).skip(1).map(move |vs6| (vs1, vs2, vs3, vs4, vs5, vs6))
 	});
+	let sixth = sixth.take(how_many_heartbeat_skip);
 	let val: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled() {
 		true => sixth
 			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
