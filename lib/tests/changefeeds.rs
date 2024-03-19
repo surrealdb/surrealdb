@@ -9,7 +9,6 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core2::sql::Array;
 
 mod helpers;
 mod parse;
@@ -342,7 +341,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, potential_show_changes_values);
+	assert!(potential_show_changes_values.contains(&tmp));
 
 	// GC after 1hs
 	let one_hour_in_secs = 3600;
