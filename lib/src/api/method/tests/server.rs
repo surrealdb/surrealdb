@@ -78,6 +78,15 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					}
 					_ => unreachable!(),
 				},
+				Method::Insert => match dbg!(&params[..]) {
+					[Value::Table(..), Value::Array(..)] => {
+						Ok(DbResponse::Other(Value::Array(Array(Vec::new()))))
+					}
+					[Value::Table(..), _] => {
+						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
+					}
+					_ => unreachable!(),
+				},
 				Method::Export | Method::Import => match param.file {
 					Some(_) => Ok(DbResponse::Other(Value::None)),
 					_ => unreachable!(),
