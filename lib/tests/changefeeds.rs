@@ -76,8 +76,9 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.map(|(vs1, vs2)| {
 				let vs1 = to_u128_be(vs1);
 				let vs2 = to_u128_be(vs2);
-				Value::parse(format!(
-					r#"[
+				Value::parse(
+					format!(
+						r#"[
 					 {{
 						 versionstamp: {},
 						 changes: [
@@ -100,16 +101,19 @@ async fn database_change_feeds() -> Result<(), Error> {
 						 ]
 					 }}
 				]"#,
-					vs1, vs2
-				))
+						vs1, vs2
+					)
+					.as_str(),
+				)
 			})
 			.collect(),
 		false => second_timestamp
 			.map(|(vs1, vs2)| {
 				let vs1 = to_u128_be(vs1);
 				let vs2 = to_u128_be(vs2);
-				Value::parse(format!(
-					r#"[
+				Value::parse(
+					format!(
+						r#"[
 					 {{
 						 versionstamp: {},
 						 changes: [
@@ -132,8 +136,10 @@ async fn database_change_feeds() -> Result<(), Error> {
 						 ]
 					 }}
 				]"#,
-					vs1, vs2
-				))
+						vs1, vs2
+					)
+					.as_str(),
+				)
 			})
 			.collect(),
 	};
@@ -338,8 +344,9 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let val: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled() {
 		true => sixth
 			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
-				Value::parse(format!(
-					r#"[
+				Value::parse(
+					format!(
+						r#"[
 			{{
 				versionstamp: {vs1},
 				changes: [
@@ -405,13 +412,16 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			}}
 		]"#,
-				))
+					)
+					.as_str(),
+				)
 			})
 			.collect(),
 		false => sixth
 			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
-				Value::parse(format!(
-					r#"[
+				Value::parse(
+					format!(
+						r#"[
 			{{
 				versionstamp: {vs1},
 				changes: [
@@ -477,7 +487,9 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			}}
 		]"#
-				))
+					)
+					.as_str(),
+				)
 			})
 			.collect(),
 	};
