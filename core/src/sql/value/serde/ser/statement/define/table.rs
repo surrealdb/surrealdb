@@ -5,6 +5,7 @@ use crate::sql::value::serde::ser;
 use crate::sql::Ident;
 use crate::sql::Permissions;
 use crate::sql::Strand;
+use crate::sql::TableType;
 use crate::sql::View;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -48,6 +49,7 @@ pub struct SerializeDefineTableStatement {
 	changefeed: Option<ChangeFeed>,
 	comment: Option<Strand>,
 	if_not_exists: bool,
+	kind: TableType,
 }
 
 impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
@@ -83,6 +85,9 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
+			"kind" => {
+				self.kind = value.serialize(ser::table_type::Serializer.wrap())?;
+			}
 			"if_not_exists" => {
 				self.if_not_exists = value.serialize(ser::primitive::bool::Serializer.wrap())?
 			}
@@ -105,6 +110,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTableStatement {
 			permissions: self.permissions,
 			changefeed: self.changefeed,
 			comment: self.comment,
+			kind: self.kind,
 			if_not_exists: self.if_not_exists,
 		})
 	}

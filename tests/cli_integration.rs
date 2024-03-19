@@ -99,7 +99,7 @@ mod cli_integration {
 		{
 			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} -");
 			let output = common::run(&args).output().expect("failed to run stdout export: {args}");
-			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
+			assert!(output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
 		}
 
@@ -632,8 +632,10 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output =
-				common::run(&args).input("DEFINE TABLE thing CHANGEFEED 1s;\n").output().unwrap();
+			let output = common::run(&args)
+				.input("DEFINE TABLE thing TYPE ANY CHANGEFEED 1s;\n")
+				.output()
+				.unwrap();
 			let output = remove_debug_info(output);
 			assert_eq!(output, "[NONE]\n\n".to_owned(), "failed to send sql: {args}");
 		}
