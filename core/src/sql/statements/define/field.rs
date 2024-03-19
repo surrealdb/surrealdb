@@ -3,10 +3,12 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::Part;
 use crate::sql::{
 	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,
 };
+use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -51,20 +53,30 @@ impl DefineFieldStatement {
 		if self.if_not_exists && run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok()
 		{
 			return Err(Error::FdAlreadyExists {
-				value: self.name.to_string(),
+				value: fd,
 			});
 		}
 		// Process the statement
-		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+
+		let tb = run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		let key = crate::key::table::fd::new(opt.ns(), opt.db(), &self.what, &fd);
+		run.set(
+			key,
+			DefineFieldStatement {
+				if_not_exists: false,
+				..self.clone()
+			},
+		)
+		.await?;
+
+		// find existing field definitions.
+		let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
 
 		// Process possible recursive_definitions.
 		if let Some(mut cur_kind) = self.kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = self.name.clone();
-			// find existing field definitions.
-			let fields = run.all_tb_fields(opt.ns(), opt.db(), &self.what).await.ok();
 			loop {
 				let new_kind = cur_kind.inner_kind();
 				name.0.push(Part::All);
@@ -103,14 +115,48 @@ impl DefineFieldStatement {
 			}
 		}
 
-		run.set(
-			key,
-			DefineFieldStatement {
-				if_not_exists: false,
-				..self.clone()
-			},
-		)
-		.await?;
+		let new_tb = match (fd.as_str(), tb.kind.clone(), self.kind.clone()) {
+			("in", TableType::Relation(rel), Some(dk)) => {
+				if !matches!(dk, Kind::Record(_)) {
+					return Err(Error::Thrown("in field on a relation must be a record".into()));
+				};
+				if rel.from.as_ref() != Some(&dk) {
+					Some(DefineTableStatement {
+						kind: TableType::Relation(Relation {
+							from: Some(dk),
+							..rel
+						}),
+						..tb
+					})
+				} else {
+					None
+				}
+			}
+			("out", TableType::Relation(rel), Some(dk)) => {
+				if !matches!(dk, Kind::Record(_)) {
+					return Err(Error::Thrown("out field on a relation must be a record".into()));
+				};
+				if rel.to.as_ref() != Some(&dk) {
+					Some(DefineTableStatement {
+						kind: TableType::Relation(Relation {
+							to: Some(dk),
+							..rel
+						}),
+						..tb
+					})
+				} else {
+					None
+				}
+			}
+			_ => None,
+		};
+		if let Some(tb) = new_tb {
+			let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.what);
+			run.set(key, &tb).await?;
+			let key = crate::key::table::ft::prefix(opt.ns(), opt.db(), &self.what);
+			run.clr(key).await?;
+		}
+
 		// Clear the cache
 		let key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.what);
 		run.clr(key).await?;
