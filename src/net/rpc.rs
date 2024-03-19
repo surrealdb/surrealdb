@@ -2,13 +2,12 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 
 use crate::cnf;
-use crate::cnf::PKG_NAME;
-use crate::cnf::PKG_VERSION;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
 use crate::rpc::format::Format;
 use crate::rpc::format::PROTOCOLS;
+use crate::rpc::post_context::PostRpcContext;
 use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::WEBSOCKETS;
 use axum::routing::get;
@@ -24,7 +23,6 @@ use http::HeaderValue;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::rpc::method::Method;
-use surrealdb::rpc::BasicRpcContext;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
@@ -109,18 +107,8 @@ async fn post_handler(
 			return Err(Error::InvalidType);
 		}
 	}
-	let kvs = DB.get().unwrap();
 
-	let mut rpc_ctx =
-		BasicRpcContext::new(kvs, session, BTreeMap::new(), format!("{PKG_NAME}-{}", *PKG_VERSION));
-
-	//  {
-	// 	session,
-	// 	kvs,
-	// 	vars: BTreeMap::new(),
-	// 	lq_handler: None,
-	// 	version: format!("{PKG_NAME}-{}", *PKG_VERSION),
-	// };
+	let mut rpc_ctx = PostRpcContext::new(DB.get().unwrap(), session, BTreeMap::new());
 
 	match fmt.req_http(body) {
 		Ok(req) => {
@@ -129,7 +117,4 @@ async fn post_handler(
 		}
 		Err(err) => Err(Error::from(err)),
 	}
-
-	// let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
-	// Ok(fmt.res_http(res.into_response(None)))
 }

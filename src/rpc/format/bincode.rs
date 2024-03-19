@@ -6,7 +6,7 @@ use axum::response::IntoResponse;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
-use http::{HeaderValue, StatusCode};
+use http::HeaderValue;
 use surrealdb::rpc::RpcError;
 use surrealdb::sql::serde::deserialize;
 use surrealdb::sql::Value;

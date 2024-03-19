@@ -36,7 +36,7 @@ pub fn res_ws(res: Response) -> Result<(usize, Message), RpcError> {
 	Ok((res.len(), Message::Binary(res)))
 }
 pub fn req_http(body: Bytes) -> Result<Request, RpcError> {
-	let mut val: Vec<u8> = body.into();
+	let val: Vec<u8> = body.into();
 	rmpv::decode::read_value(&mut val.as_slice())
 		.map_err(|_| RpcError::ParseError)
 		.map(Pack)?
