@@ -1,4 +1,4 @@
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Reverse;
 use std::collections::btree_map::Entry;
 #[cfg(debug_assertions)]
 use std::collections::HashMap;
@@ -17,6 +17,7 @@ use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
+use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{
 	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
@@ -74,17 +75,19 @@ impl MTreeIndex {
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
 		let doc_id = *resolved.doc_id();
-		// Index the values
+		// Lock the index
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = self.extract_vector(v)?.into();
-			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
+			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
+			vector.check_dimension(self.dim)?;
+			// Insert the vector in the index
+			mtree.insert(tx, &mut self.store, vector.into(), doc_id).await?;
 		}
 		Ok(())
 	}
@@ -92,77 +95,34 @@ impl MTreeIndex {
 	pub(crate) async fn knn_search(
 		&self,
 		tx: &mut Transaction,
-		a: Array,
+		a: &Array,
 		k: usize,
-	) -> Result<VecDeque<DocId>, Error> {
+	) -> Result<VecDeque<(DocId, f64)>, Error> {
 		// Extract the vector
-		let vector = self.check_vector_array(a)?;
-		// Lock the store
-		let res = self.mtree.read().await.knn_search(tx, &self.store, &vector, k).await?;
+		let vector = Arc::new(Vector::try_from_array(self.vector_type, a)?);
+		vector.check_dimension(self.dim)?;
+		// Lock the index
+		let mtree = self.mtree.read().await;
+		// Do the search
+		let res = mtree.knn_search(tx, &self.store, &vector, k).await?;
 		Ok(res.docs)
-	}
-
-	fn check_vector_array(&self, a: Array) -> Result<SharedVector, Error> {
-		if a.0.len() != self.dim {
-			return Err(Error::InvalidVectorDimension {
-				current: a.0.len(),
-				expected: self.dim,
-			});
-		}
-		let mut vec = Vector::new(self.vector_type, a.len());
-		for v in a.0 {
-			if let Value::Number(n) = v {
-				vec.add(n);
-			} else {
-				return Err(Error::InvalidVectorType {
-					current: v.clone().to_string(),
-					expected: "Number",
-				});
-			}
-		}
-		Ok(vec.into())
-	}
-
-	fn extract_vector(&self, v: Value) -> Result<Vector, Error> {
-		let mut vec = Vector::new(self.vector_type, self.dim);
-		Self::check_vector_value(v, &mut vec)?;
-		if vec.len() != self.dim {
-			return Err(Error::InvalidVectorDimension {
-				current: vec.len(),
-				expected: self.dim,
-			});
-		}
-		Ok(vec)
-	}
-
-	fn check_vector_value(value: Value, vec: &mut Vector) -> Result<(), Error> {
-		match value {
-			Value::Array(a) => {
-				for v in a {
-					Self::check_vector_value(v, vec)?;
-				}
-				Ok(())
-			}
-			Value::Number(n) => {
-				vec.add(n);
-				Ok(())
-			}
-			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
-		}
 	}
 
 	pub(crate) async fn remove_document(
 		&mut self,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(tx, rid.into()).await? {
+			// Lock the index
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = self.extract_vector(v)?.into();
-				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
+				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
+				vector.check_dimension(self.dim)?;
+				// Remove the vector
+				mtree.delete(tx, &mut self.store, vector.into(), doc_id).await?;
 			}
 		}
 		Ok(())
@@ -187,103 +147,6 @@ impl MTreeIndex {
 		}
 		Ok(())
 	}
-}
-
-struct KnnResultBuilder {
-	knn: u64,
-	docs: RoaringTreemap,
-	priority_list: BTreeMap<PriorityResult, RoaringTreemap>,
-}
-
-impl KnnResultBuilder {
-	fn new(knn: usize) -> Self {
-		Self {
-			knn: knn as u64,
-			docs: RoaringTreemap::default(),
-			priority_list: BTreeMap::default(),
-		}
-	}
-	fn check_add(&self, dist: f64) -> bool {
-		if self.docs.len() < self.knn {
-			true
-		} else if let Some(pr) = self.priority_list.keys().last() {
-			dist <= pr.0
-		} else {
-			true
-		}
-	}
-
-	fn add(&mut self, dist: f64, docs: &RoaringTreemap) {
-		let pr = PriorityResult(dist);
-		match self.priority_list.entry(pr) {
-			Entry::Vacant(e) => {
-				for doc in docs {
-					self.docs.insert(doc);
-				}
-				e.insert(docs.clone());
-			}
-			Entry::Occupied(mut e) => {
-				let d = e.get_mut();
-				for doc in docs {
-					d.insert(doc);
-					self.docs.insert(doc);
-				}
-			}
-		}
-
-		#[cfg(debug_assertions)]
-		debug!("KnnResult add - dist: {} - docs: {:?} - total: {}", dist, docs, self.docs.len());
-		debug!("{:?}", self.priority_list);
-
-		// Do possible eviction
-		let docs_len = self.docs.len();
-		if docs_len > self.knn {
-			if let Some((_, d)) = self.priority_list.last_key_value() {
-				if docs_len - d.len() >= self.knn {
-					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
-						self.docs -= evicted_docs;
-					}
-				}
-			}
-		}
-	}
-
-	fn build(self, #[cfg(debug_assertions)] visited_nodes: HashMap<NodeId, usize>) -> KnnResult {
-		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
-		#[cfg(debug_assertions)]
-		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
-		let mut left = self.knn;
-		for (_, docs) in self.priority_list {
-			let dl = docs.len();
-			if dl > left {
-				for doc_id in docs.iter().take(left as usize) {
-					sorted_docs.push_back(doc_id);
-				}
-				break;
-			}
-			for doc_id in docs {
-				sorted_docs.push_back(doc_id);
-			}
-			left -= dl;
-			// We don't expect anymore result, we can leave
-			if left == 0 {
-				break;
-			}
-		}
-		debug!("sorted_docs: {:?}", sorted_docs);
-		KnnResult {
-			docs: sorted_docs,
-			#[cfg(debug_assertions)]
-			visited_nodes,
-		}
-	}
-}
-
-pub struct KnnResult {
-	docs: VecDeque<DocId>,
-	#[cfg(debug_assertions)]
-	#[allow(dead_code)]
-	visited_nodes: HashMap<NodeId, usize>,
 }
 
 // https://en.wikipedia.org/wiki/M-tree
@@ -316,16 +179,19 @@ impl MTree {
 		let mut queue = BinaryHeap::new();
 		let mut res = KnnResultBuilder::new(k);
 		if let Some(root_id) = self.state.root {
-			queue.push(Reverse(PriorityNode(0.0, root_id)));
+			queue.push(Reverse(PriorityNode {
+				dist: 0.0,
+				doc: root_id,
+			}));
 		}
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
 		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, current.0 .1).await?;
+			let node = store.get_node(tx, current.0.doc).await?;
 			#[cfg(debug_assertions)]
 			{
-				debug!("Visit node id: {} - dist: {}", current.0 .1, current.0 .1);
-				if visited_nodes.insert(current.0 .1, node.n.len()).is_some() {
+				debug!("Visit node id: {} - dist: {}", current.0.doc, current.0.dist);
+				if visited_nodes.insert(current.0.doc, node.n.len()).is_some() {
 					return Err(Error::Unreachable("MTree::knn_search"));
 				}
 			}
@@ -338,7 +204,7 @@ impl MTree {
 						if res.check_add(d) {
 							#[cfg(debug_assertions)]
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
-							res.add(d, &p.docs);
+							res.add(d, &Ids64::Bits(p.docs.clone()));
 						}
 					}
 				}
@@ -350,7 +216,10 @@ impl MTree {
 						let min_dist = (d - p.radius).max(0.0);
 						if res.check_add(min_dist) {
 							debug!("Queue add - dist: {} - node: {}", min_dist, p.node);
-							queue.push(Reverse(PriorityNode(min_dist, p.node)));
+							queue.push(Reverse(PriorityNode {
+								dist: min_dist,
+								doc: p.node,
+							}));
 						}
 					}
 				}
@@ -817,10 +686,10 @@ impl MTree {
 			return Ok(0.0);
 		}
 		let dist = match &self.distance {
-			Distance::Euclidean => v1.euclidean_distance(v2)?,
+			Distance::Euclidean => v1.euclidean_distance(v2),
 			Distance::Cosine => v1.cosine_distance(v2),
-			Distance::Manhattan => v1.manhattan_distance(v2)?,
-			Distance::Minkowski(order) => v1.minkowski_distance(v2, order)?,
+			Distance::Manhattan => v1.manhattan_distance(v2),
+			Distance::Minkowski(order) => v1.minkowski_distance(v2, order.to_float()),
 			_ => return Err(Error::UnsupportedDistance(self.distance.clone())),
 		};
 		if dist.is_finite() {
@@ -1260,70 +1129,6 @@ impl MTree {
 
 struct DistanceCache(BTreeMap<(SharedVector, SharedVector), f64>);
 
-struct PriorityNode(f64, NodeId);
-
-impl PartialEq<Self> for PriorityNode {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0 && self.1 == other.1
-	}
-}
-
-impl Eq for PriorityNode {}
-
-impl PartialOrd<Self> for PriorityNode {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for PriorityNode {
-	fn cmp(&self, other: &Self) -> Ordering {
-		let cmp = cmp_f64(&self.0, &other.0);
-		if cmp != Ordering::Equal {
-			return cmp;
-		}
-		self.1.cmp(&other.1)
-	}
-}
-
-#[derive(Debug)]
-struct PriorityResult(f64);
-
-impl Eq for PriorityResult {}
-
-impl PartialEq<Self> for PriorityResult {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
-	}
-}
-
-impl PartialOrd<Self> for PriorityResult {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for PriorityResult {
-	fn cmp(&self, other: &Self) -> Ordering {
-		cmp_f64(&self.0, &other.0)
-	}
-}
-
-fn cmp_f64(f1: &f64, f2: &f64) -> Ordering {
-	if let Some(cmp) = f1.partial_cmp(f2) {
-		return cmp;
-	}
-	if f1.is_nan() {
-		if f2.is_nan() {
-			Ordering::Equal
-		} else {
-			Ordering::Less
-		}
-	} else {
-		Ordering::Greater
-	}
-}
-
 pub(in crate::idx) type MTreeStore = TreeStore<MTreeNode>;
 type MStoredNode = StoredNode<MTreeNode>;
 
@@ -1608,14 +1413,13 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
-	use rand::prelude::StdRng;
-	use rand::{Rng, SeedableRng};
 	use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 	use crate::err::Error;
 	use test_log::test;
 
 	use crate::idx::docids::DocId;
+	use crate::idx::trees::knn::tests::{new_vec, TestCollection};
 	use crate::idx::trees::mtree::{
 		InternalMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
 	};
@@ -1625,7 +1429,6 @@ mod tests {
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::Number;
 
 	async fn new_operation(
 		ds: &Datastore,
@@ -1655,24 +1458,6 @@ mod tests {
 		} else {
 			tx.cancel().await
 		}
-	}
-
-	fn new_vec(mut n: i64, t: VectorType, dim: usize) -> SharedVector {
-		let mut vec = Vector::new(t, dim);
-		vec.add(Number::Int(n));
-		for _ in 1..dim {
-			n += 1;
-			vec.add(Number::Int(n));
-		}
-		vec.into()
-	}
-
-	fn new_random_vec(rng: &mut StdRng, t: VectorType, dim: usize) -> SharedVector {
-		let mut vec = Vector::new(t, dim);
-		for _ in 0..dim {
-			vec.add(Number::Float(rng.gen_range(-5.0..5.0)));
-		}
-		vec.into()
 	}
 
 	#[test(tokio::test)]
@@ -2089,20 +1874,14 @@ mod tests {
 		cache_size: usize,
 	) -> Result<(), Error> {
 		for (doc_id, obj) in collection.as_ref() {
-			info!("### Remove {} {:?}", doc_id, obj);
-			let doc_found = {
-				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Read, cache_size).await;
-				let res = t.knn_search(&mut tx, &mut st, obj, 10).await?;
-				res.docs.contains(doc_id)
-			};
 			{
+				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Write, cache_size).await;
-				assert_eq!(
+				assert!(
 					t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
-					doc_found,
-					"Delete failed - doc_id: {doc_id} - doc_found: {doc_found} - obj: {obj:?}",
+					"Delete failed - doc_id: {doc_id} - obj: {obj:?} - coll: {:?} ",
+					collection.as_ref()
 				);
 				finish_operation(t, tx, st, true).await?;
 			}
@@ -2110,11 +1889,12 @@ mod tests {
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Read, cache_size).await;
 				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
-				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
+				let docs: Vec<DocId> = res.docs.into_iter().map(|(d, _)| d).collect();
+				assert!(!docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
 				let (mut st, mut tx) =
-					new_operation(ds, t, TransactionType::Read, cache_size).await;
+					new_operation(&ds, t, TransactionType::Read, cache_size).await;
 				check_tree_properties(&mut tx, &mut st, t).await?;
 			}
 		}
@@ -2135,9 +1915,10 @@ mod tests {
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
 				let res = t.knn_search(&mut tx, &st, obj, knn).await?;
+				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 				if collection.is_unique() {
 					assert!(
-						res.docs.contains(doc_id),
+						docs.contains(doc_id),
 						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
 						obj,
 						knn,
@@ -2147,6 +1928,7 @@ mod tests {
 				}
 				let expected_len = collection.as_ref().len().min(knn);
 				if expected_len != res.docs.len() {
+					#[cfg(debug_assertions)]
 					debug!("{:?}", res.visited_nodes);
 					check_tree_properties(&mut tx, &mut st, t).await?;
 				}
@@ -2182,9 +1964,8 @@ mod tests {
 			);
 			// We check that the results are sorted by ascending distance
 			let mut dist = 0.0;
-			for doc in res.docs {
+			for (doc, d) in res.docs {
 				let o = map.get(&doc).unwrap();
-				let d = t.calculate_distance(obj, o)?;
 				debug!("doc: {doc} - d: {d} - {obj:?} - {o:?}");
 				assert!(d >= dist, "d: {d} - dist: {dist}");
 				dist = d;
@@ -2237,53 +2018,6 @@ mod tests {
 		Ok(())
 	}
 
-	enum TestCollection {
-		Unique(Vec<(DocId, SharedVector)>),
-		NonUnique(Vec<(DocId, SharedVector)>),
-	}
-
-	impl AsRef<Vec<(DocId, SharedVector)>> for TestCollection {
-		fn as_ref(&self) -> &Vec<(DocId, SharedVector)> {
-			match self {
-				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
-			}
-		}
-	}
-
-	impl TestCollection {
-		fn new_unique(
-			collection_size: usize,
-			vector_type: VectorType,
-			dimension: usize,
-		) -> TestCollection {
-			let mut collection = vec![];
-			for doc_id in 0..collection_size as DocId {
-				collection.push((doc_id, new_vec((doc_id + 1) as i64, vector_type, dimension)));
-			}
-			TestCollection::Unique(collection)
-		}
-
-		fn new_random(
-			collection_size: usize,
-			vector_type: VectorType,
-			dimension: usize,
-		) -> TestCollection {
-			let mut rng = get_seed_rnd();
-			let mut collection = vec![];
-
-			// Prepare data set
-			for doc_id in 0..collection_size {
-				collection
-					.push((doc_id as DocId, new_random_vec(&mut rng, vector_type, dimension)));
-			}
-			TestCollection::NonUnique(collection)
-		}
-
-		fn is_unique(&self) -> bool {
-			matches!(self, TestCollection::Unique(_))
-		}
-	}
-
 	#[test(tokio::test)]
 	#[ignore]
 	async fn test_mtree_unique_xs() -> Result<(), Error> {
@@ -2294,7 +2028,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_unique(i, vt, 2),
+					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 					true,
 					true,
 					true,
@@ -2338,7 +2072,7 @@ mod tests {
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_unique(i, vt, 2),
+					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 					true,
 					true,
 					true,
@@ -2356,7 +2090,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new_unique(150, vt, 3),
+				TestCollection::new(true, 100, vt, 3, &Distance::Euclidean),
 				true,
 				true,
 				true,
@@ -2373,7 +2107,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 10),
+				TestCollection::new(true, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				false,
@@ -2390,7 +2124,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 10),
+				TestCollection::new(true, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				false,
@@ -2407,7 +2141,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_unique(1000, vt, 10),
+				TestCollection::new(true, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				false,
@@ -2421,13 +2155,15 @@ mod tests {
 	#[test(tokio::test)]
 	#[ignore]
 	async fn test_mtree_random_xs() -> Result<(), Error> {
-		for vt in [VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16] {
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
 			for i in 0..30 {
 				// 10, 40
 				test_mtree_collection(
 					&[3, 40],
 					vt,
-					TestCollection::new_random(i, vt, 1),
+					TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
 					true,
 					true,
 					true,
@@ -2445,7 +2181,7 @@ mod tests {
 			test_mtree_collection(
 				&[10, 20],
 				vt,
-				TestCollection::new_random(150, vt, 3),
+				TestCollection::new(false, 100, vt, 3, &Distance::Euclidean),
 				true,
 				true,
 				true,
@@ -2462,7 +2198,7 @@ mod tests {
 			test_mtree_collection(
 				&[40],
 				vt,
-				TestCollection::new_random(1000, vt, 10),
+				TestCollection::new(false, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
 				true,
@@ -2579,9 +2315,9 @@ mod tests {
 		.await
 	}
 
-	fn check_knn(res: &VecDeque<DocId>, expected: Vec<DocId>) {
-		let expected: VecDeque<DocId> = expected.into_iter().collect();
-		assert_eq!(res, &expected);
+	fn check_knn(res: &VecDeque<(DocId, f64)>, expected: Vec<DocId>) {
+		let res: Vec<DocId> = res.into_iter().map(|(doc, _)| *doc).collect();
+		assert_eq!(res, expected);
 	}
 
 	#[derive(Default, Debug)]
@@ -2713,15 +2449,5 @@ mod tests {
 		} else {
 			*max = Some(val);
 		}
-	}
-
-	fn get_seed_rnd() -> StdRng {
-		let seed: u64 = std::env::var("TEST_SEED")
-			.unwrap_or_else(|_| rand::random::<u64>().to_string())
-			.parse()
-			.expect("Failed to parse seed");
-		debug!("Seed: {}", seed);
-		// Create a seeded RNG
-		StdRng::seed_from_u64(seed)
 	}
 }

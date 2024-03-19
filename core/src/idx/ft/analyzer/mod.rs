@@ -233,7 +233,7 @@ mod tests {
 	use super::Analyzer;
 	use crate::ctx::Context;
 	use crate::dbs::{Options, Transaction};
-	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
+	use crate::idx::ft::analyzer::tokenizer::Tokens;
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::{
 		sql::{statements::DefineStatement, Statement},

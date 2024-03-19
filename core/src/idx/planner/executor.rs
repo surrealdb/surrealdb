@@ -134,7 +134,7 @@ impl InnerQueryExecutor {
 						if let IndexOperator::Knn(a, k) = io.op() {
 							let mut tx = txn.lock().await;
 							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
-								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
+								MtEntry::new(&mut tx, mt, a, *k).await?
 							} else {
 								let ikb = IndexKeyBase::new(opt, idx_def);
 								let mt = MTreeIndex::new(
@@ -145,7 +145,7 @@ impl InnerQueryExecutor {
 									TransactionType::Read,
 								)
 								.await?;
-								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
+								let entry = MtEntry::new(&mut tx, &mt, a, *k).await?;
 								mt_map.insert(ix_ref, mt);
 								entry
 							};
@@ -366,8 +366,11 @@ impl QueryExecutor {
 
 	fn new_mtree_index_knn_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
-			if let Some(mte) = self.0.mt_entries.get(exp.as_ref()) {
-				let it = DocIdsIterator::new(mte.doc_ids.clone(), mte.res.clone());
+			if let Some(mte) = self.0.mt_entries.get(exp) {
+				let it = DocIdsIterator::new(
+					mte.doc_ids.clone(),
+					mte.res.iter().map(|(d, _)| *d).collect(),
+				);
 				return Some(ThingIterator::Knn(it));
 			}
 		}
@@ -541,14 +544,14 @@ impl FtEntry {
 #[derive(Clone)]
 pub(super) struct MtEntry {
 	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<DocId>,
+	res: VecDeque<(DocId, f64)>,
 }
 
 impl MtEntry {
 	async fn new(
 		tx: &mut kvs::Transaction,
 		mt: &MTreeIndex,
-		a: Array,
+		a: &Array,
 		k: u32,
 	) -> Result<Self, Error> {
 		let res = mt.knn_search(tx, a, k as usize).await?;
