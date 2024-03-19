@@ -344,6 +344,14 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let val: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled() {
 		true => sixth
 			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
+				let (vs1, vs2, vs3, vs4, vs5, vs6) = (
+					to_u128_be(vs1),
+					to_u128_be(vs2),
+					to_u128_be(vs3),
+					to_u128_be(vs4),
+					to_u128_be(vs5),
+					to_u128_be(vs6),
+				);
 				Value::parse(
 					format!(
 						r#"[
@@ -419,6 +427,14 @@ async fn table_change_feeds() -> Result<(), Error> {
 			.collect(),
 		false => sixth
 			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
+				let (vs1, vs2, vs3, vs4, vs5, vs6) = (
+					to_u128_be(vs1),
+					to_u128_be(vs2),
+					to_u128_be(vs3),
+					to_u128_be(vs4),
+					to_u128_be(vs5),
+					to_u128_be(vs6),
+				);
 				Value::parse(
 					format!(
 						r#"[
