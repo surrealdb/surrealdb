@@ -342,7 +342,11 @@ impl Connection {
 		}
 
 		// if the write lock is a bottleneck then execute could be refactored into execute_mut and execute
-		rpc.write().await.execute(method, params).await.map_err(Into::into)
+		// rpc.write().await.execute(method, params).await.map_err(Into::into)
+		match method.needs_mut() {
+			true => rpc.write().await.execute(method, params).await.map_err(Into::into),
+			false => rpc.read().await.execute_immut(method, params).await.map_err(Into::into),
+		}
 	}
 }
 

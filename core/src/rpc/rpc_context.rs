@@ -63,6 +63,25 @@ pub trait RpcContext {
 		}
 	}
 
+	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
+		match method {
+			Method::Ping => Ok(Value::None.into()),
+			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
+			Method::Select => self.select(params).await.map(Into::into).map_err(Into::into),
+			Method::Insert => self.insert(params).await.map(Into::into).map_err(Into::into),
+			Method::Create => self.create(params).await.map(Into::into).map_err(Into::into),
+			Method::Update => self.update(params).await.map(Into::into).map_err(Into::into),
+			Method::Merge => self.merge(params).await.map(Into::into).map_err(Into::into),
+			Method::Patch => self.patch(params).await.map(Into::into).map_err(Into::into),
+			Method::Delete => self.delete(params).await.map(Into::into).map_err(Into::into),
+			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
+			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
+			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
+			Method::Unknown => Err(RpcError::MethodNotFound),
+			_ => Err(RpcError::MethodNotFound),
+		}
+	}
+
 	// ------------------------------
 	// Methods for authentication
 	// ------------------------------
@@ -439,7 +458,7 @@ pub trait RpcContext {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&mut self, params: Array) -> Result<impl Into<Data>, RpcError> {
+	async fn query(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
 		let Ok((query, o)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
@@ -475,13 +494,13 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn query_inner(
-		&mut self,
+		&self,
 		query: Value,
 		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>, RpcError> {
 		// If no live query handler force realtime off
 		if !Self::LQ_SUPPORT && self.session().rt {
-			self.session_mut().rt = false;
+			return Err(RpcError::BadLQConfig);
 		}
 		// Execute the query on the database
 		let res = match query {

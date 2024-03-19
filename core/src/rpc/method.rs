@@ -91,14 +91,26 @@ impl Method {
 	}
 
 	pub fn needs_mut(&self) -> bool {
-		matches!(
-			self,
-			Self::Use
-				| Self::Signup | Self::Signin
-				| Self::Invalidate
-				| Self::Authenticate
-				| Self::Set | Self::Unset
-				| Self::Query
-		)
+		!self.can_be_immut()
+	}
+
+	// should be the same as execute_immut
+	pub fn can_be_immut(&self) -> bool {
+		match self {
+			Method::Ping => true,
+			Method::Info => true,
+			Method::Select => true,
+			Method::Insert => true,
+			Method::Create => true,
+			Method::Update => true,
+			Method::Merge => true,
+			Method::Patch => true,
+			Method::Delete => true,
+			Method::Version => true,
+			Method::Query => true,
+			Method::Relate => true,
+			Method::Unknown => true,
+			_ => false,
+		}
 	}
 }
