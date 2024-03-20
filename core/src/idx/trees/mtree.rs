@@ -2332,7 +2332,7 @@ mod tests {
 				TestCollection::new_unique(150, vt, 3),
 				true,
 				true,
-				true,
+				false,
 				0,
 			)
 			.await?;
@@ -2423,7 +2423,7 @@ mod tests {
 				TestCollection::new_random(150, vt, 3),
 				true,
 				true,
-				true,
+				false,
 				0,
 			)
 			.await?;
@@ -2440,7 +2440,7 @@ mod tests {
 				TestCollection::new_random(1000, vt, 10),
 				false,
 				true,
-				true,
+				false,
 				0,
 			)
 			.await?;
