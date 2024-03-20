@@ -62,6 +62,12 @@ impl From<String> for Idiom {
 	}
 }
 
+impl From<&str> for Idiom {
+	fn from(v: &str) -> Self {
+		Self(vec![Part::from(v)])
+	}
+}
+
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Self(v)
@@ -73,6 +79,7 @@ impl From<&[Part]> for Idiom {
 		Self(v.to_vec())
 	}
 }
+
 impl From<Part> for Idiom {
 	fn from(v: Part) -> Self {
 		Self(vec![v])
