@@ -16,10 +16,7 @@ impl<'r> Responder<'r, 'static> for Error {
 		Response::build()
 			.status(Status::InternalServerError)
 			.header(rocket::http::ContentType::JSON)
-			.sized_body(
-				error_message.len(),
-				std::io::Cursor::new(error_message),
-			)
+			.sized_body(error_message.len(), std::io::Cursor::new(error_message))
 			.ok()
 	}
 }
