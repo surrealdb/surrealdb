@@ -4443,7 +4443,6 @@ version = "0.11.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6920094eb85afde5e4a138be3f2de8bbdf28000f0029e72c45025a56b042251"
 dependencies = [
- "async-compression",
  "base64 0.21.7",
  "bytes",
  "encoding_rs",
@@ -4482,10 +4481,13 @@ name = "reqwest"
 version = "0.11.27"
 source = "git+https://github.com/seanmonstar/reqwest.git?branch=0.12-dev#1bece6ff9409d4684fb6b3013a7fd0ff10662c38"
 dependencies = [
+ "async-compression",
  "base64 0.21.7",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
+ "h2 0.4.2",
  "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
@@ -5519,7 +5521,7 @@ dependencies = [
  "pprof",
  "rand 0.8.5",
  "rcgen",
- "reqwest 0.11.24",
+ "reqwest 0.11.27",
  "revision",
  "rmp-serde",
  "rmpv",
@@ -5734,7 +5736,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "regex-syntax 0.8.2",
- "reqwest 0.11.24",
+ "reqwest 0.11.27",
  "revision",
  "ring 0.17.7",
  "roaring",

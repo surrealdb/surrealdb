@@ -77,6 +77,7 @@ rand = "0.8.5"
 reqwest = { git = "https://github.com/seanmonstar/reqwest.git", branch = "0.12-dev", default-features = false, features = [
 	"blocking",
 	"gzip",
+	"http2",
 ] }
 revision = "0.5.0"
 rmpv = "1.0.1"
