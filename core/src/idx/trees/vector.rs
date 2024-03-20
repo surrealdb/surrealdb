@@ -1,9 +1,11 @@
 use crate::err::Error;
+use crate::fnc::util::math::ToFloat;
 use crate::sql::index::VectorType;
 use crate::sql::Number;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::ops::Mul;
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
@@ -107,6 +109,66 @@ impl Vector {
 			Ok(())
 		}
 	}
+
+	fn dot<T>(a: &[T], b: &[T]) -> f64
+	where
+		T: Mul<Output = T> + Copy + ToFloat,
+	{
+		a.iter().zip(b.iter()).map(|(&x, &y)| x.to_float() * y.to_float()).sum::<f64>()
+	}
+
+	fn magnitude<T>(v: &[T]) -> f64
+	where
+		T: ToFloat + Copy,
+	{
+		v.iter()
+			.map(|&x| {
+				let x = x.to_float();
+				x * x
+			})
+			.sum::<f64>()
+			.sqrt()
+	}
+
+	fn normalize<T>(v: &[T]) -> Vec<f64>
+	where
+		T: ToFloat + Copy,
+	{
+		let mag = Self::magnitude(v);
+		if mag == 0.0 || mag.is_nan() {
+			vec![0.0; v.len()] // Return a zero vector if magnitude is zero
+		} else {
+			v.iter().map(|&x| x.to_float() / mag).collect()
+		}
+	}
+
+	fn cosine<T>(a: &[T], b: &[T]) -> f64
+	where
+		T: ToFloat + Mul<Output = T> + Copy,
+	{
+		let norm_a = Self::normalize(a);
+		let norm_b = Self::normalize(b);
+		let mut s = Self::dot(&norm_a, &norm_b);
+		if s < -1.0 {
+			s = -1.0;
+		}
+		if s > 1.0 {
+			s = 1.0;
+		}
+		1.0 - s
+	}
+
+	pub(crate) fn cosine_distance(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => Self::cosine(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::cosine(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::cosine(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::cosine(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::cosine(a, b),
+			_ => f64::NAN,
+		}
+	}
+
 	pub(super) fn euclidean_distance(&self, other: &Self) -> Result<f64, Error> {
 		Self::check_same_dimension("vector::distance::euclidean", self, other)?;
 		match (self, other) {

@@ -1,5 +1,5 @@
-pub mod error;
-pub mod person;
+mod error;
+mod person;
 
 use axum::{
 	routing::{delete, get, post, put},

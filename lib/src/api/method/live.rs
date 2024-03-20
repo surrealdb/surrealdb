@@ -97,6 +97,7 @@ macro_rules! into_future {
 					rx: Some(rx),
 					client: Surreal {
 						router: client.router.clone(),
+						waiter: client.waiter.clone(),
 						engine: PhantomData,
 					},
 					response_type: PhantomData,

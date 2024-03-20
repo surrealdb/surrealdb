@@ -117,7 +117,7 @@ fn identifiers() {
 fn numbers() {
 	test_case! {
 		r#"
-			123123+32010230.123012031+33043030dec+33043030f+
+			123123+32010230.123012031+33043030dec+33043030f+303e10dec+
 
 		"#
 			=> [
@@ -128,6 +128,8 @@ fn numbers() {
 			TokenKind::Number(NumberKind::Decimal),
 			t!("+"),
 			TokenKind::Number(NumberKind::Float),
+			t!("+"),
+			TokenKind::Number(NumberKind::DecimalExponent),
 			t!("+"),
 		]
 	}

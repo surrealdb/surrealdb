@@ -135,7 +135,7 @@ license-files = []
 [[licenses.clarify]]
 name = "surrealdb-core"
 expression = "BUSL-1.1"
-license-files = [{ path = "../LICENSE", hash = 0x08ad5bad }]
+license-files = []
 
 [[licenses.clarify]]
 name = "surrealml-core"

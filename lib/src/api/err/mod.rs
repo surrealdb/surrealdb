@@ -194,6 +194,18 @@ pub enum Error {
 	/// Called `Response::take` or `Response::stream` on a query response more than once
 	#[error("Tried to take a query response that has already been taken")]
 	ResponseAlreadyTaken,
+
+	/// Tried to insert on an object
+	#[error("Insert queries on objects not supported: {0}")]
+	InsertOnObject(Object),
+
+	/// Tried to insert on an array
+	#[error("Insert queries on arrays not supported: {0}")]
+	InsertOnArray(Array),
+
+	/// Tried to insert on an edge or edges
+	#[error("Insert queries on edges not supported: {0}")]
+	InsertOnEdges(Edges),
 }
 
 #[cfg(feature = "protocol-http")]

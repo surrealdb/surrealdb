@@ -12,6 +12,7 @@ use crate::api::ExtraFeatures;
 use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::opt::WaitFor;
 use flume::Receiver;
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -24,6 +25,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::watch;
 use url::Url;
 
 impl crate::api::Connection for Client {}
@@ -77,6 +79,7 @@ impl Connection for Client {
 					sender: route_tx,
 					last_id: AtomicI64::new(0),
 				})),
+				waiter: Arc::new(watch::channel(Some(WaitFor::Connection))),
 				engine: PhantomData,
 			})
 		})

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Duration;
 use surrealdb::key::table::ix;
-use surrealdb_core::sql::{value, Array, Id, Thing};
+use surrealdb::sql::{value, Array, Id, Thing};
 
 // Common use case: VectorSearch
 fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {
@@ -94,11 +94,11 @@ fn bench_hash<K: Hash + Eq + Clone, V: Clone>(
 	samples: &[(K, V)],
 ) {
 	group.bench_function("hash_insert", |b| {
-		b.iter(|| bench_hash_insert(&samples));
+		b.iter(|| bench_hash_insert(samples));
 	});
 	group.bench_function("hash_get", |b| {
-		let map = build_hash(&samples);
-		b.iter(|| bench_hash_get(&samples, &map));
+		let map = build_hash(samples);
+		b.iter(|| bench_hash_get(samples, &map));
 	});
 }
 
@@ -107,12 +107,12 @@ fn bench_trie<K: TrieKey + Clone, V: Clone>(
 	samples: &[(K, V)],
 ) {
 	group.bench_function("trie_insert", |b| {
-		b.iter(|| bench_trie_insert(&samples));
+		b.iter(|| bench_trie_insert(samples));
 	});
 
 	group.bench_function("trie_get", |b| {
-		let map = build_trie(&samples);
-		b.iter(|| bench_trie_get(&samples, &map));
+		let map = build_trie(samples);
+		b.iter(|| bench_trie_get(samples, &map));
 	});
 }
 
@@ -121,12 +121,12 @@ fn bench_btree<K: Eq + Ord + Clone, V: Clone>(
 	samples: &[(K, V)],
 ) {
 	group.bench_function("btree_insert", |b| {
-		b.iter(|| bench_btree_insert(&samples));
+		b.iter(|| bench_btree_insert(samples));
 	});
 
 	group.bench_function("btree_get", |b| {
-		let map = build_btree(&samples);
-		b.iter(|| bench_btree_get(&samples, &map));
+		let map = build_btree(samples);
+		b.iter(|| bench_btree_get(samples, &map));
 	});
 }
 

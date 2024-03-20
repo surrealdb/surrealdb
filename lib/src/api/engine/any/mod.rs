@@ -144,6 +144,7 @@ use crate::opt::path_to_string;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::watch;
 use url::Url;
 
 /// A trait for converting inputs to a server address object
@@ -240,6 +241,7 @@ impl Surreal<Any> {
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
+			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
 	}
@@ -296,6 +298,7 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 		address: address.into_endpoint(),
 		capacity: 0,
 		client: PhantomData,
+		waiter: Arc::new(watch::channel(None)),
 		response_type: PhantomData,
 	}
 }

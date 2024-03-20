@@ -14,12 +14,12 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check events
-		if !opt.events {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
-		// Check if forced
-		if !opt.force && !self.changed() {
+		// Check if changed
+		if !self.changed() {
 			return Ok(());
 		}
 		// Don't run permissions

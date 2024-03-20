@@ -18,9 +18,15 @@ use nom::{
 	multi::{many0, separated_list1},
 	Err,
 };
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 	let (i, _) = tag_no_case("USER")(i)?;
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, base, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -38,6 +44,11 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 		base,
 		vec!["Viewer".into()], // New users get the viewer role by default
 	);
+
+	if if_not_exists.is_some() {
+		res.if_not_exists = true;
+	};
+
 	// Assign any defined options
 	for opt in opts {
 		match opt {

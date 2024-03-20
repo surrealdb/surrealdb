@@ -2,6 +2,7 @@ use crate::key::database::tb;
 use crate::key::database::tb::Tb;
 use crate::kvs::ScanPage;
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::TableType;
 
 #[tokio::test]
 #[serial]
@@ -25,7 +26,7 @@ async fn table_definitions_can_be_scanned() {
 		view: None,
 		permissions: Default::default(),
 		changefeed: None,
-		comment: None,
+		..Default::default()
 	};
 	tx.set(&key, &value).await.unwrap();
 
@@ -70,6 +71,8 @@ async fn table_definitions_can_be_deleted() {
 		permissions: Default::default(),
 		changefeed: None,
 		comment: None,
+		if_not_exists: false,
+		kind: TableType::Any,
 	};
 	tx.set(&key, &value).await.unwrap();
 

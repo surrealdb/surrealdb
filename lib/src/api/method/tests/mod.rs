@@ -138,6 +138,12 @@ async fn api() {
 		DB.update(USER).range("jane".."john").content(User::default()).await.unwrap();
 	let _: Option<User> = DB.update((USER, "john")).content(User::default()).await.unwrap();
 
+	// insert
+	let _: Vec<User> = DB.insert(USER).await.unwrap();
+	let _: Option<User> = DB.insert((USER, "john")).await.unwrap();
+	let _: Vec<User> = DB.insert(USER).content(User::default()).await.unwrap();
+	let _: Option<User> = DB.insert((USER, "john")).content(User::default()).await.unwrap();
+
 	// merge
 	let _: Vec<User> = DB.update(USER).merge(User::default()).await.unwrap();
 	let _: Vec<User> = DB.update(USER).range("jane".."john").merge(User::default()).await.unwrap();

@@ -61,7 +61,7 @@ mod tests {
 		for duration in durations {
 			let string = format!("{duration:?}");
 			let parsed = super::duration_from_str(&string)
-				.expect(&format!("Duration {string} failed to parse"));
+				.unwrap_or_else(|| panic!("Duration {string} failed to parse"));
 			assert_eq!(duration, parsed, "Duration {string} not parsed correctly");
 		}
 	}

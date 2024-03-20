@@ -29,14 +29,16 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+use crate::key::debug::sprint_key;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
 use crate::kvs::api::Transaction as ApiTransaction;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
-use crate::kvs::lq_structs::{LqEntry, LqValue};
+use crate::kvs::lq_structs::{LqValue, TrackedResult};
 use crate::kvs::Check;
+use crate::options::EngineOptions;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -44,15 +46,13 @@ use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
-use crate::vs::Oracle;
 use crate::vs::Versionstamp;
+use crate::vs::{conv, Oracle};
 
 use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
-
-const LQ_CAPACITY: usize = 100;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Limit {
@@ -93,7 +93,8 @@ pub struct Transaction {
 	pub(super) cf: cf::Writer,
 	pub(super) vso: Arc<Mutex<Oracle>>,
 	pub(super) clock: Arc<SizedClock>,
-	pub(super) prepared_live_queries: (Arc<Sender<LqEntry>>, Arc<Receiver<LqEntry>>),
+	pub(super) prepared_async_events: (Arc<Sender<TrackedResult>>, Arc<Receiver<TrackedResult>>),
+	pub(super) engine_options: EngineOptions,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -134,6 +135,7 @@ macro_rules! expand_inner {
 		}
 	};
 }
+
 
 #[derive(Copy, Clone)]
 pub enum TransactionType {
@@ -236,22 +238,27 @@ impl Transaction {
 		expand_inner!(&mut self.inner, v => { v.commit().await })
 	}
 
-	#[allow(unused)]
-	pub(crate) fn consume_pending_live_queries(&self) -> Vec<LqEntry> {
-		let mut lq: Vec<LqEntry> = Vec::with_capacity(LQ_CAPACITY);
-		while let Ok(l) = self.prepared_live_queries.1.try_recv() {
-			lq.push(l);
+	/// From the existing transaction, consume all the remaining live query registration events and return them synchronously
+	/// This function does not check that a transaction was committed, but the intention is to consume from this
+	/// only once the transaction is committed
+	pub(crate) fn consume_pending_live_queries(&self) -> Vec<TrackedResult> {
+		let mut tracked_results: Vec<TrackedResult> =
+			Vec::with_capacity(self.engine_options.new_live_queries_per_transaction as usize);
+		while let Ok(tracked_result) = self.prepared_async_events.1.try_recv() {
+			tracked_results.push(tracked_result);
 		}
-		lq
+		tracked_results
 	}
 
-	/// Sends a live query to the transaction which is forwarded only once committed
-	/// And removed once a transaction is aborted
-	pub(crate) fn pre_commit_register_live_query(
+	/// Sends an async operation, such as a new live query, to the transaction which is forwarded
+	/// only once committed and removed once a transaction is aborted
+	// allow(dead_code) because this is used in v2, but not v1
+	#[allow(dead_code)]
+	pub(crate) fn pre_commit_register_async_event(
 		&mut self,
-		lq_entry: LqEntry,
+		lq_entry: TrackedResult,
 	) -> Result<(), Error> {
-		self.prepared_live_queries.0.try_send(lq_entry).map_err(|_send_err| {
+		self.prepared_async_events.0.try_send(lq_entry).map_err(|_send_err| {
 			Error::Internal("Prepared lq failed to add lq to channel".to_string())
 		})
 	}
@@ -262,6 +269,7 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Del {:?}", key);
 		expand_inner!(&mut self.inner, v => { v.del(key).await })
@@ -271,7 +279,7 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key> + Debug,
+		K: Into<Key> + Debug + AsRef<[u8]>,
 	{
 		#[cfg(debug_assertions)]
 		trace!("Exi {:?}", key);
@@ -284,6 +292,7 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Get {:?}", key);
 		expand_inner!(&mut self.inner, v => { v.get(key).await })
@@ -296,6 +305,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} => {:?}", key, val);
 		expand_inner!(&mut self.inner, v => { v.set(key, val).await })
@@ -311,6 +321,8 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		// We convert to byte slice as its easier at this level
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Get Timestamp {:?}", key);
 		expand_inner!(&mut self.inner, v => { v.get_timestamp(key, lock).await })
@@ -352,6 +364,9 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let ts_key = ts_key.into();
+		let prefix = prefix.into();
+		let suffix = suffix.into();
 		#[cfg(debug_assertions)]
 		trace!("Set {:?} <ts> {:?} => {:?}", prefix, suffix, val);
 		expand_inner!(&mut self.inner, v => { v.set_versionstamped_key(ts_key, prefix, suffix, val).await })
@@ -375,6 +390,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
+		let rng = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
 		#[cfg(debug_assertions)]
 		trace!("Scan {:?} - {:?}", rng.start, rng.end);
 		expand_inner!(&mut self.inner, v => { v.scan(rng, limit).await })
@@ -390,10 +409,10 @@ impl Transaction {
 		batch_limit: u32,
 	) -> Result<ScanResult<K>, Error>
 	where
-		K: Into<Key> + From<Vec<u8>> + Debug + Clone,
+		K: Into<Key> + From<Vec<u8>> + AsRef<[u8]> + Debug + Clone,
 	{
 		#[cfg(debug_assertions)]
-		trace!("Scan {:?} - {:?}", page.range.start, page.range.end);
+		trace!("Scan paged {} - {}", sprint_key(&page.range.start), sprint_key(&page.range.end));
 		let range = page.range.clone();
 		let res = expand_inner!(&mut self.inner, v => { v.scan(range, batch_limit).await });
 
@@ -428,6 +447,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Putc {:?} if {:?} => {:?}", key, chk, val);
 		expand_inner!(&mut self.inner, v => { v.putc(key, val, chk).await })
@@ -440,6 +460,7 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Delc {:?} if {:?}", key, chk);
 		expand_inner!(&mut self.inner, v => { v.delc(key, chk).await })
@@ -456,10 +477,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Getr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		let beg: Key = rng.start.into();
 		let end: Key = rng.end.into();
+		#[cfg(debug_assertions)]
+		trace!("Getr {}..{} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let mut out: Vec<(Key, Val)> = vec![];
 		let mut next_page = Some(ScanPage {
 			range: beg..end,
@@ -490,6 +511,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug + Clone,
 	{
+		let rng = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
 		#[cfg(debug_assertions)]
 		trace!("Delr {:?}..{:?} (limit: {limit})", rng.start, rng.end);
 		match expand_inner!(&mut self.inner, v => { v.delr(rng.clone(), limit).await }) {
@@ -519,11 +544,14 @@ impl Transaction {
 			let res = res.values;
 			// Exit when settled
 			if res.is_empty() {
+				trace!("Delr page was empty");
 				break;
 			}
 			// Loop over results
 			for (k, _) in res.into_iter() {
 				// Delete
+				#[cfg(debug_assertions)]
+				trace!("Delr key {}", sprint_key(&k));
 				self.del(k).await?;
 			}
 		}
@@ -536,10 +564,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Getp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
+		#[cfg(debug_assertions)]
+		trace!("Getp {}-{} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let mut out: Vec<(Key, Val)> = vec![];
 		// Start processing
 		let mut next_page = Some(ScanPage {
@@ -570,10 +598,10 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!("Delp {:?} (limit: {limit})", key);
 		let beg: Key = key.into();
 		let end: Key = beg.clone().add(0xff);
+		#[cfg(debug_assertions)]
+		trace!("Delp {}-{} (limit: {limit})", sprint_key(&beg), sprint_key(&end));
 		let min = beg.clone();
 		let max = end.clone();
 		self.delr(min..max, limit).await?;
@@ -801,7 +829,7 @@ impl Transaction {
 		let key = crate::key::table::lq::new(ns, db, tb, live_stm.id.0);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
 		#[cfg(debug_assertions)]
-		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		trace!("putc_tblq ({:?}): key={:?}", &live_stm.id, sprint_key(&key_enc));
 		self.putc(key_enc, live_stm, expected).await
 	}
 
@@ -1367,6 +1395,34 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific function definition from a database.
+	pub async fn get_db_function(
+		&mut self,
+		ns: &str,
+		db: &str,
+		fc: &str,
+	) -> Result<DefineFunctionStatement, Error> {
+		let key = crate::key::database::fc::new(ns, db, fc);
+		let val = self.get(key).await?.ok_or(Error::FcNotFound {
+			value: fc.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific function definition from a database.
+	pub async fn get_db_param(
+		&mut self,
+		ns: &str,
+		db: &str,
+		pa: &str,
+	) -> Result<DefineParamStatement, Error> {
+		let key = crate::key::database::pa::new(ns, db, pa);
+		let val = self.get(key).await?.ok_or(Error::PaNotFound {
+			value: pa.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific scope definition.
 	pub async fn get_sc(
 		&mut self,
@@ -1435,9 +1491,60 @@ impl Transaction {
 	) -> Result<LiveStatement, Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, *lv);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
-		trace!("Getting lv ({:?}) {:?}", lv, crate::key::debug::sprint_key(&key_enc));
+		trace!("Getting lv ({:?}) {}", lv, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
 			value: lv.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	pub async fn get_tb_event(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ev: &str,
+	) -> Result<DefineEventStatement, Error> {
+		let key = crate::key::table::ev::new(ns, db, tb, ev);
+		let key_enc = crate::key::table::ev::Ev::encode(&key)?;
+		trace!("Getting ev ({:?}) {}", ev, sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::EvNotFound {
+			value: ev.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	pub async fn get_tb_field(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		fd: &str,
+	) -> Result<DefineFieldStatement, Error> {
+		let key = crate::key::table::fd::new(ns, db, tb, fd);
+		let key_enc = crate::key::table::fd::Fd::encode(&key)?;
+		trace!("Getting fd ({:?}) {}", fd, sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::FdNotFound {
+			value: fd.to_string(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve an event for a table.
+	pub async fn get_tb_index(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<DefineIndexStatement, Error> {
+		let key = crate::key::table::ix::new(ns, db, tb, ix);
+		let key_enc = crate::key::table::ix::Ix::encode(&key)?;
+		trace!("Getting ix ({:?}) {}", ix, sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::IxNotFound {
+			value: ix.to_string(),
 		})?;
 		Ok(val.into())
 	}
@@ -2055,16 +2162,18 @@ impl Transaction {
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
 	// you must call the `complete_changes` function and then commit the transaction.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn record_change(
 		&mut self,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		id: &Thing,
-		p: Cow<'_, Value>,
-		v: Cow<'_, Value>,
+		previous: Cow<'_, Value>,
+		current: Cow<'_, Value>,
+		store_difference: bool,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), p, v)
+		self.cf.update(ns, db, tb, id.clone(), previous, current, store_difference)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
@@ -2246,6 +2355,14 @@ impl Transaction {
 		// This also works as an advisory lock on the ts keys so that there is
 		// on other concurrent transactions that can write to the ts_key or the keys after it.
 		let vs = self.get_timestamp(crate::key::database::vs::new(ns, db), lock).await?;
+		#[cfg(debug_assertions)]
+		trace!(
+			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
+			ts,
+			conv::versionstamp_to_u64(&vs),
+			ns,
+			db
+		);
 
 		// Ensure there are no keys after the ts_key
 		// Otherwise we can go back in time!
@@ -2255,6 +2372,13 @@ impl Transaction {
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
+			trace!(
+				"There already was a greater committed timestamp {} in ns: {}, db: {} found: {}",
+				ts,
+				ns,
+				db,
+				sprint_key(k)
+			);
 			let k = crate::key::database::ts::Ts::decode(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
@@ -2298,6 +2422,23 @@ impl Transaction {
 	#[allow(unused_variables)]
 	fn check_level(&mut self, check: Check) {
 		expand_inner!(&mut self.inner, v => { v.check_level(check) })
+	}
+
+	#[cfg(debug_assertions)]
+	#[allow(unused)]
+	#[doc(hidden)]
+	pub async fn print_all(&mut self) {
+		let mut next_page =
+			Some(ScanPage::from(crate::key::root::ns::prefix()..b"\xff\xff\xff".to_vec()));
+		println!("Start print all");
+		while next_page.is_some() {
+			let res = self.scan_paged(next_page.unwrap(), 1000).await.unwrap();
+			for (k, _) in res.values {
+				println!("{}", sprint_key(&k));
+			}
+			next_page = res.next_page;
+		}
+		println!("End print all");
 	}
 }
 
@@ -2560,7 +2701,7 @@ mod tests {
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod tx_test {
-	use crate::kvs::lq_structs::LqEntry;
+	use crate::kvs::lq_structs::{LqEntry, TrackedResult};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -2591,13 +2732,13 @@ mod tx_test {
 				auth: None,
 			},
 		};
-		tx.pre_commit_register_live_query(lq_entry.clone()).unwrap();
+		tx.pre_commit_register_async_event(TrackedResult::LiveQuery(lq_entry.clone())).unwrap();
 
 		tx.commit().await.unwrap();
 
 		// Verify data
 		let live_queries = tx.consume_pending_live_queries();
 		assert_eq!(live_queries.len(), 1);
-		assert_eq!(live_queries[0], lq_entry);
+		assert_eq!(live_queries[0], TrackedResult::LiveQuery(lq_entry));
 	}
 }

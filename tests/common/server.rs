@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 use tokio::time;
+use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
 
 pub const USER: &str = "root";
@@ -33,8 +34,13 @@ impl Child {
 		self
 	}
 
-	pub fn finish(mut self) {
-		self.inner.take().unwrap().kill().unwrap();
+	pub fn finish(&mut self) -> Result<&mut Self, String> {
+		let a = self
+			.inner
+			.as_mut()
+			.map(|child| child.kill().map_err(|e| format!("failed to kill: {}", e)))
+			.unwrap_or(Err("no inner".to_string()));
+		a.map(|_ok| self)
 	}
 
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
@@ -58,8 +64,8 @@ impl Child {
 
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
-	pub fn output(mut self) -> Result<String, String> {
-		let status = self.inner.take().unwrap().wait().unwrap();
+	pub fn output(&mut self) -> Result<String, String> {
+		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
 
 		let mut buf = self.stdout();
 		buf.push_str(&self.stderr());

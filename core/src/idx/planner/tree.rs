@@ -97,9 +97,15 @@ impl<'a> TreeBuilder<'a> {
 		match v {
 			Value::Expression(e) => self.eval_expression(e).await,
 			Value::Idiom(i) => self.eval_idiom(i).await,
-			Value::Strand(_) | Value::Number(_) | Value::Bool(_) | Value::Thing(_) => {
-				Ok(Node::Computed(Arc::new(v.to_owned())))
-			}
+			Value::Strand(_)
+			| Value::Number(_)
+			| Value::Bool(_)
+			| Value::Thing(_)
+			| Value::Duration(_)
+			| Value::Uuid(_)
+			| Value::Constant(_)
+			| Value::Geometry(_)
+			| Value::Datetime(_) => Ok(Node::Computed(Arc::new(v.to_owned()))),
 			Value::Array(a) => self.eval_array(a).await,
 			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
@@ -310,12 +316,11 @@ impl<'a> TreeBuilder<'a> {
 				(Operator::Contain, v, IdiomPosition::Left) => {
 					Some(IndexOperator::Equality(v.clone()))
 				}
-				(Operator::ContainAny, Value::Array(a), IdiomPosition::Left) => {
-					Some(IndexOperator::Union(a.clone()))
-				}
-				(Operator::ContainAll, Value::Array(a), IdiomPosition::Left) => {
-					Some(IndexOperator::Union(a.clone()))
-				}
+				(
+					Operator::ContainAny | Operator::ContainAll | Operator::Inside,
+					Value::Array(a),
+					IdiomPosition::Left,
+				) => Some(IndexOperator::Union(a.clone())),
 				(
 					Operator::LessThan
 					| Operator::LessThanOrEqual

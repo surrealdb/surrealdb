@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::iam::Auth;
 use crate::iam::{Level, Role};
 use crate::sql::value::Value;
+use chrono::Utc;
 use std::sync::Arc;
 
 /// Specifies the current session information when processing a query.
@@ -27,6 +28,8 @@ pub struct Session {
 	pub tk: Option<Value>,
 	/// The current scope authentication data
 	pub sd: Option<Value>,
+	/// The current expiration time of the session
+	pub exp: Option<i64>,
 }
 
 impl Session {
@@ -69,6 +72,15 @@ impl Session {
 		self.rt
 	}
 
+	/// Checks if the session has expired
+	pub(crate) fn expired(&self) -> bool {
+		match self.exp {
+			Some(exp) => Utc::now().timestamp() > exp,
+			// It is currently possible to have sessions without expiration.
+			None => false,
+		}
+	}
+
 	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
 		// Add scope auth data
@@ -90,6 +102,7 @@ impl Session {
 			"sc".to_string() => self.sc.to_owned().into(),
 			"sd".to_string() => self.sd.to_owned().into(),
 			"tk".to_string() => self.tk.to_owned().into(),
+			"exp".to_string() => self.exp.to_owned().into(),
 		});
 		ctx.add_value("session", val);
 		// Output context
@@ -132,6 +145,7 @@ impl Session {
 			sc: Some(sc.to_owned()),
 			tk: None,
 			sd: Some(rid),
+			exp: None,
 		}
 	}
 

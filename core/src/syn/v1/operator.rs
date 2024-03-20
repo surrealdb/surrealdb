@@ -76,7 +76,6 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::Mul, char('∙')),
 			value(Operator::Div, char('/')),
 			value(Operator::Div, char('÷')),
-			#[cfg(feature = "sql2")]
 			value(Operator::Rem, char('%')),
 		)),
 		alt((
@@ -150,12 +149,25 @@ pub fn knn_distance(i: &str) -> IResult<&str, Distance> {
 }
 
 pub fn knn(i: &str) -> IResult<&str, Operator> {
-	let (i, _) = opt(tag_no_case("knn"))(i)?;
-	let (i, _) = char('<')(i)?;
-	let (i, k) = u32(i)?;
-	let (i, dist) = opt(knn_distance)(i)?;
-	let (i, _) = char('>')(i)?;
-	Ok((i, Operator::Knn(k, dist)))
+	alt((
+		|i| {
+			let (i, _) = opt(tag_no_case("knn"))(i)?;
+			let (i, _) = char('<')(i)?;
+			let (i, k) = u32(i)?;
+			let (i, dist) = opt(knn_distance)(i)?;
+			let (i, _) = char('>')(i)?;
+			Ok((i, Operator::Knn(k, dist)))
+		},
+		|i| {
+			let (i, _) = tag("<|")(i)?;
+			cut(|i| {
+				let (i, k) = u32(i)?;
+				let (i, dist) = opt(knn_distance)(i)?;
+				let (i, _) = tag("|>")(i)?;
+				Ok((i, Operator::Knn(k, dist)))
+			})(i)
+		},
+	))(i)
 }
 
 pub fn dir(i: &str) -> IResult<&str, Dir> {
@@ -218,7 +230,13 @@ mod tests {
 		let res = knn("<5>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<5>", format!("{}", out));
+		assert_eq!("<|5|>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(5, None));
+
+		let res = knn("<|5|>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<|5|>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(5, None));
 	}
 
@@ -227,16 +245,22 @@ mod tests {
 		let res = knn("<3,EUCLIDEAN>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<3,EUCLIDEAN>", format!("{}", out));
+		assert_eq!("<|3,EUCLIDEAN|>", format!("{}", out));
+		assert_eq!(out, Operator::Knn(3, Some(Distance::Euclidean)));
+
+		let res = knn("<|3,EUCLIDEAN|>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<|3,EUCLIDEAN|>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(3, Some(Distance::Euclidean)));
 	}
 
 	#[test]
 	fn test_knn_with_prefix() {
-		let res = knn("knn<5>");
+		let res = knn("<|5|>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<5>", format!("{}", out));
+		assert_eq!("<|5|>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(5, None));
 	}
 }

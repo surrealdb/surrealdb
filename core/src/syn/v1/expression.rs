@@ -84,7 +84,7 @@ pub fn future(i: &str) -> IResult<&str, Future> {
 mod tests {
 
 	use super::*;
-	use crate::sql::{Block, Kind, Number, Operator, Value};
+	use crate::sql::{Block, Kind, Number};
 
 	#[test]
 	fn cast_int() {

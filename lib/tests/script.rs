@@ -7,8 +7,8 @@ use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::sql::Number;
 use surrealdb::sql::Value;
-use surrealdb_core::sql::Number;
 
 #[tokio::test]
 async fn script_function_error() -> Result<(), Error> {

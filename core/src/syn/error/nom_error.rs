@@ -75,10 +75,6 @@ impl<I: Clone> ParseError<I> {
 			ref tried,
 			..
 		}
-		| Self::Expected {
-			ref tried,
-			..
-		}
 		| Self::Explained {
 			ref tried,
 			..
@@ -248,9 +244,9 @@ impl ParseError<&str> {
 			ParseError::Field(tried, f) => {
 				let location = Location::of_in(tried, input);
 				let text = format!(
-					"Found '{f}' in SELECT clause at line {} column {}, but field is not an aggregate function, and is not present in GROUP BY expression",
-					location.line, location.column
-				);
+                    "Found '{f}' in SELECT clause at line {} column {}, but field is not an aggregate function, and is not present in GROUP BY expression",
+                    location.line, location.column
+                );
 				let snippet = Snippet::from_source_location(input, location, None);
 				RenderedError {
 					text,
@@ -260,9 +256,9 @@ impl ParseError<&str> {
 			ParseError::Split(tried, f) => {
 				let location = Location::of_in(tried, input);
 				let text = format!(
-					"Found '{f}' in SPLIT ON clause at line {} column {}, but field is is not present in SELECT expression",
-					location.line, location.column
-				);
+                    "Found '{f}' in SPLIT ON clause at line {} column {}, but field is is not present in SELECT expression",
+                    location.line, location.column
+                );
 				let snippet = Snippet::from_source_location(input, location, None);
 				RenderedError {
 					text,
@@ -272,9 +268,9 @@ impl ParseError<&str> {
 			ParseError::Order(tried, f) => {
 				let location = Location::of_in(tried, input);
 				let text = format!(
-					"Found '{f}' in ORDER BY clause at line {} column {}, but field is is not present in SELECT expression",
-					location.line, location.column
-				);
+                    "Found '{f}' in ORDER BY clause at line {} column {}, but field is is not present in SELECT expression",
+                    location.line, location.column
+                );
 				let snippet = Snippet::from_source_location(input, location, None);
 				RenderedError {
 					text,
@@ -284,9 +280,9 @@ impl ParseError<&str> {
 			ParseError::Group(tried, f) => {
 				let location = Location::of_in(tried, input);
 				let text = format!(
-					"Found '{f}' in GROUP BY clause at line {} column {}, but field is is not present in SELECT expression",
-					location.line, location.column
-				);
+                    "Found '{f}' in GROUP BY clause at line {} column {}, but field is is not present in SELECT expression",
+                    location.line, location.column
+                );
 				let snippet = Snippet::from_source_location(input, location, None);
 				RenderedError {
 					text,

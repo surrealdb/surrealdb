@@ -2,6 +2,7 @@ pub mod args;
 pub mod connection;
 pub mod failure;
 pub mod format;
+pub mod post_context;
 pub mod request;
 pub mod response;
 

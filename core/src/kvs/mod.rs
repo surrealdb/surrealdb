@@ -17,7 +17,8 @@ mod ds;
 mod fdb;
 mod indxdb;
 mod kv;
-mod mem;
+// pub(crate) for tests
+pub(crate) mod mem;
 mod rocksdb;
 mod speedb;
 mod surrealkv;

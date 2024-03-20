@@ -15,7 +15,13 @@ pub(super) struct Highlighter {
 }
 
 impl Highlighter {
-	pub(super) fn new(prefix: Value, suffix: Value, idiom: &Idiom, doc: &Value) -> Self {
+	pub(super) fn new(
+		prefix: Value,
+		suffix: Value,
+		partial: bool,
+		idiom: &Idiom,
+		doc: &Value,
+	) -> Self {
 		let prefix = prefix.to_raw_string().chars().collect();
 		let suffix = suffix.to_raw_string().chars().collect();
 		// Extract the fields we want to highlight
@@ -24,12 +30,12 @@ impl Highlighter {
 			fields,
 			prefix,
 			suffix,
-			offseter: Offseter::default(),
+			offseter: Offseter::new(partial),
 		}
 	}
 
-	pub(super) fn highlight(&mut self, os: Vec<Offset>) {
-		self.offseter.highlight(os);
+	pub(super) fn highlight(&mut self, term_len: u32, os: Vec<Offset>) {
+		self.offseter.highlight(term_len, os);
 	}
 
 	fn extract(val: Value, vals: &mut Vec<String>) {
@@ -104,27 +110,41 @@ impl TryFrom<Highlighter> for Value {
 	}
 }
 
-#[derive(Default)]
 pub(super) struct Offseter {
+	partial: bool,
 	offsets: HashMap<u32, BTreeMap<Position, Position>>,
 }
 
 impl Offseter {
-	pub(super) fn highlight(&mut self, os: Vec<Offset>) {
+	pub(super) fn new(partial: bool) -> Self {
+		Self {
+			partial,
+			offsets: Default::default(),
+		}
+	}
+
+	pub(super) fn highlight(&mut self, term_len: u32, os: Vec<Offset>) {
 		for o in os {
+			let (start, end) = if self.partial {
+				let start = o.gen_start.min(o.end);
+				let end = (start + term_len).min(o.end);
+				(start, end)
+			} else {
+				(o.start, o.end)
+			};
 			match self.offsets.entry(o.index) {
-				HEntry::Occupied(mut e) => match e.get_mut().entry(o.start) {
+				HEntry::Occupied(mut e) => match e.get_mut().entry(start) {
 					BEntry::Vacant(e) => {
-						e.insert(o.end);
+						e.insert(end);
 					}
 					BEntry::Occupied(mut e) => {
 						if o.end.gt(e.get()) {
-							e.insert(o.end);
+							e.insert(end);
 						}
 					}
 				},
 				HEntry::Vacant(e) => {
-					e.insert(BTreeMap::from([(o.start, o.end)]));
+					e.insert(BTreeMap::from([(start, end)]));
 				}
 			}
 		}

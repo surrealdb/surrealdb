@@ -97,6 +97,7 @@ async fn select_all(
 			Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res))),
 			Some(Accept::ApplicationPack) => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
+			// TODO: remove format in 2.0.0
 			Some(Accept::Surrealdb) => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(Error::InvalidType),

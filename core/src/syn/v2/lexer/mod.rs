@@ -10,7 +10,7 @@ mod datetime;
 mod duration;
 mod ident;
 mod js;
-mod keywords;
+pub mod keywords;
 mod number;
 mod reader;
 mod strand;

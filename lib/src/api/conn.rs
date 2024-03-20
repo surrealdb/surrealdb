@@ -68,6 +68,8 @@ pub enum Method {
 	Import,
 	/// Invalidates a session
 	Invalidate,
+	/// Inserts a record or records into a table
+	Insert,
 	/// Kills a live query
 	#[doc(hidden)] // Not supported yet
 	Kill,

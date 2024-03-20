@@ -4,7 +4,7 @@ use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
-use revision::revisioned;
+use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
@@ -37,7 +37,63 @@ pub struct BState {
 	generation: u64,
 }
 
-impl VersionedSerdeState for BState {}
+impl VersionedSerdeState for BState {
+	fn try_from_val(val: Val) -> Result<Self, Error> {
+		match Self::deserialize_revisioned(&mut val.as_slice()) {
+			Ok(r) => Ok(r),
+			// If it fails here, there is the chance it was an old version of BState
+			// that included the #[serde[skip]] updated parameter
+			Err(e) => match BState1skip::deserialize_revisioned(&mut val.as_slice()) {
+				Ok(b_old) => Ok(b_old.into()),
+				Err(_) => match BState1::deserialize_revisioned(&mut val.as_slice()) {
+					Ok(b_old) => Ok(b_old.into()),
+					// Otherwise we return the initial error
+					Err(_) => Err(Error::Revision(e)),
+				},
+			},
+		}
+	}
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
+pub(in crate::idx) struct BState1 {
+	minimum_degree: u32,
+	root: Option<NodeId>,
+	next_node_id: NodeId,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
+pub(in crate::idx) struct BState1skip {
+	minimum_degree: u32,
+	root: Option<NodeId>,
+	next_node_id: NodeId,
+	#[serde(skip)]
+	updated: bool,
+}
+
+impl From<BState1> for BState {
+	fn from(o: BState1) -> Self {
+		Self {
+			minimum_degree: o.minimum_degree,
+			root: o.root,
+			next_node_id: o.next_node_id,
+			generation: 0,
+		}
+	}
+}
+
+impl From<BState1skip> for BState {
+	fn from(o: BState1skip) -> Self {
+		Self {
+			minimum_degree: o.minimum_degree,
+			root: o.root,
+			next_node_id: o.next_node_id,
+			generation: 0,
+		}
+	}
+}
 
 impl BState {
 	pub fn new(minimum_degree: u32) -> Self {
@@ -991,7 +1047,7 @@ mod tests {
 
 	async fn check_insertions<F, BK>(
 		mut tx: Transaction,
-		mut st: BTreeStore<BK>,
+		st: BTreeStore<BK>,
 		t: &mut BTree<BK>,
 		samples_size: usize,
 		sample_provider: F,
@@ -1001,7 +1057,7 @@ mod tests {
 	{
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
-			assert_eq!(t.search(&mut tx, &mut st, &key).await.unwrap(), Some(payload));
+			assert_eq!(t.search(&mut tx, &st, &key).await.unwrap(), Some(payload));
 		}
 		tx.cancel().await.unwrap();
 	}
@@ -1061,9 +1117,9 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
+			let (mut tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &st).await.unwrap(),
 				BStatistics {
 					keys_count: 100,
 					max_depth: 3,
@@ -1091,9 +1147,9 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
+			let (mut tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &st).await.unwrap(),
 				BStatistics {
 					keys_count: 100,
 					max_depth: 3,
@@ -1125,8 +1181,8 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-			let s = t.statistics(&mut tx, &mut st).await.unwrap();
+			let (mut tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
+			let s = t.statistics(&mut tx, &st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
 		}
@@ -1152,8 +1208,8 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
-			let s = t.statistics(&mut tx, &mut st).await.unwrap();
+			let (mut tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
+			let s = t.statistics(&mut tx, &st).await.unwrap();
 			assert_eq!(s.keys_count, 100);
 			tx.cancel().await.unwrap();
 		}
@@ -1175,9 +1231,9 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
+			let (mut tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &st).await.unwrap(),
 				BStatistics {
 					keys_count: 10000,
 					max_depth: 3,
@@ -1204,10 +1260,9 @@ mod tests {
 		}
 
 		{
-			let (mut tx, mut st) =
-				new_operation_trie(&ds, &t, TransactionType::Read, cache_size).await;
+			let (mut tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, cache_size).await;
 			assert_eq!(
-				t.statistics(&mut tx, &mut st).await.unwrap(),
+				t.statistics(&mut tx, &st).await.unwrap(),
 				BStatistics {
 					keys_count: 10000,
 					max_depth: 3,
@@ -1247,8 +1302,8 @@ mod tests {
 			.await;
 		}
 
-		let (mut tx, mut st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
-		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
+		let (mut tx, st) = new_operation_fst(&ds, &t, TransactionType::Read, 20).await;
+		let statistics = t.statistics(&mut tx, &st).await.unwrap();
 		tx.cancel().await.unwrap();
 		statistics
 	}
@@ -1265,8 +1320,8 @@ mod tests {
 			.await;
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
-		let statistics = t.statistics(&mut tx, &mut st).await.unwrap();
+		let (mut tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
+		let statistics = t.statistics(&mut tx, &st).await.unwrap();
 		tx.cancel().await.unwrap();
 
 		statistics
@@ -1365,7 +1420,7 @@ mod tests {
 
 		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 
-		let s = t.statistics(&mut tx, &mut st).await.unwrap();
+		let s = t.statistics(&mut tx, &st).await.unwrap();
 		assert_eq!(s.keys_count, 23);
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
@@ -1474,7 +1529,7 @@ mod tests {
 				st,
 				tx,
 				check_generation,
-				format!("Insert CLRS example"),
+				"Insert CLRS example".to_string(),
 			)
 			.await?;
 		}
@@ -1498,9 +1553,8 @@ mod tests {
 				}
 				key_count -= 1;
 				{
-					let (mut tx, mut st) =
-						new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
-					let s = t.statistics(&mut tx, &mut st).await?;
+					let (mut tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
+					let s = t.statistics(&mut tx, &st).await?;
 					assert_eq!(s.keys_count, key_count);
 				}
 			}
@@ -1508,7 +1562,7 @@ mod tests {
 
 		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 
-		let s = t.statistics(&mut tx, &mut st).await.unwrap();
+		let s = t.statistics(&mut tx, &st).await.unwrap();
 		assert_eq!(s.keys_count, 18);
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
@@ -1590,7 +1644,7 @@ mod tests {
 				st,
 				tx,
 				check_generation,
-				format!("Insert CLRS example"),
+				"Insert CLRS example".to_string(),
 			)
 			.await?;
 		}
@@ -1607,7 +1661,7 @@ mod tests {
 			{
 				let (mut tx, mut st) =
 					new_operation_trie(&ds, &t, TransactionType::Write, 20).await;
-				assert!(t.delete(&mut tx, &mut &mut st, key.into()).await?.is_some());
+				assert!(t.delete(&mut tx, &mut st, key.into()).await?.is_some());
 				expected_keys.remove(key);
 				let (_, tree_keys) = check_btree_properties(&t, &mut tx, &mut st).await?;
 				assert_eq!(expected_keys, tree_keys);
@@ -1623,10 +1677,10 @@ mod tests {
 
 			// Check that every expected keys are still found in the tree
 			{
-				let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
+				let (mut tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
 				for (key, payload) in &expected_keys {
 					assert_eq!(
-						t.search(&mut tx, &mut st, &key.as_str().into()).await?,
+						t.search(&mut tx, &st, &key.as_str().into()).await?,
 						Some(*payload),
 						"Can't find: {key}",
 					)
@@ -1635,8 +1689,8 @@ mod tests {
 			}
 		}
 
-		let (mut tx, mut st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
-		let s = t.statistics(&mut tx, &mut st).await?;
+		let (mut tx, st) = new_operation_trie(&ds, &t, TransactionType::Read, 20).await;
+		let s = t.statistics(&mut tx, &st).await?;
 		assert_eq!(s.keys_count, 0);
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
@@ -1951,9 +2005,8 @@ mod tests {
 				let stored_node = st.get_node_mut(tx, node_id).await?;
 				if let BTreeNode::Internal(keys, children) = &stored_node.n {
 					let depth = depth + 1;
-					let mut idx = 0;
 					let mut child_right_key = None;
-					for child_id in children {
+					for (idx, child_id) in children.iter().enumerate() {
 						let child_left_key = child_right_key;
 						child_right_key = keys.get_key(idx);
 						if let Some(crk) = &child_left_key {
@@ -1986,7 +2039,6 @@ mod tests {
 							child_left_key.clone(),
 							child_right_key.clone(),
 						));
-						idx += 1;
 					}
 				}
 				inspect_func(count, depth, node_id, &stored_node);

@@ -3,6 +3,7 @@ use crate::api::conn::Param;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
+use crate::opt::WaitFor;
 use crate::sql::Value;
 use crate::Surreal;
 use std::borrow::Cow;
@@ -45,7 +46,9 @@ where
 				self.client.router.extract()?,
 				Param::new(vec![self.ns, self.db.into()]),
 			)
-			.await
+			.await?;
+			self.client.waiter.0.send(Some(WaitFor::Database)).ok();
+			Ok(())
 		})
 	}
 }

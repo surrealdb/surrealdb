@@ -51,10 +51,11 @@ pub async fn score(
 
 pub async fn highlight(
 	(ctx, txn, doc): (&Context<'_>, Option<&Transaction>, Option<&CursorDoc<'_>>),
-	(prefix, suffix, match_ref): (Value, Value, Value),
+	(prefix, suffix, match_ref, partial): (Value, Value, Value, Option<Value>),
 ) -> Result<Value, Error> {
 	if let Some((txn, exe, doc, thg)) = get_execution_context(ctx, txn, doc) {
-		exe.highlight(txn, thg, prefix, suffix, &match_ref, doc.doc.as_ref()).await
+		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
+		exe.highlight(txn, thg, prefix, suffix, match_ref, partial, doc.doc.as_ref()).await
 	} else {
 		Ok(Value::None)
 	}
@@ -62,10 +63,11 @@ pub async fn highlight(
 
 pub async fn offsets(
 	(ctx, txn, doc): (&Context<'_>, Option<&Transaction>, Option<&CursorDoc<'_>>),
-	(match_ref,): (Value,),
+	(match_ref, partial): (Value, Option<Value>),
 ) -> Result<Value, Error> {
 	if let Some((txn, exe, _, thg)) = get_execution_context(ctx, txn, doc) {
-		exe.offsets(txn, thg, &match_ref).await
+		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
+		exe.offsets(txn, thg, match_ref, partial).await
 	} else {
 		Ok(Value::None)
 	}

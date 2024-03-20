@@ -4,7 +4,7 @@ use super::super::{
 	IResult,
 };
 use crate::sql::{
-	index::{Distance, MTreeParams, SearchParams, VectorType},
+	index::{Distance, Distance1, MTreeParams, SearchParams, VectorType},
 	Ident, Index,
 };
 
@@ -118,6 +118,7 @@ pub fn mtree_distance(i: &str) -> IResult<&str, Distance> {
 	let (i, _) = shouldbespace(i)?;
 	alt((
 		map(tag_no_case("EUCLIDEAN"), |_| Distance::Euclidean),
+		map(tag_no_case("COSINE"), |_| Distance::Cosine),
 		map(tag_no_case("MANHATTAN"), |_| Distance::Manhattan),
 		minkowski,
 	))(i)
@@ -178,6 +179,7 @@ pub fn mtree(i: &str) -> IResult<&str, Index> {
 			i,
 			Index::MTree(MTreeParams {
 				dimension,
+				_distance: Distance1::Euclidean, // TODO remove once 1.0 && 1.1 are EOL
 				distance: distance.unwrap_or(Distance::Euclidean),
 				vector_type: vector_type.unwrap_or(VectorType::F64),
 				capacity: capacity.unwrap_or(40),

@@ -179,7 +179,7 @@ pub mod is {
 	use uuid::Uuid;
 
 	#[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
-	#[rustfmt::skip] static LONGITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
+	#[rustfmt::skip] static LONGITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(char::is_alphanumeric).into())
@@ -520,8 +520,23 @@ mod tests {
 
 	#[test]
 	fn is_longitude() {
-		let value = super::is::longitude((String::from("51.509865"),)).unwrap();
+		let value = super::is::longitude((String::from("91.509865"),)).unwrap();
 		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("-91.509865"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("-180.00000"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("-180.00001"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+
+		let value = super::is::longitude((String::from("180.00000"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::longitude((String::from("180.00001"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
 
 		let value = super::is::longitude((String::from("12345"),)).unwrap();
 		assert_eq!(value, Value::Bool(false));

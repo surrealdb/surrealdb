@@ -3,7 +3,7 @@ use std::string::String as StdString;
 use js::{
 	class::{Trace, Tracer},
 	prelude::*,
-	Class, Ctx, Exception, FromJs, Object, Result, Value,
+	Class, Ctx, Exception, Object, Result, Value,
 };
 
 use crate::fnc::script::fetch::{classes::Headers, util};

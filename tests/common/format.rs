@@ -1,4 +1,4 @@
-use std::string::ToString;
+use std::{fmt, string::ToString};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Format {
@@ -7,12 +7,12 @@ pub enum Format {
 	Pack,
 }
 
-impl ToString for Format {
-	fn to_string(&self) -> String {
+impl fmt::Display for Format {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::Json => "json".to_owned(),
-			Self::Cbor => "cbor".to_owned(),
-			Self::Pack => "msgpack".to_owned(),
+			Self::Json => "json".fmt(f),
+			Self::Cbor => "cbor".fmt(f),
+			Self::Pack => "msgpack".fmt(f),
 		}
 	}
 }

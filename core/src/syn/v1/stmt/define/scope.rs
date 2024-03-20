@@ -8,9 +8,15 @@ use super::super::super::{
 };
 use crate::sql::{statements::DefineScopeStatement, Duration, Strand, Value};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(scope_opts)(i)?;
@@ -19,6 +25,7 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let mut res = DefineScopeStatement {
 		name,
 		code: DefineScopeStatement::random_code(),
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
