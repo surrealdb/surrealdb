@@ -46,15 +46,12 @@ use super::{
 #[derive(Clone, Copy)]
 pub(super) struct SurrealAuth;
 
-impl<B> AsyncAuthorizeRequest<B> for SurrealAuth
-where
-	B: Send + Sync + 'static,
-{
-	type RequestBody = B;
+impl AsyncAuthorizeRequest<Body> for SurrealAuth {
+	type RequestBody = Body;
 	type ResponseBody = Body;
-	type Future = BoxFuture<'static, Result<Request<B>, Response<Self::ResponseBody>>>;
+	type Future = BoxFuture<'static, Result<Request<Body>, Response<Self::ResponseBody>>>;
 
-	fn authorize(&mut self, request: Request<B>) -> Self::Future {
+	fn authorize(&mut self, request: Request<Body>) -> Self::Future {
 		Box::pin(async {
 			let (mut parts, body) = request.into_parts();
 			match check_auth(&mut parts).await {
