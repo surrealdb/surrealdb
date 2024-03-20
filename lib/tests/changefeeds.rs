@@ -11,8 +11,8 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core2::sql::Array;
-use surrealdb_core2::test_helpers::{generate_versionstamp_sequences, to_u128_be};
+use surrealdb::sql::Array;
+use surrealdb::test_helpers::{generate_versionstamp_sequences, to_u128_be};
 
 mod helpers;
 
