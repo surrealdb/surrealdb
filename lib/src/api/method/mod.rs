@@ -780,6 +780,7 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
+	/// use surrealdb::sql;
 	///
 	/// # #[derive(serde::Deserialize)]
 	/// # struct Person;
@@ -825,6 +826,35 @@ where
 	///             },
 	///         },
 	///         User {
+	///             name: "Jaime",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: true,
+	///             },
+	///         },
+	///     ])
+	///     .await?;
+	///
+	/// // Insert multiple records with pre-defined IDs
+	/// #[derive(Serialize)]
+	/// struct User<'a> {
+	///     id: sql::Thing,
+	///     name: &'a str,
+	///     settings: Settings,
+	/// }
+	///
+	/// let people: Vec<Person> = db.insert("person")
+	///     .content(vec![
+	///         User {
+	///             id: sql::thing("person:tobie")?,
+	///             name: "Tobie",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: false,
+	///             },
+	///         },
+	///         User {
+	///             id: sql::thing("person:jaime")?,
 	///             name: "Jaime",
 	///             settings: Settings {
 	///                 active: true,
