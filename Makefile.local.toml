@@ -25,7 +25,7 @@ args = ["doc", "--open", "--no-deps", "--package", "surrealdb", "--features", "r
 category = "LOCAL USAGE"
 command = "cargo"
 env = { RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS = "--cfg surrealdb_unstable", RUST_MIN_STACK={ value = "4194304", condition = { env_not_set = ["RUST_MIN_STACK"] } } }
-args = ["test", "--workspace", "--ensure-time", "--no-fail-fast", "--features", "sql2"]
+args = ["test", "--workspace", "--no-fail-fast", "--features", "sql2", "--", "--ensure-time"]
 
 # Check
 [tasks.cargo-check]
