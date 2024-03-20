@@ -1,11 +1,10 @@
-use axum::{
-	body::{boxed, Body, BoxBody},
-	headers::{
-		authorization::{Basic, Bearer},
-		Authorization, Origin,
-	},
-	Extension, RequestPartsExt, TypedHeader,
+use axum::RequestPartsExt;
+use axum::{body::Body, Extension};
+use axum_extra::headers::{
+	authorization::{Basic, Bearer},
+	Authorization, Origin,
 };
+use axum_extra::TypedHeader;
 use futures_util::future::BoxFuture;
 use http::{request::Parts, StatusCode};
 use hyper::{Request, Response};
@@ -52,7 +51,7 @@ where
 	B: Send + Sync + 'static,
 {
 	type RequestBody = B;
-	type ResponseBody = BoxBody;
+	type ResponseBody = Body;
 	type Future = BoxFuture<'static, Result<Request<B>, Response<Self::ResponseBody>>>;
 
 	fn authorize(&mut self, request: Request<B>) -> Self::Future {
@@ -66,7 +65,7 @@ where
 				Err(err) => {
 					let unauthorized_response = Response::builder()
 						.status(StatusCode::UNAUTHORIZED)
-						.body(boxed(Body::from(err.to_string())))
+						.body(Body::new(err.to_string()))
 						.unwrap();
 					Err(unauthorized_response)
 				}

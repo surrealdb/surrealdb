@@ -11,7 +11,7 @@ use axum::Router;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http::StatusCode;
-use http_body::Body as HttpBody;
+
 use hyper::body::Body;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
@@ -25,9 +25,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 const MAX: usize = 1024 * 1024 * 1024 * 4; // 4 GiB
 
 /// The router definition for the ML API endpoints.
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
 	B::Data: Send + Into<Bytes>,
 	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,

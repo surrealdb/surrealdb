@@ -6,16 +6,14 @@ use axum::Router;
 use axum::{response::Response, Extension};
 use bytes::Bytes;
 use http::StatusCode;
-use http_body::Body as HttpBody;
 use hyper::body::Body;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::View;
 use surrealdb::iam::ResourceKind::Any;
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new().route("/export", get(handler))

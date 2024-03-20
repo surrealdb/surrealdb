@@ -118,7 +118,7 @@ where
 
 pub(super) async fn client_ip_middleware<B>(
 	request: Request<B>,
-	next: Next<B>,
+	next: Next,
 ) -> Result<Response, StatusCode>
 where
 	B: Send,
