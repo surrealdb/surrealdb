@@ -1035,9 +1035,9 @@ impl Datastore {
 				Some(doc)
 			}
 			TableMutation::Def(_) => None,
-			TableMutation::SetPrevious(id, _old, new) => {
+			TableMutation::SetWithDiff(id, new, _operations) => {
 				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
-				// TODO set previous value
+				// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 				Some(doc)
 			}
 		}
