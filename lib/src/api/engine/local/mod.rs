@@ -33,6 +33,7 @@ use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
+use crate::api::engine::insert_statement;
 use crate::api::engine::merge_statement;
 use crate::api::engine::patch_statement;
 use crate::api::engine::select_statement;
@@ -578,6 +579,13 @@ async fn router(
 		Method::Update => {
 			let (one, statement) = update_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Update(statement)]));
+			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
+			let value = take(one, response).await?;
+			Ok(DbResponse::Other(value))
+		}
+		Method::Insert => {
+			let (one, statement) = insert_statement(&mut params);
+			let query = Query(Statements(vec![Statement::Insert(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone())).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
