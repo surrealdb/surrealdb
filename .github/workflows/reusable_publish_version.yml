@@ -346,7 +346,7 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               mkdir /tmp/onnxruntime
@@ -373,7 +373,7 @@ jobs:
               brew install protobuf
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               mkdir /tmp/onnxruntime
@@ -395,7 +395,7 @@ jobs:
             file: surreal-${{ needs.prepare-vars.outputs.name }}.linux-amd64
             build-step: |
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmpdir=$(mktemp -d)
@@ -433,7 +433,7 @@ jobs:
               set -x
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmpdir=$(mktemp -d)
@@ -474,7 +474,7 @@ jobs:
               vcpkg integrate install
 
               # Build
-              features=storage-tikv,http-compression,sql2,jwks,${{ inputs.extra-features }}
+              features=storage-tikv,http-compression,jwks,${{ inputs.extra-features }}
 
               # Download libonnxruntime's static library and tell ORT crate to use it
               tmp_dir=$(mktemp -d)
