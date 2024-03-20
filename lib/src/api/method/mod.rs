@@ -837,7 +837,7 @@ where
 	///
 	/// // Insert multiple records with pre-defined IDs
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
+	/// struct UserWithId<'a> {
 	///     id: sql::Thing,
 	///     name: &'a str,
 	///     settings: Settings,
@@ -845,7 +845,7 @@ where
 	///
 	/// let people: Vec<Person> = db.insert("person")
 	///     .content(vec![
-	///         User {
+	///         UserWithId {
 	///             id: sql::thing("person:tobie")?,
 	///             name: "Tobie",
 	///             settings: Settings {
@@ -853,7 +853,7 @@ where
 	///                 marketing: false,
 	///             },
 	///         },
-	///         User {
+	///         UserWithId {
 	///             id: sql::thing("person:jaime")?,
 	///             name: "Jaime",
 	///             settings: Settings {
