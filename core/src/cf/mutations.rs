@@ -190,8 +190,6 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::Strand;
-
 	#[test]
 	fn serialization() {
 		use super::*;
