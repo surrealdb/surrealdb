@@ -6,6 +6,9 @@ use std::cmp::Ordering;
 
 /// Used for cluster logic to move LQ data to LQ cleanup code
 /// Not a stored struct; Used only in this module
+///
+/// This struct is public because it is used in Live Query errors for v1.
+/// V1 is now deprecated and the struct can be made non-public
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LqValue {
 	pub nd: Uuid,
