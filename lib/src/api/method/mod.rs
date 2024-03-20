@@ -13,6 +13,7 @@ mod delete;
 mod export;
 mod health;
 mod import;
+mod insert;
 mod invalidate;
 mod merge;
 mod patch;
@@ -45,6 +46,7 @@ pub use export::Backup;
 pub use export::Export;
 pub use health::Health;
 pub use import::Import;
+pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use live::Stream;
 pub use merge::Merge;
@@ -113,6 +115,7 @@ impl Method {
 			Method::Health => "health",
 			Method::Import => "import",
 			Method::Invalidate => "invalidate",
+			Method::Insert => "insert",
 			Method::Kill => "kill",
 			Method::Live => "live",
 			Method::Merge => "merge",
@@ -765,6 +768,107 @@ where
 	/// ```
 	pub fn create<R>(&self, resource: impl opt::IntoResource<R>) -> Create<C, R> {
 		Create {
+			client: Cow::Borrowed(self),
+			resource: resource.into_resource(),
+			response_type: PhantomData,
+		}
+	}
+
+	/// Insert a record or records into a table
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use serde::Serialize;
+	/// use surrealdb::sql;
+	///
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
+	/// #[derive(Serialize)]
+	/// struct Settings {
+	///     active: bool,
+	///     marketing: bool,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct User<'a> {
+	///     name: &'a str,
+	///     settings: Settings,
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
+	/// // Insert a record with a specific ID
+	/// let person: Option<Person> = db.insert(("person", "tobie"))
+	///     .content(User {
+	///         name: "Tobie",
+	///         settings: Settings {
+	///             active: true,
+	///             marketing: true,
+	///         },
+	///     })
+	///     .await?;
+	///
+	/// // Insert multiple records into the table
+	/// let people: Vec<Person> = db.insert("person")
+	///     .content(vec![
+	///         User {
+	///             name: "Tobie",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: false,
+	///             },
+	///         },
+	///         User {
+	///             name: "Jaime",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: true,
+	///             },
+	///         },
+	///     ])
+	///     .await?;
+	///
+	/// // Insert multiple records with pre-defined IDs
+	/// #[derive(Serialize)]
+	/// struct UserWithId<'a> {
+	///     id: sql::Thing,
+	///     name: &'a str,
+	///     settings: Settings,
+	/// }
+	///
+	/// let people: Vec<Person> = db.insert("person")
+	///     .content(vec![
+	///         UserWithId {
+	///             id: sql::thing("person:tobie")?,
+	///             name: "Tobie",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: false,
+	///             },
+	///         },
+	///         UserWithId {
+	///             id: sql::thing("person:jaime")?,
+	///             name: "Jaime",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: true,
+	///             },
+	///         },
+	///     ])
+	///     .await?;
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn insert<R>(&self, resource: impl opt::IntoResource<R>) -> Insert<C, R> {
+		Insert {
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,

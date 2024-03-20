@@ -21,6 +21,7 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
+use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -37,6 +38,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::mem;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -354,11 +356,29 @@ pub(crate) fn router(
 																	}
 																}
 																// Send the response back to the caller
+																let mut response = response.result;
+																if matches!(method, Method::Insert)
+																{
+																	// For insert, we need to flatten single responses in an array
+																	if let Ok(Data::Other(
+																		Value::Array(Array(value)),
+																	)) = &mut response
+																	{
+																		if let [value] =
+																			&mut value[..]
+																		{
+																			response =
+																				Ok(Data::Other(
+																					mem::take(
+																						value,
+																					),
+																				));
+																		}
+																	}
+																}
 																let _res = sender
 																	.into_send_async(
-																		DbResponse::from(
-																			response.result,
-																		),
+																		DbResponse::from(response),
 																	)
 																	.await;
 															}
