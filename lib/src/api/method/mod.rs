@@ -159,7 +159,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: &'static str,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -179,7 +179,7 @@ where
 	///     // Create or update a specific record
 	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
 	///         .content(Person {
-	///             name: "Tobie",
+	///             name: "Tobie".into(),
 	///         }).await?;
 	///
 	///     Ok(())
@@ -200,7 +200,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: &'static str,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -220,7 +220,7 @@ where
 	///     // Create or update a specific record
 	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
 	///         .content(Person {
-	///             name: "Tobie",
+	///             name: "Tobie".into(),
 	///         }).await?;
 	///
 	///     Ok(())
@@ -320,8 +320,8 @@ where
 	///
 	/// #[derive(Serialize)]
 	/// struct Name {
-	///     first: &'static str,
-	///     last: &'static str,
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -330,8 +330,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -360,8 +360,8 @@ where
 	///
 	/// #[derive(Serialize)]
 	/// struct Name {
-	///     first: &'static str,
-	///     last: &'static str,
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -370,8 +370,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -402,8 +402,8 @@ where
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams {
-	///     email: &'static str,
-	///     password: &'static str,
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -434,8 +434,8 @@ where
 	///     database: "database",
 	///     scope: "user_scope",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
@@ -536,8 +536,8 @@ where
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams {
-	///     email: &'static str,
-	///     password: &'static str,
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -553,8 +553,8 @@ where
 	///     database: "database",
 	///     scope: "user_scope",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
