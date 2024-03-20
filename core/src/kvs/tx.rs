@@ -136,7 +136,6 @@ macro_rules! expand_inner {
 	};
 }
 
-
 #[derive(Copy, Clone)]
 pub enum TransactionType {
 	Read,
