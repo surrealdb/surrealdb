@@ -54,6 +54,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  RUSTFLAGS: "--cfg surrealdb_unstable"
+
 jobs:
   prepare-vars:
     name: Prepare vars
@@ -524,7 +527,6 @@ jobs:
       - name: Build step
         env:
           SURREAL_BUILD_METADATA: ${{ needs.prepare-vars.outputs.build-metadata }}
-          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
