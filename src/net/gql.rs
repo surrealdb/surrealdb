@@ -7,7 +7,7 @@ use axum::{response, Extension};
 use http_body::Body as HttpBody;
 
 use async_graphql::http::GraphiQLSource;
-use async_graphql_axum::{GraphQLBatchRequest, GraphQLRequest, GraphQLResponse};
+use async_graphql_axum::{GraphQL, GraphQLBatchRequest, GraphQLRequest, GraphQLResponse};
 use axum::routing::get;
 
 use surrealdb::dbs::Session;
@@ -16,12 +16,14 @@ use crate::gql::schema::get_schema;
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
+	B: HttpBody + Send + Sync + 'static,
+	B::Data: Send + Sync,
 	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
+	bytes::Bytes: From<<B as HttpBody>::Data>,
 {
-	Router::new().route("/graphql", get(graphiql).post(post_handler))
+	let service = GraphQL::new(get_schema());
+	Router::new().route("/graphql", get(graphiql).post_service(service))
 }
 
 pub async fn graphiql() -> impl IntoResponse {

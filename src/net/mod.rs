@@ -24,11 +24,9 @@ mod ml;
 use crate::cli::CF;
 use crate::cnf;
 use crate::err::Error;
-use crate::gql::schema::get_schema;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::notifications;
 use crate::telemetry::metrics::HttpMetricsLayer;
-use async_graphql_axum::GraphQL;
 use axum::response::Redirect;
 use axum::routing::get;
 use axum::{middleware, Router};
@@ -167,18 +165,13 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(sql::router())
 		.merge(signin::router())
 		.merge(signup::router())
-		.merge(key::router());
+		.merge(key::router())
+		.merge(gql::router());
 
 	#[cfg(any(feature = "ml", feature = "ml2"))]
 	let axum_app = axum_app.merge(ml::router());
 
 	let axum_app = axum_app.layer(service);
-
-	// let axum_app = axum_app.merge(gql::router());
-
-	let schema = get_schema();
-
-	axum_app.route("/graphql", get(gql::graphiql).post_service(GraphQL::new(schema)));
 
 	// Get a new server handler
 	let handle = Handle::new();
