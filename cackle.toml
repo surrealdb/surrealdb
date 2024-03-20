@@ -763,9 +763,6 @@ allow_unsafe = true
 
 [pkg.same-file]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
 
 [pkg.doc-comment]
 build.allow_apis = [
@@ -1309,19 +1306,4 @@ allow_apis = [
 [pkg.vart]
 allow_apis = [
     "net",
-]
-
-# examples
-[pkg.pear_codegen]
-allow_proc_macro = true
-
-[pkg.devise_codegen]
-allow_proc_macro = true
-
-[pkg.rocket_codegen]
-allow_proc_macro = true
-
-[pkg.walkdir]
-allow_apis = [
-    "fs",
 ]
