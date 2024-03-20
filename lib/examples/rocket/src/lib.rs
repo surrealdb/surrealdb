@@ -16,7 +16,7 @@ pub struct Person {
 	name: String,
 }
 
-pub type Db = Surreal<any::Any>;
+pub type Db = Surreal<Any>;
 
 pub async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
 	let endpoint = env::var("SURREALDB_ENDPOINT").unwrap_or_else(|_| "memory".to_owned());
