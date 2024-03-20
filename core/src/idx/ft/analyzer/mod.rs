@@ -242,6 +242,7 @@ mod tests {
 	use super::Analyzer;
 	use crate::ctx::Context;
 	use crate::dbs::{Options, Transaction};
+	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::{
@@ -262,7 +263,13 @@ mod tests {
 		};
 		let a: Analyzer = az.into();
 		let tokens = a
-			.generate_tokens(&Context::default(), &Options::default(), &txn, input.to_string())
+			.generate_tokens(
+				&Context::default(),
+				&Options::default(),
+				&txn,
+				FilteringStage::INDEXING,
+				input.to_string(),
+			)
 			.await
 			.unwrap();
 		tokens

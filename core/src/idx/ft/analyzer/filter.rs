@@ -70,10 +70,7 @@ impl Filter {
 
 	fn is_stage(&self, stage: FilteringStage) -> bool {
 		if let FilteringStage::QUERYING = stage {
-			match self {
-				Filter::EdgeNgram(_, _) | Filter::Ngram(_, _) => false,
-				_ => true,
-			}
+			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Ngram(_, _))
 		} else {
 			true
 		}
