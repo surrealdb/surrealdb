@@ -863,13 +863,13 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket_permanent = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket_permanent.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket_permanent.send_message_use(Some(NS), Some(DB)).await?;
 	// Setup the scope
-	socket
+	socket_permanent
 		.send_message_query(
 			r#"
 			DEFINE SCOPE scope SESSION 1s
@@ -879,7 +879,9 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	// Send SIGNUP command
-	let res = socket
+	let mut socket_expiring_auth = Socket::connect(&addr, SERVER, FORMAT).await?;
+
+	let res = socket_expiring_auth
 		.send_request(
 			"signup",
 			json!([{
@@ -897,20 +899,24 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res.as_object().unwrap();
 	// Verify response contains no error
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Authenticate the connection
+	socket_expiring_auth.send_message_signin(USER, PASS, None, None, None).await?;
 	// Send LIVE command
-	let res = socket.send_request("live", json!(["tester"])).await?;
+	let res = socket_expiring_auth.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	// Wait 2 seconds for auth to expire
-	tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+	tokio::time::sleep(Duration::from_secs(1)).await;
 	// Create a new test record
-	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
+	let res = socket_permanent
+		.send_request("query", json!(["CREATE tester:id SET name = 'foo'"]))
+		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
+	let msgs = socket_expiring_auth.receive_all_other_messages(0, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Test passed
 	server.finish().unwrap();

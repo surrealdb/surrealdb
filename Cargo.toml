@@ -20,7 +20,7 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
-sql2 = ["surrealdb/sql2"]
+sql2 = [] # Deprecated since v1.4
 parser2 = ["surrealdb/parser2"]
 performance-profiler = ["dep:pprof"]
 
@@ -83,6 +83,7 @@ surrealdb = { version = "1", path = "lib", features = [
 	"protocol-http",
 	"protocol-ws",
 	"rustls",
+	"sql2",
 ] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
