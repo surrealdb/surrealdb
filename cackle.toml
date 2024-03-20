@@ -763,6 +763,9 @@ allow_unsafe = true
 
 [pkg.same-file]
 allow_unsafe = true
+build.allow_apis = [
+    "fs",
+]
 
 [pkg.doc-comment]
 build.allow_apis = [
@@ -1317,3 +1320,8 @@ allow_proc_macro = true
 
 [pkg.rocket_codegen]
 allow_proc_macro = true
+
+[pkg.walkdir]
+build.allow_apis = [
+    "fs",
+]
