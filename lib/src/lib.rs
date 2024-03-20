@@ -14,24 +14,27 @@
 //! # Examples
 //!
 //! ```no_run
+//! use std::borrow::Cow;
 //! use serde::{Serialize, Deserialize};
 //! use serde_json::json;
 //! use surrealdb::{Error, Surreal};
-//! use surrealdb::sql;
 //! use surrealdb::opt::auth::Root;
 //! use surrealdb::engine::remote::ws::Ws;
-//!
-//! #[derive(Serialize, Deserialize)]
-//! struct Name {
-//!     first: String,
-//!     last: String,
-//! }
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Person {
 //!     title: String,
 //!     name: Name,
 //!     marketing: bool,
+//! }
+//! 
+//! // Pro tip: Replace String with Cow<'static, str> to
+//! // avoid unnecessary heap allocations when inserting
+//! 
+//! #[derive(Serialize, Deserialize)]
+//! struct Name {
+//!     first: Cow<'static, str>,
+//!     last: Cow<'static, str>,
 //! }
 //!
 //! // Install at https://surrealdb.com/install
