@@ -96,10 +96,7 @@ fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
 		[what, data] => (mem::take(what), mem::take(data)),
 		_ => unreachable!(),
 	};
-	let one = match &data {
-		Value::Array(arr) => arr.len() == 1,
-		_ => true,
-	};
+	let one = !data.is_array();
 	(
 		one,
 		InsertStatement {
