@@ -6,7 +6,7 @@ use axum::Router;
 use axum::{response::Response, Extension};
 use bytes::Bytes;
 use http::StatusCode;
-use hyper::body::Body;
+use http_body_util::StreamBody;
 use surrealdb::dbs::Session;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::iam::Action::View;
@@ -23,7 +23,9 @@ async fn handler(Extension(session): Extension<Session>) -> Result<impl IntoResp
 	// Get the datastore reference
 	let db = DB.get().unwrap();
 	// Create a chunked response
-	let (mut chn, body) = Body::channel();
+	let (mut chn, body_stream) = surrealdb::channel::bounded(1);
+	// let (mut chn, body) = Body::channel();
+	// let body = StreamBody::new(body_stream);
 	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(&session)?;
 	// Check the permissions level
@@ -37,7 +39,8 @@ async fn handler(Extension(session): Extension<Session>) -> Result<impl IntoResp
 	// Process all chunk values
 	tokio::spawn(async move {
 		while let Ok(v) = rcv.recv().await {
-			let _ = chn.send_data(Bytes::from(v)).await;
+			// let _ = chn.send_data(Bytes::from(v)).await;
+			let _ = chn.send(Ok(Ok(Bytes::from(v)))).await;
 		}
 	});
 	// Return the chunked body
