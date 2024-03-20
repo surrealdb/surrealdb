@@ -1,6 +1,9 @@
 #![cfg(feature = "kv-mem")]
 
 use crate::err::Error;
+#[cfg(debug_assertions)]
+use crate::key::debug::sprint_key;
+use crate::key::error::KeyCategory;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
