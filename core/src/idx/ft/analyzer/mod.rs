@@ -267,4 +267,9 @@ mod tests {
 		}
 		assert_eq!(&res, expected);
 	}
+
+	pub(super) async fn test_analyzer_tokens(def: &str, input: &str, expected: &[Token]) {
+		let tokens = get_analyzer_tokens(def, input).await;
+		assert_eq!(tokens.list(), expected);
+	}
 }
