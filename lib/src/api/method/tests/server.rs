@@ -78,7 +78,7 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					}
 					_ => unreachable!(),
 				},
-				Method::Insert => match dbg!(&params[..]) {
+				Method::Insert => match &params[..] {
 					[Value::Table(..), Value::Array(..)] => {
 						Ok(DbResponse::Other(Value::Array(Array(Vec::new()))))
 					}

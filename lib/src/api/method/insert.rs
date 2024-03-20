@@ -130,7 +130,6 @@ where
 							"Tried to insert multiple records on a record ID".to_owned(),
 						)
 						.into());
-						content.content = data;
 					}
 					false => {
 						content.resource = Ok(Table(record_id.tb.clone()).into());

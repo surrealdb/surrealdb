@@ -93,7 +93,6 @@ fn update_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 #[allow(dead_code)] // used by the the embedded database and `http`
 fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
 	let (what, data) = match params {
-		[what] => (mem::take(what), Value::None),
 		[what, data] => (mem::take(what), mem::take(data)),
 		_ => unreachable!(),
 	};
