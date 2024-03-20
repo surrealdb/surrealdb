@@ -25,6 +25,7 @@ mod surrealkv;
 mod tikv;
 mod tx;
 
+pub(crate) mod api;
 mod clock;
 pub(crate) mod lq_structs;
 #[cfg(test)]
