@@ -27,10 +27,10 @@
 //!     name: Name,
 //!     marketing: bool,
 //! }
-//! 
+//!
 //! // Pro tip: Replace String with Cow<'static, str> to
 //! // avoid unnecessary heap allocations when inserting
-//! 
+//!
 //! #[derive(Serialize, Deserialize)]
 //! struct Name {
 //!     first: Cow<'static, str>,
