@@ -6,6 +6,12 @@ use crate::sql::language::Language;
 use deunicode::deunicode;
 use rust_stemmers::{Algorithm, Stemmer};
 
+#[derive(Clone, Copy)]
+pub(super) enum FilteringStage {
+	INDEXING,
+	QUERYING,
+}
+
 pub(super) enum Filter {
 	Stemmer(Stemmer),
 	Ascii,
@@ -62,10 +68,27 @@ impl Filter {
 		}
 	}
 
-	pub(super) fn apply_filters(mut t: Tokens, f: &Option<Vec<Filter>>) -> Result<Tokens, Error> {
-		if let Some(f) = f {
-			for f in f {
-				t = t.filter(f)?;
+	fn is_stage(&self, stage: FilteringStage) -> bool {
+		if let FilteringStage::QUERYING = stage {
+			match self {
+				Filter::EdgeNgram(_, _) | Filter::Ngram(_, _) => false,
+				_ => true,
+			}
+		} else {
+			true
+		}
+	}
+
+	pub(super) fn apply_filters(
+		mut t: Tokens,
+		f: &Option<Vec<Filter>>,
+		stage: FilteringStage,
+	) -> Result<Tokens, Error> {
+		if let Some(filters) = f {
+			for filter in filters {
+				if filter.is_stage(stage) {
+					t = t.filter(filter)?;
+				}
 			}
 		}
 		Ok(t)

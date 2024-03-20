@@ -280,8 +280,9 @@ async fn select_where_matches_partial_highlight() -> Result<(), Error> {
 async fn select_where_matches_partial_highlight_ngram() -> Result<(), Error> {
 	let sql = r"
 		CREATE blog:1 SET content = 'Hello World!';
-		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,ngram(1,32);
 		DEFINE INDEX blog_content ON blog FIELDS content SEARCH ANALYZER simple BM25 HIGHLIGHTS;
+		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello';
 		SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'el';
 		SELECT id, search::highlight('<em>', '</em>', 1, false) AS content FROM blog WHERE content @1@ 'el';
 		SELECT id, search::highlight('<em>', '</em>', 1, true) AS content FROM blog WHERE content @1@ 'el';
@@ -292,13 +293,13 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
+	assert_eq!(res.len(), 10);
 	//
 	for _ in 0..3 {
 		let _ = res.remove(0).result?;
 	}
 	//
-	for i in 0..2 {
+	for i in 0..3 {
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(
 			"[
