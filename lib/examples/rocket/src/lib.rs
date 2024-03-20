@@ -7,6 +7,8 @@ use surrealdb::engine::any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Config;
 use surrealdb::Surreal;
+use rocket::{routes, Build};
+use surrealdb::engine::any::Any;
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
@@ -28,4 +30,13 @@ pub async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
 	db.use_ns("namespace").use_db("database").await?;
 
 	Ok(db)
+}
+
+pub fn router(db_conn:Surreal<Any>) -> rocket::Rocket<Build> {
+	rocket::build()
+		.mount(
+			"/",
+			routes![person::create, person::read, person::update, person::delete, person::list],
+		)
+		.manage(db_conn)
 }
