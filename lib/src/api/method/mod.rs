@@ -140,9 +140,10 @@ where
 	/// Initialises a new unconnected instance of the client
 	///
 	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// ensures that a single database instance is available across very large or complicated
-	/// applications. With the singleton, only one connection to the database is instantiated,
-	/// and the database connection does not have to be shared across components or controllers.
+	/// pattern in the example below ensures that a single database instance is available
+	/// across very large or complicated applications. With the singleton, only one connection
+	/// to the database is instantiated, and the database connection does not have to be shared
+	/// across components or controllers.
 	///
 	/// # Examples
 	///
@@ -151,7 +152,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::engine::remote::ws::Ws;
@@ -162,7 +162,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -194,7 +194,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
@@ -204,7 +203,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -323,9 +322,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -334,8 +333,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -363,9 +362,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -374,8 +373,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -405,9 +404,9 @@ where
 	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -438,8 +437,8 @@ where
 	///     database: "database",
 	///     scope: "user_scope",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
@@ -539,9 +538,9 @@ where
 	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -557,8 +556,8 @@ where
 	///     database: "database",
 	///     scope: "user_scope",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
@@ -737,8 +736,8 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///
@@ -894,8 +893,8 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///
