@@ -8,8 +8,8 @@ use rust_stemmers::{Algorithm, Stemmer};
 
 #[derive(Clone, Copy)]
 pub(super) enum FilteringStage {
-	INDEXING,
-	QUERYING,
+	Indexing,
+	Querying,
 }
 
 pub(super) enum Filter {
@@ -69,7 +69,7 @@ impl Filter {
 	}
 
 	fn is_stage(&self, stage: FilteringStage) -> bool {
-		if let FilteringStage::QUERYING = stage {
+		if let FilteringStage::Querying = stage {
 			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Ngram(_, _))
 		} else {
 			true

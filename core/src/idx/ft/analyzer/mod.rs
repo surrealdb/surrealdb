@@ -44,7 +44,7 @@ impl Analyzer {
 		query_string: String,
 	) -> Result<Vec<Option<(TermId, u32)>>, Error> {
 		let tokens =
-			self.generate_tokens(ctx, opt, txn, FilteringStage::QUERYING, query_string).await?;
+			self.generate_tokens(ctx, opt, txn, FilteringStage::Querying, query_string).await?;
 		// We first collect every unique terms
 		// as it can contains duplicates
 		let mut terms = HashSet::new();
@@ -75,7 +75,7 @@ impl Analyzer {
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let mut inputs = vec![];
-		self.analyze_content(ctx, opt, txn, field_content, FilteringStage::INDEXING, &mut inputs)
+		self.analyze_content(ctx, opt, txn, field_content, FilteringStage::Indexing, &mut inputs)
 			.await?;
 		// We then collect every unique terms and count the frequency
 		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
@@ -116,7 +116,7 @@ impl Analyzer {
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let mut inputs = Vec::with_capacity(content.len());
-		self.analyze_content(ctx, opt, txn, content, FilteringStage::INDEXING, &mut inputs).await?;
+		self.analyze_content(ctx, opt, txn, content, FilteringStage::Indexing, &mut inputs).await?;
 		// We then collect every unique terms and count the frequency and extract the offsets
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
@@ -233,7 +233,7 @@ impl Analyzer {
 		txn: &Transaction,
 		input: String,
 	) -> Result<Value, Error> {
-		self.generate_tokens(ctx, opt, txn, FilteringStage::INDEXING, input).await?.try_into()
+		self.generate_tokens(ctx, opt, txn, FilteringStage::Indexing, input).await?.try_into()
 	}
 }
 
@@ -267,7 +267,7 @@ mod tests {
 				&Context::default(),
 				&Options::default(),
 				&txn,
-				FilteringStage::INDEXING,
+				FilteringStage::Indexing,
 				input.to_string(),
 			)
 			.await
