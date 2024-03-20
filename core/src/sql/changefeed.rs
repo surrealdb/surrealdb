@@ -5,7 +5,7 @@ use std::fmt::{self, Display, Formatter};
 use std::str;
 use std::time;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 2)]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,

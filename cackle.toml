@@ -1307,3 +1307,13 @@ allow_apis = [
 allow_apis = [
     "net",
 ]
+
+# examples
+[pkg.pear_codegen]
+allow_proc_macro = true
+
+[pkg.devise_codegen]
+allow_proc_macro = true
+
+[pkg.rocket_codegen]
+allow_proc_macro = true
