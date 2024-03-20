@@ -5539,7 +5539,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.20.1",
  "tokio-util",
- "tonic 0.8.3",
+ "tonic 0.11.0",
  "tower",
  "tower-http",
  "tracing",
@@ -6363,6 +6363,33 @@ dependencies = [
  "rustls-pemfile 1.0.4",
  "tokio",
  "tokio-rustls 0.24.1",
+ "tokio-stream",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76c4eb7a4e9ef9d4763600161f12f5070b92a578e1b634db88a6887844c91a13"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum 0.6.20",
+ "base64 0.21.7",
+ "bytes",
+ "h2 0.3.24",
+ "http 0.2.11",
+ "http-body 0.4.6",
+ "hyper 0.14.28",
+ "hyper-timeout",
+ "percent-encoding",
+ "pin-project",
+ "prost 0.12.3",
+ "tokio",
  "tokio-stream",
  "tower",
  "tower-layer",
