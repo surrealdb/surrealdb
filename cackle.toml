@@ -763,7 +763,7 @@ allow_unsafe = true
 
 [pkg.same-file]
 allow_unsafe = true
-build.allow_apis = [
+allow_apis = [
     "fs",
 ]
 
@@ -1322,6 +1322,6 @@ allow_proc_macro = true
 allow_proc_macro = true
 
 [pkg.walkdir]
-build.allow_apis = [
+allow_apis = [
     "fs",
 ]
