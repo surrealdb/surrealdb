@@ -24,8 +24,8 @@ pub async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
 		username: "root",
 		password: "root",
 	};
-	let rootconfig = Config::new().user(root);
-	let db = any::connect((endpoint, rootconfig)).await?;
+	let config = Config::new().user(root);
+	let db = any::connect((endpoint, config)).await?;
 	db.signin(root).await?;
 	db.use_ns("namespace").use_db("database").await?;
 
