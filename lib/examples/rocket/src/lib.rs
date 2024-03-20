@@ -2,13 +2,13 @@ mod error;
 pub mod person;
 
 use rocket::serde::{Deserialize, Serialize};
+use rocket::{routes, Build};
 use std::env;
 use surrealdb::engine::any;
+use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Config;
 use surrealdb::Surreal;
-use rocket::{routes, Build};
-use surrealdb::engine::any::Any;
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
@@ -32,7 +32,7 @@ pub async fn create_db_connection() -> Result<Db, Box<dyn std::error::Error>> {
 	Ok(db)
 }
 
-pub fn router(db_conn:Surreal<Any>) -> rocket::Rocket<Build> {
+pub fn router(db_conn: Surreal<Any>) -> rocket::Rocket<Build> {
 	rocket::build()
 		.mount(
 			"/",
