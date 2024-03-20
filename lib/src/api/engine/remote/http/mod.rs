@@ -13,6 +13,7 @@ use crate::api::conn::MlConfig;
 use crate::api::conn::Param;
 use crate::api::engine::create_statement;
 use crate::api::engine::delete_statement;
+use crate::api::engine::insert_statement;
 use crate::api::engine::merge_statement;
 use crate::api::engine::patch_statement;
 use crate::api::engine::remote::duration_from_str;
@@ -469,6 +470,14 @@ async fn router(
 		Method::Update => {
 			let path = base_url.join(SQL_PATH)?;
 			let (one, statement) = update_statement(&mut params);
+			let request =
+				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
+			let value = take(one, request).await?;
+			Ok(DbResponse::Other(value))
+		}
+		Method::Insert => {
+			let path = base_url.join(SQL_PATH)?;
+			let (one, statement) = insert_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
 			let value = take(one, request).await?;
