@@ -44,7 +44,7 @@ use surrealdb::sql::Thing;
 use surrealdb::Surreal;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::Error as SurrealError;
+use surrealdb::Error;
 
 #[derive(Serialize, Deserialize)]
 struct Name {
@@ -70,7 +70,7 @@ struct Person {
 // followed by the query `SELECT * FROM person;`
 
 #[tokio::main]
-async fn main() -> Result<(), SurrealError> {
+async fn main() -> Result<(), Error> {
     let db = Surreal::new::<Ws>("localhost:8000").await?;
 
     // Signin as a namespace, database, or root user

@@ -16,7 +16,7 @@
 //! ```no_run
 //! use serde::{Serialize, Deserialize};
 //! use serde_json::json;
-//! use surrealdb::{Error as SurrealError, Surreal};
+//! use surrealdb::{Error, Surreal};
 //! use surrealdb::sql;
 //! use surrealdb::opt::auth::Root;
 //! use surrealdb::engine::remote::ws::Ws;
@@ -43,7 +43,7 @@
 //! // followed by the query `SELECT * FROM person;`
 
 //! #[tokio::main]
-//! async fn main() -> Result<(), SurrealError> {
+//! async fn main() -> Result<(), Error> {
 //!     let db = Surreal::new::<Ws>("localhost:8000").await?;
 //!
 //!     // Signin as a namespace, database, or root user
