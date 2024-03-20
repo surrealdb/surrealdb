@@ -158,8 +158,12 @@ pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
 
+#[cfg(not(feature = "sql2"))]
 #[doc(inline)]
-pub use surrealdb_core::*;
+pub use surrealdb_core1::*;
+#[cfg(feature = "sql2")]
+#[doc(inline)]
+pub use surrealdb_core2::*;
 
 use uuid::Uuid;
 

@@ -8,12 +8,10 @@ use super::super::super::{
 };
 use crate::sql::{statements::DefineScopeStatement, Duration, Strand, Value};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
-#[cfg(feature = "sql2")]
 use nom::{combinator::opt, sequence::tuple};
 
 pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -27,7 +25,6 @@ pub fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	let mut res = DefineScopeStatement {
 		name,
 		code: DefineScopeStatement::random_code(),
-		#[cfg(feature = "sql2")]
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
