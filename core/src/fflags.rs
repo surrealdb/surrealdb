@@ -1,14 +1,12 @@
 //! Feature flags for SurrealDB
 //! This is a public scope module that is not for external use
 //! It is public for API access
-use std::sync::RwLock;
-
-///
+use std::cell::{Cell, RefCell};
 
 /// FeatureFlags set for the project
 /// Use this while implementing features
 #[allow(dead_code)]
-pub static FFLAGS: RwLock<FFlags> = RwLock::new(FFlags {
+pub static FFLAGS: FFlags = FFlags {
 	// TODO(fflag-lqcf): This TODO signature marks tests that are affected by the fflag that do not have access to the fflag (scope)
     change_feed_live_queries: FFlagEnabledStatus {
         enabled_release: false,
@@ -22,7 +20,7 @@ pub static FFLAGS: RwLock<FFlags> = RwLock::new(FFlags {
         date_enabled_release: None,
         release_version: None,
     }
-});
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
