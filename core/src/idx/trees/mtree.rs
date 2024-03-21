@@ -158,6 +158,8 @@ pub struct MTree {
 }
 
 impl MTree {
+	const RADIUS_EPSILON:f64 = f64::EPSILON * 3f64;
+
 	pub fn new(state: MState, distance: Distance) -> Self {
 		let minimum = (state.capacity + 1) as usize / 2;
 		Self {
@@ -442,7 +444,7 @@ impl MTree {
 					let max_dist = self.compute_internal_max_distance(&node);
 					Self::set_stored_node(store, node_id, node_key, node.into_mtree_node(), true)
 						.await?;
-					Ok(InsertionResult::CoveringRadius(max_dist))
+					Ok(InsertionResult::CoveringRadius(max_dist + Self::RADIUS_EPSILON))
 				} else {
 					node.insert(o1, p1);
 					node.insert(o2, p2);
@@ -478,7 +480,7 @@ impl MTree {
 						updated,
 					)
 					.await?;
-				Ok(InsertionResult::CoveringRadius(max_dist))
+				Ok(InsertionResult::CoveringRadius(max_dist + Self::RADIUS_EPSILON))
 			}
 		}
 	}
@@ -682,16 +684,7 @@ impl MTree {
 	}
 
 	fn calculate_distance(&self, v1: &SharedVector, v2: &SharedVector) -> Result<f64, Error> {
-		if v1.eq(v2) {
-			return Ok(0.0);
-		}
-		let dist = match &self.distance {
-			Distance::Euclidean => v1.euclidean_distance(v2),
-			Distance::Cosine => v1.cosine_distance(v2),
-			Distance::Manhattan => v1.manhattan_distance(v2),
-			Distance::Minkowski(order) => v1.minkowski_distance(v2, order.to_float()),
-			_ => return Err(Error::UnsupportedDistance(self.distance.clone())),
-		};
+		let dist = self.distance.calculate(v1, v2);
 		if dist.is_finite() {
 			Ok(dist)
 		} else {
@@ -1877,24 +1870,24 @@ mod tests {
 			{
 				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Write, cache_size).await;
+					new_operation(ds, t, TransactionType::Write, cache_size).await;
 				assert!(
-					t.delete(&mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
+					t.delete(&mut tx, &mut st, obj.clone(), *doc_id).await?,
 					"Delete failed - doc_id: {doc_id} - obj: {obj:?} - coll: {:?} ",
 					collection.as_ref()
 				);
 				finish_operation(t, tx, st, true).await?;
 			}
 			{
-				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Read, cache_size).await;
-				let res = t.knn_search(&mut tx, &mut st, obj, 1).await?;
+				let (st, mut tx) =
+					new_operation(ds, t, TransactionType::Read, cache_size).await;
+				let res = t.knn_search(&mut tx, &st, obj, 1).await?;
 				let docs: Vec<DocId> = res.docs.into_iter().map(|(d, _)| d).collect();
 				assert!(!docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
 			}
 			{
 				let (mut st, mut tx) =
-					new_operation(&ds, t, TransactionType::Read, cache_size).await;
+					new_operation(ds, t, TransactionType::Read, cache_size).await;
 				check_tree_properties(&mut tx, &mut st, t).await?;
 			}
 		}
@@ -2019,7 +2012,6 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	#[ignore]
 	async fn test_mtree_unique_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
@@ -2031,7 +2023,7 @@ mod tests {
 					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 					true,
 					true,
-					true,
+					false,
 					100,
 				)
 				.await?;
@@ -2063,7 +2055,6 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	#[ignore]
 	async fn test_mtree_unique_xs_full_cache() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
@@ -2075,7 +2066,7 @@ mod tests {
 					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 					true,
 					true,
-					true,
+					false,
 					0,
 				)
 				.await?;
@@ -2153,7 +2144,6 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	#[ignore]
 	async fn test_mtree_random_xs() -> Result<(), Error> {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
@@ -2166,7 +2156,7 @@ mod tests {
 					TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
 					true,
 					true,
-					true,
+					false,
 					0,
 				)
 				.await?;
@@ -2316,7 +2306,7 @@ mod tests {
 	}
 
 	fn check_knn(res: &VecDeque<(DocId, f64)>, expected: Vec<DocId>) {
-		let res: Vec<DocId> = res.into_iter().map(|(doc, _)| *doc).collect();
+		let res: Vec<DocId> = res.iter().map(|(doc, _)| *doc).collect();
 		assert_eq!(res, expected);
 	}
 
@@ -2401,7 +2391,7 @@ mod tests {
 					for (o, p) in entries {
 						if let Some(center) = center.as_ref() {
 							let pd = t.calculate_distance(center, o)?;
-							assert_eq!(pd, p.parent_dist, "Incorrect parent distance");
+							assert_eq_dist(pd, p.parent_dist, 3);
 							assert!(pd + p.radius <= radius);
 						}
 						nodes.push_back((p.node, p.radius, Some(o.clone()), next_depth))
@@ -2420,8 +2410,7 @@ mod tests {
 						}
 						if let Some(center) = center.as_ref() {
 							let pd = t.calculate_distance(center, o)?;
-							debug!("calc_dist: {:?} {:?} = {}", center, &o, pd);
-							assert_eq!(pd, p.parent_dist, "Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}", p.parent_dist, t.distance, pd, node_id, o, center);
+							assert_eq_dist(pd, p.parent_dist, 3);
 						}
 						checks.doc_count += p.docs.len() as usize;
 					}
@@ -2429,6 +2418,14 @@ mod tests {
 			}
 		}
 		Ok(checks)
+	}
+
+	fn assert_eq_dist(result: f64, expected: f64, epsilon_tolerancy: usize) {
+		let margin = f64::EPSILON * epsilon_tolerancy as f64;
+		assert!(
+			(result - expected).abs() <= margin,
+			"Expected {expected} but got {result} - difference exceeds epsilon {margin}"
+		);
 	}
 
 	fn update_min(min: &mut Option<usize>, val: usize) {

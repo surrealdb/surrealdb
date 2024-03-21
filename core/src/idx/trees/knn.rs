@@ -61,6 +61,7 @@ impl Ord for PriorityResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Ids64 {
+	#[allow(dead_code)]
 	Empty,
 	One(u64),
 	Vec2([u64; 2]),
@@ -288,6 +289,7 @@ impl Ids64 {
 		}
 	}
 
+	#[allow(dead_code)]
 	pub(super) fn remove(&mut self, d: DocId) -> Option<Self> {
 		match self {
 			Self::Empty => None,
