@@ -26,8 +26,9 @@ use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Idiom, Number, Object, Operator, Table, Thing, Value};
 use std::borrow::Borrow;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
