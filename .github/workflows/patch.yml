@@ -48,6 +48,8 @@ jobs:
           sudo mv taplo /usr/bin/taplo
 
       - name: Prepare patch branch
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: |
           set -x
 

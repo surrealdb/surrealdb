@@ -141,7 +141,7 @@ mod tests {
 	use crate::sql::value::Value;
 	use crate::vs;
 
-	const dont_store_previous: bool = false;
+	const DONT_STORE_PREVIOUS: bool = false;
 
 	#[tokio::test]
 	async fn test_changefeed_read_write() {
@@ -200,7 +200,7 @@ mod tests {
 			id: Id::String("A".to_string()),
 		};
 		let value_a: super::Value = "a".into();
-		let mut previous = Cow::from(Value::None);
+		let previous = Cow::from(Value::None);
 		tx1.record_change(
 			ns,
 			db,
@@ -208,7 +208,7 @@ mod tests {
 			&thing_a,
 			previous.clone(),
 			Cow::Borrowed(&value_a),
-			dont_store_previous,
+			DONT_STORE_PREVIOUS,
 		);
 		tx1.complete_changes(true).await.unwrap();
 		tx1.commit().await.unwrap();
@@ -226,7 +226,7 @@ mod tests {
 			&thing_c,
 			previous.clone(),
 			Cow::Borrowed(&value_c),
-			dont_store_previous,
+			DONT_STORE_PREVIOUS,
 		);
 		tx2.complete_changes(true).await.unwrap();
 		tx2.commit().await.unwrap();
@@ -245,7 +245,7 @@ mod tests {
 			&thing_b,
 			previous.clone(),
 			Cow::Borrowed(&value_b),
-			dont_store_previous,
+			DONT_STORE_PREVIOUS,
 		);
 		let thing_c2 = Thing {
 			tb: tb.to_owned(),
@@ -259,7 +259,7 @@ mod tests {
 			&thing_c2,
 			previous.clone(),
 			Cow::Borrowed(&value_c2),
-			dont_store_previous,
+			DONT_STORE_PREVIOUS,
 		);
 		tx3.complete_changes(true).await.unwrap();
 		tx3.commit().await.unwrap();

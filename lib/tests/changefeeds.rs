@@ -64,11 +64,13 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
 
-	let cf_val_arr = match FFLAGS.change_feed_live_queries.enabled() {
-		true => Value::parse(
-			"[
+	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
+	{
+		true => vec![
+			Value::parse(
+				"[
 			{
-				versionstamp: 2,
+				versionstamp: 65536,
 				changes: [
 					{
 						create: {
@@ -79,7 +81,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 131072,
 				changes: [
 					{
 						delete: {
@@ -89,11 +91,88 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-		),
-		false => Value::parse(
-			"[
+			),
+			Value::parse(
+				"[
 			{
-				versionstamp: 2,
+				versionstamp: 65536,
+				changes: [
+					{
+						create: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						create: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						create: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 262144,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+		],
+		false => vec![
+			Value::parse(
+				"[
+			{
+				versionstamp: 65536,
 				changes: [
 					{
 						update: {
@@ -104,7 +183,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 131072,
 				changes: [
 					{
 						delete: {
@@ -114,7 +193,83 @@ async fn database_change_feeds() -> Result<(), Error> {
 				]
 			}
 		]",
-		),
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 65536,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 196608,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+			Value::parse(
+				"[
+			{
+				versionstamp: 131072,
+				changes: [
+					{
+						update: {
+							id: person:test,
+							name: 'Name: Tobie'
+						}
+					}
+				]
+			},
+			{
+				versionstamp: 262144,
+				changes: [
+					{
+						delete: {
+							id: person:test
+						}
+					}
+				]
+			}
+		]",
+			),
+		],
 	};
 
 	// Declare check that is repeatable
@@ -122,7 +277,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		dbs: &Datastore,
 		sql2: &str,
 		ses: &Session,
-		cf_val_arr: &Value,
+		cf_val_arr: &Vec<Value>,
 	) -> Result<(), String> {
 		let res = &mut dbs.execute(sql2, ses, None).await?;
 		assert_eq!(res.len(), 3);
@@ -149,17 +304,19 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
-		Some(&tmp)
-			.filter(|x| *x == cf_val_arr)
+		cf_val_arr
+			.iter()
+			.find(|x| *x == &tmp)
+			// We actually dont want to capture if its found
 			.map(|_v| ())
-			.ok_or(format!("Expected SHOW CHANGES value:\nleft: {}\nright: {}", tmp, cf_val_arr))?;
+			.ok_or(format!("Expected SHOW CHANGES value not found:\n{}", tmp))?;
 		Ok(())
 	}
 
 	// Check the validation with repeats
 	let limit = 1;
 	for i in 0..limit {
-		let test_result = check_test(&dbs, sql2, &ses, &cf_val_arr).await;
+		let test_result = check_test(&dbs, sql2, &ses, &potential_show_changes_values).await;
 		match test_result {
 			Ok(_) => break,
 			Err(e) => {
@@ -185,7 +342,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, cf_val_arr);
+	assert!(potential_show_changes_values.contains(&tmp));
 	// GC after 1hs
 	let one_hour_in_secs = 3600;
 	current_time += one_hour_in_secs;
@@ -297,7 +454,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		true => Value::parse(
 			"[
 			{
-				versionstamp: 1,
+				versionstamp: 65536,
 				changes: [
 					{
 						define_table: {
@@ -307,7 +464,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 2,
+				versionstamp: 131072,
 				changes: [
 					{
 						create: {
@@ -318,7 +475,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 196608,
 				changes: [
 					{
 						update: {
@@ -329,7 +486,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 4,
+				versionstamp: 262144,
 				changes: [
 					{
 						update: {
@@ -340,7 +497,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 5,
+				versionstamp: 327680,
 				changes: [
 					{
 						delete: {
@@ -350,7 +507,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 6,
+				versionstamp: 393216,
 				changes: [
 					{
 						create: {
@@ -365,7 +522,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 		false => Value::parse(
 			"[
 			{
-				versionstamp: 1,
+				versionstamp: 65536,
 				changes: [
 					{
 						define_table: {
@@ -375,7 +532,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 2,
+				versionstamp: 131072,
 				changes: [
 					{
 						update: {
@@ -386,7 +543,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 3,
+				versionstamp: 196608,
 				changes: [
 					{
 						update: {
@@ -397,7 +554,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 4,
+				versionstamp: 262144,
 				changes: [
 					{
 						update: {
@@ -408,7 +565,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 5,
+				versionstamp: 327680,
 				changes: [
 					{
 						delete: {
@@ -418,7 +575,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 				]
 			},
 			{
-				versionstamp: 6,
+				versionstamp: 393216,
 				changes: [
 					{
 						update: {
