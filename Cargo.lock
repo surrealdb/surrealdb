@@ -3663,6 +3663,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "900d57987be3f2aeb70d385fff9b27fb74c5723cc9a52d904d4f9c807a0667bf"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "once_cell",
+ "pin-project-lite",
+ "thiserror",
+ "urlencoding",
+]
+
+[[package]]
 name = "opentelemetry-otlp"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3672,7 +3687,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http 0.2.11",
- "opentelemetry",
+ "opentelemetry 0.19.0",
  "opentelemetry-proto",
  "prost 0.11.9",
  "thiserror",
@@ -3688,7 +3703,7 @@ checksum = "045f8eea8c0fa19f7d48e7bc3128a39c2e5c533d5c61298c548dfefc1064474c"
 dependencies = [
  "futures",
  "futures-util",
- "opentelemetry",
+ "opentelemetry 0.19.0",
  "prost 0.11.9",
  "tonic 0.8.3",
 ]
@@ -5717,7 +5732,7 @@ dependencies = [
  "mimalloc",
  "nix 0.27.1",
  "once_cell",
- "opentelemetry",
+ "opentelemetry 0.19.0",
  "opentelemetry-otlp",
  "opentelemetry-proto",
  "pin-project-lite",
@@ -5771,6 +5786,7 @@ dependencies = [
  "indexmap 2.2.2",
  "native-tls",
  "once_cell",
+ "opentelemetry 0.22.0",
  "path-clean",
  "pharos",
  "pprof",
@@ -5929,6 +5945,7 @@ dependencies = [
  "num_cpus",
  "object_store",
  "once_cell",
+ "opentelemetry 0.22.0",
  "pbkdf2",
  "pharos",
  "phf",
@@ -6708,7 +6725,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00a39dcf9bfc1742fa4d6215253b33a6e474be78275884c216fc2a06267b3600"
 dependencies = [
  "once_cell",
- "opentelemetry",
+ "opentelemetry 0.19.0",
  "tracing",
  "tracing-core",
  "tracing-log 0.1.4",

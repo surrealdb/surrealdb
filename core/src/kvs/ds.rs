@@ -1,12 +1,12 @@
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
+use once_cell::sync::Lazy;
+use opentelemetry::metrics::Meter;
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
@@ -52,6 +52,22 @@ const LQ_CHANNEL_SIZE: usize = 100;
 
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
+
+const ds_meter: Lazy<Meter, fn() -> Meter> = Lazy::new(|| {
+	let meter = opentelemetry::global::meter("surrealdb");
+	meter
+});
+
+const counter: Lazy<
+	opentelemetry::metrics::Counter<u64>,
+	fn() -> opentelemetry::metrics::Counter<u64>,
+> = Lazy::new(|| {
+	let a = ds_meter
+		.u64_counter("surreal-counter")
+		.with_description("A counter of surreal operations")
+		.init();
+	a
+});
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -823,11 +839,10 @@ impl Datastore {
 	// tick is called periodically to perform maintenance tasks.
 	// This is called every TICK_INTERVAL.
 	pub async fn tick(&self) -> Result<(), Error> {
-		let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
-			Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
-		})?;
-		let ts = now.as_secs();
-		self.tick_at(ts).await?;
+		let mut tx = self.transaction(Read, Optimistic).await?;
+		let now = tx.clock().await.value;
+		tx.cancel().await?;
+		self.tick_at(now).await?;
 		Ok(())
 	}
 
@@ -867,6 +882,10 @@ impl Datastore {
 
 	/// Poll change feeds for live query notifications
 	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
+		// let a = opentelemetry::Context::current()
+		// 	.with_value(Hypothetical("SURREALDBBB".to_string()))
+		// 	.attach();
+		counter.add(123456, &[opentelemetry::KeyValue::new("key", "value")]);
 		// Runtime feature gate, as it is not production-ready
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			return Ok(());
@@ -884,9 +903,9 @@ impl Datastore {
 		// Change map includes a mapping of selector to changesets, ordered by versionstamp
 		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
 		let mut tx = self.transaction(Read, Optimistic).await?;
-		let mut tracked_cfs = self.cf_watermarks.write().await;
-		let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
-		for (selector, vs) in tracked_cfs.iter() {
+		let mut cf_watermarks = self.cf_watermarks.write().await;
+		let mut tracked_cfs_updates = Vec::with_capacity(cf_watermarks.len());
+		for (selector, vs) in cf_watermarks.iter() {
 			// Read the change feed for the selector
 			let res = cf::read(
 				&mut tx,
@@ -911,7 +930,7 @@ impl Datastore {
 				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
 					trace!("Adding a change set for lq notification processing");
 					// Update the cf watermark so we can progress scans
-					// If the notifications fail from here-on, they are lost
+					// If the notifications fail from here-on (function fail, continue next tick), they are lost
 					// this is a separate vec that we later insert to because we are iterating immutably
 					// We shouldn't use a read lock because of consistency between watermark scans
 					tracked_cfs_updates.push((selector.clone(), change_set.0));
@@ -924,7 +943,8 @@ impl Datastore {
 
 		// Now we update since we are no longer iterating immutably
 		for (selector, vs) in tracked_cfs_updates {
-			tracked_cfs.insert(selector, vs);
+			trace!("Updating watermark to {:?} for selector {:?}", vs, selector);
+			cf_watermarks.insert(selector, vs);
 		}
 
 		for (selector, change_sets) in change_map {
@@ -1066,9 +1086,12 @@ impl Datastore {
 						}
 					}
 					let selector = lq_index_key.selector;
-					// TODO(phughk): - read watermark for catchup
+					// Read watermark to prevent catchup
+					let mut tx = self.transaction(Read, Optimistic).await?;
 					// We insert the current watermark.
-					cf_watermarks.entry(selector).or_insert_with(Versionstamp::default);
+					let vs = u64_to_versionstamp(tx.clock.now().await.value);
+					tx.cancel().await?;
+					cf_watermarks.entry(selector).or_insert_with(|| vs);
 				}
 				TrackedResult::KillQuery(kill_entry) => {
 					let found: Option<(LqIndexKey, LqIndexValue)> = lq_map
