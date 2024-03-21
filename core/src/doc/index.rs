@@ -133,11 +133,7 @@ impl Combinator {
 			if !f {
 				// Iterator for not flattened values
 				if let Value::Array(v) = v {
-					iterators.push(Box::new(MultiValuesIterator {
-						vals: v.0,
-						done: false,
-						current: 0,
-					}));
+					iterators.push(Box::new(MultiValuesIterator::new(v.0)));
 					continue;
 				}
 			}
@@ -183,6 +179,28 @@ struct MultiValuesIterator {
 	vals: Vec<Value>,
 	done: bool,
 	current: usize,
+	end: usize,
+}
+
+impl MultiValuesIterator {
+	fn new(vals: Vec<Value>) -> Self {
+		let len = vals.len();
+		if len == 0 {
+			Self {
+				vals,
+				done: true,
+				current: 0,
+				end: 0,
+			}
+		} else {
+			Self {
+				vals,
+				done: false,
+				current: 0,
+				end: len - 1,
+			}
+		}
+	}
 }
 
 impl ValuesIterator for MultiValuesIterator {
@@ -190,7 +208,7 @@ impl ValuesIterator for MultiValuesIterator {
 		if self.done {
 			return false;
 		}
-		if self.current == self.vals.len() - 1 {
+		if self.current == self.end {
 			self.done = true;
 			return false;
 		}

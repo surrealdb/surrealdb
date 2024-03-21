@@ -354,10 +354,6 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.drop = true;
 				}
-				t!("RELATION") => {
-					self.pop_peek();
-					res.kind = TableType::Relation(self.parse_relation_schema()?);
-				}
 				t!("TYPE") => {
 					self.pop_peek();
 					match self.peek_kind() {

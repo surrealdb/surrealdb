@@ -2648,7 +2648,7 @@ async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<()
 #[cfg(feature = "sql2")]
 async fn define_table_relation() -> Result<(), Error> {
 	let sql = "
-		DEFINE TABLE likes RELATION;
+		DEFINE TABLE likes TYPE RELATION;
 		CREATE person:raphael, person:tobie;
 		RELATE person:raphael->likes->person:tobie;
 		CREATE likes:1;
@@ -2669,6 +2669,26 @@ async fn define_table_relation() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_err());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_empty_array() -> Result<(), Error> {
+	let sql = r"
+		DEFINE TABLE indexTest;
+		INSERT INTO indexTest { arr: [] };
+		DEFINE INDEX idx_arr ON TABLE indexTest COLUMNS arr;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..3 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
 	Ok(())
 }
