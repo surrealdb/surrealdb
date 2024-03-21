@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineSimilarity, EuclideanDistance, HammingDistance, JaccardSimilarity,
+	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
 	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
 };
 use crate::sql::ident::Ident;
@@ -13,7 +13,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -24,6 +24,9 @@ pub enum Index {
 	Search(SearchParams),
 	/// M-Tree index for distance based metrics
 	MTree(MTreeParams),
+	/// HNSW index for distance based metrics
+	#[revision(start = 2)]
+	Hnsw(HnswParams),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -94,6 +97,22 @@ pub enum Distance1 {
 	Minkowski(Number),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[revisioned(revision = 1)]
+pub struct HnswParams {
+	pub dimension: u16,
+	pub distance: Distance,
+	pub vector_type: VectorType,
+	pub m: u16,
+	pub m0: u16,
+	pub ef_construction: u16,
+	pub heuristic: bool,
+	pub extend_candidates: bool,
+	pub keep_pruned_connections: bool,
+	pub ml: Number,
+}
+
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
@@ -112,7 +131,7 @@ pub enum Distance {
 impl Distance {
 	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
 		match self {
-			Self::Cosine => v1.cosine_similarity(v2),
+			Self::Cosine => v1.cosine_distance(v2),
 			Self::Chebyshev => v1.chebyshev_distance(v2),
 			Self::Euclidean => v1.euclidean_distance(v2),
 			Self::Hamming => v1.hamming_distance(v2),
@@ -194,6 +213,23 @@ impl Display for Index {
 					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
 					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order, p.doc_ids_cache, p.mtree_cache
 				)
+			}
+			Self::Hnsw(p) => {
+				write!(
+					f,
+					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} ML {}",
+					p.dimension, p.distance, p.vector_type, p.ef_construction, p.m, p.m0, p.ml
+				)?;
+				if p.heuristic {
+					f.write_str(" HEURISTIC")?
+				}
+				if p.extend_candidates {
+					f.write_str(" EXTEND_CANDIDATES")?
+				}
+				if p.keep_pruned_connections {
+					f.write_str(" KEEP_PRUNED_CONNECTIONS")?
+				}
+				Ok(())
 			}
 		}
 	}

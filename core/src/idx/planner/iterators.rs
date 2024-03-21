@@ -21,6 +21,7 @@ pub(crate) enum ThingIterator {
 	UniqueUnion(UniqueUnionThingIterator),
 	Matches(MatchesThingIterator),
 	Knn(DocIdsIterator),
+	Things(ThingsIterator),
 }
 
 impl ThingIterator {
@@ -38,6 +39,7 @@ impl ThingIterator {
 			ThingIterator::UniqueUnion(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
+			ThingIterator::Things(i) => Ok(i.next_batch(size)),
 		}
 	}
 }
@@ -474,5 +476,21 @@ impl DocIdsIterator {
 			}
 		}
 		Ok(res)
+	}
+}
+
+pub(crate) struct ThingsIterator {
+	res: VecDeque<Thing>,
+}
+
+impl ThingsIterator {
+	pub(super) fn new(res: VecDeque<Thing>) -> Self {
+		Self {
+			res,
+		}
+	}
+	fn next_batch(&mut self, limit: u32) -> Vec<(Thing, Option<DocId>)> {
+		let limit = self.res.len().min(limit as usize);
+		self.res.drain(0..limit).map(|thg| (thg, None)).collect()
 	}
 }

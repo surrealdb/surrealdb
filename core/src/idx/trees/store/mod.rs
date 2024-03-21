@@ -1,4 +1,5 @@
 pub mod cache;
+pub(crate) mod hnsw;
 pub(crate) mod tree;
 
 use crate::dbs::Options;
@@ -7,9 +8,11 @@ use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::cache::{TreeCache, TreeCaches};
+use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::sql::index::HnswParams;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::Index;
 use std::fmt::{Debug, Display, Formatter};
@@ -190,6 +193,7 @@ struct Inner {
 	btree_fst_caches: TreeCaches<BTreeNode<FstKeys>>,
 	btree_trie_caches: TreeCaches<BTreeNode<TrieKeys>>,
 	mtree_caches: TreeCaches<MTreeNode>,
+	hnsw_indexes: HnswIndexes,
 }
 impl Default for IndexStores {
 	fn default() -> Self {
@@ -197,6 +201,7 @@ impl Default for IndexStores {
 			btree_fst_caches: TreeCaches::default(),
 			btree_trie_caches: TreeCaches::default(),
 			mtree_caches: TreeCaches::default(),
+			hnsw_indexes: HnswIndexes::default(),
 		}))
 	}
 }
@@ -233,6 +238,16 @@ impl IndexStores {
 	) -> MTreeStore {
 		let cache = self.0.mtree_caches.get_cache(generation, &keys, cache_size).await;
 		TreeStore::new(keys, cache, tt).await
+	}
+
+	pub(crate) async fn get_index_hnsw(
+		&self,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		p: &HnswParams,
+	) -> SharedHnswIndex {
+		let ikb = IndexKeyBase::new(opt, ix);
+		self.0.hnsw_indexes.get(&ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(
@@ -281,6 +296,9 @@ impl IndexStores {
 			Index::MTree(_) => {
 				self.remove_mtree_cache(ikb).await;
 			}
+			Index::Hnsw(_) => {
+				self.remove_hnsw_index(ikb).await;
+			}
 			_ => {}
 		}
 		Ok(())
@@ -298,9 +316,14 @@ impl IndexStores {
 		self.0.mtree_caches.remove_cache(&TreeNodeProvider::Vector(ikb.clone())).await;
 	}
 
+	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) {
+		self.0.hnsw_indexes.remove(&ikb).await;
+	}
+
 	pub async fn is_empty(&self) -> bool {
 		self.0.mtree_caches.is_empty().await
 			&& self.0.btree_fst_caches.is_empty().await
 			&& self.0.btree_trie_caches.is_empty().await
+			&& self.0.hnsw_indexes.is_empty().await
 	}
 }

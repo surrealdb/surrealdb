@@ -153,21 +153,32 @@ pub fn knn(i: &str) -> IResult<&str, Operator> {
 		|i| {
 			let (i, _) = opt(tag_no_case("knn"))(i)?;
 			let (i, _) = char('<')(i)?;
-			let (i, k) = u32(i)?;
-			let (i, dist) = opt(knn_distance)(i)?;
+			let (i, op) = alt((inner_ann, inner_knn))(i)?;
 			let (i, _) = char('>')(i)?;
-			Ok((i, Operator::Knn(k, dist)))
+			Ok((i, op))
 		},
 		|i| {
 			let (i, _) = tag("<|")(i)?;
 			cut(|i| {
-				let (i, k) = u32(i)?;
-				let (i, dist) = opt(knn_distance)(i)?;
+				let (i, op) = alt((inner_ann, inner_knn))(i)?;
 				let (i, _) = tag("|>")(i)?;
-				Ok((i, Operator::Knn(k, dist)))
+				Ok((i, op))
 			})(i)
 		},
 	))(i)
+}
+
+fn inner_knn(i: &str) -> IResult<&str, Operator> {
+	let (i, k) = u32(i)?;
+	let (i, dist) = opt(knn_distance)(i)?;
+	Ok((i, Operator::Knn(k, dist)))
+}
+
+fn inner_ann(i: &str) -> IResult<&str, Operator> {
+	let (i, k) = u32(i)?;
+	let (i, _) = char(',')(i)?;
+	let (i, ef) = u32(i)?;
+	Ok((i, Operator::Ann(k, ef)))
 }
 
 pub fn dir(i: &str) -> IResult<&str, Dir> {
@@ -262,5 +273,14 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("<|5|>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(5, None));
+	}
+
+	#[test]
+	fn test_ann() {
+		let res = knn("<5,10>");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("<5,10>", format!("{}", out));
+		assert_eq!(out, Operator::Ann(5, 10));
 	}
 }

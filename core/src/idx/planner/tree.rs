@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::KnnExpressions;
+use crate::idx::planner::executor::{AnnExpressions, ExpressionKey, KnnExpressions};
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
@@ -42,12 +42,13 @@ struct TreeBuilder<'a> {
 	table: &'a Table,
 	with: &'a Option<With>,
 	indexes: Option<Arc<[DefineIndexStatement]>>,
-	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
+	resolved_expressions: HashMap<ExpressionKey, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Arc<Idiom>>,
 	idioms_indexes: HashMap<Arc<Idiom>, Option<Arc<Vec<IndexRef>>>>,
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 	knn_expressions: KnnExpressions,
+	ann_expressions: AnnExpressions,
 }
 
 impl<'a> TreeBuilder<'a> {
@@ -75,6 +76,7 @@ impl<'a> TreeBuilder<'a> {
 			index_map: Default::default(),
 			with_indexes,
 			knn_expressions: Default::default(),
+			ann_expressions: Default::default(),
 		}
 	}
 	async fn lazy_cache_indexes(&mut self) -> Result<(), Error> {
@@ -193,7 +195,7 @@ impl<'a> TreeBuilder<'a> {
 				if let Some(re) = self.resolved_expressions.get(e).cloned() {
 					return Ok(re.into());
 				}
-				let exp = Arc::new(e.clone());
+				let exp = e.clone().into();
 				let left = Arc::new(self.eval_value(l).await?);
 				let right = Arc::new(self.eval_value(r).await?);
 				let mut io = None;
@@ -238,7 +240,7 @@ impl<'a> TreeBuilder<'a> {
 		op: &Operator,
 		id: Arc<Idiom>,
 		n: &Node,
-		e: &Arc<Expression>,
+		e: &ExpressionKey,
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>, Error> {
 		for ir in irs {
@@ -250,6 +252,7 @@ impl<'a> TreeBuilder<'a> {
 						..
 					} => Self::eval_matches_operator(op, n),
 					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id.clone())?,
+					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id.clone())?,
 				};
 				if let Some(op) = op {
 					let io = IndexOption::new(*ir, id, op);
@@ -271,7 +274,7 @@ impl<'a> TreeBuilder<'a> {
 
 	fn eval_indexed_knn(
 		&mut self,
-		exp: &Arc<Expression>,
+		exp: &ExpressionKey,
 		op: &Operator,
 		n: &Node,
 		id: Arc<Idiom>,
@@ -296,7 +299,28 @@ impl<'a> TreeBuilder<'a> {
 		Ok(None)
 	}
 
-	fn eval_knn(&mut self, id: Arc<Idiom>, val: &Node, exp: &Arc<Expression>) -> Result<(), Error> {
+	fn eval_indexed_ann(
+		&mut self,
+		exp: &ExpressionKey,
+		op: &Operator,
+		nd: &Node,
+		id: Arc<Idiom>,
+	) -> Result<Option<IndexOperator>, Error> {
+		if let Operator::Ann(n, ef) = op {
+			if let Node::Computed(v) = nd {
+				let vec: Vec<Number> = v.as_ref().try_into()?;
+				let n = *n as usize;
+				let ef = *ef as usize;
+				self.ann_expressions.insert(exp.clone(), (n, id, Arc::new(vec), ef));
+				if let Value::Array(a) = v.as_ref() {
+					return Ok(Some(IndexOperator::Ann(a.clone(), n, ef)));
+				}
+			}
+		}
+		Ok(None)
+	}
+
+	fn eval_knn(&mut self, id: Arc<Idiom>, val: &Node, exp: &ExpressionKey) -> Result<(), Error> {
 		if let Operator::Knn(k, d) = exp.operator() {
 			if let Node::Computed(v) = val {
 				let vec: Vec<Number> = v.as_ref().try_into()?;
@@ -348,17 +372,17 @@ pub(super) type IndexRef = u16;
 /// For each expression a possible index option
 #[derive(Default)]
 pub(super) struct IndexesMap {
-	pub(super) options: Vec<(Arc<Expression>, IndexOption)>,
+	pub(super) options: Vec<(ExpressionKey, IndexOption)>,
 	pub(super) definitions: Vec<DefineIndexStatement>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum Node {
 	Expression {
 		io: Option<IndexOption>,
 		left: Arc<Node>,
 		right: Arc<Node>,
-		exp: Arc<Expression>,
+		exp: ExpressionKey,
 	},
 	IndexedField(Arc<Idiom>, Arc<Vec<IndexRef>>),
 	NonIndexedField(Arc<Idiom>),
@@ -415,7 +439,7 @@ impl IdiomPosition {
 
 #[derive(Clone)]
 struct ResolvedExpression {
-	exp: Arc<Expression>,
+	exp: ExpressionKey,
 	io: Option<IndexOption>,
 	left: Arc<Node>,
 	right: Arc<Node>,
