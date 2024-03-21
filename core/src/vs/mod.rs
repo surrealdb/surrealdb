@@ -7,6 +7,13 @@
 /// The first 8 bytes are significant (the u64), and the remaining 2 bytes are not significant, but used for extra precision.
 /// To convert to and from this module, see the conv module in this same directory.
 ///
+/// You're going to want these
+/// 65536
+/// 131072
+/// 196608
+/// 262144
+/// 327680
+/// 393216
 pub type Versionstamp = [u8; 10];
 
 pub(crate) mod conv;
