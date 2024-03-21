@@ -175,7 +175,7 @@ async fn live_select_record_ranges() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(timeout = Duration::from_millis(50)))]
 async fn live_select_query() {
 	let (permit, db) = new_db().await;
 
