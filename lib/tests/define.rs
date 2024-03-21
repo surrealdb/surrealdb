@@ -2648,7 +2648,7 @@ async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<()
 #[cfg(feature = "sql2")]
 async fn define_table_relation() -> Result<(), Error> {
 	let sql = "
-		DEFINE TABLE likes RELATION;
+		DEFINE TABLE likes TYPE RELATION;
 		CREATE person:raphael, person:tobie;
 		RELATE person:raphael->likes->person:tobie;
 		CREATE likes:1;
