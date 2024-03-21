@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -9,12 +9,15 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
+use std::sync::Arc;
 
-use crate::sql::{Kind, TableType};
+use crate::sql::{Idiom, Kind, Part, Table, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
+
+use super::DefineFieldStatement;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -31,7 +34,7 @@ pub struct DefineTableStatement {
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
-	pub table_type: TableType,
+	pub kind: TableType,
 }
 
 impl DefineTableStatement {
@@ -70,8 +73,32 @@ impl DefineTableStatement {
 				..self.clone()
 			}
 		};
-		if let TableType::Relation(rel) = &self.table_type {
-			run.define_in_out_fd_from_relation(opt.ns(), opt.db(), &self.name, rel).await?
+		if let TableType::Relation(rel) = &self.kind {
+			let tb: &str = &self.name;
+			let in_kind = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+			let out_kind = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+			let in_key = crate::key::table::fd::new(opt.ns(), opt.db(), tb, "in");
+			let out_key = crate::key::table::fd::new(opt.ns(), opt.db(), tb, "out");
+			run.set(
+				in_key,
+				DefineFieldStatement {
+					name: Idiom(vec![Part::from("in")]),
+					what: tb.into(),
+					kind: Some(in_kind),
+					..Default::default()
+				},
+			)
+			.await?;
+			run.set(
+				out_key,
+				DefineFieldStatement {
+					name: Idiom(vec![Part::from("out")]),
+					what: tb.into(),
+					kind: Some(out_kind),
+					..Default::default()
+				},
+			)
+			.await?;
 		}
 
 		let tb_key = crate::key::table::fd::prefix(opt.ns(), opt.db(), &self.name);
@@ -94,13 +121,7 @@ impl DefineTableStatement {
 			// Release the transaction
 			drop(run);
 			// Force queries to run
-			let opt = &opt.new_with_force(true);
-			// Don't process field queries
-			let opt = &opt.new_with_fields(false);
-			// Don't process event queries
-			let opt = &opt.new_with_events(false);
-			// Don't process index queries
-			let opt = &opt.new_with_indexes(false);
+			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Process the view data
@@ -121,23 +142,20 @@ impl DefineTableStatement {
 
 impl DefineTableStatement {
 	pub fn is_relation(&self) -> bool {
-		matches!(self.table_type, TableType::Relation(_))
+		matches!(self.kind, TableType::Relation(_))
 	}
 
 	pub fn allows_relation(&self) -> bool {
-		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
+		matches!(self.kind, TableType::Relation(_) | TableType::Any)
 	}
 
 	pub fn allows_normal(&self) -> bool {
-		matches!(self.table_type, TableType::Normal | TableType::Any)
+		matches!(self.kind, TableType::Normal | TableType::Any)
 	}
 }
 
-fn get_tables_from_kind(kind: &Kind) -> String {
-	let Kind::Record(tables) = kind else {
-		panic!()
-	};
-	tables.iter().map(ToString::to_string).collect::<Vec<_>>().join(" | ")
+fn get_tables_from_kind(tables: &[Table]) -> String {
+	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
 }
 
 impl Display for DefineTableStatement {
@@ -148,16 +166,16 @@ impl Display for DefineTableStatement {
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
-		match &self.table_type {
+		match &self.kind {
 			TableType::Normal => {
 				f.write_str(" NORMAL")?;
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
-				if let Some(kind) = &rel.from {
+				if let Some(Kind::Record(kind)) = &rel.from {
 					write!(f, " IN {}", get_tables_from_kind(kind))?;
 				}
-				if let Some(kind) = &rel.to {
+				if let Some(Kind::Record(kind)) = &rel.to {
 					write!(f, " OUT {}", get_tables_from_kind(kind))?;
 				}
 			}

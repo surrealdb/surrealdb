@@ -74,7 +74,7 @@ async fn table_definitions_can_be_deleted() {
 		changefeed: None,
 		comment: None,
 		if_not_exists: false,
-		table_type: TableType::Any,
+		kind: TableType::Any,
 	};
 	tx.set(&key, &value).await.unwrap();
 

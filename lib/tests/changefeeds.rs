@@ -1,3 +1,5 @@
+mod parse;
+
 use chrono::DateTime;
 
 use helpers::new_ds;
@@ -11,7 +13,6 @@ use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
 
 mod helpers;
-mod parse;
 
 #[test_log::test(tokio::test)]
 async fn database_change_feeds() -> Result<(), Error> {
@@ -137,20 +138,20 @@ async fn database_change_feeds() -> Result<(), Error> {
 		);
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
 		let val = Value::parse("[]");
 		Some(&tmp)
 			.filter(|x| *x == &val)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
 		Some(&tmp)
 			.filter(|x| *x == cf_val_arr)
-			.map(|v| ())
+			.map(|_v| ())
 			.ok_or(format!("Expected SHOW CHANGES value:\nleft: {}\nright: {}", tmp, cf_val_arr))?;
 		Ok(())
 	}
@@ -185,7 +186,6 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, cf_val_arr);
-
 	// GC after 1hs
 	let one_hour_in_secs = 3600;
 	current_time += one_hour_in_secs;
@@ -733,5 +733,89 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		unreachable!()
 	};
 	assert_eq!(array.len(), 0);
+	Ok(())
+}
+
+#[tokio::test]
+async fn changefeed_with_original() -> Result<(), Error> {
+	if !FFLAGS.change_feed_live_queries.enabled() {
+		return Ok(());
+	}
+	let db = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	// Enable change feeds
+	db.execute("DEFINE TABLE user CHANGEFEED 1h INCLUDE ORIGINAL;", &ses, None)
+		.await?
+		.remove(0)
+		.result?;
+	db.execute("CREATE user CONTENT {'id': 'id_one'};", &ses, None).await?.remove(0).result?;
+
+	// Now validate original values are stored
+	let value: Value =
+		db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
+	let Value::Array(array) = value else {
+		unreachable!()
+	};
+	assert_eq!(array.len(), 2);
+
+	assert_eq!(
+		array.get(0).unwrap(),
+		&surrealdb::sql::value(
+			r#"{
+    "changes": [{
+        "define_table": {
+            "name": "user",
+        },
+    }],
+    "versionstamp": 65536
+    }"#
+		)
+		.unwrap()
+	);
+	assert_eq!(
+		array.get(1).unwrap(),
+		&surrealdb::sql::value(
+			r#"
+    {
+        "changes": [{
+            "create": {
+                "id": user:id_one,
+            },
+            "original": None,
+        }],
+        "versionstamp": 131072
+    }
+    "#
+		)
+		.unwrap()
+	);
+
+	db.execute("UPDATE user:id_one SET name = 'Raynor';", &ses, None).await?.remove(0).result?;
+	let array =
+		db.execute("SHOW CHANGES FOR TABLE user SINCE 0", &ses, None).await?.remove(0).result?;
+	let Value::Array(array) = array else {
+		unreachable!()
+	};
+	assert_eq!(array.len(), 3);
+	assert_eq!(
+		array.get(2).unwrap(),
+		&surrealdb::sql::value(
+			r#"
+    {
+        "changes": [{
+            "update": {
+                "id": user:id_one,
+                "name": "Raynor",
+            },
+            "original": {
+                "id": user:id_one,
+            },
+        }],
+        "versionstamp": 196608,
+    }"#
+		)
+		.unwrap()
+	);
+
 	Ok(())
 }

@@ -13,9 +13,12 @@ pub mod any;
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
+#[doc(hidden)]
+pub mod tasks;
 
 use crate::sql::statements::CreateStatement;
 use crate::sql::statements::DeleteStatement;
+use crate::sql::statements::InsertStatement;
 use crate::sql::statements::SelectStatement;
 use crate::sql::statements::UpdateStatement;
 use crate::sql::Array;
@@ -81,6 +84,24 @@ fn update_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 		UpdateStatement {
 			what,
 			data,
+			output: Some(Output::After),
+			..Default::default()
+		},
+	)
+}
+
+#[allow(dead_code)] // used by the the embedded database and `http`
+fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
+	let (what, data) = match params {
+		[what, data] => (mem::take(what), mem::take(data)),
+		_ => unreachable!(),
+	};
+	let one = !data.is_array();
+	(
+		one,
+		InsertStatement {
+			into: what,
+			data: Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
 		},

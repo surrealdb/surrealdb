@@ -26,7 +26,7 @@ impl<'a> Document<'a> {
 		// Get the database and the table for the record
 		let db = run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
 		// Check if changefeeds are enabled
-		if db.changefeed.is_some() || tb.changefeed.is_some() {
+		if let Some(cf) = db.as_ref().changefeed.as_ref().or(tb.as_ref().changefeed.as_ref()) {
 			// Get the arguments
 			let tb = tb.name.as_str();
 			let id = self.id.as_ref().unwrap();
@@ -38,6 +38,7 @@ impl<'a> Document<'a> {
 				id,
 				self.initial.doc.clone(),
 				self.current.doc.clone(),
+				cf.store_original,
 			);
 		}
 		// Carry on

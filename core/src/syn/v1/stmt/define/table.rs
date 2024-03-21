@@ -66,7 +66,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 				res.permissions = v;
 			}
 			DefineTableOption::TableType(t) => {
-				res.table_type = t;
+				res.kind = t;
 			}
 		}
 	}
