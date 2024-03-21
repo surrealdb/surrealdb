@@ -7,6 +7,12 @@ use surrealdb::Action;
 use surrealdb::Notification;
 
 #[test_log::test(tokio::test)]
+async fn live_select_table_fflags() {
+	FFLAGS.change_feed_live_queries.override_test(true);
+	live_select_table().await;
+}
+
+#[test_log::test(tokio::test)]
 async fn live_select_table() {
 	let (permit, db) = new_db().await;
 
@@ -63,6 +69,12 @@ async fn live_select_table() {
 }
 
 #[test_log::test(tokio::test)]
+async fn live_select_record_id_fflags() {
+	FFLAGS.change_feed_live_queries.override_test(true);
+	live_select_record_id().await;
+}
+
+#[test_log::test(tokio::test)]
 async fn live_select_record_id() {
 	let (permit, db) = new_db().await;
 
@@ -116,6 +128,12 @@ async fn live_select_record_id() {
 	}
 
 	drop(permit);
+}
+
+#[test_log::test(tokio::test)]
+async fn live_select_record_ranges_fflags() {
+	FFLAGS.change_feed_live_queries.override_test(true);
+	live_select_record_ranges().await;
 }
 
 #[test_log::test(tokio::test)]

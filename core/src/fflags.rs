@@ -1,7 +1,7 @@
 //! Feature flags for SurrealDB
 //! This is a public scope module that is not for external use
 //! It is public for API access
-///
+use std::cell::{Cell, RefCell};
 
 /// FeatureFlags set for the project
 /// Use this while implementing features
@@ -72,5 +72,17 @@ impl FFlagEnabledStatus {
 			enabled = enabled || self.enabled_release;
 		}
 		enabled
+	}
+
+	pub fn override_debug(&mut self, value: bool) {
+		self.enabled_debug = value;
+	}
+
+	pub fn override_test(&mut self, value: bool) {
+		self.enabled_test = value;
+	}
+
+	pub fn override_release(&mut self, value: bool) {
+		self.enabled_release = value;
 	}
 }
