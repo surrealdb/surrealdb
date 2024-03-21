@@ -2093,7 +2093,7 @@ mod tests {
 				TestCollection::new(true, 100, vt, 3, &Distance::Euclidean),
 				true,
 				true,
-				true,
+				false,
 				0,
 			)
 			.await?;
@@ -2184,7 +2184,7 @@ mod tests {
 				TestCollection::new(false, 100, vt, 3, &Distance::Euclidean),
 				true,
 				true,
-				true,
+				false,
 				0,
 			)
 			.await?;
@@ -2201,7 +2201,7 @@ mod tests {
 				TestCollection::new(false, 1000, vt, 20, &Distance::Euclidean),
 				false,
 				true,
-				true,
+				false,
 				0,
 			)
 			.await?;
