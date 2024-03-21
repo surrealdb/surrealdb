@@ -640,7 +640,8 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[test(tokio::test(timeout = "10s"))]
+#[test(tokio::test)]
+#[ntest::timeout(10000)]
 async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -707,7 +708,8 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[test(tokio::test(timeout = "10s"))]
+#[test(tokio::test)]
+#[ntest::timeout(10000)]
 async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -810,7 +812,8 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	Ok(())
 }
 
-#[test(tokio::test(timeout = "10s"))]
+#[test(tokio::test)]
+#[ntest::timeout(10000)]
 async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();

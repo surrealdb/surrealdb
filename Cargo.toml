@@ -124,6 +124,7 @@ jemallocator = "0.5.4"
 [dev-dependencies]
 assert_fs = "1.0.13"
 env_logger = "0.10.1"
+ntest = "0.9.2"
 opentelemetry-proto = { version = "0.2.0", features = [
 	"gen-tonic",
 	"traces",
