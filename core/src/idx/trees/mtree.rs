@@ -158,7 +158,7 @@ pub struct MTree {
 }
 
 impl MTree {
-	const RADIUS_EPSILON:f64 = f64::EPSILON * 3f64;
+	const RADIUS_EPSILON: f64 = f64::EPSILON * 3f64;
 
 	pub fn new(state: MState, distance: Distance) -> Self {
 		let minimum = (state.capacity + 1) as usize / 2;
@@ -1879,8 +1879,7 @@ mod tests {
 				finish_operation(t, tx, st, true).await?;
 			}
 			{
-				let (st, mut tx) =
-					new_operation(ds, t, TransactionType::Read, cache_size).await;
+				let (st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
 				let res = t.knn_search(&mut tx, &st, obj, 1).await?;
 				let docs: Vec<DocId> = res.docs.into_iter().map(|(d, _)| d).collect();
 				assert!(!docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
