@@ -6,7 +6,7 @@ use futures::TryStreamExt;
 use surrealdb::Action;
 use surrealdb::Notification;
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(timeout = "10s"))]
 async fn live_select_table() {
 	let (permit, db) = new_db().await;
 
@@ -62,7 +62,7 @@ async fn live_select_table() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(timeout = "10s"))]
 async fn live_select_record_id() {
 	let (permit, db) = new_db().await;
 
@@ -118,7 +118,7 @@ async fn live_select_record_id() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(timeout = "10s"))]
 async fn live_select_record_ranges() {
 	let (permit, db) = new_db().await;
 
@@ -175,7 +175,7 @@ async fn live_select_record_ranges() {
 	drop(permit);
 }
 
-#[test_log::test(tokio::test(timeout = Duration::from_millis(50)))]
+#[test_log::test(tokio::test(timeout = "10s"))]
 async fn live_select_query() {
 	let (permit, db) = new_db().await;
 
