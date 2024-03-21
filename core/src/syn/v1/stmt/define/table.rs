@@ -29,7 +29,7 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(table_opts)(i)?;
 	let (i, _) = expected(
-		"TYPE, RELATION, DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
+		"TYPE, DROP, SCHEMALESS, SCHEMAFUL(L), VIEW, CHANGEFEED, PERMISSIONS, or COMMENT",
 		ending::query,
 	)(i)?;
 	// Create the base statement
@@ -129,7 +129,6 @@ fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
 		table_permissions,
 		table_changefeed,
 		table_type,
-		table_relation,
 	))(i)
 }
 
