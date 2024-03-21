@@ -1,12 +1,14 @@
 //! Feature flags for SurrealDB
 //! This is a public scope module that is not for external use
 //! It is public for API access
+use std::sync::RwLock;
+
 ///
 
 /// FeatureFlags set for the project
 /// Use this while implementing features
 #[allow(dead_code)]
-pub static FFLAGS: FFlags = FFlags {
+pub static FFLAGS: RwLock<FFlags> = RwLock::new(FFlags {
 	// TODO(fflag-lqcf): This TODO signature marks tests that are affected by the fflag that do not have access to the fflag (scope)
     change_feed_live_queries: FFlagEnabledStatus {
         enabled_release: false,
@@ -20,7 +22,7 @@ pub static FFLAGS: FFlags = FFlags {
         date_enabled_release: None,
         release_version: None,
     }
-};
+});
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
@@ -72,5 +74,17 @@ impl FFlagEnabledStatus {
 			enabled = enabled || self.enabled_release;
 		}
 		enabled
+	}
+
+	pub fn override_debug(&mut self, value: bool) {
+		self.enabled_debug = value;
+	}
+
+	pub fn override_test(&mut self, value: bool) {
+		self.enabled_test = value;
+	}
+
+	pub fn override_release(&mut self, value: bool) {
+		self.enabled_release = value;
 	}
 }
