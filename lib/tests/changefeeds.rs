@@ -11,6 +11,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
+use surrealdb_core2::test_helpers::{generate_versionstamp_sequences, to_u128_be};
 
 mod helpers;
 
@@ -64,212 +65,47 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
 
+	// Two timestamps
+	let variance = 4;
+	let first_timestamp = generate_versionstamp_sequences([0; 10]).take(variance);
+	let second_timestamp = first_timestamp.flat_map(|vs1| {
+		generate_versionstamp_sequences(vs1).skip(1).take(variance).map(move |vs2| (vs1, vs2))
+	});
+
 	let potential_show_changes_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled()
 	{
-		true => vec![
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 262144,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-		],
-		false => vec![
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-			Value::parse(
-				"[
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 262144,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			}
-		]",
-			),
-		],
+		true => second_timestamp
+			.map(|(vs1, vs2)| {
+				let vs1 = to_u128_be(vs1);
+				let vs2 = to_u128_be(vs2);
+				Value::parse(
+					format!(
+						r#"[
+						{{ versionstamp: {}, changes: [ {{ create: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
+						{{ versionstamp: {}, changes: [ {{ delete: {{ id: person:test }} }} ] }}
+						]"#,
+						vs1, vs2
+					)
+					.as_str(),
+				)
+			})
+			.collect(),
+		false => second_timestamp
+			.map(|(vs1, vs2)| {
+				let vs1 = to_u128_be(vs1);
+				let vs2 = to_u128_be(vs2);
+				Value::parse(
+					format!(
+						r#"[
+						{{ versionstamp: {}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
+						{{ versionstamp: {}, changes: [ {{ delete: {{ id: person:test }} }} ] }}
+						]"#,
+						vs1, vs2
+					)
+					.as_str(),
+				)
+			})
+			.collect(),
 	};
 
 	// Declare check that is repeatable
@@ -309,7 +145,15 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.find(|x| *x == &tmp)
 			// We actually dont want to capture if its found
 			.map(|_v| ())
-			.ok_or(format!("Expected SHOW CHANGES value not found:\n{}", tmp))?;
+			.ok_or(format!(
+				"Expected SHOW CHANGES value not found:\n{}\nin:\n{}",
+				tmp,
+				cf_val_arr
+					.iter()
+					.map(|vs| vs.to_string())
+					.reduce(|left, right| format!("{}\n{}", left, right))
+					.unwrap()
+			))?;
 		Ok(())
 	}
 
@@ -351,7 +195,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
-	assert_eq!(tmp, val);
+	assert_eq!(val, tmp);
 	//
 	Ok(())
 }
@@ -450,145 +294,98 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let _tmp = res.remove(0).result?;
 	// SHOW CHANGES
 	let tmp = res.remove(0).result?;
-	let val = match FFLAGS.change_feed_live_queries.enabled() {
-		true => Value::parse(
-			"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						define_table: {
-							name: 'person'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						create: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Jaime'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 262144,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 327680,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 393216,
-				changes: [
-					{
-						create: {
-							id: person:1000,
-							name: 'Name: Yusuke'
-						}
-					}
-				]
-			}
-		]",
-		),
-		false => Value::parse(
-			"[
-			{
-				versionstamp: 65536,
-				changes: [
-					{
-						define_table: {
-							name: 'person'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 131072,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 196608,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Jaime'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 262144,
-				changes: [
-					{
-						update: {
-							id: person:test,
-							name: 'Name: Tobie'
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 327680,
-				changes: [
-					{
-						delete: {
-							id: person:test
-						}
-					}
-				]
-			},
-			{
-				versionstamp: 393216,
-				changes: [
-					{
-						update: {
-							id: person:1000,
-							name: 'Name: Yusuke'
-						}
-					}
-				]
-			}
-		]",
-		),
+	// If you want to write a macro, you are welcome to
+	let limit_variance = 3;
+	let first = generate_versionstamp_sequences([0; 10]).take(limit_variance);
+	let second = first.flat_map(|vs1| {
+		generate_versionstamp_sequences(vs1).take(limit_variance).skip(1).map(move |vs2| (vs1, vs2))
+	});
+	let third = second.flat_map(|(vs1, vs2)| {
+		generate_versionstamp_sequences(vs2)
+			.take(limit_variance)
+			.skip(1)
+			.map(move |vs3| (vs1, vs2, vs3))
+	});
+	let fourth = third.flat_map(|(vs1, vs2, vs3)| {
+		generate_versionstamp_sequences(vs3)
+			.take(limit_variance)
+			.skip(1)
+			.map(move |vs4| (vs1, vs2, vs3, vs4))
+	});
+	let fifth = fourth.flat_map(|(vs1, vs2, vs3, vs4)| {
+		generate_versionstamp_sequences(vs4)
+			.take(limit_variance)
+			.skip(1)
+			.map(move |vs5| (vs1, vs2, vs3, vs4, vs5))
+	});
+	let sixth = fifth.flat_map(|(vs1, vs2, vs3, vs4, vs5)| {
+		generate_versionstamp_sequences(vs5)
+			.take(limit_variance)
+			.skip(1)
+			.map(move |vs6| (vs1, vs2, vs3, vs4, vs5, vs6))
+	});
+	let allowed_values: Vec<Value> = match FFLAGS.change_feed_live_queries.enabled() {
+		true => sixth
+			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
+				let (vs1, vs2, vs3, vs4, vs5, vs6) = (
+					to_u128_be(vs1),
+					to_u128_be(vs2),
+					to_u128_be(vs3),
+					to_u128_be(vs4),
+					to_u128_be(vs5),
+					to_u128_be(vs6),
+				);
+				Value::parse(
+					format!(
+						r#"[
+						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person' }} }} ] }},
+						{{ versionstamp: {vs2}, changes: [ {{ create: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
+						{{ versionstamp: {vs3}, changes: [ {{ update: {{ id: person:test, name: 'Name: Jaime' }} }} ] }},
+						{{ versionstamp: {vs4}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
+						{{ versionstamp: {vs5}, changes: [ {{ delete: {{ id: person:test }} }} ] }},
+						{{ versionstamp: {vs6}, changes: [ {{ create: {{ id: person:1000, name: 'Name: Yusuke' }} }} ] }}
+						   ]"#,
+					)
+					.as_str(),
+				)
+			})
+			.collect(),
+		false => sixth
+			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
+				let (vs1, vs2, vs3, vs4, vs5, vs6) = (
+					to_u128_be(vs1),
+					to_u128_be(vs2),
+					to_u128_be(vs3),
+					to_u128_be(vs4),
+					to_u128_be(vs5),
+					to_u128_be(vs6),
+				);
+				Value::parse(
+					format!(
+						r#"[
+						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person' }} }} ] }},
+						{{ versionstamp: {vs2}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
+						{{ versionstamp: {vs3}, changes: [ {{ update: {{ id: person:test, name: 'Name: Jaime' }} }} ] }},
+						{{ versionstamp: {vs4}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
+						{{ versionstamp: {vs5}, changes: [ {{ delete: {{ id: person:test }} }} ] }},
+						{{ versionstamp: {vs6}, changes: [ {{ update: {{ id: person:1000, name: 'Name: Yusuke' }} }} ] }}
+						]"#
+					)
+					.as_str(),
+				)
+			})
+			.collect(),
 	};
-	assert_eq!(tmp, val);
+	assert!(
+		allowed_values.contains(&tmp),
+		"tmp:\n{}\nchecked:\n{}",
+		tmp,
+		allowed_values
+			.iter()
+			.map(|v| v.to_string())
+			.reduce(|a, b| format!("{}\n{}", a, b))
+			.unwrap()
+	);
 	// Retain for 1h
 	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
@@ -596,7 +393,16 @@ async fn table_change_feeds() -> Result<(), Error> {
 	dbs.tick_at(end_ts + 3599).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, val);
+	assert!(
+		allowed_values.contains(&tmp),
+		"tmp:\n{}\nchecked:\n{}",
+		tmp,
+		allowed_values
+			.iter()
+			.map(|v| v.to_string())
+			.reduce(|a, b| format!("{}\n{}", a, b))
+			.unwrap()
+	);
 	// GC after 1hs
 	dbs.tick_at(end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
