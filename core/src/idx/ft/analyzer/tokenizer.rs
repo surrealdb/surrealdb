@@ -39,7 +39,7 @@ impl Tokens {
 			match fr {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
-					Term::NewTerm(s) => tks.push(tk.new_token(s)),
+					Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 				},
 				FilterResult::Terms(ts) => {
 					let mut already_pushed = false;
@@ -51,7 +51,7 @@ impl Tokens {
 									already_pushed = true;
 								}
 							}
-							Term::NewTerm(s) => tks.push(tk.new_token(s)),
+							Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 						}
 					}
 				}
@@ -97,7 +97,7 @@ pub(super) enum Token {
 }
 
 impl Token {
-	fn new_token(&self, term: String) -> Self {
+	fn new_token(&self, term: String, start: Position) -> Self {
 		let len = term.chars().count() as u32;
 		match self {
 			Token::Ref {
@@ -105,7 +105,7 @@ impl Token {
 				bytes,
 				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
 				len,
@@ -115,7 +115,7 @@ impl Token {
 				bytes,
 				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
 				len,
