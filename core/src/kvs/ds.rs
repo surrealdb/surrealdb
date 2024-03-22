@@ -433,6 +433,14 @@ impl Datastore {
 		self.auth_enabled
 	}
 
+	pub(crate) fn is_memory(&self) -> bool {
+		#[cfg(feature = "kv-mem")]
+		if matches!(self.inner, Inner::Mem(_)) {
+			return true;
+		};
+		false
+	}
+
 	/// Is authentication level enabled for this Datastore?
 	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
 	pub fn is_auth_level_enabled(&self) -> bool {
@@ -1377,6 +1385,7 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			self.is_memory(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

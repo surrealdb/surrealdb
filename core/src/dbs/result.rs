@@ -1,16 +1,16 @@
 use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
-use crate::dbs::store::StoreCollector;
+use crate::dbs::store::{FileCollector, MemoryCollector};
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
-use crate::sql::Value;
-use std::cmp::Ordering;
+use crate::sql::{Orders, Value};
 use std::slice::IterMut;
 
 pub(super) enum Results {
 	None,
-	Store(StoreCollector),
+	Memory(MemoryCollector),
+	File(Box<FileCollector>),
 	Groups(GroupsCollector),
 }
 
@@ -21,12 +21,18 @@ impl Default for Results {
 }
 
 impl Results {
-	pub(super) fn prepare(&mut self, stm: &Statement<'_>) -> Self {
-		if stm.expr().is_some() && stm.group().is_some() {
+	pub(super) fn prepare(
+		&mut self,
+		ctx: &Context<'_>,
+		stm: &Statement<'_>,
+	) -> Result<Self, Error> {
+		Ok(if stm.expr().is_some() && stm.group().is_some() {
 			Self::Groups(GroupsCollector::new(stm))
+		} else if ctx.is_memory() {
+			Self::Memory(Default::default())
 		} else {
-			Self::Store(StoreCollector::default())
-		}
+			Self::File(Box::new(FileCollector::new()?))
+		})
 	}
 	pub(super) async fn push(
 		&mut self,
@@ -38,8 +44,11 @@ impl Results {
 	) -> Result<(), Error> {
 		match self {
 			Results::None => {}
-			Results::Store(s) => {
+			Results::Memory(s) => {
 				s.push(val);
+			}
+			Results::File(e) => {
+				e.push(val)?;
 			}
 			Results::Groups(g) => {
 				g.push(ctx, opt, txn, stm, val).await?;
@@ -48,78 +57,60 @@ impl Results {
 		Ok(())
 	}
 
-	pub(super) fn sort_by<F>(&mut self, compare: F)
-	where
-		F: FnMut(&Value, &Value) -> Ordering,
-	{
-		if let Results::Store(s) = self {
-			s.sort_by(compare)
+	pub(super) fn sort(&mut self, orders: &Orders) -> Result<(), Error> {
+		match self {
+			Results::Memory(m) => m.sort(orders),
+			Results::File(f) => f.sort(orders),
+			_ => Ok(()),
 		}
 	}
 
 	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
-		if let Results::Store(s) = self {
-			if let Some(&start) = start {
-				s.start(start);
-			}
-			if let Some(&limit) = limit {
-				s.limit(limit);
-			}
+		match self {
+			Results::None => {}
+			Results::Memory(m) => m.start_limit(start, limit),
+			Results::File(f) => f.start_limit(start, limit),
+			Results::Groups(_) => {}
 		}
 	}
 
 	pub(super) fn len(&self) -> usize {
 		match self {
 			Results::None => 0,
-			Results::Store(s) => s.len(),
+			Results::Memory(s) => s.len(),
+			Results::File(e) => e.len(),
 			Results::Groups(g) => g.len(),
 		}
 	}
 
-	pub(super) async fn group(
-		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		stm: &Statement<'_>,
-	) -> Result<Self, Error> {
-		Ok(match self {
-			Self::None => Self::None,
-			Self::Store(s) => Self::Store(s.take_store()),
-			Self::Groups(g) => Self::Store(g.output(ctx, opt, txn, stm).await?),
-		})
+	pub(super) fn try_into_iter(&mut self) -> Result<IterMut<'_, Value>, Error> {
+		match self {
+			Results::Memory(s) => s.try_iter_mut(),
+			Results::File(f) => f.try_iter_mut(),
+			_ => Ok([].iter_mut()),
+		}
 	}
 
-	pub(super) fn take(&mut self) -> Vec<Value> {
-		if let Self::Store(s) = self {
-			s.take_vec()
-		} else {
-			vec![]
-		}
+	pub(super) fn take(&mut self) -> Result<Vec<Value>, Error> {
+		Ok(match self {
+			Results::Memory(m) => m.take_vec(),
+			Results::File(f) => f.take_vec()?,
+			_ => vec![],
+		})
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
 		match self {
 			Results::None => exp.add_collector("None", vec![]),
-			Results::Store(s) => {
+			Results::Memory(s) => {
 				s.explain(exp);
+			}
+			Results::File(e) => {
+				e.explain(exp);
 			}
 			Results::Groups(g) => {
 				g.explain(exp);
 			}
-		}
-	}
-}
-
-impl<'a> IntoIterator for &'a mut Results {
-	type Item = &'a mut Value;
-	type IntoIter = IterMut<'a, Value>;
-
-	fn into_iter(self) -> Self::IntoIter {
-		if let Results::Store(s) = self {
-			s.into_iter()
-		} else {
-			[].iter_mut()
 		}
 	}
 }

@@ -53,6 +53,8 @@ pub struct Context<'a> {
 	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
+	// Is the datastore in memory? (KV-MEM, WASM)
+	is_memory: bool,
 }
 
 impl<'a> Default for Context<'a> {
@@ -77,6 +79,7 @@ impl<'a> Context<'a> {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
+		is_memory: bool,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -89,6 +92,7 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			is_memory,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -108,6 +112,7 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			is_memory: false,
 		}
 	}
 
@@ -124,6 +129,7 @@ impl<'a> Context<'a> {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			is_memory: parent.is_memory,
 		}
 	}
 
@@ -237,6 +243,11 @@ impl<'a> Context<'a> {
 	/// Check if the context is not ok to continue, because it timed out.
 	pub fn is_timedout(&self) -> bool {
 		matches!(self.done(), Some(Reason::Timedout))
+	}
+
+	/// Return true if the underlying Datastore is KV-MEM (Or WASM)
+	pub fn is_memory(&self) -> bool {
+		self.is_memory
 	}
 
 	/// Get a value from the context. If no value is stored under the

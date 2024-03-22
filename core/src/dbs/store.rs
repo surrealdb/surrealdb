@@ -1,53 +1,246 @@
 use crate::dbs::plan::Explanation;
+use crate::err::Error;
 use crate::sql::value::Value;
-use std::cmp::Ordering;
+use crate::sql::Orders;
+// use ext_sort::buffer::mem::MemoryLimitedBufferBuilder;
+// use ext_sort::{ExternalSorter, RmpExternalChunk};
+use revision::Revisioned;
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::mem;
+use tempfile::TempDir;
 
 #[derive(Default)]
-// TODO Use surreal-kv once the number of record reach a given threshold
-pub(super) struct StoreCollector(Vec<Value>);
+pub(super) struct MemoryCollector(Vec<Value>);
 
-impl StoreCollector {
+impl MemoryCollector {
 	pub(super) fn push(&mut self, val: Value) {
 		self.0.push(val);
 	}
 
-	// When surreal-kv will be used, the key will be used to sort the records in surreal-kv
-	pub(super) fn sort_by<F>(&mut self, compare: F)
-	where
-		F: FnMut(&Value, &Value) -> Ordering,
-	{
-		self.0.sort_by(compare);
+	pub(super) fn sort(&mut self, orders: &Orders) -> Result<(), Error> {
+		self.0.sort_by(|a, b| orders.compare(a, b));
+		Ok(())
 	}
 
 	pub(super) fn len(&self) -> usize {
 		self.0.len()
 	}
 
-	pub(super) fn start(&mut self, start: usize) {
-		self.0 = mem::take(&mut self.0).into_iter().skip(start).collect();
-	}
-	pub(super) fn limit(&mut self, limit: usize) {
-		self.0 = mem::take(&mut self.0).into_iter().take(limit).collect();
+	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
+		match (start, limit) {
+			(Some(&start), Some(&limit)) => {
+				self.0 = mem::take(&mut self.0).into_iter().skip(start).take(limit).collect()
+			}
+			(Some(&start), None) => {
+				self.0 = mem::take(&mut self.0).into_iter().skip(start).collect()
+			}
+			(None, Some(&limit)) => {
+				self.0 = mem::take(&mut self.0).into_iter().take(limit).collect()
+			}
+			(None, None) => {}
+		}
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
 		mem::take(&mut self.0)
 	}
-	pub(super) fn take_store(&mut self) -> Self {
-		Self(self.take_vec())
+
+	pub(super) fn try_iter_mut(&mut self) -> Result<std::slice::IterMut<'_, Value>, Error> {
+		Ok(self.0.iter_mut())
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
-		exp.add_collector("Store", vec![]);
+		exp.add_collector("Memory", vec![]);
 	}
 }
 
-impl<'a> IntoIterator for &'a mut StoreCollector {
-	type Item = &'a mut Value;
-	type IntoIter = std::slice::IterMut<'a, Value>;
+pub(super) struct FileCollector {
+	dir: TempDir,
+	len: usize,
+	writer: Option<FileWriter>,
+	reader: Option<FileReader>,
+	start: Option<usize>,
+	limit: Option<usize>,
+}
 
-	fn into_iter(self) -> Self::IntoIter {
-		self.0.iter_mut()
+impl FileCollector {
+	pub(super) fn new() -> Result<Self, Error> {
+		let dir = TempDir::new()?;
+		Ok(Self {
+			len: 0,
+			writer: Some(FileWriter::new(&dir)?),
+			reader: None,
+			start: None,
+			limit: None,
+			dir,
+		})
+	}
+	pub(super) fn push(&mut self, value: Value) -> Result<(), Error> {
+		if let Some(writer) = &mut self.writer {
+			writer.push(value)?;
+			self.len += 1;
+			Ok(())
+		} else {
+			Err(Error::Unreachable("FileCollector::push"))
+		}
+	}
+
+	fn check_reader(&mut self) -> Result<(), Error> {
+		if self.reader.is_none() {
+			if let Some(writer) = self.writer.take() {
+				writer.flush()?;
+				self.reader = Some(FileReader::new(self.len, &self.dir)?);
+			}
+		}
+		Ok(())
+	}
+	pub(super) fn sort(&mut self, _orders: &Orders) -> Result<(), Error> {
+		self.check_reader()?;
+		todo!()
+	}
+
+	pub(super) fn len(&self) -> usize {
+		self.len
+	}
+
+	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
+		self.start = start.cloned();
+		self.limit = limit.cloned();
+	}
+
+	pub(super) fn try_iter_mut(&mut self) -> Result<std::slice::IterMut<'_, Value>, Error> {
+		todo!()
+	}
+
+	pub(super) fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+		self.check_reader()?;
+		if let Some(reader) = &mut self.reader {
+			reader.take_vec(self.start, self.limit)
+		} else {
+			Ok(vec![])
+		}
+	}
+	pub(super) fn explain(&self, exp: &mut Explanation) {
+		exp.add_collector("TempFile", vec![]);
+	}
+}
+
+struct FileWriter {
+	index: BufWriter<File>,
+	records: BufWriter<File>,
+	offset: usize,
+}
+
+const INDEX_FILE_NAME: &str = "ix";
+const RECORDS_FILE_NAME: &str = "re";
+const USIZE_SIZE: usize = mem::size_of::<usize>();
+impl FileWriter {
+	fn new(dir: &TempDir) -> Result<Self, Error> {
+		let index = OpenOptions::new()
+			.create_new(true)
+			.append(true)
+			.open(dir.path().join(INDEX_FILE_NAME))?;
+		let records = OpenOptions::new()
+			.create_new(true)
+			.append(true)
+			.open(dir.path().join(RECORDS_FILE_NAME))?;
+		Ok(Self {
+			index: BufWriter::new(index),
+			records: BufWriter::new(records),
+			offset: 0,
+		})
+	}
+
+	fn write_usize(writer: &mut BufWriter<File>, u: usize) -> Result<(), Error> {
+		let buf = u.to_be_bytes();
+		writer.write_all(&buf)?;
+		Ok(())
+	}
+
+	fn push(&mut self, value: Value) -> Result<(), Error> {
+		// Serialize the value in a buffer
+		let mut val = Vec::new();
+		value.serialize_revisioned(&mut val)?;
+		// Write the size of the buffer in the index
+		Self::write_usize(&mut self.records, val.len())?;
+		// Write the buffer in the records
+		self.records.write_all(&val)?;
+		// Increment the offset
+		self.offset += val.len() + USIZE_SIZE;
+		Self::write_usize(&mut self.index, self.offset)?;
+		Ok(())
+	}
+
+	fn flush(mut self) -> Result<(), Error> {
+		self.records.flush()?;
+		self.index.flush()?;
+		Ok(())
+	}
+}
+
+struct FileReader {
+	len: usize,
+	index: BufReader<File>,
+	records: BufReader<File>,
+}
+
+impl FileReader {
+	fn new(len: usize, dir: &TempDir) -> Result<Self, Error> {
+		let index = OpenOptions::new().read(true).open(dir.path().join(INDEX_FILE_NAME))?;
+		let records = OpenOptions::new().read(true).open(dir.path().join(RECORDS_FILE_NAME))?;
+		Ok(Self {
+			len,
+			index: BufReader::new(index),
+			records: BufReader::new(records),
+		})
+	}
+
+	fn read_usize(reader: &mut BufReader<File>) -> Result<usize, Error> {
+		let mut buf = vec![0u8; USIZE_SIZE];
+		reader.read_exact(&mut buf)?;
+		// Safe to call unwrap because we know the slice length matches the expected length
+		let u = usize::from_be_bytes(buf.try_into().unwrap());
+		Ok(u)
+	}
+
+	fn take_vec(
+		&mut self,
+		start: Option<usize>,
+		limit: Option<usize>,
+	) -> Result<Vec<Value>, Error> {
+		let start = start.unwrap_or(0);
+		if start >= self.len {
+			return Ok(vec![]);
+		}
+
+		if start > 0 {
+			self.index.get_mut().seek(SeekFrom::Start((start * USIZE_SIZE) as u64))?;
+
+			// Get the start offset of the first record
+			let start_offset = Self::read_usize(&mut self.index)?;
+
+			// Set records to the position of the first record
+			self.records.get_mut().seek(SeekFrom::Start(start_offset as u64))?;
+		}
+
+		// Compute the maximum number of record to collect
+		let max = self.len - start;
+		let num = if let Some(limit) = limit {
+			limit.min(max)
+		} else {
+			max
+		};
+
+		// Collect the records
+		let mut res = Vec::with_capacity(num);
+		for _ in 0..num {
+			let len = Self::read_usize(&mut self.records)?;
+			let mut buf = vec![0u8; len];
+			self.records.read_exact(&mut buf)?;
+			let val = Value::deserialize_revisioned(&mut buf.as_slice())?;
+			res.push(val);
+		}
+		Ok(res)
 	}
 }
