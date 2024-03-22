@@ -39,7 +39,7 @@ impl Tokens {
 			match fr {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
-					Term::NewTerm(s) => tks.push(tk.new_token(s)),
+					Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 				},
 				FilterResult::Terms(ts) => {
 					let mut already_pushed = false;
@@ -51,7 +51,7 @@ impl Tokens {
 									already_pushed = true;
 								}
 							}
-							Term::NewTerm(s) => tks.push(tk.new_token(s)),
+							Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
 						}
 					}
 				}
@@ -84,35 +84,41 @@ impl TryFrom<Tokens> for Value {
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
 pub(super) enum Token {
 	Ref {
-		chars: (Position, Position),
+		chars: (Position, Position, Position),
 		bytes: (Position, Position),
+		len: u32,
 	},
 	String {
-		chars: (Position, Position),
+		chars: (Position, Position, Position),
 		bytes: (Position, Position),
 		term: String,
+		len: u32,
 	},
 }
 
 impl Token {
-	fn new_token(&self, term: String) -> Self {
+	fn new_token(&self, term: String, start: Position) -> Self {
+		let len = term.chars().count() as u32;
 		match self {
 			Token::Ref {
 				chars,
 				bytes,
+				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
+				len,
 			},
 			Token::String {
 				chars,
 				bytes,
 				..
 			} => Token::String {
-				chars: *chars,
+				chars: (chars.0, chars.1 + start, chars.2),
 				bytes: *bytes,
 				term,
+				len,
 			},
 		}
 	}
@@ -122,11 +128,11 @@ impl Token {
 			Token::Ref {
 				chars,
 				..
-			} => Offset::new(i, chars.0, chars.1),
+			} => Offset::new(i, chars.0, chars.1, chars.2),
 			Token::String {
 				chars,
 				..
-			} => Offset::new(i, chars.0, chars.1),
+			} => Offset::new(i, chars.0, chars.1, chars.2),
 		}
 	}
 
@@ -135,11 +141,24 @@ impl Token {
 			Token::Ref {
 				chars,
 				..
-			} => chars.0 == chars.1,
+			} => chars.0 == chars.2,
 			Token::String {
 				term,
 				..
 			} => term.is_empty(),
+		}
+	}
+
+	pub(super) fn get_char_len(&self) -> u32 {
+		match self {
+			Token::Ref {
+				len,
+				..
+			} => *len,
+			Token::String {
+				len,
+				..
+			} => *len,
 		}
 	}
 
@@ -207,8 +226,9 @@ impl Tokenizer {
 				// The last pos may be more advanced due to the is_valid process
 				if last_char_pos < current_char_pos {
 					t.push(Token::Ref {
-						chars: (last_char_pos, current_char_pos),
+						chars: (last_char_pos, last_char_pos, current_char_pos),
 						bytes: (last_byte_pos, current_byte_pos),
+						len: current_char_pos - last_char_pos,
 					});
 				}
 				last_char_pos = current_char_pos;
@@ -225,8 +245,9 @@ impl Tokenizer {
 		}
 		if current_char_pos != last_char_pos {
 			t.push(Token::Ref {
-				chars: (last_char_pos, current_char_pos),
+				chars: (last_char_pos, last_char_pos, current_char_pos),
 				bytes: (last_byte_pos, current_byte_pos),
+				len: current_char_pos - last_char_pos,
 			});
 		}
 		Tokens {

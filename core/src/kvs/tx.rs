@@ -29,7 +29,6 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
-#[cfg(debug_assertions)]
 use crate::key::debug::sprint_key;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;
@@ -1939,7 +1938,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific function definition from a database.
-	#[cfg(feature = "sql2")]
 	pub async fn get_db_function(
 		&mut self,
 		ns: &str,
@@ -1954,7 +1952,6 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific function definition from a database.
-	#[cfg(feature = "sql2")]
 	pub async fn get_db_param(
 		&mut self,
 		ns: &str,
@@ -2044,7 +2041,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an event for a table.
-	#[cfg(feature = "sql2")]
 	pub async fn get_tb_event(
 		&mut self,
 		ns: &str,
@@ -2062,7 +2058,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an event for a table.
-	#[cfg(feature = "sql2")]
 	pub async fn get_tb_field(
 		&mut self,
 		ns: &str,
@@ -2080,7 +2075,6 @@ impl Transaction {
 	}
 
 	/// Retrieve an event for a table.
-	#[cfg(feature = "sql2")]
 	pub async fn get_tb_index(
 		&mut self,
 		ns: &str,
@@ -2710,16 +2704,18 @@ impl Transaction {
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
 	// you must call the `complete_changes` function and then commit the transaction.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn record_change(
 		&mut self,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		id: &Thing,
-		p: Cow<'_, Value>,
-		v: Cow<'_, Value>,
+		previous: Cow<'_, Value>,
+		current: Cow<'_, Value>,
+		store_difference: bool,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), p, v)
+		self.cf.update(ns, db, tb, id.clone(), previous, current, store_difference)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.

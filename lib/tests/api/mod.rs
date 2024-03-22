@@ -1,6 +1,6 @@
 // Tests common to all protocols and storage engines
 
-use surrealdb_core::fflags::FFLAGS;
+use surrealdb::fflags::FFLAGS;
 
 static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -484,6 +484,44 @@ async fn create_record_with_id_with_content() {
 		.await
 		.unwrap();
 	assert_eq!(value.record(), thing("user:jane").ok());
+}
+
+#[test_log::test(tokio::test)]
+async fn insert_table() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let table = "user";
+	let _: Vec<RecordId> = db.insert(table).await.unwrap();
+	let _: Vec<RecordId> = db.insert(table).content(json!({ "foo": "bar" })).await.unwrap();
+	let _: Vec<RecordId> = db.insert(table).content(json!([{ "foo": "bar" }])).await.unwrap();
+	let _: Value = db.insert(Resource::from(table)).await.unwrap();
+	let _: Value = db.insert(Resource::from(table)).content(json!({ "foo": "bar" })).await.unwrap();
+	let _: Value =
+		db.insert(Resource::from(table)).content(json!([{ "foo": "bar" }])).await.unwrap();
+	let users: Vec<RecordId> = db.insert(table).await.unwrap();
+	assert!(!users.is_empty());
+}
+
+#[test_log::test(tokio::test)]
+async fn insert_thing() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let table = "user";
+	let _: Option<RecordId> = db.insert((table, "user1")).await.unwrap();
+	let _: Option<RecordId> =
+		db.insert((table, "user1")).content(json!({ "foo": "bar" })).await.unwrap();
+	let _: Value = db.insert(Resource::from((table, "user2"))).await.unwrap();
+	let _: Value =
+		db.insert(Resource::from((table, "user2"))).content(json!({ "foo": "bar" })).await.unwrap();
+	let user: Option<RecordId> = db.insert((table, "user3")).await.unwrap();
+	assert_eq!(
+		user,
+		Some(RecordId {
+			id: thing("user:user3").unwrap(),
+		})
+	);
 }
 
 #[test_log::test(tokio::test)]

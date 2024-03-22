@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Duration;
 use surrealdb::key::table::ix;
-use surrealdb_core::sql::{value, Array, Id, Thing};
+use surrealdb::sql::{value, Array, Id, Thing};
 
 // Common use case: VectorSearch
 fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {

@@ -12,12 +12,12 @@ use crate::api::OnceLockExt;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
-use crate::engine::IntervalStream;
-use crate::fflags::FFLAGS;
+use crate::engine::tasks::start_tasks;
 use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
+use crate::options::EngineOptions;
 use flume::Receiver;
 use flume::Sender;
 use futures::future::Either;
@@ -34,12 +34,8 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::task::Poll;
-use std::time::Duration;
-use surrealdb_core::dbs::Options;
 use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
-use wasmtimer::tokio as time;
-use wasmtimer::tokio::MissedTickBehavior;
 
 impl crate::api::Connection for Db {}
 
@@ -151,9 +147,12 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let (maintenance_tx, maintenance_rx) = flume::bounded::<()>(1);
 		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		run_maintenance(kvs.clone(), tick_interval, maintenance_rx);
+		let opt = EngineOptions {
+			tick_interval,
+			..Default::default()
+		};
+		let (_tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
@@ -202,61 +201,10 @@ pub(crate) fn router(
 		}
 
 		// Stop maintenance tasks
-		let _ = maintenance_tx.into_send_async(()).await;
-	});
-}
-
-fn run_maintenance(kvs: Arc<Datastore>, tick_interval: Duration, stop_signal: Receiver<()>) {
-	// Some classic ownership shenanigans
-	let kvs_two = kvs.clone();
-	let stop_signal_two = stop_signal.clone();
-
-	// Spawn the ticker, which is used for tracking versionstamps and heartbeats across databases
-	spawn_local(async move {
-		let mut interval = time::interval(tick_interval);
-		// Don't bombard the database if we miss some ticks
-		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-		// Delay sending the first tick
-		interval.tick().await;
-
-		let ticker = IntervalStream::new(interval);
-
-		let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
-
-		let mut stream = streams.merge();
-
-		while let Some(Some(_)) = stream.next().await {
-			match kvs.tick().await {
-				Ok(()) => trace!("Node agent tick ran successfully"),
-				Err(error) => error!("Error running node agent tick: {error}"),
+		for chan in task_chans {
+			if let Err(e) = chan.send(()) {
+				error!("Error sending shutdown signal to maintenance task: {e}");
 			}
 		}
 	});
-
-	if FFLAGS.change_feed_live_queries.enabled() {
-		// Spawn the live query change feed consumer, which is used for catching up on relevant change feeds
-		spawn_local(async move {
-			let kvs = kvs_two;
-			let stop_signal = stop_signal_two;
-			let mut interval = time::interval(tick_interval);
-			// Don't bombard the database if we miss some ticks
-			interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-			// Delay sending the first tick
-			interval.tick().await;
-
-			let ticker = IntervalStream::new(interval);
-
-			let streams = (ticker.map(Some), stop_signal.into_stream().map(|_| None));
-
-			let mut stream = streams.merge();
-
-			let opt = Options::default();
-			while let Some(Some(_)) = stream.next().await {
-				match kvs.process_lq_notifications(&opt).await {
-					Ok(()) => trace!("Live Query poll ran successfully"),
-					Err(error) => error!("Error running live query poll: {error}"),
-				}
-			}
-		})
-	}
 }

@@ -8,7 +8,7 @@ use test_log::test;
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send INFO command
@@ -19,14 +19,14 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res.as_object().unwrap();
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -65,14 +65,14 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["user"], "user", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -113,14 +113,14 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -187,14 +187,14 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -215,14 +215,14 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 		res
 	);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -237,14 +237,14 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket.send_message_query("DEFINE NAMESPACE test").await?;
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -258,14 +258,14 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 	// Verify the variables are set
 	let res = socket.send_message_query("SELECT * FROM $let_var, $set_var").await?;
 	assert_eq!(res[0]["result"], json!(["let_value", "set_value"]), "result: {:?}", res);
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -283,14 +283,14 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 	let res = socket.send_message_query("SELECT * FROM $let_var").await?;
 	assert_eq!(res[0]["result"], json!([null]), "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -308,14 +308,14 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -349,14 +349,14 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -387,14 +387,14 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -428,14 +428,14 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], json!(null), "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -470,14 +470,14 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], "foo", "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -517,14 +517,14 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res[0]["name"], json!(null), "result: {:?}", res);
 	assert_eq!(res[0]["value"], "bar", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -554,14 +554,14 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 0, "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -581,14 +581,14 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res[0]["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Send version command
@@ -597,7 +597,7 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("surrealdb-"), "result: {}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
@@ -605,7 +605,7 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 #[test(tokio::test)]
 async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -636,14 +636,14 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 
 	assert!(res.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:#?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -703,14 +703,14 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:id", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -806,14 +806,14 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket1 = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -854,22 +854,22 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:id", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
-	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
+	let mut socket_permanent = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
-	socket.send_message_signin(USER, PASS, None, None, None).await?;
+	socket_permanent.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
-	socket.send_message_use(Some(NS), Some(DB)).await?;
+	socket_permanent.send_message_use(Some(NS), Some(DB)).await?;
 	// Setup the scope
-	socket
+	socket_permanent
 		.send_message_query(
 			r#"
 			DEFINE SCOPE scope SESSION 1s
@@ -879,7 +879,9 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 		)
 		.await?;
 	// Send SIGNUP command
-	let res = socket
+	let mut socket_expiring_auth = Socket::connect(&addr, SERVER, FORMAT).await?;
+
+	let res = socket_expiring_auth
 		.send_request(
 			"signup",
 			json!([{
@@ -897,30 +899,34 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res.as_object().unwrap();
 	// Verify response contains no error
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
+	// Authenticate the connection
+	socket_expiring_auth.send_message_signin(USER, PASS, None, None, None).await?;
 	// Send LIVE command
-	let res = socket.send_request("live", json!(["tester"])).await?;
+	let res = socket_expiring_auth.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	// Wait 2 seconds for auth to expire
-	tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+	tokio::time::sleep(Duration::from_secs(1)).await;
 	// Create a new test record
-	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
+	let res = socket_permanent
+		.send_request("query", json!(["CREATE tester:id SET name = 'foo'"]))
+		.await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	// Wait some time for all messages to arrive, and then search for the notification message
-	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await?;
+	let msgs = socket_expiring_auth.receive_all_other_messages(0, Duration::from_secs(1)).await?;
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 	Ok(())
 }
 
 #[test(tokio::test)]
 async fn session_expiration() {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection
@@ -936,7 +942,8 @@ async fn session_expiration() {
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Create resource that requires a scope session to query
 	socket
 		.send_message_query(
@@ -945,14 +952,16 @@ async fn session_expiration() {
 				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	socket
 		.send_message_query(
 			r#"
 			CREATE test:1 SET working = "yes"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Send SIGNUP command
 	let res = socket
 		.send_request(
@@ -991,7 +1000,10 @@ async fn session_expiration() {
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	assert_eq!(
+		res["error"],
+		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
+	);
 	// Sign in again using the same session
 	let res = socket
 		.send_request(
@@ -1017,13 +1029,13 @@ async fn session_expiration() {
 	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 }
 
 #[test(tokio::test)]
 async fn session_expiration_operations() {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection
@@ -1040,7 +1052,8 @@ async fn session_expiration_operations() {
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Create resource that requires a scope session to query
 	socket
 		.send_message_query(
@@ -1049,14 +1062,16 @@ async fn session_expiration_operations() {
 				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	socket
 		.send_message_query(
 			r#"
 			CREATE test:1 SET working = "yes"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Send SIGNUP command
 	let res = socket
 		.send_request(
@@ -1095,72 +1110,70 @@ async fn session_expiration_operations() {
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	assert_eq!(
+		res["error"],
+		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
+	);
 	// Test operations that SHOULD NOT work with an expired session
 	let operations_ko = vec![
 		socket.send_request("let", json!(["let_var", "let_value",])),
 		socket.send_request("set", json!(["set_var", "set_value",])),
 		socket.send_request("info", json!([])),
 		socket.send_request("select", json!(["tester",])),
-		socket
-			.send_request(
-				"insert",
-				json!([
-					"tester",
+		socket.send_request(
+			"insert",
+			json!([
+				"tester",
+				{
+					"name": "foo",
+					"value": "bar",
+				}
+			]),
+		),
+		socket.send_request(
+			"create",
+			json!([
+				"tester",
+				{
+					"value": "bar",
+				}
+			]),
+		),
+		socket.send_request(
+			"update",
+			json!([
+				"tester",
+				{
+					"value": "bar",
+				}
+			]),
+		),
+		socket.send_request(
+			"merge",
+			json!([
+				"tester",
+				{
+					"value": "bar",
+				}
+			]),
+		),
+		socket.send_request(
+			"patch",
+			json!([
+				"tester:id",
+				[
 					{
-						"name": "foo",
-						"value": "bar",
-					}
-				]),
-			),
-		socket
-			.send_request(
-				"create",
-				json!([
-					"tester",
+						"op": "add",
+						"path": "value",
+						"value": "bar"
+					},
 					{
-						"value": "bar",
+						"op": "remove",
+						"path": "name",
 					}
-				]),
-			),
-		socket
-			.send_request(
-				"update",
-				json!([
-					"tester",
-					{
-						"value": "bar",
-					}
-				]),
-			),
-		socket
-			.send_request(
-				"merge",
-				json!([
-					"tester",
-					{
-						"value": "bar",
-					}
-				]),
-			),
-		socket
-			.send_request(
-				"patch",
-				json!([
-					"tester:id",
-					[
-						{
-							"op": "add",
-							"path": "value",
-							"value": "bar"
-						},
-						{
-							"op": "remove",
-							"path": "name",
-						}
-					]
-				]),
-			),
+				]
+			]),
+		),
 		socket.send_request("delete", json!(["tester"])),
 		socket.send_request("live", json!(["tester"])),
 		socket.send_request("kill", json!(["tester"])),
@@ -1172,8 +1185,11 @@ async fn session_expiration_operations() {
 		let res = res.unwrap();
 		assert!(res.is_object(), "result: {:?}", res);
 		let res = res.as_object().unwrap();
-		assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
-	};
+		assert_eq!(
+			res["error"],
+			json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
+		);
+	}
 
 	// Test operations that SHOULD work with an expired session
 	let operations_ok = vec![
@@ -1191,22 +1207,22 @@ async fn session_expiration_operations() {
 		let res = res.as_object().unwrap();
 		// Verify response contains no error
 		assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
-	};
+	}
 
 	// Test operations that SHOULD work with an expired session
 	// These operations will refresh the session expiration
 	let res = socket
-			.send_request(
-				"signup",
-				json!([{
-					"ns": NS,
-					"db": DB,
-					"sc": "scope",
-					"email": "another@email.com",
-					"pass": "pass",
-				}]),
-			)
-			.await;
+		.send_request(
+			"signup",
+			json!([{
+				"ns": NS,
+				"db": DB,
+				"sc": "scope",
+				"email": "another@email.com",
+				"pass": "pass",
+			}]),
+		)
+		.await;
 	assert!(res.is_ok(), "result: {:?}", res);
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
@@ -1221,7 +1237,10 @@ async fn session_expiration_operations() {
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	assert_eq!(
+		res["error"],
+		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
+	);
 	let res = socket
 		.send_request(
 			"signin",
@@ -1250,7 +1269,10 @@ async fn session_expiration_operations() {
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	assert_eq!(
+		res["error"],
+		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
+	);
 
 	// This needs to be last operation as the session will no longer expire afterwards
 	let res = socket.send_request("authenticate", json!([root_token,])).await;
@@ -1262,13 +1284,13 @@ async fn session_expiration_operations() {
 	assert!(res.keys().all(|k| ["id", "result"].contains(&k.as_str())), "result: {:?}", res);
 
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 }
 
 #[test(tokio::test)]
 async fn session_reauthentication() {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection and store the root level token
@@ -1286,7 +1308,8 @@ async fn session_reauthentication() {
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Create resource that requires a scope session to query
 	socket
 		.send_message_query(
@@ -1295,14 +1318,16 @@ async fn session_reauthentication() {
 				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	socket
 		.send_message_query(
 			r#"
 			CREATE test:1 SET working = "yes"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Send SIGNUP command
 	let res = socket
 		.send_request(
@@ -1347,13 +1372,13 @@ async fn session_reauthentication() {
 	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 }
 
 #[test(tokio::test)]
 async fn session_reauthentication_expired() {
 	// Setup database server
-	let (addr, server) = common::start_server_with_defaults().await.unwrap();
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
 	// Authenticate the connection and store the root level token
@@ -1371,7 +1396,8 @@ async fn session_reauthentication_expired() {
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Create resource that requires a scope session to query
 	socket
 		.send_message_query(
@@ -1380,14 +1406,16 @@ async fn session_reauthentication_expired() {
 				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	socket
 		.send_message_query(
 			r#"
 			CREATE test:1 SET working = "yes"
 			;"#,
 		)
-		.await.unwrap();
+		.await
+		.unwrap();
 	// Send SIGNUP command
 	let res = socket
 		.send_request(
@@ -1423,12 +1451,15 @@ async fn session_reauthentication_expired() {
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {:?}", res);
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "There was a problem with the database: The session has expired"}));
+	assert_eq!(
+		res["error"],
+		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
+	);
 	// Authenticate using the root token, which has not expired yet
 	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
 	// Check that we have root access and the session is not expired
 	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
 	// Test passed
-	server.finish();
+	server.finish().unwrap();
 }

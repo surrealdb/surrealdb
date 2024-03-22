@@ -8,12 +8,10 @@ use super::super::super::{
 };
 use crate::sql::{statements::DefineDatabaseStatement, ChangeFeed, Strand};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
-#[cfg(feature = "sql2")]
 use nom::{combinator::opt, sequence::tuple};
 
 pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -27,7 +25,6 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	// Create the base statement
 	let mut res = DefineDatabaseStatement {
 		name,
-		#[cfg(feature = "sql2")]
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};

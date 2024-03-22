@@ -65,6 +65,7 @@ macro_rules! expected {
 }
 
 #[cfg(test)]
+#[macro_export]
 macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
 		let mut parser = $crate::syn::v2::parser::Parser::new($t.as_bytes());
