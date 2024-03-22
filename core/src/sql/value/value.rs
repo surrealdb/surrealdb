@@ -2856,15 +2856,15 @@ mod tests {
 	#[test]
 	fn check_size() {
 		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
-		assert_eq!(104, std::mem::size_of::<Error>());
-		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
+		assert_eq!(112, std::mem::size_of::<Error>());
+		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
 		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::array::Array>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::object::Object>());
-		assert_eq!(56, std::mem::size_of::<crate::sql::geometry::Geometry>());
+		assert_eq!(48, std::mem::size_of::<crate::sql::geometry::Geometry>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::param::Param>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
