@@ -55,6 +55,14 @@ impl MemoryCollector {
 	}
 }
 
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 pub(super) struct FileCollector {
 	dir: TempDir,
 	len: usize,
@@ -64,6 +72,14 @@ pub(super) struct FileCollector {
 	limit: Option<usize>,
 }
 
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 impl FileCollector {
 	pub(super) fn new() -> Result<Self, Error> {
 		let dir = TempDir::new()?;

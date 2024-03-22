@@ -1,7 +1,16 @@
 use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
-use crate::dbs::store::{FileCollector, MemoryCollector};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use crate::dbs::store::FileCollector;
+use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
 use crate::sql::{Orders, Value};
@@ -10,6 +19,14 @@ use std::slice::IterMut;
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
 }
@@ -26,14 +43,23 @@ impl Results {
 		ctx: &Context<'_>,
 		stm: &Statement<'_>,
 	) -> Result<Self, Error> {
-		Ok(if stm.expr().is_some() && stm.group().is_some() {
-			Self::Groups(GroupsCollector::new(stm))
-		} else if ctx.is_memory() {
-			Self::Memory(Default::default())
-		} else {
-			Self::File(Box::new(FileCollector::new()?))
-		})
+		if stm.expr().is_some() && stm.group().is_some() {
+			return Ok(Self::Groups(GroupsCollector::new(stm)));
+		}
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
+		if !ctx.is_memory() {
+			return Ok(Self::File(Box::new(FileCollector::new()?)));
+		}
+		Ok(Self::Memory(Default::default()))
 	}
+
 	pub(super) async fn push(
 		&mut self,
 		ctx: &Context<'_>,
