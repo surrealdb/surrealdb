@@ -262,7 +262,8 @@ mod tests {
 			panic!()
 		};
 		let a: Analyzer = az.into();
-		let tokens = a
+		
+		a
 			.generate_tokens(
 				&Context::default(),
 				&Options::default(),
@@ -271,8 +272,7 @@ mod tests {
 				input.to_string(),
 			)
 			.await
-			.unwrap();
-		tokens
+			.unwrap()
 	}
 
 	pub(super) async fn test_analyzer(def: &str, input: &str, expected: &[&str]) {

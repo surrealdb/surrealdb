@@ -202,7 +202,7 @@ impl IndexRangeThingIterator {
 			.await?;
 		let res = res.values;
 		if let Some((key, _)) = res.last() {
-			self.r.beg = key.clone();
+			self.r.beg.clone_from(key);
 			self.r.beg.push(0x00);
 		}
 		let mut r = Vec::with_capacity(res.len());
