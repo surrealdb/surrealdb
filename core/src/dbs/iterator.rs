@@ -447,7 +447,7 @@ impl Iterator {
 		if let Some(fetchs) = stm.fetch() {
 			for fetch in fetchs.iter() {
 				// Loop over each result value
-				for obj in self.results.try_into_iter()? {
+				for obj in self.results.try_iter_mut()? {
 					// Fetch the value at the path
 					obj.fetch(ctx, opt, txn, fetch).await?;
 				}

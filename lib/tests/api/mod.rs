@@ -589,7 +589,7 @@ async fn select_record_ranges() {
 }
 
 #[test_log::test(tokio::test)]
-async fn select_record_order_by_and_limit() {
+async fn select_record_order_by_start_limit() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
@@ -600,15 +600,15 @@ async fn select_record_order_by_and_limit() {
         CREATE user:zoey SET name = 'Zoey';
     ";
 	db.query(sql).await.unwrap().check().unwrap();
-	// TODO: ORDER BY name DESC START 1 LIMIT 2
-	let sql = "SELECT name FROM user";
+	// TODO: ORDER BY
+	let sql = "SELECT name FROM user START 1 LIMIT 2";
 	let mut response = db.query(sql).await.unwrap();
 	//response.check().unwrap();
 	let users: Vec<RecordName> = response.take(0).unwrap();
 	let convert = |users: Vec<RecordName>| -> Vec<String> {
 		users.into_iter().map(|user| user.name).collect()
 	};
-	assert_eq!(convert(users), vec!["Amos", "Jane", "John", "Zoey"]);
+	assert_eq!(convert(users), vec!["Jane", "John",]);
 }
 
 #[test_log::test(tokio::test)]

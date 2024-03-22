@@ -149,7 +149,7 @@ impl Results {
 		}
 	}
 
-	pub(super) fn try_into_iter(&mut self) -> Result<IterMut<'_, Value>, Error> {
+	pub(super) fn try_iter_mut(&mut self) -> Result<IterMut<'_, Value>, Error> {
 		match self {
 			Self::Memory(s) => s.try_iter_mut(),
 			#[cfg(any(

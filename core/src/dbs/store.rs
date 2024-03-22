@@ -231,7 +231,7 @@ impl FileWriter {
 		Self::write_usize(&mut self.records, val.len())?;
 		// Write the buffer in the records
 		self.records.write_all(&val)?;
-		// Increment the offset
+		// Increment the offset of the next record
 		self.offset += val.len() + FileCollector::USIZE_SIZE;
 		Self::write_usize(&mut self.index, self.offset)?;
 		Ok(())
@@ -299,15 +299,13 @@ impl FileReader {
 		}
 
 		if start > 0 {
-			self.index
-				.get_mut()
-				.seek(SeekFrom::Start((start * FileCollector::USIZE_SIZE) as u64))?;
+			self.index.seek(SeekFrom::Start(((start - 1) * FileCollector::USIZE_SIZE) as u64))?;
 
 			// Get the start offset of the first record
 			let start_offset = Self::read_usize(&mut self.index)?;
 
 			// Set records to the position of the first record
-			self.records.get_mut().seek(SeekFrom::Start(start_offset as u64))?;
+			self.records.seek(SeekFrom::Start(start_offset as u64))?;
 		}
 
 		// Compute the maximum number of record to collect
