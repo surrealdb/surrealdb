@@ -296,7 +296,7 @@ mod tests {
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
-		stack.enter(|mut ctx| async move { parser.parse_thing(&mut ctx).await }).finish()
+		stack.enter(|ctx| async move { parser.parse_thing(ctx).await }).finish()
 	}
 
 	#[test]
