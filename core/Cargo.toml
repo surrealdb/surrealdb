@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.0.0-alpha.4.0"
+version = "2.0.0-1.5.0"
 rust-version = "1.70.0"
 readme = "../lib/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -41,7 +41,7 @@ kv-surrealkv = ["dep:surrealkv", "tokio/time"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core1", "dep:ndarray"]
-jwks = ["dep:reqwest", "sql2"]
+jwks = ["dep:reqwest"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -50,7 +50,6 @@ arbitrary = [
     "uuid/arbitrary",
 ]
 experimental-parser = ["dep:phf", "dep:unicase"]
-sql2 = []
 # Private features
 kv-fdb = ["tokio/time"]
 

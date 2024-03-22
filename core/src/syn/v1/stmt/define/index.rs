@@ -22,7 +22,6 @@ use nom::{
 
 pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = tag_no_case("INDEX")(i)?;
-	#[cfg(feature = "sql2")]
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
@@ -44,7 +43,6 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let mut res = DefineIndexStatement {
 		name,
 		what,
-		#[cfg(feature = "sql2")]
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
@@ -128,7 +126,6 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Idx,
 				comment: None,
-				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -147,7 +144,6 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Uniq,
 				comment: None,
-				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -183,7 +179,6 @@ mod tests {
 					terms_cache: 400,
 				}),
 				comment: None,
-				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -216,7 +211,6 @@ mod tests {
 					terms_cache: 100,
 				}),
 				comment: None,
-				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);
@@ -247,7 +241,6 @@ mod tests {
 					mtree_cache: 100,
 				}),
 				comment: None,
-				#[cfg(feature = "sql2")]
 				if_not_exists: false,
 			}
 		);

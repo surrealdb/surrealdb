@@ -14,6 +14,7 @@ mod statement;
 mod transaction;
 mod variables;
 
+pub use self::lifecycle::*;
 pub use self::notification::*;
 pub use self::options::*;
 pub use self::response::*;
@@ -30,6 +31,8 @@ pub use self::capabilities::Capabilities;
 pub mod node;
 
 mod group;
+#[doc(hidden)]
+pub mod lifecycle;
 mod processor;
 mod result;
 mod store;

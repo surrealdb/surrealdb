@@ -1,7 +1,6 @@
 use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
-use std::collections::BTreeMap;
 use std::iter::once;
 use std::ops::Deref;
 use surrealdb::sql::Datetime;
@@ -94,36 +93,31 @@ impl TryFrom<Cbor> for Value {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid RecordID value"),
 						},
-						Data::Array(mut v) if v.len() == 2 => match (v.remove(0), v.remove(0)) {
-							(Data::Text(tb), Data::Text(id)) => {
-								Ok(Value::from(Thing::from((tb, id))))
-							}
-							(Data::Text(tb), Data::Integer(id)) => {
-								Ok(Value::from(Thing::from((tb, Id::from(i128::from(id) as i64)))))
-							}
-							(Data::Text(tb), Data::Array(id)) => Ok(Value::from(Thing::from((
-								tb,
-								Id::from(
-									id.into_iter()
-										.map(|v| Value::try_from(Cbor(v)))
-										.collect::<Result<Vec<Value>, &str>>()?,
+						Data::Array(mut v) if v.len() == 2 => {
+							let tb = match Value::try_from(Cbor(v.remove(0))) {
+								Ok(Value::Strand(tb)) => tb.0,
+								Ok(Value::Table(tb)) => tb.0,
+								_ => return Err(
+									"Expected the tb of a Record Id to be a String or Table value",
 								),
-							)))),
-							(Data::Text(tb), Data::Map(id)) => Ok(Value::from(Thing::from((
-								tb,
-								Id::from(
-									id.into_iter()
-										.map(|(k, v)| {
-											let k =
-												Value::try_from(Cbor(k)).map(|k| k.as_raw_string());
-											let v = Value::try_from(Cbor(v));
-											Ok((k?, v?))
-										})
-										.collect::<Result<BTreeMap<String, Value>, &str>>()?,
-								),
-							)))),
-							_ => Err("Expected a CBOR array with 2 elements, a text data type, and a valid ID type"),
-						},
+							};
+
+							match Value::try_from(Cbor(v.remove(0))) {
+								Ok(Value::Strand(id)) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								Ok(Value::Number(Number::Int(id))) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								Ok(Value::Array(id)) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								Ok(Value::Object(id)) => {
+									Ok(Value::from(Thing::from((tb, Id::from(id)))))
+								}
+								_ => Err("Expected the id of a Record Id to be a String, Integer, Array or Object value"),
+							}
+						}
 						_ => Err("Expected a CBOR text data type, or a CBOR array with 2 elements"),
 					},
 					// A literal table
@@ -131,18 +125,18 @@ impl TryFrom<Cbor> for Value {
 						Data::Text(v) => Ok(Value::Table(v.into())),
 						_ => Err("Expected a CBOR text data type"),
 					},
-					TAG_GEOMETRY_POINT => match v.deref() {
-						Data::Array(v) if v.len() == 2 => {
-							let x = Value::try_from(Cbor(v.clone().remove(0)))?;
-							let y = Value::try_from(Cbor(v.clone().remove(0)))?;
+					TAG_GEOMETRY_POINT => match *v {
+						Data::Array(mut v) if v.len() == 2 => {
+							let x = Value::try_from(Cbor(v.remove(0)))?;
+							let y = Value::try_from(Cbor(v.remove(0)))?;
 
 							match (x, y) {
-								(Value::Number(x), Value::Number(y)) => {
-									Ok(Value::Geometry(Geometry::Point((x.as_float(), y.as_float()).into())))
-								},
+								(Value::Number(x), Value::Number(y)) => Ok(Value::Geometry(
+									Geometry::Point((x.as_float(), y.as_float()).into()),
+								)),
 								_ => Err("Expected a CBOR array with 2 decimal values"),
 							}
-						},
+						}
 						_ => Err("Expected a CBOR array with 2 decimal values"),
 					},
 					TAG_GEOMETRY_LINE => match v.deref() {
@@ -151,12 +145,12 @@ impl TryFrom<Cbor> for Value {
 								.iter()
 								.map(|v| match Value::try_from(Cbor(v.clone()))? {
 									Value::Geometry(Geometry::Point(v)) => Ok(v),
-									_ => Err("Expected a CBOR array with Geometry Point values")
+									_ => Err("Expected a CBOR array with Geometry Point values"),
 								})
 								.collect::<Result<Vec<Point>, &str>>()?;
 
 							Ok(Value::Geometry(Geometry::Line(LineString::from(points))))
-						},
+						}
 						_ => Err("Expected a CBOR array with Geometry Point values"),
 					},
 					TAG_GEOMETRY_POLYGON => match v.deref() {
@@ -165,17 +159,22 @@ impl TryFrom<Cbor> for Value {
 								.iter()
 								.map(|v| match Value::try_from(Cbor(v.clone()))? {
 									Value::Geometry(Geometry::Line(v)) => Ok(v),
-									_ => Err("Expected a CBOR array with Geometry Line values")
+									_ => Err("Expected a CBOR array with Geometry Line values"),
 								})
 								.collect::<Result<Vec<LineString>, &str>>()?;
 
 							let first = match lines.first() {
 								Some(v) => v,
-								_ => return Err("Expected a CBOR array with at least two Geometry Line values")
+								_ => return Err(
+									"Expected a CBOR array with at least two Geometry Line values",
+								),
 							};
 
-							Ok(Value::Geometry(Geometry::Polygon(Polygon::new(first.clone(), Vec::from(&lines[1..])))))
-						},
+							Ok(Value::Geometry(Geometry::Polygon(Polygon::new(
+								first.clone(),
+								Vec::from(&lines[1..]),
+							))))
+						}
 						_ => Err("Expected a CBOR array with at least two Geometry Line values"),
 					},
 					TAG_GEOMETRY_MULTIPOINT => match v.deref() {
@@ -184,12 +183,12 @@ impl TryFrom<Cbor> for Value {
 								.iter()
 								.map(|v| match Value::try_from(Cbor(v.clone()))? {
 									Value::Geometry(Geometry::Point(v)) => Ok(v),
-									_ => Err("Expected a CBOR array with Geometry Point values")
+									_ => Err("Expected a CBOR array with Geometry Point values"),
 								})
 								.collect::<Result<Vec<Point>, &str>>()?;
 
 							Ok(Value::Geometry(Geometry::MultiPoint(MultiPoint::from(points))))
-						},
+						}
 						_ => Err("Expected a CBOR array with Geometry Point values"),
 					},
 					TAG_GEOMETRY_MULTILINE => match v.deref() {
@@ -198,12 +197,12 @@ impl TryFrom<Cbor> for Value {
 								.iter()
 								.map(|v| match Value::try_from(Cbor(v.clone()))? {
 									Value::Geometry(Geometry::Line(v)) => Ok(v),
-									_ => Err("Expected a CBOR array with Geometry Line values")
+									_ => Err("Expected a CBOR array with Geometry Line values"),
 								})
 								.collect::<Result<Vec<LineString>, &str>>()?;
 
 							Ok(Value::Geometry(Geometry::MultiLine(MultiLineString::new(lines))))
-						},
+						}
 						_ => Err("Expected a CBOR array with Geometry Point values"),
 					},
 					TAG_GEOMETRY_MULTIPOLYGON => match v.deref() {
@@ -212,12 +211,14 @@ impl TryFrom<Cbor> for Value {
 								.iter()
 								.map(|v| match Value::try_from(Cbor(v.clone()))? {
 									Value::Geometry(Geometry::Polygon(v)) => Ok(v),
-									_ => Err("Expected a CBOR array with Geometry Polygon values")
+									_ => Err("Expected a CBOR array with Geometry Polygon values"),
 								})
 								.collect::<Result<Vec<Polygon>, &str>>()?;
 
-							Ok(Value::Geometry(Geometry::MultiPolygon(MultiPolygon::from(polygons))))
-						},
+							Ok(Value::Geometry(Geometry::MultiPolygon(MultiPolygon::from(
+								polygons,
+							))))
+						}
 						_ => Err("Expected a CBOR array with Geometry Polygon values"),
 					},
 					TAG_GEOMETRY_COLLECTION => match v.deref() {
@@ -226,12 +227,12 @@ impl TryFrom<Cbor> for Value {
 								.iter()
 								.map(|v| match Value::try_from(Cbor(v.clone()))? {
 									Value::Geometry(v) => Ok(v),
-									_ => Err("Expected a CBOR array with Geometry values")
+									_ => Err("Expected a CBOR array with Geometry values"),
 								})
 								.collect::<Result<Vec<Geometry>, &str>>()?;
 
 							Ok(Value::Geometry(Geometry::Collection(geometries)))
-						},
+						}
 						_ => Err("Expected a CBOR array with Geometry values"),
 					},
 					// An unknown tag

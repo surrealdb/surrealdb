@@ -122,7 +122,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test DROP SCHEMALESS PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY DROP SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -154,7 +154,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -190,7 +190,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -222,7 +222,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 			models: {},
 			params: {},
 			scopes: {},
-			tables: { test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE' },
+			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
 	);
@@ -263,8 +263,8 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
-				view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
+				view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -276,7 +276,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 		"{
 			events: {},
 			fields: {},
-			tables: { view: 'DEFINE TABLE view SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' },
+			tables: { view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
 		}",
@@ -296,7 +296,7 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-				test: 'DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE',
+				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
 			},
 			users: {},
 		}",
@@ -1948,7 +1948,7 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
+        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
 		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
     ];
 
@@ -2139,9 +2139,9 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 			params: {},
 			scopes: {},
 			tables: {
-					default: 'DEFINE TABLE default SCHEMALESS PERMISSIONS NONE',
-					full: 'DEFINE TABLE full SCHEMALESS PERMISSIONS FULL',
-					select_full: 'DEFINE TABLE select_full SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
+					default: 'DEFINE TABLE default TYPE ANY SCHEMALESS PERMISSIONS NONE',
+					full: 'DEFINE TABLE full TYPE ANY SCHEMALESS PERMISSIONS FULL',
+					select_full: 'DEFINE TABLE select_full TYPE ANY SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
 			},
 			tokens: {},
 			users: {}
@@ -2640,6 +2640,55 @@ async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<()
 	//
 	let tmp = res.remove(0).result.unwrap_err();
 	assert!(matches!(tmp, Error::UserRootAlreadyExists { .. }),);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+#[cfg(feature = "sql2")]
+async fn define_table_relation() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE likes TYPE RELATION;
+		CREATE person:raphael, person:tobie;
+		RELATE person:raphael->likes->person:tobie;
+		CREATE likes:1;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_empty_array() -> Result<(), Error> {
+	let sql = r"
+		DEFINE TABLE indexTest;
+		INSERT INTO indexTest { arr: [] };
+		DEFINE INDEX idx_arr ON TABLE indexTest COLUMNS arr;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	for _ in 0..3 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
 	Ok(())
 }

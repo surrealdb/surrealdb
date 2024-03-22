@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.4.0"
+version = "1.5.0"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -20,12 +20,12 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
-sql2 = ["surrealdb/sql2"]
+sql2 = [] # Deprecated since v1.4
 parser2 = ["surrealdb/parser2"]
 performance-profiler = ["dep:pprof"]
 
 [workspace]
-members = ["core", "lib", "lib/examples/actix", "lib/examples/axum"]
+members = ["core", "lib", "lib/examples/actix", "lib/examples/axum", "lib/examples/rocket"]
 
 [profile.release]
 lto = true
@@ -83,6 +83,7 @@ surrealdb = { version = "1", path = "lib", features = [
 	"protocol-http",
 	"protocol-ws",
 	"rustls",
+	"sql2",
 ] }
 tempfile = "3.8.1"
 thiserror = "1.0.50"
