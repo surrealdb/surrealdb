@@ -39,7 +39,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 					},
 						{
 							detail: {
-								type: 'Store'
+								type: 'Memory'
 							},
 							operation: 'Collector'
 					}
@@ -89,7 +89,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -155,7 +155,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -403,7 +403,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -638,7 +638,7 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}

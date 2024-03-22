@@ -210,7 +210,7 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Store'
+					type: 'Memory'
 				}},
 				operation: 'Collector'
 			}},
@@ -241,7 +241,7 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Store'
+					type: 'Memory'
 				}},
 				operation: 'Collector'
 			}},
@@ -264,7 +264,7 @@ const THREE_TABLE_EXPLAIN: &str = "[
 	},
 	{
 		detail: {
-			type: 'Store'
+			type: 'Memory'
 		},
 		operation: 'Collector'
 	},
@@ -312,7 +312,7 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -338,7 +338,7 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -364,7 +364,7 @@ const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -390,7 +390,7 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	},
 	{
 		detail: {
-			type: 'Store'
+			type: 'Memory'
 		},
 		operation: 'Collector'
 	},
@@ -427,7 +427,7 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 				},
@@ -464,7 +464,7 @@ async fn select_with_no_index_unary_operator() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -498,7 +498,7 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -588,7 +588,7 @@ const EXPLAIN_FROM_TO: &str = r"[
 		},
 		{
 			detail: {
-				type: 'Store'
+				type: 'Memory'
 			},
 			operation: 'Collector'
 		}
@@ -635,7 +635,7 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 		},
 		{
 			detail: {
-				type: 'Store'
+				type: 'Memory'
 			},
 			operation: 'Collector'
 		}
@@ -686,7 +686,7 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -737,7 +737,7 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -831,7 +831,7 @@ const EXPLAIN_LESS: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -872,7 +872,7 @@ const EXPLAIN_LESS_OR_EQUAL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -917,7 +917,7 @@ const EXPLAIN_MORE: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -958,7 +958,7 @@ const EXPLAIN_MORE_OR_EQUAL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -1014,7 +1014,7 @@ async fn select_with_idiom_param_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1062,7 +1062,7 @@ const CONTAINS_TABLE_EXPLAIN: &str = r"[
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -1128,7 +1128,7 @@ async fn select_contains() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1171,7 +1171,7 @@ async fn select_contains_all() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1214,7 +1214,7 @@ async fn select_contains_any() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1264,7 +1264,7 @@ async fn select_unique_contains() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1317,7 +1317,7 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1380,7 +1380,7 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1441,7 +1441,7 @@ async fn select_with_in_operator() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1519,7 +1519,7 @@ async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}

@@ -589,6 +589,29 @@ async fn select_record_ranges() {
 }
 
 #[test_log::test(tokio::test)]
+async fn select_record_order_by_and_limit() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sql = "
+        CREATE user:amos SET name = 'Amos';
+        CREATE user:jane SET name = 'Jane';
+        CREATE user:john SET name = 'John';
+        CREATE user:zoey SET name = 'Zoey';
+    ";
+	db.query(sql).await.unwrap().check().unwrap();
+	// TODO: ORDER BY name DESC START 1 LIMIT 2
+	let sql = "SELECT name FROM user";
+	let mut response = db.query(sql).await.unwrap();
+	//response.check().unwrap();
+	let users: Vec<RecordName> = response.take(0).unwrap();
+	let convert = |users: Vec<RecordName>| -> Vec<String> {
+		users.into_iter().map(|user| user.name).collect()
+	};
+	assert_eq!(convert(users), vec!["Amos", "Jane", "John", "Zoey"]);
+}
+
+#[test_log::test(tokio::test)]
 async fn update_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
