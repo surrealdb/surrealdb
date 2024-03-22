@@ -53,6 +53,14 @@ pub struct Context<'a> {
 	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	// Is the datastore in memory? (KV-MEM, WASM)
 	is_memory: bool,
 }
@@ -79,6 +87,14 @@ impl<'a> Context<'a> {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
 		is_memory: bool,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
@@ -92,6 +108,14 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			is_memory,
 		};
 		if let Some(timeout) = time_out {
@@ -112,6 +136,14 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			is_memory: false,
 		}
 	}
@@ -129,6 +161,14 @@ impl<'a> Context<'a> {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			is_memory: parent.is_memory,
 		}
 	}
@@ -246,6 +286,14 @@ impl<'a> Context<'a> {
 	}
 
 	/// Return true if the underlying Datastore is KV-MEM (Or WASM)
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	pub fn is_memory(&self) -> bool {
 		self.is_memory
 	}

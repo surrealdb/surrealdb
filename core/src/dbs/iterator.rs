@@ -295,7 +295,18 @@ impl Iterator {
 		// Process the query START clause
 		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
 		// Prepare the results with possible optimisations on groups
-		self.results = self.results.prepare(ctx, stm)?;
+		self.results = self.results.prepare(
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			ctx,
+			stm,
+		)?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		if plan.do_iterate {

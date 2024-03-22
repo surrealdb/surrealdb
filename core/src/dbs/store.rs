@@ -4,10 +4,42 @@ use crate::sql::value::Value;
 use crate::sql::Orders;
 // use ext_sort::buffer::mem::MemoryLimitedBufferBuilder;
 // use ext_sort::{ExternalSorter, RmpExternalChunk};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use revision::Revisioned;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use std::fs::{File, OpenOptions};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::mem;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use tempfile::TempDir;
 
 #[derive(Default)]
@@ -81,6 +113,10 @@ pub(super) struct FileCollector {
 	feature = "kv-speedb"
 ))]
 impl FileCollector {
+	const INDEX_FILE_NAME: &'static str = "ix";
+	const RECORDS_FILE_NAME: &'static str = "re";
+	const USIZE_SIZE: usize = mem::size_of::<usize>();
+
 	pub(super) fn new() -> Result<Self, Error> {
 		let dir = TempDir::new()?;
 		Ok(Self {
@@ -142,25 +178,38 @@ impl FileCollector {
 	}
 }
 
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 struct FileWriter {
 	index: BufWriter<File>,
 	records: BufWriter<File>,
 	offset: usize,
 }
 
-const INDEX_FILE_NAME: &str = "ix";
-const RECORDS_FILE_NAME: &str = "re";
-const USIZE_SIZE: usize = mem::size_of::<usize>();
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 impl FileWriter {
 	fn new(dir: &TempDir) -> Result<Self, Error> {
 		let index = OpenOptions::new()
 			.create_new(true)
 			.append(true)
-			.open(dir.path().join(INDEX_FILE_NAME))?;
+			.open(dir.path().join(FileCollector::INDEX_FILE_NAME))?;
 		let records = OpenOptions::new()
 			.create_new(true)
 			.append(true)
-			.open(dir.path().join(RECORDS_FILE_NAME))?;
+			.open(dir.path().join(FileCollector::RECORDS_FILE_NAME))?;
 		Ok(Self {
 			index: BufWriter::new(index),
 			records: BufWriter::new(records),
@@ -183,7 +232,7 @@ impl FileWriter {
 		// Write the buffer in the records
 		self.records.write_all(&val)?;
 		// Increment the offset
-		self.offset += val.len() + USIZE_SIZE;
+		self.offset += val.len() + FileCollector::USIZE_SIZE;
 		Self::write_usize(&mut self.index, self.offset)?;
 		Ok(())
 	}
@@ -195,16 +244,35 @@ impl FileWriter {
 	}
 }
 
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 struct FileReader {
 	len: usize,
 	index: BufReader<File>,
 	records: BufReader<File>,
 }
 
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 impl FileReader {
 	fn new(len: usize, dir: &TempDir) -> Result<Self, Error> {
-		let index = OpenOptions::new().read(true).open(dir.path().join(INDEX_FILE_NAME))?;
-		let records = OpenOptions::new().read(true).open(dir.path().join(RECORDS_FILE_NAME))?;
+		let index =
+			OpenOptions::new().read(true).open(dir.path().join(FileCollector::INDEX_FILE_NAME))?;
+		let records = OpenOptions::new()
+			.read(true)
+			.open(dir.path().join(FileCollector::RECORDS_FILE_NAME))?;
 		Ok(Self {
 			len,
 			index: BufReader::new(index),
@@ -213,7 +281,7 @@ impl FileReader {
 	}
 
 	fn read_usize(reader: &mut BufReader<File>) -> Result<usize, Error> {
-		let mut buf = vec![0u8; USIZE_SIZE];
+		let mut buf = vec![0u8; FileCollector::USIZE_SIZE];
 		reader.read_exact(&mut buf)?;
 		// Safe to call unwrap because we know the slice length matches the expected length
 		let u = usize::from_be_bytes(buf.try_into().unwrap());
@@ -231,7 +299,9 @@ impl FileReader {
 		}
 
 		if start > 0 {
-			self.index.get_mut().seek(SeekFrom::Start((start * USIZE_SIZE) as u64))?;
+			self.index
+				.get_mut()
+				.seek(SeekFrom::Start((start * FileCollector::USIZE_SIZE) as u64))?;
 
 			// Get the start offset of the first record
 			let start_offset = Self::read_usize(&mut self.index)?;

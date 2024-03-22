@@ -433,6 +433,14 @@ impl Datastore {
 		self.auth_enabled
 	}
 
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	pub(crate) fn is_memory(&self) -> bool {
 		#[cfg(feature = "kv-mem")]
 		if matches!(self.inner, Inner::Mem(_)) {
@@ -1385,6 +1393,14 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			self.is_memory(),
 		)?;
 		// Setup the notification channel
