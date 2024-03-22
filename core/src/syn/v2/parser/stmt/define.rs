@@ -340,7 +340,7 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		let mut res = DefineTableStatement {
 			name,
-			permissions: Permissions::none(),			
+			permissions: Permissions::none(),
 			if_not_exists,
 			..Default::default()
 		};
@@ -516,7 +516,6 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_index(&mut self) -> ParseResult<DefineIndexStatement> {
-		
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -532,7 +531,7 @@ impl Parser<'_> {
 		let mut res = DefineIndexStatement {
 			name,
 			what,
-			
+
 			if_not_exists,
 			..Default::default()
 		};
@@ -685,7 +684,6 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_define_analyzer(&mut self) -> ParseResult<DefineAnalyzerStatement> {
-		
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -696,12 +694,12 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		let mut res = DefineAnalyzerStatement {
 			name,
-			
+
 			function: None,
 			tokenizers: None,
 			filters: None,
 			comment: None,
-			
+
 			if_not_exists,
 		};
 		loop {
@@ -769,7 +767,7 @@ impl Parser<'_> {
 					}
 					res.tokenizers = Some(tokenizers);
 				}
-				
+
 				t!("FUNCTION") => {
 					self.pop_peek();
 					expected!(self, t!("fn"));
