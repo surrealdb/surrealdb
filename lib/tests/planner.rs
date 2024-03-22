@@ -1419,7 +1419,7 @@ async fn select_with_in_operator() -> Result<(), Error> {
 		SELECT * FROM user WHERE email IN ['a@b', 'e@f'];
 		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'];
 		";
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 7);
 	skip_ok(&mut res, 3)?;
@@ -1480,7 +1480,7 @@ async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
 		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["99999999-aaaa-1111-8888-abcdef012345", "00013483-fedd-43e3-a94e-80728d896f6e", "99999999-aaaa-1111-8888-abcdef012345"];
 		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e"] EXPLAIN;
 	"#;
-	let mut res = dbs.execute(&sql, &ses, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 2)?;
