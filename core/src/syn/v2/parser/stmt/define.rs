@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use crate::{
 	sql::{
 		filter::Filter,
@@ -8,8 +10,9 @@ use crate::{
 			DefineNamespaceStatement, DefineParamStatement, DefineScopeStatement, DefineStatement,
 			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
 		},
+		table_type,
 		tokenizer::Tokenizer,
-		Ident, Idioms, Index, Param, Permissions, Scoring, Strand, Values,
+		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType, Values,
 	},
 	syn::v2::{
 		parser::{
@@ -252,7 +255,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_scope(&mut self, ctx: &mut Stk) -> ParseResult<DefineScopeStatement> {
+	pub async fn parse_define_scope(&mut self, stk: &mut Stk) -> ParseResult<DefineScopeStatement> {
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -280,11 +283,11 @@ impl Parser<'_> {
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					res.signup = Some(self.parse_value()?);
+					res.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					res.signin = Some(self.parse_value()?);
+					res.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				_ => break,
 			}
