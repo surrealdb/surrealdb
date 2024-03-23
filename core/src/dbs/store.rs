@@ -62,6 +62,7 @@ pub(super) mod file_store {
 	use crate::err::Error;
 	use crate::sql::{Orders, Value};
 	use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
+	use once_cell::sync::Lazy;
 	use revision::Revisioned;
 	use std::fs::{File, OpenOptions};
 	use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
@@ -77,6 +78,12 @@ pub(super) mod file_store {
 		orders: Option<Orders>,
 		paging: FilePaging,
 	}
+
+	pub static SURREALDB_EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> = Lazy::new(|| {
+		option_env!("SURREALDB_EXTERNAL_SORTING_BUFFER_LIMIT")
+			.and_then(|s| s.parse::<usize>().ok())
+			.unwrap_or(50_000)
+	});
 
 	impl FileCollector {
 		const INDEX_FILE_NAME: &'static str = "ix";
@@ -155,7 +162,10 @@ pub(super) mod file_store {
 			let sorter: ExternalSorter<Value, Error, LimitedBufferBuilder, ValueExternalChunk> =
 				ExternalSorterBuilder::new()
 					.with_tmp_dir(&sort_dir)
-					.with_buffer(LimitedBufferBuilder::new(50_000, true))
+					.with_buffer(LimitedBufferBuilder::new(
+						*SURREALDB_EXTERNAL_SORTING_BUFFER_LIMIT,
+						true,
+					))
 					.build()?;
 
 			let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
