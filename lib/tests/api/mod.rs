@@ -1,6 +1,7 @@
 // Tests common to all protocols and storage engines
 
 use surrealdb::fflags::FFLAGS;
+use surrealdb::Response;
 
 static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -589,26 +590,61 @@ async fn select_record_ranges() {
 }
 
 #[test_log::test(tokio::test)]
-async fn select_record_order_by_start_limit() {
+async fn select_records_order_by_start_limit() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
-        CREATE user:amos SET name = 'Amos';
-        CREATE user:jane SET name = 'Jane';
         CREATE user:john SET name = 'John';
         CREATE user:zoey SET name = 'Zoey';
+    	CREATE user:amos SET name = 'Amos';
+        CREATE user:jane SET name = 'Jane';
     ";
 	db.query(sql).await.unwrap().check().unwrap();
-	// TODO: ORDER BY
-	let sql = "SELECT name FROM user START 1 LIMIT 2";
+
+	let check_start_limit = |mut response: Response, expected: Vec<&str>| {
+		let users: Vec<RecordName> = response.take(0).unwrap();
+		let users: Vec<String> = users.into_iter().map(|user| user.name).collect();
+		assert_eq!(users, expected);
+	};
+
+	let response =
+		db.query("SELECT name FROM user ORDER BY name DESC START 1 LIMIT 2").await.unwrap();
+	check_start_limit(response, vec!["John", "Jane"]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC START 1").await.unwrap();
+	check_start_limit(response, vec!["John", "Jane", "Amos"]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC START 4").await.unwrap();
+	check_start_limit(response, vec![]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC LIMIT 2").await.unwrap();
+	check_start_limit(response, vec!["Zoey", "John"]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC LIMIT 10").await.unwrap();
+	check_start_limit(response, vec!["Zoey", "John", "Jane", "Amos"]);
+}
+
+#[test_log::test(tokio::test)]
+async fn select_records_order_by() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sql = "
+        CREATE user:john SET name = 'John';
+        CREATE user:zoey SET name = 'Zoey';
+    	CREATE user:amos SET name = 'Amos';
+        CREATE user:jane SET name = 'Jane';
+    ";
+	db.query(sql).await.unwrap().check().unwrap();
+	let sql = "SELECT name FROM user ORDER BY name DESC";
 	let mut response = db.query(sql).await.unwrap();
 	//response.check().unwrap();
 	let users: Vec<RecordName> = response.take(0).unwrap();
 	let convert = |users: Vec<RecordName>| -> Vec<String> {
 		users.into_iter().map(|user| user.name).collect()
 	};
-	assert_eq!(convert(users), vec!["Jane", "John",]);
+	assert_eq!(convert(users), vec!["Zoey", "John", "Jane", "Amos"]);
 }
 
 #[test_log::test(tokio::test)]

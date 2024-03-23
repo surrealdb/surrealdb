@@ -335,7 +335,7 @@ impl Iterator {
 
 			// Process any ORDER clause
 			if let Some(orders) = stm.order() {
-				self.results.sort(orders)?;
+				self.results.sort(orders);
 			}
 
 			// Process any START & LIMIT clause

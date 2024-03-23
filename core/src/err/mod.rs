@@ -11,6 +11,15 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use ext_sort::SortError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
@@ -1026,6 +1035,25 @@ impl<T> From<channel::SendError<T>> for Error {
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())
+	}
+}
+
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+impl<S, D, I> From<SortError<S, D, I>> for Error
+where
+	S: std::error::Error,
+	D: std::error::Error,
+	I: std::error::Error,
+{
+	fn from(e: SortError<S, D, I>) -> Error {
+		Error::Internal(e.to_string())
 	}
 }
 

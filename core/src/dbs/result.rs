@@ -9,7 +9,7 @@ use crate::dbs::plan::Explanation;
 	feature = "kv-tikv",
 	feature = "kv-speedb"
 ))]
-use crate::dbs::store::FileCollector;
+use crate::dbs::store::file_store::FileCollector;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
@@ -99,7 +99,7 @@ impl Results {
 		Ok(())
 	}
 
-	pub(super) fn sort(&mut self, orders: &Orders) -> Result<(), Error> {
+	pub(super) fn sort(&mut self, orders: &Orders) {
 		match self {
 			Self::Memory(m) => m.sort(orders),
 			#[cfg(any(
@@ -111,7 +111,7 @@ impl Results {
 				feature = "kv-speedb"
 			))]
 			Self::File(f) => f.sort(orders),
-			_ => Ok(()),
+			_ => {}
 		}
 	}
 
