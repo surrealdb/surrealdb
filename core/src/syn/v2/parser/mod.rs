@@ -44,6 +44,7 @@ mod token_buffer;
 pub mod test;
 
 pub use error::{IntErrorKind, ParseError, ParseErrorKind};
+use reblessive::Stk;
 
 /// The result returned by most parser function.
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -76,6 +77,8 @@ pub struct Parser<'a> {
 	token_buffer: TokenBuffer<4>,
 	table_as_field: bool,
 	legacy_strands: bool,
+	object_recursion: usize,
+	query_recursion: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -87,7 +90,24 @@ impl<'a> Parser<'a> {
 			token_buffer: TokenBuffer::new(),
 			table_as_field: false,
 			legacy_strands: false,
+			object_recursion: 100,
+			query_recursion: 20,
 		}
+	}
+
+	pub fn with_object_recursion_limit(mut self, limit: usize) -> Self {
+		self.object_recursion = limit;
+		self
+	}
+
+	pub fn with_query_recursion_limit(mut self, limit: usize) -> Self {
+		self.query_recursion = limit;
+		self
+	}
+
+	pub fn with_allow_legacy_strand(mut self, value: bool) -> Self {
+		self.legacy_strands = value;
+		self
 	}
 
 	/// Set whether to parse strands as legacy strands.
@@ -111,6 +131,8 @@ impl<'a> Parser<'a> {
 			token_buffer: TokenBuffer::new(),
 			legacy_strands: self.legacy_strands,
 			table_as_field: false,
+			object_recursion: self.object_recursion,
+			query_recursion: self.query_recursion,
 		}
 	}
 
@@ -217,24 +239,27 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub fn parse_query(&mut self) -> ParseResult<sql::Query> {
-		let statements = self.parse_stmt_list()?;
+	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Query> {
+		let statements = self.parse_stmt_list(ctx).await?;
 		Ok(sql::Query(statements))
 	}
 
 	/// Parse a single statement.
-	pub fn parse_statement(&mut self) -> ParseResult<sql::Statement> {
-		self.parse_stmt()
+	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::Statement> {
+		self.parse_stmt(ctx).await
 	}
 
 	/// Parse a possibly partial statement.
 	///
 	/// This will try to parse a statement if a full statement can be parsed from the buffer parser
 	/// is operating on.
-	pub fn parse_partial_statement(&mut self) -> PartialResult<sql::Statement> {
+	pub async fn parse_partial_statement(
+		&mut self,
+		ctx: &mut Stk,
+	) -> PartialResult<sql::Statement> {
 		while self.eat(t!(";")) {}
 
-		let res = self.parse_stmt();
+		let res = ctx.run(|ctx| self.parse_stmt(ctx)).await;
 		match res {
 			Err(ParseError {
 				kind: ParseErrorKind::UnexpectedEof {

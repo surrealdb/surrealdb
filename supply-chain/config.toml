@@ -1735,6 +1735,10 @@ criteria = "safe-to-deploy"
 version = "0.21.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.reblessive]]
+version = "0.3.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.rquickjs]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
