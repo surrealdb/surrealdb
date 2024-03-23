@@ -446,11 +446,13 @@ impl Iterator {
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
 			for fetch in fetchs.iter() {
+				let mut values = self.results.take()?;
 				// Loop over each result value
-				for obj in self.results.try_iter_mut()? {
+				for obj in &mut values {
 					// Fetch the value at the path
 					obj.fetch(ctx, opt, txn, fetch).await?;
 				}
+				self.results = values.into();
 			}
 		}
 		Ok(())

@@ -1,5 +1,4 @@
 use crate::dbs::plan::Explanation;
-use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::Orders;
 use std::mem;
@@ -39,12 +38,14 @@ impl MemoryCollector {
 		mem::take(&mut self.0)
 	}
 
-	pub(super) fn try_iter_mut(&mut self) -> Result<std::slice::IterMut<'_, Value>, Error> {
-		Ok(self.0.iter_mut())
-	}
-
 	pub(super) fn explain(&self, exp: &mut Explanation) {
 		exp.add_collector("Memory", vec![]);
+	}
+}
+
+impl From<Vec<Value>> for MemoryCollector {
+	fn from(values: Vec<Value>) -> Self {
+		Self(values)
 	}
 }
 
@@ -126,13 +127,6 @@ pub(super) mod file_store {
 		pub(in crate::dbs) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
 			self.paging.start = start.cloned();
 			self.paging.limit = limit.cloned();
-		}
-
-		pub(in crate::dbs) fn try_iter_mut(
-			&mut self,
-		) -> Result<std::slice::IterMut<'_, Value>, Error> {
-			// Used by fetch
-			todo!()
 		}
 
 		pub(in crate::dbs) fn take_vec(&mut self) -> Result<Vec<Value>, Error> {

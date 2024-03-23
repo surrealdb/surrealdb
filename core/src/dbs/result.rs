@@ -14,7 +14,6 @@ use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
 use crate::sql::{Orders, Value};
-use std::slice::IterMut;
 
 pub(super) enum Results {
 	None,
@@ -29,12 +28,6 @@ pub(super) enum Results {
 	))]
 	File(Box<FileCollector>),
 	Groups(GroupsCollector),
-}
-
-impl Default for Results {
-	fn default() -> Self {
-		Self::None
-	}
 }
 
 impl Results {
@@ -149,22 +142,6 @@ impl Results {
 		}
 	}
 
-	pub(super) fn try_iter_mut(&mut self) -> Result<IterMut<'_, Value>, Error> {
-		match self {
-			Self::Memory(s) => s.try_iter_mut(),
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			Self::File(f) => f.try_iter_mut(),
-			_ => Ok([].iter_mut()),
-		}
-	}
-
 	pub(super) fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
@@ -202,5 +179,17 @@ impl Results {
 				g.explain(exp);
 			}
 		}
+	}
+}
+
+impl Default for Results {
+	fn default() -> Self {
+		Self::None
+	}
+}
+
+impl From<Vec<Value>> for Results {
+	fn from(value: Vec<Value>) -> Self {
+		Results::Memory(value.into())
 	}
 }
