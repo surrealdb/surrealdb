@@ -78,7 +78,6 @@ mod api_integration {
 		use std::task::Poll;
 		use surrealdb::engine::remote::ws::Client;
 		use surrealdb::engine::remote::ws::Ws;
-		use surrealdb_core2::syn::Parse;
 
 		async fn new_db() -> (SemaphorePermit<'static>, Surreal<Client>) {
 			let permit = PERMITS.acquire().await.unwrap();
