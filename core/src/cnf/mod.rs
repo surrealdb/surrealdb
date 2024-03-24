@@ -1,4 +1,13 @@
 use once_cell::sync::Lazy;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::path::PathBuf;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
@@ -41,4 +50,33 @@ pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> = Lazy::new(|| {
 	option_env!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS")
 		.and_then(|s| s.parse::<bool>().ok())
 		.unwrap_or(false)
+});
+
+/// Specifies the path of the temporary directory used by SurrealDB.
+/// If not specified, SurrealDB attempts to make a temporary directory inside `env::temp_dir()`.
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+pub(crate) static TEMPORARY_DIRECTORY: Lazy<Option<PathBuf>> =
+	Lazy::new(|| option_env!("SURREAL_TEMPORARY_DIRECTORY").map(|s| PathBuf::from(s)));
+
+/// Specifies the buffer limit for external sorting.
+/// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> = Lazy::new(|| {
+	option_env!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT")
+		.and_then(|s| s.parse::<usize>().ok())
+		.unwrap_or(50_000)
 });

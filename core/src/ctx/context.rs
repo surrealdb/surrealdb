@@ -285,7 +285,6 @@ impl<'a> Context<'a> {
 		matches!(self.done(), Some(Reason::Timedout))
 	}
 
-	/// Return true if the underlying Datastore is KV-MEM (Or WASM)
 	#[cfg(any(
 		feature = "kv-surrealkv",
 		feature = "kv-file",
@@ -294,6 +293,7 @@ impl<'a> Context<'a> {
 		feature = "kv-tikv",
 		feature = "kv-speedb"
 	))]
+	/// Return true if the underlying Datastore is KV-MEM (Or WASM)
 	pub fn is_memory(&self) -> bool {
 		self.is_memory
 	}

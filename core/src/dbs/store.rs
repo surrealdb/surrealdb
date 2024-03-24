@@ -58,6 +58,7 @@ impl From<Vec<Value>> for MemoryCollector {
 	feature = "kv-speedb"
 ))]
 pub(super) mod file_store {
+	use crate::cnf::{EXTERNAL_SORTING_BUFFER_LIMIT, TEMPORARY_DIRECTORY};
 	use crate::dbs::plan::Explanation;
 	use crate::err::Error;
 	use crate::sql::{Orders, Value};
@@ -68,7 +69,21 @@ pub(super) mod file_store {
 	use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
 	use std::path::PathBuf;
 	use std::{fs, io, mem};
-	use tempfile::TempDir;
+	use tempfile::{Builder, TempDir};
+
+	/// Provide lazy initialization of a static `Builder` instance with a prefix set to "SURREAL".
+	static TEMPORARY_BUILDER: Lazy<Builder> = Lazy::new(|| {
+		let mut b = Builder::new();
+		b.prefix("SURREAL");
+		b
+	});
+	fn new_temp_dir() -> io::Result<TempDir> {
+		if let Some(path) = TEMPORARY_DIRECTORY.as_ref() {
+			TEMPORARY_BUILDER.tempdir_in(path)
+		} else {
+			TEMPORARY_BUILDER.tempdir()
+		}
+	}
 
 	pub(in crate::dbs) struct FileCollector {
 		dir: TempDir,
@@ -79,12 +94,6 @@ pub(super) mod file_store {
 		paging: FilePaging,
 	}
 
-	pub static SURREALDB_EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> = Lazy::new(|| {
-		option_env!("SURREALDB_EXTERNAL_SORTING_BUFFER_LIMIT")
-			.and_then(|s| s.parse::<usize>().ok())
-			.unwrap_or(50_000)
-	});
-
 	impl FileCollector {
 		const INDEX_FILE_NAME: &'static str = "ix";
 		const RECORDS_FILE_NAME: &'static str = "re";
@@ -94,7 +103,7 @@ pub(super) mod file_store {
 		const USIZE_SIZE: usize = mem::size_of::<usize>();
 
 		pub(in crate::dbs) fn new() -> Result<Self, Error> {
-			let dir = TempDir::new()?;
+			let dir = new_temp_dir()?;
 			Ok(Self {
 				len: 0,
 				writer: Some(FileWriter::new(&dir)?),
@@ -162,10 +171,7 @@ pub(super) mod file_store {
 			let sorter: ExternalSorter<Value, Error, LimitedBufferBuilder, ValueExternalChunk> =
 				ExternalSorterBuilder::new()
 					.with_tmp_dir(&sort_dir)
-					.with_buffer(LimitedBufferBuilder::new(
-						*SURREALDB_EXTERNAL_SORTING_BUFFER_LIMIT,
-						true,
-					))
+					.with_buffer(LimitedBufferBuilder::new(*EXTERNAL_SORTING_BUFFER_LIMIT, true))
 					.build()?;
 
 			let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
