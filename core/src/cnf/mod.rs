@@ -63,7 +63,7 @@ pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> = Lazy::new(|| {
 	feature = "kv-speedb"
 ))]
 pub(crate) static TEMPORARY_DIRECTORY: Lazy<Option<PathBuf>> =
-	Lazy::new(|| option_env!("SURREAL_TEMPORARY_DIRECTORY").map(|s| PathBuf::from(s)));
+	Lazy::new(|| option_env!("SURREAL_TEMPORARY_DIRECTORY").map(PathBuf::from));
 
 /// Specifies the buffer limit for external sorting.
 /// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
