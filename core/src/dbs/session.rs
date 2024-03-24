@@ -45,9 +45,15 @@ impl Session {
 		self
 	}
 
-	/// Set the selected database for the session
+	/// Set the selected scope for the session
 	pub fn with_sc(mut self, sc: &str) -> Session {
 		self.sc = Some(sc.to_owned());
+		self
+	}
+
+	/// Set the selected token for the session
+	pub fn with_tk(mut self, tk: Option<Value>) -> Session {
+		self.tk = tk.to_owned();
 		self
 	}
 

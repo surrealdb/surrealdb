@@ -88,6 +88,9 @@ pub async fn signin(
 					// Attempt to signin to root
 					super::signin::root(kvs, session, user, pass).await
 				}
+				(None, None) => {
+					super::signin::sc(kvs, session, session.ns.clone().unwrap(), session.db.clone().unwrap(), session.sc.clone().unwrap(), vars).await
+				}
 				_ => Err(Error::MissingUserOrPass),
 			}
 		}
@@ -118,7 +121,7 @@ pub async fn sc(
 					// Setup the query params
 					let vars = Some(vars.0);
 					// Setup the system session for finding the signin record
-					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+					let mut sess = Session::editor().with_ns(&ns).with_db(&db).with_tk(session.tk.clone());
 					sess.ip.clone_from(&session.ip);
 					sess.or.clone_from(&session.or);
 					// Compute the value with the params

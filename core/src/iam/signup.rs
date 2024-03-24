@@ -31,6 +31,9 @@ pub async fn signup(
 			// Attempt to signup to specified scope
 			super::signup::sc(kvs, session, ns, db, sc, vars).await
 		}
+		(None, None, None) => {
+			super::signup::sc(kvs, session, session.ns.clone().unwrap(), session.db.clone().unwrap(), session.sc.clone().unwrap(), vars).await
+	    }
 		_ => Err(Error::InvalidSignup),
 	}
 }
@@ -58,7 +61,7 @@ pub async fn sc(
 					// Setup the query params
 					let vars = Some(vars.0);
 					// Setup the system session for creating the signup record
-					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+					let mut sess = Session::editor().with_ns(&ns).with_db(&db).with_tk(session.tk.clone());
 					sess.ip.clone_from(&session.ip);
 					sess.or.clone_from(&session.or);
 					// Compute the value with the params
