@@ -1126,7 +1126,7 @@ mod cli_integration {
 
 	#[test(tokio::test)]
 	async fn test_temporary_directory() {
-		info!("* Non-existing temp directory");
+		info!("* The path is a non-existing directory");
 		{
 			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
 			let res = common::start_server(StartServerArguments {
@@ -1136,14 +1136,18 @@ mod cli_integration {
 				..Default::default()
 			})
 			.await;
-			if let Err(e) = res {
-				assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
-			} else {
-				panic!("Should not be ok!");
+			match res {
+				Ok((_, mut server)) => {
+					server.finish().unwrap();
+					panic!("Should not be ok!");
+				}
+				Err(e) => {
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+				}
 			}
 		}
 
-		info!("* The temp path is a file");
+		info!("* The path is a file");
 		{
 			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
 			let temp_file = tempfile::NamedTempFile::new().unwrap();
@@ -1154,15 +1158,19 @@ mod cli_integration {
 				..Default::default()
 			})
 			.await;
-			if let Err(e) = res {
-				assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
-			} else {
-				panic!("Should not be ok!");
+			match res {
+				Ok((_, mut server)) => {
+					server.finish().unwrap();
+					panic!("Should not be ok!");
+				}
+				Err(e) => {
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+				}
 			}
 			temp_file.close().unwrap();
 		}
 
-		info!("* The temp path is a valid directory");
+		info!("* The path is a valid directory");
 		{
 			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
 			let temp_dir = tempfile::tempdir().unwrap();
