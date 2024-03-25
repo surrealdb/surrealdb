@@ -74,6 +74,8 @@ pub enum ParseErrorKind {
 		idiom: String,
 		kind: MissingKind,
 	},
+	ExceededObjectDepthLimit,
+	ExceededQueryDepthLimit,
 	NoWhitespace,
 }
 
@@ -239,6 +241,24 @@ impl ParseError {
 			}
 			ParseErrorKind::NoWhitespace => {
 				let text = "Whitespace is dissallowed in this position";
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::ExceededObjectDepthLimit => {
+				let text = "Parsing exceeded the depth limit for objects";
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::ExceededQueryDepthLimit => {
+				let text = "Parsing exceeded the depth limit for queries";
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {

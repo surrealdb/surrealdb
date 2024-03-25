@@ -3,6 +3,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
+	enter_query_recursion,
 	sql::{
 		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Part, Script, Strand, Subquery, Table,
 		Value,
@@ -221,9 +222,11 @@ impl Parser<'_> {
 				self.parse_mock(token.span).map(Value::Mock)?
 			}
 			t!("IF") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Ifelse(stmt)))
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = ctx.run(|ctx| this.parse_if_stmt(ctx)).await?;
+					Value::Subquery(Box::new(Subquery::Ifelse(stmt)))
+				})
 			}
 			t!("(") => {
 				self.pop_peek();
@@ -341,15 +344,27 @@ impl Parser<'_> {
 				self.parse_inner_subquery(ctx, Some(peek.span)).await
 			}
 			t!("IF") => {
-				self.pop_peek();
-				let if_stmt = ctx.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Ok(Subquery::Ifelse(if_stmt))
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let if_stmt = ctx.run(|ctx| this.parse_if_stmt(ctx)).await?;
+					Ok(Subquery::Ifelse(if_stmt))
+				})
 			}
 			_ => self.parse_inner_subquery(ctx, None).await,
 		}
 	}
 
 	pub async fn parse_inner_subquery_or_coordinate(
+		&mut self,
+		ctx: &mut Stk,
+		start: Span,
+	) -> ParseResult<Value> {
+		enter_query_recursion!(this = self => {
+			this.parse_inner_subquery_or_coordinate_inner(ctx,start).await
+		})
+	}
+
+	async fn parse_inner_subquery_or_coordinate_inner(
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,
@@ -486,6 +501,16 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_inner_subquery(
+		&mut self,
+		ctx: &mut Stk,
+		start: Option<Span>,
+	) -> ParseResult<Subquery> {
+		enter_query_recursion!(this = self => {
+			this.parse_inner_subquery_inner(ctx,start).await
+		})
+	}
+
+	async fn parse_inner_subquery_inner(
 		&mut self,
 		ctx: &mut Stk,
 		start: Option<Span>,

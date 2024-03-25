@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::enter_query_recursion;
 use crate::sql::block::Entry;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
@@ -92,6 +93,12 @@ impl Parser<'_> {
 	}
 
 	pub(super) async fn parse_stmt(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
+		enter_query_recursion!(this = self => {
+			this.parse_stmt_inner(ctx).await
+		})
+	}
+
+	async fn parse_stmt_inner(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
 		let token = self.peek();
 		match token.kind {
 			t!("ANALYZE") => {
@@ -207,6 +214,12 @@ impl Parser<'_> {
 	}
 
 	pub(super) async fn parse_entry(&mut self, ctx: &mut Stk) -> ParseResult<Entry> {
+		enter_query_recursion!(this = self => {
+			this.parse_entry_inner(ctx).await
+		})
+	}
+
+	async fn parse_entry_inner(&mut self, ctx: &mut Stk) -> ParseResult<Entry> {
 		let token = self.peek();
 		match token.kind {
 			t!("BREAK") => {
