@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use crate::{
 	sql::statements::IfelseStatement,
 	syn::v2::{
@@ -10,8 +12,8 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub fn parse_if_stmt(&mut self) -> ParseResult<IfelseStatement> {
-		let condition = self.parse_value_field()?;
+	pub async fn parse_if_stmt(&mut self, ctx: &mut Stk) -> ParseResult<IfelseStatement> {
+		let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 
 		let mut res = IfelseStatement {
 			exprs: Vec::new(),
@@ -21,15 +23,15 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			t!("THEN") => {
-				let body = self.parse_value_field()?;
+				let body = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				self.eat(t!(";"));
 				res.exprs.push((condition, body));
-				self.parse_worded_tail(&mut res)?;
+				self.parse_worded_tail(ctx, &mut res).await?;
 			}
 			t!("{") => {
-				let body = self.parse_block(next.span)?;
+				let body = self.parse_block(ctx, next.span).await?;
 				res.exprs.push((condition, body.into()));
-				self.parse_bracketed_tail(&mut res)?;
+				self.parse_bracketed_tail(ctx, &mut res).await?;
 			}
 			x => unexpected!(self, x, "THEN or '{'"),
 		}
@@ -37,19 +39,23 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	fn parse_worded_tail(&mut self, res: &mut IfelseStatement) -> ParseResult<()> {
+	async fn parse_worded_tail(
+		&mut self,
+		ctx: &mut Stk,
+		res: &mut IfelseStatement,
+	) -> ParseResult<()> {
 		loop {
 			match self.next().kind {
 				t!("END") => return Ok(()),
 				t!("ELSE") => {
 					if self.eat(t!("IF")) {
-						let condition = self.parse_value_field()?;
+						let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						expected!(self, t!("THEN"));
-						let body = self.parse_value_field()?;
+						let body = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						self.eat(t!(";"));
 						res.exprs.push((condition, body));
 					} else {
-						let value = self.parse_value_field()?;
+						let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						self.eat(t!(";"));
 						expected!(self, t!("END"));
 						res.close = Some(value);
@@ -61,19 +67,23 @@ impl Parser<'_> {
 		}
 	}
 
-	fn parse_bracketed_tail(&mut self, res: &mut IfelseStatement) -> ParseResult<()> {
+	async fn parse_bracketed_tail(
+		&mut self,
+		ctx: &mut Stk,
+		res: &mut IfelseStatement,
+	) -> ParseResult<()> {
 		loop {
 			match self.peek_kind() {
 				t!("ELSE") => {
 					self.pop_peek();
 					if self.eat(t!("IF")) {
-						let condition = self.parse_value_field()?;
+						let condition = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						let span = expected!(self, t!("{")).span;
-						let body = self.parse_block(span)?;
+						let body = self.parse_block(ctx, span).await?;
 						res.exprs.push((condition, body.into()));
 					} else {
 						let span = expected!(self, t!("{")).span;
-						let value = self.parse_block(span)?;
+						let value = self.parse_block(ctx, span).await?;
 						res.close = Some(value.into());
 						return Ok(());
 					}

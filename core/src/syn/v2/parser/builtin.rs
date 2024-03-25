@@ -7,6 +7,7 @@ use crate::{
 	},
 };
 use phf::phf_map;
+use reblessive::Stk;
 use unicase::UniCase;
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;
@@ -409,7 +410,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub fn parse_builtin(&mut self, start: Span) -> ParseResult<Value> {
+	pub async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			self.next_token_value::<Ident>()?;
@@ -424,8 +425,9 @@ impl Parser<'_> {
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),
-			Some((k, PathKind::Function)) => self
-				.parse_builtin_function(k.into_inner().to_owned())
+			Some((k, PathKind::Function)) => stk
+				.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
+				.await
 				.map(|x| Value::Function(Box::new(x))),
 			None => {
 				// Generate an suggestion.
@@ -464,7 +466,11 @@ impl Parser<'_> {
 	}
 
 	/// Parse a call to a builtin function.
-	pub fn parse_builtin_function(&mut self, name: String) -> ParseResult<Function> {
+	pub async fn parse_builtin_function(
+		&mut self,
+		stk: &mut Stk,
+		name: String,
+	) -> ParseResult<Function> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -472,7 +478,8 @@ impl Parser<'_> {
 				break;
 			}
 
-			args.push(self.parse_value_field()?);
+			let arg = stk.run(|ctx| self.parse_value_field(ctx)).await?;
+			args.push(arg);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!(")"), start)?;

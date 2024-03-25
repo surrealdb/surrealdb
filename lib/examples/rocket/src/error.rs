@@ -1,7 +1,6 @@
 use rocket::http::Status;
 use rocket::response::{self, Responder, Response};
 use rocket::Request;
-use serde_json::json;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
