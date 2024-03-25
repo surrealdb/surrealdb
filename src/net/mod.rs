@@ -166,7 +166,7 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		.merge(signin::router())
 		.merge(signup::router())
 		.merge(key::router())
-		.merge(gql::router());
+		.merge(gql::router().await);
 
 	#[cfg(any(feature = "ml", feature = "ml2"))]
 	let axum_app = axum_app.merge(ml::router());

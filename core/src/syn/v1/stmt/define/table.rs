@@ -36,8 +36,6 @@ pub fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	let mut res = DefineTableStatement {
 		name,
 		permissions: Permissions::none(),
-		// Default to ANY if not specified in the DEFINE statement
-		table_type: TableType::Any,
 		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
