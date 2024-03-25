@@ -166,7 +166,7 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 			});
 		};
 		let begin = if let Some(x) = x.get("begin") {
-			let start = start.ok_or(Error::InvalidArguments {
+			let start = start.ok_or_else(|| Error::InvalidArguments {
 				name: "type::range".to_string(),
 				message: "Can't define an inclusion for begin if there is no begin bound"
 					.to_string(),
@@ -185,7 +185,7 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 			start.map(Bound::Included).unwrap_or(Bound::Unbounded)
 		};
 		let end = if let Some(x) = x.get("end") {
-			let end = end.ok_or(Error::InvalidArguments {
+			let end = end.ok_or_else(|| Error::InvalidArguments {
 				name: "type::range".to_string(),
 				message: "Can't define an inclusion for end if there is no end bound".to_string(),
 			})?;
