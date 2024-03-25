@@ -55,7 +55,6 @@ rustls = [
 ml = ["surrealdb-core/ml"]
 jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
-sql2 = ["surrealdb-core/sql2"]
 parser2 = ["surrealdb-core/experimental-parser"]
 # Private features
 kv-fdb = ["tokio/time"]
