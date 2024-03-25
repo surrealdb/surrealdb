@@ -195,7 +195,7 @@ fn get_executor_and_thing<'a>(
 fn get_executor_option<'a>(
 	ctx: &'a Context<'_>,
 	doc: Option<&'a CursorDoc<'_>>,
-	exp: &'a Expression,
+	exp: &Expression,
 ) -> ExecutorOption<'a> {
 	if let Some(doc) = doc {
 		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
