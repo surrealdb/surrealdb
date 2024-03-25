@@ -19,26 +19,7 @@ async fn config(
 	de_code: String,
 	_token_header: Header,
 ) -> Result<(DecodingKey, Validation), Error> {
-	#[cfg(feature = "sql2")]
-	let is_jwks = de_kind == Algorithm::Jwks;
-	#[cfg(not(feature = "sql2"))]
-	let is_jwks = false;
-	if is_jwks {
-		#[cfg(not(feature = "jwks"))]
-		{
-			warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-			Err(Error::InvalidAuth)
-		}
-		#[cfg(feature = "jwks")]
-		// The key identifier header must be present
-		if let Some(kid) = _token_header.kid {
-			jwks::config(_kvs, &kid, &de_code).await
-		} else {
-			Err(Error::MissingTokenHeader("kid".to_string()))
-		}
-	} else {
-		config_alg(de_kind, de_code)
-	}
+	config_alg(de_kind, de_code)
 }
 
 fn config_alg(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
@@ -95,8 +76,6 @@ fn config_alg(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation)
 			DecodingKey::from_rsa_pem(code.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
-		#[cfg(feature = "sql2")]
-		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here
 	}
 }
 

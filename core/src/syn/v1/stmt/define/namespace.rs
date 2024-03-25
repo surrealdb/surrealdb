@@ -7,17 +7,9 @@ use super::super::super::{
 };
 use crate::sql::{statements::DefineNamespaceStatement, Strand};
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
-#[cfg(feature = "sql2")]
-use nom::{combinator::opt, sequence::tuple};
 
 pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;
-	#[cfg(feature = "sql2")]
-	let (i, if_not_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(namespace_opts)(i)?;
@@ -25,8 +17,6 @@ pub fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 	// Create the base statement
 	let mut res = DefineNamespaceStatement {
 		name,
-		#[cfg(feature = "sql2")]
-		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options

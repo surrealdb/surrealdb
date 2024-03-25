@@ -22,12 +22,6 @@ use nom::{
 
 pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = tag_no_case("INDEX")(i)?;
-	#[cfg(feature = "sql2")]
-	let (i, if_not_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, what, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -44,8 +38,6 @@ pub fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let mut res = DefineIndexStatement {
 		name,
 		what,
-		#[cfg(feature = "sql2")]
-		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -128,8 +120,6 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Idx,
 				comment: None,
-				#[cfg(feature = "sql2")]
-				if_not_exists: false,
 			}
 		);
 		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col");
@@ -147,8 +137,6 @@ mod tests {
 				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
 				index: Index::Uniq,
 				comment: None,
-				#[cfg(feature = "sql2")]
-				if_not_exists: false,
 			}
 		);
 		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col UNIQUE");
@@ -183,8 +171,6 @@ mod tests {
 					terms_cache: 400,
 				}),
 				comment: None,
-				#[cfg(feature = "sql2")]
-				if_not_exists: false,
 			}
 		);
 		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) \
@@ -216,8 +202,6 @@ mod tests {
 					terms_cache: 100,
 				}),
 				comment: None,
-				#[cfg(feature = "sql2")]
-				if_not_exists: false,
 			}
 		);
 		assert_eq!(
@@ -247,8 +231,6 @@ mod tests {
 					mtree_cache: 100,
 				}),
 				comment: None,
-				#[cfg(feature = "sql2")]
-				if_not_exists: false,
 			}
 		);
 		assert_eq!(
