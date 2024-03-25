@@ -24,6 +24,7 @@ use crate::{
 		token::{t, Span, Token, TokenKind},
 	},
 };
+use reblessive::Stk;
 
 mod basic;
 mod builtin;
@@ -44,7 +45,6 @@ mod token_buffer;
 pub mod test;
 
 pub use error::{IntErrorKind, ParseError, ParseErrorKind};
-use reblessive::Stk;
 
 /// The result returned by most parser function.
 pub type ParseResult<T> = Result<T, ParseError>;

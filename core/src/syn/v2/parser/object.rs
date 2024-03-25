@@ -4,6 +4,7 @@ use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Po
 use reblessive::Stk;
 
 use crate::{
+	enter_object_recursion,
 	sql::{Block, Geometry, Object, Strand, Value},
 	syn::v2::{
 		parser::{mac::expected, ParseError, ParseErrorKind, ParseResult, Parser},
@@ -24,12 +25,16 @@ impl Parser<'_> {
 	) -> ParseResult<Value> {
 		if self.eat(t!("}")) {
 			// empty object, just return
-			return Ok(Value::Object(Object::default()));
+			enter_object_recursion!(_this = self => {
+				return Ok(Value::Object(Object::default()));
+			})
 		}
 
 		// Check first if it can be an object.
 		if self.peek_token_at(1).kind == t!(":") {
-			return self.parse_object_or_geometry(ctx, start).await;
+			enter_object_recursion!(this = self => {
+			   return this.parse_object_or_geometry(ctx, start).await;
+			})
 		}
 
 		// not an object so instead parse as a block.
@@ -582,7 +587,9 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects the first `{` to already have been eaten.
 	pub(super) async fn parse_object(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object> {
-		self.parse_object_from_map(ctx, BTreeMap::new(), start).await
+		enter_object_recursion!(this = self => {
+			this.parse_object_from_map(ctx, BTreeMap::new(), start).await
+		})
 	}
 
 	async fn parse_object_from_map(
