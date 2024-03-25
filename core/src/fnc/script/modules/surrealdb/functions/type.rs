@@ -25,4 +25,5 @@ impl_module_def!(
 	"string" => run,
 	"table" => run,
 	"thing" => run
+	"range" => run
 );
