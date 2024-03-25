@@ -39,12 +39,11 @@ pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
+	feature = "storage-surrealkv",
+	feature = "storage-rocksdb",
+	feature = "storage-fdb",
+	feature = "storage-tikv",
+	feature = "storage-speedb"
 ))]
 pub(crate) fn dir_exists(path: &str) -> Result<PathBuf, String> {
 	let path = path_exists(path)?;

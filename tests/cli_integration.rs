@@ -1123,6 +1123,61 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 	}
+
+	#[test(tokio::test)]
+	async fn test_temporary_directory() {
+		info!("* Non-existing temp directory");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let res = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some("/tmp/TELL-ME-THIS-FILE-DOES-NOT-EXISTS".to_owned()),
+				..Default::default()
+			})
+			.await;
+			if let Err(e) = res {
+				assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+			} else {
+				panic!("Should not be ok!");
+			}
+		}
+
+		info!("* The temp path is a file");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let temp_file = tempfile::NamedTempFile::new().unwrap();
+			let res = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some(format!("{}", temp_file.path().display())),
+				..Default::default()
+			})
+			.await;
+			if let Err(e) = res {
+				assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+			} else {
+				panic!("Should not be ok!");
+			}
+			temp_file.close().unwrap();
+		}
+
+		info!("* The temp path is a valid directory");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let temp_dir = tempfile::tempdir().unwrap();
+			let (_, mut server) = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some(format!("{}", temp_dir.path().display())),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+			temp_dir.close().unwrap();
+			server.finish().unwrap();
+		}
+	}
 }
 
 fn remove_debug_info(output: String) -> String {

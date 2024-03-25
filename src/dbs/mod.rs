@@ -2,12 +2,11 @@ use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
 #[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
+	feature = "storage-surrealkv",
+	feature = "storage-rocksdb",
+	feature = "storage-fdb",
+	feature = "storage-tikv",
+	feature = "storage-speedb"
 ))]
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -47,15 +46,14 @@ pub struct StartCommandDbsOptions {
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
 	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
+		feature = "storage-surrealkv",
+		feature = "storage-speedb",
+		feature = "storage-rocksdb",
+		feature = "storage-fdb",
+		feature = "storage-tikv",
 	))]
 	#[arg(help = "Sets the directory for storing temporary database files")]
-	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", short = "tmp", long = "temporary-directory")]
+	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
 	#[arg(value_parser = super::cli::validator::dir_exists)]
 	temporary_directory: Option<PathBuf>,
 }
@@ -236,12 +234,11 @@ pub async fn init(
 		auth_level_enabled,
 		caps,
 		#[cfg(any(
-			feature = "kv-surrealkv",
-			feature = "kv-file",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
+			feature = "storage-surrealkv",
+			feature = "storage-rocksdb",
+			feature = "storage-fdb",
+			feature = "storage-tikv",
+			feature = "storage-speedb"
 		))]
 		temporary_directory,
 	}: StartCommandDbsOptions,
@@ -274,7 +271,7 @@ pub async fn init(
 	debug!("Server capabilities: {caps}");
 
 	// Parse and setup the desired kv datastore
-	let mut dbs = Datastore::new(&opt.path)
+	let dbs = Datastore::new(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
@@ -284,14 +281,13 @@ pub async fn init(
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
 	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
+		feature = "storage-surrealkv",
+		feature = "storage-rocksdb",
+		feature = "storage-fdb",
+		feature = "storage-tikv",
+		feature = "storage-speedb"
 	))]
-	let dbs = dbs.with_temporary_directory(temporary_directory);
+	let mut dbs = dbs.with_temporary_directory(temporary_directory);
 	if let Some(engine_options) = opt.engine {
 		dbs = dbs.with_engine_options(engine_options);
 	}
