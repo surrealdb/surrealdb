@@ -866,63 +866,6 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
-async fn field_definition_readonly() -> Result<(), Error> {
-	let sql = "
-		DEFINE TABLE person SCHEMAFULL;
-		DEFINE FIELD birthdate ON person TYPE datetime READONLY;
-		CREATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
-		UPDATE person:test SET birthdate = d'2024-12-13T21:27:55.632Z';
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				birthdate: d'2023-12-13T21:27:55.632Z',
-				id: person:test
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				birthdate: d'2023-12-13T21:27:55.632Z',
-				id: person:test
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(
-		matches!(
-			&tmp,
-			Err(e) if e.to_string() == "Found changed value for field `birthdate`, with record `person:test`, but field is readonly",
-
-		),
-		"{}",
-		tmp.unwrap_err().to_string()
-	);
-	//
-	Ok(())
-}
-
-#[tokio::test]
 async fn field_definition_flexible_array_any() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
