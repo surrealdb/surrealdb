@@ -1,6 +1,15 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
@@ -37,6 +46,18 @@ pub struct StartCommandDbsOptions {
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	#[arg(help = "Sets the directory for storing temporary database files")]
+	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY")]
+	#[arg(value_parser = super::cli::validator::dir_exists)]
+	temporary_directory: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -214,6 +235,15 @@ pub async fn init(
 		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
 		auth_level_enabled,
 		caps,
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
+		temporary_directory,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
 	// Get local copy of options
@@ -253,6 +283,15 @@ pub async fn init(
 		.with_auth_enabled(auth_enabled)
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	let dbs = dbs.with_temporary_directory(temporary_directory);
 	if let Some(engine_options) = opt.engine {
 		dbs = dbs.with_engine_options(engine_options);
 	}

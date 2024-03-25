@@ -58,32 +58,17 @@ impl From<Vec<Value>> for MemoryCollector {
 	feature = "kv-speedb"
 ))]
 pub(super) mod file_store {
-	use crate::cnf::{EXTERNAL_SORTING_BUFFER_LIMIT, TEMPORARY_DIRECTORY};
+	use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 	use crate::dbs::plan::Explanation;
 	use crate::err::Error;
 	use crate::sql::{Orders, Value};
 	use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
-	use once_cell::sync::Lazy;
 	use revision::Revisioned;
 	use std::fs::{File, OpenOptions};
 	use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};
-	use std::path::PathBuf;
+	use std::path::{Path, PathBuf};
 	use std::{fs, io, mem};
 	use tempfile::{Builder, TempDir};
-
-	/// Provide lazy initialization of a static `Builder` instance with a prefix set to "SURREAL".
-	static TEMPORARY_BUILDER: Lazy<Builder> = Lazy::new(|| {
-		let mut b = Builder::new();
-		b.prefix("SURREAL");
-		b
-	});
-	fn new_temp_dir() -> io::Result<TempDir> {
-		if let Some(path) = TEMPORARY_DIRECTORY.as_ref() {
-			TEMPORARY_BUILDER.tempdir_in(path)
-		} else {
-			TEMPORARY_BUILDER.tempdir()
-		}
-	}
 
 	pub(in crate::dbs) struct FileCollector {
 		dir: TempDir,
@@ -102,8 +87,8 @@ pub(super) mod file_store {
 
 		const USIZE_SIZE: usize = mem::size_of::<usize>();
 
-		pub(in crate::dbs) fn new() -> Result<Self, Error> {
-			let dir = new_temp_dir()?;
+		pub(in crate::dbs) fn new(temp_dir: &Path) -> Result<Self, Error> {
+			let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
 			Ok(Self {
 				len: 0,
 				writer: Some(FileWriter::new(&dir)?),

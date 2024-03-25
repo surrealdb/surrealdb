@@ -56,7 +56,7 @@ impl Results {
 			feature = "kv-speedb"
 		))]
 		if !ctx.is_memory() {
-			return Ok(Self::File(Box::new(FileCollector::new()?)));
+			return Ok(Self::File(Box::new(FileCollector::new(ctx.temporary_directory())?)));
 		}
 		Ok(Self::Memory(Default::default()))
 	}

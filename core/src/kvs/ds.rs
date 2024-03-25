@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, fmt};
 
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
@@ -92,6 +93,8 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
+	// The temporary directory
+	temporary_directory: Arc<PathBuf>,
 }
 
 /// We always want to be circulating the live query information
@@ -366,6 +369,15 @@ impl Datastore {
 			cf_watermarks: Arc::new(RwLock::new(BTreeMap::new())),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			temporary_directory: Arc::new(env::temp_dir()),
 		})
 	}
 
@@ -415,6 +427,11 @@ impl Datastore {
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
+		self
+	}
+
+	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
+		self.temporary_directory = Arc::new(path.unwrap_or_else(env::temp_dir));
 		self
 	}
 
@@ -1402,6 +1419,15 @@ impl Datastore {
 				feature = "kv-speedb"
 			))]
 			self.is_memory(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			self.temporary_directory.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
