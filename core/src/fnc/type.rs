@@ -177,7 +177,7 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 				x => {
 					return Err(Error::ConvertTo {
 						from: x.clone(),
-						into: "\"included\" | \"excluded\"".to_owned(),
+						into: r#""included" | "excluded""#.to_owned(),
 					})
 				}
 			}
@@ -195,7 +195,7 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 				x => {
 					return Err(Error::ConvertTo {
 						from: x.clone(),
-						into: "\"included\" | \"excluded\"".to_owned(),
+						into: r#""included" | "excluded""#.to_owned(),
 					})
 				}
 			}
