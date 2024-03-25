@@ -1,7 +1,7 @@
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{offset::LocalResult, DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -63,6 +63,31 @@ impl TryFrom<&str> for Datetime {
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::datetime_raw(v) {
 			Ok(v) => Ok(v),
+			_ => Err(()),
+		}
+	}
+}
+
+impl TryFrom<i128> for Datetime {
+	type Error = ();
+	fn try_from(v: i128) -> Result<Self, Self::Error> {
+		match i64::try_from(v) {
+			Ok(v) => match Utc.timestamp_opt(v, 0) {
+				LocalResult::Single(v) => Ok(Self(v)),
+				_ => Err(()),
+			},
+			_ => Err(()),
+		}
+	}
+}
+
+impl TryFrom<f64> for Datetime {
+	type Error = ();
+	fn try_from(v: f64) -> Result<Self, Self::Error> {
+		const NANOS_PER_SEC: f64 = 1_000_000_000.0;
+
+		match Utc.timestamp_opt(v as i64, (v.fract() * NANOS_PER_SEC) as u32) {
+			LocalResult::Single(v) => Ok(Self(v)),
 			_ => Err(()),
 		}
 	}

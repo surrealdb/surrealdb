@@ -12,13 +12,15 @@ use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
-const TAG_DATETIME: u64 = 0;
+const TAG_STRING_DATETIME: u64 = 0;
+const TAG_DATETIME: u64 = 1;
 const TAG_NONE: u64 = 6;
-const TAG_UUID: u64 = 7;
+const TAG_STRING_UUID: u64 = 7;
 const TAG_DECIMAL: u64 = 8;
 const TAG_DURATION: u64 = 9;
 const TAG_RECORDID: u64 = 10;
 const TAG_TABLE: u64 = 11;
+const TAG_UUID: u64 = 37;
 const TAG_GEOMETRY_POINT: u64 = 88;
 const TAG_GEOMETRY_LINE: u64 = 89;
 const TAG_GEOMETRY_POLYGON: u64 = 90;
@@ -54,22 +56,42 @@ impl TryFrom<Cbor> for Value {
 			Data::Tag(t, v) => {
 				match t {
 					// A literal datetime
-					TAG_DATETIME => match *v {
+					TAG_STRING_DATETIME => match *v {
 						Data::Text(v) => match Datetime::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Datetime value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
 					},
+					// An epoch-based datetime (https://www.rfc-editor.org/rfc/rfc8949.html#name-epoch-based-date-time)
+					TAG_DATETIME => match *v {
+						Data::Integer(v) => match Datetime::try_from(i128::from(v)) {
+							Ok(v) => Ok(v.into()),
+							_ => Err("Expected a valid Datetime value"),
+						},
+						Data::Float(v) => match Datetime::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err("Expected a valid Datetime value"),
+						},
+						_ => Err("Expected a CBOR integer or float data type"),
+					},
 					// A literal NONE
 					TAG_NONE => Ok(Value::None),
 					// A literal uuid
-					TAG_UUID => match *v {
+					TAG_STRING_UUID => match *v {
 						Data::Text(v) => match Uuid::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid UUID value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
+					},
+					// A byte string uuid
+					TAG_UUID => match *v {
+						Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
+							Ok(v) => Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(v)))),
+							Err(_) => Err("Expected a CBOR byte array with 16 elements"),
+						},
+						_ => Err("Expected a CBOR byte array with 16 elements"),
 					},
 					// A literal decimal
 					TAG_DECIMAL => match *v {
@@ -244,6 +266,9 @@ impl TryFrom<Cbor> for Value {
 	}
 }
 
+// TODO(kearfy): Make this the default in v2.0.0 and drop this boolean
+const SERIALIZATION_V2: bool = false;
+
 impl TryFrom<Value> for Cbor {
 	type Error = &'static str;
 	fn try_from(val: Value) -> Result<Self, &'static str> {
@@ -263,9 +288,29 @@ impl TryFrom<Value> for Cbor {
 				Ok(Cbor(Data::Tag(TAG_DURATION, Box::new(Data::Text(v.to_raw())))))
 			}
 			Value::Datetime(v) => {
-				Ok(Cbor(Data::Tag(TAG_DATETIME, Box::new(Data::Text(v.to_raw())))))
+				if SERIALIZATION_V2 {
+					let timestamp = v.timestamp();
+					let nanos = v.timestamp_subsec_nanos();
+
+					const NANOS_PER_SEC: f64 = 1_000_000_000.0;
+
+					let data = match nanos {
+						0 => Box::new(Data::Integer(timestamp.into())),
+						_ => Box::new(Data::Float(timestamp as f64 + nanos as f64 / NANOS_PER_SEC)),
+					};
+
+					Ok(Cbor(Data::Tag(TAG_DATETIME, data)))
+				} else {
+					Ok(Cbor(Data::Tag(TAG_STRING_DATETIME, Box::new(Data::Text(v.to_raw())))))
+				}
 			}
-			Value::Uuid(v) => Ok(Cbor(Data::Tag(TAG_UUID, Box::new(Data::Text(v.to_raw()))))),
+			Value::Uuid(v) => {
+				if SERIALIZATION_V2 {
+					Ok(Cbor(Data::Tag(TAG_UUID, Box::new(Data::Bytes(v.into_bytes().into())))))
+				} else {
+					Ok(Cbor(Data::Tag(TAG_STRING_UUID, Box::new(Data::Text(v.to_raw())))))
+				}
+			}
 			Value::Array(v) => Ok(Cbor(Data::Array(
 				v.into_iter()
 					.map(|v| {
