@@ -270,6 +270,7 @@ pub async fn init(
 	let caps = caps.into();
 	debug!("Server capabilities: {caps}");
 
+	#[allow(unused_mut)]
 	// Parse and setup the desired kv datastore
 	let mut dbs = Datastore::new(&opt.path)
 		.await?
