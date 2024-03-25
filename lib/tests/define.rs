@@ -2692,3 +2692,47 @@ async fn define_statement_index_empty_array() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn define_table_relation_in_out() -> Result<(), Error> {
+	let sql = r"
+		DEFINE TABLE likes TYPE RELATION FROM person TO person | thing SCHEMAFUL;
+		LET $first_p = CREATE person SET name = 'first person';
+		LET $second_p = CREATE person SET name = 'second person';
+		LET $thing = CREATE thing SET name = 'rust';
+		LET $other = CREATE other;
+		RELATE $first_p->likes->$thing;
+		RELATE $first_p->likes->$second_p;
+		CREATE likes;
+		RELATE $first_p->likes->$other;
+		RELATE $thing->likes->$first_p;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 10);
+	//
+	for _ in 0..7 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp,
+		Err(crate::Error::TableCheck {
+			thing: _,
+			relation: _,
+			target_type: _
+		})
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+
+	Ok(())
+}
