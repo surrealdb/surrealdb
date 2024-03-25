@@ -147,7 +147,7 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 		Value::Array(v) => Some(v.into()),
 		Value::Object(v) => Some(v.into()),
 		Value::Number(v) => Some(v.into()),
-		Value::Null => None,
+		Value::Null | Value::None => None,
 		v => Some(Id::from(v.as_string())),
 	});
 	let end = args.next().and_then(|x| match x {
@@ -155,7 +155,7 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 		Value::Array(v) => Some(v.into()),
 		Value::Object(v) => Some(v.into()),
 		Value::Number(v) => Some(v.into()),
-		Value::Null => None,
+		Value::Null | Value::None => None,
 		v => Some(Id::from(v.as_string())),
 	});
 	let (begin, end) = if let Some(x) = args.next() {
