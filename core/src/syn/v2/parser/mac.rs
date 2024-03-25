@@ -114,6 +114,8 @@ macro_rules! enter_object_recursion {
 #[macro_export]
 macro_rules! enter_query_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
+
+        println!("{} = {}",$this.query_recursion, std::backtrace::Backtrace::force_capture());
 		if $this.query_recursion == 0 {
 			return Err($crate::syn::v2::parser::ParseError::new(
 				$crate::syn::v2::parser::ParseErrorKind::ExceededQueryDepthLimit,

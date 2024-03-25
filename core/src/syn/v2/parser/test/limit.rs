@@ -173,3 +173,26 @@ fn query_depth_block() {
 		.finish()
 		.expect_err("recursion limit of 5 didn't trigger on 6 deep query");
 }
+
+#[test]
+fn query_depth_if() {
+	let mut stack = Stack::new();
+
+	let source = r#"
+        IF IF IF IF IF true THEN false END { false } { false } { false } { false }
+	"#;
+	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	stack
+		.enter(|stk| parser.parse_query(stk))
+		.finish()
+		.expect("recursion limit of 5 couldn't parse 5 deep query");
+
+	let source = r#"
+        IF IF IF IF IF IF true THEN false END { false } { false } { false } { false } { false }
+	"#;
+	let mut parser = Parser::new(source.as_bytes()).with_query_recursion_limit(5);
+	stack
+		.enter(|stk| parser.parse_query(stk))
+		.finish()
+		.expect_err("recursion limit of 5 didn't trigger on 6 deep query");
+}
