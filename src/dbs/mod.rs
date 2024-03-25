@@ -55,7 +55,7 @@ pub struct StartCommandDbsOptions {
 		feature = "kv-speedb"
 	))]
 	#[arg(help = "Sets the directory for storing temporary database files")]
-	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY")]
+	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", short = "tmp", long = "temporary-directory")]
 	#[arg(value_parser = super::cli::validator::dir_exists)]
 	temporary_directory: Option<PathBuf>,
 }

@@ -1,10 +1,27 @@
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::env;
+use std::fmt;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{env, fmt};
 
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
@@ -93,6 +110,14 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	// The temporary directory
 	temporary_directory: Arc<PathBuf>,
 }
@@ -430,6 +455,14 @@ impl Datastore {
 		self
 	}
 
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = Arc::new(path.unwrap_or_else(env::temp_dir));
 		self

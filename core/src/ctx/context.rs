@@ -12,8 +12,24 @@ use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use std::env;
 use std::fmt::{self, Debug};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -108,6 +124,14 @@ impl<'a> Context<'a> {
 			feature = "kv-speedb"
 		))]
 		is_memory: bool,
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
 		temporary_directory: Arc<PathBuf>,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
@@ -130,6 +154,14 @@ impl<'a> Context<'a> {
 				feature = "kv-speedb"
 			))]
 			is_memory,
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			temporary_directory,
 		};
 		if let Some(timeout) = time_out {
