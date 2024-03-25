@@ -26,6 +26,7 @@ use crate::{
 	syn::v2::parser::{Parser, PartialResult},
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use reblessive::Stack;
 
 static SOURCE: &str = r#"
 	ANALYZE INDEX b on a;
@@ -323,8 +324,8 @@ fn statements() -> Vec<Statement> {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))])]),
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				_distance: Default::default(),
 				distance: Distance::Minkowski(Number::Int(5)),
+				_distance: Default::default(),
 				capacity: 6,
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
@@ -659,6 +660,7 @@ fn test_streaming() {
 	let source_bytes = SOURCE.as_bytes();
 	let mut source_start = 0;
 	let mut parser = Parser::new(&[]);
+	let mut stack = Stack::new();
 
 	for i in 0..source_bytes.len() {
 		let partial_source = &source_bytes[source_start..i];
@@ -666,7 +668,7 @@ fn test_streaming() {
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
-		match parser.parse_partial_statement() {
+		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
 			PartialResult::Pending {
 				..
 			} => {
@@ -696,6 +698,6 @@ fn test_streaming() {
 		"failed to parse at {}\nAt statement {}\n\n{:?}",
 		src,
 		expected[current_stmt],
-		parser.parse_partial_statement()
+		stack.enter(|stk| parser.parse_partial_statement(stk)).finish()
 	);
 }

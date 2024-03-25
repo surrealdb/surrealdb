@@ -5,7 +5,6 @@ use std::collections::btree_map::Entry as BEntry;
 use std::collections::hash_map::Entry as HEntry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::default::Default;
 
 pub(super) struct Highlighter {
 	prefix: Vec<char>,

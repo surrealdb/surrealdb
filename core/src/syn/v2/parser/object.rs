@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use reblessive::Stk;
 
 use crate::{
 	sql::{Block, Geometry, Object, Strand, Value},
@@ -16,7 +17,11 @@ impl Parser<'_> {
 	/// Parse an production which starts with an `{`
 	///
 	/// Either a block statemnt, a object or geometry.
-	pub(super) fn parse_object_like(&mut self, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_object_like(
+		&mut self,
+		ctx: &mut Stk,
+		start: Span,
+	) -> ParseResult<Value> {
 		if self.eat(t!("}")) {
 			// empty object, just return
 			return Ok(Value::Object(Object::default()));
@@ -24,18 +29,18 @@ impl Parser<'_> {
 
 		// Check first if it can be an object.
 		if self.peek_token_at(1).kind == t!(":") {
-			return self.parse_object_or_geometry(start);
+			return self.parse_object_or_geometry(ctx, start).await;
 		}
 
 		// not an object so instead parse as a block.
-		self.parse_block(start).map(Box::new).map(Value::Block)
+		self.parse_block(ctx, start).await.map(Box::new).map(Value::Block)
 	}
 
 	/// Parse a production starting with an `{` as either an object or a geometry.
 	///
 	/// This function tries to match an object to an geometry like object and if it is unable
 	/// fallsback to parsing normal objects.
-	fn parse_object_or_geometry(&mut self, start: Span) -> ParseResult<Value> {
+	async fn parse_object_or_geometry(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
 		expected!(self, t!(":"));
@@ -55,48 +60,70 @@ impl Parser<'_> {
 						//
 						// we can unwrap strand since we just matched it to not be an err.
 						self.parse_geometry_after_type(
+							ctx,
 							start,
 							key,
 							strand.unwrap(),
 							Self::to_point,
 							|x| Value::Geometry(Geometry::Point(x)),
 						)
+						.await
 					}
-					Ok("LineString") => self.parse_geometry_after_type(
-						start,
-						key,
-						strand.unwrap(),
-						Self::to_line,
-						|x| Value::Geometry(Geometry::Line(x)),
-					),
-					Ok("Polygon") => self.parse_geometry_after_type(
-						start,
-						key,
-						strand.unwrap(),
-						Self::to_polygon,
-						|x| Value::Geometry(Geometry::Polygon(x)),
-					),
-					Ok("MultiPoint") => self.parse_geometry_after_type(
-						start,
-						key,
-						strand.unwrap(),
-						Self::to_multipoint,
-						|x| Value::Geometry(Geometry::MultiPoint(x)),
-					),
-					Ok("MultiLineString") => self.parse_geometry_after_type(
-						start,
-						key,
-						strand.unwrap(),
-						Self::to_multiline,
-						|x| Value::Geometry(Geometry::MultiLine(x)),
-					),
-					Ok("MultiPolygon") => self.parse_geometry_after_type(
-						start,
-						key,
-						strand.unwrap(),
-						Self::to_multipolygon,
-						|x| Value::Geometry(Geometry::MultiPolygon(x)),
-					),
+					Ok("LineString") => {
+						self.parse_geometry_after_type(
+							ctx,
+							start,
+							key,
+							strand.unwrap(),
+							Self::to_line,
+							|x| Value::Geometry(Geometry::Line(x)),
+						)
+						.await
+					}
+					Ok("Polygon") => {
+						self.parse_geometry_after_type(
+							ctx,
+							start,
+							key,
+							strand.unwrap(),
+							Self::to_polygon,
+							|x| Value::Geometry(Geometry::Polygon(x)),
+						)
+						.await
+					}
+					Ok("MultiPoint") => {
+						self.parse_geometry_after_type(
+							ctx,
+							start,
+							key,
+							strand.unwrap(),
+							Self::to_multipoint,
+							|x| Value::Geometry(Geometry::MultiPoint(x)),
+						)
+						.await
+					}
+					Ok("MultiLineString") => {
+						self.parse_geometry_after_type(
+							ctx,
+							start,
+							key,
+							strand.unwrap(),
+							Self::to_multiline,
+							|x| Value::Geometry(Geometry::MultiLine(x)),
+						)
+						.await
+					}
+					Ok("MultiPolygon") => {
+						self.parse_geometry_after_type(
+							ctx,
+							start,
+							key,
+							strand.unwrap(),
+							Self::to_multipolygon,
+							|x| Value::Geometry(Geometry::MultiPolygon(x)),
+						)
+						.await
+					}
 					Ok("GeometryCollection") => {
 						self.next();
 						let strand = strand.unwrap();
@@ -104,9 +131,11 @@ impl Parser<'_> {
 							// missing next field, not a geometry.
 							return self
 								.parse_object_from_map(
+									ctx,
 									BTreeMap::from([(key, Value::Strand(strand))]),
 									start,
 								)
+								.await
 								.map(Value::Object);
 						}
 						let coord_key = self.parse_object_key()?;
@@ -115,13 +144,15 @@ impl Parser<'_> {
 							// invalid field key, not a Geometry
 							return self
 								.parse_object_from_key(
+									ctx,
 									coord_key,
 									BTreeMap::from([(key, Value::Strand(strand))]),
 									start,
 								)
+								.await
 								.map(Value::Object);
 						}
-						let value = self.parse_value_field()?;
+						let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						let comma = self.eat(t!(","));
 						if !self.eat(t!("}")) {
 							if !comma {
@@ -138,12 +169,14 @@ impl Parser<'_> {
 							// A comma and then no brace. more then two fields, not a geometry.
 							return self
 								.parse_object_from_map(
+									ctx,
 									BTreeMap::from([
 										(key, Value::Strand(strand)),
 										(coord_key, value),
 									]),
 									start,
 								)
+								.await
 								.map(Value::Object);
 						}
 
@@ -185,19 +218,24 @@ impl Parser<'_> {
 							)]))))
 						} else {
 							self.parse_object_from_map(
+								ctx,
 								BTreeMap::from([(key, Value::Strand(strand.unwrap()))]),
 								start,
 							)
+							.await
 							.map(Value::Object)
 						}
 					}
-					_ => self.parse_object_from_key(key, BTreeMap::new(), start).map(Value::Object),
+					_ => self
+						.parse_object_from_key(ctx, key, BTreeMap::new(), start)
+						.await
+						.map(Value::Object),
 				}
 			}
 			"coordinates" => {
 				// found coordinates field, next must be a coordinates value but we don't know
 				// which until we match type.
-				let value = self.parse_value_field()?;
+				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				if !self.eat(t!(",")) {
 					// no comma object must end early.
 					self.expect_closing_delimiter(t!("}"), start)?;
@@ -214,7 +252,8 @@ impl Parser<'_> {
 				if type_key != "type" {
 					// not the right field, return object.
 					return self
-						.parse_object_from_key(type_key, BTreeMap::from([(key, value)]), start)
+						.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
+						.await
 						.map(Value::Object);
 				}
 				let peek = self.peek();
@@ -285,7 +324,7 @@ impl Parser<'_> {
 						(ate_comma, Value::Strand(strand.unwrap()))
 					}
 					_ => {
-						let value = self.parse_value_field()?;
+						let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						(self.eat(t!(",")), value)
 					}
 				};
@@ -300,13 +339,15 @@ impl Parser<'_> {
 					]))));
 				}
 				self.parse_object_from_map(
+					ctx,
 					BTreeMap::from([(key, value), (type_key, type_value)]),
 					start,
 				)
+				.await
 				.map(Value::Object)
 			}
 			"geometries" => {
-				let value = self.parse_value_field()?;
+				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				if !self.eat(t!(",")) {
 					self.expect_closing_delimiter(t!("}"), start)?;
 					return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
@@ -315,7 +356,8 @@ impl Parser<'_> {
 				expected!(self, t!(":"));
 				if type_key != "type" {
 					return self
-						.parse_object_from_key(type_key, BTreeMap::from([(key, value)]), start)
+						.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
+						.await
 						.map(Value::Object);
 				}
 				let peek = self.peek();
@@ -346,7 +388,7 @@ impl Parser<'_> {
 						}
 						(ate_comma, Value::Strand(strand.unwrap()))
 					} else {
-						let value = self.parse_value_field()?;
+						let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 						(self.eat(t!(",")), value)
 					};
 
@@ -358,17 +400,23 @@ impl Parser<'_> {
 					]))));
 				}
 				self.parse_object_from_map(
+					ctx,
 					BTreeMap::from([(key, value), (type_key, type_value)]),
 					start,
 				)
+				.await
 				.map(Value::Object)
 			}
-			_ => self.parse_object_from_key(key, BTreeMap::new(), start).map(Value::Object),
+			_ => self
+				.parse_object_from_key(ctx, key, BTreeMap::new(), start)
+				.await
+				.map(Value::Object),
 		}
 	}
 
-	fn parse_geometry_after_type<F, Fm, R>(
+	async fn parse_geometry_after_type<F, Fm, R>(
 		&mut self,
+		ctx: &mut Stk,
 		start: Span,
 		key: String,
 		strand: Strand,
@@ -392,13 +440,15 @@ impl Parser<'_> {
 			// next field was not correct, fallback to parsing plain object.
 			return self
 				.parse_object_from_key(
+					ctx,
 					coord_key,
 					BTreeMap::from([(key, Value::Strand(strand))]),
 					start,
 				)
+				.await
 				.map(Value::Object);
 		}
-		let value = self.parse_value_field()?;
+		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		let comma = self.eat(t!(","));
 		if !self.eat(t!("}")) {
 			// the object didn't end, either an error or not a geometry.
@@ -414,9 +464,11 @@ impl Parser<'_> {
 
 			return self
 				.parse_object_from_map(
+					ctx,
 					BTreeMap::from([(key, Value::Strand(strand)), (coord_key, value)]),
 					start,
 				)
+				.await
 				.map(Value::Object);
 		}
 
@@ -507,19 +559,20 @@ impl Parser<'_> {
 		Some(Point::from((a.clone().try_into().ok()?, b.clone().try_into().ok()?)))
 	}
 
-	fn parse_object_from_key(
+	async fn parse_object_from_key(
 		&mut self,
+		ctx: &mut Stk,
 		key: String,
 		mut map: BTreeMap<String, Value>,
 		start: Span,
 	) -> ParseResult<Object> {
-		let v = self.parse_value_field()?;
+		let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		map.insert(key, v);
 		if !self.eat(t!(",")) {
 			self.expect_closing_delimiter(t!("}"), start)?;
 			return Ok(Object(map));
 		}
-		self.parse_object_from_map(map, start)
+		self.parse_object_from_map(ctx, map, start).await
 	}
 
 	/// Parses an object.
@@ -528,12 +581,13 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the first `{` to already have been eaten.
-	pub(super) fn parse_object(&mut self, start: Span) -> ParseResult<Object> {
-		self.parse_object_from_map(BTreeMap::new(), start)
+	pub(super) async fn parse_object(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object> {
+		self.parse_object_from_map(ctx, BTreeMap::new(), start).await
 	}
 
-	fn parse_object_from_map(
+	async fn parse_object_from_map(
 		&mut self,
+		ctx: &mut Stk,
 		mut map: BTreeMap<String, Value>,
 		start: Span,
 	) -> ParseResult<Object> {
@@ -542,7 +596,7 @@ impl Parser<'_> {
 				return Ok(Object(map));
 			}
 
-			let (key, value) = self.parse_object_entry()?;
+			let (key, value) = self.parse_object_entry(ctx).await?;
 			// TODO: Error on duplicate key?
 			map.insert(key, value);
 
@@ -558,7 +612,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the starting `{` to have already been eaten and its span to be handed to this
 	/// functions as the `start` parameter.
-	pub(super) fn parse_block(&mut self, start: Span) -> ParseResult<Block> {
+	pub(super) async fn parse_block(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Block> {
 		let mut statements = Vec::new();
 		loop {
 			while self.eat(t!(";")) {}
@@ -566,7 +620,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let stmt = self.parse_entry()?;
+			let stmt = ctx.run(|ctx| self.parse_entry(ctx)).await?;
 			statements.push(stmt);
 			if !self.eat(t!(";")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
@@ -578,10 +632,10 @@ impl Parser<'_> {
 
 	/// Parse a single entry in the object, i.e. `field: value + 1` in the object `{ field: value +
 	/// 1 }`
-	fn parse_object_entry(&mut self) -> ParseResult<(String, Value)> {
+	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Value)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
-		let value = self.parse_value_field()?;
+		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		Ok((text, value))
 	}
 
