@@ -271,7 +271,7 @@ pub async fn init(
 	debug!("Server capabilities: {caps}");
 
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let mut dbs = Datastore::new(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
