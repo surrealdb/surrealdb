@@ -1,7 +1,5 @@
 use crate::dbs::Session;
 use crate::err::Error;
-#[cfg(feature = "jwks")]
-use crate::iam::jwks;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
