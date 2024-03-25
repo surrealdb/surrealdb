@@ -2855,16 +2855,16 @@ mod tests {
 
 	#[test]
 	fn check_size() {
-		assert_eq!(64, std::mem::size_of::<Value>());
-		assert_eq!(104, std::mem::size_of::<Error>());
-		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
+		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
+		assert_eq!(112, std::mem::size_of::<Error>());
+		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
 		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::array::Array>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::object::Object>());
-		assert_eq!(56, std::mem::size_of::<crate::sql::geometry::Geometry>());
+		assert_eq!(48, std::mem::size_of::<crate::sql::geometry::Geometry>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::param::Param>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
@@ -2880,19 +2880,19 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		let enc: Vec<u8> = Value::None.try_into().unwrap();
+		let enc: Vec<u8> = Value::None.into();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Null.try_into().unwrap();
+		let enc: Vec<u8> = Value::Null.into();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = Value::Bool(true).try_into().unwrap();
+		let enc: Vec<u8> = Value::Bool(true).into();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::Bool(false).try_into().unwrap();
+		let enc: Vec<u8> = Value::Bool(false).into();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = Value::from("test").try_into().unwrap();
+		let enc: Vec<u8> = Value::from("test").into();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").try_into().unwrap();
+		let enc: Vec<u8> = Value::parse("{ hello: 'world' }").into();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").try_into().unwrap();
+		let enc: Vec<u8> = Value::parse("{ compact: true, schema: 0 }").into();
 		assert_eq!(27, enc.len());
 	}
 
@@ -2904,8 +2904,8 @@ mod tests {
 		let res = Value::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let enc: Vec<u8> = val.try_into().unwrap();
-		let dec: Value = enc.try_into().unwrap();
+		let enc: Vec<u8> = val.into();
+		let dec: Value = enc.into();
 		assert_eq!(res, dec);
 	}
 }

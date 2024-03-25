@@ -113,7 +113,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		dbs: &Datastore,
 		sql2: &str,
 		ses: &Session,
-		cf_val_arr: &Vec<Value>,
+		cf_val_arr: &[Value],
 	) -> Result<(), String> {
 		let res = &mut dbs.execute(sql2, ses, None).await?;
 		assert_eq!(res.len(), 3);
@@ -722,7 +722,7 @@ async fn changefeed_with_original() -> Result<(), Error> {
 	assert_eq!(array.len(), 2);
 
 	assert_eq!(
-		array.get(0).unwrap(),
+		array.first().unwrap(),
 		&surrealdb::sql::value(
 			r#"{
     "changes": [{

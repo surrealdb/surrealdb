@@ -1131,6 +1131,9 @@ allow_unsafe = true
 [pkg.rquickjs-core]
 allow_unsafe = true
 
+[pkg.reblessive]
+allow_unsafe = true
+
 [pkg.tungstenite]
 allow_unsafe = true
 

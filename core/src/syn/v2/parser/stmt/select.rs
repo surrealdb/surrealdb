@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use crate::{
 	sql::{
 		statements::SelectStatement, Explain, Field, Fields, Ident, Idioms, Limit, Order, Orders,
@@ -14,38 +16,45 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub(crate) fn parse_select_stmt(&mut self) -> ParseResult<SelectStatement> {
+	pub(crate) async fn parse_select_stmt(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<SelectStatement> {
 		let before = self.peek().span;
-		let expr = self.parse_fields()?;
+		let expr = self.parse_fields(stk).await?;
 		let fields_span = before.covers(self.last_span());
 
-		let omit = self.eat(t!("OMIT")).then(|| self.parse_idiom_list()).transpose()?.map(Idioms);
+		let omit = if self.eat(t!("OMIT")) {
+			Some(Idioms(self.parse_idiom_list(stk).await?))
+		} else {
+			None
+		};
 
 		expected!(self, t!("FROM"));
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![self.parse_value()?];
+		let mut what = vec![stk.run(|ctx| self.parse_value(ctx)).await?];
 		while self.eat(t!(",")) {
-			what.push(self.parse_value()?);
+			what.push(stk.run(|ctx| self.parse_value(ctx)).await?);
 		}
 		let what = Values(what);
 
 		let with = self.try_parse_with()?;
-		let cond = self.try_parse_condition()?;
+		let cond = self.try_parse_condition(stk).await?;
 		let split = self.try_parse_split(&expr, fields_span)?;
 		let group = self.try_parse_group(&expr, fields_span)?;
 		let order = self.try_parse_orders(&expr, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
-			let start = self.try_parse_start()?;
-			let limit = self.try_parse_limit()?;
+			let start = self.try_parse_start(stk).await?;
+			let limit = self.try_parse_limit(stk).await?;
 			(limit, start)
 		} else {
-			let limit = self.try_parse_limit()?;
-			let start = self.try_parse_start()?;
+			let limit = self.try_parse_limit(stk).await?;
+			let start = self.try_parse_start(stk).await?;
 			(limit, start)
 		};
-		let fetch = self.try_parse_fetch()?;
+		let fetch = self.try_parse_fetch(stk).await?;
 		let version = self.try_parse_version()?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
@@ -197,21 +206,21 @@ impl Parser<'_> {
 		})
 	}
 
-	fn try_parse_limit(&mut self) -> ParseResult<Option<Limit>> {
+	async fn try_parse_limit(&mut self, ctx: &mut Stk) -> ParseResult<Option<Limit>> {
 		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = self.parse_value()?;
+		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
-	fn try_parse_start(&mut self) -> ParseResult<Option<Start>> {
+	async fn try_parse_start(&mut self, ctx: &mut Stk) -> ParseResult<Option<Start>> {
 		if !self.eat(t!("START")) {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = self.parse_value()?;
+		let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
 		Ok(Some(Start(value)))
 	}
 
