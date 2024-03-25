@@ -25,7 +25,9 @@ impl Parser<'_> {
 	) -> ParseResult<Value> {
 		if self.eat(t!("}")) {
 			// empty object, just return
-			return Ok(Value::Object(Object::default()));
+			enter_object_recursion!(_this = self => {
+				return Ok(Value::Object(Object::default()));
+			})
 		}
 
 		// Check first if it can be an object.

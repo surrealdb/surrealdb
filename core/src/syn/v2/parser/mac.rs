@@ -141,6 +141,7 @@ macro_rules! enter_query_recursion {
 		}
 
 		$this.query_recursion -= 1;
+        #[allow(unused_mut)]
 		let mut $name = Dropper($this);
 		{
 			$($t)*
