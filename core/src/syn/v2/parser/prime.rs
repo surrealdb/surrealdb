@@ -1,4 +1,3 @@
-use futures::executor::enter;
 use geo::Point;
 use reblessive::Stk;
 

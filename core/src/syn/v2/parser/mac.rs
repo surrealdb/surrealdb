@@ -77,7 +77,7 @@ macro_rules! test_parse {
 #[macro_export]
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
-		if $this.object_recursion == 0 {
+		if dbg!($this.object_recursion) == 0 {
 			return Err($crate::syn::v2::parser::ParseError::new(
 				$crate::syn::v2::parser::ParseErrorKind::ExceededObjectDepthLimit,
 				$this.last_span(),
