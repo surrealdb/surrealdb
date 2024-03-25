@@ -168,7 +168,8 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 		let begin = if let Some(x) = x.get("begin") {
 			let start = start.ok_or(Error::InvalidArguments {
 				name: "type::range".to_string(),
-				message: "Can't define an inclusion if there is no bound".to_string(),
+				message: "Can't define an inclusion for begin if there is no begin bound"
+					.to_string(),
 			})?;
 			match x {
 				Value::Strand(Strand(x)) if x == "included" => Bound::Included(start),
@@ -186,7 +187,7 @@ pub fn range(args: Vec<Value>) -> Result<Value, Error> {
 		let end = if let Some(x) = x.get("end") {
 			let end = end.ok_or(Error::InvalidArguments {
 				name: "type::range".to_string(),
-				message: "Can't define an incluse if there is no bound".to_string(),
+				message: "Can't define an inclusion for end if there is no end bound".to_string(),
 			})?;
 			match x {
 				Value::Strand(Strand(x)) if x == "included" => Bound::Included(end),
