@@ -558,6 +558,48 @@ pub trait RpcContext {
 	}
 
 	// ------------------------------
+	// Methods for running functions
+	// ------------------------------
+
+	async fn run(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_one_two_or_three()
+		else {
+			return Err(RpcError::InvalidParams);
+		};
+
+		let version = match version {
+			Value::Strand(Strand(v)) => Some(v),
+			Value::None | Value::Null => None,
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let args = match args {
+			Value::Array(Array(arr)) => arr,
+			Value::None | Value::Null => vec![],
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let func: Value = match &func_name[0..4] {
+			"fn::" => Function::Custom(func_name.chars().skip(4).collect(), args).into(),
+			"ml::" => Model {
+				name: func_name.chars().skip(4).collect(),
+				version: version.ok_or(RpcError::InvalidParams)?,
+				args,
+			}
+			.into(),
+			_ => Function::Normal(func_name, args).into(),
+		};
+
+		let mut res = self
+			.kvs()
+			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
+			.await?;
+		let out = res.remove(0).result?;
+
+		Ok(out)
+	}
+
+	// ------------------------------
 	// Private methods
 	// ------------------------------
 
