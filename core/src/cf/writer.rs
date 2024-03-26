@@ -84,12 +84,7 @@ impl Writer {
 						trace!("The record is {new_record} because previous is {previous:?}");
 						TableMutation::SetWithDiff(id, current.into_owned(), patches, new_record)
 					}
-					false => {
-						if (true) {
-							panic!("Check store difference as it is false")
-						}
-						TableMutation::Set(id, current.into_owned())
-					}
+					false => TableMutation::Set(id, current.into_owned()),
 				},
 			);
 		} else {
