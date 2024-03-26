@@ -3,7 +3,6 @@
 
 use futures::StreamExt;
 use futures::TryStreamExt;
-use std::rc::Rc;
 use surrealdb::Action;
 use surrealdb::Notification;
 
