@@ -4,7 +4,7 @@ use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Function, Statement, Strand, Value},
+	sql::{Array, Function, Model, Statement, Strand, Value},
 };
 use uuid::Uuid;
 
@@ -499,28 +499,32 @@ pub trait RpcContext {
 		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_three() else {
 			return Err(RpcError::InvalidParams);
 		};
-		let _version = match version {
+
+		let version = match version {
 			Value::Strand(Strand(v)) => Some(v),
 			Value::None | Value::Null => None,
 			_ => return Err(RpcError::InvalidParams),
 		};
+
 		let args = match args {
 			Value::Array(Array(arr)) => arr,
 			_ => vec![],
 		};
 
-		let func = if func_name.starts_with("fn::") {
-			Function::Custom(func_name.chars().skip(4).collect(), args)
-		} else {
-			Function::Normal(func_name, args)
+		let func: Value = match &func_name[0..4] {
+			"fn::" => Function::Custom(func_name.chars().skip(4).collect(), args).into(),
+			"ml::" => Model {
+				name: func_name.chars().skip(4).collect(),
+				version: version.ok_or(RpcError::InvalidParams)?,
+				args,
+			}
+			.into(),
+			_ => Function::Normal(func_name, args).into(),
 		};
+
 		let mut res = self
 			.kvs()
-			.process(
-				Statement::Value(Value::Function(Box::new(func))).into(),
-				self.session(),
-				Some(self.vars().clone()),
-			)
+			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
 			.await?;
 		let out = res.remove(0).result?;
 
