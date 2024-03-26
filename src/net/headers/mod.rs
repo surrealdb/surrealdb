@@ -27,13 +27,25 @@ pub use db::SurrealDatabase;
 pub use id::SurrealId;
 pub use ns::SurrealNamespace;
 
-pub fn add_version_header() -> SetResponseHeaderLayer<HeaderValue> {
-	let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
-	SetResponseHeaderLayer::if_not_present(VERSION.to_owned(), HeaderValue::try_from(val).unwrap())
+pub fn add_version_header(disabled: bool) -> SetResponseHeaderLayer<Option<HeaderValue>> {
+	let header_value = if disabled {
+		None
+	} else {
+		let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
+		Some(HeaderValue::try_from(val).unwrap())
+	};
+
+	SetResponseHeaderLayer::if_not_present(VERSION.to_owned(), header_value)
 }
 
-pub fn add_server_header() -> SetResponseHeaderLayer<HeaderValue> {
-	SetResponseHeaderLayer::if_not_present(SERVER, HeaderValue::try_from(SERVER_NAME).unwrap())
+pub fn add_server_header(disabled: bool) -> SetResponseHeaderLayer<Option<HeaderValue>> {
+	let header_value = if disabled {
+		None
+	} else {
+		Some(HeaderValue::try_from(SERVER_NAME).unwrap())
+	};
+
+	SetResponseHeaderLayer::if_not_present(SERVER, header_value)
 }
 
 // Parse a TypedHeader, returning None if the header is missing and an error if the header is invalid.

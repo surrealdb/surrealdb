@@ -96,7 +96,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
-
+	#[arg(help = "Whether to suppress the server name and version header")]
+	#[arg(env = "SURREAL_NO_SERVER_ID_HEADERS", long)]
+	#[arg(default_value_t = false)]
+	hide_server_id_headers: bool,
 	//
 	// Database options
 	//
@@ -142,6 +145,7 @@ pub async fn init(
 		log,
 		tick_interval,
 		no_banner,
+		hide_server_id_headers,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
@@ -171,6 +175,7 @@ pub async fn init(
 		user,
 		pass,
 		tick_interval,
+		hide_server_id_headers,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 		engine: None,
