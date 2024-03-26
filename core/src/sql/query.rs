@@ -29,6 +29,12 @@ impl From<RemoveStatement> for Query {
 	}
 }
 
+impl From<Statement> for Query {
+	fn from(s: Statement) -> Self {
+		Query(Statements(vec![s]))
+	}
+}
+
 impl Deref for Query {
 	type Target = Vec<Statement>;
 	fn deref(&self) -> &Self::Target {

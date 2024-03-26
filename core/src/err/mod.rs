@@ -536,7 +536,7 @@ pub enum Error {
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Found record: `{thing}` which is {}a relation, but expected a `target_type`", if *relation { "not " } else { "" })]
+	#[error("Found record: `{thing}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
 	TableCheck {
 		thing: String,
 		relation: bool,

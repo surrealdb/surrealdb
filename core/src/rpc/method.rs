@@ -22,6 +22,7 @@ pub enum Method {
 	Version,
 	Query,
 	Relate,
+	Run,
 }
 
 impl Method {
@@ -51,6 +52,7 @@ impl Method {
 			"version" => Self::Version,
 			"query" => Self::Query,
 			"relate" => Self::Relate,
+			"run" => Self::Run,
 			_ => Self::Unknown,
 		}
 	}
@@ -81,6 +83,7 @@ impl Method {
 			Self::Version => "version",
 			Self::Query => "query",
 			Self::Relate => "relate",
+			Self::Run => "run",
 		}
 	}
 }
@@ -105,7 +108,7 @@ impl Method {
 				| Method::Patch | Method::Delete
 				| Method::Version
 				| Method::Query | Method::Relate
-				| Method::Unknown
+				| Method::Run | Method::Unknown
 		)
 	}
 }
