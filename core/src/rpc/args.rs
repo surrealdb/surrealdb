@@ -48,7 +48,7 @@ impl Take for Array {
 	}
 	/// Convert the array to two arguments
 	fn needs_one_or_two(self) -> Result<(Value, Value), RpcError> {
-		if self.is_empty() && self.len() > 2 {
+		if self.is_empty() || self.len() > 2 {
 			return Err(RpcError::InvalidParams);
 		}
 		let mut x = self.into_iter();
@@ -60,7 +60,7 @@ impl Take for Array {
 	}
 	/// Convert the array to three arguments
 	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), RpcError> {
-		if self.is_empty() && self.len() > 3 {
+		if self.is_empty() || self.len() > 3 {
 			return Err(RpcError::InvalidParams);
 		}
 		let mut x = self.into_iter();

@@ -496,7 +496,8 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn run(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_three() else {
+		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_one_two_or_three()
+		else {
 			return Err(RpcError::InvalidParams);
 		};
 
