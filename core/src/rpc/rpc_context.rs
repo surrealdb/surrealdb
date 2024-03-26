@@ -4,7 +4,7 @@ use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Value},
+	sql::{Array, Function, Statement, Strand, Value},
 };
 use uuid::Uuid;
 
@@ -59,6 +59,7 @@ pub trait RpcContext {
 			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
+			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -77,6 +78,7 @@ pub trait RpcContext {
 			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
+			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
@@ -481,12 +483,43 @@ pub trait RpcContext {
 	}
 
 	// ------------------------------
-	// Methods for querying
+	// Methods for relating
 	// ------------------------------
 
 	async fn relate(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
 		let out: Result<Value, RpcError> = Err(RpcError::MethodNotFound);
 		out
+	}
+
+	// ------------------------------
+	// Methods for running functions
+	// ------------------------------
+
+	async fn run(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((Value::Strand(Strand(func_name)), args)) = params.needs_one_or_two() else {
+			return Err(RpcError::InvalidParams);
+		};
+		let args = match args {
+			Value::Array(Array(arr)) => arr,
+			_ => vec![],
+		};
+
+		let func = if func_name.starts_with("fn::") {
+			Function::Custom(func_name.chars().skip(4).collect(), args)
+		} else {
+			Function::Normal(func_name, args)
+		};
+		let mut res = self
+			.kvs()
+			.process(
+				Statement::Value(Value::Function(Box::new(func))).into(),
+				self.session(),
+				Some(self.vars().clone()),
+			)
+			.await?;
+		let out = res.remove(0).result?;
+
+		Ok(out)
 	}
 
 	// ------------------------------
