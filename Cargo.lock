@@ -5479,6 +5479,7 @@ dependencies = [
  "flume",
  "futures",
  "futures-concurrency",
+ "futures-lite 2.2.0",
  "geo 0.27.0",
  "indexmap 2.2.2",
  "native-tls",

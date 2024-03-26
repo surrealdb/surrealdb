@@ -74,6 +74,7 @@ mod api_integration {
 	mod ws {
 		use super::*;
 		use futures::poll;
+		use std::cell::RefCell;
 		use std::pin::pin;
 		use std::task::Poll;
 		use surrealdb::engine::remote::ws::Client;
