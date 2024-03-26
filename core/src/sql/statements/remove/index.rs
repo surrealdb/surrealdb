@@ -26,7 +26,7 @@ impl RemoveIndexStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 			// Claim transaction
@@ -47,8 +47,8 @@ impl RemoveIndexStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::IxNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

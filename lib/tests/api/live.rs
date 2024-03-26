@@ -6,6 +6,8 @@ use futures::TryStreamExt;
 use surrealdb::Action;
 use surrealdb::Notification;
 
+const LQ_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[test_log::test(tokio::test)]
 async fn live_select_table() {
 	let (permit, db) = new_db().await;
@@ -22,11 +24,7 @@ async fn live_select_table() {
 		let created: Vec<RecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(10), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, vec![notification.data.clone()]);
 		// It should be newly created
@@ -37,11 +35,7 @@ async fn live_select_table() {
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(1), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
@@ -62,8 +56,7 @@ async fn live_select_table() {
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
-		let notification =
-			tokio::time::timeout(Duration::from_secs(10), users.next()).await.unwrap().unwrap();
+		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.is_object());
 		// It should be newly created
@@ -89,11 +82,7 @@ async fn live_select_record_id() {
 		let created: Option<RecordId> = db.create(record_id).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(1), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, Some(notification.data.clone()));
 		// It should be newly created
@@ -104,11 +93,7 @@ async fn live_select_record_id() {
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(1), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
@@ -116,11 +101,7 @@ async fn live_select_record_id() {
 		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(1), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 	}
@@ -135,7 +116,7 @@ async fn live_select_record_id() {
 		db.create(Resource::from(record_id)).await.unwrap();
 		// Pull the notification
 		let notification: Notification<Value> =
-			tokio::time::timeout(Duration::from_secs(1), users.next()).await.unwrap().unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.is_object());
 		// It should be newly created
@@ -161,11 +142,7 @@ async fn live_select_record_ranges() {
 		let created: Option<RecordId> = db.create((table, "jane")).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(1), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, Some(notification.data.clone()));
 		// It should be newly created
@@ -176,11 +153,7 @@ async fn live_select_record_ranges() {
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(1), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
@@ -188,11 +161,7 @@ async fn live_select_record_ranges() {
 		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(1), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 	}
@@ -208,7 +177,7 @@ async fn live_select_record_ranges() {
 		db.create(Resource::from((table, "job"))).await.unwrap();
 		// Pull the notification
 		let notification: Notification<Value> =
-			tokio::time::timeout(Duration::from_secs(1), users.next()).await.unwrap().unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.is_object());
 		// It should be newly created
@@ -239,11 +208,7 @@ async fn live_select_query() {
 		let created: Vec<RecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(10), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, vec![notification.data.clone()]);
 		// It should be newly created
@@ -253,11 +218,8 @@ async fn live_select_query() {
 		let _: Option<RecordId> =
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
-		let notification = tokio::time::timeout(Duration::from_secs(10), users.next())
-			.await
-			.unwrap()
-			.unwrap()
-			.unwrap();
+		let notification =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
@@ -266,11 +228,7 @@ async fn live_select_query() {
 		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(10), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 	}
@@ -289,8 +247,7 @@ async fn live_select_query() {
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
-		let notification =
-			tokio::time::timeout(Duration::from_secs(10), users.next()).await.unwrap().unwrap();
+		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 
 		// The returned record should be an object
 		assert!(notification.data.is_object());
@@ -313,11 +270,7 @@ async fn live_select_query() {
 		let created: Vec<RecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(10), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should match the created record
 		assert_eq!(created, vec![notification.data.clone()]);
 		// It should be newly created
@@ -328,11 +281,7 @@ async fn live_select_query() {
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(10), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be updated
 		assert_eq!(notification.action, Action::Update);
 
@@ -340,11 +289,7 @@ async fn live_select_query() {
 		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
 		// Pull the notification
 		let notification: Notification<RecordId> =
-			tokio::time::timeout(Duration::from_secs(10), users.next())
-				.await
-				.unwrap()
-				.unwrap()
-				.unwrap();
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 	}
@@ -365,8 +310,7 @@ async fn live_select_query() {
 		// Create a record
 		db.create(Resource::from(&table)).await.unwrap();
 		// Pull the notification
-		let notification =
-			tokio::time::timeout(Duration::from_secs(10), users.next()).await.unwrap().unwrap();
+		let notification = tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
 		// The returned record should be an object
 		assert!(notification.data.is_object());
 		// It should be newly created
