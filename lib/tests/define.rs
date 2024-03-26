@@ -2736,3 +2736,207 @@ async fn define_table_relation_in_out() -> Result<(), Error> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn define_table_relation_redefinition() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE likes TYPE RELATION IN person OUT person;
+		LET $person = CREATE person;
+		LET $thing = CREATE thing;
+		LET $other = CREATE other;
+		RELATE $person->likes->$thing;
+		DEFINE TABLE likes TYPE RELATION IN person OUT person | thing;
+		RELATE $person->likes->$thing;
+		RELATE $person->likes->$other;
+		DEFINE FIELD out ON TABLE likes TYPE record<person | thing | other>;
+		RELATE $person->likes->$other;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 10);
+	//
+	for _ in 0..4 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_table_relation_redefinition_info() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE likes TYPE RELATION IN person OUT person;
+		INFO FOR TABLE likes;
+		INFO FOR DB;
+		DEFINE TABLE likes TYPE RELATION IN person OUT person | thing;
+		INFO FOR TABLE likes;
+		INFO FOR DB;
+		DEFINE FIELD out ON TABLE likes TYPE record<person | thing | other>;
+		INFO FOR TABLE likes;
+		INFO FOR DB;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 9);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person> PERMISSIONS FULL' },
+			tables: {},
+			indexes: {},
+			lives: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {},
+			tokens: {},
+			functions: {},
+			models: {},
+			params: {},
+			scopes: {},
+			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE' },
+			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person | thing> PERMISSIONS FULL' },
+			tables: {},
+			indexes: {},
+			lives: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {},
+			tokens: {},
+			functions: {},
+			models: {},
+			params: {},
+			scopes: {},
+			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing SCHEMALESS PERMISSIONS NONE' },
+			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person | thing | other> PERMISSIONS FULL' },
+			tables: {},
+			indexes: {},
+			lives: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			analyzers: {},
+			tokens: {},
+			functions: {},
+			models: {},
+			params: {},
+			scopes: {},
+			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing | other SCHEMALESS PERMISSIONS NONE' },
+			users: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_table_type_normal() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE thing TYPE NORMAL;
+		CREATE thing;
+		RELATE foo:one->thing->foo:two;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_table_type_any() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE thing TYPE ANY;
+		CREATE thing;
+		RELATE foo:one->thing->foo:two;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	Ok(())
+}
