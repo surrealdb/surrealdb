@@ -72,6 +72,7 @@ impl Writer {
 		store_difference: bool,
 	) {
 		if current.is_some() {
+			trace!("New current so weird stuff happening. Store difference is {store_difference}");
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
@@ -79,12 +80,20 @@ impl Writer {
 				match store_difference {
 					true => {
 						let patches = current.diff(&previous, Idiom(Vec::new()));
-						TableMutation::SetWithDiff(id, current.into_owned(), patches)
+						let new_record = !previous.is_some();
+						trace!("The record is {new_record} because previous is {previous:?}");
+						TableMutation::SetWithDiff(id, current.into_owned(), patches, new_record)
 					}
-					false => TableMutation::Set(id, current.into_owned()),
+					false => {
+						if (true) {
+							panic!("Check store difference as it is false")
+						}
+						TableMutation::Set(id, current.into_owned())
+					}
 				},
 			);
 		} else {
+			trace!("Not current, delete this trace");
 			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
 	}

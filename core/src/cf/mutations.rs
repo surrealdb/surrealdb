@@ -21,10 +21,11 @@ pub enum TableMutation {
 	Del(Thing),
 	Def(DefineTableStatement),
 	#[revision(start = 2)]
-	/// Includes the ID, current value, and changes that were applied to achieve this value
-	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}])
+	/// Includes the ID, current value (after change), changes that were applied to achieve this
+	/// value, and if this is a new record (i.e. create = true vs update = false)
+	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
 	/// Means that we have already applied the add "/note" operation to achieve the recorded result
-	SetWithDiff(Thing, Value, Vec<Operation>),
+	SetWithDiff(Thing, Value, Vec<Operation>, bool),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -80,10 +81,14 @@ impl TableMutation {
 				h.insert("update".to_string(), v);
 				h
 			}
-			TableMutation::SetWithDiff(_thing, current, operations) => {
+			TableMutation::SetWithDiff(_thing, current, operations, new_record) => {
 				h.insert("current".to_string(), current);
 				h.insert(
-					"update".to_string(),
+					if new_record {
+						"create".to_string()
+					} else {
+						"update".to_string()
+					},
 					Value::Array(Array(
 						operations
 							.clone()
@@ -139,7 +144,17 @@ impl Display for TableMutation {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
-			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
+			TableMutation::SetWithDiff(id, _previous, v, new_record) => write!(
+				f,
+				"SET {} {:?} {}",
+				id,
+				v,
+				if *new_record {
+					"new_record"
+				} else {
+					"update_record"
+				}
+			),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::Def(t) => write!(f, "{}", t),
 		}
