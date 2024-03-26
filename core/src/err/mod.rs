@@ -923,6 +923,10 @@ pub enum Error {
 	/// A node task has failed
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
+
+	/// An error related to live query occurred
+	#[error("Failed to process Live Query: {0}")]
+	LiveQueryError(LiveQueryCause),
 }
 
 impl From<Error> for String {
@@ -1036,4 +1040,15 @@ impl Serialize for Error {
 	{
 		serializer.serialize_str(self.to_string().as_str())
 	}
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub(crate) enum LiveQueryCause {
+	#[doc(hidden)]
+	#[error("The Live Query must have a change feed for it it work")]
+	MissingChangeFeed,
+	#[doc(hidden)]
+	#[error("The Live Query must have a change feed that includes relative changes")]
+	ChangeFeedNoOriginal,
 }

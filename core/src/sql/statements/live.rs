@@ -1,12 +1,13 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::err::{Error, LiveQueryCause};
 use crate::fflags::FFLAGS;
 use crate::iam::Auth;
 use crate::kvs::lq_structs::{LqEntry, TrackedResult};
-use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
+use crate::sql::{Cond, Fetchs, Fields, Table, Uuid, Value};
 use derive::Store;
+use futures::lock::MutexGuard;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -101,12 +102,15 @@ impl LiveStatement {
 			true => {
 				let mut run = txn.lock().await;
 				match stm.what.compute(ctx, opt, txn, doc).await? {
-					Value::Table(_tb) => {
+					Value::Table(tb) => {
+						let ns = opt.ns().to_string();
+						let db = opt.db().to_string();
+						self.validate_change_feed_valid(&mut run, &ns, &db, &tb).await?;
 						// Send the live query registration hook to the transaction pre-commit channel
 						run.pre_commit_register_async_event(TrackedResult::LiveQuery(LqEntry {
 							live_id: stm.id,
-							ns: opt.ns().to_string(),
-							db: opt.db().to_string(),
+							ns,
+							db,
 							stm,
 						}))?;
 					}
@@ -141,6 +145,31 @@ impl LiveStatement {
 				Ok(id.into())
 			}
 		}
+	}
+
+	async fn validate_change_feed_valid(
+		&self,
+		tx: &mut MutexGuard<'_, crate::kvs::Transaction>,
+		ns: &String,
+		db: &String,
+		tb: &Table,
+	) -> Result<(), Error> {
+		// Find the table definition
+		let tb_definition = tx.get_and_cache_tb(ns, db, tb).await.map_err(|e| match e {
+			Error::TbNotFound {
+				value,
+			} => Error::LiveQueryError(LiveQueryCause::MissingChangeFeed),
+			_ => e,
+		})?;
+		// check it has a change feed
+		let cf = tb_definition
+			.changefeed
+			.ok_or(Error::LiveQueryError(LiveQueryCause::MissingChangeFeed))?;
+		// check the change feed includes the original - required for differentiating between CREATE and UPDATE
+		if !cf.store_original {
+			return Err(Error::LiveQueryError(LiveQueryCause::ChangeFeedNoOriginal));
+		}
+		Ok(())
 	}
 
 	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {
