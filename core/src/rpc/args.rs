@@ -6,6 +6,7 @@ use super::rpc_error::RpcError;
 pub trait Take {
 	fn needs_one(self) -> Result<Value, RpcError>;
 	fn needs_two(self) -> Result<(Value, Value), RpcError>;
+	fn needs_three(self) -> Result<(Value, Value, Value), RpcError>;
 	fn needs_one_or_two(self) -> Result<(Value, Value), RpcError>;
 	fn needs_one_two_or_three(self) -> Result<(Value, Value, Value), RpcError>;
 }
@@ -32,6 +33,17 @@ impl Take for Array {
 			(Some(a), Some(b)) => Ok((a, b)),
 			(Some(a), None) => Ok((a, Value::None)),
 			(_, _) => Ok((Value::None, Value::None)),
+		}
+	}
+	/// Convert the array to three arguments
+	fn needs_three(self) -> Result<(Value, Value, Value), RpcError> {
+		if self.len() != 3 {
+			return Err(RpcError::InvalidParams);
+		}
+		let mut x = self.into_iter();
+		match (x.next(), x.next(), x.next()) {
+			(Some(a), Some(b), Some(c)) => Ok((a, b, c)),
+			_ => Err(RpcError::InvalidParams),
 		}
 	}
 	/// Convert the array to two arguments
