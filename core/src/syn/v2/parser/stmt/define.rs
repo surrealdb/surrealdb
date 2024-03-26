@@ -800,12 +800,12 @@ impl Parser<'_> {
 		};
 		loop {
 			match self.peek_kind() {
-				t!("FROM") => {
+				t!("FROM") | t!("IN") => {
 					self.pop_peek();
 					let from = self.parse_tables()?;
 					res.from = Some(from);
 				}
-				t!("TO") => {
+				t!("TO") | t!("OUT") => {
 					self.pop_peek();
 					let to = self.parse_tables()?;
 					res.to = Some(to);
