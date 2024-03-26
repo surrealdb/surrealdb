@@ -1131,6 +1131,9 @@ allow_unsafe = true
 [pkg.rquickjs-core]
 allow_unsafe = true
 
+[pkg.reblessive]
+allow_unsafe = true
+
 [pkg.tungstenite]
 allow_unsafe = true
 
@@ -1307,3 +1310,13 @@ allow_apis = [
 allow_apis = [
     "net",
 ]
+
+# examples
+[pkg.pear_codegen]
+allow_proc_macro = true
+
+[pkg.devise_codegen]
+allow_proc_macro = true
+
+[pkg.rocket_codegen]
+allow_proc_macro = true

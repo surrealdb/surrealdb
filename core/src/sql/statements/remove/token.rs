@@ -26,7 +26,7 @@ impl RemoveTokenStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
@@ -73,8 +73,8 @@ impl RemoveTokenStatement {
 				_ => Err(Error::InvalidLevel(self.base.to_string())),
 			}
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(e) if self.if_exists => match e {
 				Error::NtNotFound {
 					..

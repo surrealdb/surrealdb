@@ -26,7 +26,7 @@ impl RemoveModelStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 			// Claim transaction
@@ -41,8 +41,8 @@ impl RemoveModelStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::MlNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

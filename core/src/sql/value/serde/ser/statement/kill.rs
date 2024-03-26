@@ -70,7 +70,6 @@ impl serde::ser::SerializeStruct for SerializeKillStatement {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::statements::kill::KillStatement;
 
 	#[test]
 	fn default() {
