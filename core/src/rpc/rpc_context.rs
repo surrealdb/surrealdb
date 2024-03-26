@@ -509,7 +509,8 @@ pub trait RpcContext {
 
 		let args = match args {
 			Value::Array(Array(arr)) => arr,
-			_ => vec![],
+			Value::None | Value::Null => vec![],
+			_ => return Err(RpcError::InvalidParams),
 		};
 
 		let func: Value = match &func_name[0..4] {
