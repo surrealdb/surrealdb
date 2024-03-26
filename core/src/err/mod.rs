@@ -1044,7 +1044,7 @@ impl Serialize for Error {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub(crate) enum LiveQueryCause {
+pub enum LiveQueryCause {
 	#[doc(hidden)]
 	#[error("The Live Query must have a change feed for it it work")]
 	MissingChangeFeed,

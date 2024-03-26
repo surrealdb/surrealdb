@@ -150,14 +150,14 @@ impl LiveStatement {
 	async fn validate_change_feed_valid(
 		&self,
 		tx: &mut MutexGuard<'_, crate::kvs::Transaction>,
-		ns: &String,
-		db: &String,
+		ns: &str,
+		db: &str,
 		tb: &Table,
 	) -> Result<(), Error> {
 		// Find the table definition
 		let tb_definition = tx.get_and_cache_tb(ns, db, tb).await.map_err(|e| match e {
 			Error::TbNotFound {
-				value,
+				value: _tb,
 			} => Error::LiveQueryError(LiveQueryCause::MissingChangeFeed),
 			_ => e,
 		})?;
