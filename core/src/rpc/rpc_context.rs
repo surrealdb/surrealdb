@@ -4,7 +4,7 @@ use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Function, Model, Statement, Strand, Value},
+	sql::{self, statements::RelateStatement, Array, Function, Model, Statement, Strand, Value},
 };
 use uuid::Uuid;
 
@@ -486,9 +486,34 @@ pub trait RpcContext {
 	// Methods for relating
 	// ------------------------------
 
-	async fn relate(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
-		let out: Result<Value, RpcError> = Err(RpcError::MethodNotFound);
-		out
+	async fn relate(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		println!("params: {:?}", params);
+		let Ok((from, kind, to, content)) = params.needs_three_or_four() else {
+			return Err(RpcError::InvalidParams);
+		};
+
+		let kind = kind.could_be_table();
+		let data = match content {
+			Value::None | Value::Null => None,
+			Value::Object(_) => Some(sql::Data::ContentExpression(content)),
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let relation = RelateStatement {
+			kind,
+			from,
+			with: to,
+			data,
+			..Default::default()
+		};
+
+		let mut res = self
+			.kvs()
+			.process(Statement::Relate(relation).into(), self.session(), Some(self.vars().clone()))
+			.await?;
+		let out = res.remove(0).result?;
+
+		Ok(out)
 	}
 
 	// ------------------------------

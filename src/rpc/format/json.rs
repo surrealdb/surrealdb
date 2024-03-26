@@ -6,13 +6,14 @@ use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::StatusCode;
 use surrealdb::rpc::RpcError;
-use surrealdb::sql;
+use surrealdb::syn;
 
 pub fn req_ws(msg: Message) -> Result<Request, RpcError> {
 	match msg {
-		Message::Text(val) => {
-			surrealdb::sql::value(&val).map_err(|_| RpcError::ParseError)?.try_into()
-		}
+		#[cfg(feature = "parser2")]
+		Message::Text(val) => syn::json_legacy_strand(&val).map_err(|_| RpcError::ParseError)?.try_into(),
+		#[cfg(not(feature = "parser2"))]
+		Message::Text(val) => syn::json(&val).map_err(|_| RpcError::ParseError)?.try_into(),
 		_ => Err(RpcError::InvalidRequest),
 	}
 }
@@ -27,9 +28,12 @@ pub fn res_ws(res: Response) -> Result<(usize, Message), RpcError> {
 }
 
 pub fn req_http(val: &Bytes) -> Result<Request, RpcError> {
-	sql::value(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
-		.or(Err(RpcError::ParseError))?
-		.try_into()
+	#[cfg(feature = "parser2")]
+	let value = syn::json_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?);
+	#[cfg(not(feature = "parser2"))]
+	let value = syn::json(std::str::from_utf8(val).or(Err(RpcError::ParseError))?);
+
+	value.or(Err(RpcError::ParseError))?.try_into()
 }
 
 pub fn res_http(res: Response) -> Result<AxumResponse, RpcError> {
