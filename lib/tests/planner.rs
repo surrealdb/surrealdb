@@ -527,7 +527,12 @@ fn range_test(unique: bool, from_incl: bool, to_incl: bool) -> String {
 	CREATE test:16 SET year = {};
 	CREATE test:20 SET year = 2020;
 	SELECT id FROM test WHERE year {} 2000 AND year {} 2020 EXPLAIN;
-	SELECT id FROM test WHERE year {} 2000 AND year {} 2020;",
+	SELECT id FROM test WHERE year {} 2000 AND year {} 2020;
+	SELECT id FROM test WHERE year {} 2016 EXPLAIN;
+	SELECT id FROM test WHERE year {} 2016;
+	SELECT id FROM test WHERE year {} 2016 EXPLAIN;
+	SELECT id FROM test WHERE year {} 2016;
+	",
 		if unique {
 			"UNIQUE"
 		} else {
@@ -542,6 +547,10 @@ fn range_test(unique: bool, from_incl: bool, to_incl: bool) -> String {
 		to_op,
 		from_op,
 		to_op,
+		from_op,
+		from_op,
+		to_op,
+		to_op,
 	)
 }
 
@@ -549,20 +558,44 @@ async fn select_range(
 	unique: bool,
 	from_incl: bool,
 	to_incl: bool,
-	explain: &str,
-	result: &str,
+	explain_from_to: &str,
+	result_from_to: &str,
+	explain_from: &str,
+	result_from: &str,
+	explain_to: &str,
+	result_to: &str,
 ) -> Result<(), Error> {
 	let dbs = new_ds().await?;
-	let mut res = execute_test(&dbs, &range_test(unique, from_incl, to_incl), 8).await?;
+	let mut res = execute_test(&dbs, &range_test(unique, from_incl, to_incl), 12).await?;
 	skip_ok(&mut res, 6)?;
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(explain);
+		let val = Value::parse(explain_from_to);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	{
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(result);
+		let val = Value::parse(result_from_to);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(explain_from);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(result_from);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(explain_to);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	{
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(result_to);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	Ok(())
@@ -594,7 +627,82 @@ const EXPLAIN_FROM_TO: &str = r"[
 		}
 	]";
 
+const EXPLAIN_FROM: &str = r"[
+		{
+			detail: {
+				plan: {
+					from: {
+						inclusive: false,
+						value: 2000
+					},
+					index: 'year',
+					to: {
+						inclusive: false,
+						value: 2020
+					}
+				},
+				table: 'test'
+			},
+			operation: 'Iterate Index'
+		},
+		{
+			detail: {
+				type: 'Store'
+			},
+			operation: 'Collector'
+		}
+	]";
+
+const EXPLAIN_TO: &str = r"[
+		{
+			detail: {
+				plan: {
+					from: {
+						inclusive: false,
+						value: 2000
+					},
+					index: 'year',
+					to: {
+						inclusive: false,
+						value: 2020
+					}
+				},
+				table: 'test'
+			},
+			operation: 'Iterate Index'
+		},
+		{
+			detail: {
+				type: 'Store'
+			},
+			operation: 'Collector'
+		}
+	]";
 const RESULT_FROM_TO: &str = r"[
+		{
+			id: test:10,
+		},
+		{
+			id: test:15,
+		},
+		{
+			id: test:16,
+		}
+	]";
+
+const RESULT_FROM: &str = r"[
+		{
+			id: test:10,
+		},
+		{
+			id: test:15,
+		},
+		{
+			id: test:16,
+		}
+	]";
+
+const RESULT_TO: &str = r"[
 		{
 			id: test:10,
 		},
@@ -607,15 +715,63 @@ const RESULT_FROM_TO: &str = r"[
 	]";
 #[tokio::test]
 async fn select_index_range_from_to() -> Result<(), Error> {
-	select_range(false, false, false, EXPLAIN_FROM_TO, RESULT_FROM_TO).await
+	select_range(
+		false,
+		false,
+		false,
+		EXPLAIN_FROM_TO,
+		RESULT_FROM_TO,
+		EXPLAIN_FROM,
+		RESULT_FROM,
+		RESULT_TO,
+		EXPLAIN_TO,
+	)
+	.await
 }
 
 #[tokio::test]
 async fn select_unique_range_from_to() -> Result<(), Error> {
-	select_range(true, false, false, EXPLAIN_FROM_TO, RESULT_FROM_TO).await
+	select_range(
+		true,
+		false,
+		false,
+		EXPLAIN_FROM_TO,
+		RESULT_FROM_TO,
+		EXPLAIN_FROM,
+		RESULT_FROM,
+		RESULT_TO,
+		EXPLAIN_TO,
+	)
+	.await
 }
 
 const EXPLAIN_FROM_INCL_TO: &str = r"[
+		{
+			detail: {
+				plan: {
+					from: {
+						inclusive: true,
+						value: 2000
+					},
+					index: 'year',
+					to: {
+						inclusive: false,
+						value: 2020
+					}
+				},
+				table: 'test'
+			},
+			operation: 'Iterate Index'
+		},
+		{
+			detail: {
+				type: 'Store'
+			},
+			operation: 'Collector'
+		}
+	]";
+
+const EXPLAIN_FROM_INCL: &str = r"[
 		{
 			detail: {
 				plan: {
@@ -656,17 +812,80 @@ const RESULT_FROM_INCL_TO: &str = r"[
 		}
 	]";
 
+const RESULT_FROM_INCL: &str = r"[
+		{
+			id: test:0,
+		},
+		{
+			id: test:10,
+		},
+		{
+			id: test:15,
+		},
+		{
+			id: test:16,
+		}
+	]";
+
 #[tokio::test]
 async fn select_index_range_from_incl_to() -> Result<(), Error> {
-	select_range(false, true, false, EXPLAIN_FROM_INCL_TO, RESULT_FROM_INCL_TO).await
+	select_range(
+		false,
+		true,
+		false,
+		EXPLAIN_FROM_INCL_TO,
+		RESULT_FROM_INCL_TO,
+		EXPLAIN_FROM_INCL,
+		RESULT_FROM_INCL,
+		EXPLAIN_TO,
+		RESULT_TO,
+	)
+	.await
 }
 
 #[tokio::test]
 async fn select_unique_range_from_incl_to() -> Result<(), Error> {
-	select_range(true, true, false, EXPLAIN_FROM_INCL_TO, RESULT_FROM_INCL_TO).await
+	select_range(
+		true,
+		true,
+		false,
+		EXPLAIN_FROM_INCL_TO,
+		RESULT_FROM_INCL_TO,
+		EXPLAIN_FROM_INCL,
+		RESULT_FROM_INCL,
+		EXPLAIN_TO,
+		RESULT_TO,
+	)
+	.await
 }
 
 const EXPLAIN_FROM_TO_INCL: &str = r"[
+			{
+				detail: {
+					plan: {
+						from: {
+							inclusive: false,
+							value: 2000
+						},
+						index: 'year',
+						to: {
+							inclusive: true,
+							value: 2020
+						}
+					},
+					table: 'test'
+				},
+				operation: 'Iterate Index'
+			},
+			{
+				detail: {
+					type: 'Store'
+				},
+				operation: 'Collector'
+			}
+		]";
+
+const EXPLAIN_TO_INCL: &str = r"[
 			{
 				detail: {
 					plan: {
@@ -707,14 +926,51 @@ const RESULT_FROM_TO_INCL: &str = r"[
 		},
 	]";
 
+const RESULT_TO_INCL: &str = r"[
+		{
+			id: test:10,
+		},
+		{
+			id: test:15,
+		},
+		{
+			id: test:16,
+		},
+		{
+			id: test:20,
+		},
+	]";
+
 #[tokio::test]
 async fn select_index_range_from_to_incl() -> Result<(), Error> {
-	select_range(false, false, true, EXPLAIN_FROM_TO_INCL, RESULT_FROM_TO_INCL).await
+	select_range(
+		false,
+		false,
+		true,
+		EXPLAIN_FROM_TO_INCL,
+		RESULT_FROM_TO_INCL,
+		EXPLAIN_FROM,
+		RESULT_FROM,
+		EXPLAIN_TO_INCL,
+		RESULT_TO_INCL,
+	)
+	.await
 }
 
 #[tokio::test]
 async fn select_unique_range_from_to_incl() -> Result<(), Error> {
-	select_range(true, false, true, EXPLAIN_FROM_TO_INCL, RESULT_FROM_TO_INCL).await
+	select_range(
+		true,
+		false,
+		true,
+		EXPLAIN_FROM_TO_INCL,
+		RESULT_FROM_TO_INCL,
+		EXPLAIN_FROM,
+		RESULT_FROM,
+		EXPLAIN_TO_INCL,
+		RESULT_TO_INCL,
+	)
+	.await
 }
 
 const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
@@ -763,12 +1019,34 @@ const RESULT_FROM_INCL_TO_INCL: &str = r"[
 
 #[tokio::test]
 async fn select_index_range_from_incl_to_incl() -> Result<(), Error> {
-	select_range(false, true, true, EXPLAIN_FROM_INCL_TO_INCL, RESULT_FROM_INCL_TO_INCL).await
+	select_range(
+		false,
+		true,
+		true,
+		EXPLAIN_FROM_INCL_TO_INCL,
+		RESULT_FROM_INCL_TO_INCL,
+		EXPLAIN_FROM_INCL,
+		RESULT_FROM_INCL,
+		EXPLAIN_TO_INCL,
+		RESULT_TO_INCL,
+	)
+	.await
 }
 
 #[tokio::test]
 async fn select_unique_range_from_incl_to_incl() -> Result<(), Error> {
-	select_range(true, true, true, EXPLAIN_FROM_INCL_TO_INCL, RESULT_FROM_INCL_TO_INCL).await
+	select_range(
+		true,
+		true,
+		true,
+		EXPLAIN_FROM_INCL_TO_INCL,
+		RESULT_FROM_INCL_TO_INCL,
+		EXPLAIN_FROM_INCL,
+		RESULT_FROM_INCL,
+		EXPLAIN_TO_INCL,
+		RESULT_TO_INCL,
+	)
+	.await
 }
 
 fn single_range_operator_test(unique: bool, op: &str) -> String {
@@ -1525,6 +1803,81 @@ async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
 			}
 		]"#,
 	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = r#"
+		DEFINE INDEX index_note_id ON TABLE notes COLUMNS id;
+		DEFINE INDEX index_note_kind ON TABLE notes COLUMNS kind;
+		DEFINE INDEX index_note_pubkey ON TABLE notes COLUMNS pubkey;
+		DEFINE INDEX index_note_published ON TABLE notes COLUMNS published;
+		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN ['123']) AND published > '2024' EXPLAIN;
+		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN ['123']) AND published > '2024';
+	"#;
+	let mut res = dbs.execute(sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 6);
+	skip_ok(&mut res, 4)?;
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_kind",
+								"operator": "union",
+								"value": [
+									1,
+									2
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_pubkey",
+								"operator": "union",
+								"value": [
+									"123"
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_published",
+								"operator": ">",
+								"value": "2024"
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[]"#);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
