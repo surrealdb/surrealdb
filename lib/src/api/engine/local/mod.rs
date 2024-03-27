@@ -741,7 +741,7 @@ async fn router(
 								path: PathBuf::from(path),
 								error: io::Error::new(
 									io::ErrorKind::InvalidData,
-									error.message.to_string()
+									error.message.to_string(),
 								),
 							}
 							.into());

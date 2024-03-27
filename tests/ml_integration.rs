@@ -14,6 +14,14 @@ mod ml_integration {
 	use test_log::test;
 	use ulid::Ulid;
 
+	#[derive(Serialize, Deserialize, Debug)]
+	struct ErrorResponse {
+		code: u16,
+		details: String,
+		description: String,
+		information: String,
+	}
+
 	static LOCK: AtomicBool = AtomicBool::new(false);
 
 	#[derive(Serialize, Deserialize, Debug)]
@@ -43,9 +51,7 @@ mod ml_integration {
 	}
 
 	async fn upload_file(addr: &str, ns: &str, db: &str) -> Result<(), Box<dyn std::error::Error>> {
-		let generator = StreamAdapter::new(
-			5, "./tests/linear_test.surml".to_string()
-		).unwrap();
+		let generator = StreamAdapter::new(5, "./tests/linear_test.surml".to_string()).unwrap();
 		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
@@ -74,6 +80,41 @@ mod ml_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 		upload_file(&addr, &ns, &db).await?;
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn upload_bad_file() -> Result<(), Box<dyn std::error::Error>> {
+		let _lock = LockHandle::acquire_lock();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let generator = StreamAdapter::new(5, "./tests/should_crash.surml".to_string()).unwrap();
+		let body = Body::wrap_stream(generator);
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_secs(1))
+			.default_headers(headers)
+			.build()?;
+		// Send HTTP request
+		let res = client
+			.post(format!("http://{addr}/ml/import"))
+			.basic_auth(common::USER, Some(common::PASS))
+			.body(body)
+			.send()
+			.await?;
+		// Check response code
+		let raw_data = res.text().await?;
+		let response: ErrorResponse = serde_json::from_str(&raw_data)?;
+
+		assert_eq!(response.code, 400);
+		assert_eq!(
+			"Not enough bytes to read for header, maybe the file format is not correct".to_string(),
+			response.information
+		);
 		Ok(())
 	}
 
