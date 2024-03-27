@@ -32,6 +32,7 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 		Cow::Borrowed(v)
 	}
 }
+#[non_exhaustive]
 pub struct Context<'a> {
 	// An optional parent context.
 	parent: Option<&'a Context<'a>>,

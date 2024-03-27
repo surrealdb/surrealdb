@@ -25,6 +25,7 @@ use std::{
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Statements(pub Vec<Statement>);
 
 impl Deref for Statements {
@@ -54,6 +55,7 @@ impl Display for Statements {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Statement {
 	Value(Value),
 	Analyze(AnalyzeStatement),

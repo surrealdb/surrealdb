@@ -12,12 +12,14 @@ use super::classes::Blob;
 pub type StreamItem = StdResult<Bytes, RequestError>;
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum BodyKind {
 	Buffer,
 	String,
 	Blob(String),
 }
 
+#[non_exhaustive]
 pub enum BodyData {
 	Buffer(Bytes),
 	Stream(RefCell<ReadableStream<StreamItem>>),
@@ -28,6 +30,7 @@ pub enum BodyData {
 /// A struct representing the body mixin.
 ///
 /// Implements [`FromJs`] for conversion from `Blob`, `ArrayBuffer`, any `TypedBuffer` and `String`.
+#[non_exhaustive]
 pub struct Body {
 	/// The type of body
 	pub kind: BodyKind,

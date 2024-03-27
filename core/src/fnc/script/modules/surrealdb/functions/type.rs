@@ -5,6 +5,7 @@ use js::prelude::Async;
 
 mod is;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

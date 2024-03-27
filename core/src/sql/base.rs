@@ -6,6 +6,7 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Base {
 	Root,
 	Ns,

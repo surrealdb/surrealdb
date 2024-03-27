@@ -7,6 +7,7 @@ use nom::{
 };
 
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[non_exhaustive]
 pub enum BuiltinName<I> {
 	Function(I),
 	Constant(constant::Constant),

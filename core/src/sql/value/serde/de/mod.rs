@@ -281,6 +281,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 #[derive(Debug, Clone)]
 #[doc(hidden)]
 #[non_exhaustive]
+#[non_exhaustive]
 pub struct FromValueError {
 	pub value: Value,
 	pub error: String,

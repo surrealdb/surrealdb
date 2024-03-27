@@ -9,6 +9,7 @@ use std::collections::HashMap;
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[non_exhaustive]
 pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iat: Option<i64>,

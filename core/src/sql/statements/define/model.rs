@@ -15,6 +15,7 @@ use std::fmt::{self, Write};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct DefineModelStatement {
 	pub hash: String,
 	pub name: Ident,

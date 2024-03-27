@@ -20,6 +20,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 #[serde(rename = "$surrealdb::private::sql::Array")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {

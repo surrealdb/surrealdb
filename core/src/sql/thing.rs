@@ -16,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 #[serde(rename = "$surrealdb::private::sql::Thing")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Thing {
 	/// Table name
 	pub tb: String,

@@ -9,6 +9,7 @@ use self::query::{QueryContext, QUERY_DATA_PROP_NAME};
 mod functions;
 pub mod query;
 
+#[non_exhaustive]
 pub struct Package;
 
 #[js::function]

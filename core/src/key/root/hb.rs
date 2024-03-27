@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Hb {
 	__: u8,
 	_a: u8,

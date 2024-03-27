@@ -18,10 +18,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct Datastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
+#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,

@@ -7,10 +7,12 @@ use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 
+#[non_exhaustive]
 pub struct Datastore {
 	db: indxdb::Db,
 }
 
+#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,

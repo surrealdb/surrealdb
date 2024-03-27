@@ -71,6 +71,7 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 }
 
 /// The kind of a parsed path.
+#[non_exhaustive]
 pub enum PathKind {
 	Constant(Constant),
 	Function,

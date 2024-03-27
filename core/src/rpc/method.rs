@@ -1,4 +1,5 @@
 #[non_exhaustive]
+#[non_exhaustive]
 pub enum Method {
 	Unknown,
 	Ping,

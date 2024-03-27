@@ -7,6 +7,7 @@ use serde::ser::Impossible;
 use serde::ser::Serialize;
 use std::collections::BTreeMap;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -41,6 +42,7 @@ impl ser::Serializer for Serializer {
 }
 
 #[derive(Default)]
+#[non_exhaustive]
 pub struct SerializeValueMap {
 	map: BTreeMap<String, Value>,
 	next_key: Option<String>,

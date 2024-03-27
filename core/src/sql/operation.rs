@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "op")]
 #[serde(rename_all = "lowercase")]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Operation {
 	Add {
 		path: Idiom,

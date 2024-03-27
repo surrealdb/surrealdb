@@ -4,6 +4,7 @@ use crate::fnc::script::modules::impl_module_def;
 mod distance;
 mod similarity;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

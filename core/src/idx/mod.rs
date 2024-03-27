@@ -28,6 +28,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct IndexKeyBase {
 	inner: Arc<Inner>,
 }

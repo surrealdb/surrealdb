@@ -6,6 +6,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
 /// ChangeFeedInclude statements are an appendix
+#[non_exhaustive]
 pub enum ChangeFeedInclude {
 	Original,
 }

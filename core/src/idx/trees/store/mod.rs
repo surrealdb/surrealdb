@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub type NodeId = u64;
 
+#[non_exhaustive]
 pub enum TreeStore<N>
 where
 	N: TreeNode + Debug + Clone,
@@ -98,6 +99,7 @@ where
 }
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum TreeNodeProvider {
 	DocIds(IndexKeyBase),
 	DocLengths(IndexKeyBase),
@@ -143,6 +145,7 @@ impl TreeNodeProvider {
 	}
 }
 
+#[non_exhaustive]
 pub struct StoredNode<N>
 where
 	N: Clone + Display,
@@ -184,6 +187,7 @@ pub trait TreeNode: Debug + Clone + Display {
 }
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct IndexStores(Arc<Inner>);
 
 struct Inner {

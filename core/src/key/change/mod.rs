@@ -10,6 +10,7 @@ use std::str;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Cf<'a> {
 	__: u8,
 	_a: u8,

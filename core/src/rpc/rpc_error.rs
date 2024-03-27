@@ -4,6 +4,7 @@ use crate::err;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
+#[non_exhaustive]
 pub enum RpcError {
 	#[error("Parse error")]
 	ParseError,

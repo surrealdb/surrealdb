@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 /// This struct is public because it is used in Live Query errors for v1.
 /// V1 is now deprecated and the struct can be made non-public
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct LqValue {
 	pub nd: Uuid,
 	pub ns: String,
