@@ -885,9 +885,16 @@ impl Datastore {
 		// Change map includes a mapping of selector to changesets, ordered by versionstamp
 		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
 		{
-			let mut tracked_cfs = self.cf_watermarks.lock().await;
-			let tracked_cfs_updates = self.find_required_cfs_to_catch_up(tracked_cfs).await?;
+			let tx = self.transaction(Read, Optimistic).await?;
+			let tracked_cfs_updates = find_required_cfs_to_catch_up(
+				tx,
+				self.cf_watermarks.clone(),
+				self.engine_options.live_query_catchup_size,
+				&mut change_map,
+			)
+			.await?;
 			// Now we update since we are no longer iterating immutably
+			let mut tracked_cfs = self.cf_watermarks.lock().await;
 			for (selector, vs) in tracked_cfs_updates {
 				tracked_cfs.insert(selector, vs);
 			}
@@ -1643,48 +1650,50 @@ impl Datastore {
 		// All ok
 		Ok(())
 	}
+}
 
-	async fn find_required_cfs_to_catch_up(
-		&self,
-		tracked_cfs: MutexGuard<BTreeMap<LqSelector, Versionstamp>>,
-	) -> Result<Vec<(LqSelector, Versionstamp)>, Error> {
-		let mut tx = self.transaction(Read, Optimistic).await?;
-		let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
-		for (selector, vs) in tracked_cfs.iter() {
-			// Read the change feed for the selector
-			let res = cf::read(
-				&mut tx,
-				&selector.ns,
-				&selector.db,
-				// Technically, we can not fetch by table and do the per-table filtering this side.
-				// That is an improvement though
-				Some(&selector.tb),
-				ShowSince::versionstamp(vs),
-				Some(self.engine_options.live_query_catchup_size),
+async fn find_required_cfs_to_catch_up(
+	mut tx: Transaction,
+	tracked_cfs: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
+	catchup_size: u32,
+	change_map: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
+) -> Result<Vec<(LqSelector, Versionstamp)>, Error> {
+	let tracked_cfs = tracked_cfs.lock().await;
+	let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
+	for (selector, vs) in tracked_cfs.iter() {
+		// Read the change feed for the selector
+		let res = cf::read(
+			&mut tx,
+			&selector.ns,
+			&selector.db,
+			// Technically, we can not fetch by table and do the per-table filtering this side.
+			// That is an improvement though
+			Some(&selector.tb),
+			ShowSince::versionstamp(vs),
+			Some(catchup_size),
+		)
+		.await?;
+		// Confirm we do need to change watermark - this is technically already handled by the cf range scan
+		if res.is_empty() {
+			trace!(
+				"There were no changes in the change feed for {:?} from versionstamp {:?}",
+				selector,
+				conv::versionstamp_to_u64(vs)
 			)
-			.await?;
-			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
-			if res.is_empty() {
-				trace!(
-					"There were no changes in the change feed for {:?} from versionstamp {:?}",
-					selector,
-					conv::versionstamp_to_u64(vs)
-				)
-			}
-			if let Some(change_set) = res.last() {
-				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
-					trace!("Adding a change set for lq notification processing");
-					// Update the cf watermark so we can progress scans
-					// If the notifications fail from here-on, they are lost
-					// this is a separate vec that we later insert to because we are iterating immutably
-					// We shouldn't use a read lock because of consistency between watermark scans
-					tracked_cfs_updates.push((selector.clone(), change_set.0));
-					// This does not guarantee a notification, as a changeset an include many tables and many changes
-					change_map.insert(selector.clone(), res);
-				}
+		}
+		if let Some(change_set) = res.last() {
+			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
+				trace!("Adding a change set for lq notification processing");
+				// Update the cf watermark so we can progress scans
+				// If the notifications fail from here-on, they are lost
+				// this is a separate vec that we later insert to because we are iterating immutably
+				// We shouldn't use a read lock because of consistency between watermark scans
+				tracked_cfs_updates.push((selector.clone(), change_set.0));
+				// This does not guarantee a notification, as a changeset an include many tables and many changes
+				change_map.insert(selector.clone(), res);
 			}
 		}
-		tx.cancel().await?;
-		Ok(tracked_cfs_updates)
 	}
+	tx.cancel().await?;
+	Ok(tracked_cfs_updates)
 }
