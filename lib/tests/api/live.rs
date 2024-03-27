@@ -219,11 +219,17 @@ async fn live_select_query() {
 		let _: Option<RecordId> =
 			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
 		// Pull the notification
+		{
+			// TODO delete this debug block
+			let notification =
+				tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+			assert_eq!(notification.action, Action::Create, "{:?}", notification);
+		}
 		let notification =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 
 		// It should be updated
-		assert_eq!(notification.action, Action::Update);
+		assert_eq!(notification.action, Action::Update, "{:?}", notification);
 
 		// Delete the record
 		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
