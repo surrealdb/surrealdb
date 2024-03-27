@@ -1100,9 +1100,9 @@ dependencies = [
 
 [[package]]
 name = "cedar-policy"
-version = "2.4.3"
+version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31ff2003d0aba0a4b2e5212660321d63dc7c36efe636d6ca1882d489cbc0bef8"
+checksum = "3d91e3b10a0f7f2911774d5e49713c4d25753466f9e11d1cd2ec627f8a2dc857"
 dependencies = [
  "cedar-policy-core",
  "cedar-policy-validator",
@@ -1117,9 +1117,9 @@ dependencies = [
 
 [[package]]
 name = "cedar-policy-core"
-version = "2.4.3"
+version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c52f9666c7cb1b6f14a6e77d3ffcffa20fd3e1012ac8dcc393498c33ff632c3"
+checksum = "cd2315591c6b7e18f8038f0a0529f254235fd902b6c217aabc04f2459b0d9995"
 dependencies = [
  "either",
  "ipnet",
@@ -1140,9 +1140,9 @@ dependencies = [
 
 [[package]]
 name = "cedar-policy-validator"
-version = "2.4.3"
+version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76a63c1a72bcafda800830cbdde316162074b341b7d59bd4b1cea6156f22dfa7"
+checksum = "e756e1b2a5da742ed97e65199ad6d0893e9aa4bd6b34be1de9e70bd1e6adc7df"
 dependencies = [
  "cedar-policy-core",
  "itertools 0.10.5",
@@ -5272,9 +5272,9 @@ checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
 
 [[package]]
 name = "serde"
-version = "1.0.193"
+version = "1.0.197"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25dd9975e68d0cb5aa1120c288333fc98731bd1dd12f561e468ea4728c042b89"
+checksum = "3fb1c873e1b9b056a4dc4c0c198b24c3ffa059243875552b2bd0933b1aee4ce2"
 dependencies = [
  "serde_derive",
 ]
@@ -5290,9 +5290,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.193"
+version = "1.0.197"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43576ca501357b9b071ac53cdc7da8ef0cbd9493d8df094cd821777ea6e894d3"
+checksum = "7eb0b34b42edc17f6b7cac84a52a1c5f0e1bb2227e997ca9011ea3dd34e8610b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5886,7 +5886,7 @@ dependencies = [
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
  "surrealkv",
- "surrealml-core",
+ "surrealml-core 0.0.8",
  "thiserror",
  "tokio",
  "tracing",
@@ -5972,7 +5972,7 @@ dependencies = [
  "surrealdb-jsonwebtoken",
  "surrealdb-tikv-client",
  "surrealkv",
- "surrealml-core",
+ "surrealml-core 0.1.1",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -6083,6 +6083,23 @@ dependencies = [
  "once_cell",
  "ort",
  "regex",
+]
+
+[[package]]
+name = "surrealml-core"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5af53365d57a1bd7473366d3a413a4c858d5ddb3823e54322977d9934f75e279"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "ndarray",
+ "once_cell",
+ "ort",
+ "regex",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -6274,18 +6291,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.56"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d54378c645627613241d077a3a79db965db602882668f9136ac42af9ecb730ad"
+checksum = "03468839009160513471e86a034bb2c5c0e4baae3b43f79ffc55c4a5427b3297"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.56"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa0faa943b50f3db30a20aa7e265dbc66076993efed8463e8de414e5d06d3471"
+checksum = "c61f3ba182994efc43764a46c018c347bc492c79f024e705f46567b418f6d4f7"
 dependencies = [
  "proc-macro2",
  "quote",

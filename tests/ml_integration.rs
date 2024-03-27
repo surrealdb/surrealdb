@@ -44,7 +44,7 @@ mod ml_integration {
 
 	async fn upload_file(addr: &str, ns: &str, db: &str) -> Result<(), Box<dyn std::error::Error>> {
 		let generator = StreamAdapter::new(5, "./tests/linear_test.surml".to_string());
-		let body = Body::wrap_stream(generator);
+		let body = Body::wrap_stream(generator).unwrap();
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
