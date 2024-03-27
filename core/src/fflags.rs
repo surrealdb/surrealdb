@@ -10,8 +10,8 @@ pub static FFLAGS: FFlags = FFlags {
 	// TODO(fflag-lqcf): This TODO signature marks tests that are affected by the fflag that do not have access to the fflag (scope)
     change_feed_live_queries: FFlagEnabledStatus {
         enabled_release: false,
-        enabled_debug: false,
-        enabled_test: false,
+        enabled_debug: true,
+        enabled_test: true,
         env_override: "SURREALDB_CHANGE_FEED_LIVE_QUERIES",
         owner: "Hugh Kaznowski",
         description: "Disables live queries as a separate feature and moves to using change feeds as the underlying mechanism",

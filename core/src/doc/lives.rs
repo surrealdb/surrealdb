@@ -116,10 +116,13 @@ impl<'a> Document<'a> {
 			let lq = Statement::from(*lv);
 			// Get the event action
 			let met = if stm.is_delete() {
+				trace!("The statement is delete, {}", stm);
 				Value::from("DELETE")
 			} else if self.is_new() {
+				trace!("The self doc is new, {:?}", self);
 				Value::from("CREATE")
 			} else {
+				trace!("Neither stm {} is delete or doc {:?} is new, so update", stm, self);
 				Value::from("UPDATE")
 			};
 			// Check if this is a delete statement
