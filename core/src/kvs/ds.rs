@@ -1028,6 +1028,7 @@ impl Datastore {
 		match mutation {
 			TableMutation::Set(a, b) => {
 				let doc = Document::new(None, Some(a), None, b, Workable::Normal);
+				panic!("Just a normal set");
 				Some(doc)
 			}
 			TableMutation::Del(a) => {
@@ -1036,7 +1037,14 @@ impl Datastore {
 			}
 			TableMutation::Def(_) => None,
 			TableMutation::SetWithDiff(id, new, _operations, new_record) => {
-				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
+				let original = if *new_record {
+					&Value::None
+				} else {
+					new
+				};
+				let doc =
+					Document::new_artificial(None, Some(id), None, new, original, Workable::Normal);
+				trace!("Constructed artificial document: {:?}, is_new={}", doc, doc.is_new());
 				// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 				Some(doc)
 			}

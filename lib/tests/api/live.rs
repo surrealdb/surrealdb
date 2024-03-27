@@ -195,6 +195,7 @@ async fn live_select_query() {
 
 	{
 		let table = Ulid::new().to_string();
+		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
 		let mut users = db
@@ -235,6 +236,7 @@ async fn live_select_query() {
 
 	{
 		let table = Ulid::new().to_string();
+		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
 		let mut users = db
@@ -257,6 +259,7 @@ async fn live_select_query() {
 
 	{
 		let table = Ulid::new().to_string();
+		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
 		let mut users = db
@@ -296,6 +299,7 @@ async fn live_select_query() {
 
 	{
 		let table = Ulid::new().to_string();
+		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
 		let mut users = db
