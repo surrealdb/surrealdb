@@ -188,7 +188,8 @@ mod ml_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-		let generator = StreamAdapter::new(5, "./tests/no_name_or_version.surml".to_string()).unwrap();
+		let generator =
+			StreamAdapter::new(5, "./tests/no_name_or_version.surml".to_string()).unwrap();
 		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
