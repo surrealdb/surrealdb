@@ -81,7 +81,7 @@ impl Writer {
 					true => {
 						let patches = current.diff(&previous, Idiom(Vec::new()));
 						let new_record = !previous.is_some();
-						trace!("The record is {new_record} because previous is {previous:?}");
+						trace!("The record is new_record={new_record} because previous is {previous:?}");
 						TableMutation::SetWithDiff(id, current.into_owned(), patches, new_record)
 					}
 					false => TableMutation::Set(id, current.into_owned()),
