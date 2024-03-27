@@ -148,7 +148,11 @@ impl RelateStatement {
 						None => i.ingest(Iterable::Relatable(f, tb.generate(), w)),
 					},
 					// The relation can not be any other type
-					_ => unreachable!(),
+					v => {
+						return Err(Error::RelateStatement {
+							value: v.to_string(),
+						})
+					}
 				};
 			}
 		}
