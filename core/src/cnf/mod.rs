@@ -1,27 +1,5 @@
 use once_cell::sync::Lazy;
 
-#[macro_export]
-macro_rules! lazy_env_parse {
-	($key:expr, $t:ty, $default:expr) => {
-		once_cell::sync::Lazy::new(|| {
-			std::env::var($key)
-				.and_then(|s| Ok(s.parse::<$t>().unwrap_or($default)))
-				.unwrap_or($default)
-		})
-	};
-}
-
-#[macro_export]
-macro_rules! lazy_env_parse_or_else {
-	($key:expr, $t:ty, $default:expr) => {
-		once_cell::sync::Lazy::new(|| {
-			std::env::var($key)
-				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_else($default)))
-				.unwrap_or_else($default)
-		})
-	};
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
