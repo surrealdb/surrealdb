@@ -20,12 +20,6 @@ use nom::{
 
 pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let (i, _) = tag_no_case("FIELD")(i)?;
-	#[cfg(feature = "sql2")]
-	let (i, if_not_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, what, opts)) = cut(|i| {
 		let (i, name) = idiom::local(i)?;
@@ -35,9 +29,6 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 		let (i, _) = shouldbespace(i)?;
 		let (i, what) = ident(i)?;
 		let (i, opts) = many0(field_opts)(i)?;
-		#[cfg(feature = "sql2")]
-		let one_of = "one of FLEX(IBLE), TYPE, READONLY, VALUE, ASSERT, DEFAULT, or COMMENT";
-		#[cfg(not(feature = "sql2"))]
 		let one_of = "one of FLEX(IBLE), TYPE, VALUE, ASSERT, DEFAULT, or COMMENT";
 		let (i, _) = expected(one_of, cut(ending::query))(i)?;
 		Ok((i, (name, what, opts)))
@@ -46,8 +37,6 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let mut res = DefineFieldStatement {
 		name,
 		what,
-		#[cfg(feature = "sql2")]
-		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
@@ -58,10 +47,6 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 			}
 			DefineFieldOption::Kind(v) => {
 				res.kind = Some(v);
-			}
-			#[cfg(feature = "sql2")]
-			DefineFieldOption::ReadOnly => {
-				res.readonly = true;
 			}
 			DefineFieldOption::Value(v) => {
 				res.value = Some(v);
@@ -87,8 +72,6 @@ pub fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 enum DefineFieldOption {
 	Flex,
 	Kind(Kind),
-	#[cfg(feature = "sql2")]
-	ReadOnly,
 	Value(Value),
 	Assert(Value),
 	Default(Value),
@@ -100,8 +83,6 @@ fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
 	alt((
 		field_flex,
 		field_kind,
-		#[cfg(feature = "sql2")]
-		field_readonly,
 		field_value,
 		field_assert,
 		field_default,
@@ -122,13 +103,6 @@ fn field_kind(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = cut(kind)(i)?;
 	Ok((i, DefineFieldOption::Kind(v)))
-}
-
-#[cfg(feature = "sql2")]
-fn field_readonly(i: &str) -> IResult<&str, DefineFieldOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("READONLY")(i)?;
-	Ok((i, DefineFieldOption::ReadOnly))
 }
 
 fn field_value(i: &str) -> IResult<&str, DefineFieldOption> {

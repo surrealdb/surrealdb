@@ -76,8 +76,6 @@ pub fn binary_symbols(i: &str) -> IResult<&str, Operator> {
 			value(Operator::Mul, char('∙')),
 			value(Operator::Div, char('/')),
 			value(Operator::Div, char('÷')),
-			#[cfg(feature = "sql2")]
-			value(Operator::Rem, char('%')),
 		)),
 		alt((
 			value(Operator::Contain, char('∋')),
@@ -231,13 +229,13 @@ mod tests {
 		let res = knn("<5>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<|5|>", format!("{}", out));
+		assert_eq!("<5>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(5, None));
 
 		let res = knn("<|5|>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<|5|>", format!("{}", out));
+		assert_eq!("<5>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(5, None));
 	}
 
@@ -246,13 +244,13 @@ mod tests {
 		let res = knn("<3,EUCLIDEAN>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<|3,EUCLIDEAN|>", format!("{}", out));
+		assert_eq!("<3,EUCLIDEAN>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(3, Some(Distance::Euclidean)));
 
 		let res = knn("<|3,EUCLIDEAN|>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<|3,EUCLIDEAN|>", format!("{}", out));
+		assert_eq!("<3,EUCLIDEAN>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(3, Some(Distance::Euclidean)));
 	}
 
@@ -261,7 +259,7 @@ mod tests {
 		let res = knn("<|5|>");
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<|5|>", format!("{}", out));
+		assert_eq!("<5>", format!("{}", out));
 		assert_eq!(out, Operator::Knn(5, None));
 	}
 }

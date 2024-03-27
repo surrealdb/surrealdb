@@ -41,7 +41,7 @@ kv-surrealkv = ["dep:surrealkv", "tokio/time"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core1", "dep:ndarray"]
-jwks = ["dep:reqwest", "sql2"]
+jwks = ["dep:reqwest"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -50,7 +50,6 @@ arbitrary = [
     "uuid/arbitrary",
 ]
 experimental-parser = ["dep:phf", "dep:unicase"]
-sql2 = []
 # Private features
 kv-fdb = ["tokio/time"]
 

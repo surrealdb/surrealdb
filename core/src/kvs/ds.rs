@@ -17,8 +17,6 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 use crate::cf;
 use crate::cf::{ChangeSet, TableMutation};
 use crate::ctx::Context;
-#[cfg(feature = "jwks")]
-use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
 	Statement, Variables, Workable,
@@ -430,12 +428,6 @@ impl Datastore {
 	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
 	pub fn is_auth_level_enabled(&self) -> bool {
 		self.auth_level_enabled
-	}
-
-	/// Does the datastore allow connections to a network target?
-	#[cfg(feature = "jwks")]
-	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
-		self.capabilities.allows_network_target(net_target)
 	}
 
 	/// Setup the initial credentials

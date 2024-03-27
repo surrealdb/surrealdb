@@ -1,5 +1,3 @@
-#[cfg(all(not(feature = "jwks"), feature = "sql2"))]
-use super::super::super::error::ParseError::Expected;
 use super::super::super::{
 	comment::shouldbespace,
 	ending,
@@ -14,17 +12,9 @@ use crate::{
 };
 use nom::Err;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
-#[cfg(feature = "sql2")]
-use nom::{combinator::opt, sequence::tuple};
 
 pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
-	#[cfg(feature = "sql2")]
-	let (i, if_not_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, base, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -40,21 +30,12 @@ pub fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let mut res = DefineTokenStatement {
 		name,
 		base,
-		#[cfg(feature = "sql2")]
-		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
 	for opt in opts {
 		match opt {
 			DefineTokenOption::Type(v) => {
-				#[cfg(all(not(feature = "jwks"), feature = "sql2"))]
-				if matches!(v, Algorithm::Jwks) {
-					return Err(Err::Error(Expected {
-						tried: i,
-						expected: "the 'jwks' feature to be enabled",
-					}));
-				}
 				res.kind = v;
 			}
 			DefineTokenOption::Value(v) => {

@@ -18,12 +18,6 @@ use nom::{
 
 pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 	let (i, _) = tag_no_case("EVENT")(i)?;
-	#[cfg(feature = "sql2")]
-	let (i, if_not_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, what, opts)) = cut(|i| {
 		let (i, name) = ident(i)?;
@@ -41,8 +35,6 @@ pub fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 		name,
 		what,
 		when: Value::Bool(true),
-		#[cfg(feature = "sql2")]
-		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
