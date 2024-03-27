@@ -46,7 +46,7 @@ mod ml_integration {
 		let generator = StreamAdapter::new(
 			5, "./tests/linear_test.surml".to_string()
 		).unwrap();
-		let body = Body::wrap_stream(generator).unwrap();
+		let body = Body::wrap_stream(generator);
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
