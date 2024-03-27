@@ -1509,3 +1509,28 @@ async fn run_functions() {
 	// Test passed
 	server.finish().unwrap();
 }
+
+#[test(tokio::test)]
+async fn relate_rpc() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// create records and relate
+	socket.send_message_query("CREATE foo:a, foo:b").await.unwrap();
+	socket
+		.send_message_relate("foo:a".into(), "bar".into(), "foo:b".into(), Some(json!({"val": 42})))
+		.await
+		.unwrap();
+	// test
+	let mut res = socket.send_message_query("foo:a->bar->foo").await.unwrap();
+	let expected = json!([{"val": 42, "id": "foo:b"}]);
+	assert_eq!(res.remove(0), expected);
+
+	// Test passed
+	server.finish().unwrap();
+}
