@@ -1463,3 +1463,49 @@ async fn session_reauthentication_expired() {
 	// Test passed
 	server.finish().unwrap();
 }
+
+#[test(tokio::test)]
+async fn run_functions() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Define function
+	socket
+		.send_message_query("DEFINE FUNCTION fn::foo() {RETURN 'fn::foo called';}")
+		.await
+		.unwrap();
+	socket
+		.send_message_query(
+			"DEFINE FUNCTION fn::bar($val: string) {RETURN 'fn::bar called with: ' + $val;}",
+		)
+		.await
+		.unwrap();
+	// call functions
+	let res = socket.send_message_run("fn::foo", None, vec![]).await.unwrap();
+	assert!(matches!(res, serde_json::Value::String(s) if &s == "fn::foo called"));
+	let res = socket.send_message_run("fn::bar", None, vec![]).await;
+	assert!(res.is_err());
+	let res = socket.send_message_run("fn::bar", None, vec![42.into()]).await;
+	assert!(res.is_err());
+	let res = socket.send_message_run("fn::bar", None, vec!["first".into(), "second".into()]).await;
+	assert!(res.is_err());
+	let res = socket.send_message_run("fn::bar", None, vec!["string_val".into()]).await.unwrap();
+	assert!(matches!(res, serde_json::Value::String(s) if &s == "fn::bar called with: string_val"));
+
+	// normal functions
+	let res = socket.send_message_run("math::abs", None, vec![(-42).into()]).await.unwrap();
+	assert!(matches!(res, serde_json::Value::Number(n) if n.as_u64() == Some(42)));
+	let res = socket
+		.send_message_run("math::max", None, vec![vec![1, 2, 3, 4, 5, 6].into()])
+		.await
+		.unwrap();
+	assert!(matches!(res, serde_json::Value::Number(n) if n.as_u64() == Some(6)));
+
+	// Test passed
+	server.finish().unwrap();
+}
