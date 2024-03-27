@@ -1,5 +1,27 @@
 use once_cell::sync::Lazy;
 
+#[macro_export]
+macro_rules! lazy_env_parse {
+	($key:expr, $t:ty, $default:expr) => {
+		once_cell::sync::Lazy::new(|| {
+			std::env::var($key)
+				.and_then(|s| Ok(s.parse::<$t>().unwrap_or($default)))
+				.unwrap_or($default)
+		})
+	};
+}
+
+#[macro_export]
+macro_rules! lazy_env_parse_or_else {
+	($key:expr, $t:ty, $default:expr) => {
+		once_cell::sync::Lazy::new(|| {
+			std::env::var($key)
+				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_else($default)))
+				.unwrap_or_else($default)
+		})
+	};
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
@@ -17,9 +39,8 @@ pub const MAX_CONCURRENT_TASKS: usize = 64;
 /// During query execution, all potentially-recursive code paths count against this limit. Whereas
 /// parsing assigns equal weight to each recursion, certain expensive code paths are allowed to
 /// count for more than one unit of depth during execution.
-pub static MAX_COMPUTATION_DEPTH: Lazy<u8> = Lazy::new(|| {
-	option_env!("SURREAL_MAX_COMPUTATION_DEPTH").and_then(|s| s.parse::<u8>().ok()).unwrap_or(120)
-});
+pub static MAX_COMPUTATION_DEPTH: Lazy<u8> =
+	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u8, 120);
 
 /// Specifies the names of parameters which can not be specified in a query.
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];
@@ -37,8 +58,5 @@ pub const SERVER_NAME: &str = "SurrealDB";
 pub const PROCESSOR_BATCH_SIZE: u32 = 50;
 
 /// Forward all signup/signin query errors to a client trying authenticate to a scope. Do not use in production.
-pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> = Lazy::new(|| {
-	option_env!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS")
-		.and_then(|s| s.parse::<bool>().ok())
-		.unwrap_or(false)
-});
+pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> =
+	lazy_env_parse!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS", bool, false);
