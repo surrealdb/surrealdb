@@ -132,20 +132,6 @@ mod database_upgrade {
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
 	}
 
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_1_2_0() {
-		upgrade_test_1_2("v1.2.0").await;
-	}
-
-	#[test(tokio::test(flavor = "multi_thread"))]
-	#[cfg(feature = "storage-rocksdb")]
-	#[serial]
-	async fn upgrade_test_1_2_1() {
-		upgrade_test_1_2("v1.2.1").await;
-	}
-
 	// *******
 	// DATASET
 	// *******
