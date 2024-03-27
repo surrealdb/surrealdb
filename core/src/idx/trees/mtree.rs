@@ -279,6 +279,7 @@ impl KnnResultBuilder {
 	}
 }
 
+#[non_exhaustive]
 pub struct KnnResult {
 	docs: VecDeque<DocId>,
 	#[cfg(debug_assertions)]
@@ -288,6 +289,7 @@ pub struct KnnResult {
 
 // https://en.wikipedia.org/wiki/M-tree
 // https://arxiv.org/pdf/1004.4216.pdf
+#[non_exhaustive]
 pub struct MTree {
 	state: MState,
 	distance: Distance,
@@ -1336,6 +1338,7 @@ type LeafMap = BTreeMap<SharedVector, ObjectProperties>;
 /// Both LeafNodes and InternalNodes are implemented as a map.
 /// In this map, the key is an object, and the values correspond to its properties.
 /// In essence, an entry can be visualized as a tuple of the form (object, properties).
+#[non_exhaustive]
 pub enum MTreeNode {
 	Internal(InternalNode),
 	Leaf(LeafNode),
@@ -1549,6 +1552,7 @@ impl From<MtStatistics> for Value {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct MState {
 	capacity: u16,
 	root: Option<NodeId>,
@@ -1570,6 +1574,7 @@ impl MState {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[non_exhaustive]
 pub struct RoutingProperties {
 	// Reference to the node
 	node: NodeId,
@@ -1580,6 +1585,7 @@ pub struct RoutingProperties {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[non_exhaustive]
 pub struct ObjectProperties {
 	// Distance to its parent object
 	parent_dist: f64,

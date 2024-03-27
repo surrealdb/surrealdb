@@ -27,6 +27,7 @@ pub use reader::{BytesReader, CharError};
 /// Can be retrieved from the `Lexer::error` field whenever it returned a [`TokenKind::Invalid`]
 /// token.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	#[error("Lexer encountered unexpected character {0:?}")]
 	UnexpectedCharacter(char),
@@ -71,6 +72,7 @@ impl From<CharError> for Error {
 /// Note that SurrealQL syntax cannot be lexed in advance. For example, record strings and regexes,
 /// both cannot be parsed correctly without knowledge of previous tokens as they are both ambigious
 /// with other tokens.
+#[non_exhaustive]
 pub struct Lexer<'a> {
 	/// The reader for reading the source bytes.
 	pub reader: BytesReader<'a>,

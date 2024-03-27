@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum Entry {
 	// Single definitions
 	Db(Arc<DefineDatabaseStatement>),
@@ -51,6 +52,7 @@ pub enum Entry {
 }
 
 #[derive(Default)]
+#[non_exhaustive]
 pub struct Cache(pub HashMap<Key, Entry>);
 
 impl Cache {
