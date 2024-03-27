@@ -20,6 +20,8 @@ use crate::sql::Permission;
 use futures::future::try_join_all;
 #[cfg(any(feature = "ml", feature = "ml2"))]
 use std::collections::HashMap;
+#[cfg(any(feature = "ml", feature = "ml2"))]
+use crate::ml::errors::error::SurrealError;
 
 #[cfg(any(feature = "ml", feature = "ml2"))]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
@@ -125,11 +127,15 @@ impl Model {
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(
+						|err: SurrealError| Error::ModelComputation(err.message.to_string())
+					)?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.buffered_compute(&mut args).map_err(Error::ModelComputation)
+					compute_unit.buffered_compute(&mut args).map_err(
+						|err: SurrealError| Error::ModelComputation(err.message.to_string())
+					)
 				})
 				.await
 				.unwrap()?;
@@ -149,11 +155,15 @@ impl Model {
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(
+						|err: SurrealError| Error::ModelComputation(err.message.to_string())
+					)?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+					compute_unit.raw_compute(tensor, None).map_err(
+						|err: SurrealError| Error::ModelComputation(err.message.to_string())
+					)
 				})
 				.await
 				.unwrap()?;
@@ -177,11 +187,15 @@ impl Model {
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(
+						|err: SurrealError| Error::ModelComputation(err.message.to_string())
+					)?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+					compute_unit.raw_compute(tensor, None).map_err(
+						|err: SurrealError| Error::ModelComputation(err.message.to_string())
+					)
 				})
 				.await
 				.unwrap()?;
