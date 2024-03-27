@@ -97,6 +97,26 @@ impl<'a> Document<'a> {
 			initial: CursorDoc::new(ir, id, doc_id, val),
 		}
 	}
+
+	/// Create a new document that is not going through the standard lifecycle of documents
+	///
+	/// This allows for it to be crafted without needing statements to operate on it
+	#[doc(hidden)]
+	pub fn new_artificial(
+		ir: Option<IteratorRef>,
+		id: Option<&'a Thing>,
+		doc_id: Option<DocId>,
+		val: &'a Value,
+		initial: &'a Value,
+		extras: Workable,
+	) -> Self {
+		Document {
+			id,
+			extras,
+			current: CursorDoc::new(ir, id, doc_id, val),
+			initial: CursorDoc::new(ir, id, doc_id, initial),
+		}
+	}
 }
 
 impl<'a> Document<'a> {

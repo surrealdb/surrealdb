@@ -79,7 +79,9 @@ impl Writer {
 				match store_difference {
 					true => {
 						let patches = current.diff(&previous, Idiom(Vec::new()));
-						TableMutation::SetWithDiff(id, current.into_owned(), patches)
+						let new_record = !previous.is_some();
+						trace!("The record is new_record={new_record} because previous is {previous:?}");
+						TableMutation::SetWithDiff(id, current.into_owned(), patches, new_record)
 					}
 					false => TableMutation::Set(id, current.into_owned()),
 				},
@@ -287,6 +289,7 @@ mod tests {
 							Thing::from(("mytb".to_string(), "A".to_string())),
 							Value::None,
 							vec![],
+							false,
 						)],
 						false => vec![TableMutation::Set(
 							Thing::from(("mytb".to_string(), "A".to_string())),
@@ -304,6 +307,7 @@ mod tests {
 							Thing::from(("mytb".to_string(), "C".to_string())),
 							Value::None,
 							vec![],
+							false,
 						)],
 						false => vec![TableMutation::Set(
 							Thing::from(("mytb".to_string(), "C".to_string())),
@@ -322,11 +326,13 @@ mod tests {
 								Thing::from(("mytb".to_string(), "B".to_string())),
 								Value::None,
 								vec![],
+								false,
 							),
 							TableMutation::SetWithDiff(
 								Thing::from(("mytb".to_string(), "C".to_string())),
 								Value::None,
 								vec![],
+								false,
 							),
 						],
 						false => vec![
@@ -370,11 +376,13 @@ mod tests {
 							Thing::from(("mytb".to_string(), "B".to_string())),
 							Value::None,
 							vec![],
+							false,
 						),
 						TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "C".to_string())),
 							Value::None,
 							vec![],
+							false,
 						),
 					],
 					false => vec![

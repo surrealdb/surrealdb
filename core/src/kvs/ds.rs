@@ -84,7 +84,7 @@ pub struct Datastore {
 	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, Vec<LqIndexValue>>>>,
 	// Set of tracked change feeds with associated watermarks
 	// This is updated with new/removed live queries and improves cf request performance
-	cf_watermarks: Arc<RwLock<BTreeMap<LqSelector, Versionstamp>>>,
+	cf_watermarks: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -363,7 +363,7 @@ impl Datastore {
 			clock,
 			index_stores: IndexStores::default(),
 			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
-			cf_watermarks: Arc::new(RwLock::new(BTreeMap::new())),
+			cf_watermarks: Arc::new(Mutex::new(BTreeMap::new())),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 		})
@@ -883,49 +883,21 @@ impl Datastore {
 
 		// Change map includes a mapping of selector to changesets, ordered by versionstamp
 		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
-		let mut tx = self.transaction(Read, Optimistic).await?;
-		let mut tracked_cfs = self.cf_watermarks.write().await;
-		let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
-		for (selector, vs) in tracked_cfs.iter() {
-			// Read the change feed for the selector
-			let res = cf::read(
-				&mut tx,
-				&selector.ns,
-				&selector.db,
-				// Technically, we can not fetch by table and do the per-table filtering this side.
-				// That is an improvement though
-				Some(&selector.tb),
-				ShowSince::versionstamp(vs),
-				Some(self.engine_options.live_query_catchup_size),
+		{
+			let tx = self.transaction(Read, Optimistic).await?;
+			let tracked_cfs_updates = find_required_cfs_to_catch_up(
+				tx,
+				self.cf_watermarks.clone(),
+				self.engine_options.live_query_catchup_size,
+				&mut change_map,
 			)
 			.await?;
-			// Confirm we do need to change watermark - this is technically already handled by the cf range scan
-			if res.is_empty() {
-				trace!(
-					"There were no changes in the change feed for {:?} from versionstamp {:?}",
-					selector,
-					conv::versionstamp_to_u64(vs)
-				)
+			// Now we update since we are no longer iterating immutably
+			let mut tracked_cfs = self.cf_watermarks.lock().await;
+			for (selector, vs) in tracked_cfs_updates {
+				tracked_cfs.insert(selector, vs);
 			}
-			if let Some(change_set) = res.last() {
-				if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
-					trace!("Adding a change set for lq notification processing");
-					// Update the cf watermark so we can progress scans
-					// If the notifications fail from here-on, they are lost
-					// this is a separate vec that we later insert to because we are iterating immutably
-					// We shouldn't use a read lock because of consistency between watermark scans
-					tracked_cfs_updates.push((selector.clone(), change_set.0));
-					// This does not guarantee a notification, as a changeset an include many tables and many changes
-					change_map.insert(selector.clone(), res);
-				}
-			}
-		}
-		tx.cancel().await?;
-
-		// Now we update since we are no longer iterating immutably
-		for (selector, vs) in tracked_cfs_updates {
-			tracked_cfs.insert(selector, vs);
-		}
+		};
 
 		for (selector, change_sets) in change_map {
 			// find matching live queries
@@ -943,83 +915,128 @@ impl Datastore {
 
 			// Find relevant changes
 			let tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
+			trace!("There are {} change sets", change_sets.len());
+			trace!(
+				"\n{}",
+				change_sets
+					.iter()
+					.enumerate()
+					.map(|(i, x)| format!("[{i}] {:?}", x))
+					.collect::<Vec<String>>()
+					.join("\n")
+			);
 			for change_set in change_sets {
-				// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
-				for (lq_key, lq_value) in lq_pairs.iter() {
+				self.process_change_set_for_notifications(tx.clone(), opt, change_set, &lq_pairs)
+					.await?;
+			}
+		}
+		trace!("Finished process lq successfully");
+		Ok(())
+	}
+
+	async fn process_change_set_for_notifications(
+		&self,
+		tx: Arc<Mutex<Transaction>>,
+		opt: &Options,
+		change_set: ChangeSet,
+		lq_pairs: &Vec<(LqIndexKey, LqIndexValue)>,
+	) -> Result<(), Error> {
+		// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
+		trace!("Moving to next change set, {:?}", change_set);
+		for (lq_key, lq_value) in lq_pairs.iter() {
+			trace!(
+				"Processing live query for notification key={:?} and value={:?}",
+				lq_key,
+				lq_value
+			);
+			let change_vs = change_set.0;
+			let database_mutation = &change_set.1;
+			for table_mutations in database_mutation.0.iter() {
+				if table_mutations.0 == lq_key.selector.tb {
+					// Create a doc of the table value
+					// Run the 'lives' logic on the doc, while providing live queries instead of reading from storage
+					// This will generate and send notifications
 					trace!(
-						"Processing live query for notification key={:?} and value={:?}",
-						lq_key,
-						lq_value
+						"There are {} table mutations being prepared for notifications",
+						table_mutations.1.len()
 					);
-					let change_vs = change_set.0;
-					let database_mutation = &change_set.1;
-					for table_mutations in database_mutation.0.iter() {
-						if table_mutations.0 == lq_key.selector.tb {
-							// Create a doc of the table value
-							// Run the 'lives' logic on the doc, while providing live queries instead of reading from storage
-							// This will generate and send notifications
-							for mutation in table_mutations.1.iter() {
-								if let Some(doc) = Self::construct_document(mutation) {
-									// We know we are only processing a single LQ at a time, so we can limit notifications to 1
-									let notification_capacity = 1;
-									// We track notifications as a separate channel in case we want to process
-									// for the current state we only forward
-									let (sender, receiver) =
-										channel::bounded(notification_capacity);
-									doc.check_lqs_and_send_notifications(
-										opt,
-										&Statement::Live(&lq_value.stm),
-										&tx,
-										[&lq_value.stm].as_slice(),
-										&sender,
-									)
+					for (i, mutation) in table_mutations.1.iter().enumerate() {
+						trace!(
+							"[{} @ {:?}] Processing table mutation: {:?}",
+							i,
+							change_vs,
+							mutation
+						);
+						trace!("Constructing document from mutation");
+						if let Some(doc) = Self::construct_document(mutation) {
+							// We know we are only processing a single LQ at a time, so we can limit notifications to 1
+							let notification_capacity = 1;
+							// We track notifications as a separate channel in case we want to process
+							// for the current state we only forward
+							let (sender, receiver) = channel::bounded(notification_capacity);
+							doc.check_lqs_and_send_notifications(
+								opt,
+								&Statement::Live(&lq_value.stm),
+								&tx,
+								[&lq_value.stm].as_slice(),
+								&sender,
+							)
+							.await
+							.map_err(|e| {
+								Error::Internal(format!(
+									"Error checking lqs for notifications: {:?}",
+									e
+								))
+							})?;
+
+							// Send the notifications to driver or api
+							// TODO: evaluate if we want channel directly instead of proxy
+							while let Ok(notification) = receiver.try_recv() {
+								trace!("Sending notification to client");
+								self.notification_channel
+									.as_ref()
+									.unwrap()
+									.0
+									.send(notification)
 									.await
-									.map_err(|e| {
-										Error::Internal(format!(
-											"Error checking lqs for notifications: {:?}",
-											e
-										))
-									})?;
-
-									// Send the notifications to driver or api
-									// TODO: evaluate if we want channel directly instead of proxy
-									while let Ok(notification) = receiver.try_recv() {
-										trace!("Sending notification to client");
-										self.notification_channel
-											.as_ref()
-											.unwrap()
-											.0
-											.send(notification)
-											.await
-											.unwrap();
-									}
-									trace!("Ended notification sending")
-								}
-
-								// Update watermarks
-								trace!(
-									"Updating watermark to {:?} for index key {:?}",
-									change_vs,
-									lq_key
-								);
-
-								// For each live query we have processed we update the watermarks
-								self.local_live_queries.write().await.insert(
-									(*lq_key).clone(),
-									vec![LqIndexValue {
-										vs: change_vs,
-										..lq_value.clone()
-									}],
-								);
-
-								// We also update the tracked_cfs with a minimum watermark
+									.unwrap();
 							}
+							trace!("Ended notification sending")
 						}
+
+						self.update_versionstamp(&change_vs, lq_key, lq_value).await;
 					}
 				}
 			}
 		}
 		Ok(())
+	}
+
+	async fn update_versionstamp(
+		&self,
+		change_vs: &Versionstamp,
+		lq_key: &LqIndexKey,
+		lq_value: &LqIndexValue,
+	) {
+		// We increase the watermark because scans are inclusive of first result
+		// And we have already processed the input watermark - it is derived from the event
+		// let change_vs = conv::try_u128_to_versionstamp(conv::to_u128_be(*change_vs) + 1).unwrap();
+
+		// Update watermarks
+		trace!("Updating watermark to {:?} for index key {:?}", change_vs, lq_key);
+		// For each live query we have processed we update the watermarks
+		self.local_live_queries.write().await.insert(
+			lq_key.clone(),
+			vec![LqIndexValue {
+				vs: *change_vs,
+				..lq_value.clone()
+			}],
+		);
+
+		// TODO(phugk) We also update the tracked_cfs with a minimum watermark
+		let mut tracked_cfs = self.cf_watermarks.lock().await;
+		// TODO we may be able to re-use the key without cloning...
+		tracked_cfs.insert(lq_key.selector.clone(), *change_vs).unwrap();
 	}
 
 	/// Construct a document from a Change Feed mutation
@@ -1035,8 +1052,19 @@ impl Datastore {
 				Some(doc)
 			}
 			TableMutation::Def(_) => None,
-			TableMutation::SetWithDiff(id, new, _operations) => {
-				let doc = Document::new(None, Some(id), None, new, Workable::Normal);
+			TableMutation::SetWithDiff(id, new, _operations, new_record) => {
+				let original = if *new_record {
+					&Value::None
+				} else {
+					new
+				};
+				let doc =
+					Document::new_artificial(None, Some(id), None, new, original, Workable::Normal);
+				trace!(
+					"Constructed artificial document: {:?}, is_new={}, and new_record={new_record}",
+					doc,
+					doc.is_new()
+				);
 				// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 				Some(doc)
 			}
@@ -1051,7 +1079,7 @@ impl Datastore {
 	) -> Result<(), Error> {
 		// Lock the local live queries
 		let mut lq_map = self.local_live_queries.write().await;
-		let mut cf_watermarks = self.cf_watermarks.write().await;
+		let mut cf_watermarks = self.cf_watermarks.lock().await;
 		let mut watermarks_to_check: Vec<LqIndexKey> = vec![];
 		for lq in lqs {
 			match lq {
@@ -1620,4 +1648,50 @@ impl Datastore {
 		// All ok
 		Ok(())
 	}
+}
+
+async fn find_required_cfs_to_catch_up(
+	mut tx: Transaction,
+	tracked_cfs: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
+	catchup_size: u32,
+	change_map: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
+) -> Result<Vec<(LqSelector, Versionstamp)>, Error> {
+	let tracked_cfs = tracked_cfs.lock().await;
+	let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
+	for (selector, vs) in tracked_cfs.iter() {
+		// Read the change feed for the selector
+		let res = cf::read(
+			&mut tx,
+			&selector.ns,
+			&selector.db,
+			// Technically, we can not fetch by table and do the per-table filtering this side.
+			// That is an improvement though
+			Some(&selector.tb),
+			ShowSince::versionstamp(vs),
+			Some(catchup_size),
+		)
+		.await?;
+		// Confirm we do need to change watermark - this is technically already handled by the cf range scan
+		if res.is_empty() {
+			trace!(
+				"There were no changes in the change feed for {:?} from versionstamp {:?}",
+				selector,
+				conv::versionstamp_to_u64(vs)
+			)
+		}
+		if let Some(change_set) = res.last() {
+			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
+				trace!("Adding a change set for lq notification processing");
+				// Update the cf watermark so we can progress scans
+				// If the notifications fail from here-on, they are lost
+				// this is a separate vec that we later insert to because we are iterating immutably
+				// We shouldn't use a read lock because of consistency between watermark scans
+				tracked_cfs_updates.push((selector.clone(), change_set.0));
+				// This does not guarantee a notification, as a changeset an include many tables and many changes
+				change_map.insert(selector.clone(), res);
+			}
+		}
+	}
+	tx.cancel().await?;
+	Ok(tracked_cfs_updates)
 }
