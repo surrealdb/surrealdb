@@ -119,6 +119,102 @@ mod ml_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn upload_file_with_no_name() -> Result<(), Box<dyn std::error::Error>> {
+		let _lock = LockHandle::acquire_lock();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let generator = StreamAdapter::new(5, "./tests/no_name.surml".to_string()).unwrap();
+		let body = Body::wrap_stream(generator);
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_secs(1))
+			.default_headers(headers)
+			.build()?;
+		// Send HTTP request
+		let res = client
+			.post(format!("http://{addr}/ml/import"))
+			.basic_auth(common::USER, Some(common::PASS))
+			.body(body)
+			.send()
+			.await?;
+		// Check response code
+		let raw_data = res.text().await?;
+		let response: ErrorResponse = serde_json::from_str(&raw_data)?;
+
+		assert_eq!(response.code, 400);
+		assert_eq!("Model name and version must be set".to_string(), response.information);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn upload_file_with_no_version() -> Result<(), Box<dyn std::error::Error>> {
+		let _lock = LockHandle::acquire_lock();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let generator = StreamAdapter::new(5, "./tests/no_version.surml".to_string()).unwrap();
+		let body = Body::wrap_stream(generator);
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_secs(1))
+			.default_headers(headers)
+			.build()?;
+		// Send HTTP request
+		let res = client
+			.post(format!("http://{addr}/ml/import"))
+			.basic_auth(common::USER, Some(common::PASS))
+			.body(body)
+			.send()
+			.await?;
+		// Check response code
+		let raw_data = res.text().await?;
+		let response: ErrorResponse = serde_json::from_str(&raw_data)?;
+
+		assert_eq!(response.code, 400);
+		assert_eq!("Model name and version must be set".to_string(), response.information);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn upload_file_with_no_version_or_name() -> Result<(), Box<dyn std::error::Error>> {
+		let _lock = LockHandle::acquire_lock();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		let generator = StreamAdapter::new(5, "./tests/no_name_or_version.surml".to_string()).unwrap();
+		let body = Body::wrap_stream(generator);
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", ns.parse()?);
+		headers.insert("DB", db.parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_secs(1))
+			.default_headers(headers)
+			.build()?;
+		// Send HTTP request
+		let res = client
+			.post(format!("http://{addr}/ml/import"))
+			.basic_auth(common::USER, Some(common::PASS))
+			.body(body)
+			.send()
+			.await?;
+		// Check response code
+		let raw_data = res.text().await?;
+		let response: ErrorResponse = serde_json::from_str(&raw_data)?;
+
+		assert_eq!(response.code, 400);
+		assert_eq!("Model name and version must be set".to_string(), response.information);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn raw_compute() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
