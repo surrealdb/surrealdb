@@ -12,10 +12,12 @@ use surrealkv::Options;
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
 
+#[non_exhaustive]
 pub struct Datastore {
 	db: Store,
 }
 
+#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,

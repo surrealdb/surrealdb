@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 // Vs stands for Database Versionstamp
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Vs<'a> {
 	__: u8,
 	_a: u8,

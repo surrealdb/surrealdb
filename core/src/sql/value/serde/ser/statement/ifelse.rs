@@ -7,6 +7,7 @@ use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -36,6 +37,7 @@ impl ser::Serializer for Serializer {
 type ValueValueTuple = (Value, Value);
 
 #[derive(Default)]
+#[non_exhaustive]
 pub struct SerializeIfelseStatement {
 	exprs: Vec<ValueValueTuple>,
 	close: Option<Value>,
@@ -71,6 +73,7 @@ impl serde::ser::SerializeStruct for SerializeIfelseStatement {
 	}
 }
 
+#[non_exhaustive]
 pub struct ValueValueVecSerializer;
 
 impl ser::Serializer for ValueValueVecSerializer {
@@ -92,6 +95,7 @@ impl ser::Serializer for ValueValueVecSerializer {
 	}
 }
 
+#[non_exhaustive]
 pub struct SerializeValueValueVec(Vec<ValueValueTuple>);
 
 impl serde::ser::SerializeSeq for SerializeValueValueVec {

@@ -12,6 +12,7 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct RemoveTableStatement {
 	pub name: Ident,
 	#[revision(start = 2)]

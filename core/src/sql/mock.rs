@@ -5,6 +5,7 @@ use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Mock";
 
+#[non_exhaustive]
 pub struct IntoIter {
 	model: Mock,
 	index: u64,
@@ -47,6 +48,7 @@ impl Iterator for IntoIter {
 #[serde(rename = "$surrealdb::private::sql::Mock")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),

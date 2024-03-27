@@ -4,6 +4,7 @@ use crate::syn::v2::token::Span;
 use std::fmt;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum CharError {
 	#[error("found eof inside multi byte character")]
 	Eof,
@@ -12,6 +13,7 @@ pub enum CharError {
 }
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct BytesReader<'a> {
 	data: &'a [u8],
 	current: usize,

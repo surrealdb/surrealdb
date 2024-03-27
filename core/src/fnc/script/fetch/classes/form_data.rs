@@ -12,6 +12,7 @@ use std::{collections::HashMap, string::String as StdString};
 use crate::fnc::script::fetch::classes::Blob;
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum FormDataValue<'js> {
 	String(String<'js>),
 	Blob {
@@ -47,6 +48,7 @@ impl<'js> FormDataValue<'js> {
 
 #[js::class]
 #[derive(Clone, Trace)]
+#[non_exhaustive]
 pub struct FormData<'js> {
 	#[qjs(skip_trace)]
 	pub(crate) values: HashMap<StdString, Vec<FormDataValue<'js>>>,

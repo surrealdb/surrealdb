@@ -5,6 +5,7 @@ use crate::sql::value::Value;
 
 mod uuid;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl js::module::ModuleDef for Package {

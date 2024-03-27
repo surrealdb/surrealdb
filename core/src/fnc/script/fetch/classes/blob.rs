@@ -8,6 +8,7 @@ use js::{
 };
 
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum EndingType {
 	Transparent,
 	Native,
@@ -78,6 +79,7 @@ fn normalize_type(mut ty: String) -> String {
 
 #[derive(Clone, Trace)]
 #[js::class]
+#[non_exhaustive]
 pub struct Blob {
 	pub(crate) mime: String,
 	// TODO: make bytes?

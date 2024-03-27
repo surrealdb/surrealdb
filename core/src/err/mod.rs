@@ -25,6 +25,7 @@ use thiserror::Error;
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[non_exhaustive]
+#[non_exhaustive]
 pub enum Error {
 	/// This error is used for ignoring a document when processing a query
 	#[doc(hidden)]
@@ -1043,6 +1044,7 @@ impl Serialize for Error {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 #[non_exhaustive]
 pub enum LiveQueryCause {
 	#[doc(hidden)]

@@ -7,6 +7,7 @@ use std::time;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
 	#[revision(start = 2)]

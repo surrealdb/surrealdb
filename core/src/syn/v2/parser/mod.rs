@@ -51,6 +51,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 
 /// A result of trying to parse a possibly partial query.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PartialResult<T> {
 	/// The parser couldn't be sure that it has finished a full value.
 	Pending {
@@ -71,6 +72,7 @@ pub enum PartialResult<T> {
 }
 
 /// The SurrealQL parser.
+#[non_exhaustive]
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,

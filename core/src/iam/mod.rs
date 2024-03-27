@@ -19,6 +19,7 @@ pub use self::auth::*;
 pub use self::entities::*;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	#[error("Invalid role '{0}'")]
 	InvalidRole(String),

@@ -19,6 +19,7 @@ pub use classes::Query;
 pub const QUERY_DATA_PROP_NAME: &str = "__query_context__";
 
 /// A class to carry the data to run subqueries.
+#[non_exhaustive]
 pub struct QueryContext<'js> {
 	pub context: &'js Context<'js>,
 	pub opt: &'js Options,

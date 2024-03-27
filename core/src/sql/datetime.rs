@@ -17,6 +17,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {

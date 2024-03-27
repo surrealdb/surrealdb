@@ -12,6 +12,7 @@ use std::ops::Bound;
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum ParseError<I> {
 	Base(I),
 	Expected {

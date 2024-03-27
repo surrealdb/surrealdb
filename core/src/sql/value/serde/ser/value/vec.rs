@@ -5,6 +5,7 @@ use ser::Serializer as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -39,6 +40,7 @@ impl ser::Serializer for Serializer {
 }
 
 #[derive(Default)]
+#[non_exhaustive]
 pub struct SerializeValueVec(pub Vec<Value>);
 
 impl serde::ser::SerializeSeq for SerializeValueVec {

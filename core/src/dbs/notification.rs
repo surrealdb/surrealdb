@@ -6,6 +6,7 @@ use std::fmt::{self, Debug, Display};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Action {
 	Create,
 	Update,
@@ -24,6 +25,7 @@ impl Display for Action {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs
 	pub id: Uuid,

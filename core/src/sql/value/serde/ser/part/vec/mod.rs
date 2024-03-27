@@ -7,6 +7,7 @@ use ser::Serializer as _;
 use serde::ser::Impossible;
 use serde::ser::Serialize;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
@@ -40,6 +41,7 @@ impl ser::Serializer for Serializer {
 	}
 }
 
+#[non_exhaustive]
 pub struct SerializePartVec(Vec<Part>);
 
 impl serde::ser::SerializeSeq for SerializePartVec {

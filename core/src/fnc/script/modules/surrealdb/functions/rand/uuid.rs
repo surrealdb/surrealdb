@@ -3,6 +3,7 @@ use js::{prelude::Rest, Ctx};
 use super::super::run;
 use crate::sql::value::Value;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl js::module::ModuleDef for Package {

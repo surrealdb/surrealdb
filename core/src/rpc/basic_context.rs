@@ -9,6 +9,7 @@ use crate::{
 
 use super::{args::Take, Data, RpcError};
 
+#[non_exhaustive]
 pub struct BasicRpcContext<'a> {
 	pub kvs: &'a Datastore,
 	pub session: Session,

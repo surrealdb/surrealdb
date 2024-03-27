@@ -11,6 +11,7 @@ use uuid::Uuid;
 ///
 /// The value is just the table of the live query as a Strand, which is the missing information from the key path
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Lq<'a> {
 	__: u8,
 	_a: u8,

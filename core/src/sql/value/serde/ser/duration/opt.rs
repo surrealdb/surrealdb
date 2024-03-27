@@ -4,6 +4,7 @@ use serde::ser::Impossible;
 use serde::ser::Serialize;
 use std::time::Duration;
 
+#[non_exhaustive]
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {

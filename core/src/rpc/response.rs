@@ -10,6 +10,7 @@ use serde::Serialize;
 // In future, they will possibly be merged to avoid having to keep them in sync.
 #[derive(Debug, Serialize)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Data {
 	/// Generally methods return a `sql::Value`
 	Other(Value),
