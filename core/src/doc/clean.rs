@@ -4,10 +4,12 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
+use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
 	pub async fn clean(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -45,7 +47,7 @@ impl<'a> Document<'a> {
 						fd if fd.is_in() => continue,
 						fd if fd.is_out() => continue,
 						fd if fd.is_meta() => continue,
-						fd => self.current.doc.to_mut().del(ctx, opt, txn, fd).await?,
+						fd => self.current.doc.to_mut().del(stk, ctx, opt, txn, fd).await?,
 					}
 				}
 			}

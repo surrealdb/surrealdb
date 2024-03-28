@@ -9,6 +9,7 @@ use crate::sql::statements::{
 	RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 };
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -44,6 +45,7 @@ impl Block {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -55,12 +57,12 @@ impl Block {
 		for (i, v) in self.iter().enumerate() {
 			match v {
 				Entry::Set(v) => {
-					let val = v.compute(&ctx, opt, txn, doc).await?;
+					let val = v.compute(stk, &ctx, opt, txn, doc).await?;
 					ctx.add_value(v.name.to_owned(), val);
 				}
 				Entry::Throw(v) => {
 					// Always errors immediately
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Break(v) => {
 					// Always errors immediately
@@ -71,28 +73,28 @@ impl Block {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
 				Entry::Foreach(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Ifelse(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Select(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Create(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Update(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Delete(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Relate(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Insert(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Define(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
@@ -102,15 +104,15 @@ impl Block {
 				}
 				Entry::Output(v) => {
 					// Return the RETURN value
-					return v.compute(&ctx, opt, txn, doc).await;
+					return v.compute(stk, &ctx, opt, txn, doc).await;
 				}
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
 						// If the last entry then return the value
-						return v.compute(&ctx, opt, txn, doc).await;
+						return v.compute(stk, &ctx, opt, txn, doc).await;
 					} else {
 						// Otherwise just process the value
-						v.compute(&ctx, opt, txn, doc).await?;
+						v.compute(stk, &ctx, opt, txn, doc).await?;
 					}
 				}
 			}

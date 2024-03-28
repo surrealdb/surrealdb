@@ -5,6 +5,7 @@ use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 
 pub mod args;
 pub mod array;
@@ -34,6 +35,7 @@ pub mod vector;
 
 /// Attempts to run any function
 pub async fn run(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
 	txn: &Transaction,
@@ -51,7 +53,7 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		asynchronous(ctx, Some(opt), Some(txn), doc, name, args).await
+		asynchronous(stk, ctx, Some(opt), Some(txn), doc, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -370,6 +372,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 
 /// Attempts to run any asynchronous function.
 pub async fn asynchronous(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: Option<&Options>,
 	txn: Option<&Transaction>,

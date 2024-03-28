@@ -598,6 +598,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-waker"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
 name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4491,10 +4497,12 @@ dependencies = [
 
 [[package]]
 name = "reblessive"
-version = "0.3.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fa873c785a072f2d26c6c1e56e5ea60ff2763bd6c3560227198efd8b9204707"
+checksum = "eb88832db7cfbac349e0276a84d4fbbcdb9cfe8069affbc765d8fd012265ba45"
 dependencies = [
+ "atomic-waker",
+ "futures-util",
  "pin-project-lite",
  "pin-utils",
 ]

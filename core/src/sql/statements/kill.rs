@@ -1,6 +1,7 @@
 use std::fmt;
 
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +27,7 @@ impl KillStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -38,7 +40,7 @@ impl KillStatement {
 		// Resolve live query id
 		let live_query_id = match &self.id {
 			Value::Uuid(id) => *id,
-			Value::Param(param) => match param.compute(ctx, opt, txn, None).await? {
+			Value::Param(param) => match param.compute(stk, ctx, opt, txn, None).await? {
 				Value::Uuid(id) => id,
 				Value::Strand(id) => match uuid::Uuid::try_parse(&id) {
 					Ok(id) => Uuid(id),
@@ -152,7 +154,7 @@ mod test {
 		let ds = Datastore::new("memory").await.unwrap();
 		let tx =
 			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
-		res.compute(&ctx, &opt, &tx, None).await.unwrap();
+		res.compute(stk, &ctx, &opt, &tx, None).await.unwrap();
 
 		let mut tx = tx.lock().await;
 		tx.commit().await.unwrap();

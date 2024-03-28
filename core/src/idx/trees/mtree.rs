@@ -7,7 +7,6 @@ use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
 
-use async_recursion::async_recursion;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -491,8 +490,7 @@ impl MTree {
 		Ok(false)
 	}
 
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(? Send))]
+	/// Was marked recursive
 	async fn insert_at_node(
 		&mut self,
 		tx: &mut Transaction,
@@ -877,8 +875,7 @@ impl MTree {
 		Ok(deleted)
 	}
 
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(? Send))]
+	/// Was marked recursive
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_at_node(
 		&mut self,

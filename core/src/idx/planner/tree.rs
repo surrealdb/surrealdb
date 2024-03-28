@@ -8,7 +8,7 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{
 	Array, Cond, Expression, Idiom, Number, Operator, Part, Subquery, Table, Value, With,
 };
-use async_recursion::async_recursion;
+use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -17,15 +17,16 @@ pub(super) struct Tree {}
 impl Tree {
 	/// Traverse all the conditions and extract every expression
 	/// that can be resolved by an index.
-	pub(super) async fn build<'a>(
-		ctx: &'a Context<'_>,
-		opt: &'a Options,
-		txn: &'a Transaction,
-		table: &'a Table,
-		cond: &'a Option<Cond>,
-		with: &'a Option<With>,
+	pub(super) async fn build(
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		table: &Table,
+		cond: &Option<Cond>,
+		with: &Option<With>,
 	) -> Result<Option<(Node, IndexesMap, Vec<IndexRef>, KnnExpressions)>, Error> {
-		let mut b = TreeBuilder::new(ctx, opt, txn, table, with);
+		let mut b = TreeBuilder::new(stk, ctx, opt, txn, table, with);
 		if let Some(cond) = cond {
 			let node = b.eval_value(&cond.0).await?;
 			Ok(Some((node, b.index_map, b.with_indexes, b.knn_expressions)))
@@ -36,6 +37,7 @@ impl Tree {
 }
 
 struct TreeBuilder<'a> {
+	stk: &'a mut Stk,
 	ctx: &'a Context<'a>,
 	opt: &'a Options,
 	txn: &'a Transaction,
@@ -52,6 +54,7 @@ struct TreeBuilder<'a> {
 
 impl<'a> TreeBuilder<'a> {
 	fn new(
+		stk: &'a mut Stk,
 		ctx: &'a Context<'_>,
 		opt: &'a Options,
 		txn: &'a Transaction,
@@ -63,6 +66,7 @@ impl<'a> TreeBuilder<'a> {
 			_ => vec![],
 		};
 		Self {
+			stk,
 			ctx,
 			opt,
 			txn,
@@ -91,8 +95,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	/// Was marked recursive
 	async fn eval_value(&mut self, v: &Value) -> Result<Node, Error> {
 		match v {
 			Value::Expression(e) => self.eval_expression(e).await,
@@ -109,7 +112,7 @@ impl<'a> TreeBuilder<'a> {
 			Value::Array(a) => self.eval_array(a).await,
 			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
-				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
+				let v = p.compute(self.stk, self.ctx, self.opt, self.txn, None).await?;
 				self.eval_value(&v).await
 			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
@@ -119,7 +122,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_array(&mut self, a: &Array) -> Result<Node, Error> {
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			values.push(v.compute(self.ctx, self.opt, self.txn, None).await?);
+			values.push(v.compute(self.stk, self.ctx, self.opt, self.txn, None).await?);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
@@ -136,7 +139,7 @@ impl<'a> TreeBuilder<'a> {
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
-				let v = i.compute(self.ctx, self.opt, self.txn, None).await?;
+				let v = i.compute(self.stk, self.ctx, self.opt, self.txn, None).await?;
 				return self.eval_value(&v).await;
 			}
 		}

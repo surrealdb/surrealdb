@@ -8,6 +8,7 @@ use crate::sql::{
 	Value, Values, Version, With,
 };
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -56,6 +57,7 @@ impl SelectStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -80,7 +82,7 @@ impl SelectStatement {
 		}
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
+			let v = w.compute(stk, ctx, opt, txn, doc).await?;
 			match v {
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
@@ -146,7 +148,7 @@ impl SelectStatement {
 			ctx.set_query_planner(&planner);
 		}
 		// Output the results
-		match i.output(&ctx, opt, txn, &stm).await? {
+		match i.output(stk, &ctx, opt, txn, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results

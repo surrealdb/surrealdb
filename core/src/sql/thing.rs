@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::{escape::escape_rid, id::Id, Strand, Value};
 use crate::syn;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -100,6 +101,7 @@ impl Thing {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -107,7 +109,7 @@ impl Thing {
 	) -> Result<Value, Error> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),
-			id: self.id.compute(ctx, opt, txn, doc).await?,
+			id: self.id.compute(stk, ctx, opt, txn, doc).await?,
 		}))
 	}
 }

@@ -17,7 +17,7 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use async_recursion::async_recursion;
+use reblessive::tree::Stk;
 use std::cmp::Ordering;
 use std::mem;
 
@@ -281,6 +281,7 @@ impl Iterator {
 	/// Process the records and output
 	pub async fn output(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -316,7 +317,7 @@ impl Iterator {
 				return Err(e);
 			}
 			// Process any SPLIT clause
-			self.output_split(ctx, opt, txn, stm).await?;
+			self.output_split(stk, ctx, opt, txn, stm).await?;
 			// Process any GROUP clause
 			self.results = self.results.group(ctx, opt, txn, stm).await?;
 			// Process any ORDER clause
@@ -328,7 +329,7 @@ impl Iterator {
 				e.add_fetch(self.results.len());
 			} else {
 				// Process any FETCH clause
-				self.output_fetch(ctx, opt, txn, stm).await?;
+				self.output_fetch(stk, ctx, opt, txn, stm).await?;
 			}
 		}
 
@@ -378,6 +379,7 @@ impl Iterator {
 	#[inline]
 	async fn output_split(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -399,7 +401,7 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(ctx, opt, txn, split, val).await?;
+								obj.set(stk, ctx, opt, txn, split, val).await?;
 								// Add the object to the results
 								self.results.push(ctx, opt, txn, stm, obj).await?;
 							}
@@ -408,7 +410,7 @@ impl Iterator {
 							// Make a copy of object
 							let mut obj = obj.clone();
 							// Set the value at the path
-							obj.set(ctx, opt, txn, split, val).await?;
+							obj.set(stk, ctx, opt, txn, split, val).await?;
 							// Add the object to the results
 							self.results.push(ctx, opt, txn, stm, obj).await?;
 						}
@@ -460,6 +462,7 @@ impl Iterator {
 	#[inline]
 	async fn output_fetch(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -470,17 +473,18 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut self.results {
 					// Fetch the value at the path
-					obj.fetch(ctx, opt, txn, fetch).await?;
+					obj.fetch(stk, ctx, opt, txn, fetch).await?;
 				}
 			}
 		}
 		Ok(())
 	}
 
+	/// Was marked recursive
 	#[cfg(target_arch = "wasm32")]
-	#[async_recursion(?Send)]
 	async fn iterate(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -498,8 +502,8 @@ impl Iterator {
 		Ok(())
 	}
 
+	/// Was marked recursive
 	#[cfg(not(target_arch = "wasm32"))]
-	#[async_recursion]
 	async fn iterate(
 		&mut self,
 		ctx: &Context<'_>,

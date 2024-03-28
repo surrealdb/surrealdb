@@ -28,6 +28,7 @@ use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Idiom, Object, Thing, Value};
+use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
@@ -223,6 +224,7 @@ impl FtIndex {
 
 	pub(crate) async fn index_document(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -240,13 +242,13 @@ impl FtIndex {
 		let (doc_length, terms_and_frequencies, offsets) = if self.highlighting {
 			let (dl, tf, ofs) = self
 				.analyzer
-				.extract_terms_with_frequencies_with_offsets(ctx, opt, txn, &mut t, content)
+				.extract_terms_with_frequencies_with_offsets(stk, ctx, opt, txn, &mut t, content)
 				.await?;
 			(dl, tf, Some(ofs))
 		} else {
 			let (dl, tf) = self
 				.analyzer
-				.extract_terms_with_frequencies(ctx, opt, txn, &mut t, content)
+				.extract_terms_with_frequencies(stk, ctx, opt, txn, &mut t, content)
 				.await?;
 			(dl, tf, None)
 		};
@@ -328,13 +330,14 @@ impl FtIndex {
 
 	pub(super) async fn extract_terms(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		query_string: String,
 	) -> Result<Vec<Option<(TermId, u32)>>, Error> {
 		let t = self.terms.read().await;
-		let terms = self.analyzer.extract_terms(ctx, opt, txn, &t, query_string).await?;
+		let terms = self.analyzer.extract_terms(stk, ctx, opt, txn, &t, query_string).await?;
 		Ok(terms)
 	}
 
@@ -532,13 +535,14 @@ mod tests {
 	}
 
 	async fn search(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		fti: &FtIndex,
 		qs: &str,
 	) -> (Option<HitsIterator>, BM25Scorer) {
-		let t = fti.extract_terms(ctx, opt, txn, qs.to_string()).await.unwrap();
+		let t = fti.extract_terms(stk, ctx, opt, txn, qs.to_string()).await.unwrap();
 		let mut tx = txn.lock().await;
 		let td = Arc::new(fti.get_terms_docs(&mut tx, &t).await.unwrap());
 		drop(tx);
@@ -596,6 +600,7 @@ mod tests {
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
 		};
+		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
 
@@ -603,103 +608,140 @@ mod tests {
 		let doc2: Thing = ("t", "doc2").into();
 		let doc3: Thing = ("t", "doc3").into();
 
-		{
-			// Add one document
-			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-			fti.index_document(&ctx, &opt, &txn, &doc1, vec![Value::from("hello the world")])
+		stack
+			.enter(|stk| async {
+				// Add one document
+				let (ctx, opt, txn, mut fti) =
+					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+				fti.index_document(
+					stk,
+					&ctx,
+					&opt,
+					&txn,
+					&doc1,
+					vec![Value::from("hello the world")],
+				)
 				.await
 				.unwrap();
-			finish(&txn, fti).await;
-		}
+				finish(&txn, fti).await;
+			})
+			.finish()
+			.await;
 
-		{
-			// Add two documents
-			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-			fti.index_document(&ctx, &opt, &txn, &doc2, vec![Value::from("a yellow hello")])
+		stack
+			.enter(|stk| async {
+				// Add two documents
+				let (ctx, opt, txn, mut fti) =
+					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+				fti.index_document(
+					stk,
+					&ctx,
+					&opt,
+					&txn,
+					&doc2,
+					vec![Value::from("a yellow hello")],
+				)
 				.await
 				.unwrap();
-			fti.index_document(&ctx, &opt, &txn, &doc3, vec![Value::from("foo bar")])
-				.await
-				.unwrap();
-			finish(&txn, fti).await;
-		}
+				fti.index_document(stk, &ctx, &opt, &txn, &doc3, vec![Value::from("foo bar")])
+					.await
+					.unwrap();
+				finish(&txn, fti).await;
+			})
+			.finish()
+			.await;
 
-		{
-			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
-			// Check the statistics
-			let statistics = fti.statistics(&txn).await.unwrap();
-			assert_eq!(statistics.terms.keys_count, 7);
-			assert_eq!(statistics.postings.keys_count, 8);
-			assert_eq!(statistics.doc_ids.keys_count, 3);
-			assert_eq!(statistics.doc_lengths.keys_count, 3);
+		stack
+			.enter(|stk| async {
+				let (ctx, opt, txn, fti) =
+					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+				// Check the statistics
+				let statistics = fti.statistics(&txn).await.unwrap();
+				assert_eq!(statistics.terms.keys_count, 7);
+				assert_eq!(statistics.postings.keys_count, 8);
+				assert_eq!(statistics.doc_ids.keys_count, 3);
+				assert_eq!(statistics.doc_lengths.keys_count, 3);
 
-			// Search & score
-			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "hello").await;
-			check_hits(&txn, hits, scr, vec![(&doc1, Some(-0.4859746)), (&doc2, Some(-0.4859746))])
+				// Search & score
+				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "hello").await;
+				check_hits(
+					&txn,
+					hits,
+					scr,
+					vec![(&doc1, Some(-0.4859746)), (&doc2, Some(-0.4859746))],
+				)
 				.await;
 
-			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "world").await;
-			check_hits(&txn, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
+				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "world").await;
+				check_hits(&txn, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
 
-			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "yellow").await;
-			check_hits(&txn, hits, scr, vec![(&doc2, Some(0.4859746))]).await;
+				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "yellow").await;
+				check_hits(&txn, hits, scr, vec![(&doc2, Some(0.4859746))]).await;
 
-			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "foo").await;
-			check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "foo").await;
+				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
-			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "bar").await;
-			check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "bar").await;
+				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
-			let (hits, _) = search(&ctx, &opt, &txn, &fti, "dummy").await;
-			assert!(hits.is_none());
-		}
+				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "dummy").await;
+				assert!(hits.is_none());
+			})
+			.finish()
+			.await;
 
-		{
-			// Reindex one document
-			let (ctx, opt, txn, mut fti) =
-				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-			fti.index_document(&ctx, &opt, &txn, &doc3, vec![Value::from("nobar foo")])
-				.await
-				.unwrap();
-			finish(&txn, fti).await;
+		stack
+			.enter(|stk| async {
+				// Reindex one document
+				let (ctx, opt, txn, mut fti) =
+					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+				fti.index_document(stk, &ctx, &opt, &txn, &doc3, vec![Value::from("nobar foo")])
+					.await
+					.unwrap();
+				finish(&txn, fti).await;
 
-			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+				let (ctx, opt, txn, fti) =
+					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
 
-			// We can still find 'foo'
-			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "foo").await;
-			check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+				// We can still find 'foo'
+				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "foo").await;
+				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
-			// We can't anymore find 'bar'
-			let (hits, _) = search(&ctx, &opt, &txn, &fti, "bar").await;
-			assert!(hits.is_none());
+				// We can't anymore find 'bar'
+				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "bar").await;
+				assert!(hits.is_none());
 
-			// We can now find 'nobar'
-			let (hits, scr) = search(&ctx, &opt, &txn, &fti, "nobar").await;
-			check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
-		}
+				// We can now find 'nobar'
+				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "nobar").await;
+				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+			})
+			.finish()
+			.await;
 
-		{
-			// Remove documents
-			let (_, _, txn, mut fti) =
-				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-			fti.remove_document(&txn, &doc1).await.unwrap();
-			fti.remove_document(&txn, &doc2).await.unwrap();
-			fti.remove_document(&txn, &doc3).await.unwrap();
-			finish(&txn, fti).await;
-		}
+		stack
+			.enter(|stk| async {
+				// Remove documents
+				let (_, _, txn, mut fti) =
+					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+				fti.remove_document(&txn, &doc1).await.unwrap();
+				fti.remove_document(&txn, &doc2).await.unwrap();
+				fti.remove_document(&txn, &doc3).await.unwrap();
+				finish(&txn, fti).await;
+			})
+			.finish()
+			.await;
 
-		{
-			let (ctx, opt, txn, fti) =
-				tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
-			let (hits, _) = search(&ctx, &opt, &txn, &fti, "hello").await;
-			assert!(hits.is_none());
-			let (hits, _) = search(&ctx, &opt, &txn, &fti, "foo").await;
-			assert!(hits.is_none());
-		}
+		stack
+			.enter(|stk| async {
+				let (ctx, opt, txn, fti) =
+					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "hello").await;
+				assert!(hits.is_none());
+				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "foo").await;
+				assert!(hits.is_none());
+			})
+			.finish()
+			.await;
 	}
 
 	async fn test_ft_index_bm_25(hl: bool) {
@@ -713,6 +755,7 @@ mod tests {
 			let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 				panic!()
 			};
+			let mut stack = reblessive::TreeStack::new();
 
 			let doc1: Thing = ("t", "doc1").into();
 			let doc2: Thing = ("t", "doc2").into();
@@ -720,106 +763,116 @@ mod tests {
 			let doc4: Thing = ("t", "doc4").into();
 
 			let btree_order = 5;
-			{
-				let (ctx, opt, txn, mut fti) =
-					tx_fti(&ds, TransactionType::Write, &az, btree_order, hl).await;
-				fti.index_document(
-					&ctx,
-					&opt,
-					&txn,
-					&doc1,
-					vec![Value::from("the quick brown fox jumped over the lazy dog")],
-				)
-				.await
-				.unwrap();
-				fti.index_document(
-					&ctx,
-					&opt,
-					&txn,
-					&doc2,
-					vec![Value::from("the fast fox jumped over the lazy dog")],
-				)
-				.await
-				.unwrap();
-				fti.index_document(
-					&ctx,
-					&opt,
-					&txn,
-					&doc3,
-					vec![Value::from("the dog sat there and did nothing")],
-				)
-				.await
-				.unwrap();
-				fti.index_document(
-					&ctx,
-					&opt,
-					&txn,
-					&doc4,
-					vec![Value::from("the other animals sat there watching")],
-				)
-				.await
-				.unwrap();
-				finish(&txn, fti).await;
-			}
-
-			{
-				let (ctx, opt, txn, fti) =
-					tx_fti(&ds, TransactionType::Read, &az, btree_order, hl).await;
-
-				let statistics = fti.statistics(&txn).await.unwrap();
-				assert_eq!(statistics.terms.keys_count, 17);
-				assert_eq!(statistics.postings.keys_count, 28);
-				assert_eq!(statistics.doc_ids.keys_count, 4);
-				assert_eq!(statistics.doc_lengths.keys_count, 4);
-
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "the").await;
-				check_hits(
-					&txn,
-					hits,
-					scr,
-					vec![
-						(&doc1, Some(-3.4388628)),
-						(&doc2, Some(-3.621457)),
-						(&doc3, Some(-2.258829)),
-						(&doc4, Some(-2.393017)),
-					],
-				)
+			stack
+				.enter(|stk| async {
+					let (ctx, opt, txn, mut fti) =
+						tx_fti(&ds, TransactionType::Write, &az, btree_order, hl).await;
+					fti.index_document(
+						stk,
+						&ctx,
+						&opt,
+						&txn,
+						&doc1,
+						vec![Value::from("the quick brown fox jumped over the lazy dog")],
+					)
+					.await
+					.unwrap();
+					fti.index_document(
+						stk,
+						&ctx,
+						&opt,
+						&txn,
+						&doc2,
+						vec![Value::from("the fast fox jumped over the lazy dog")],
+					)
+					.await
+					.unwrap();
+					fti.index_document(
+						stk,
+						&ctx,
+						&opt,
+						&txn,
+						&doc3,
+						vec![Value::from("the dog sat there and did nothing")],
+					)
+					.await
+					.unwrap();
+					fti.index_document(
+						stk,
+						&ctx,
+						&opt,
+						&txn,
+						&doc4,
+						vec![Value::from("the other animals sat there watching")],
+					)
+					.await
+					.unwrap();
+					finish(&txn, fti).await;
+				})
+				.finish()
 				.await;
 
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "dog").await;
-				check_hits(
-					&txn,
-					hits,
-					scr,
-					vec![
-						(&doc1, Some(-0.7832165)),
-						(&doc2, Some(-0.8248031)),
-						(&doc3, Some(-0.87105393)),
-					],
-				)
+			stack
+				.enter(|stk| async {
+					let (ctx, opt, txn, fti) =
+						tx_fti(&ds, TransactionType::Read, &az, btree_order, hl).await;
+
+					let statistics = fti.statistics(&txn).await.unwrap();
+					assert_eq!(statistics.terms.keys_count, 17);
+					assert_eq!(statistics.postings.keys_count, 28);
+					assert_eq!(statistics.doc_ids.keys_count, 4);
+					assert_eq!(statistics.doc_lengths.keys_count, 4);
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "the").await;
+					check_hits(
+						&txn,
+						hits,
+						scr,
+						vec![
+							(&doc1, Some(-3.4388628)),
+							(&doc2, Some(-3.621457)),
+							(&doc3, Some(-2.258829)),
+							(&doc4, Some(-2.393017)),
+						],
+					)
+					.await;
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "dog").await;
+					check_hits(
+						&txn,
+						hits,
+						scr,
+						vec![
+							(&doc1, Some(-0.7832165)),
+							(&doc2, Some(-0.8248031)),
+							(&doc3, Some(-0.87105393)),
+						],
+					)
+					.await;
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "fox").await;
+					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "over").await;
+					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "lazy").await;
+					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "jumped").await;
+					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "nothing").await;
+					check_hits(&txn, hits, scr, vec![(&doc3, Some(0.87105393))]).await;
+
+					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "animals").await;
+					check_hits(&txn, hits, scr, vec![(&doc4, Some(0.92279965))]).await;
+
+					let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "dummy").await;
+					assert!(hits.is_none());
+				})
+				.finish()
 				.await;
-
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "fox").await;
-				check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
-
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "over").await;
-				check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
-
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "lazy").await;
-				check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
-
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "jumped").await;
-				check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
-
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "nothing").await;
-				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.87105393))]).await;
-
-				let (hits, scr) = search(&ctx, &opt, &txn, &fti, "animals").await;
-				check_hits(&txn, hits, scr, vec![(&doc4, Some(0.92279965))]).await;
-
-				let (hits, _) = search(&ctx, &opt, &txn, &fti, "dummy").await;
-				assert!(hits.is_none());
-			}
 		}
 	}
 
@@ -837,10 +890,16 @@ mod tests {
 		let btree_order = 5;
 		let doc1: Thing = ("t", "doc1").into();
 		let content1 = Value::from(Array::from(vec!["Enter a search term", "Welcome", "Docusaurus blogging features are powered by the blog plugin.", "Simply add Markdown files (or folders) to the blog directory.", "blog", "Regular blog authors can be added to authors.yml.", "authors.yml", "The blog post date can be extracted from filenames, such as:", "2019-05-30-welcome.md", "2019-05-30-welcome/index.md", "A blog post folder can be convenient to co-locate blog post images:", "The blog supports tags as well!", "And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.", "blog: false", "MDX Blog Post", "Blog posts support Docusaurus Markdown features, such as MDX.", "Use the power of React to create interactive blog posts.", "Long Blog Post", "This is the summary of a very long blog post,", "Use a <!-- truncate --> comment to limit blog post size in the list view.", "<!--", "truncate", "-->", "First Blog Post", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+		let mut stack = reblessive::TreeStack::new();
 
 		let start = std::time::Instant::now();
 		while start.elapsed().as_secs() < 3 {
-			remove_insert_task(ds.as_ref(), &az, btree_order, &doc1, &content1).await;
+			stack
+				.enter(|stk| {
+					remove_insert_task(stk, ds.as_ref(), &az, btree_order, &doc1, &content1)
+				})
+				.finish()
+				.await;
 		}
 	}
 	#[test(tokio::test)]
@@ -857,6 +916,7 @@ mod tests {
 	}
 
 	async fn remove_insert_task(
+		stk: &mut Stk,
 		ds: &Datastore,
 		az: &DefineAnalyzerStatement,
 		btree_order: u32,
@@ -866,13 +926,14 @@ mod tests {
 		let (ctx, opt, txn, mut fti) =
 			tx_fti(ds, TransactionType::Write, az, btree_order, false).await;
 		fti.remove_document(&txn, rid).await.unwrap();
-		fti.index_document(&ctx, &opt, &txn, rid, vec![content.clone()]).await.unwrap();
+		fti.index_document(stk, &ctx, &opt, &txn, rid, vec![content.clone()]).await.unwrap();
 		finish(&txn, fti).await;
 	}
 
 	#[test(tokio::test)]
 	async fn remove_insert_sequence() {
 		let ds = Datastore::new("memory").await.unwrap();
+		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
 			panic!()
@@ -885,7 +946,13 @@ mod tests {
 			{
 				let (ctx, opt, txn, mut fti) =
 					tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
-				fti.index_document(&ctx, &opt, &txn, &doc, vec![content.clone()]).await.unwrap();
+				stack
+					.enter(|stk| {
+						fti.index_document(stk, &ctx, &opt, &txn, &doc, vec![content.clone()])
+					})
+					.finish()
+					.await
+					.unwrap();
 				finish(&txn, fti).await;
 			}
 

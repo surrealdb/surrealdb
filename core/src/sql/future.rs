@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::Block;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -26,6 +27,7 @@ impl Future {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -33,7 +35,7 @@ impl Future {
 	) -> Result<Value, Error> {
 		// Process the future if enabled
 		match opt.futures {
-			true => self.0.compute(ctx, opt, txn, doc).await?.ok(),
+			true => self.0.compute(stk, ctx, opt, txn, doc).await?.ok(),
 			false => Ok(self.clone().into()),
 		}
 	}
