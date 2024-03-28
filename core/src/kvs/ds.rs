@@ -940,7 +940,7 @@ impl Datastore {
 		tx: Arc<Mutex<Transaction>>,
 		opt: &Options,
 		change_set: ChangeSet,
-		lq_pairs: &Vec<(LqIndexKey, LqIndexValue)>,
+		lq_pairs: &[(LqIndexKey, LqIndexValue)],
 	) -> Result<(), Error> {
 		// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
 		trace!("Moving to next change set, {:?}", change_set);
