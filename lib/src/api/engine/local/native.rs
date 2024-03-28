@@ -146,14 +146,6 @@ pub(crate) fn router(
 			.with_query_timeout(address.config.query_timeout)
 			.with_transaction_timeout(address.config.transaction_timeout)
 			.with_capabilities(address.config.capabilities);
-		#[cfg(any(
-			feature = "kv-surrealkv",
-			feature = "kv-file",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
-		))]
 		let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 		let kvs = Arc::new(kvs);
