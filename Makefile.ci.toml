@@ -27,7 +27,7 @@ args = ["clippy", "--all-targets", "--features", "storage-mem,storage-rocksdb,st
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUST_LOG = { value = "cli_integration=debug", condition = { env_not_set = ["RUST_LOG"] } } }
-args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,http,scripting,jwks,sql2", "--workspace", "--test", "cli_integration", "--", "cli_integration"]
+args = ["test", "--locked", "--no-default-features", "--features", "storage-mem,storage-surrealkv,http,scripting,jwks,sql2", "--workspace", "--test", "cli_integration", "--", "cli_integration"]
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
