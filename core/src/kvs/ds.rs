@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
@@ -1043,28 +1044,26 @@ impl Datastore {
 	/// This is required to perform document operations such as live query notifications
 	fn construct_document(mutation: &TableMutation) -> Option<Document> {
 		match mutation {
-			TableMutation::Set(a, b) => {
-				let doc = Document::new(None, Some(a), None, b, Workable::Normal);
+			TableMutation::Set(id, current_value) => {
+				let doc = Document::new(None, Some(id), None, current_value, Workable::Normal);
 				Some(doc)
 			}
-			TableMutation::Del(a) => {
-				let doc = Document::new(None, Some(a), None, &Value::None, Workable::Normal);
+			TableMutation::Del(id) => {
+				let doc = Document::new(None, Some(id), None, &Value::None, Workable::Normal);
 				Some(doc)
 			}
 			TableMutation::Def(_) => None,
-			TableMutation::SetWithDiff(id, new, _operations, new_record) => {
-				let original = if *new_record {
-					&Value::None
-				} else {
-					new
-				};
-				let doc =
-					Document::new_artificial(None, Some(id), None, new, original, Workable::Normal);
-				trace!(
-					"Constructed artificial document: {:?}, is_new={}, and new_record={new_record}",
-					doc,
-					doc.is_new()
+			TableMutation::SetWithDiff(id, current_value, _operations) => {
+				let todo_original_after_reverse_applying_patches = Value::None;
+				let doc = Document::new_artificial(
+					None,
+					Some(id),
+					None,
+					Cow::Borrowed(current_value),
+					Cow::Owned(todo_original_after_reverse_applying_patches),
+					Workable::Normal,
 				);
+				trace!("Constructed artificial document: {:?}, is_new={}", doc, doc.is_new());
 				// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 				Some(doc)
 			}

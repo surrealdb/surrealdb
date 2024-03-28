@@ -1,3 +1,4 @@
+use crate::fflags::FFLAGS;
 use crate::sql::array::Array;
 use crate::sql::object::Object;
 use crate::sql::statements::DefineTableStatement;
@@ -25,7 +26,7 @@ pub enum TableMutation {
 	/// value, and if this is a new record (i.e. create = true vs update = false)
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
 	/// Means that we have already applied the add "/note" operation to achieve the recorded result
-	SetWithDiff(Thing, Value, Vec<Operation>, bool),
+	SetWithDiff(Thing, Value, Vec<Operation>),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -78,17 +79,17 @@ impl TableMutation {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
-				h.insert("update".to_string(), v);
+				if FFLAGS.change_feed_live_queries.enabled() {
+					h.insert("create".to_string(), v);
+				} else {
+					h.insert("update".to_string(), v);
+				}
 				h
 			}
-			TableMutation::SetWithDiff(_thing, current, operations, new_record) => {
+			TableMutation::SetWithDiff(_thing, current, operations) => {
 				h.insert("current".to_string(), current);
 				h.insert(
-					if new_record {
-						"create".to_string()
-					} else {
-						"update".to_string()
-					},
+					"update".to_string(),
 					Value::Array(Array(
 						operations
 							.clone()
@@ -144,17 +145,7 @@ impl Display for TableMutation {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
-			TableMutation::SetWithDiff(id, _previous, v, new_record) => write!(
-				f,
-				"SET {} {:?} {}",
-				id,
-				v,
-				if *new_record {
-					"new_record"
-				} else {
-					"update_record"
-				}
-			),
+			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::Def(t) => write!(f, "{}", t),
 		}
@@ -262,7 +253,6 @@ mod tests {
 							path: "/note".into(),
 							value: Value::from("surreal"),
 						}],
-						false,
 					),
 					TableMutation::SetWithDiff(
 						Thing::from(("mytb".to_string(), "tobie".to_string())),
@@ -279,7 +269,6 @@ mod tests {
 						vec![Operation::Remove {
 							path: "/temp".into(),
 						}],
-						false,
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
 					TableMutation::Def(DefineTableStatement {
