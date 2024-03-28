@@ -38,3 +38,16 @@ pub const PROCESSOR_BATCH_SIZE: u32 = 50;
 /// Forward all signup/signin query errors to a client trying authenticate to a scope. Do not use in production.
 pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS", bool, false);
+
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+/// Specifies the buffer limit for external sorting.
+/// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
+pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
+	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
