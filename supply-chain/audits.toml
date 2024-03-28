@@ -1,10 +1,7 @@
 
 # cargo-vet audits file
 
-[[audits.ext-sort]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.1.4"
+[audits]
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
