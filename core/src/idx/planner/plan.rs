@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{IndexRef, Node};
+use crate::idx::planner::tree::{Depth, IndexRef, Node};
 use crate::sql::with::With;
 use crate::sql::{Array, Idiom, Object};
 use crate::sql::{Expression, Operator, Value};
@@ -10,9 +10,11 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 pub(super) struct PlanBuilder {
-	indexes: Vec<(Arc<Expression>, IndexOption)>,
-	range_queries: HashMap<IndexRef, RangeQueryBuilder>,
+	has_indexes: bool,
+	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
 	with_indexes: Vec<IndexRef>,
+	levels: HashMap<Depth, Level>,
+	all_and_levels: HashMap<Depth, bool>,
 	all_and: bool,
 	all_exp_with_index: bool,
 }
@@ -27,9 +29,11 @@ impl PlanBuilder {
 			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
 		}
 		let mut b = PlanBuilder {
-			indexes: Default::default(),
-			range_queries: Default::default(),
+			has_indexes: false,
+			non_range_indexes: Default::default(),
+			levels: Default::default(),
 			with_indexes,
+			all_and_levels: Default::default(),
 			all_and: true,
 			all_exp_with_index: true,
 		};
@@ -37,8 +41,8 @@ impl PlanBuilder {
 		if let Err(e) = b.eval_node(&root) {
 			return Ok(Plan::TableIterator(Some(e.to_string())));
 		}
-		// If we didn't found any index, we're done with no index plan
-		if b.indexes.is_empty() {
+		// If we didn't find any index, we're done with no index plan
+		if !b.has_indexes {
 			return Ok(Plan::TableIterator(Some("NO INDEX FOUND".to_string())));
 		}
 
@@ -46,17 +50,27 @@ impl PlanBuilder {
 		if b.all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
-			if let Some((ir, rq)) = b.range_queries.drain().take(1).next() {
-				return Ok(Plan::SingleIndexMultiExpression(ir, rq));
+			if let Some((_, level)) = b.levels.into_iter().next() {
+				if let Some((ir, rq)) = level.take_first_range() {
+					return Ok(Plan::SingleIndexRange(ir, rq));
+				}
 			}
 			// Otherwise we take the first single index option
-			if let Some((e, i)) = b.indexes.pop() {
+			if let Some((e, i)) = b.non_range_indexes.pop() {
 				return Ok(Plan::SingleIndex(e, i));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
-		if b.all_exp_with_index {
-			return Ok(Plan::MultiIndex(b.indexes));
+		else if b.all_exp_with_index {
+			let mut ranges = Vec::with_capacity(b.levels.len());
+			for (depth, level) in b.levels {
+				if b.all_and_levels.get(&depth) == Some(&true) {
+					level.take_union_ranges(&mut ranges);
+				} else {
+					level.take_intersect_ranges(&mut ranges);
+				}
+			}
+			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
 		}
 		Ok(Plan::TableIterator(None))
 	}
@@ -74,17 +88,15 @@ impl PlanBuilder {
 	fn eval_node(&mut self, node: &Node) -> Result<(), String> {
 		match node {
 			Node::Expression {
+				depth,
 				io,
 				left,
 				right,
 				exp,
 			} => {
-				if self.all_and && Operator::Or.eq(exp.operator()) {
-					self.all_and = false;
-				}
-				let is_bool = self.check_boolean_operator(exp.operator());
+				let is_bool = self.check_boolean_operator(*depth, exp.operator());
 				if let Some(io) = self.filter_index_option(io.as_ref()) {
-					self.add_index_option(exp.clone(), io);
+					self.add_index_option(*depth, exp.clone(), io);
 				} else if self.all_exp_with_index && !is_bool {
 					self.all_exp_with_index = false;
 				}
@@ -97,41 +109,49 @@ impl PlanBuilder {
 		}
 	}
 
-	fn check_boolean_operator(&mut self, op: &Operator) -> bool {
+	fn check_boolean_operator(&mut self, depth: Depth, op: &Operator) -> bool {
 		match op {
 			Operator::Neg | Operator::Or => {
 				if self.all_and {
 					self.all_and = false;
 				}
+				self.all_and_levels.entry(depth).and_modify(|b| *b = false).or_insert(false);
 				true
 			}
-			Operator::And => true,
-			_ => false,
+			Operator::And => {
+				self.all_and_levels.entry(depth).or_insert(true);
+				true
+			}
+			_ => {
+				self.all_and_levels.entry(depth).or_insert(true);
+				false
+			}
 		}
 	}
 
-	fn add_index_option(&mut self, exp: Arc<Expression>, io: IndexOption) {
-		if let IndexOperator::RangePart(o, v) = io.op() {
-			match self.range_queries.entry(io.ix_ref()) {
+	fn add_index_option(&mut self, depth: Depth, exp: Arc<Expression>, io: IndexOption) {
+		if let IndexOperator::RangePart(_, _) = io.op() {
+			let level = self.levels.entry(depth).or_default();
+			match level.ranges.entry(io.ix_ref()) {
 				Entry::Occupied(mut e) => {
-					e.get_mut().add(exp.clone(), o, v);
+					e.get_mut().push((exp, io));
 				}
 				Entry::Vacant(e) => {
-					let mut b = RangeQueryBuilder::default();
-					b.add(exp.clone(), o, v);
-					e.insert(b);
+					e.insert(vec![(exp, io)]);
 				}
 			}
+		} else {
+			self.non_range_indexes.push((exp, io));
 		}
-		self.indexes.push((exp, io));
+		self.has_indexes = true;
 	}
 }
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
 	SingleIndex(Arc<Expression>, IndexOption),
-	MultiIndex(Vec<(Arc<Expression>, IndexOption)>),
-	SingleIndexMultiExpression(IndexRef, RangeQueryBuilder),
+	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
+	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -284,23 +304,79 @@ impl From<&RangeValue> for Value {
 	}
 }
 
+#[derive(Default)]
+pub(super) struct Level {
+	ranges: HashMap<IndexRef, Vec<(Arc<Expression>, IndexOption)>>,
+}
+
+impl Level {
+	fn take_first_range(self) -> Option<(IndexRef, UnionRangeQueryBuilder)> {
+		if let Some((ir, ri)) = self.ranges.into_iter().take(1).next() {
+			UnionRangeQueryBuilder::new_aggregate(ri).map(|rb| (ir, rb))
+		} else {
+			None
+		}
+	}
+
+	fn take_union_ranges(self, r: &mut Vec<(IndexRef, UnionRangeQueryBuilder)>) {
+		for (ir, ri) in self.ranges {
+			if let Some(rb) = UnionRangeQueryBuilder::new_aggregate(ri) {
+				r.push((ir, rb));
+			}
+		}
+	}
+
+	fn take_intersect_ranges(self, r: &mut Vec<(IndexRef, UnionRangeQueryBuilder)>) {
+		for (ir, ri) in self.ranges {
+			for (exp, io) in ri {
+				if let Some(rb) = UnionRangeQueryBuilder::new(exp, io) {
+					r.push((ir, rb));
+				}
+			}
+		}
+	}
+}
+
 #[derive(Default, Debug)]
-pub(super) struct RangeQueryBuilder {
+pub(super) struct UnionRangeQueryBuilder {
 	pub(super) exps: HashSet<Arc<Expression>>,
 	pub(super) from: RangeValue,
 	pub(super) to: RangeValue,
 }
 
-impl RangeQueryBuilder {
-	fn add(&mut self, exp: Arc<Expression>, op: &Operator, v: &Value) {
-		match op {
-			Operator::LessThan => self.to.set_to(v),
-			Operator::LessThanOrEqual => self.to.set_to_inclusive(v),
-			Operator::MoreThan => self.from.set_from(v),
-			Operator::MoreThanOrEqual => self.from.set_from_inclusive(v),
-			_ => return,
+impl UnionRangeQueryBuilder {
+	fn new_aggregate(exp_ios: Vec<(Arc<Expression>, IndexOption)>) -> Option<Self> {
+		if exp_ios.is_empty() {
+			return None;
 		}
-		self.exps.insert(exp);
+		let mut b = Self::default();
+		for (exp, io) in exp_ios {
+			b.add(exp, io);
+		}
+		Some(b)
+	}
+
+	fn new(exp: Arc<Expression>, io: IndexOption) -> Option<Self> {
+		let mut b = Self::default();
+		if b.add(exp, io) {
+			Some(b)
+		} else {
+			None
+		}
+	}
+
+	fn add(&mut self, exp: Arc<Expression>, io: IndexOption) -> bool {
+		if let IndexOperator::RangePart(op, val) = io.op() {
+			match op {
+				Operator::LessThan => self.to.set_to(val),
+				Operator::LessThanOrEqual => self.to.set_to_inclusive(val),
+				Operator::MoreThan => self.from.set_from(val),
+				Operator::MoreThanOrEqual => self.from.set_from_inclusive(val),
+				_ => return false,
+			}
+			self.exps.insert(exp);
+		}
+		true
 	}
 }
 

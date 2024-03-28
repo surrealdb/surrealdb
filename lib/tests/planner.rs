@@ -1539,14 +1539,18 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 		DEFINE INDEX index_note_kind ON TABLE notes COLUMNS kind;
 		DEFINE INDEX index_note_pubkey ON TABLE notes COLUMNS pubkey;
 		DEFINE INDEX index_note_published ON TABLE notes COLUMNS published;
-		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN ['123']) AND published > '2024' EXPLAIN;
-		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN ['123']) AND published > '2024';
+		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN [123]) AND published > 2024 EXPLAIN;
+		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN [123]) AND published > 2024;
+		SELECT * FROM notes WHERE published < 2024 AND (kind IN [1,2] OR pubkey IN [123]) AND published > 2022 EXPLAIN;
+		SELECT * FROM notes WHERE published < 2024 AND (kind IN [1,2] OR pubkey IN [123]) AND published > 2022;
+		SELECT * FROM notes WHERE published < 2022 OR (kind IN [1,2] OR pubkey IN [123]) AND published > 2022 EXPLAIN;
+		SELECT * FROM notes WHERE published < 2022 OR (kind IN [1,2] OR pubkey IN [123]) AND published > 2022;
 	"#;
 	let mut res = dbs.execute(sql, &ses, None).await?;
-
-	assert_eq!(res.len(), 6);
+	//
+	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 4)?;
-
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
@@ -1570,7 +1574,7 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 								"index": "index_note_pubkey",
 								"operator": "union",
 								"value": [
-									"123"
+									123
 								]
 							},
 							"table": "notes"
@@ -1593,6 +1597,145 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 							"table": "notes"
 						},
 						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[]"#);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_kind",
+								"operator": "union",
+								"value": [
+									1,
+									2
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_pubkey",
+								"operator": "union",
+								"value": [
+									123
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 2022
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: 2024
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Store'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[]"#);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_kind",
+								"operator": "union",
+								"value": [
+									1,
+									2
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_pubkey",
+								"operator": "union",
+								"value": [
+									123
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: None
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: 2022
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 2022
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: None
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
 					},
 					{
 						detail: {
