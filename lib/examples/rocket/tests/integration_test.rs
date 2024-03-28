@@ -52,7 +52,7 @@ async fn delete_all_persons(client: &Client) {
 fn test_read_person() {
 	run_test!(|client| {
 		// Insert a person to ensure the database is not empty.
-		let john_id = 1; 
+		let john_id = 1;
 		client
 			.post(format!("/person/{}", john_id))
 			.header(ContentType::JSON)
