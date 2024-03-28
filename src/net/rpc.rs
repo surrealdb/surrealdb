@@ -12,15 +12,15 @@ use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::WEBSOCKETS;
 use axum::routing::get;
 use axum::routing::post;
-use axum::TypedHeader;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
 	Extension, Router,
 };
+use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderValue;
-use http_body::Body as HttpBody;
+
 use surrealdb::dbs::Session;
 use surrealdb::rpc::method::Method;
 use tower_http::request_id::RequestId;
@@ -31,11 +31,8 @@ use super::headers::ContentType;
 
 use surrealdb::rpc::rpc_context::RpcContext;
 
-pub(super) fn router<S, B>() -> Router<S, B>
+pub(super) fn router<S>() -> Router<S>
 where
-	B: HttpBody + Send + 'static,
-	B::Data: Send,
-	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
