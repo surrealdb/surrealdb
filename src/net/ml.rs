@@ -61,6 +61,12 @@ async fn import(
 		Ok(file) => file,
 		Err(err) => return Err(Error::Other(err.to_string())),
 	};
+
+	// reject the file if there is no model name or version
+	if file.header.name.to_string() == "" || file.header.version.to_string() == "" {
+		return Err(Error::Other("Model name and version must be set".to_string()));
+	}
+
 	// Convert the file back in to raw bytes
 	let data = file.to_bytes();
 	// Calculate the hash of the model file
