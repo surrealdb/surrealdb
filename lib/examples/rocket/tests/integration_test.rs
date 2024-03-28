@@ -71,7 +71,7 @@ fn test_read_person() {
 		let person = person_data.unwrap();
 		assert_eq!(person.name, "John Doe");
 
-		// Cleanup: Delete the inserted person to maintain test isolation.
+		// Cleanup
 		delete_person(&client, john_id).await;
 	});
 }
