@@ -1600,7 +1600,7 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -1661,7 +1661,7 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -1739,7 +1739,7 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
