@@ -12,13 +12,17 @@ use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
-const TAG_DATETIME: u64 = 0;
+const TAG_STRING_DATETIME: u64 = 0;
+const TAG_EPOCH_DATETIME: u64 = 1;
 const TAG_NONE: u64 = 6;
-const TAG_UUID: u64 = 7;
+const TAG_STRING_UUID: u64 = 7;
 const TAG_DECIMAL: u64 = 8;
-const TAG_DURATION: u64 = 9;
+const TAG_STRING_DURATION: u64 = 9;
 const TAG_RECORDID: u64 = 10;
 const TAG_TABLE: u64 = 11;
+const TAG_CUSTOM_DATETIME: u64 = 20;
+const TAG_UUID: u64 = 37;
+const TAG_DURATION: u64 = 53;
 const TAG_GEOMETRY_POINT: u64 = 88;
 const TAG_GEOMETRY_LINE: u64 = 89;
 const TAG_GEOMETRY_POLYGON: u64 = 90;
@@ -54,22 +58,70 @@ impl TryFrom<Cbor> for Value {
 			Data::Tag(t, v) => {
 				match t {
 					// A literal datetime
-					TAG_DATETIME => match *v {
+					TAG_STRING_DATETIME => match *v {
 						Data::Text(v) => match Datetime::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Datetime value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
 					},
+					// An epoch-based datetime (https://www.rfc-editor.org/rfc/rfc8949.html#name-epoch-based-date-time)
+					TAG_EPOCH_DATETIME => match *v {
+						Data::Integer(v) => match Datetime::try_from(i128::from(v)) {
+							Ok(v) => Ok(v.into()),
+							_ => Err("Expected a valid Datetime value"),
+						},
+						Data::Float(v) => match Datetime::try_from(v) {
+							Ok(v) => Ok(v.into()),
+							_ => Err("Expected a valid Datetime value"),
+						},
+						_ => Err("Expected a CBOR integer or float data type"),
+					},
+					// A custom [seconds: i64, nanos: u32] datetime
+					TAG_CUSTOM_DATETIME => match *v {
+						Data::Array(v) if v.len() == 2 => {
+							let mut iter = v.into_iter();
+
+							let seconds = match iter.next() {
+								Some(v) => match i64::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => return Err("Expected a CBOR integer data type"),
+							};
+
+							let nanos = match iter.next() {
+								Some(v) => match u32::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => return Err("Expected a CBOR integer data type"),
+							};
+
+							match Utc.timestamp_opt(seconds, nanos) {
+								LocalResult::Single(v) => Ok(Value::Datetime(v.into())),
+								_ => Err("Expected a valid Datetime value"),
+							}
+						}
+						_ => Err("Expected a CBOR array with 2 elements"),
+					},
 					// A literal NONE
 					TAG_NONE => Ok(Value::None),
 					// A literal uuid
-					TAG_UUID => match *v {
+					TAG_STRING_UUID => match *v {
 						Data::Text(v) => match Uuid::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid UUID value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
+					},
+					// A byte string uuid
+					TAG_UUID => match *v {
+						Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
+							Ok(v) => Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(v)))),
+							Err(_) => Err("Expected a CBOR byte array with 16 elements"),
+						},
+						_ => Err("Expected a CBOR byte array with 16 elements"),
 					},
 					// A literal decimal
 					TAG_DECIMAL => match *v {
@@ -80,12 +132,37 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A literal duration
-					TAG_DURATION => match *v {
+					TAG_STRING_DURATION => match *v {
 						Data::Text(v) => match Duration::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Duration value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
+					},
+					// A custom [seconds: Option<u64>, nanos: Option<u32>] duration
+					TAG_DURATION => match *v {
+						Data::Array(v) if v.len() <= 2 => {
+							let mut iter = v.into_iter();
+
+							let seconds = match iter.next() {
+								Some(v) => match u64::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => 0,
+							};
+
+							let nanos = match iter.next() {
+								Some(v) => match u32::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => 0,
+							};
+
+							Duration::new(seconds, nanos).into()
+						}
+						_ => Err("Expected a CBOR array with at most 2 elements"),
 					},
 					// A literal recordid
 					TAG_RECORDID => match *v {
@@ -244,6 +321,9 @@ impl TryFrom<Cbor> for Value {
 	}
 }
 
+// TODO(kearfy): Make this the default in v2.0.0 and drop this boolean
+const SERIALIZATION_V2: bool = false;
+
 impl TryFrom<Value> for Cbor {
 	type Error = &'static str;
 	fn try_from(val: Value) -> Result<Self, &'static str> {
@@ -260,12 +340,52 @@ impl TryFrom<Value> for Cbor {
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
 			Value::Duration(v) => {
-				Ok(Cbor(Data::Tag(TAG_DURATION, Box::new(Data::Text(v.to_raw())))))
+				if SERIALIZATION_V2 {
+					let seconds = v.secs();
+					let nanos = v.subsec_nanos();
+
+					let tag_value = match (seconds, nanos) {
+						(0, 0) => Box::new(Data::Array(vec![])),
+						(_, 0) => Box::new(Data::Array(vec![Data::Integer(seconds.into())])),
+						_ => Box::new(Data::Array(vec![
+							Data::Integer(seconds.into()),
+							Data::Integer(nanos.into()),
+						])),
+					};
+
+					Ok(Cbor(Data::Tag(TAG_DURATION, tag_value)))
+				} else {
+					Ok(Cbor(Data::Tag(TAG_STRING_DURATION, Box::new(Data::Text(v.to_raw())))))
+				}
 			}
 			Value::Datetime(v) => {
-				Ok(Cbor(Data::Tag(TAG_DATETIME, Box::new(Data::Text(v.to_raw())))))
+				if SERIALIZATION_V2 {
+					let seconds = v.timestamp();
+					let nanos = v.timestamp_subsec_nanos();
+
+					let tag = match nanos {
+						0 => Data::Tag(TAG_EPOCH_DATETIME, Box::new(Data::Integer(seconds.into()))),
+						_ => Data::Tag(
+							TAG_CUSTOM_DATETIME,
+							Box::new(Data::Array(vec![
+								Data::Integer(seconds.into()),
+								Data::Integer(nanos.into()),
+							])),
+						),
+					};
+
+					Ok(Cbor(tag))
+				} else {
+					Ok(Cbor(Data::Tag(TAG_STRING_DATETIME, Box::new(Data::Text(v.to_raw())))))
+				}
 			}
-			Value::Uuid(v) => Ok(Cbor(Data::Tag(TAG_UUID, Box::new(Data::Text(v.to_raw()))))),
+			Value::Uuid(v) => {
+				if SERIALIZATION_V2 {
+					Ok(Cbor(Data::Tag(TAG_UUID, Box::new(Data::Bytes(v.into_bytes().into())))))
+				} else {
+					Ok(Cbor(Data::Tag(TAG_STRING_UUID, Box::new(Data::Text(v.to_raw())))))
+				}
+			}
 			Value::Array(v) => Ok(Cbor(Data::Array(
 				v.into_iter()
 					.map(|v| {
