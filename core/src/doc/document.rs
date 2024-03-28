@@ -37,12 +37,12 @@ impl<'a> CursorDoc<'a> {
 		ir: Option<IteratorRef>,
 		rid: Option<&'a Thing>,
 		doc_id: Option<DocId>,
-		doc: &'a Value,
+		doc: Cow<'a, Value>,
 	) -> Self {
 		Self {
 			ir,
 			rid,
-			doc: Cow::Borrowed(doc),
+			doc,
 			doc_id,
 		}
 	}
@@ -93,8 +93,8 @@ impl<'a> Document<'a> {
 		Document {
 			id,
 			extras,
-			current: CursorDoc::new(ir, id, doc_id, val),
-			initial: CursorDoc::new(ir, id, doc_id, val),
+			current: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
+			initial: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
 		}
 	}
 
@@ -106,8 +106,8 @@ impl<'a> Document<'a> {
 		ir: Option<IteratorRef>,
 		id: Option<&'a Thing>,
 		doc_id: Option<DocId>,
-		val: &'a Value,
-		initial: &'a Value,
+		val: Cow<'a, Value>,
+		initial: Cow<'a, Value>,
 		extras: Workable,
 	) -> Self {
 		Document {

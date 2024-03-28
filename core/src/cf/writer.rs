@@ -1,4 +1,5 @@
 use crate::cf::{TableMutation, TableMutations};
+use crate::fflags::FFLAGS;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
@@ -82,7 +83,11 @@ impl Writer {
 						let patches = current.diff(&previous, Idiom(Vec::new()));
 						let new_record = !previous.is_some();
 						trace!("The record is new_record={new_record} because previous is {previous:?}");
-						TableMutation::SetWithDiff(id, current.into_owned(), patches, new_record)
+						if previous.is_none() {
+							TableMutation::Set(id, current.into_owned())
+						} else {
+							TableMutation::SetWithDiff(id, current.into_owned(), patches)
+						}
 					}
 					false => TableMutation::Set(id, current.into_owned()),
 				},
