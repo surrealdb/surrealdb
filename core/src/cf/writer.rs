@@ -1,5 +1,4 @@
 use crate::cf::{TableMutation, TableMutations};
-use crate::fflags::FFLAGS;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
