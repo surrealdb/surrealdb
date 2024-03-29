@@ -81,12 +81,10 @@ impl TryFrom<i128> for Datetime {
 	}
 }
 
-impl TryFrom<f64> for Datetime {
+impl TryFrom<(i64, u32)> for Datetime {
 	type Error = ();
-	fn try_from(v: f64) -> Result<Self, Self::Error> {
-		const NANOS_PER_SEC: f64 = 1_000_000_000.0;
-
-		match Utc.timestamp_opt(v as i64, (v.fract() * NANOS_PER_SEC) as u32) {
+	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
+		match Utc.timestamp_opt(v.0, v.1) {
 			LocalResult::Single(v) => Ok(Self(v)),
 			_ => Err(()),
 		}

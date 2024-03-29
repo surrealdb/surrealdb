@@ -13,16 +13,15 @@ use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
 const TAG_STRING_DATETIME: u64 = 0;
-const TAG_EPOCH_DATETIME: u64 = 1;
 const TAG_NONE: u64 = 6;
 const TAG_STRING_UUID: u64 = 7;
 const TAG_DECIMAL: u64 = 8;
 const TAG_STRING_DURATION: u64 = 9;
 const TAG_RECORDID: u64 = 10;
 const TAG_TABLE: u64 = 11;
-const TAG_CUSTOM_DATETIME: u64 = 20;
-const TAG_UUID: u64 = 37;
-const TAG_DURATION: u64 = 53;
+const TAG_CUSTOM_DATETIME: u64 = 12;
+const TAG_CUSTOM_DURATION: u64 = 13;
+const TAG_BINARY_UUID: u64 = 37;
 const TAG_GEOMETRY_POINT: u64 = 88;
 const TAG_GEOMETRY_LINE: u64 = 89;
 const TAG_GEOMETRY_POLYGON: u64 = 90;
@@ -65,25 +64,13 @@ impl TryFrom<Cbor> for Value {
 						},
 						_ => Err("Expected a CBOR text data type"),
 					},
-					// An epoch-based datetime (https://www.rfc-editor.org/rfc/rfc8949.html#name-epoch-based-date-time)
-					TAG_EPOCH_DATETIME => match *v {
-						Data::Integer(v) => match Datetime::try_from(i128::from(v)) {
-							Ok(v) => Ok(v.into()),
-							_ => Err("Expected a valid Datetime value"),
-						},
-						Data::Float(v) => match Datetime::try_from(v) {
-							Ok(v) => Ok(v.into()),
-							_ => Err("Expected a valid Datetime value"),
-						},
-						_ => Err("Expected a CBOR integer or float data type"),
-					},
 					// A custom [seconds: i64, nanos: u32] datetime
 					TAG_CUSTOM_DATETIME => match *v {
 						Data::Array(v) if v.len() == 2 => {
 							let mut iter = v.into_iter();
 
 							let seconds = match iter.next() {
-								Some(v) => match i64::try_from(v) {
+								Some(Data::Integer(v)) => match i64::try_from(v) {
 									Ok(v) => v,
 									_ => return Err("Expected a CBOR integer data type"),
 								},
@@ -91,15 +78,15 @@ impl TryFrom<Cbor> for Value {
 							};
 
 							let nanos = match iter.next() {
-								Some(v) => match u32::try_from(v) {
+								Some(Data::Integer(v)) => match u32::try_from(v) {
 									Ok(v) => v,
 									_ => return Err("Expected a CBOR integer data type"),
 								},
 								_ => return Err("Expected a CBOR integer data type"),
 							};
 
-							match Utc.timestamp_opt(seconds, nanos) {
-								LocalResult::Single(v) => Ok(Value::Datetime(v.into())),
+							match Datetime::try_from((seconds, nanos)) {
+								Ok(v) => Ok(v.into()),
 								_ => Err("Expected a valid Datetime value"),
 							}
 						}
@@ -116,7 +103,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A byte string uuid
-					TAG_UUID => match *v {
+					TAG_BINARY_UUID => match *v {
 						Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
 							Ok(v) => Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(v)))),
 							Err(_) => Err("Expected a CBOR byte array with 16 elements"),
@@ -140,12 +127,12 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A custom [seconds: Option<u64>, nanos: Option<u32>] duration
-					TAG_DURATION => match *v {
+					TAG_CUSTOM_DURATION => match *v {
 						Data::Array(v) if v.len() <= 2 => {
 							let mut iter = v.into_iter();
 
 							let seconds = match iter.next() {
-								Some(v) => match u64::try_from(v) {
+								Some(Data::Integer(v)) => match u64::try_from(v) {
 									Ok(v) => v,
 									_ => return Err("Expected a CBOR integer data type"),
 								},
@@ -153,14 +140,14 @@ impl TryFrom<Cbor> for Value {
 							};
 
 							let nanos = match iter.next() {
-								Some(v) => match u32::try_from(v) {
+								Some(Data::Integer(v)) => match u32::try_from(v) {
 									Ok(v) => v,
 									_ => return Err("Expected a CBOR integer data type"),
 								},
 								_ => 0,
 							};
 
-							Duration::new(seconds, nanos).into()
+							Ok(Duration::new(seconds, nanos).into())
 						}
 						_ => Err("Expected a CBOR array with at most 2 elements"),
 					},
@@ -353,7 +340,7 @@ impl TryFrom<Value> for Cbor {
 						])),
 					};
 
-					Ok(Cbor(Data::Tag(TAG_DURATION, tag_value)))
+					Ok(Cbor(Data::Tag(TAG_CUSTOM_DURATION, tag_value)))
 				} else {
 					Ok(Cbor(Data::Tag(TAG_STRING_DURATION, Box::new(Data::Text(v.to_raw())))))
 				}
@@ -363,25 +350,23 @@ impl TryFrom<Value> for Cbor {
 					let seconds = v.timestamp();
 					let nanos = v.timestamp_subsec_nanos();
 
-					let tag = match nanos {
-						0 => Data::Tag(TAG_EPOCH_DATETIME, Box::new(Data::Integer(seconds.into()))),
-						_ => Data::Tag(
-							TAG_CUSTOM_DATETIME,
-							Box::new(Data::Array(vec![
-								Data::Integer(seconds.into()),
-								Data::Integer(nanos.into()),
-							])),
-						),
-					};
-
-					Ok(Cbor(tag))
+					Ok(Cbor(Data::Tag(
+						TAG_CUSTOM_DATETIME,
+						Box::new(Data::Array(vec![
+							Data::Integer(seconds.into()),
+							Data::Integer(nanos.into()),
+						])),
+					)))
 				} else {
 					Ok(Cbor(Data::Tag(TAG_STRING_DATETIME, Box::new(Data::Text(v.to_raw())))))
 				}
 			}
 			Value::Uuid(v) => {
 				if SERIALIZATION_V2 {
-					Ok(Cbor(Data::Tag(TAG_UUID, Box::new(Data::Bytes(v.into_bytes().into())))))
+					Ok(Cbor(Data::Tag(
+						TAG_BINARY_UUID,
+						Box::new(Data::Bytes(v.into_bytes().into())),
+					)))
 				} else {
 					Ok(Cbor(Data::Tag(TAG_STRING_UUID, Box::new(Data::Text(v.to_raw())))))
 				}
