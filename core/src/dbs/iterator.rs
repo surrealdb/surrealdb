@@ -20,18 +20,19 @@ use crate::sql::value::Value;
 use async_recursion::async_recursion;
 use std::cmp::Ordering;
 use std::mem;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
-	Table(Table),
+	Table(Arc<Table>),
 	Thing(Thing),
 	Range(Range),
 	Edges(Edges),
 	Defer(Thing),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
-	Index(Table, IteratorRef),
+	Index(Arc<Table>, IteratorRef),
 }
 
 pub(crate) struct Processed {
@@ -118,7 +119,7 @@ impl Iterator {
 					}
 					_ => {
 						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v))
+						self.ingest(Iterable::Table(Arc::new(v)))
 					}
 				},
 				// There is no data clause so create a record id
@@ -129,7 +130,7 @@ impl Iterator {
 					}
 					_ => {
 						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v))
+						self.ingest(Iterable::Table(Arc::new(v)))
 					}
 				},
 			},
