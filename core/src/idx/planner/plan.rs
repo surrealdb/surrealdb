@@ -5,17 +5,25 @@ use crate::sql::with::With;
 use crate::sql::{Array, Idiom, Object};
 use crate::sql::{Expression, Operator, Value};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
+/// The `PlanBuilder` struct represents a builder for constructing query plans.
 pub(super) struct PlanBuilder {
+	/// Do we have at least one index?
 	has_indexes: bool,
+	/// List of expressions that are not ranges, backed by an index
 	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
+	/// List of indexes involved in this plan
 	with_indexes: Vec<IndexRef>,
-	groups: HashMap<GroupRef, Group>,
+	/// Group each possible optimisations local to a SubQuery
+	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
+	/// Does a group contains only AND relations?
 	all_and_groups: HashMap<GroupRef, bool>,
+	/// Does the whole query contains only AND relations?
 	all_and: bool,
+	/// Is every expression backed by an index?
 	all_exp_with_index: bool,
 }
 
