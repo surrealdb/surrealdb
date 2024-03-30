@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{Depth, IndexRef, Node};
+use crate::idx::planner::tree::{GroupRef, IndexRef, Node};
 use crate::sql::with::With;
 use crate::sql::{Array, Idiom, Object};
 use crate::sql::{Expression, Operator, Value};
@@ -13,8 +13,8 @@ pub(super) struct PlanBuilder {
 	has_indexes: bool,
 	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
 	with_indexes: Vec<IndexRef>,
-	levels: HashMap<Depth, Level>,
-	all_and_levels: HashMap<Depth, bool>,
+	groups: HashMap<GroupRef, Group>,
+	all_and_groups: HashMap<GroupRef, bool>,
 	all_and: bool,
 	all_exp_with_index: bool,
 }
@@ -31,9 +31,9 @@ impl PlanBuilder {
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
-			levels: Default::default(),
+			groups: Default::default(),
 			with_indexes,
-			all_and_levels: Default::default(),
+			all_and_groups: Default::default(),
 			all_and: true,
 			all_exp_with_index: true,
 		};
@@ -50,8 +50,8 @@ impl PlanBuilder {
 		if b.all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
-			if let Some((_, level)) = b.levels.into_iter().next() {
-				if let Some((ir, rq)) = level.take_first_range() {
+			if let Some((_, group)) = b.groups.into_iter().next() {
+				if let Some((ir, rq)) = group.take_first_range() {
 					return Ok(Plan::SingleIndexRange(ir, rq));
 				}
 			}
@@ -62,12 +62,12 @@ impl PlanBuilder {
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
 		else if b.all_exp_with_index {
-			let mut ranges = Vec::with_capacity(b.levels.len());
-			for (depth, level) in b.levels {
-				if b.all_and_levels.get(&depth) == Some(&true) {
-					level.take_union_ranges(&mut ranges);
+			let mut ranges = Vec::with_capacity(b.groups.len());
+			for (depth, group) in b.groups {
+				if b.all_and_groups.get(&depth) == Some(&true) {
+					group.take_union_ranges(&mut ranges);
 				} else {
-					level.take_intersect_ranges(&mut ranges);
+					group.take_intersect_ranges(&mut ranges);
 				}
 			}
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
@@ -88,15 +88,15 @@ impl PlanBuilder {
 	fn eval_node(&mut self, node: &Node) -> Result<(), String> {
 		match node {
 			Node::Expression {
-				depth,
+				group,
 				io,
 				left,
 				right,
 				exp,
 			} => {
-				let is_bool = self.check_boolean_operator(*depth, exp.operator());
+				let is_bool = self.check_boolean_operator(*group, exp.operator());
 				if let Some(io) = self.filter_index_option(io.as_ref()) {
-					self.add_index_option(*depth, exp.clone(), io);
+					self.add_index_option(*group, exp.clone(), io);
 				} else if self.all_exp_with_index && !is_bool {
 					self.all_exp_with_index = false;
 				}
@@ -109,29 +109,29 @@ impl PlanBuilder {
 		}
 	}
 
-	fn check_boolean_operator(&mut self, depth: Depth, op: &Operator) -> bool {
+	fn check_boolean_operator(&mut self, gr: GroupRef, op: &Operator) -> bool {
 		match op {
 			Operator::Neg | Operator::Or => {
 				if self.all_and {
 					self.all_and = false;
 				}
-				self.all_and_levels.entry(depth).and_modify(|b| *b = false).or_insert(false);
+				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
 				true
 			}
 			Operator::And => {
-				self.all_and_levels.entry(depth).or_insert(true);
+				self.all_and_groups.entry(gr).or_insert(true);
 				true
 			}
 			_ => {
-				self.all_and_levels.entry(depth).or_insert(true);
+				self.all_and_groups.entry(gr).or_insert(true);
 				false
 			}
 		}
 	}
 
-	fn add_index_option(&mut self, depth: Depth, exp: Arc<Expression>, io: IndexOption) {
+	fn add_index_option(&mut self, group_ref: GroupRef, exp: Arc<Expression>, io: IndexOption) {
 		if let IndexOperator::RangePart(_, _) = io.op() {
-			let level = self.levels.entry(depth).or_default();
+			let level = self.groups.entry(group_ref).or_default();
 			match level.ranges.entry(io.ix_ref()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().push((exp, io));
@@ -305,11 +305,11 @@ impl From<&RangeValue> for Value {
 }
 
 #[derive(Default)]
-pub(super) struct Level {
+pub(super) struct Group {
 	ranges: HashMap<IndexRef, Vec<(Arc<Expression>, IndexOption)>>,
 }
 
-impl Level {
+impl Group {
 	fn take_first_range(self) -> Option<(IndexRef, UnionRangeQueryBuilder)> {
 		if let Some((ir, ri)) = self.ranges.into_iter().take(1).next() {
 			UnionRangeQueryBuilder::new_aggregate(ri).map(|rb| (ir, rb))
