@@ -1389,7 +1389,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-		use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
 		use rand::{distributions::Alphanumeric, Rng};
 		use wiremock::matchers::{method, path};

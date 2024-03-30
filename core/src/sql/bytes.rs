@@ -1,4 +1,4 @@
-use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
