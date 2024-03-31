@@ -267,7 +267,7 @@ impl TryFrom<Cbor> for Value {
 
 							Ok(Value::Geometry(Geometry::MultiLine(MultiLineString::new(lines))))
 						}
-						_ => Err("Expected a CBOR array with Geometry Point values"),
+						_ => Err("Expected a CBOR array with Geometry Line values"),
 					},
 					TAG_GEOMETRY_MULTIPOLYGON => match v.deref() {
 						Data::Array(v) => {
