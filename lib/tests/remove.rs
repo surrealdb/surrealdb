@@ -125,13 +125,11 @@ async fn remove_statement_index() -> Result<(), Error> {
 	}
 
 	// Every index store cache has been removed
-	#[cfg(feature = "sql2")]
 	assert!(dbs.index_store().is_empty().await);
 	Ok(())
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE TABLE foo;
@@ -148,7 +146,6 @@ async fn should_error_when_remove_and_table_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_table_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE TABLE IF EXISTS foo;
@@ -165,7 +162,6 @@ async fn should_not_error_when_remove_table_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_analyzer_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE ANALYZER foo;
@@ -182,7 +178,6 @@ async fn should_error_when_remove_and_analyzer_does_not_exist() -> Result<(), Er
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_analyzer_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE ANALYZER IF EXISTS foo;
@@ -199,7 +194,6 @@ async fn should_not_error_when_remove_analyzer_if_exists() -> Result<(), Error> 
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_database_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE DATABASE foo;
@@ -216,7 +210,6 @@ async fn should_error_when_remove_and_database_does_not_exist() -> Result<(), Er
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_database_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE DATABASE IF EXISTS foo;
@@ -233,7 +226,6 @@ async fn should_not_error_when_remove_database_if_exists() -> Result<(), Error> 
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_event_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE EVENT foo ON bar;
@@ -250,7 +242,6 @@ async fn should_error_when_remove_and_event_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_event_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE EVENT IF EXISTS foo ON bar;
@@ -267,7 +258,6 @@ async fn should_not_error_when_remove_event_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_field_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE FIELD foo ON bar;
@@ -284,7 +274,6 @@ async fn should_error_when_remove_and_field_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_field_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE FIELD IF EXISTS foo ON bar;
@@ -301,7 +290,6 @@ async fn should_not_error_when_remove_field_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_function_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE FUNCTION fn::foo;
@@ -318,7 +306,6 @@ async fn should_error_when_remove_and_function_does_not_exist() -> Result<(), Er
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_function_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE FUNCTION IF EXISTS fn::foo;
@@ -335,7 +322,6 @@ async fn should_not_error_when_remove_function_if_exists() -> Result<(), Error> 
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_index_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE INDEX foo ON bar;
@@ -352,7 +338,6 @@ async fn should_error_when_remove_and_index_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_index_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE INDEX IF EXISTS foo ON bar;
@@ -369,7 +354,6 @@ async fn should_not_error_when_remove_index_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_namespace_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE NAMESPACE foo;
@@ -386,7 +370,6 @@ async fn should_error_when_remove_and_namespace_does_not_exist() -> Result<(), E
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_namespace_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE NAMESPACE IF EXISTS foo;
@@ -403,7 +386,6 @@ async fn should_not_error_when_remove_namespace_if_exists() -> Result<(), Error>
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_param_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE PARAM $foo;
@@ -420,7 +402,6 @@ async fn should_error_when_remove_and_param_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_param_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE PARAM IF EXISTS $foo;
@@ -437,7 +418,6 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_scope_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE SCOPE foo;
@@ -454,7 +434,6 @@ async fn should_error_when_remove_and_scope_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_scope_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE SCOPE IF EXISTS foo;
@@ -471,7 +450,6 @@ async fn should_not_error_when_remove_scope_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_token_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE TOKEN foo ON NAMESPACE;
@@ -488,7 +466,6 @@ async fn should_error_when_remove_and_token_does_not_exist() -> Result<(), Error
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_token_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE TOKEN IF EXISTS foo ON NAMESPACE;
@@ -505,7 +482,6 @@ async fn should_not_error_when_remove_token_if_exists() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_error_when_remove_and_user_does_not_exist() -> Result<(), Error> {
 	let sql = "
 		REMOVE USER foo ON ROOT;
@@ -522,7 +498,6 @@ async fn should_error_when_remove_and_user_does_not_exist() -> Result<(), Error>
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn should_not_error_when_remove_user_if_exists() -> Result<(), Error> {
 	let sql = "
 		REMOVE USER IF EXISTS foo ON ROOT;

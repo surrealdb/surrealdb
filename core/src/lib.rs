@@ -34,15 +34,19 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(feature = "ml")]
-#[doc(hidden)]
-pub mod obs;
 #[doc(hidden)]
 pub mod options;
 #[doc(hidden)]
 pub mod rpc;
 #[doc(hidden)]
 pub mod syn;
+
+#[cfg(feature = "ml")]
+#[doc(hidden)]
+pub use surrealml as ml;
+#[cfg(feature = "ml")]
+#[doc(hidden)]
+pub mod obs;
 
 #[doc(hidden)]
 pub mod test_helpers {
@@ -58,8 +62,3 @@ pub mod channel {
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }
-
-#[cfg(feature = "ml")]
-#[cfg(not(target_arch = "wasm32"))]
-#[doc(hidden)]
-pub use surrealml as ml;

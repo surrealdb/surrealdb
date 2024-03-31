@@ -91,7 +91,6 @@ use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(feature = "sql2")]
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
@@ -102,7 +101,6 @@ use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
-#[cfg(feature = "sql2")]
 const DEFAULT_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
 /// In-memory database
