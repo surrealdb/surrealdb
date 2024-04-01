@@ -21,12 +21,6 @@ pub struct Response {
 }
 
 impl Response {
-	/// Convert and simplify the value into JSON
-	#[inline]
-	pub fn into_json(self) -> Json {
-		Json::from(self.into_value())
-	}
-
 	#[inline]
 	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
