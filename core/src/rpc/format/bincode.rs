@@ -3,7 +3,7 @@ use crate::rpc::RpcError;
 use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Value;
 
-pub fn req(val: &Vec<u8>) -> Result<Request, RpcError> {
+pub fn req(val: &[u8]) -> Result<Request, RpcError> {
 	deserialize::<Value>(val).map_err(|_| RpcError::ParseError)?.try_into()
 }
 

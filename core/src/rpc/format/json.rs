@@ -3,7 +3,7 @@ use crate::rpc::RpcError;
 use crate::sql;
 use crate::sql::Value;
 
-pub fn req(val: &Vec<u8>) -> Result<Request, RpcError> {
+pub fn req(val: &[u8]) -> Result<Request, RpcError> {
 	sql::value(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
 		.or(Err(RpcError::ParseError))?
 		.try_into()
