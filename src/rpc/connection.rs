@@ -3,7 +3,6 @@ use crate::cnf::{
 };
 use crate::dbs::DB;
 use crate::rpc::failure::Failure;
-use crate::rpc::format::Format;
 use crate::rpc::response::{failure, IntoRpcResponse};
 use crate::rpc::{CONN_CLOSED_ERR, LIVE_QUERIES, WEBSOCKETS};
 use crate::telemetry;
@@ -20,6 +19,7 @@ use surrealdb::channel::{self, Receiver, Sender};
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::rpc::args::Take;
+use surrealdb::rpc::format::Format;
 use surrealdb::rpc::method::Method;
 use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::{Data, RpcError};

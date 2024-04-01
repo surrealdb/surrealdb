@@ -1,6 +1,8 @@
 pub mod args;
 pub mod basic_context;
+pub mod format;
 pub mod method;
+pub mod request;
 mod response;
 pub mod rpc_context;
 mod rpc_error;

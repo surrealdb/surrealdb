@@ -1,5 +1,4 @@
 use crate::rpc::failure::Failure;
-use crate::rpc::format::Format;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
@@ -8,6 +7,7 @@ use serde::Serialize;
 use serde_json::Value as Json;
 use std::sync::Arc;
 use surrealdb::channel::Sender;
+use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
 use tracing::Span;
