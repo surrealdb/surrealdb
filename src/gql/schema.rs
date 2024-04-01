@@ -29,6 +29,9 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 	let tbs = tx.all_tb("test", "test").await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
+	// remove hardcoded db and ns
+	const DB_NAME: &str = "test";
+	const NS_NAME: &str = "test";
 
 	for tb in tbs.iter() {
 		info!("Adding table: {}", tb.name);
@@ -36,15 +39,29 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		query = query.field(Field::new(
 			tb.name.to_string(),
 			TypeRef::named_nn_list_nn(tb.name.to_string()),
-			move |_ctx| {
+			move |ctx| {
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let kvs = DB.get().unwrap();
 
 					let use_stmt = Statement::Use(UseStatement {
-						db: Some("test".to_string()),
-						ns: Some("test".to_string()),
+						db: Some(DB_NAME.to_string()),
+						ns: Some(NS_NAME.to_string()),
 					});
+
+					// -- debugging --
+					let fields = ctx.args;
+					let map = fields.as_index_map();
+					dbg!(map);
+
+					let par_val = ctx.parent_value.as_value().unwrap().clone();
+					dbg!(par_val);
+
+					let inner = ctx.ctx.clone();
+					let node = inner.path_node;
+					dbg!(node);
+					// ---------------
+
 					let ast = Statement::Select(SelectStatement {
 						what: Values(vec![SqlValue::Table(Table(tb_name))]),
 						expr: Fields::all(),
@@ -70,8 +87,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 				})
 			},
 		));
-		// TODO: remove hardcoded ns and db
-		let fds = tx.all_tb_fields("test", "test", &tb.name.0).await?;
+		let fds = tx.all_tb_fields(DB_NAME, NS_NAME, &tb.name.0).await?;
 
 		let mut table_ty_obj = Object::new(tb.name.to_string()).field(Field::new(
 			"id",
@@ -79,17 +95,33 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 			|ctx| {
 				FieldFuture::new(async move {
 					let record = ctx.parent_value.as_value().unwrap();
+					let GqlValue::Object(record_map) = record else {
+						todo!()
+					};
+					let id = record_map.get("id").unwrap();
 
-					Ok(Some(GqlValue::from("1")))
+					Ok(Some(id.to_owned()))
 				})
 			},
 		));
 
 		for fd in fds.iter() {
+			let fd_name = Name::new(fd.name.to_string());
 			table_ty_obj = table_ty_obj.field(Field::new(
 				fd.name.to_string(),
 				kind_to_type(fd.kind.clone()),
-				|_ctx| FieldFuture::new(async move { Ok(Some(GqlValue::Null)) }),
+				move |ctx| {
+					let fd_name = fd_name.clone();
+					FieldFuture::new(async move {
+						let record = ctx.parent_value.as_value().unwrap();
+						let GqlValue::Object(record_map) = record else {
+							todo!()
+						};
+						let val = record_map.get(&fd_name).unwrap();
+
+						Ok(Some(val.to_owned()))
+					})
+				},
 			));
 		}
 
