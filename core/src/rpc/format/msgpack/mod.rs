@@ -6,8 +6,7 @@ pub use convert::Pack;
 use crate::rpc::request::Request;
 use crate::sql::Value;
 
-pub fn req(body: Vec<u8>) -> Result<Request, RpcError> {
-	let val: Vec<u8> = body.into();
+pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
 	rmpv::decode::read_value(&mut val.as_slice())
 		.map_err(|_| RpcError::ParseError)
 		.map(Pack)?
