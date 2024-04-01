@@ -318,11 +318,8 @@ impl Number {
 
 	pub fn to_decimal(&self) -> Decimal {
 		match self {
-			// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
-			// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
-			#[allow(warnings)]
-			Number::Int(v) => Decimal::try_from(*v).unwrap_or_default(),
-			Number::Float(v) => Decimal::try_from(*v).unwrap_or_default(),
+			Number::Int(v) => Decimal::from(*v),
+			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
 		}
 	}

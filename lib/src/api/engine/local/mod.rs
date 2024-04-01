@@ -736,7 +736,7 @@ async fn router(
 						Ok(file) => file,
 						Err(error) => {
 							return Err(Error::FileRead {
-								path: PathBuf::from(path),
+								path,
 								error: io::Error::new(
 									io::ErrorKind::InvalidData,
 									error.message.to_string(),
