@@ -1,4 +1,5 @@
 use crate::rpc::failure::Failure;
+use crate::rpc::format::WsFormat;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;

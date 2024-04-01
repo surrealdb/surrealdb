@@ -109,7 +109,7 @@ impl Socket {
 			Format::Json => Ok(Message::Text(serde_json::to_string(message)?)),
 			Format::Cbor => {
 				pub mod try_from_impls {
-					include!("../../src/rpc/format/cbor/convert.rs");
+					include!("../../core/src/rpc/format/cbor/convert.rs");
 				}
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
@@ -128,7 +128,7 @@ impl Socket {
 			}
 			Format::Pack => {
 				pub mod try_from_impls {
-					include!("../../src/rpc/format/msgpack/convert.rs");
+					include!("../../core/src/rpc/format/msgpack/convert.rs");
 				}
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
@@ -166,7 +166,7 @@ impl Socket {
 				match format {
 					Format::Cbor => {
 						pub mod try_from_impls {
-							include!("../../src/rpc/format/cbor/convert.rs");
+							include!("../../core/src/rpc/format/cbor/convert.rs");
 						}
 						// For tests we need to convert the binary data to
 						// a serde_json::Value so that test assertions work.
@@ -182,7 +182,7 @@ impl Socket {
 					}
 					Format::Pack => {
 						pub mod try_from_impls {
-							include!("../../src/rpc/format/msgpack/convert.rs");
+							include!("../../core/src/rpc/format/msgpack/convert.rs");
 						}
 						// For tests we need to convert the binary data to
 						// a serde_json::Value so that test assertions work.

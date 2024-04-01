@@ -3,6 +3,7 @@ use crate::cnf::{
 };
 use crate::dbs::DB;
 use crate::rpc::failure::Failure;
+use crate::rpc::format::WsFormat;
 use crate::rpc::response::{failure, IntoRpcResponse};
 use crate::rpc::{CONN_CLOSED_ERR, LIVE_QUERIES, WEBSOCKETS};
 use crate::telemetry;

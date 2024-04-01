@@ -20,12 +20,18 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
-sql2 = [] # Deprecated since v1.4
+sql2 = []                                                         # Deprecated since v1.4
 parser2 = ["surrealdb/parser2"]
 performance-profiler = ["dep:pprof"]
 
 [workspace]
-members = ["core", "lib", "lib/examples/actix", "lib/examples/axum", "lib/examples/rocket"]
+members = [
+    "core",
+    "lib",
+    "lib/examples/actix",
+    "lib/examples/axum",
+    "lib/examples/rocket",
+]
 
 [profile.release]
 lto = true
@@ -44,6 +50,7 @@ axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
+ciborium = "0.2.1"
 clap = { version = "4.4.11", features = [
     "env",
     "derive",
@@ -72,6 +79,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "gzip",
 ] }
 revision = "0.5.0"
+rmpv = "1.0.1"
 rustyline = { version = "12.0.0", features = ["derive"] }
 semver = "1.0.20"
 serde = { version = "1.0.193", features = ["derive"] }
