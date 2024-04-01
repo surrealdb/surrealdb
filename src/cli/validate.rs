@@ -57,8 +57,7 @@ pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
 
 	if !has_entries {
 		eprintln!("No files found");
-
-		return Err(Error::Io(IoError::new(ErrorKind::NotFound, format!("No files found"))));
+		return Err(Error::Io(IoError::new(ErrorKind::NotFound, "No files found".to_string())));
 	}
 
 	Ok(())
