@@ -22,7 +22,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources
@@ -46,7 +46,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -73,14 +73,14 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
           components: rustfmt
 
       - name: Checkout sources
         uses: actions/checkout@v4
 
       - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny
+        run: cargo install --debug --locked cargo-deny@0.14.11
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet
@@ -97,6 +97,8 @@ jobs:
         run: cargo vet
 
       - name: Check dependencies for unauthorized access
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo acl -n
 
       - name: Dependency check failure
@@ -112,7 +114,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
@@ -136,7 +138,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
           components: clippy
 
       - name: Checkout sources
@@ -164,7 +166,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -200,7 +202,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -227,10 +229,10 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
@@ -254,7 +256,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -281,7 +283,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -305,7 +307,7 @@ jobs:
         run: cargo make ci-workspace-coverage
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         timeout-minutes: 1
         continue-on-error: true
         with:
@@ -320,7 +322,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -360,7 +362,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -396,7 +398,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -432,7 +434,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -468,7 +470,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -491,7 +493,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -514,7 +516,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -537,7 +539,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -560,7 +562,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -603,7 +605,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -640,7 +642,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -673,7 +675,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@v4

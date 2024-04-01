@@ -10,6 +10,7 @@ use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
+	UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -265,23 +266,30 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(it_entry) = self.0.it_entries.get(it_ref as usize) {
 			match it_entry {
-				IteratorEntry::Single(_, io) => {
-					if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
-						match ix.index {
-							Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
-							Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
-							Index::Search {
-								..
-							} => self.new_search_index_iterator(it_ref, io.clone()).await,
-							Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(it_ref)),
-						}
-					} else {
-						Ok(None)
-					}
-				}
+				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, it_ref, io).await,
 				IteratorEntry::Range(_, ir, from, to) => {
 					Ok(self.new_range_iterator(opt, *ir, from, to))
 				}
+			}
+		} else {
+			Ok(None)
+		}
+	}
+
+	async fn new_single_iterator(
+		&self,
+		opt: &Options,
+		it_ref: IteratorRef,
+		io: &IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
+		if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
+			match ix.index {
+				Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
+				Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
+				Index::Search {
+					..
+				} => self.new_search_index_iterator(it_ref, io.clone()).await,
+				Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(it_ref)),
 			}
 		} else {
 			Ok(None)
@@ -337,6 +345,9 @@ impl QueryExecutor {
 		match io.op() {
 			IndexOperator::Equality(value) => {
 				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)))
+			}
+			IndexOperator::Union(value) => {
+				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(opt, ix, value)))
 			}
 			_ => None,
 		}
@@ -429,16 +440,18 @@ impl QueryExecutor {
 		None
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn highlight(
 		&self,
 		txn: &Transaction,
 		thg: &Thing,
 		prefix: Value,
 		suffix: Value,
-		match_ref: &Value,
+		match_ref: Value,
+		partial: bool,
 		doc: &Value,
 	) -> Result<Value, Error> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(match_ref) {
+		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let mut run = txn.lock().await;
 			return ft
 				.highlight(
@@ -447,6 +460,7 @@ impl QueryExecutor {
 					&e.0.terms,
 					prefix,
 					suffix,
+					partial,
 					e.0.index_option.id_ref(),
 					doc,
 				)
@@ -459,11 +473,12 @@ impl QueryExecutor {
 		&self,
 		txn: &Transaction,
 		thg: &Thing,
-		match_ref: &Value,
+		match_ref: Value,
+		partial: bool,
 	) -> Result<Value, Error> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(match_ref) {
+		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let mut run = txn.lock().await;
-			return ft.extract_offsets(&mut run, thg, &e.0.terms).await;
+			return ft.extract_offsets(&mut run, thg, &e.0.terms, partial).await;
 		}
 		Ok(Value::None)
 	}
@@ -500,7 +515,7 @@ struct FtEntry(Arc<Inner>);
 struct Inner {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<DocIds>>,
-	terms: Vec<Option<TermId>>,
+	terms: Vec<Option<(TermId, u32)>>,
 	terms_docs: TermsDocs,
 	scorer: Option<BM25Scorer>,
 }

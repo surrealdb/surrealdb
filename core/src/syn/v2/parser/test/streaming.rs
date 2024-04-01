@@ -21,11 +21,12 @@ use crate::{
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
+		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::v2::parser::{Parser, PartialResult},
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use reblessive::Stack;
 
 static SOURCE: &str = r#"
 	ANALYZE INDEX b on a;
@@ -151,11 +152,13 @@ fn statements() -> Vec<Statement> {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: Some(Strand("test".to_string())),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Namespace(DefineNamespaceStatement {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
 			id: None,
@@ -165,12 +168,14 @@ fn statements() -> Vec<Statement> {
 				expiry: std::time::Duration::from_secs(60) * 10,
 				store_original: false,
 			}),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Database(DefineDatabaseStatement {
 			id: None,
 			name: Ident("a".to_string()),
 			comment: None,
 			changefeed: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Function(DefineFunctionStatement {
 			name: Ident("foo::bar".to_string()),
@@ -184,6 +189,7 @@ fn statements() -> Vec<Statement> {
 			})]),
 			comment: Some(Strand("test".to_string())),
 			permissions: Permission::Full,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Token(DefineTokenStatement {
 			name: Ident("a".to_string()),
@@ -191,6 +197,7 @@ fn statements() -> Vec<Statement> {
 			kind: Algorithm::EdDSA,
 			code: "foo".to_string(),
 			comment: Some(Strand("bar".to_string())),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Param(DefineParamStatement {
 			name: Ident("a".to_string()),
@@ -204,6 +211,7 @@ fn statements() -> Vec<Statement> {
 			)),
 			comment: None,
 			permissions: Permission::Specific(Value::Null),
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Table(DefineTableStatement {
 			id: None,
@@ -239,6 +247,8 @@ fn statements() -> Vec<Statement> {
 				store_original: false,
 			}),
 			comment: None,
+			if_not_exists: false,
+			kind: TableType::Any,
 		})),
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
@@ -246,6 +256,7 @@ fn statements() -> Vec<Statement> {
 			when: Value::Null,
 			then: Values(vec![Value::Null, Value::None]),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Field(DefineFieldStatement {
 			name: Idiom(vec![
@@ -271,6 +282,7 @@ fn statements() -> Vec<Statement> {
 				select: Permission::Full,
 			},
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -296,6 +308,7 @@ fn statements() -> Vec<Statement> {
 				terms_cache: 8,
 			}),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -303,6 +316,7 @@ fn statements() -> Vec<Statement> {
 			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))])]),
 			index: Index::Uniq,
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),
@@ -311,6 +325,7 @@ fn statements() -> Vec<Statement> {
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
 				distance: Distance::Minkowski(Number::Int(5)),
+				_distance: Default::default(),
 				capacity: 6,
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
@@ -318,6 +333,7 @@ fn statements() -> Vec<Statement> {
 				vector_type: VectorType::F64,
 			}),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Define(DefineStatement::Analyzer(DefineAnalyzerStatement {
 			name: Ident("ana".to_owned()),
@@ -337,6 +353,7 @@ fn statements() -> Vec<Statement> {
 			]),
 			function: Some(Ident("foo::bar".to_string())),
 			comment: None,
+			if_not_exists: false,
 		})),
 		Statement::Delete(DeleteStatement {
 			only: true,
@@ -588,6 +605,7 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Remove(RemoveStatement::Function(RemoveFunctionStatement {
 			name: Ident("foo::bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Remove(RemoveStatement::Field(RemoveFieldStatement {
 			name: Idiom(vec![
@@ -596,6 +614,7 @@ fn statements() -> Vec<Statement> {
 				Part::Index(Number::Int(10)),
 			]),
 			what: Ident("bar".to_owned()),
+			if_exists: false,
 		})),
 		Statement::Update(UpdateStatement {
 			only: true,
@@ -641,6 +660,7 @@ fn test_streaming() {
 	let source_bytes = SOURCE.as_bytes();
 	let mut source_start = 0;
 	let mut parser = Parser::new(&[]);
+	let mut stack = Stack::new();
 
 	for i in 0..source_bytes.len() {
 		let partial_source = &source_bytes[source_start..i];
@@ -648,7 +668,7 @@ fn test_streaming() {
 		//println!("{}:{}", i, src);
 		parser = parser.change_source(partial_source);
 		parser.reset();
-		match parser.parse_partial_statement() {
+		match stack.enter(|stk| parser.parse_partial_statement(stk)).finish() {
 			PartialResult::Pending {
 				..
 			} => {
@@ -678,6 +698,6 @@ fn test_streaming() {
 		"failed to parse at {}\nAt statement {}\n\n{:?}",
 		src,
 		expected[current_stmt],
-		parser.parse_partial_statement()
+		stack.enter(|stk| parser.parse_partial_statement(stk)).finish()
 	);
 }

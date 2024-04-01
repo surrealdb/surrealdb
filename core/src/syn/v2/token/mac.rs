@@ -53,6 +53,12 @@ macro_rules! t {
 	(">") => {
 		$crate::syn::v2::token::TokenKind::RightChefron
 	};
+	("<|") => {
+		$crate::syn::v2::token::TokenKind::Operator($crate::syn::v2::token::Operator::KnnOpen)
+	};
+	("|>") => {
+		$crate::syn::v2::token::TokenKind::Operator($crate::syn::v2::token::Operator::KnnClose)
+	};
 
 	(";") => {
 		$crate::syn::v2::token::TokenKind::SemiColon

@@ -34,11 +34,21 @@ pub mod idx;
 pub mod key;
 #[doc(hidden)]
 pub mod kvs;
-#[cfg(any(feature = "ml", feature = "ml2", feature = "jwks"))]
+#[cfg(any(feature = "ml", feature = "ml2"))]
 #[doc(hidden)]
 pub mod obs;
 #[doc(hidden)]
+pub mod options;
+#[doc(hidden)]
+pub mod rpc;
+#[doc(hidden)]
 pub mod syn;
+
+#[doc(hidden)]
+pub mod test_helpers {
+	pub use crate::vs::conv::to_u128_be;
+	pub use crate::vs::generate_versionstamp_sequences;
+}
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export

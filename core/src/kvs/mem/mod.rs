@@ -1,6 +1,8 @@
 #![cfg(feature = "kv-mem")]
 
 use crate::err::Error;
+#[cfg(debug_assertions)]
+use crate::key::debug::sprint_key;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
@@ -168,7 +170,15 @@ impl Transaction {
 			Some(prev) => {
 				let slice = prev.as_slice();
 				let res: Result<[u8; 10], Error> = match slice.try_into() {
-					Ok(ba) => Ok(ba),
+					Ok(ba) => {
+						#[cfg(debug_assertions)]
+						trace!(
+							"Previous timestamp for key {} is {}",
+							sprint_key(&k),
+							sprint_key(&ba)
+						);
+						Ok(ba)
+					}
 					Err(e) => Err(Error::Ds(e.to_string())),
 				};
 				let array = res?;
@@ -204,15 +214,22 @@ impl Transaction {
 		}
 
 		let ts_key: Key = ts_key.into();
+		#[cfg(debug_assertions)]
+		let dbg_ts = sprint_key(&ts_key);
 		let prefix: Key = prefix.into();
-		let suffix: Key = suffix.into();
+		#[cfg(debug_assertions)]
+		let dbg_prefix = sprint_key(&prefix);
+		let mut suffix: Key = suffix.into();
+		#[cfg(debug_assertions)]
+		let dbg_suffix = sprint_key(&suffix);
 
-		let ts = self.get_timestamp(ts_key.clone())?;
-		let mut k: Vec<u8> = prefix.clone();
+		let ts = self.get_timestamp(ts_key)?;
+		let mut k: Vec<u8> = prefix;
 		k.append(&mut ts.to_vec());
-		k.append(&mut suffix.clone());
+		k.append(&mut suffix);
 
-		trace!("get_versionstamped_key; {ts_key:?} {prefix:?} {ts:?} {suffix:?} {k:?}",);
+		#[cfg(debug_assertions)]
+		trace!("get_versionstamped_key; prefix={dbg_prefix} ts={dbg_ts} suff={dbg_suffix}");
 
 		Ok(k)
 	}

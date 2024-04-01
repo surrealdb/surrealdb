@@ -5,15 +5,18 @@ use super::super::super::{
 	literal::{filters, ident, strand, tokenizer::tokenizers},
 	IResult,
 };
-#[cfg(feature = "sql2")]
 use crate::sql::Ident;
 use crate::sql::{filter::Filter, statements::DefineAnalyzerStatement, Strand, Tokenizer};
-#[cfg(feature = "sql2")]
-use nom::bytes::complete::tag;
 use nom::{branch::alt, bytes::complete::tag_no_case, combinator::cut, multi::many0};
+use nom::{bytes::complete::tag, combinator::opt, sequence::tuple};
 
 pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, opts) = many0(analyzer_opts)(i)?;
@@ -21,12 +24,12 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	// Create the base statement
 	let mut res = DefineAnalyzerStatement {
 		name,
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options
 	for opt in opts {
 		match opt {
-			#[cfg(feature = "sql2")]
 			DefineAnalyzerOption::Function(i) => {
 				res.function = Some(i);
 			}
@@ -46,7 +49,6 @@ pub fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 }
 
 enum DefineAnalyzerOption {
-	#[cfg(feature = "sql2")]
 	Function(Ident),
 	Comment(Strand),
 	Filters(Vec<Filter>),
@@ -54,16 +56,9 @@ enum DefineAnalyzerOption {
 }
 
 fn analyzer_opts(i: &str) -> IResult<&str, DefineAnalyzerOption> {
-	alt((
-		#[cfg(feature = "sql2")]
-		analyzer_function,
-		analyzer_comment,
-		analyzer_filters,
-		analyzer_tokenizers,
-	))(i)
+	alt((analyzer_function, analyzer_comment, analyzer_filters, analyzer_tokenizers))(i)
 }
 
-#[cfg(feature = "sql2")]
 fn analyzer_function(i: &str) -> IResult<&str, DefineAnalyzerOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FUNCTION")(i)?;

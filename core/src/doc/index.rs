@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Statement;
+use crate::dbs::{Force, Statement};
 use crate::dbs::{Options, Transaction};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -21,14 +21,23 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check indexes
-		if !opt.indexes {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
-		// Check if forced
-		if !opt.force && !self.changed() {
-			return Ok(());
-		}
+		// Was this force targeted at a specific index?
+		let targeted_force = matches!(opt.force, Force::Index(_));
+		// Collect indexes or skip
+		let ixs = match &opt.force {
+			Force::Index(ix)
+				if ix.first().is_some_and(|ix| self.id.is_some_and(|id| ix.what.0 == id.tb)) =>
+			{
+				ix.clone()
+			}
+			Force::All => self.ix(opt, txn).await?,
+			_ if self.changed() => self.ix(opt, txn).await?,
+			_ => return Ok(()),
+		};
 		// Check if the table is a view
 		if self.tb(opt, txn).await?.drop {
 			return Ok(());
@@ -36,7 +45,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Loop through all index statements
-		for ix in self.ix(opt, txn).await?.iter() {
+		for ix in ixs.iter() {
 			// Calculate old values
 			let o = build_opt_values(ctx, opt, txn, ix, &self.initial).await?;
 
@@ -44,7 +53,7 @@ impl<'a> Document<'a> {
 			let n = build_opt_values(ctx, opt, txn, ix, &self.current).await?;
 
 			// Update the index entries
-			if opt.force || o != n {
+			if targeted_force || o != n {
 				// Store all the variable and parameters required by the index operation
 				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
 
@@ -123,11 +132,7 @@ impl Combinator {
 			if !f {
 				// Iterator for not flattened values
 				if let Value::Array(v) = v {
-					iterators.push(Box::new(MultiValuesIterator {
-						vals: v.0,
-						done: false,
-						current: 0,
-					}));
+					iterators.push(Box::new(MultiValuesIterator::new(v.0)));
 					continue;
 				}
 			}
@@ -173,6 +178,28 @@ struct MultiValuesIterator {
 	vals: Vec<Value>,
 	done: bool,
 	current: usize,
+	end: usize,
+}
+
+impl MultiValuesIterator {
+	fn new(vals: Vec<Value>) -> Self {
+		let len = vals.len();
+		if len == 0 {
+			Self {
+				vals,
+				done: true,
+				current: 0,
+				end: 0,
+			}
+		} else {
+			Self {
+				vals,
+				done: false,
+				current: 0,
+				end: len - 1,
+			}
+		}
+	}
 }
 
 impl ValuesIterator for MultiValuesIterator {
@@ -180,7 +207,7 @@ impl ValuesIterator for MultiValuesIterator {
 		if self.done {
 			return false;
 		}
-		if self.current == self.vals.len() - 1 {
+		if self.current == self.end {
 			self.done = true;
 			return false;
 		}

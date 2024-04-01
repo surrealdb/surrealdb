@@ -1,9 +1,80 @@
 use std::collections::BTreeMap;
 
+use reblessive::Stack;
+
 use crate::{
-	sql::{Array, Constant, Id, Number, Object, Strand, Thing, Value},
-	syn::v2::parser::mac::test_parse,
+	sql::{
+		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
+	},
+	syn::v2::parser::{mac::test_parse, Parser},
 };
+
+#[test]
+fn parse_large_depth_object() {
+	let mut text = String::new();
+	let start = r#" { foo: "#;
+	let middle = r#" {bar: 1} "#;
+	let end = r#" } "#;
+
+	for _ in 0..1000 {
+		text.push_str(start);
+	}
+	text.push_str(middle);
+	for _ in 0..1000 {
+		text.push_str(end);
+	}
+	let mut parser = Parser::new(text.as_bytes())
+		.with_query_recursion_limit(100000)
+		.with_object_recursion_limit(100000);
+	let mut stack = Stack::new();
+	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
+	let Query(Statements(stmts)) = query;
+	let Statement::Value(Value::Object(ref object)) = stmts[0] else {
+		panic!()
+	};
+	let mut object = object;
+	for _ in 0..999 {
+		let Some(Value::Object(ref new_object)) = object.get("foo") else {
+			panic!()
+		};
+		object = new_object
+	}
+}
+
+#[test]
+fn parse_large_depth_record_id() {
+	let mut text = String::new();
+	let start = r#" r"a:[ "#;
+	let middle = r#" b:{c: 1} "#;
+	let end = r#" ]" "#;
+
+	for _ in 0..1000 {
+		text.push_str(start);
+	}
+	text.push_str(middle);
+	for _ in 0..1000 {
+		text.push_str(end);
+	}
+	let mut parser = Parser::new(text.as_bytes())
+		.with_query_recursion_limit(100000)
+		.with_object_recursion_limit(100000);
+	let mut stack = Stack::new();
+	let query = stack.enter(|stk| parser.parse_query(stk)).finish().unwrap();
+	let Query(Statements(stmts)) = query;
+	let Statement::Value(Value::Thing(ref thing)) = stmts[0] else {
+		panic!()
+	};
+	let mut thing = thing;
+	for _ in 0..999 {
+		let Id::Array(ref x) = thing.id else {
+			panic!()
+		};
+		let Value::Thing(ref new_thing) = x[0] else {
+			panic!()
+		};
+		thing = new_thing
+	}
+}
 
 #[test]
 fn parse_recursive_record_string() {
@@ -63,4 +134,18 @@ fn constant_uppercase() {
 fn constant_mixedcase() {
 	let out = test_parse!(parse_value, r#" MaTh::Pi "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
+}
+
+#[test]
+fn scientific_decimal() {
+	let res = test_parse!(parse_value, r#" 9.7e-7dec "#).unwrap();
+	assert!(matches!(res, Value::Number(Number::Decimal(_))));
+	assert_eq!(res.to_string(), "0.00000097dec")
+}
+
+#[test]
+fn scientific_number() {
+	let res = test_parse!(parse_value, r#" 9.7e-5"#).unwrap();
+	assert!(matches!(res, Value::Number(Number::Float(_))));
+	assert_eq!(res.to_string(), "0.000097f")
 }

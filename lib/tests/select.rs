@@ -220,6 +220,12 @@ async fn select_expression_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				},
+				{
+					detail: {
 						count: 2,
 					},
 					operation: 'Fetch'
@@ -521,6 +527,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 						table: 'post',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
 				}
 		]",
 	);
@@ -539,6 +551,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 						table: 'post',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
 				},
 				{
 					detail: {
@@ -597,6 +615,12 @@ async fn select_where_and_with_index() -> Result<(), Error> {
 						table: 'person',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
 				}
 		]",
 	);
@@ -644,6 +668,12 @@ async fn select_where_and_with_unique_index() -> Result<(), Error> {
 						table: 'person',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
 				}
 		]",
 	);
@@ -693,6 +723,12 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 						table: 'person',
 					},
 					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
 				}
 		]",
 	);
@@ -741,7 +777,13 @@ async fn select_where_explain() -> Result<(), Error> {
 						table: 'software',
 					},
 					operation: 'Iterate Table'
-				}
+				},
+                {
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				},
 			]",
 	);
 	assert_eq!(tmp, val);
@@ -760,6 +802,12 @@ async fn select_where_explain() -> Result<(), Error> {
 						table: 'software',
 					},
 					operation: 'Iterate Table'
+				},
+                {
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
 				},
 				{
 					detail: {

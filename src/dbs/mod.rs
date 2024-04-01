@@ -1,12 +1,20 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-use std::sync::OnceLock;
+#[cfg(any(
+	feature = "storage-surrealkv",
+	feature = "storage-rocksdb",
+	feature = "storage-fdb",
+	feature = "storage-tikv",
+	feature = "storage-speedb"
+))]
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use surrealdb::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use surrealdb::kvs::Datastore;
 
-pub static DB: OnceLock<Datastore> = OnceLock::new();
+pub static DB: OnceLock<Arc<Datastore>> = OnceLock::new();
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -37,6 +45,17 @@ pub struct StartCommandDbsOptions {
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
+	#[cfg(any(
+		feature = "storage-surrealkv",
+		feature = "storage-speedb",
+		feature = "storage-rocksdb",
+		feature = "storage-fdb",
+		feature = "storage-tikv",
+	))]
+	#[arg(help = "Sets the directory for storing temporary database files")]
+	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
+	#[arg(value_parser = super::cli::validator::dir_exists)]
+	temporary_directory: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -214,6 +233,14 @@ pub async fn init(
 		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
 		auth_level_enabled,
 		caps,
+		#[cfg(any(
+			feature = "storage-surrealkv",
+			feature = "storage-rocksdb",
+			feature = "storage-fdb",
+			feature = "storage-tikv",
+			feature = "storage-speedb"
+		))]
+		temporary_directory,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
 	// Get local copy of options
@@ -243,8 +270,9 @@ pub async fn init(
 	let caps = caps.into();
 	debug!("Server capabilities: {caps}");
 
+	#[allow(unused_mut)]
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let mut dbs = Datastore::new(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
@@ -253,6 +281,19 @@ pub async fn init(
 		.with_auth_enabled(auth_enabled)
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
+	#[cfg(any(
+		feature = "storage-surrealkv",
+		feature = "storage-rocksdb",
+		feature = "storage-fdb",
+		feature = "storage-tikv",
+		feature = "storage-speedb"
+	))]
+	let mut dbs = dbs.with_temporary_directory(temporary_directory);
+	if let Some(engine_options) = opt.engine {
+		dbs = dbs.with_engine_options(engine_options);
+	}
+	// Make immutable
+	let dbs = dbs;
 
 	dbs.bootstrap().await?;
 
@@ -261,7 +302,7 @@ pub async fn init(
 	}
 
 	// Store database instance
-	let _ = DB.set(dbs);
+	let _ = DB.set(Arc::new(dbs));
 
 	// All ok
 	Ok(())
@@ -273,7 +314,7 @@ mod tests {
 
 	use surrealdb::dbs::Session;
 	use surrealdb::iam::verify::verify_root_creds;
-	use surrealdb::kvs::{Datastore, LockType::*, TransactionType::*};
+	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 

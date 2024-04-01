@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::Statement;
+use crate::dbs::{Force, Statement};
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
@@ -37,14 +37,27 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check tables
-		if !opt.tables {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
-		// Check if forced
-		if !opt.force && !self.changed() {
-			return Ok(());
-		}
+		// Was this force targeted at a specific foreign table?
+		let targeted_force = matches!(opt.force, Force::Table(_));
+		// Collect foreign tables or skip
+		let fts = match &opt.force {
+			Force::Table(tb)
+				if tb.first().is_some_and(|tb| {
+					tb.view.as_ref().is_some_and(|v| {
+						self.id.is_some_and(|id| v.what.iter().any(|p| p.0 == id.tb))
+					})
+				}) =>
+			{
+				tb.clone()
+			}
+			Force::All => self.ft(opt, txn).await?,
+			_ if self.changed() => self.ft(opt, txn).await?,
+			_ => return Ok(()),
+		};
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
 		// Get the record id
@@ -58,7 +71,7 @@ impl<'a> Document<'a> {
 			Action::Update
 		};
 		// Loop through all foreign table statements
-		for ft in self.ft(opt, txn).await?.iter() {
+		for ft in fts.iter() {
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
 			// Check if there is a GROUP BY clause
@@ -93,7 +106,7 @@ impl<'a> Document<'a> {
 						Some(cond) => {
 							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
-									if !opt.force && act != Action::Create {
+									if !targeted_force && act != Action::Create {
 										// Delete the old value
 										let act = Action::Delete;
 										// Modify the value in the table
@@ -123,7 +136,7 @@ impl<'a> Document<'a> {
 									}
 								}
 								_ => {
-									if !opt.force && act != Action::Create {
+									if !targeted_force && act != Action::Create {
 										// Update the new value
 										let act = Action::Update;
 										// Modify the value in the table
@@ -142,7 +155,7 @@ impl<'a> Document<'a> {
 						}
 						// No WHERE clause is specified
 						None => {
-							if !opt.force && act != Action::Create {
+							if !targeted_force && act != Action::Create {
 								// Delete the old value
 								let act = Action::Delete;
 								// Modify the value in the table

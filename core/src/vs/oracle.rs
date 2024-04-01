@@ -153,10 +153,9 @@ fn secs_since_unix_epoch() -> u64 {
 	}
 }
 
+#[cfg(test)]
 mod tests {
-	#[allow(unused)]
 	use super::*;
-	#[allow(unused)]
 	use crate::vs::to_u128_be;
 
 	#[test]

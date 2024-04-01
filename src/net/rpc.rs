@@ -1,30 +1,47 @@
+use std::collections::BTreeMap;
+use std::ops::Deref;
+
 use crate::cnf;
+use crate::dbs::DB;
 use crate::err::Error;
 use crate::rpc::connection::Connection;
 use crate::rpc::format::Format;
 use crate::rpc::format::PROTOCOLS;
+use crate::rpc::post_context::PostRpcContext;
+use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::WEBSOCKETS;
 use axum::routing::get;
+use axum::routing::post;
+use axum::TypedHeader;
 use axum::{
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
 	Extension, Router,
 };
+use bytes::Bytes;
 use http::HeaderValue;
 use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
+use surrealdb::rpc::method::Method;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
+
+use super::headers::Accept;
+use super::headers::ContentType;
+
+use surrealdb::rpc::rpc_context::RpcContext;
 
 pub(super) fn router<S, B>() -> Router<S, B>
 where
 	B: HttpBody + Send + 'static,
+	B::Data: Send,
+	B::Error: std::error::Error + Send + Sync + 'static,
 	S: Clone + Send + Sync + 'static,
 {
-	Router::new().route("/rpc", get(handler))
+	Router::new().route("/rpc", get(get_handler)).route("/rpc", post(post_handler))
 }
 
-async fn handler(
+async fn get_handler(
 	ws: WebSocketUpgrade,
 	Extension(id): Extension<RequestId>,
 	Extension(sess): Extension<Session>,
@@ -70,9 +87,37 @@ async fn handle_socket(ws: WebSocket, sess: Session, id: Uuid) {
 		// No protocol format was specified
 		_ => Format::None,
 	};
-	//
+	// Format::Unsupported is not in the PROTOCOLS list so cannot be the value of format here
 	// Create a new connection instance
 	let rpc = Connection::new(id, sess, format);
 	// Serve the socket connection requests
 	Connection::serve(rpc, ws).await;
+}
+
+async fn post_handler(
+	Extension(session): Extension<Session>,
+	output: Option<TypedHeader<Accept>>,
+	content_type: TypedHeader<ContentType>,
+	body: Bytes,
+) -> Result<impl IntoResponse, impl IntoResponse> {
+	let fmt: Format = content_type.deref().into();
+	let out_fmt: Option<Format> = output.as_deref().map(Into::into);
+	if let Some(out_fmt) = out_fmt {
+		if fmt != out_fmt {
+			return Err(Error::InvalidType);
+		}
+	}
+	if fmt == Format::Unsupported || fmt == Format::None {
+		return Err(Error::InvalidType);
+	}
+
+	let mut rpc_ctx = PostRpcContext::new(DB.get().unwrap(), session, BTreeMap::new());
+
+	match fmt.req_http(body) {
+		Ok(req) => {
+			let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
+			fmt.res_http(res.into_response(None)).map_err(Error::from)
+		}
+		Err(err) => Err(Error::from(err)),
+	}
 }

@@ -17,9 +17,15 @@ use nom::{
 	combinator::cut,
 	multi::many0,
 };
+use nom::{combinator::opt, sequence::tuple};
 
 pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
+	let (i, if_not_exists) = opt(tuple((
+		shouldbespace,
+		tag_no_case("IF"),
+		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
 	let (i, name) = ident_path(i)?;
@@ -47,6 +53,7 @@ pub fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 		name,
 		args,
 		block,
+		if_not_exists: if_not_exists.is_some(),
 		..Default::default()
 	};
 	// Assign any defined options

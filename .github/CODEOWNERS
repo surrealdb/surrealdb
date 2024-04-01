@@ -8,6 +8,7 @@
 .dockerignore @surrealdb/ci
 build.rs @surrealdb/ci
 *.nix @surrealdb/ci
+flake.lock @surrealdb/ci
 /.cargo/ @surrealdb/ci
 /.config/ @surrealdb/ci
 /dev/ @surrealdb/ci
@@ -22,6 +23,7 @@ core/Cargo.toml @surrealdb/security
 lib/Cargo.toml @surrealdb/security
 cackle.toml @surrealdb/security
 supply-chain/* @surrealdb/security
+deny.toml @surrealdb/security
 
 # General owners for the database
 /core/ @surrealdb/db

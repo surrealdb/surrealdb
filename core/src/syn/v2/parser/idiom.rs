@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use crate::{
 	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
 	syn::v2::token::{t, Span, TokenKind},
@@ -10,10 +12,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the next tokens to be of a field set.
-	pub fn parse_fields(&mut self) -> ParseResult<Fields> {
+	pub async fn parse_fields(&mut self, ctx: &mut Stk) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
-			let expr = self.parse_value_field()?;
-			let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
+			let expr = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let alias = if self.eat(t!("AS")) {
+				Some(self.parse_plain_idiom(ctx).await?)
+			} else {
+				None
+			};
 			Ok(Fields(
 				vec![Field::Single {
 					expr,
@@ -27,8 +33,12 @@ impl Parser<'_> {
 				let field = if self.eat(t!("*")) {
 					Field::All
 				} else {
-					let expr = self.parse_value_field()?;
-					let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
+					let expr = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+					let alias = if self.eat(t!("AS")) {
+						Some(self.parse_plain_idiom(ctx).await?)
+					} else {
+						None
+					};
 					Field::Single {
 						expr,
 						alias,
@@ -44,10 +54,10 @@ impl Parser<'_> {
 	}
 
 	/// Parses a list of idioms seperated by a `,`
-	pub fn parse_idiom_list(&mut self) -> ParseResult<Vec<Idiom>> {
-		let mut res = vec![self.parse_plain_idiom()?];
+	pub async fn parse_idiom_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Idiom>> {
+		let mut res = vec![self.parse_plain_idiom(ctx).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_plain_idiom()?);
+			res.push(self.parse_plain_idiom(ctx).await?);
 		}
 		Ok(res)
 	}
@@ -56,7 +66,11 @@ impl Parser<'_> {
 	///
 	/// This function differes from [`Parser::parse_remaining_value_idiom`] in how it handles graph
 	/// parsing. Graphs inside a plain idioms will remain a normal graph production.
-	pub(crate) fn parse_remaining_idiom(&mut self, start: Vec<Part>) -> ParseResult<Idiom> {
+	pub(crate) async fn parse_remaining_idiom(
+		&mut self,
+		stk: &mut Stk,
+		start: Vec<Part>,
+	) -> ParseResult<Idiom> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
@@ -70,19 +84,23 @@ impl Parser<'_> {
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
-					res.push(self.parse_bracket_part(span)?)
+					let part = self.parse_bracket_part(stk, span).await?;
+					res.push(part)
 				}
 				t!("->") => {
 					self.pop_peek();
-					res.push(Part::Graph(self.parse_graph(Dir::Out)?))
+					let graph = stk.run(|stk| self.parse_graph(stk, Dir::Out)).await?;
+					res.push(Part::Graph(graph))
 				}
 				t!("<->") => {
 					self.pop_peek();
-					res.push(Part::Graph(self.parse_graph(Dir::Both)?))
+					let graph = stk.run(|stk| self.parse_graph(stk, Dir::Both)).await?;
+					res.push(Part::Graph(graph))
 				}
 				t!("<-") => {
 					self.pop_peek();
-					res.push(Part::Graph(self.parse_graph(Dir::In)?))
+					let graph = stk.run(|stk| self.parse_graph(stk, Dir::In)).await?;
+					res.push(Part::Graph(graph))
 				}
 				t!("..") => {
 					return Err(ParseError::new(
@@ -106,7 +124,11 @@ impl Parser<'_> {
 	/// This function differes from [`Parser::parse_remaining_value_idiom`] in how it handles graph
 	/// parsing. When parsing a idiom like production which can be a value, the initial start value
 	/// might need to be changed to a Edge depending on what is parsed next.
-	pub(crate) fn parse_remaining_value_idiom(&mut self, start: Vec<Part>) -> ParseResult<Value> {
+	pub(crate) async fn parse_remaining_value_idiom(
+		&mut self,
+		ctx: &mut Stk,
+		start: Vec<Part>,
+	) -> ParseResult<Value> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
@@ -120,23 +142,24 @@ impl Parser<'_> {
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
-					res.push(self.parse_bracket_part(span)?)
+					let part = self.parse_bracket_part(ctx, span).await?;
+					res.push(part)
 				}
 				t!("->") => {
 					self.pop_peek();
-					if let Some(x) = self.parse_graph_idiom(&mut res, Dir::Out)? {
+					if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Out).await? {
 						return Ok(x);
 					}
 				}
 				t!("<->") => {
 					self.pop_peek();
-					if let Some(x) = self.parse_graph_idiom(&mut res, Dir::Out)? {
+					if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Both).await? {
 						return Ok(x);
 					}
 				}
 				t!("<-") => {
 					self.pop_peek();
-					if let Some(x) = self.parse_graph_idiom(&mut res, Dir::Out)? {
+					if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::In).await? {
 						return Ok(x);
 					}
 				}
@@ -158,8 +181,13 @@ impl Parser<'_> {
 
 	/// Parse a graph idiom and possibly rewrite the starting value to be an edge whenever the
 	/// parsed production matches `Thing -> Ident`.
-	fn parse_graph_idiom(&mut self, res: &mut Vec<Part>, dir: Dir) -> ParseResult<Option<Value>> {
-		let graph = self.parse_graph(dir)?;
+	async fn parse_graph_idiom(
+		&mut self,
+		ctx: &mut Stk,
+		res: &mut Vec<Part>,
+		dir: Dir,
+	) -> ParseResult<Option<Value>> {
+		let graph = ctx.run(|ctx| self.parse_graph(ctx, dir)).await?;
 		// the production `Thing Graph` is reparsed as an edge if the graph does not contain an
 		// alias or a condition.
 		if res.len() == 1 && graph.alias.is_none() && graph.cond.is_none() {
@@ -194,24 +222,27 @@ impl Parser<'_> {
 
 	/// Parse a idiom which can only start with a graph or an identifier.
 	/// Other expressions are not allowed as start of this idiom
-	pub fn parse_plain_idiom(&mut self) -> ParseResult<Idiom> {
+	pub async fn parse_plain_idiom(&mut self, ctx: &mut Stk) -> ParseResult<Idiom> {
 		let start = match self.peek_kind() {
 			t!("->") => {
 				self.pop_peek();
-				Part::Graph(self.parse_graph(Dir::Out)?)
+				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
+				Part::Graph(graph)
 			}
 			t!("<->") => {
 				self.pop_peek();
-				Part::Graph(self.parse_graph(Dir::Both)?)
+				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
+				Part::Graph(graph)
 			}
 			t!("<-") => {
 				self.pop_peek();
-				Part::Graph(self.parse_graph(Dir::In)?)
+				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
+				Part::Graph(graph)
 			}
 			_ => Part::Field(self.next_token_value()?),
 		};
 		let start = vec![start];
-		self.parse_remaining_idiom(start)
+		self.parse_remaining_idiom(ctx, start).await
 	}
 
 	/// Parse the part after the `.` in a idiom
@@ -226,7 +257,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 	/// Parse the part after the `[` in a idiom
-	pub fn parse_bracket_part(&mut self, start: Span) -> ParseResult<Part> {
+	pub async fn parse_bracket_part(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Part> {
 		let res = match self.peek_kind() {
 			t!("*") => {
 				self.pop_peek();
@@ -239,7 +270,8 @@ impl Parser<'_> {
 			t!("123") => Part::Index(self.next_token_value()?),
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
-				Part::Where(self.parse_value_field()?)
+				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				Part::Where(value)
 			}
 			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
 			TokenKind::Strand => Part::Value(Value::Strand(self.next_token_value()?)),
@@ -361,10 +393,10 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what list.
-	pub fn parse_what_list(&mut self) -> ParseResult<Vec<Value>> {
-		let mut res = vec![self.parse_what_value()?];
+	pub async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Value>> {
+		let mut res = vec![self.parse_what_value(ctx).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_what_value()?)
+			res.push(self.parse_what_value(ctx).await?)
 		}
 		Ok(res)
 	}
@@ -373,8 +405,8 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what value
-	pub fn parse_what_value(&mut self) -> ParseResult<Value> {
-		let start = self.parse_what_primary()?;
+	pub async fn parse_what_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		let start = self.parse_what_primary(ctx).await?;
 		if start.can_start_idiom() && Self::continues_idiom(self.peek_kind()) {
 			let start = match start {
 				Value::Table(Table(x)) => vec![Part::Field(Ident(x))],
@@ -382,7 +414,7 @@ impl Parser<'_> {
 				x => vec![Part::Start(x)],
 			};
 
-			let idiom = self.parse_remaining_value_idiom(start)?;
+			let idiom = self.parse_remaining_value_idiom(ctx, start).await?;
 			Ok(idiom)
 		} else {
 			Ok(start)
@@ -394,7 +426,7 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at the field like part
 	/// of the graph
-	pub fn parse_graph(&mut self, dir: Dir) -> ParseResult<Graph> {
+	pub async fn parse_graph(&mut self, ctx: &mut Stk, dir: Dir) -> ParseResult<Graph> {
 		match self.peek_kind() {
 			t!("?") => {
 				self.pop_peek();
@@ -423,8 +455,12 @@ impl Parser<'_> {
 					x => unexpected!(self, x, "`?` or an identifier"),
 				};
 
-				let cond = self.try_parse_condition()?;
-				let alias = self.eat(t!("AS")).then(|| self.parse_plain_idiom()).transpose()?;
+				let cond = self.try_parse_condition(ctx).await?;
+				let alias = if self.eat(t!("AS")) {
+					Some(self.parse_plain_idiom(ctx).await?)
+				} else {
+					None
+				};
 
 				self.expect_closing_delimiter(t!(")"), span)?;
 
@@ -455,7 +491,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{Dir, Expression, Id, Number, Object, Param, Strand, Table, Thing};
+	use crate::sql::{Expression, Id, Number, Object, Param, Strand, Thing};
 	use crate::syn::Parse;
 
 	use super::*;
