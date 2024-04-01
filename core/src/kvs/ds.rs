@@ -1,5 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::env;
 use std::fmt;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -92,6 +110,16 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	// The temporary directory
+	temporary_directory: Arc<PathBuf>,
 }
 
 /// We always want to be circulating the live query information
@@ -366,6 +394,15 @@ impl Datastore {
 			cf_watermarks: Arc::new(RwLock::new(BTreeMap::new())),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			temporary_directory: Arc::new(env::temp_dir()),
 		})
 	}
 
@@ -418,6 +455,19 @@ impl Datastore {
 		self
 	}
 
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
+		self.temporary_directory = Arc::new(path.unwrap_or_else(env::temp_dir));
+		self
+	}
+
 	/// Set the engine options for the datastore
 	pub fn with_engine_options(mut self, engine_options: EngineOptions) -> Self {
 		self.engine_options = engine_options;
@@ -431,6 +481,22 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
+	}
+
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	pub(crate) fn is_memory(&self) -> bool {
+		#[cfg(feature = "kv-mem")]
+		if matches!(self.inner, Inner::Mem(_)) {
+			return true;
+		};
+		false
 	}
 
 	/// Is authentication level enabled for this Datastore?
@@ -1377,6 +1443,24 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			self.is_memory(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			self.temporary_directory.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
