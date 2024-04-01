@@ -118,11 +118,6 @@ compile_error!(
 	"`parser2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
 );
 
-#[cfg(all(not(surrealdb_unstable), feature = "kv-surrealkv"))]
-compile_error!(
-	"`kv-surrealkv` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-);
-
 #[macro_use]
 extern crate tracing;
 

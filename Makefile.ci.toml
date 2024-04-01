@@ -166,19 +166,15 @@ category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
-[tasks.ci-api-integration-tikv-tests]
+[tasks.ci-api-integration-surrealkv]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
 run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
 
 [tasks.ci-api-integration-tikv]
 category = "CI - INTEGRATION TESTS"
-run_task = { name = ["start-tikv", "ci-api-integration-tikv-tests", "stop-tikv"], fork = true }
-
-[tasks.ci-api-integration-surrealkv]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv", RUSTFLAGS = "--cfg surrealdb_unstable" }
-run_task = { name = ["test-kvs", "test-api-integration"], fork = true, parallel = false }
+env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+run_task = { name = ["start-tikv", "test-kvs", "test-api-integration", "stop-tikv"], fork = true, parallel = false }
 
 
 #
