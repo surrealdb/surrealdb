@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
-use async_graphql::dynamic::Type;
 use async_graphql::dynamic::TypeRef;
+use async_graphql::dynamic::{Enum, Type};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
@@ -12,10 +12,10 @@ use async_graphql::Value as GqlValue;
 use serde_json::Number;
 use surrealdb::sql::statements::SelectStatement;
 use surrealdb::sql::statements::UseStatement;
-use surrealdb::sql::Table;
-use surrealdb::sql::Values;
 use surrealdb::sql::{Fields, Start};
 use surrealdb::sql::{Kind, Limit};
+use surrealdb::sql::{Order, Table};
+use surrealdb::sql::{Orders, Values};
 use surrealdb::sql::{Statement, Thing};
 
 use crate::dbs::DB;
@@ -52,10 +52,40 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		};
 	}
 
+	macro_rules! order {
+		(asc, $field:expr) => {
+			::surrealdb::sql::Order {
+				order: $field.into(),
+				random: false,
+				collate: false,
+				numeric: false,
+				direction: true,
+			}
+		};
+		(desc, $field:expr) => {
+			::surrealdb::sql::Order {
+				order: $field.into(),
+				random: false,
+				collate: false,
+				numeric: false,
+				direction: false,
+			}
+		};
+	}
+
 	for tb in tbs.iter() {
 		info!("Adding table: {}", tb.name);
 		let tb_name = tb.name.to_string();
 		let first_tb_name = tb_name.clone();
+
+		let table_orderable_name = format!("_orderable_{tb_name}");
+		let mut table_orderable = Enum::new(&table_orderable_name).item("id");
+		let table_order_name = format!("_order_{tb_name}");
+		let table_order = InputObject::new(&table_order_name)
+			.field(InputValue::new("asc", TypeRef::named(&table_orderable_name)))
+			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
+			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
+
 		query = query.field(
 			Field::new(
 				tb.name.to_string(),
@@ -95,12 +125,48 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							.map(|v| v.as_i64())
 							.flatten()
 							.map(|l| Limit(SqlValue::from(l)));
+						let order = args.get("order");
+
+						let orders = match order {
+							Some(GqlValue::Object(o)) => {
+								let mut orders = vec![];
+								let mut current = o;
+								loop {
+									let asc = current.get("asc");
+									let desc = current.get("desc");
+									match (asc, desc) {
+										(Some(_), Some(_)) => {
+											// TODO: easy to do so needs god error handling
+											panic!("Found both asc and desc in order");
+										}
+										(Some(GqlValue::Enum(a)), None) => {
+											orders.push(order!(asc, a.as_str()))
+										}
+										(None, Some(GqlValue::Enum(d))) => {
+											orders.push(order!(desc, d.as_str()))
+										}
+										(_, _) => {
+											break;
+										}
+									}
+									if let Some(GqlValue::Object(next)) = current.get("then") {
+										current = next;
+									} else {
+										break;
+									}
+								}
+								Some(orders)
+							}
+							_ => None,
+						};
+						info!("orders: {orders:?}");
 
 						let ast = Statement::Select(SelectStatement {
 							what: Values(vec![SqlValue::Table(Table(tb_name))]),
 							expr: Fields::all(),
 							start,
 							limit,
+							order: orders.map(|o| Orders(o)),
 							..Default::default()
 						});
 
@@ -128,7 +194,8 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 				},
 			)
 			.argument(limit_input!())
-			.argument(start_input!()),
+			.argument(start_input!())
+			.argument(InputValue::new("order", TypeRef::named(&table_order_name))),
 		);
 
 		query = query.field(
@@ -143,12 +210,10 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 						let args = ctx.args.as_index_map();
 						// async-graphql should validate that this is present as it is non-null
 						let id = args.get("id").map(GqlValueUtils::as_string).flatten().unwrap();
-						// TODO: Don't know why this doesn't work
-						// let thing = match Thing::try_from(&id) {
-						// 	Ok(t) => t,
-						// 	Err(_) => Thing::from((tb_name, id)),
-						// };
-						let thing = Thing::from((tb_name, id));
+						let thing = match id.clone().try_into() {
+							Ok(t) => t,
+							Err(_) => Thing::from((tb_name, id)),
+						};
 
 						let use_stmt = Statement::Use(UseStatement {
 							db: Some(DB_NAME.to_string()),
@@ -200,6 +265,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 		for fd in fds.iter() {
 			let fd_name = Name::new(fd.name.to_string());
+			table_orderable = table_orderable.item(fd_name.to_string());
 			table_ty_obj = table_ty_obj.field(Field::new(
 				fd.name.to_string(),
 				kind_to_type(fd.kind.clone()),
@@ -219,15 +285,54 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		}
 
 		types.push(Type::Object(table_ty_obj));
+		types.push(table_order.into());
+		types.push(Type::Enum(table_orderable));
 	}
-	info!("current Query: {:?}", query);
 
-	query = query.field(Field::new("value2", TypeRef::named_nn(TypeRef::INT), |ctx| {
-		FieldFuture::new(async move { Ok(Some(GqlValue::from(100))) })
-	}));
+	//TODO: This is broken
+	query = query.field(
+		Field::new("_get_record", TypeRef::named("record"), |ctx| {
+			FieldFuture::new(async move {
+				let kvs = DB.get().unwrap();
+
+				let args = ctx.args.as_index_map();
+				// async-graphql should validate that this is present as it is non-null
+				let id = args.get("id").map(GqlValueUtils::as_string).flatten().unwrap();
+
+				let use_stmt = Statement::Use(UseStatement {
+					db: Some(DB_NAME.to_string()),
+					ns: Some(NS_NAME.to_string()),
+				});
+
+				let ast = Statement::Select(SelectStatement {
+					what: Values(vec![SqlValue::Thing(id.try_into().unwrap())]),
+					expr: Fields::all(),
+					only: true,
+					..Default::default()
+				});
+
+				let query = vec![use_stmt, ast].into();
+				info!("query: {}", query);
+
+				let res = kvs.process(query, &Default::default(), Default::default()).await?;
+				// ast is constructed such that there will only be two responses the first of which is NONE
+				let mut res_iter = res.into_iter();
+				let _ = res_iter.next();
+				let res = res_iter.next().unwrap();
+				let res = res.result?;
+				let out =
+					sql_value_to_gql_value(res).map_err(|_| "SQL to GQL translation failed")?;
+
+				Ok(Some(out))
+			})
+		})
+		.argument(id_input!()),
+	);
+	info!("current Query: {:?}", query);
 
 	let mut schema = Schema::build("Query", None, None).register(query);
 	for ty in types {
+		println!("adding type: {ty:?}");
 		schema = schema.register(ty);
 	}
 
@@ -236,8 +341,10 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 	schema = schema.register(id_interface);
 
 	let relation_interface = Interface::new("relation")
+		.field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)))
 		.field(InterfaceField::new("in", TypeRef::named_nn(TypeRef::ID)))
-		.field(InterfaceField::new("out", TypeRef::named_nn(TypeRef::ID)));
+		.field(InterfaceField::new("out", TypeRef::named_nn(TypeRef::ID)))
+		.implement("record");
 	schema = schema.register(relation_interface);
 
 	// let limit_input = InputObject::new("limit").field(limit_val);
