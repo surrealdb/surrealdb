@@ -108,9 +108,7 @@ impl Socket {
 		match format {
 			Format::Json => Ok(Message::Text(serde_json::to_string(message)?)),
 			Format::Cbor => {
-				pub mod try_from_impls {
-					include!("../../core/src/rpc/format/cbor/convert.rs");
-				}
+				use surrealdb::rpc::format::cbor::Cbor;
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
 				// datetimes, and durations are stored properly.
@@ -119,7 +117,7 @@ impl Socket {
 				// Then we parse the JSON in to SurrealQL.
 				let surrealql = surrealdb::sql::value(&json)?;
 				// Then we convert the SurrealQL in to CBOR.
-				let cbor = try_from_impls::Cbor::try_from(surrealql)?;
+				let cbor = Cbor::try_from(surrealql)?;
 				// Then serialize the CBOR as binary data.
 				let mut output = Vec::new();
 				ciborium::into_writer(&cbor.0, &mut output).unwrap();
@@ -127,9 +125,7 @@ impl Socket {
 				Ok(Message::Binary(output))
 			}
 			Format::Pack => {
-				pub mod try_from_impls {
-					include!("../../core/src/rpc/format/msgpack/convert.rs");
-				}
+				use surrealdb::rpc::format::msgpack::Pack;
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
 				// datetimes, and durations are stored properly.
@@ -138,7 +134,7 @@ impl Socket {
 				// Then we parse the JSON in to SurrealQL.
 				let surrealql = surrealdb::sql::value(&json)?;
 				// Then we convert the SurrealQL in to MessagePack.
-				let pack = try_from_impls::Pack::try_from(surrealql)?;
+				let pack = Pack::try_from(surrealql)?;
 				// Then serialize the MessagePack as binary data.
 				let mut output = Vec::new();
 				rmpv::encode::write_value(&mut output, &pack.0).unwrap();
@@ -165,15 +161,13 @@ impl Socket {
 				debug!("Response {msg:?}");
 				match format {
 					Format::Cbor => {
-						pub mod try_from_impls {
-							include!("../../core/src/rpc/format/cbor/convert.rs");
-						}
+						use surrealdb::rpc::format::cbor::Cbor;
 						// For tests we need to convert the binary data to
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the CBOR data.
 						let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
-						let msg: Value = try_from_impls::Cbor(msg).try_into()?;
+						let msg: Value = Cbor(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.
@@ -181,15 +175,13 @@ impl Socket {
 						Ok(Some(msg))
 					}
 					Format::Pack => {
-						pub mod try_from_impls {
-							include!("../../core/src/rpc/format/msgpack/convert.rs");
-						}
+						use surrealdb::rpc::format::msgpack::Pack;
 						// For tests we need to convert the binary data to
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the MessagePack data.
 						let msg: rmpv::Value = rmpv::decode::read_value(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
-						let msg: Value = try_from_impls::Pack(msg).try_into()?;
+						let msg: Value = Pack(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.
