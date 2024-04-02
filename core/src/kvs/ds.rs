@@ -25,7 +25,6 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use channel::{Receiver, Sender};
-use futures::lock::MutexGuard;
 use futures::{lock::Mutex, Future};
 use tokio::sync::RwLock;
 use tracing::instrument;
@@ -1036,7 +1035,7 @@ impl Datastore {
 							mutation
 						);
 						trace!("Constructing document from mutation");
-						if let Some(doc) = Self::construct_document(mutation) {
+						if let Some(doc) = construct_document(mutation) {
 							// We know we are only processing a single LQ at a time, so we can limit notifications to 1
 							let notification_capacity = 1;
 							// We track notifications as a separate channel in case we want to process
@@ -1105,46 +1104,6 @@ impl Datastore {
 		let mut tracked_cfs = self.cf_watermarks.lock().await;
 		// TODO we may be able to re-use the key without cloning...
 		tracked_cfs.insert(lq_key.selector.clone(), *change_vs).unwrap();
-	}
-
-	/// Construct a document from a Change Feed mutation
-	/// This is required to perform document operations such as live query notifications
-	fn construct_document(mutation: &TableMutation) -> Option<Document> {
-		match mutation {
-			TableMutation::Set(id, current_value) => {
-				let doc = Document::new_artificial(
-					None,
-					Some(id),
-					None,
-					Cow::Borrowed(current_value),
-					Cow::Owned(Value::None),
-					Workable::Normal,
-				);
-				Some(doc)
-			}
-			TableMutation::Del(id) => {
-				let doc = Document::new(None, Some(id), None, &Value::None, Workable::Normal);
-				Some(doc)
-			}
-			TableMutation::Def(_) => None,
-			TableMutation::SetWithDiff(id, current_value, _operations) => {
-				let todo_original_after_reverse_applying_patches = Value::None;
-				let todo_original_after_reverse_applying_patches = Value::Strand(Strand::from(
-					"placeholder until we can derive diffs from reversing patch operations",
-				));
-				let doc = Document::new_artificial(
-					None,
-					Some(id),
-					None,
-					Cow::Borrowed(current_value),
-					Cow::Owned(todo_original_after_reverse_applying_patches),
-					Workable::Normal,
-				);
-				trace!("Constructed artificial document: {:?}, is_new={}", doc, doc.is_new());
-				// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
-				Some(doc)
-			}
-		}
 	}
 
 	/// Add and kill live queries being track on the datastore
@@ -1788,4 +1747,43 @@ async fn find_required_cfs_to_catch_up(
 	}
 	tx.cancel().await?;
 	Ok(tracked_cfs_updates)
+}
+
+/// Construct a document from a Change Feed mutation
+/// This is required to perform document operations such as live query notifications
+pub(crate) fn construct_document(mutation: &TableMutation) -> Option<Document> {
+	match mutation {
+		TableMutation::Set(id, current_value) => {
+			let doc = Document::new_artificial(
+				None,
+				Some(id),
+				None,
+				Cow::Borrowed(current_value),
+				Cow::Owned(Value::None),
+				Workable::Normal,
+			);
+			Some(doc)
+		}
+		TableMutation::Del(id) => {
+			let doc = Document::new(None, Some(id), None, &Value::None, Workable::Normal);
+			Some(doc)
+		}
+		TableMutation::Def(_) => None,
+		TableMutation::SetWithDiff(id, current_value, _operations) => {
+			let todo_original_after_reverse_applying_patches = Value::Strand(Strand::from(
+				"placeholder until we can derive diffs from reversing patch operations",
+			));
+			let doc = Document::new_artificial(
+				None,
+				Some(id),
+				None,
+				Cow::Borrowed(current_value),
+				Cow::Owned(todo_original_after_reverse_applying_patches),
+				Workable::Normal,
+			);
+			trace!("Constructed artificial document: {:?}, is_new={}", doc, doc.is_new());
+			// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
+			Some(doc)
+		}
+	}
 }

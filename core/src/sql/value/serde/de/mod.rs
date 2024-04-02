@@ -6,7 +6,6 @@ use serde::Serialize;
 use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JsonValue;
-use std::backtrace;
 
 impl From<Value> for serde_json::Value {
 	fn from(value: Value) -> Self {
