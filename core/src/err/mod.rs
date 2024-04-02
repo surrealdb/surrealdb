@@ -11,6 +11,15 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
 use base64_lib::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use ext_sort::SortError;
 use fst::Error as FstError;
 use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
@@ -527,7 +536,7 @@ pub enum Error {
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Found record: `{thing}` which is {}a relation, but expected a `target_type`", if *relation { "not " } else { "" })]
+	#[error("Found record: `{thing}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
 	TableCheck {
 		thing: String,
 		relation: bool,
@@ -923,6 +932,10 @@ pub enum Error {
 	/// A node task has failed
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
+
+	/// An error related to live query occurred
+	#[error("Failed to process Live Query: {0}")]
+	LiveQueryError(LiveQueryCause),
 }
 
 impl From<Error> for String {
@@ -1029,6 +1042,25 @@ impl From<reqwest::Error> for Error {
 	}
 }
 
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+impl<S, D, I> From<SortError<S, D, I>> for Error
+where
+	S: std::error::Error,
+	D: std::error::Error,
+	I: std::error::Error,
+{
+	fn from(e: SortError<S, D, I>) -> Error {
+		Error::Internal(e.to_string())
+	}
+}
+
 impl Serialize for Error {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -1036,4 +1068,15 @@ impl Serialize for Error {
 	{
 		serializer.serialize_str(self.to_string().as_str())
 	}
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum LiveQueryCause {
+	#[doc(hidden)]
+	#[error("The Live Query must have a change feed for it it work")]
+	MissingChangeFeed,
+	#[doc(hidden)]
+	#[error("The Live Query must have a change feed that includes relative changes")]
+	ChangeFeedNoOriginal,
 }

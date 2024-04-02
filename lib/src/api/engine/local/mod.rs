@@ -738,8 +738,11 @@ async fn router(
 						Ok(file) => file,
 						Err(error) => {
 							return Err(Error::FileRead {
-								path,
-								error,
+								path: PathBuf::from(path),
+								error: io::Error::new(
+									io::ErrorKind::InvalidData,
+									error.message.to_string(),
+								),
 							}
 							.into());
 						}

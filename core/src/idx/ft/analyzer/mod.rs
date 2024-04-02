@@ -262,17 +262,16 @@ mod tests {
 			panic!()
 		};
 		let a: Analyzer = az.into();
-		let tokens = a
-			.generate_tokens(
-				&Context::default(),
-				&Options::default(),
-				&txn,
-				FilteringStage::Indexing,
-				input.to_string(),
-			)
-			.await
-			.unwrap();
-		tokens
+
+		a.generate_tokens(
+			&Context::default(),
+			&Options::default(),
+			&txn,
+			FilteringStage::Indexing,
+			input.to_string(),
+		)
+		.await
+		.unwrap()
 	}
 
 	pub(super) async fn test_analyzer(def: &str, input: &str, expected: &[&str]) {

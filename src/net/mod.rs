@@ -36,7 +36,7 @@ use http::header;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::headers::{DB, ID, NS};
+use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, DB_LEGACY, ID, ID_LEGACY, NS, NS_LEGACY};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -107,6 +107,12 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		NS.clone(),
 		DB.clone(),
 		ID.clone(),
+		AUTH_NS.clone(),
+		AUTH_DB.clone(),
+		// TODO(gguillemas): Remove these headers once the legacy authentication is deprecated in v2.0.0
+		NS_LEGACY.clone(),
+		DB_LEGACY.clone(),
+		ID_LEGACY.clone(),
 	];
 
 	#[cfg(not(feature = "http-compression"))]
@@ -118,6 +124,12 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		NS.clone(),
 		DB.clone(),
 		ID.clone(),
+		AUTH_NS.clone(),
+		AUTH_DB.clone(),
+		// TODO(gguillemas): Remove these headers once the legacy authentication is deprecated in v2.0.0
+		NS_LEGACY.clone(),
+		DB_LEGACY.clone(),
+		ID_LEGACY.clone(),
 	];
 
 	let service = service

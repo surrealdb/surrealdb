@@ -1,6 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
-use crate::dbs::store::StoreCollector;
+use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
 use crate::sql::function::OptimisedAggregate;
@@ -110,8 +110,8 @@ impl GroupsCollector {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-	) -> Result<StoreCollector, Error> {
-		let mut results = StoreCollector::default();
+	) -> Result<MemoryCollector, Error> {
+		let mut results = MemoryCollector::default();
 		if let Some(fields) = stm.expr() {
 			let grp = mem::take(&mut self.grp);
 			// Loop over each grouped collection

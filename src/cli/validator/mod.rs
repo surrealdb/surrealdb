@@ -22,15 +22,35 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 	}
 }
 
-pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
+pub(crate) fn path_exists(path: &str) -> Result<PathBuf, String> {
 	let path = Path::new(path);
 	if !*path.try_exists().as_ref().map_err(ToString::to_string)? {
-		return Err(String::from("Ensure the file exists"));
+		return Err(String::from("Ensure the path exists"));
 	}
+	Ok(path.to_owned())
+}
+
+pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
+	let path = path_exists(path)?;
 	if !path.is_file() {
 		return Err(String::from("Ensure the path is a file"));
 	}
-	Ok(path.to_owned())
+	Ok(path)
+}
+
+#[cfg(any(
+	feature = "storage-surrealkv",
+	feature = "storage-rocksdb",
+	feature = "storage-fdb",
+	feature = "storage-tikv",
+	feature = "storage-speedb"
+))]
+pub(crate) fn dir_exists(path: &str) -> Result<PathBuf, String> {
+	let path = path_exists(path)?;
+	if !path.is_dir() {
+		return Err(String::from("Ensure the path is a directory"));
+	}
+	Ok(path)
 }
 
 pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {

@@ -14,6 +14,7 @@ mod test;
 
 use lexer::Lexer;
 use parser::{ParseError, ParseErrorKind, Parser};
+use reblessive::Stack;
 
 /// Takes a string and returns if it could be a reserved keyword in certain contexts.
 pub fn could_be_reserved_keyword(s: &str) -> bool {
@@ -34,7 +35,12 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 pub fn parse(input: &str) -> Result<Query, Error> {
 	debug!("parsing query, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_query().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_query(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parses a SurrealQL [`Value`].
@@ -42,7 +48,12 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 pub fn value(input: &str) -> Result<Value, Error> {
 	debug!("parsing value, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_value_field().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_value_field(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parses a SurrealQL [`Value`].
@@ -50,8 +61,13 @@ pub fn value(input: &str) -> Result<Value, Error> {
 pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 	debug!("parsing value, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
+	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
-	parser.parse_value().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	stack
+		.enter(|stk| parser.parse_value(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
@@ -59,7 +75,12 @@ pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
 pub fn json(input: &str) -> Result<Value, Error> {
 	debug!("parsing json, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_json(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
@@ -67,15 +88,25 @@ pub fn json(input: &str) -> Result<Value, Error> {
 pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
 	debug!("parsing json, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
+	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
-	parser.parse_json().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	stack
+		.enter(|stk| parser.parse_json(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 /// Parses a SurrealQL Subquery [`Subquery`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn subquery(input: &str) -> Result<Subquery, Error> {
 	debug!("parsing subquery, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_full_subquery().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_full_subquery(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parses a SurrealQL [`Idiom`]
@@ -83,7 +114,12 @@ pub fn subquery(input: &str) -> Result<Subquery, Error> {
 pub fn idiom(input: &str) -> Result<Idiom, Error> {
 	debug!("parsing idiom, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_plain_idiom().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_plain_idiom(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
@@ -117,12 +153,22 @@ pub fn duration(input: &str) -> Result<Duration, Error> {
 pub fn range(input: &str) -> Result<Range, Error> {
 	debug!("parsing range, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_range().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_range(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
 
 /// Parse a record id.
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	debug!("parsing thing, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser.parse_thing().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
+	let mut stack = Stack::new();
+	stack
+		.enter(|stk| parser.parse_thing(stk))
+		.finish()
+		.map_err(|e| e.render_on(input))
+		.map_err(Error::InvalidQuery)
 }
