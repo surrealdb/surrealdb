@@ -7,13 +7,14 @@ use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
-use async_graphql::indexmap::IndexSet;
+use async_graphql::indexmap::{IndexMap, IndexSet};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use serde_json::Number;
+use surrealdb::err::Error;
 use surrealdb::sql::statements::SelectStatement;
 use surrealdb::sql::statements::UseStatement;
-use surrealdb::sql::{Fields, Start, TableType};
+use surrealdb::sql::{Cond, Fields, Start, TableType, Value};
 use surrealdb::sql::{Kind, Limit};
 use surrealdb::sql::{Order, Table};
 use surrealdb::sql::{Orders, Values};
@@ -153,7 +154,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 									let desc = current.get("desc");
 									match (asc, desc) {
 										(Some(_), Some(_)) => {
-											// TODO: easy to do so needs god error handling
+											// TODO: easy to do so needs good error handling
 											panic!("Found both asc and desc in order");
 										}
 										(Some(GqlValue::Enum(a)), None) => {
@@ -178,14 +179,32 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 						};
 						info!("orders: {orders:?}");
 
+						let cond = match filter {
+							Some(f) => {
+								let GqlValue::Object(o) = f else {
+									panic!(
+										"value doesn't fit schema, should be rejected by graphql"
+									)
+								};
+
+								let cond = cond_from_filter(o);
+
+								Some(Cond(cond))
+							}
+							None => None,
+						};
+
 						let ast = Statement::Select(SelectStatement {
 							what: Values(vec![SqlValue::Table(Table(tb_name))]),
 							expr: Fields::all(),
 							start,
 							limit,
 							order: orders.map(|o| Orders(o)),
+							cond,
 							..Default::default()
 						});
+
+						info!("query ast: {ast:?}");
 
 						let query = vec![use_stmt, ast].into();
 						info!("query: {}", query);
@@ -511,4 +530,17 @@ fn unwrap_type(ty: TypeRef) -> TypeRef {
 		TypeRef::NonNull(t) => unwrap_type(*t),
 		_ => ty,
 	}
+}
+
+fn cond_from_filter(filter: IndexMap<Name, GqlValue>) -> Result<Cond, Error> {
+	let mut cond = Value::None;
+
+	for (op_name, val) in filter.iter() {
+		let op = match op_name.as_str() {
+			"eq" => {}
+			_ => return Err(Error::Thrown("Unsupported op".to_string())),
+		};
+		break;
+	}
+	Ok(Cond(cond))
 }

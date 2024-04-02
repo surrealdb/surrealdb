@@ -345,7 +345,7 @@ impl Parser<'_> {
 			name,
 			permissions: Permissions::none(),
 			// Default to ANY if not specified in the DEFINE statement
-			table_type: TableType::Any,
+			kind: TableType::Any,
 			if_not_exists,
 			..Default::default()
 		};
