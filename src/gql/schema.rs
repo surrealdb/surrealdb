@@ -7,12 +7,13 @@ use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
 use async_graphql::dynamic::{InputObject, Object};
 use async_graphql::dynamic::{InputValue, Schema};
+use async_graphql::indexmap::IndexSet;
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use serde_json::Number;
 use surrealdb::sql::statements::SelectStatement;
 use surrealdb::sql::statements::UseStatement;
-use surrealdb::sql::{Fields, Start};
+use surrealdb::sql::{Fields, Start, TableType};
 use surrealdb::sql::{Kind, Limit};
 use surrealdb::sql::{Order, Table};
 use surrealdb::sql::{Orders, Values};
@@ -24,59 +25,66 @@ use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
 use surrealdb::sql::Value as SqlValue;
 
+macro_rules! limit_input {
+	() => {
+		InputValue::new("limit", TypeRef::named(TypeRef::INT))
+	};
+}
+
+macro_rules! start_input {
+	() => {
+		InputValue::new("start", TypeRef::named(TypeRef::INT))
+	};
+}
+
+macro_rules! id_input {
+	() => {
+		InputValue::new("id", TypeRef::named_nn(TypeRef::STRING))
+	};
+}
+
+macro_rules! order {
+	(asc, $field:expr) => {
+		::surrealdb::sql::Order {
+			order: $field.into(),
+			random: false,
+			collate: false,
+			numeric: false,
+			direction: true,
+		}
+	};
+	(desc, $field:expr) => {
+		::surrealdb::sql::Order {
+			order: $field.into(),
+			random: false,
+			collate: false,
+			numeric: false,
+			direction: false,
+		}
+	};
+}
+
 pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 	let kvs = DB.get().unwrap();
 	let mut tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 	let tbs = tx.all_tb("test", "test").await?;
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
-	// remove hardcoded db and ns
+	// TODO: remove hardcoded db and ns
 	const DB_NAME: &str = "test";
 	const NS_NAME: &str = "test";
-
-	macro_rules! limit_input {
-		() => {
-			InputValue::new("limit", TypeRef::named(TypeRef::INT))
-		};
-	}
-
-	macro_rules! start_input {
-		() => {
-			InputValue::new("start", TypeRef::named(TypeRef::INT))
-		};
-	}
-
-	macro_rules! id_input {
-		() => {
-			InputValue::new("id", TypeRef::named_nn(TypeRef::STRING))
-		};
-	}
-
-	macro_rules! order {
-		(asc, $field:expr) => {
-			::surrealdb::sql::Order {
-				order: $field.into(),
-				random: false,
-				collate: false,
-				numeric: false,
-				direction: true,
-			}
-		};
-		(desc, $field:expr) => {
-			::surrealdb::sql::Order {
-				order: $field.into(),
-				random: false,
-				collate: false,
-				numeric: false,
-				direction: false,
-			}
-		};
-	}
 
 	for tb in tbs.iter() {
 		info!("Adding table: {}", tb.name);
 		let tb_name = tb.name.to_string();
 		let first_tb_name = tb_name.clone();
+		let second_tb_name = tb_name.clone();
+
+		let interface = match tb.kind {
+			// TODO: re-enable relation interface
+			// TableType::Relation(_) => "relation",
+			_ => "record",
+		};
 
 		let table_orderable_name = format!("_orderable_{tb_name}");
 		let mut table_orderable = Enum::new(&table_orderable_name).item("id");
@@ -85,6 +93,11 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 			.field(InputValue::new("asc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
+
+		let table_filter_name = format!("_filter_{tb_name}");
+		let mut table_filter = InputObject::new(&table_filter_name);
+		table_filter = table_filter.field(InputValue::new("id", TypeRef::named("_filter_id")));
+		types.push(Type::InputObject(filter_id()));
 
 		query = query.field(
 			Field::new(
@@ -120,12 +133,16 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 							.map(|v| v.as_i64())
 							.flatten()
 							.map(|s| Start(SqlValue::from(s)));
+
 						let limit = args
 							.get("limit")
 							.map(|v| v.as_i64())
 							.flatten()
 							.map(|l| Limit(SqlValue::from(l)));
+
 						let order = args.get("order");
+
+						let filter = args.get("filter");
 
 						let orders = match order {
 							Some(GqlValue::Object(o)) => {
@@ -195,7 +212,8 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 			)
 			.argument(limit_input!())
 			.argument(start_input!())
-			.argument(InputValue::new("order", TypeRef::named(&table_order_name))),
+			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
+			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
 
 		query = query.field(
@@ -203,7 +221,7 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 				format!("_get_{}", tb.name),
 				TypeRef::named(tb.name.to_string()),
 				move |ctx| {
-					let tb_name = tb_name.clone();
+					let tb_name = second_tb_name.clone();
 					FieldFuture::new(async move {
 						let kvs = DB.get().unwrap();
 
@@ -261,15 +279,24 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 					Ok(Some(id.to_owned()))
 				})
 			}))
-			.implement("record");
+			.implement(interface);
 
 		for fd in fds.iter() {
 			let fd_name = Name::new(fd.name.to_string());
+			let fd_type = kind_to_type(fd.kind.clone());
 			table_orderable = table_orderable.item(fd_name.to_string());
-			table_ty_obj = table_ty_obj.field(Field::new(
-				fd.name.to_string(),
-				kind_to_type(fd.kind.clone()),
-				move |ctx| {
+			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
+
+			let type_filter =
+				Type::InputObject(filter_from_type(fd.kind.clone(), type_filter_name.clone()));
+			println!("\n{type_filter:?}\n");
+			types.push(type_filter);
+
+			table_filter = table_filter
+				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
+
+			table_ty_obj =
+				table_ty_obj.field(Field::new(fd.name.to_string(), fd_type, move |ctx| {
 					let fd_name = fd_name.clone();
 					FieldFuture::new(async move {
 						let record = ctx.parent_value.as_value().unwrap();
@@ -280,13 +307,14 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 
 						Ok(Some(val.to_owned()))
 					})
-				},
-			));
+				}));
 		}
 
 		types.push(Type::Object(table_ty_obj));
 		types.push(table_order.into());
 		types.push(Type::Enum(table_orderable));
+		println!("\n\n\n{table_filter:?}");
+		types.push(Type::InputObject(table_filter));
 	}
 
 	//TODO: This is broken
@@ -340,14 +368,13 @@ pub async fn get_schema() -> Result<Schema, Box<dyn std::error::Error>> {
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
 	schema = schema.register(id_interface);
 
+	// TODO: when used get: `Result::unwrap()` on an `Err` value: SchemaError("Field \"like.in\" is not sub-type of \"relation.in\"")
 	let relation_interface = Interface::new("relation")
 		.field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)))
-		.field(InterfaceField::new("in", TypeRef::named_nn(TypeRef::ID)))
-		.field(InterfaceField::new("out", TypeRef::named_nn(TypeRef::ID)))
+		.field(InterfaceField::new("in", TypeRef::named_nn("record")))
+		.field(InterfaceField::new("out", TypeRef::named_nn("record")))
 		.implement("record");
 	schema = schema.register(relation_interface);
-
-	// let limit_input = InputObject::new("limit").field(limit_val);
 
 	Ok(schema.finish().unwrap())
 }
@@ -416,7 +443,10 @@ fn kind_to_type(kind: Option<Kind>) -> TypeRef {
 		Kind::Point => todo!("Kind::Point "),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => todo!("Kind::Uuid "),
-		Kind::Record(_) => todo!("Kind::Record(_) "),
+		Kind::Record(mut r) => match r.len() {
+			1 => TypeRef::named(r.pop().unwrap().0),
+			_ => todo!("dynamic unions for multiple records"),
+		},
 		Kind::Geometry(_) => todo!("Kind::Geometry(_) "),
 		Kind::Option(_) => todo!("Kind::Option(_) "),
 		Kind::Either(_) => todo!("Kind::Either(_) "),
@@ -427,5 +457,58 @@ fn kind_to_type(kind: Option<Kind>) -> TypeRef {
 	match optional {
 		true => out_ty,
 		false => TypeRef::NonNull(Box::new(out_ty)),
+	}
+}
+
+macro_rules! filter_impl {
+	($filter:ident, $ty:ident, $name:expr) => {
+		$filter = $filter.field(InputValue::new($name, $ty.clone()));
+	};
+}
+
+fn filter_id() -> InputObject {
+	let mut filter = InputObject::new("_filter_id");
+	let ty = TypeRef::named(TypeRef::ID);
+	filter_impl!(filter, ty, "eq");
+	filter_impl!(filter, ty, "ne");
+	filter
+}
+fn filter_from_type(kind: Option<Kind>, filter_name: String) -> InputObject {
+	let ty = kind_to_type(kind.clone());
+	let ty = unwrap_type(ty);
+
+	let mut filter = InputObject::new(filter_name);
+	filter_impl!(filter, ty, "eq");
+	filter_impl!(filter, ty, "ne");
+
+	match kind.unwrap() {
+		Kind::Any => {}
+		Kind::Null => {}
+		Kind::Bool => {}
+		Kind::Bytes => {}
+		Kind::Datetime => {}
+		Kind::Decimal => {}
+		Kind::Duration => {}
+		Kind::Float => {}
+		Kind::Int => {}
+		Kind::Number => {}
+		Kind::Object => {}
+		Kind::Point => {}
+		Kind::String => {}
+		Kind::Uuid => {}
+		Kind::Record(_) => {}
+		Kind::Geometry(_) => {}
+		Kind::Option(_) => {}
+		Kind::Either(_) => {}
+		Kind::Set(_, _) => {}
+		Kind::Array(_, _) => {}
+	};
+	filter
+}
+
+fn unwrap_type(ty: TypeRef) -> TypeRef {
+	match ty {
+		TypeRef::NonNull(t) => unwrap_type(*t),
+		_ => ty,
 	}
 }
