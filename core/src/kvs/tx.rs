@@ -46,7 +46,7 @@ use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
 use crate::vs::Versionstamp;
-use crate::vs::{conv, Oracle};
+use crate::vs::Oracle;
 
 use super::kv::Add;
 use super::kv::Convert;
