@@ -670,6 +670,12 @@ mod cli_integration {
 				let output = remove_debug_info(output).replace('\n', "");
 				// TODO: when enabling the feature flag, turn these to `create` not `update`
 				let allowed = [
+					// Delete these
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
+					// Keep these
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
 					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
@@ -1120,6 +1126,69 @@ mod cli_integration {
 			let query = "RETURN 1;\n\n";
 			let output = common::run(&cmd).input(query).output().unwrap();
 			assert!(output.contains("[1]"), "unexpected output: {output:?}");
+			server.finish().unwrap();
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn test_temporary_directory() {
+		info!("* The path is a non-existing directory");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let res = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some("/tmp/TELL-ME-THIS-FILE-DOES-NOT-EXISTS".to_owned()),
+				..Default::default()
+			})
+			.await;
+			match res {
+				Ok((_, mut server)) => {
+					server.finish().unwrap();
+					panic!("Should not be ok!");
+				}
+				Err(e) => {
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+				}
+			}
+		}
+
+		info!("* The path is a file");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let temp_file = tempfile::NamedTempFile::new().unwrap();
+			let res = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some(format!("{}", temp_file.path().display())),
+				..Default::default()
+			})
+			.await;
+			match res {
+				Ok((_, mut server)) => {
+					server.finish().unwrap();
+					panic!("Should not be ok!");
+				}
+				Err(e) => {
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
+				}
+			}
+			temp_file.close().unwrap();
+		}
+
+		info!("* The path is a valid directory");
+		{
+			let path = format!("surrealkv:{}", tempfile::tempdir().unwrap().path().display());
+			let temp_dir = tempfile::tempdir().unwrap();
+			let (_, mut server) = common::start_server(StartServerArguments {
+				path: Some(path),
+				args: "".to_owned(),
+				temporary_directory: Some(format!("{}", temp_dir.path().display())),
+				..Default::default()
+			})
+			.await
+			.unwrap();
+			temp_dir.close().unwrap();
 			server.finish().unwrap();
 		}
 	}
