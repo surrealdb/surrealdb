@@ -37,12 +37,12 @@ impl<'a> CursorDoc<'a> {
 		ir: Option<IteratorRef>,
 		rid: Option<&'a Thing>,
 		doc_id: Option<DocId>,
-		doc: &'a Value,
+		doc: Cow<'a, Value>,
 	) -> Self {
 		Self {
 			ir,
 			rid,
-			doc: Cow::Borrowed(doc),
+			doc,
 			doc_id,
 		}
 	}
@@ -93,8 +93,28 @@ impl<'a> Document<'a> {
 		Document {
 			id,
 			extras,
+			current: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
+			initial: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
+		}
+	}
+
+	/// Create a new document that is not going through the standard lifecycle of documents
+	///
+	/// This allows for it to be crafted without needing statements to operate on it
+	#[doc(hidden)]
+	pub fn new_artificial(
+		ir: Option<IteratorRef>,
+		id: Option<&'a Thing>,
+		doc_id: Option<DocId>,
+		val: Cow<'a, Value>,
+		initial: Cow<'a, Value>,
+		extras: Workable,
+	) -> Self {
+		Document {
+			id,
+			extras,
 			current: CursorDoc::new(ir, id, doc_id, val),
-			initial: CursorDoc::new(ir, id, doc_id, val),
+			initial: CursorDoc::new(ir, id, doc_id, initial),
 		}
 	}
 }
