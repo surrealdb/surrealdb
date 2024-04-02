@@ -3,10 +3,11 @@ use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::KnnExpressions;
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
+use crate::kvs;
 use crate::sql::index::{Distance, Index};
-use crate::sql::statements::DefineIndexStatement;
+use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
-	Array, Cond, Expression, Idiom, Number, Operator, Part, Subquery, Table, Value, With,
+	Array, Cond, Expression, Idiom, Kind, Number, Operator, Part, Subquery, Table, Value, With,
 };
 use async_recursion::async_recursion;
 use std::collections::HashMap;
@@ -51,14 +52,21 @@ struct TreeBuilder<'a> {
 	txn: &'a Transaction,
 	table: &'a Table,
 	with: &'a Option<With>,
-	indexes: Option<Arc<[DefineIndexStatement]>>,
+	fields_and_indexes: Option<(Arc<[DefineIndexStatement]>, Arc<[DefineFieldStatement]>)>,
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Arc<Idiom>>,
-	idioms_indexes: HashMap<Arc<Idiom>, Option<Arc<Vec<IndexRef>>>>,
+	idioms_indexes: HashMap<Arc<Idiom>, Arc<Vec<IndexRef>>>,
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 	knn_expressions: KnnExpressions,
+	idioms_record_options: HashMap<Arc<Idiom>, RecordOptions>,
 	group_sequence: GroupRef,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub(super) struct RecordOptions {
+	irs: Arc<Vec<IndexRef>>,
+	remotes: Arc<Vec<(Table, Vec<DefineIndexStatement>)>>,
 }
 
 impl<'a> TreeBuilder<'a> {
@@ -79,28 +87,28 @@ impl<'a> TreeBuilder<'a> {
 			txn,
 			table,
 			with,
-			indexes: None,
+			fields_and_indexes: None,
 			resolved_expressions: Default::default(),
 			resolved_idioms: Default::default(),
 			idioms_indexes: Default::default(),
 			index_map: Default::default(),
 			with_indexes,
 			knn_expressions: Default::default(),
+			idioms_record_options: Default::default(),
 			group_sequence: 0,
 		}
 	}
 
-	async fn lazy_cache_indexes(&mut self) -> Result<(), Error> {
-		if self.indexes.is_none() {
-			let indexes = self
-				.txn
-				.clone()
-				.lock()
-				.await
-				.all_tb_indexes(self.opt.ns(), self.opt.db(), &self.table.0)
-				.await?;
-			self.indexes = Some(indexes);
+	async fn lazy_cache_fields_and_indexes(
+		&mut self,
+		tx: &mut kvs::Transaction,
+	) -> Result<(), Error> {
+		if self.fields_and_indexes.is_some() {
+			return Ok(());
 		}
+		let indexes = tx.all_tb_indexes(self.opt.ns(), self.opt.db(), &self.table.0).await?;
+		let fields = tx.all_tb_fields(self.opt.ns(), self.opt.db(), &self.table.0).await?;
+		self.fields_and_indexes = Some((indexes, fields));
 		Ok(())
 	}
 
@@ -140,8 +148,13 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_idiom(&mut self, group: GroupRef, i: &Idiom) -> Result<Node, Error> {
 		// Check if the idiom has already been resolved
 		if let Some(i) = self.resolved_idioms.get(i) {
-			if let Some(Some(irs)) = self.idioms_indexes.get(i).cloned() {
-				return Ok(Node::IndexedField(i.clone(), irs));
+			if let Some(irs) = self.idioms_indexes.get(i) {
+				if !irs.is_empty() {
+					return Ok(Node::IndexedField(i.clone(), irs.clone()));
+				}
+			}
+			if let Some(ro) = self.idioms_record_options.get(i).cloned() {
+				return Ok(Node::RecordField(i.clone(), ro));
 			}
 			return Ok(Node::NonIndexedField(i.clone()));
 		};
@@ -154,26 +167,32 @@ impl<'a> TreeBuilder<'a> {
 			}
 		}
 
-		self.lazy_cache_indexes().await?;
+		let mut tx = self.txn.lock().await;
+		self.lazy_cache_fields_and_indexes(&mut tx).await?;
 
 		let i = Arc::new(i.clone());
-
 		self.resolved_idioms.insert(i.clone(), i.clone());
 
 		// Try to detect if it matches an index
-		if let Some(irs) = self.resolve_indexes(&i) {
-			return Ok(Node::IndexedField(i.clone(), irs));
+		let irs = self.resolve_indexes(i.clone());
+		if !irs.is_empty() {
+			return Ok(Node::IndexedField(i, irs));
 		}
-
+		// Try to detect an indexed record field
+		if let Some(ro) = self.resolve_record_field(&mut tx, &i).await? {
+			return Ok(Node::RecordField(i.clone(), ro));
+		}
 		Ok(Node::NonIndexedField(i))
 	}
 
-	fn resolve_indexes(&mut self, i: &Arc<Idiom>) -> Option<Arc<Vec<IndexRef>>> {
-		let mut res = None;
-		if let Some(indexes) = &self.indexes {
-			let mut irs = Vec::new();
-			for ix in indexes.as_ref() {
-				if ix.cols.len() == 1 && ix.cols[0].eq(i) {
+	fn resolve_indexes(&mut self, i: Arc<Idiom>) -> Arc<Vec<IndexRef>> {
+		if let Some(irs) = self.idioms_indexes.get(&i).cloned() {
+			return irs;
+		}
+		let mut irs = Vec::new();
+		if let Some((indexes, _)) = &self.fields_and_indexes {
+			for ix in indexes.iter() {
+				if ix.cols.len() == 1 && ix.cols[0].eq(&i) {
 					let ixr = self.index_map.definitions.len() as IndexRef;
 					if let Some(With::Index(ixs)) = self.with {
 						if ixs.contains(&ix.name.0) {
@@ -184,12 +203,52 @@ impl<'a> TreeBuilder<'a> {
 					irs.push(ixr);
 				}
 			}
-			if !irs.is_empty() {
-				res = Some(Arc::new(irs));
+		}
+		let irs = Arc::new(irs);
+		self.idioms_indexes.insert(i, irs.clone());
+		irs
+	}
+
+	async fn resolve_record_field(
+		&mut self,
+		tx: &mut kvs::Transaction,
+		idiom: &Arc<Idiom>,
+	) -> Result<Option<RecordOptions>, Error> {
+		if let Some((_, fields)) = &self.fields_and_indexes {
+			for field in fields.iter() {
+				if let Some(Kind::Record(tables)) = &field.kind {
+					if idiom.starts_with(&field.name.0) {
+						let (local_field, remote_field) = idiom.0.split_at(field.name.0.len());
+						if remote_field.is_empty() {
+							return Ok(None);
+						}
+						let local_field = Idiom::from(local_field);
+						let remote_field = Idiom::from(remote_field);
+						let mut remotes = vec![];
+						for table in tables {
+							let indexes =
+								tx.all_tb_indexes(self.opt.ns(), self.opt.db(), &table.0).await?;
+							let mut ix_res = vec![];
+							for ix in indexes.iter() {
+								if ix.cols.len() == 1 && ix.cols[0].eq(&remote_field) {
+									ix_res.push(ix.clone());
+								}
+							}
+							remotes.push((table.clone(), ix_res));
+						}
+						// TODO: compute IRS
+						let irs = self.resolve_indexes(Arc::new(local_field));
+						let ro = RecordOptions {
+							irs,
+							remotes: Arc::new(remotes),
+						};
+						self.idioms_record_options.insert(idiom.clone(), ro.clone());
+						return Ok(Some(ro));
+					}
+				}
 			}
 		}
-		self.idioms_indexes.insert(i.clone(), res.clone());
-		res
+		Ok(None)
 	}
 
 	async fn eval_expression(&mut self, group: GroupRef, e: &Expression) -> Result<Node, Error> {
@@ -379,6 +438,7 @@ pub(super) enum Node {
 		exp: Arc<Expression>,
 	},
 	IndexedField(Arc<Idiom>, Arc<Vec<IndexRef>>),
+	RecordField(Arc<Idiom>, RecordOptions),
 	NonIndexedField(Arc<Idiom>),
 	Computed(Arc<Value>),
 	Unsupported(String),
@@ -394,10 +454,16 @@ impl Node {
 	}
 
 	pub(super) fn is_indexed_field(&self) -> Option<(Arc<Idiom>, Arc<Vec<IndexRef>>)> {
-		if let Node::IndexedField(id, irs) = self {
-			Some((id.clone(), irs.clone()))
-		} else {
-			None
+		match self {
+			Node::IndexedField(id, irs) => Some((id.clone(), irs.clone())),
+			Node::RecordField(id, ro) => {
+				if ro.irs.is_empty() {
+					None
+				} else {
+					Some((id.clone(), ro.irs.clone()))
+				}
+			}
+			_ => None,
 		}
 	}
 
