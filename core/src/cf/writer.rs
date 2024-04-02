@@ -62,7 +62,7 @@ impl Writer {
 	}
 
 	#[allow(clippy::too_many_arguments)]
-	pub(crate) fn update(
+	pub(crate) fn record_cf_change(
 		&mut self,
 		ns: &str,
 		db: &str,

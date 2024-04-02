@@ -42,7 +42,7 @@ use crate::kvs::lq_structs::{
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::options::EngineOptions;
 use crate::sql::statements::show::ShowSince;
-use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
+use crate::sql::{self, statements::DefineUserStatement, Base, Query, Strand, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
 
@@ -1046,8 +1046,14 @@ impl Datastore {
 	fn construct_document(mutation: &TableMutation) -> Option<Document> {
 		match mutation {
 			TableMutation::Set(id, current_value) => {
-				let doc = Document::new(None, Some(id), None, current_value, Workable::Normal);
-				panic!("Just a normal set");
+				let doc = Document::new_artificial(
+					None,
+					Some(id),
+					None,
+					Cow::Borrowed(current_value),
+					Cow::Owned(Value::None),
+					Workable::Normal,
+				);
 				Some(doc)
 			}
 			TableMutation::Del(id) => {
@@ -1056,7 +1062,9 @@ impl Datastore {
 			}
 			TableMutation::Def(_) => None,
 			TableMutation::SetWithDiff(id, current_value, _operations) => {
-				let todo_original_after_reverse_applying_patches = Value::None;
+				let todo_original_after_reverse_applying_patches = Value::Strand(Strand::from(
+					"placeholder until we can derive diffs from reversing patch operations",
+				));
 				let doc = Document::new_artificial(
 					None,
 					Some(id),

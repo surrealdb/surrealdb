@@ -236,6 +236,9 @@ async fn live_select_query() {
 		// Pull the notification
 		let notification: Notification<RecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+		// TODO the problem is with delete not sending or sending `none`; Basically the document fed into `lives` is bad
+		let notification: Notification<RecordId> =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 	}

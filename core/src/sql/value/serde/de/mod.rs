@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JsonValue;
+use std::backtrace;
 
 impl From<Value> for serde_json::Value {
 	fn from(value: Value) -> Self {
@@ -293,10 +294,15 @@ where
 	T: DeserializeOwned,
 {
 	let json = into_json(value.clone(), false);
-	serde_json::from_value(json).map_err(|error| FromValueError {
-		value,
-		error: error.to_string(),
-	})
+	serde_json::from_value(json)
+		.map_err(|error| FromValueError {
+			value,
+			error: error.to_string(),
+		})
+		.map_err(|e| {
+			panic!("Failed to deserialize value: {:?}", e);
+			e
+		})
 }
 
 #[cfg(test)]

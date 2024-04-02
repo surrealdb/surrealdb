@@ -268,6 +268,9 @@ impl Serialize for Error {
 
 impl From<FromValueError> for crate::Error {
 	fn from(error: FromValueError) -> Self {
+		if true {
+			panic!("Error::FromValue: {:?}", error)
+		};
 		Self::Api(Error::FromValue {
 			value: error.value,
 			error: error.error,
