@@ -134,8 +134,12 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 		parts.extract_with_state(&state).await.unwrap_or(ExtractClientIP(None));
 
 	// Create session
-	#[rustfmt::skip]
-	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
+	let mut session = Session::default();
+	session.ip = ip;
+	session.or = or;
+	session.id = id;
+	session.ns = ns;
+	session.db = db;
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {

@@ -46,3 +46,14 @@ impl Display for Notification {
 		write!(f, "{}", obj)
 	}
 }
+
+impl Notification {
+	/// Construct a new notification
+	pub const fn new(id: Uuid, action: Action, result: Value) -> Self {
+		Self {
+			id,
+			action,
+			result,
+		}
+	}
+}
