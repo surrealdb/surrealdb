@@ -210,7 +210,7 @@ fn table_explain(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Store'
+					type: 'Memory'
 				}},
 				operation: 'Collector'
 			}},
@@ -241,7 +241,7 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 			}},
 			{{
 				detail: {{
-					type: 'Store'
+					type: 'Memory'
 				}},
 				operation: 'Collector'
 			}},
@@ -264,7 +264,7 @@ const THREE_TABLE_EXPLAIN: &str = "[
 	},
 	{
 		detail: {
-			type: 'Store'
+			type: 'Memory'
 		},
 		operation: 'Collector'
 	},
@@ -312,7 +312,7 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -338,7 +338,7 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -364,7 +364,7 @@ const SINGLE_INDEX_UNIQ_EXPLAIN: &str = "[
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -390,7 +390,7 @@ const SINGLE_INDEX_IDX_EXPLAIN: &str = "[
 	},
 	{
 		detail: {
-			type: 'Store'
+			type: 'Memory'
 		},
 		operation: 'Collector'
 	},
@@ -427,7 +427,7 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 				},
 				{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 				},
@@ -464,7 +464,7 @@ async fn select_with_no_index_unary_operator() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -498,7 +498,7 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -588,7 +588,7 @@ const EXPLAIN_FROM_TO: &str = r"[
 		},
 		{
 			detail: {
-				type: 'Store'
+				type: 'Memory'
 			},
 			operation: 'Collector'
 		}
@@ -635,7 +635,7 @@ const EXPLAIN_FROM_INCL_TO: &str = r"[
 		},
 		{
 			detail: {
-				type: 'Store'
+				type: 'Memory'
 			},
 			operation: 'Collector'
 		}
@@ -686,7 +686,7 @@ const EXPLAIN_FROM_TO_INCL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -737,7 +737,7 @@ const EXPLAIN_FROM_INCL_TO_INCL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -831,7 +831,7 @@ const EXPLAIN_LESS: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -872,7 +872,7 @@ const EXPLAIN_LESS_OR_EQUAL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -917,7 +917,7 @@ const EXPLAIN_MORE: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -958,7 +958,7 @@ const EXPLAIN_MORE_OR_EQUAL: &str = r"[
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -1014,7 +1014,7 @@ async fn select_with_idiom_param_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1062,7 +1062,7 @@ const CONTAINS_TABLE_EXPLAIN: &str = r"[
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					}
@@ -1128,7 +1128,7 @@ async fn select_contains() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1171,7 +1171,7 @@ async fn select_contains_all() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1214,7 +1214,7 @@ async fn select_contains_any() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1264,7 +1264,7 @@ async fn select_unique_contains() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1317,7 +1317,7 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1380,7 +1380,7 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1441,7 +1441,7 @@ async fn select_with_in_operator() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -1519,11 +1519,404 @@ async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
 			},
 			{
 				detail: {
-					type: 'Store'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
 		]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let sql = r#"
+		DEFINE INDEX index_note_id ON TABLE notes COLUMNS id;
+		DEFINE INDEX index_note_kind ON TABLE notes COLUMNS kind;
+		DEFINE INDEX index_note_pubkey ON TABLE notes COLUMNS pubkey;
+		DEFINE INDEX index_note_published ON TABLE notes COLUMNS published;
+		CREATE notes:1 SET kind = 1, pubkey = 123, published=2021;
+		CREATE notes:2 SET kind = 2, pubkey = 123, published=2022;
+		CREATE notes:3 SET kind = 1, pubkey = 123, published=2023;
+		CREATE notes:4 SET kind = 2, pubkey = 123, published=2024;
+		CREATE notes:5 SET kind = 1, pubkey = 123, published=2025;
+		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN [123]) AND published > 2022 EXPLAIN;
+		SELECT * FROM notes WHERE (kind IN [1,2] OR pubkey IN [123]) AND published > 2022;
+		SELECT * FROM notes WHERE published < 2024 AND (kind IN [1,2] OR pubkey IN [123]) AND published > 2022 EXPLAIN;
+		SELECT * FROM notes WHERE published < 2024 AND (kind IN [1,2] OR pubkey IN [123]) AND published > 2022;
+		SELECT * FROM notes WHERE published < 2022 OR (kind IN [1,2] OR pubkey IN [123]) AND published > 2022 EXPLAIN;
+		SELECT * FROM notes WHERE published < 2022 OR (kind IN [1,2] OR pubkey IN [123]) AND published > 2022;
+		SELECT * FROM notes WHERE (kind IN [1,2] AND published < 2022) OR (pubkey IN [123] AND published > 2022) EXPLAIN;
+		SELECT * FROM notes WHERE (kind IN [1,2] AND published < 2022) OR (pubkey IN [123] AND published > 2022);
+	"#;
+	let mut res = dbs.execute(sql, &ses, None).await?;
+	//
+	assert_eq!(res.len(), 17);
+	skip_ok(&mut res, 9)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_kind",
+								"operator": "union",
+								"value": [
+									1,
+									2
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_pubkey",
+								"operator": "union",
+								"value": [
+									123
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 2022
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: None
+								}
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					id: notes:3,
+					kind: 1,
+					pubkey: 123,
+					published: 2023
+				},
+				{
+					id: notes:5,
+					kind: 1,
+					pubkey: 123,
+					published: 2025
+				},
+				{
+					id: notes:4,
+					kind: 2,
+					pubkey: 123,
+					published: 2024
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_kind",
+								"operator": "union",
+								"value": [
+									1,
+									2
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_pubkey",
+								"operator": "union",
+								"value": [
+									123
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 2022
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: 2024
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				id: notes:3,
+				kind: 1,
+				pubkey: 123,
+				published: 2023
+			}
+		]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_kind",
+								"operator": "union",
+								"value": [
+									1,
+									2
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_pubkey",
+								"operator": "union",
+								"value": [
+									123
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: None
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: 2022
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 2022
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: None
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					id: notes:1,
+					kind: 1,
+					pubkey: 123,
+					published: 2021
+				},
+				{
+					id: notes:3,
+					kind: 1,
+					pubkey: 123,
+					published: 2023
+				},
+				{
+					id: notes:5,
+					kind: 1,
+					pubkey: 123,
+					published: 2025
+				},
+				{
+					id: notes:4,
+					kind: 2,
+					pubkey: 123,
+					published: 2024
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_kind",
+								"operator": "union",
+								"value": [
+									1,
+									2
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						"detail": {
+							"plan": {
+								"index": "index_note_pubkey",
+								"operator": "union",
+								"value": [
+									123
+								]
+							},
+							"table": "notes"
+						},
+						"operation": "Iterate Index"
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: None
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: 2022
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 2022
+								},
+								index: 'index_note_published',
+								to: {
+									inclusive: false,
+									value: None
+								}
+							},
+							table: 'notes'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					id: notes:1,
+					kind: 1,
+					pubkey: 123,
+					published: 2021
+				},
+				{
+					id: notes:3,
+					kind: 1,
+					pubkey: 123,
+					published: 2023
+				},
+				{
+					id: notes:5,
+					kind: 1,
+					pubkey: 123,
+					published: 2025
+				},
+				{
+					id: notes:4,
+					kind: 2,
+					pubkey: 123,
+					published: 2024
+				}
+			]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
