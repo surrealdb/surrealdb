@@ -220,7 +220,7 @@ async fn select_expression_value() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -530,7 +530,7 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -554,7 +554,7 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -618,7 +618,7 @@ async fn select_where_and_with_index() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -671,7 +671,7 @@ async fn select_where_and_with_unique_index() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -726,7 +726,7 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				}
@@ -780,7 +780,7 @@ async fn select_where_explain() -> Result<(), Error> {
 				},
                 {
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},
@@ -805,7 +805,7 @@ async fn select_where_explain() -> Result<(), Error> {
 				},
                 {
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},

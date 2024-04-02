@@ -12,7 +12,25 @@ use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::env;
 use std::fmt::{self, Debug};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -53,6 +71,26 @@ pub struct Context<'a> {
 	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	// Is the datastore in memory? (KV-MEM, WASM)
+	is_memory: bool,
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	// The temporary directory
+	temporary_directory: Arc<PathBuf>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -77,6 +115,24 @@ impl<'a> Context<'a> {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
+		is_memory: bool,
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
+		temporary_directory: Arc<PathBuf>,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -89,6 +145,24 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			is_memory,
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			temporary_directory,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -108,6 +182,24 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			is_memory: false,
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			temporary_directory: Arc::new(env::temp_dir()),
 		}
 	}
 
@@ -124,6 +216,24 @@ impl<'a> Context<'a> {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			is_memory: parent.is_memory,
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			temporary_directory: parent.temporary_directory.clone(),
 		}
 	}
 
@@ -237,6 +347,32 @@ impl<'a> Context<'a> {
 	/// Check if the context is not ok to continue, because it timed out.
 	pub fn is_timedout(&self) -> bool {
 		matches!(self.done(), Some(Reason::Timedout))
+	}
+
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	/// Return true if the underlying Datastore is KV-MEM (Or WASM)
+	pub fn is_memory(&self) -> bool {
+		self.is_memory
+	}
+
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	/// Return the location of the temporary directory
+	pub fn temporary_directory(&self) -> &Path {
+		self.temporary_directory.as_ref()
 	}
 
 	/// Get a value from the context. If no value is stored under the

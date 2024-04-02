@@ -1,4 +1,3 @@
-
 # cargo-vet config file
 
 [cargo-vet]
@@ -693,6 +692,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
 version = "0.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.ext-sort]]
+version = "0.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.fail]]
