@@ -2,7 +2,7 @@
 
 name: Stable release
 
-run-name: "Stable release 'releases/core-v1' (publish: ${{ inputs.publish }}, bump version: ${{ inputs.bump-version }})"
+run-name: "Stable release 'core-1.x' (publish: ${{ inputs.publish }}, bump version: ${{ inputs.bump-version }})"
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       environment: stable
-      git-ref: releases/core-v1
+      git-ref: core-1.x
       bump-version: ${{ inputs.bump-version }}
       latest: false
       publish: ${{ inputs.publish }}
