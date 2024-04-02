@@ -4,7 +4,7 @@ extern crate rocket;
 use rocket_example::{create_db_connection, router};
 
 #[launch]
-async fn rocket() -> _ {
+pub async fn rocket() -> _ {
 	let db_conn = create_db_connection().await.unwrap();
 	router(db_conn)
 }
