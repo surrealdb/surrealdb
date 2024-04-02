@@ -510,9 +510,6 @@ allow_unsafe = true
 
 [pkg.futures-util]
 allow_unsafe = true
-allow_apis = [
-    "net",
-]
 
 [pkg.indexmap]
 allow_unsafe = true
@@ -1131,6 +1128,9 @@ allow_unsafe = true
 [pkg.rquickjs-core]
 allow_unsafe = true
 
+[pkg.reblessive]
+allow_unsafe = true
+
 [pkg.tungstenite]
 allow_unsafe = true
 
@@ -1288,26 +1288,6 @@ allow_unsafe = true
 [pkg.pprof]
 allow_unsafe = true
 
-[pkg.crossbeam-queue]
-allow_unsafe = true
-
-[pkg.lru]
-allow_unsafe = true
-allow_apis = [
-    "net",
-]
-
-[pkg.surrealkv]
-allow_apis = [
-    "fs",
-    "net",
-]
-
-[pkg.vart]
-allow_apis = [
-    "net",
-]
-
 # examples
 [pkg.pear_codegen]
 allow_proc_macro = true
@@ -1317,3 +1297,8 @@ allow_proc_macro = true
 
 [pkg.rocket_codegen]
 allow_proc_macro = true
+
+[pkg.ext-sort]
+allow_apis = [
+    "fs",
+]

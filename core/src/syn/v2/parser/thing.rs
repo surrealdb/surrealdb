@@ -1,3 +1,5 @@
+use reblessive::Stk;
+
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{id::Gen, Id, Ident, Range, Thing, Value},
@@ -12,8 +14,8 @@ use crate::{
 use std::{cmp::Ordering, ops::Bound};
 
 impl Parser<'_> {
-	pub fn parse_record_string(&mut self, double: bool) -> ParseResult<Thing> {
-		let thing = self.parse_thing()?;
+	pub async fn parse_record_string(&mut self, ctx: &mut Stk, double: bool) -> ParseResult<Thing> {
+		let thing = self.parse_thing(ctx).await?;
 		// can't have any tokens in the buffer, since the next token must be produced by a specific
 		// call.
 		debug_assert_eq!(self.token_buffer.len(), 0);
@@ -35,7 +37,11 @@ impl Parser<'_> {
 		Ok(thing)
 	}
 
-	pub fn parse_thing_or_range(&mut self, ident: String) -> ParseResult<Value> {
+	pub async fn parse_thing_or_range(
+		&mut self,
+		stk: &mut Stk,
+		ident: String,
+	) -> ParseResult<Value> {
 		expected!(self, t!(":"));
 
 		self.peek();
@@ -44,12 +50,14 @@ impl Parser<'_> {
 		if self.eat(t!("..")) {
 			let end = if self.eat(t!("=")) {
 				self.no_whitespace()?;
-				Bound::Included(self.parse_id()?)
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				Bound::Included(id)
 			} else if self.peek_can_be_ident()
 				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 			{
 				self.no_whitespace()?;
-				Bound::Excluded(self.parse_id()?)
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
@@ -63,7 +71,7 @@ impl Parser<'_> {
 		let beg = if self.peek_can_be_ident()
 			|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 		{
-			let id = self.parse_id()?;
+			let id = stk.run(|ctx| self.parse_id(ctx)).await?;
 
 			if self.eat(t!(">")) {
 				self.no_whitespace()?;
@@ -78,12 +86,14 @@ impl Parser<'_> {
 		if self.eat(t!("..")) {
 			let end = if self.eat(t!("=")) {
 				self.no_whitespace()?;
-				Bound::Included(self.parse_id()?)
+				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Included(id)
 			} else if self.peek_can_be_ident()
 				|| matches!(self.peek_kind(), TokenKind::Number(_) | t!("{") | t!("["))
 			{
 				self.no_whitespace()?;
-				Bound::Excluded(self.parse_id()?)
+				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
@@ -122,7 +132,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_range(&mut self) -> ParseResult<Range> {
+	pub async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
 		let tb = self.next_token_value::<Ident>()?.0;
 
 		expected!(self, t!(":"));
@@ -134,7 +144,7 @@ impl Parser<'_> {
 			self.peek();
 			self.no_whitespace()?;
 
-			let id = self.parse_id()?;
+			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 
 			self.peek();
 			self.no_whitespace()?;
@@ -162,7 +172,7 @@ impl Parser<'_> {
 		self.no_whitespace()?;
 
 		let end = if self.peek_can_be_ident() {
-			let id = self.parse_id()?;
+			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 			if inclusive {
 				Bound::Included(id)
 			} else {
@@ -179,33 +189,37 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_thing(&mut self) -> ParseResult<Thing> {
+	pub async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
-		self.parse_thing_from_ident(ident)
+		self.parse_thing_from_ident(ctx, ident).await
 	}
 
-	pub fn parse_thing_from_ident(&mut self, ident: String) -> ParseResult<Thing> {
+	pub async fn parse_thing_from_ident(
+		&mut self,
+		ctx: &mut Stk,
+		ident: String,
+	) -> ParseResult<Thing> {
 		expected!(self, t!(":"));
 
 		self.peek();
 		self.no_whitespace()?;
 
-		let id = self.parse_id()?;
+		let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 		Ok(Thing {
 			tb: ident,
 			id,
 		})
 	}
 
-	pub fn parse_id(&mut self) -> ParseResult<Id> {
+	pub async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
 		let token = self.next();
 		match token.kind {
 			t!("{") => {
-				let object = self.parse_object(token.span)?;
+				let object = self.parse_object(stk, token.span).await?;
 				Ok(Id::Object(object))
 			}
 			t!("[") => {
-				let array = self.parse_array(token.span)?;
+				let array = self.parse_array(stk, token.span).await?;
 				Ok(Id::Array(array))
 			}
 			t!("+") => {
@@ -272,6 +286,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use reblessive::Stack;
+
 	use super::*;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
@@ -279,7 +295,8 @@ mod tests {
 
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());
-		parser.parse_thing()
+		let mut stack = Stack::new();
+		stack.enter(|ctx| async move { parser.parse_thing(ctx).await }).finish()
 	}
 
 	#[test]

@@ -55,7 +55,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 					},
 					{
 						detail: {
-							type: 'Store'
+							type: 'Memory'
 						},
 						operation: 'Collector'
 					},
@@ -208,7 +208,7 @@ async fn select_where_brute_force_knn() -> Result<(), Error> {
 				},
 				{
 					detail: {
-						type: 'Store'
+						type: 'Memory'
 					},
 					operation: 'Collector'
 				},

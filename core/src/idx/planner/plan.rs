@@ -1,20 +1,30 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::executor::ExpressionKey;
-use crate::idx::planner::tree::{IndexRef, Node};
+use crate::idx::planner::tree::{GroupRef, IndexRef, Node};
 use crate::sql::with::With;
 use crate::sql::{Array, Idiom, Object};
 use crate::sql::{Operator, Value};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
+/// The `PlanBuilder` struct represents a builder for constructing query plans.
 pub(super) struct PlanBuilder {
-	indexes: Vec<(ExpressionKey, IndexOption)>,
-	range_queries: HashMap<IndexRef, RangeQueryBuilder>,
+	/// Do we have at least one index?
+	has_indexes: bool,
+	/// List of expressions that are not ranges, backed by an index
+	non_range_indexes: Vec<(ExpressionKey, IndexOption)>,
+	/// List of indexes involved in this plan
 	with_indexes: Vec<IndexRef>,
+	/// Group each possible optimisations local to a SubQuery
+	groups: BTreeMap<GroupRef, Group>, // The order matters because we want the plan to be consistent across repeated queries.
+	/// Does a group contains only AND relations?
+	all_and_groups: HashMap<GroupRef, bool>,
+	/// Does the whole query contains only AND relations?
 	all_and: bool,
+	/// Is every expression backed by an index?
 	all_exp_with_index: bool,
 }
 
@@ -28,9 +38,11 @@ impl PlanBuilder {
 			return Ok(Plan::TableIterator(Some("WITH NOINDEX".to_string())));
 		}
 		let mut b = PlanBuilder {
-			indexes: Default::default(),
-			range_queries: Default::default(),
+			has_indexes: false,
+			non_range_indexes: Default::default(),
+			groups: Default::default(),
 			with_indexes,
+			all_and_groups: Default::default(),
 			all_and: true,
 			all_exp_with_index: true,
 		};
@@ -38,8 +50,8 @@ impl PlanBuilder {
 		if let Err(e) = b.eval_node(&root) {
 			return Ok(Plan::TableIterator(Some(e.to_string())));
 		}
-		// If we didn't found any index, we're done with no index plan
-		if b.indexes.is_empty() {
+		// If we didn't find any index, we're done with no index plan
+		if !b.has_indexes {
 			return Ok(Plan::TableIterator(Some("NO INDEX FOUND".to_string())));
 		}
 
@@ -47,17 +59,27 @@ impl PlanBuilder {
 		if b.all_and {
 			// TODO: This is currently pretty arbitrary
 			// We take the "first" range query if one is available
-			if let Some((ir, rq)) = b.range_queries.drain().take(1).next() {
-				return Ok(Plan::SingleIndexMultiExpression(ir, rq));
+			if let Some((_, group)) = b.groups.into_iter().next() {
+				if let Some((ir, rq)) = group.take_first_range() {
+					return Ok(Plan::SingleIndexRange(ir, rq));
+				}
 			}
 			// Otherwise we take the first single index option
-			if let Some((e, i)) = b.indexes.pop() {
+			if let Some((e, i)) = b.non_range_indexes.pop() {
 				return Ok(Plan::SingleIndex(e, i));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
-		if b.all_exp_with_index {
-			return Ok(Plan::MultiIndex(b.indexes));
+		else if b.all_exp_with_index {
+			let mut ranges = Vec::with_capacity(b.groups.len());
+			for (depth, group) in b.groups {
+				if b.all_and_groups.get(&depth) == Some(&true) {
+					group.take_union_ranges(&mut ranges);
+				} else {
+					group.take_intersect_ranges(&mut ranges);
+				}
+			}
+			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges));
 		}
 		Ok(Plan::TableIterator(None))
 	}
@@ -75,18 +97,15 @@ impl PlanBuilder {
 	fn eval_node(&mut self, node: &Node) -> Result<(), String> {
 		match node {
 			Node::Expression {
+				group,
 				io,
 				left,
 				right,
 				exp,
 			} => {
-				let op = exp.operator();
-				if self.all_and && Operator::Or.eq(op) {
-					self.all_and = false;
-				}
-				let is_bool = self.check_boolean_operator(op);
+				let is_bool = self.check_boolean_operator(*group, exp.operator());
 				if let Some(io) = self.filter_index_option(io.as_ref()) {
-					self.add_index_option(exp.clone(), io);
+					self.add_index_option(*group, exp.clone(), io);
 				} else if self.all_exp_with_index && !is_bool {
 					self.all_exp_with_index = false;
 				}
@@ -99,41 +118,49 @@ impl PlanBuilder {
 		}
 	}
 
-	fn check_boolean_operator(&mut self, op: &Operator) -> bool {
+	fn check_boolean_operator(&mut self, gr: GroupRef, op: &Operator) -> bool {
 		match op {
 			Operator::Neg | Operator::Or => {
 				if self.all_and {
 					self.all_and = false;
 				}
+				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
 				true
 			}
-			Operator::And => true,
-			_ => false,
+			Operator::And => {
+				self.all_and_groups.entry(gr).or_insert(true);
+				true
+			}
+			_ => {
+				self.all_and_groups.entry(gr).or_insert(true);
+				false
+			}
 		}
 	}
 
-	fn add_index_option(&mut self, exp: ExpressionKey, io: IndexOption) {
-		if let IndexOperator::RangePart(o, v) = io.op() {
-			match self.range_queries.entry(io.ix_ref()) {
+	fn add_index_option(&mut self, group_ref: GroupRef, exp: ExpressionKey, io: IndexOption) {
+		if let IndexOperator::RangePart(_, _) = io.op() {
+			let level = self.groups.entry(group_ref).or_default();
+			match level.ranges.entry(io.ix_ref()) {
 				Entry::Occupied(mut e) => {
-					e.get_mut().add(exp.clone(), o, v);
+					e.get_mut().push((exp, io));
 				}
 				Entry::Vacant(e) => {
-					let mut b = RangeQueryBuilder::default();
-					b.add(exp.clone(), o, v);
-					e.insert(b);
+					e.insert(vec![(exp, io)]);
 				}
 			}
+		} else {
+			self.non_range_indexes.push((exp, io));
 		}
-		self.indexes.push((exp, io));
+		self.has_indexes = true;
 	}
 }
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
 	SingleIndex(ExpressionKey, IndexOption),
-	MultiIndex(Vec<(ExpressionKey, IndexOption)>),
-	SingleIndexMultiExpression(IndexRef, RangeQueryBuilder),
+	MultiIndex(Vec<(ExpressionKey, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
+	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -291,23 +318,79 @@ impl From<&RangeValue> for Value {
 	}
 }
 
+#[derive(Default)]
+pub(super) struct Group {
+	ranges: HashMap<IndexRef, Vec<(ExpressionKey, IndexOption)>>,
+}
+
+impl Group {
+	fn take_first_range(self) -> Option<(IndexRef, UnionRangeQueryBuilder)> {
+		if let Some((ir, ri)) = self.ranges.into_iter().take(1).next() {
+			UnionRangeQueryBuilder::new_aggregate(ri).map(|rb| (ir, rb))
+		} else {
+			None
+		}
+	}
+
+	fn take_union_ranges(self, r: &mut Vec<(IndexRef, UnionRangeQueryBuilder)>) {
+		for (ir, ri) in self.ranges {
+			if let Some(rb) = UnionRangeQueryBuilder::new_aggregate(ri) {
+				r.push((ir, rb));
+			}
+		}
+	}
+
+	fn take_intersect_ranges(self, r: &mut Vec<(IndexRef, UnionRangeQueryBuilder)>) {
+		for (ir, ri) in self.ranges {
+			for (exp, io) in ri {
+				if let Some(rb) = UnionRangeQueryBuilder::new(exp, io) {
+					r.push((ir, rb));
+				}
+			}
+		}
+	}
+}
+
 #[derive(Default, Debug)]
-pub(super) struct RangeQueryBuilder {
+pub(super) struct UnionRangeQueryBuilder {
 	pub(super) exps: HashSet<ExpressionKey>,
 	pub(super) from: RangeValue,
 	pub(super) to: RangeValue,
 }
 
-impl RangeQueryBuilder {
-	fn add(&mut self, exp: ExpressionKey, op: &Operator, v: &Value) {
-		match op {
-			Operator::LessThan => self.to.set_to(v),
-			Operator::LessThanOrEqual => self.to.set_to_inclusive(v),
-			Operator::MoreThan => self.from.set_from(v),
-			Operator::MoreThanOrEqual => self.from.set_from_inclusive(v),
-			_ => return,
+impl UnionRangeQueryBuilder {
+	fn new_aggregate(exp_ios: Vec<(ExpressionKey, IndexOption)>) -> Option<Self> {
+		if exp_ios.is_empty() {
+			return None;
 		}
-		self.exps.insert(exp);
+		let mut b = Self::default();
+		for (exp, io) in exp_ios {
+			b.add(exp, io);
+		}
+		Some(b)
+	}
+
+	fn new(exp: ExpressionKey, io: IndexOption) -> Option<Self> {
+		let mut b = Self::default();
+		if b.add(exp, io) {
+			Some(b)
+		} else {
+			None
+		}
+	}
+
+	fn add(&mut self, exp: ExpressionKey, io: IndexOption) -> bool {
+		if let IndexOperator::RangePart(op, val) = io.op() {
+			match op {
+				Operator::LessThan => self.to.set_to(val),
+				Operator::LessThanOrEqual => self.to.set_to_inclusive(val),
+				Operator::MoreThan => self.from.set_from(val),
+				Operator::MoreThanOrEqual => self.from.set_from_inclusive(val),
+				_ => return false,
+			}
+			self.exps.insert(exp);
+		}
+		true
 	}
 }
 

@@ -342,24 +342,31 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(it_entry) = self.0.it_entries.get(it_ref as usize) {
 			match it_entry {
-				IteratorEntry::Single(_, io) => {
-					if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
-						match ix.index {
-							Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
-							Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
-							Index::Search {
-								..
-							} => self.new_search_index_iterator(it_ref, io.clone()).await,
-							Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(it_ref)),
-							Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(it_ref)),
-						}
-					} else {
-						Ok(None)
-					}
-				}
+				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, it_ref, io).await,
 				IteratorEntry::Range(_, ir, from, to) => {
 					Ok(self.new_range_iterator(opt, *ir, from, to))
 				}
+			}
+		} else {
+			Ok(None)
+		}
+	}
+
+	async fn new_single_iterator(
+		&self,
+		opt: &Options,
+		it_ref: IteratorRef,
+		io: &IndexOption,
+	) -> Result<Option<ThingIterator>, Error> {
+		if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
+			match ix.index {
+				Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
+				Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
+				Index::Search {
+					..
+				} => self.new_search_index_iterator(it_ref, io.clone()).await,
+				Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(it_ref)),
+				Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(it_ref)),
 			}
 		} else {
 			Ok(None)

@@ -1,13 +1,12 @@
 //! Contains parsing code for smaller common parts of statements.
 
-use crate::sql::change_feed_include::ChangeFeedInclude;
-use crate::sql::index::VectorType;
-use crate::syn::v2::token::VectorTypeKind;
+use reblessive::Stk;
+
 use crate::{
 	sql::{
-		changefeed::ChangeFeed, index::Distance, Base, Cond, Data, Duration, Fetch, Fetchs, Field,
-		Fields, Group, Groups, Ident, Idiom, Output, Permission, Permissions, Tables, Timeout,
-		Value, View,
+		change_feed_include::ChangeFeedInclude, changefeed::ChangeFeed, index::Distance,
+		index::VectorType, Base, Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups,
+		Ident, Idiom, Output, Permission, Permissions, Tables, Timeout, Value, View,
 	},
 	syn::v2::{
 		parser::{
@@ -15,22 +14,22 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, DistanceKind, Span, TokenKind},
+		token::{t, DistanceKind, Span, TokenKind, VectorTypeKind},
 	},
 };
 
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub fn try_parse_data(&mut self) -> ParseResult<Option<Data>> {
+	pub async fn try_parse_data(&mut self, ctx: &mut Stk) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
 				let mut set_list = Vec::new();
 				loop {
-					let idiom = self.parse_plain_idiom()?;
+					let idiom = self.parse_plain_idiom(ctx).await?;
 					let operator = self.parse_assigner()?;
-					let value = self.parse_value()?;
+					let value = ctx.run(|ctx| self.parse_value(ctx)).await?;
 					set_list.push((idiom, operator, value));
 					if !self.eat(t!(",")) {
 						break;
@@ -40,24 +39,24 @@ impl Parser<'_> {
 			}
 			t!("UNSET") => {
 				self.pop_peek();
-				let idiom_list = self.parse_idiom_list()?;
+				let idiom_list = self.parse_idiom_list(ctx).await?;
 				Data::UnsetExpression(idiom_list)
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(self.parse_value()?)
+				Data::PatchExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(self.parse_value()?)
+				Data::MergeExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(self.parse_value()?)
+				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(self.parse_value()?)
+				Data::ContentExpression(ctx.run(|ctx| self.parse_value(ctx)).await?)
 			}
 			_ => return Ok(None),
 		};
@@ -65,7 +64,7 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement output if the next token is `return`.
-	pub fn try_parse_output(&mut self) -> ParseResult<Option<Output>> {
+	pub async fn try_parse_output(&mut self, ctx: &mut Stk) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
@@ -90,7 +89,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Output::Before
 			}
-			_ => Output::Fields(self.parse_fields()?),
+			_ => Output::Fields(self.parse_fields(ctx).await?),
 		};
 		Ok(Some(res))
 	}
@@ -104,19 +103,19 @@ impl Parser<'_> {
 		Ok(Some(Timeout(duration)))
 	}
 
-	pub fn try_parse_fetch(&mut self) -> ParseResult<Option<Fetchs>> {
+	pub async fn try_parse_fetch(&mut self, ctx: &mut Stk) -> ParseResult<Option<Fetchs>> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
-		let v = self.parse_idiom_list()?.into_iter().map(Fetch).collect();
+		let v = self.parse_idiom_list(ctx).await?.into_iter().map(Fetch).collect();
 		Ok(Some(Fetchs(v)))
 	}
 
-	pub fn try_parse_condition(&mut self) -> ParseResult<Option<Cond>> {
+	pub async fn try_parse_condition(&mut self, ctx: &mut Stk) -> ParseResult<Option<Cond>> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
-		let v = self.parse_value_field()?;
+		let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 		Ok(Some(Cond(v)))
 	}
 
@@ -214,7 +213,11 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
-	pub fn parse_permission(&mut self, permissive: bool) -> ParseResult<Permissions> {
+	pub async fn parse_permission(
+		&mut self,
+		stk: &mut Stk,
+		permissive: bool,
+	) -> ParseResult<Permissions> {
 		match self.next().kind {
 			t!("NONE") => Ok(Permissions::none()),
 			t!("FULL") => Ok(Permissions::full()),
@@ -224,10 +227,10 @@ impl Parser<'_> {
 				} else {
 					Permissions::none()
 				};
-				self.parse_specific_permission(&mut permission)?;
+				stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
 				self.eat(t!(","));
 				while self.eat(t!("FOR")) {
-					self.parse_specific_permission(&mut permission)?;
+					stk.run(|stk| self.parse_specific_permission(stk, &mut permission)).await?;
 					self.eat(t!(","));
 				}
 				Ok(permission)
@@ -242,7 +245,11 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to just have eaten the `FOR` keyword.
-	pub fn parse_specific_permission(&mut self, permissions: &mut Permissions) -> ParseResult<()> {
+	pub async fn parse_specific_permission(
+		&mut self,
+		stk: &mut Stk,
+		permissions: &mut Permissions,
+	) -> ParseResult<()> {
 		let mut select = false;
 		let mut create = false;
 		let mut update = false;
@@ -269,7 +276,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let permission_value = self.parse_permission_value()?;
+		let permission_value = self.parse_permission_value(stk).await?;
 		if select {
 			permissions.select = permission_value.clone();
 		}
@@ -291,11 +298,11 @@ impl Parser<'_> {
 	/// # Parser State
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`, `UPDATE` or `DELETE`.
-	pub fn parse_permission_value(&mut self) -> ParseResult<Permission> {
+	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
 		match self.next().kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
-			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field()?)),
+			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field(stk).await?)),
 			x => unexpected!(self, x, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}
@@ -352,10 +359,10 @@ impl Parser<'_> {
 	/// # Parse State
 	/// Expects the parser to have already eaten the possible `(` if the view was wrapped in
 	/// parens. Expects the next keyword to be `SELECT`.
-	pub fn parse_view(&mut self) -> ParseResult<View> {
+	pub async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;
-		let fields = self.parse_fields()?;
+		let fields = self.parse_fields(stk).await?;
 		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
 		let mut from = vec![self.next_token_value()?];
@@ -363,7 +370,7 @@ impl Parser<'_> {
 			from.push(self.next_token_value()?);
 		}
 
-		let cond = self.try_parse_condition()?;
+		let cond = self.try_parse_condition(stk).await?;
 		let group = self.try_parse_group(&fields, fields_span)?;
 
 		Ok(View {
@@ -379,9 +386,10 @@ impl Parser<'_> {
 			DistanceKind::Chebyshev => Distance::Chebyshev,
 			DistanceKind::Cosine => Distance::Cosine,
 			DistanceKind::Euclidean => Distance::Euclidean,
+			DistanceKind::Manhattan => Distance::Manhattan,
 			DistanceKind::Hamming => Distance::Hamming,
 			DistanceKind::Jaccard => Distance::Jaccard,
-			DistanceKind::Manhattan => Distance::Manhattan,
+
 			DistanceKind::Minkowski => {
 				let distance = self.next_token_value()?;
 				Distance::Minkowski(distance)
