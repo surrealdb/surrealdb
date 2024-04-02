@@ -16,6 +16,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 #[serde(rename = "$surrealdb::private::sql::Param")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Param(pub Ident);
 
 impl From<Ident> for Param {

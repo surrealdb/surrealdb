@@ -17,6 +17,7 @@ use uuid::Uuid;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Options {
 	/// Current Node ID
 	id: Option<Uuid>,
@@ -51,6 +52,7 @@ pub struct Options {
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Force {
 	All,
 	None,

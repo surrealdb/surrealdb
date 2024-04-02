@@ -6,6 +6,7 @@ use std::hash::{Hash, Hasher};
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Scoring {
 	Bm {
 		k1: f32,

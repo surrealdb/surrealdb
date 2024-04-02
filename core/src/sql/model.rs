@@ -29,6 +29,7 @@ const ARGUMENTS: &str = "The model expects 1 argument. The argument can be eithe
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Model {
 	pub name: String,
 	pub version: String,

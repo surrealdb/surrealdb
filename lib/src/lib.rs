@@ -199,6 +199,8 @@ impl From<dbs::Action> for Action {
 			dbs::Action::Create => Self::Create,
 			dbs::Action::Update => Self::Update,
 			dbs::Action::Delete => Self::Delete,
+			#[cfg(feature = "sql2")]
+			_ => unreachable!(),
 		}
 	}
 }
