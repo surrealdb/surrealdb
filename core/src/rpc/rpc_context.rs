@@ -487,30 +487,29 @@ pub trait RpcContext {
 	// ------------------------------
 
 	async fn relate(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		println!("params: {:?}", params);
 		let Ok((from, kind, to, content)) = params.needs_three_or_four() else {
 			return Err(RpcError::InvalidParams);
 		};
 
 		let kind = kind.could_be_table();
-		let data = match content {
-			Value::None | Value::Null => None,
-			Value::Object(_) => Some(sql::Data::ContentExpression(content)),
-			_ => return Err(RpcError::InvalidParams),
+
+		// Specify the SQL query string
+		let sql = if content.is_none_or_null() {
+			"RELATE $from->$kind->$to"
+		} else {
+			"RELATE $from->$kind->$to CONTENT $content"
 		};
 
-		let relation = RelateStatement {
-			kind,
-			from,
-			with: to,
-			data,
-			..Default::default()
-		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("from") => from,
+			String::from("kind") => kind,
+			String::from("to") => to,
+			String::from("content") => content,
+			=> &self.vars()
+		});
 
-		let mut res = self
-			.kvs()
-			.process(Statement::Relate(relation).into(), self.session(), Some(self.vars().clone()))
-			.await?;
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
 		let out = res.remove(0).result?;
 
 		Ok(out)
