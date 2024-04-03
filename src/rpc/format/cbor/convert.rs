@@ -308,9 +308,6 @@ impl TryFrom<Cbor> for Value {
 	}
 }
 
-// TODO(kearfy): Make this the default in v2.0.0 and drop this boolean
-const SERIALIZATION_V2: bool = false;
-
 impl TryFrom<Value> for Cbor {
 	type Error = &'static str;
 	fn try_from(val: Value) -> Result<Self, &'static str> {
@@ -327,49 +324,34 @@ impl TryFrom<Value> for Cbor {
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
 			Value::Duration(v) => {
-				if SERIALIZATION_V2 {
-					let seconds = v.secs();
-					let nanos = v.subsec_nanos();
+				let seconds = v.secs();
+				let nanos = v.subsec_nanos();
 
-					let tag_value = match (seconds, nanos) {
-						(0, 0) => Box::new(Data::Array(vec![])),
-						(_, 0) => Box::new(Data::Array(vec![Data::Integer(seconds.into())])),
-						_ => Box::new(Data::Array(vec![
-							Data::Integer(seconds.into()),
-							Data::Integer(nanos.into()),
-						])),
-					};
+				let tag_value = match (seconds, nanos) {
+					(0, 0) => Box::new(Data::Array(vec![])),
+					(_, 0) => Box::new(Data::Array(vec![Data::Integer(seconds.into())])),
+					_ => Box::new(Data::Array(vec![
+						Data::Integer(seconds.into()),
+						Data::Integer(nanos.into()),
+					])),
+				};
 
-					Ok(Cbor(Data::Tag(TAG_CUSTOM_DURATION, tag_value)))
-				} else {
-					Ok(Cbor(Data::Tag(TAG_STRING_DURATION, Box::new(Data::Text(v.to_raw())))))
-				}
+				Ok(Cbor(Data::Tag(TAG_CUSTOM_DURATION, tag_value)))
 			}
 			Value::Datetime(v) => {
-				if SERIALIZATION_V2 {
-					let seconds = v.timestamp();
-					let nanos = v.timestamp_subsec_nanos();
+				let seconds = v.timestamp();
+				let nanos = v.timestamp_subsec_nanos();
 
-					Ok(Cbor(Data::Tag(
-						TAG_CUSTOM_DATETIME,
-						Box::new(Data::Array(vec![
-							Data::Integer(seconds.into()),
-							Data::Integer(nanos.into()),
-						])),
-					)))
-				} else {
-					Ok(Cbor(Data::Tag(TAG_STRING_DATETIME, Box::new(Data::Text(v.to_raw())))))
-				}
+				Ok(Cbor(Data::Tag(
+					TAG_CUSTOM_DATETIME,
+					Box::new(Data::Array(vec![
+						Data::Integer(seconds.into()),
+						Data::Integer(nanos.into()),
+					])),
+				)))
 			}
 			Value::Uuid(v) => {
-				if SERIALIZATION_V2 {
-					Ok(Cbor(Data::Tag(
-						TAG_BINARY_UUID,
-						Box::new(Data::Bytes(v.into_bytes().into())),
-					)))
-				} else {
-					Ok(Cbor(Data::Tag(TAG_STRING_UUID, Box::new(Data::Text(v.to_raw())))))
-				}
+				Ok(Cbor(Data::Tag(TAG_BINARY_UUID, Box::new(Data::Bytes(v.into_bytes().into())))))
 			}
 			Value::Array(v) => Ok(Cbor(Data::Array(
 				v.into_iter()
