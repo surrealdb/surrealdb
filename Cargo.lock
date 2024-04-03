@@ -4498,12 +4498,8 @@ dependencies = [
 [[package]]
 name = "reblessive"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb88832db7cfbac349e0276a84d4fbbcdb9cfe8069affbc765d8fd012265ba45"
 dependencies = [
  "atomic-waker",
- "futures-util",
- "pin-project-lite",
  "pin-utils",
 ]
 
