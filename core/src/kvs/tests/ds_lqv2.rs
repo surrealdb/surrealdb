@@ -54,7 +54,7 @@ mod check_construct {
 mod check_send {
 	use crate::cf::TableMutation;
 	use crate::ctx::Context;
-	use crate::dbs::{Notification, Options, Statement};
+	use crate::dbs::{Notification, Options, Session, Statement};
 	use crate::fflags::FFLAGS;
 	use crate::iam::Auth;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
@@ -66,8 +66,8 @@ mod check_send {
 	use futures::executor::block_on;
 	use once_cell::sync::Lazy;
 	use std::collections::BTreeMap;
+	use std::future::Future;
 	use std::sync::Arc;
-	use tokio::sync::RwLock;
 
 	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(init_test_suite())));
 
@@ -80,14 +80,32 @@ mod check_send {
 		let tk = "the_token";
 
 		// First we define a token
-		ds.execute(format!("
-USE NAMESPACE {ns};
-USE DATABASE {db};
-DEFINE SCOPE {sc};
-		DEFINE TABLE "))
+		let vars = Some(BTreeMap::new());
+		ds.execute(
+			&format!(
+				"
+			USE NAMESPACE {ns};
+			USE DATABASE {db};
+			DEFINE SCOPE {sc};
+			DEFINE TABLE {tb}"
+			),
+			&Session::owner(),
+			vars,
+		)
+		.await
+		.unwrap()
+		.into_iter()
+		.map(|r| r.result.unwrap())
+		.for_each(drop);
 
-		let mut tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-		let de = tx.get_sc(&ns, &db, &sc).await?;
+		let tx =
+			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
+		let drop_tx = tx.clone();
+		let _ = DroppyBoy::new(async move {
+			drop_tx.lock().await.commit().await.unwrap();
+		});
+		let mut tx = tx.lock().await;
+		let de = tx.get_sc(&ns, &db, &sc).await.unwrap();
 		TestSuite {
 			ds,
 			ns: ns.to_string(),
@@ -105,6 +123,36 @@ DEFINE SCOPE {sc};
 		tb: String,
 		sc: String,
 		rid: Value,
+	}
+
+	struct DroppyBoy<F>
+	where
+		F: Future,
+	{
+		f: Option<F>,
+	}
+
+	impl<F: Future> DroppyBoy<F> {
+		pub fn new(future: F) -> Self {
+			Self {
+				f: Some(future),
+			}
+		}
+	}
+
+	impl<F: Future> Drop for DroppyBoy<F>
+	where
+		F: Future,
+	{
+		fn drop(&mut self) {
+			let dummy_future: Option<F> = None;
+			let f = std::mem::replace(&mut self.f, dummy_future);
+			let f: F = match f {
+				Some(f) => f,
+				None => panic!("DroppyBoy future has an existing clone"),
+			};
+			tokio::runtime::Runtime::new().unwrap().block_on(f);
+		}
 	}
 
 	#[test_log::test(tokio::test)]
