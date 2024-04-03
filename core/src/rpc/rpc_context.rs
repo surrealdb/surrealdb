@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
+use uuid::Uuid;
+
 use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{self, statements::RelateStatement, Array, Function, Model, Statement, Strand, Value},
+	sql::{Array, Function, Model, Statement, Strand, Value},
 };
-use uuid::Uuid;
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
 
