@@ -62,9 +62,10 @@ async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), 
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<(), Error> {
 	let dbs = new_ds().await?;
-	let query = sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Function(
-		Box::new(sql::Function::Normal("this is an invalid function name".to_string(), Vec::new())),
-	))]));
+	let mut query = sql::Query::default();
+	query.0 .0 = vec![sql::Statement::Value(sql::Value::Function(Box::new(
+		sql::Function::Normal("this is an invalid function name".to_string(), Vec::new()),
+	)))];
 	let session = Session::owner().with_ns("test").with_db("test");
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
@@ -3397,7 +3398,6 @@ async fn function_string_ends_with() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::stripHtml($html: string) {
@@ -3423,7 +3423,6 @@ async fn function_search_analyzer() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::unsupportedFunction() {
@@ -3456,7 +3455,6 @@ async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::unsupportedReturnedType($html: string) {
@@ -3489,7 +3487,6 @@ async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 	let sql = r#"
         DEFINE ANALYZER htmlAnalyzer FUNCTION fn::doesNotExist TOKENIZERS blank,class;
@@ -5702,6 +5699,42 @@ async fn function_type_thing() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_type_range() -> Result<(), Error> {
+	let sql = r#"
+		RETURN type::range('person');
+		RETURN type::range('person',1);
+		RETURN type::range('person',null,10);
+		RETURN type::range('person',1,10);
+		RETURN type::range('person',1,10, { begin: "excluded", end: "included"});
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:..");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:1..");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:..10");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:1..10");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:1>..=10");
+	assert_eq!(tmp, val);
 	Ok(())
 }
 

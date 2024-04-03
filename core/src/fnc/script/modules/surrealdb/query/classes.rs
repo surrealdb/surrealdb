@@ -10,6 +10,7 @@ use js::{
 
 #[js::class]
 #[derive(Trace, Clone)]
+#[non_exhaustive]
 pub struct Query {
 	#[qjs(skip_trace)]
 	pub(crate) query: Subquery,
@@ -18,6 +19,7 @@ pub struct Query {
 }
 
 #[derive(Default, Clone)]
+#[non_exhaustive]
 pub struct QueryVariables(pub BTreeMap<String, SurValue>);
 
 impl QueryVariables {

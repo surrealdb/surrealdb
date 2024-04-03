@@ -110,10 +110,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 
-// #[cfg(all(not(surrealdb_unstable), feature = "parser2"))]
-// compile_error!(
-// 	"`parser2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-// );
+#[cfg(all(not(surrealdb_unstable), feature = "parser2"))]
+compile_error!(
+	"`parser2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
+);
 
 #[cfg(all(not(surrealdb_unstable), feature = "ml2"))]
 compile_error!(
@@ -123,10 +123,11 @@ compile_error!(
 #[cfg(all(not(surrealdb_unstable), feature = "jwks"))]
 compile_error!("`jwks` depends on a currently unstable feature, `sql2`. You need to enable the `surrealdb_unstable` flag to use it.");
 
-// #[cfg(all(not(surrealdb_unstable), feature = "sql2"))]
-// compile_error!(
-// 	"`sql2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-// );
+#[cfg(all(not(surrealdb_unstable), feature = "sql2"))]
+compile_error!(
+	"`sql2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
+);
+
 #[cfg(all(not(surrealdb_unstable), feature = "kv-surrealkv"))]
 compile_error!(
 	"`kv-surrealkv` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
@@ -156,13 +157,8 @@ pub use api::Response;
 pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
-
-#[cfg(not(feature = "sql2"))]
 #[doc(inline)]
-pub use surrealdb_core1::*;
-#[cfg(feature = "sql2")]
-#[doc(inline)]
-pub use surrealdb_core2::*;
+pub use surrealdb_core::*;
 
 use uuid::Uuid;
 
@@ -198,6 +194,7 @@ impl From<dbs::Action> for Action {
 			dbs::Action::Create => Self::Create,
 			dbs::Action::Update => Self::Update,
 			dbs::Action::Delete => Self::Delete,
+			_ => unreachable!(),
 		}
 	}
 }

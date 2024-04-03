@@ -1,7 +1,6 @@
 mod error;
 pub mod person;
 
-use rocket::serde::{Deserialize, Serialize};
 use rocket::{routes, Build};
 use std::env;
 use surrealdb::engine::any;
@@ -9,12 +8,6 @@ use surrealdb::engine::any::Any;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::Config;
 use surrealdb::Surreal;
-
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "rocket::serde")]
-pub struct Person {
-	name: String,
-}
 
 pub type Db = Surreal<Any>;
 
@@ -36,7 +29,14 @@ pub fn router(db_conn: Surreal<Any>) -> rocket::Rocket<Build> {
 	rocket::build()
 		.mount(
 			"/",
-			routes![person::create, person::read, person::update, person::delete, person::list],
+			routes![
+				person::create,
+				person::read,
+				person::update,
+				person::delete,
+				person::list,
+				person::delete_all
+			],
 		)
 		.manage(db_conn)
 }

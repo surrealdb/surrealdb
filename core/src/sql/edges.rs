@@ -11,6 +11,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 #[serde(rename = "$surrealdb::private::sql::Edges")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Edges {
 	pub dir: Dir,
 	pub from: Thing,

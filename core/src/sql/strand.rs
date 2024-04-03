@@ -13,6 +13,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 #[serde(rename = "$surrealdb::private::sql::Strand")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Strand {

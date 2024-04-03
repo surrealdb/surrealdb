@@ -1,7 +1,7 @@
 // RUST_LOG=warn cargo make ci-ml-integration
 mod common;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 mod ml_integration {
 
 	use super::*;
