@@ -208,7 +208,6 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 			Status::Err => {
 				map.insert(index, (stats, Err(Error::Query(value.as_raw_string()).into())));
 			}
-			#[cfg(feature = "sql2")]
 			_ => unreachable!(),
 		}
 	}

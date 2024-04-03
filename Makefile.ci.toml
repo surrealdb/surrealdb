@@ -125,7 +125,7 @@ args = ["test", "--locked", "--no-default-features", "--features", "${_TEST_FEAT
 
 [tasks.ci-api-integration-http]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "http", _TEST_FEATURES = "protocol-http,sql2", RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { _TEST_API_ENGINE = "http", _TEST_FEATURES = "protocol-http", RUSTFLAGS = "--cfg surrealdb_unstable" }
 run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-ws]
@@ -135,7 +135,7 @@ run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-any]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "any", _TEST_FEATURES = "protocol-http,sql2", RUSTFLAGS = "--cfg surrealdb_unstable" }
+env = { _TEST_API_ENGINE = "any", _TEST_FEATURES = "protocol-http", RUSTFLAGS = "--cfg surrealdb_unstable" }
 run_task = "ci-api-integration"
 
 #
