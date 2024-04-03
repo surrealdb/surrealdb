@@ -12,17 +12,22 @@ use surrealdb::sql::Thing;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 
-const TAG_STRING_DATETIME: u64 = 0;
+// Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+const TAG_SPEC_DATETIME: u64 = 0;
+const TAG_SPEC_UUID: u64 = 37;
+
+// Custom tags
 const TAG_NONE: u64 = 6;
-const TAG_STRING_UUID: u64 = 7;
-const TAG_STRING_DECIMAL: u64 = 8;
-// const TAG_BINARY_DECIMAL: u64 = 9;
-const TAG_STRING_DURATION: u64 = 10;
-const TAG_RECORDID: u64 = 11;
-const TAG_TABLE: u64 = 12;
-const TAG_CUSTOM_DATETIME: u64 = 13;
+const TAG_TABLE: u64 = 7;
+const TAG_RECORDID: u64 = 8;
+const TAG_STRING_UUID: u64 = 9;
+const TAG_STRING_DECIMAL: u64 = 10;
+// const TAG_BINARY_DECIMAL: u64 = 11;
+const TAG_CUSTOM_DATETIME: u64 = 12;
+const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
-const TAG_BINARY_UUID: u64 = 37;
+
+// Custom Geometries
 const TAG_GEOMETRY_POINT: u64 = 88;
 const TAG_GEOMETRY_LINE: u64 = 89;
 const TAG_GEOMETRY_POLYGON: u64 = 90;
@@ -58,7 +63,7 @@ impl TryFrom<Cbor> for Value {
 			Data::Tag(t, v) => {
 				match t {
 					// A literal datetime
-					TAG_STRING_DATETIME => match *v {
+					TAG_SPEC_DATETIME => match *v {
 						Data::Text(v) => match Datetime::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Datetime value"),
@@ -104,7 +109,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A byte string uuid
-					TAG_BINARY_UUID => match *v {
+					TAG_SPEC_UUID => match *v {
 						Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
 							Ok(v) => Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(v)))),
 							Err(_) => Err("Expected a CBOR byte array with 16 elements"),
@@ -352,7 +357,7 @@ impl TryFrom<Value> for Cbor {
 				)))
 			}
 			Value::Uuid(v) => {
-				Ok(Cbor(Data::Tag(TAG_BINARY_UUID, Box::new(Data::Bytes(v.into_bytes().into())))))
+				Ok(Cbor(Data::Tag(TAG_SPEC_UUID, Box::new(Data::Bytes(v.into_bytes().into())))))
 			}
 			Value::Array(v) => Ok(Cbor(Data::Array(
 				v.into_iter()
