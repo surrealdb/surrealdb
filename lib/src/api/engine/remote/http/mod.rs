@@ -34,8 +34,6 @@ use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::from_value;
 use crate::sql::serde::deserialize;
-use crate::sql::Array;
-use crate::sql::Strand;
 use crate::sql::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
@@ -210,6 +208,8 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 			Status::Err => {
 				map.insert(index, (stats, Err(Error::Query(value.as_raw_string()).into())));
 			}
+			#[cfg(feature = "sql2")]
+			_ => unreachable!(),
 		}
 	}
 
@@ -224,8 +224,8 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 		let value = result?;
 		match one {
 			true => match value {
-				Value::Array(Array(mut vec)) => {
-					if let [value] = &mut vec[..] {
+				Value::Array(mut vec) => {
+					if let [value] = &mut vec.0[..] {
 						return Ok(mem::take(value));
 					}
 				}
@@ -237,7 +237,7 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 	}
 	match one {
 		true => Ok(Value::None),
-		false => Ok(Value::Array(Array(vec![]))),
+		false => Ok(Value::Array(Default::default())),
 	}
 }
 
@@ -360,11 +360,11 @@ async fn router(
 			let path = base_url.join(SQL_PATH)?;
 			let mut request = client.post(path).headers(headers.clone());
 			let (ns, db) = match &mut params[..] {
-				[Value::Strand(Strand(ns)), Value::Strand(Strand(db))] => {
-					(Some(mem::take(ns)), Some(mem::take(db)))
+				[Value::Strand(ns), Value::Strand(db)] => {
+					(Some(mem::take(&mut ns.0)), Some(mem::take(&mut db.0)))
 				}
-				[Value::Strand(Strand(ns)), Value::None] => (Some(mem::take(ns)), None),
-				[Value::None, Value::Strand(Strand(db))] => (None, Some(mem::take(db))),
+				[Value::Strand(ns), Value::None] => (Some(mem::take(&mut ns.0)), None),
+				[Value::None, Value::Strand(db)] => (None, Some(mem::take(&mut db.0))),
 				_ => unreachable!(),
 			};
 			let ns = match ns {
@@ -444,7 +444,7 @@ async fn router(
 		Method::Authenticate => {
 			let path = base_url.join(SQL_PATH)?;
 			let token = match &mut params[..1] {
-				[Value::Strand(Strand(token))] => mem::take(token),
+				[Value::Strand(token)] => mem::take(&mut token.0),
 				_ => unreachable!(),
 			};
 			let request =
@@ -580,7 +580,7 @@ async fn router(
 		Method::Set => {
 			let path = base_url.join(SQL_PATH)?;
 			let (key, value) = match &mut params[..2] {
-				[Value::Strand(Strand(key)), value] => (mem::take(key), value.to_string()),
+				[Value::Strand(key), value] => (mem::take(&mut key.0), value.to_string()),
 				_ => unreachable!(),
 			};
 			let request = client
@@ -594,8 +594,8 @@ async fn router(
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Unset => {
-			if let [Value::Strand(Strand(key))] = &params[..1] {
-				vars.swap_remove(key);
+			if let [Value::Strand(key)] = &params[..1] {
+				vars.swap_remove(&key.0);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}

@@ -120,14 +120,6 @@ compile_error!(
 	"`ml2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
 );
 
-#[cfg(all(not(surrealdb_unstable), feature = "jwks"))]
-compile_error!("`jwks` depends on a currently unstable feature, `sql2`. You need to enable the `surrealdb_unstable` flag to use it.");
-
-#[cfg(all(not(surrealdb_unstable), feature = "sql2"))]
-compile_error!(
-	"`sql2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-);
-
 #[cfg(all(not(surrealdb_unstable), feature = "kv-surrealkv"))]
 compile_error!(
 	"`kv-surrealkv` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
@@ -199,6 +191,8 @@ impl From<dbs::Action> for Action {
 			dbs::Action::Create => Self::Create,
 			dbs::Action::Update => Self::Update,
 			dbs::Action::Delete => Self::Delete,
+			#[cfg(feature = "sql2")]
+			_ => unreachable!(),
 		}
 	}
 }

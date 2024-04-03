@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter, Result};
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum With {
 	NoIndex,
 	Index(Vec<String>),

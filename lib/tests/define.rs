@@ -1473,7 +1473,9 @@ where
 	let part: Vec<Part> = path.iter().map(|p| Part::from(*p)).collect();
 	let res = val.walk(&part);
 	for (i, v) in res {
-		assert_eq!(Idiom(part.clone()), i);
+		let mut idiom = Idiom::default();
+		idiom.0 = part.clone();
+		assert_eq!(idiom, i);
 		check(v);
 	}
 }

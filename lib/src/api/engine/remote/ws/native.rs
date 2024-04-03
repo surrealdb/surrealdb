@@ -21,8 +21,6 @@ use crate::api::Surreal;
 use crate::engine::remote::ws::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::sql::Array;
-use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
 use futures::stream::SplitSink;
@@ -245,13 +243,13 @@ pub(crate) fn router(
 							};
 							match method {
 								Method::Set => {
-									if let [Value::Strand(Strand(key)), value] = &params[..2] {
-										var_stash.insert(id, (key.clone(), value.clone()));
+									if let [Value::Strand(key), value] = &params[..2] {
+										var_stash.insert(id, (key.0.clone(), value.clone()));
 									}
 								}
 								Method::Unset => {
-									if let [Value::Strand(Strand(key))] = &params[..1] {
-										vars.swap_remove(key);
+									if let [Value::Strand(key)] = &params[..1] {
+										vars.swap_remove(&key.0);
 									}
 								}
 								Method::Live => {
@@ -361,11 +359,11 @@ pub(crate) fn router(
 																{
 																	// For insert, we need to flatten single responses in an array
 																	if let Ok(Data::Other(
-																		Value::Array(Array(value)),
+																		Value::Array(value),
 																	)) = &mut response
 																	{
 																		if let [value] =
-																			&mut value[..]
+																			&mut value.0[..]
 																		{
 																			response =
 																				Ok(Data::Other(
