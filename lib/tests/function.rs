@@ -3398,7 +3398,6 @@ async fn function_string_ends_with() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::stripHtml($html: string) {
@@ -3424,7 +3423,6 @@ async fn function_search_analyzer() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::unsupportedFunction() {
@@ -3457,7 +3455,6 @@ async fn function_search_analyzer_invalid_arguments() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 	let sql = r#"
         DEFINE FUNCTION fn::unsupportedReturnedType($html: string) {
@@ -3490,7 +3487,6 @@ async fn function_search_analyzer_invalid_return_type() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-#[cfg(feature = "sql2")]
 async fn function_search_analyzer_invalid_function_name() -> Result<(), Error> {
 	let sql = r#"
         DEFINE ANALYZER htmlAnalyzer FUNCTION fn::doesNotExist TOKENIZERS blank,class;

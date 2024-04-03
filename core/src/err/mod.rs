@@ -9,7 +9,7 @@ use crate::sql::value::Value;
 use crate::sql::TableType;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::Error as VersionstampError;
-use base64_lib::DecodeError as Base64Error;
+use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 #[cfg(any(
 	feature = "kv-surrealkv",
