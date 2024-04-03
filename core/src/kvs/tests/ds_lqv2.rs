@@ -56,13 +56,13 @@ mod check_send {
 	use crate::ctx::Context;
 	use crate::dbs::{Notification, Options, Session, Statement};
 	use crate::fflags::FFLAGS;
-	use crate::iam::Auth;
+	use crate::iam::{Auth, Role};
 	use crate::kvs::droppy_boy::DroppyBoy;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
 	use crate::sql;
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
-	use crate::sql::statements::LiveStatement;
-	use crate::sql::{parse, Object, Strand, Thing, Value};
+	use crate::sql::statements::{CreateStatement, LiveStatement};
+	use crate::sql::{parse, Fields, Object, Strand, Table, Thing, Value, Values};
 	use channel::Sender;
 	use futures::executor::block_on;
 	use once_cell::sync::Lazy;
@@ -77,7 +77,6 @@ mod check_send {
 		ns: String,
 		db: String,
 		tb: String,
-		sc: String,
 		rid: Value,
 	}
 
@@ -86,18 +85,16 @@ mod check_send {
 		let ns = "the_namespace";
 		let db = "the_database";
 		let tb = "the_table";
-		let sc = "the_scope";
-		let tk = "the_token";
 
-		// First we define a token
+		// First we define levels of permissions and schemas and required CF
 		let vars = Some(BTreeMap::new());
 		ds.execute(
 			&format!(
 				"
-			USE NAMESPACE {ns};
-			USE DATABASE {db};
-			DEFINE SCOPE {sc};
-			DEFINE TABLE {tb}"
+				USE NAMESPACE {ns};
+				USE DATABASE {db};
+				DEFINE TABLE {tb} CHANGEFEED 1m INCLUDE ORIGINAL;
+				"
 			),
 			&Session::owner(),
 			vars,
@@ -112,16 +109,13 @@ mod check_send {
 			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
 		let drop_tx = tx.clone();
 		let _foo = DroppyBoy::new(async move {
-			drop_tx.lock().await.cancel().await.unwrap();
+			drop_tx.lock().await.commit().await.unwrap();
 		});
-		let mut tx = tx.lock().await;
-		let de = tx.get_sc(&ns, &db, &sc).await.unwrap();
 		TestSuite {
 			ds,
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),
-			sc: sc.to_string(),
 			rid: Value::Thing(Thing::from(("user", "test"))),
 		}
 	}
@@ -131,10 +125,8 @@ mod check_send {
 		if !FFLAGS.change_feed_live_queries.enabled_test {
 			return;
 		}
-		let thing = Thing::from(("table", "id"));
-		let value = Value::Strand(Strand::from("value"));
-		let tb_mutation = TableMutation::Set(thing.clone(), value);
-		let doc = ds::construct_document(&tb_mutation).unwrap();
+
+		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
 		let (ctx, opt, stm) = ctx_opt_stm(&sender);
 		let tx = SETUP
@@ -143,11 +135,38 @@ mod check_send {
 			.await
 			.unwrap()
 			.enclose();
+		let drop_tx = tx.clone();
+		let _a = DroppyBoy::new(async move {
+			drop_tx.lock().await.commit().await.unwrap();
+		});
 
-		doc.check_lqs_and_send_notifications(&opt, &Statement::Live(&stm), &tx, &[&stm], &sender)
-			.await
-			.unwrap();
+		// Construct document we are validating
+		let thing = Thing::from(("table", "id"));
+		let value = Value::Strand(Strand::from("value"));
+		let tb_mutation = TableMutation::Set(thing.clone(), value);
+		let doc = ds::construct_document(&tb_mutation).unwrap();
 
+		// Perform "live query" on the constructed doc that we are checking
+		let live_statement = LiveStatement::new(Fields::all());
+		let executed_statement = CreateStatement {
+			only: false,
+			what: Values(vec![Value::Table(Table::from(SETUP.tb.clone()))]),
+			data: None,
+			output: None,
+			timeout: None,
+			parallel: false,
+		};
+		doc.check_lqs_and_send_notifications(
+			&opt,
+			&Statement::Create(&executed_statement),
+			&tx,
+			&[&live_statement],
+			&sender,
+		)
+		.await
+		.unwrap();
+
+		// Asserts
 		let _notification = receiver.try_recv().expect("There should be a notification");
 		assert!(receiver.try_recv().is_err());
 	}
@@ -170,7 +189,7 @@ mod check_send {
 		session.insert(OBJ_PATH_TOKEN.to_string(), Value::Strand(Strand::from("token")));
 		let session = Value::Object(Object::from(session));
 		live_stm.session = Some(session);
-		live_stm.auth = Some(Auth::for_sc(SETUP.rid.to_string(), "namespace", "database", "scope"));
+		live_stm.auth = Some(Auth::for_db(Role::Owner, "namespace", "database"));
 		(ctx, opt, live_stm)
 	}
 }
