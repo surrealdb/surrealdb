@@ -135,7 +135,6 @@ impl DbResponse {
 								(stats, Err(Error::Query(response.result.as_raw_string()).into())),
 							);
 						}
-						#[cfg(feature = "sql2")]
 						_ => unreachable!(),
 					}
 				}
