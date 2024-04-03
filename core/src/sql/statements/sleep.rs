@@ -11,6 +11,7 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct SleepStatement {
 	pub(crate) duration: Duration,
 }

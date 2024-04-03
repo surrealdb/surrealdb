@@ -21,6 +21,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 #[serde(rename = "$surrealdb::private::sql::Block")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Block(pub Vec<Entry>);
 
 impl Deref for Block {
@@ -168,6 +169,7 @@ impl Display for Block {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Entry {
 	Value(Value),
 	Set(SetStatement),

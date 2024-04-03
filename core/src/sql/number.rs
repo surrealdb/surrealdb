@@ -17,6 +17,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 #[serde(rename = "$surrealdb::private::sql::Number")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Number {
 	Int(i64),
 	Float(f64),
@@ -719,6 +720,7 @@ impl<'a> Product<&'a Self> for Number {
 	}
 }
 
+#[non_exhaustive]
 pub struct Sorted<T>(pub T);
 
 pub trait Sort {

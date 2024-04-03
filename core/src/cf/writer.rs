@@ -16,15 +16,18 @@ use std::collections::HashMap;
 // value = serialized table mutations
 type PreparedWrite = (Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val);
 
+#[non_exhaustive]
 pub struct Writer {
 	buf: Buffer,
 }
 
+#[non_exhaustive]
 pub struct Buffer {
 	pub b: HashMap<ChangeKey, TableMutations>,
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
+#[non_exhaustive]
 pub struct ChangeKey {
 	pub ns: String,
 	pub db: String,
@@ -79,7 +82,13 @@ impl Writer {
 				match store_difference {
 					true => {
 						let patches = current.diff(&previous, Idiom(Vec::new()));
-						TableMutation::SetWithDiff(id, current.into_owned(), patches)
+						let new_record = !previous.is_some();
+						trace!("The record is new_record={new_record} because previous is {previous:?}");
+						if previous.is_none() {
+							TableMutation::Set(id, current.into_owned())
+						} else {
+							TableMutation::SetWithDiff(id, current.into_owned(), patches)
+						}
 					}
 					false => TableMutation::Set(id, current.into_owned()),
 				},

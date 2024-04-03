@@ -1,3 +1,4 @@
+use crate::fflags::FFLAGS;
 use crate::sql::array::Array;
 use crate::sql::object::Object;
 use crate::sql::statements::DefineTableStatement;
@@ -14,6 +15,7 @@ use std::fmt::{self, Display, Formatter};
 // Mutation is a single mutation to a table.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
 	// we do include it in the first field for convenience.
@@ -21,8 +23,9 @@ pub enum TableMutation {
 	Del(Thing),
 	Def(DefineTableStatement),
 	#[revision(start = 2)]
-	/// Includes the ID, current value, and changes that were applied to achieve this value
-	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}])
+	/// Includes the ID, current value (after change), changes that were applied to achieve this
+	/// value, and if this is a new record (i.e. create = true vs update = false)
+	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
 	/// Means that we have already applied the add "/note" operation to achieve the recorded result
 	SetWithDiff(Thing, Value, Vec<Operation>),
 }
@@ -41,6 +44,7 @@ impl From<DefineTableStatement> for Value {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
 
 impl TableMutations {
@@ -51,6 +55,7 @@ impl TableMutations {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct DatabaseMutation(pub Vec<TableMutations>);
 
 impl DatabaseMutation {
@@ -68,6 +73,7 @@ impl Default for DatabaseMutation {
 // Change is a set of mutations made to a table at the specific timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct ChangeSet(pub [u8; 10], pub DatabaseMutation);
 
 impl TableMutation {
@@ -77,7 +83,11 @@ impl TableMutation {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
-				h.insert("update".to_string(), v);
+				if FFLAGS.change_feed_live_queries.enabled() {
+					h.insert("create".to_string(), v);
+				} else {
+					h.insert("update".to_string(), v);
+				}
 				h
 			}
 			TableMutation::SetWithDiff(_thing, current, operations) => {
@@ -174,6 +184,7 @@ impl Display for ChangeSet {
 // WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[non_exhaustive]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 
 impl WriteMutationSet {

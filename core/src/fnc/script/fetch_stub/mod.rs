@@ -33,7 +33,7 @@ macro_rules! impl_stub_class {
 			mod $module{
 				use super::*;
 
-				pub struct $name;
+				#[non_exhaustive] pub struct $name;
 
 				impl<'js> Trace<'js> for $name{
 					fn trace<'a>(&self, _tracer: Tracer<'a, 'js>){}

@@ -161,14 +161,12 @@ pub(crate) fn router(
 		let mut session = Session::default().with_rt(true);
 
 		let opt = {
-			let tick_interval = address
+			let mut engine_options = EngineOptions::default();
+			engine_options.tick_interval = address
 				.config
 				.tick_interval
 				.unwrap_or(crate::api::engine::local::DEFAULT_TICK_INTERVAL);
-			EngineOptions {
-				tick_interval,
-				..Default::default()
-			}
+			engine_options
 		};
 		let (tasks, task_chans) = start_tasks(&opt, kvs.clone());
 

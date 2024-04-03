@@ -147,11 +147,8 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		let opt = EngineOptions {
-			tick_interval,
-			..Default::default()
-		};
+		let mut opt = EngineOptions::default();
+		opt.tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
 		let (_tasks, task_chans) = start_tasks(&opt, kvs.clone());
 
 		let mut notifications = kvs.notifications();

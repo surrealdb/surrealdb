@@ -62,9 +62,10 @@ async fn check_test_is_error(sql: &str, expected_errors: &[&str]) -> Result<(), 
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<(), Error> {
 	let dbs = new_ds().await?;
-	let query = sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Function(
-		Box::new(sql::Function::Normal("this is an invalid function name".to_string(), Vec::new())),
-	))]));
+	let mut query = sql::Query::default();
+	query.0 .0 = vec![sql::Statement::Value(sql::Value::Function(Box::new(
+		sql::Function::Normal("this is an invalid function name".to_string(), Vec::new()),
+	)))];
 	let session = Session::owner().with_ns("test").with_db("test");
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);

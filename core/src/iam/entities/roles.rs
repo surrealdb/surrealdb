@@ -9,6 +9,7 @@ use std::str::FromStr;
 #[derive(Hash, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Role {
 	#[default]
 	Viewer,
