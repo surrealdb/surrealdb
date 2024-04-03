@@ -107,6 +107,33 @@ jobs:
           echo "## :warning: Dependency check failed" >> $GITHUB_STEP_SUMMARY
           echo "See instructions in the [supply chain security process](https://github.com/surrealdb/surrealdb/blob/main/supply-chain/README.md#Process)." >> $GITHUB_STEP_SUMMARY
 
+  check-fuzzing:
+    name: Check fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check fuzzers
+        run: cargo build --manifest-path lib/fuzz/Cargo.toml
+
+      - name: Check OSS-Fuzz
+        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+        with:
+          oss-fuzz-project-name: surrealdb
+          language: rust
+
   check-wasm:
     name: Check Wasm
     runs-on: ubuntu-latest
