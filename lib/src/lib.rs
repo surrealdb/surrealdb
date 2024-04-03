@@ -110,27 +110,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(test, deny(warnings))]
 
+#[cfg(all(target_arch = "wasm32", feature = "ml"))]
+compile_error!("The `ml` feature is not supported on the `wasm32` architecture.");
+
 #[cfg(all(not(surrealdb_unstable), feature = "parser2"))]
 compile_error!(
 	"`parser2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-);
-
-#[cfg(all(not(surrealdb_unstable), feature = "ml2"))]
-compile_error!(
-	"`ml2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-);
-
-#[cfg(all(not(surrealdb_unstable), feature = "jwks"))]
-compile_error!("`jwks` depends on a currently unstable feature, `sql2`. You need to enable the `surrealdb_unstable` flag to use it.");
-
-#[cfg(all(not(surrealdb_unstable), feature = "sql2"))]
-compile_error!(
-	"`sql2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-);
-
-#[cfg(all(not(surrealdb_unstable), feature = "kv-surrealkv"))]
-compile_error!(
-	"`kv-surrealkv` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
 );
 
 #[macro_use]
