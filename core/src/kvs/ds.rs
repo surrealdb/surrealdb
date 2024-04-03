@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
+use reblessive::{tree::Stk, TreeStack};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
@@ -24,6 +25,7 @@ use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use super::tx::Transaction;
 use crate::cf;
 use crate::cf::{ChangeSet, TableMutation};
 use crate::ctx::Context;
@@ -53,8 +55,6 @@ use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
-
-use super::tx::Transaction;
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -989,8 +989,14 @@ impl Datastore {
 					.join("\n")
 			);
 			for change_set in change_sets {
-				self.process_change_set_for_notifications(tx.clone(), opt, change_set, &lq_pairs)
-					.await?;
+				self.process_change_set_for_notifications(
+					stk,
+					tx.clone(),
+					opt,
+					change_set,
+					&lq_pairs,
+				)
+				.await?;
 			}
 		}
 		trace!("Finished process lq successfully");
@@ -999,6 +1005,7 @@ impl Datastore {
 
 	async fn process_change_set_for_notifications(
 		&self,
+		stk: &mut Stk,
 		tx: Arc<Mutex<Transaction>>,
 		opt: &Options,
 		change_set: ChangeSet,
@@ -1038,6 +1045,7 @@ impl Datastore {
 							// for the current state we only forward
 							let (sender, receiver) = channel::bounded(notification_capacity);
 							doc.check_lqs_and_send_notifications(
+								stk,
 								opt,
 								&Statement::Live(&lq_value.stm),
 								&tx,

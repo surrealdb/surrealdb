@@ -18,7 +18,6 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use reblessive::{tree::Stk, TreeStack};
-use std::cmp::Ordering;
 use std::mem;
 use std::sync::Arc;
 
@@ -333,7 +332,7 @@ impl Iterator {
 			self.output_split(stk, ctx, opt, txn, stm).await?;
 			// Process any GROUP clause
 			if let Results::Groups(g) = &mut self.results {
-				self.results = Results::Memory(g.output(ctx, opt, txn, stm).await?);
+				self.results = Results::Memory(g.output(stk, ctx, opt, txn, stm).await?);
 			}
 
 			// Process any ORDER clause
@@ -457,7 +456,7 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					obj.fetch(ctx, opt, txn, fetch).await?;
+					obj.fetch(stk, ctx, opt, txn, fetch).await?;
 				}
 				self.results = values.into();
 			}
@@ -489,6 +488,7 @@ impl Iterator {
 	#[cfg(not(target_arch = "wasm32"))]
 	async fn iterate(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
