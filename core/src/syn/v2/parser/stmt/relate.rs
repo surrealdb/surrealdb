@@ -58,22 +58,6 @@ impl Parser<'_> {
 	pub async fn parse_relate_kind(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("$param") => self.next_token_value().map(Value::Param),
-			t!("RETURN")
-			| t!("SELECT")
-			| t!("CREATE")
-			| t!("UPDATE")
-			| t!("DELETE")
-			| t!("RELATE")
-			| t!("DEFINE")
-			| t!("REMOVE") => {
-				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
-			}
-			t!("IF") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_if_stmt(ctx))
-					.await
-					.map(|x| Value::Subquery(Box::new(Subquery::Ifelse(x))))
-			}
 			t!("(") => {
 				let span = self.pop_peek().span;
 				let res = self
@@ -82,7 +66,7 @@ impl Parser<'_> {
 					.map(|x| Value::Subquery(Box::new(x)))?;
 				Ok(res)
 			}
-			_ => self.parse_thing(ctx).await.map(Value::Thing),
+			_ => self.parse_thing_or_table(ctx).await,
 		}
 	}
 	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
