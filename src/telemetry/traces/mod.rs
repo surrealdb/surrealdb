@@ -12,7 +12,10 @@ const TRACING_TRACER_VAR: &str = "SURREAL_TRACING_TRACER";
 // Panics if an unsupported tracer is selected or if there's an error building the tracer provider
 pub(super) fn new<S>(filter: CustomEnvFilter) -> Option<Box<dyn Layer<S> + Send + Sync>>
 where
-	S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span> + Send + Sync,
+	S: tracing::Subscriber
+		+ for<'span> tracing_subscriber::registry::LookupSpan<'span>
+		+ Send
+		+ Sync,
 {
 	match std::env::var(TRACING_TRACER_VAR).unwrap_or_default().trim().to_ascii_lowercase().as_str()
 	{
@@ -20,12 +23,18 @@ where
 		"noop" | "" => None,
 		"otlp" => {
 			// Create the OTLP tracer provider
-			let tracer_provider = otlp::build_tracer_provider().expect("Failed to initialize OTLP tracer provider");
+			let tracer_provider =
+				otlp::build_tracer_provider().expect("Failed to initialize OTLP tracer provider");
 			// Set it as the global tracer provider
 			let _ = opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 			// Returns a tracing subscriber layer built with the selected tracer and filter.
 			// It will be used by the `tracing` crate to decide what spans to send to the global tracer provider
-			Some(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("surrealdb")).with_filter(filter.0).boxed())
+			Some(
+				tracing_opentelemetry::layer()
+					.with_tracer(tracer_provider.tracer("surrealdb"))
+					.with_filter(filter.0)
+					.boxed(),
+			)
 		}
 		tracer => {
 			panic!("unsupported tracer {}", tracer);

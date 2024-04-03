@@ -17,7 +17,6 @@ use opentelemetry::Context as TelemetryContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel::{self, Receiver, Sender};
-use tokio::sync::RwLock;
 use tracing::{Instrument, Span};
 
 use surrealdb::dbs::Session;
@@ -31,8 +30,6 @@ use surrealdb::sql::Value;
 use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::Instrument;
-use tracing::Span;
 use uuid::Uuid;
 
 pub struct Connection {

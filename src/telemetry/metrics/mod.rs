@@ -2,10 +2,10 @@ pub mod http;
 pub mod ws;
 
 use opentelemetry::global;
-use opentelemetry::{metrics::MetricsError, runtime};
+use opentelemetry::metrics::{MeterProvider, MetricsError};
 use opentelemetry_otlp::MetricsExporter;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
-use opentelemetry_sdk::metrics::{Aggregation, Instrument, MeterProvider, PeriodicReader, Stream};
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, PeriodicReader, Stream};
 
 pub use self::http::tower_layer::HttpMetricsLayer;
 
@@ -43,7 +43,7 @@ fn build_meter_provider() -> Result<MeterProvider, MetricsError> {
 		Box::new(DefaultAggregationSelector::new()),
 	)?;
 
-	let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
+	let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio).build();
 
 	let histo_duration_view = {
 		let criteria = Instrument::new().name("*.duration");

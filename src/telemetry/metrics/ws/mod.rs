@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use once_cell::sync::Lazy;
 use opentelemetry::metrics::Meter;
-use opentelemetry::metrics::{Histogram, MetricsError, Unit, UpDownCounter};
+use opentelemetry::metrics::{Histogram, MetricsError, ObservableUpDownCounter, Unit};
 use opentelemetry::{global, Context, KeyValue};
 
 static METER: Lazy<Meter> = Lazy::new(|| global::meter("surrealdb.rpc"));
@@ -126,7 +126,9 @@ pub fn record_rpc(res_size: usize, is_error: bool) {
 	let mut duration = 0;
 	let mut req_size = 0;
 
-	if let Some(cx) = Context::current().get::<RequestContext>() {
+	let cx = Context::current();
+
+	if let Some(cx) = cx.get::<RequestContext>() {
 		attrs.extend_from_slice(&[
 			KeyValue::new("rpc.method", cx.method.clone()),
 			KeyValue::new("rpc.error", is_error),
@@ -141,7 +143,9 @@ pub fn record_rpc(res_size: usize, is_error: bool) {
 		]);
 	} else {
 		// If a bug causes the RequestContent to be empty, we still want to record the metrics to avoid a silent failure.
-		warn!("record_rpc: no request context found, resulting metrics will be invalid");
+		warn!(
+			"record_rpc: no request context found, this is a bug. Resulting metrics will have invalid attributes"
+		);
 		attrs.extend_from_slice(&[
 			KeyValue::new("rpc.method", "unknown"),
 			KeyValue::new("rpc.error", is_error),
