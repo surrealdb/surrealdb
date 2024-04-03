@@ -398,6 +398,7 @@ where
 	}
 }
 
+#[non_exhaustive]
 pub(super) struct KnnResultBuilder {
 	knn: u64,
 	docs: RoaringTreemap,

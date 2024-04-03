@@ -6,6 +6,7 @@ mod nom_error;
 pub use nom_error::ParseError;
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct RenderedError {
 	pub text: String,
 	pub snippets: Vec<Snippet>,
@@ -23,6 +24,7 @@ impl fmt::Display for RenderedError {
 
 /// Whether the snippet was truncated.
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[non_exhaustive]
 pub enum Truncation {
 	/// The snippet wasn't truncated
 	None,
@@ -36,6 +38,7 @@ pub enum Truncation {
 
 /// A piece of the source code with a location and an optional explanation.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Snippet {
 	/// The part of the original source code,
 	source: String,

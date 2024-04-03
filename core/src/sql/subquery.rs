@@ -18,6 +18,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),

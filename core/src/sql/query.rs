@@ -15,6 +15,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 #[revisioned(revision = 1)]
 #[serde(rename = "$surrealdb::private::sql::Query")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Query(pub Statements);
 
 impl From<DefineStatement> for Query {

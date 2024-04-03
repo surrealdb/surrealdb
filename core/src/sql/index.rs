@@ -14,6 +14,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -32,6 +33,7 @@ pub enum Index {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -53,6 +55,7 @@ pub struct SearchParams {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct MTreeParams {
 	pub dimension: u16,
 	#[revision(start = 1, end = 2, convert_fn = "convert_old_distance")]
@@ -88,6 +91,7 @@ impl MTreeParams {
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Distance1 {
 	#[default]
 	Euclidean,
@@ -116,6 +120,7 @@ pub struct HnswParams {
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Distance {
 	Chebyshev,
 	Cosine,
@@ -161,6 +166,7 @@ impl Display for Distance {
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum VectorType {
 	#[default]
 	F64,

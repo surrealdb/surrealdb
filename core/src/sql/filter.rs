@@ -7,6 +7,7 @@ use std::fmt::Display;
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Filter {
 	Ascii,
 	EdgeNgram(u16, u16),
