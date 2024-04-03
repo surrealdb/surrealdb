@@ -328,6 +328,7 @@ impl TryFrom<Value> for Cbor {
 				Number::Decimal(v) => {
 					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
 				}
+				#[allow(unreachable_patterns)]
 				_ => unreachable!(),
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
@@ -391,6 +392,7 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
+						#[allow(unreachable_patterns)]
 						_ => unreachable!(),
 					},
 				])),
@@ -445,6 +447,7 @@ fn encode_geometry(v: Geometry) -> Data {
 
 			Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data)))
 		}
+		#[allow(unreachable_patterns)]
 		_ => unreachable!(),
 	}
 }
