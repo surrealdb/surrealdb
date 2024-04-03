@@ -57,6 +57,7 @@ mod check_send {
 	use crate::dbs::{Notification, Options, Session, Statement};
 	use crate::fflags::FFLAGS;
 	use crate::iam::Auth;
+	use crate::kvs::droppy_boy::DroppyBoy;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
 	use crate::sql;
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
@@ -70,6 +71,15 @@ mod check_send {
 	use std::sync::Arc;
 
 	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(init_test_suite())));
+
+	struct TestSuite {
+		ds: Datastore,
+		ns: String,
+		db: String,
+		tb: String,
+		sc: String,
+		rid: Value,
+	}
 
 	async fn init_test_suite() -> TestSuite {
 		let ds = Datastore::new("memory").await.unwrap();
@@ -101,8 +111,8 @@ mod check_send {
 		let tx =
 			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
 		let drop_tx = tx.clone();
-		let _ = DroppyBoy::new(async move {
-			drop_tx.lock().await.commit().await.unwrap();
+		let _foo = DroppyBoy::new(async move {
+			drop_tx.lock().await.cancel().await.unwrap();
 		});
 		let mut tx = tx.lock().await;
 		let de = tx.get_sc(&ns, &db, &sc).await.unwrap();
@@ -113,45 +123,6 @@ mod check_send {
 			tb: tb.to_string(),
 			sc: sc.to_string(),
 			rid: Value::Thing(Thing::from(("user", "test"))),
-		}
-	}
-
-	struct TestSuite {
-		ds: Datastore,
-		ns: String,
-		db: String,
-		tb: String,
-		sc: String,
-		rid: Value,
-	}
-
-	struct DroppyBoy<F>
-	where
-		F: Future,
-	{
-		f: Option<F>,
-	}
-
-	impl<F: Future> DroppyBoy<F> {
-		pub fn new(future: F) -> Self {
-			Self {
-				f: Some(future),
-			}
-		}
-	}
-
-	impl<F: Future> Drop for DroppyBoy<F>
-	where
-		F: Future,
-	{
-		fn drop(&mut self) {
-			let dummy_future: Option<F> = None;
-			let f = std::mem::replace(&mut self.f, dummy_future);
-			let f: F = match f {
-				Some(f) => f,
-				None => panic!("DroppyBoy future has an existing clone"),
-			};
-			tokio::runtime::Runtime::new().unwrap().block_on(f);
 		}
 	}
 
