@@ -20,12 +20,18 @@ http = ["surrealdb/http"]
 http-compression = []
 ml = ["surrealdb/ml"]
 jwks = ["surrealdb/jwks"]
-sql2 = [] # Deprecated since v1.4
+sql2 = []                                                         # Deprecated since v1.4
 parser2 = ["surrealdb/parser2"]
 performance-profiler = ["dep:pprof"]
 
 [workspace]
-members = ["core", "lib", "lib/examples/actix", "lib/examples/axum", "lib/examples/rocket"]
+members = [
+	"core",
+	"lib",
+	"lib/examples/actix",
+	"lib/examples/axum",
+	"lib/examples/rocket",
+]
 
 [profile.release]
 lto = true
@@ -39,9 +45,10 @@ strip = false
 
 [dependencies]
 argon2 = "0.5.2"
-axum = { version = "0.6.20", features = ["tracing", "ws", "headers"] }
-axum-extra = { version = "0.7.7", features = ["query", "typed-routing"] }
-axum-server = { version = "0.5.1", features = ["tls-rustls"] }
+axum = { version = "0.7.5", features = ["tracing", "ws"] }
+axum-client-ip = "0.5.1"
+axum-extra = { version = "0.9.3", features = ["query", "typed-routing", "typed-header"] }
+axum-server = { version = "0.6.0", features = ["tls-rustls"] }
 base64 = "0.21.5"
 bytes = "1.5.0"
 ciborium = "0.2.1"
@@ -60,8 +67,10 @@ http = "0.2.11"
 http-body = "0.4.5"
 hyper = "0.14.27"
 once_cell = "1.18.0"
-opentelemetry = { version = "0.19", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.12.0", features = ["metrics"] }
+opentelemetry = { version = "0.22.0" }
+opentelemetry-otlp = { version = "0.15.0", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.22.1", features = ["metrics", "rt-tokio"] }
+opentelemetry-http = "0.11.1"
 pin-project-lite = "0.2.13"
 pprof = { version = "0.13.0", features = [
 	"flamegraph",
@@ -90,7 +99,7 @@ thiserror = "1.0.50"
 tokio = { version = "1.34.0", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.10", features = ["io"] }
 tower = "0.4.13"
-tower-http = { version = "0.4.4", features = [
+tower-http = { version = "0.5.2", features = [
 	"trace",
 	"sensitive-headers",
 	"auth",
@@ -104,7 +113,7 @@ tower-http = { version = "0.4.4", features = [
 	"compression-full",
 ] }
 tracing = "0.1"
-tracing-opentelemetry = "0.19.0"
+tracing-opentelemetry = "0.23.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
@@ -123,10 +132,10 @@ jemallocator = "0.5.4"
 
 [dev-dependencies]
 assert_fs = "1.0.13"
-env_logger = "0.10.1"
-opentelemetry-proto = { version = "0.2.0", features = [
+env_logger = "0.11.3"
+opentelemetry-proto = { version = "0.5.0", features = [
 	"gen-tonic",
-	"traces",
+	"trace",
 	"metrics",
 	"logs",
 ] }
@@ -136,7 +145,7 @@ temp-env = { version = "0.3.6", features = ["async_closure"] }
 test-log = { version = "0.2.13", features = ["trace"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = { version = "0.20.1" }
-tonic = "0.8.3"
+tonic = "0.11.0"
 ulid = "1.1.0"
 wiremock = "0.5.22"
 

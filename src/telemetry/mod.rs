@@ -7,11 +7,11 @@ use std::time::Duration;
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use once_cell::sync::Lazy;
 use opentelemetry::metrics::MetricsError;
-use opentelemetry::sdk::resource::{
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry::sdk::Resource;
-use opentelemetry::{Context as TelemetryContext, KeyValue};
+use opentelemetry_sdk::Resource;
 use tracing::{Level, Subscriber};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -83,8 +83,9 @@ impl Builder {
 		Box::new(registry)
 	}
 
-	/// Install the tracing dispatcher globally
+	/// Initialize the tracing configuration
 	pub fn init(self) {
+		// Install the `tracing` dispatcher globally
 		self.build().init();
 	}
 }
@@ -92,7 +93,6 @@ impl Builder {
 pub fn shutdown() -> Result<(), MetricsError> {
 	// Flush all telemetry data
 	opentelemetry::global::shutdown_tracer_provider();
-	metrics::shutdown(&TelemetryContext::current())?;
 
 	Ok(())
 }

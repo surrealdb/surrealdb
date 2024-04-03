@@ -3,6 +3,7 @@ use std::{fmt, time::Duration};
 use axum::extract::MatchedPath;
 use http::header;
 use hyper::{Request, Response};
+use opentelemetry::propagation::Extractor;
 use tower_http::{
 	request_id::RequestId,
 	trace::{MakeSpan, OnFailure, OnRequest, OnResponse},
@@ -33,6 +34,12 @@ pub(crate) struct HttpTraceLayerHooks;
 
 impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 	fn make_span(&mut self, req: &Request<B>) -> Span {
+		let extractor = opentelemetry_http::HeaderExtractor(req.headers());
+		let ctx = opentelemetry::global::get_text_map_propagator(|propagator| {
+			propagator.extract(&extractor as &dyn Extractor)
+		});
+		let _guard = ctx.attach();
+
 		// The fields follow the OTEL semantic conventions: https://github.com/open-telemetry/opentelemetry-specification/blob/v1.23.0/specification/trace/semantic_conventions/http.md
 		let span = tracing::debug_span!(
 			"request",

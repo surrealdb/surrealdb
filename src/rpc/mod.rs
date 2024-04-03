@@ -61,7 +61,7 @@ pub(crate) async fn notifications(canceller: CancellationToken) {
 							// get the WebSocket sending channel
 							let sender = rpc.read().await.channels.0.clone();
 							// Send the notification to the client
-							message.send(cx, format, &sender).await
+							message.send(format, &sender).await
 						}
 					}
 				},

@@ -1,6 +1,6 @@
-use axum::headers;
-use axum::headers::Header;
-use http::HeaderName;
+use axum::http::HeaderName;
+use axum_extra::headers;
+use axum_extra::headers::Header;
 use http::HeaderValue;
 
 /// Typed header implementation for the `Accept` header.
