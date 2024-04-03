@@ -62,7 +62,7 @@ fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
 
 fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table)))(i)?;
+	let (i, kind) = alt((into(thing), into(table), into(param), into(subquery)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("->")(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -72,7 +72,7 @@ fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 
 fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table)))(i)?;
+	let (i, kind) = alt((into(thing), into(table), into(param), into(subquery)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("<-")(i)?;
 	let (i, _) = mightbespace(i)?;

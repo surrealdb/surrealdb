@@ -131,7 +131,7 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.kind {
+				match &self.kind.compute(ctx, opt, txn, doc).await? {
 					// The relation has a specific record id
 					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w)),
 					// The relation does not have a specific record id
