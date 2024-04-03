@@ -4,6 +4,7 @@ use js::class::Trace;
 
 #[derive(Clone, Trace)]
 #[js::class]
+#[non_exhaustive]
 pub struct Record {
 	#[qjs(skip_trace)]
 	pub(crate) value: thing::Thing,

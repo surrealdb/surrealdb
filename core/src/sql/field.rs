@@ -14,6 +14,7 @@ use std::ops::Deref;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Fields(pub Vec<Field>, pub bool);
 
 impl Fields {
@@ -241,6 +242,7 @@ impl Fields {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]

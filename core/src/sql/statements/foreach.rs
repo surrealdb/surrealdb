@@ -12,6 +12,7 @@ use std::fmt::{self, Display};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct ForeachStatement {
 	pub param: Param,
 	pub range: Value,

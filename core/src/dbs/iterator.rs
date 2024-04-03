@@ -20,18 +20,19 @@ use crate::sql::value::Value;
 use reblessive::{tree::Stk, TreeStack};
 use std::cmp::Ordering;
 use std::mem;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) enum Iterable {
 	Value(Value),
-	Table(Table),
+	Table(Arc<Table>),
 	Thing(Thing),
 	Range(Range),
 	Edges(Edges),
 	Defer(Thing),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
-	Index(Table, IteratorRef),
+	Index(Arc<Table>, IteratorRef),
 }
 
 pub(crate) struct Processed {
@@ -119,7 +120,7 @@ impl Iterator {
 					}
 					_ => {
 						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v))
+						self.ingest(Iterable::Table(Arc::new(v)))
 					}
 				},
 				// There is no data clause so create a record id
@@ -130,7 +131,7 @@ impl Iterator {
 					}
 					_ => {
 						// Ingest the table for scanning
-						self.ingest(Iterable::Table(v))
+						self.ingest(Iterable::Table(Arc::new(v)))
 					}
 				},
 			},
@@ -298,7 +299,18 @@ impl Iterator {
 		// Process the query START clause
 		self.setup_start(stk, &cancel_ctx, opt, txn, stm).await?;
 		// Prepare the results with possible optimisations on groups
-		self.results = self.results.prepare(stm);
+		self.results = self.results.prepare(
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			ctx,
+			stm,
+		)?;
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		if plan.do_iterate {
@@ -320,9 +332,15 @@ impl Iterator {
 			// Process any SPLIT clause
 			self.output_split(stk, ctx, opt, txn, stm).await?;
 			// Process any GROUP clause
-			self.results = self.results.group(stk, ctx, opt, txn, stm).await?;
+			if let Results::Groups(g) = &mut self.results {
+				self.results = Results::Memory(g.output(ctx, opt, txn, stm).await?);
+			}
+
 			// Process any ORDER clause
-			self.output_order(ctx, opt, txn, stm).await?;
+			if let Some(orders) = stm.order() {
+				self.results.sort(orders);
+			}
+
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start.as_ref(), self.limit.as_ref());
 
@@ -335,7 +353,7 @@ impl Iterator {
 		}
 
 		// Extract the output from the result
-		let mut results = self.results.take();
+		let mut results = self.results.take()?;
 
 		// Output the explanation if any
 		if let Some(e) = plan.explanation {
@@ -392,7 +410,7 @@ impl Iterator {
 			// Loop over each split clause
 			for split in splits.iter() {
 				// Get the query result
-				let res = self.results.take();
+				let res = self.results.take()?;
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
@@ -423,44 +441,6 @@ impl Iterator {
 		}
 		Ok(())
 	}
-	#[inline]
-	async fn output_order(
-		&mut self,
-		_ctx: &Context<'_>,
-		_opt: &Options,
-		_txn: &Transaction,
-		stm: &Statement<'_>,
-	) -> Result<(), Error> {
-		if let Some(orders) = stm.order() {
-			// Sort the full result set
-			self.results.sort_by(|a, b| {
-				// Loop over each order clause
-				for order in orders.iter() {
-					// Reverse the ordering if DESC
-					let o = match order.random {
-						true => {
-							let a = rand::random::<f64>();
-							let b = rand::random::<f64>();
-							a.partial_cmp(&b)
-						}
-						false => match order.direction {
-							true => a.compare(b, order, order.collate, order.numeric),
-							false => b.compare(a, order, order.collate, order.numeric),
-						},
-					};
-					//
-					match o {
-						Some(Ordering::Greater) => return Ordering::Greater,
-						Some(Ordering::Equal) => continue,
-						Some(Ordering::Less) => return Ordering::Less,
-						None => continue,
-					}
-				}
-				Ordering::Equal
-			})
-		}
-		Ok(())
-	}
 
 	#[inline]
 	async fn output_fetch(
@@ -473,17 +453,18 @@ impl Iterator {
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
 			for fetch in fetchs.iter() {
+				let mut values = self.results.take()?;
 				// Loop over each result value
-				for obj in &mut self.results {
+				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, txn, fetch)).await?;
+					obj.fetch(ctx, opt, txn, fetch).await?;
 				}
+				self.results = values.into();
 			}
 		}
 		Ok(())
 	}
 
-	/// Was marked recursive
 	#[cfg(target_arch = "wasm32")]
 	async fn iterate(
 		&mut self,
@@ -505,18 +486,15 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Was marked recursive
 	#[cfg(not(target_arch = "wasm32"))]
 	async fn iterate(
 		&mut self,
-		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
-
 		let opt = &opt.dive(4)?;
 		// Check if iterating in parallel
 		match stm.parallel() {

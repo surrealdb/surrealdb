@@ -8,7 +8,6 @@ use reblessive::TreeStack;
 use tokio::spawn;
 use tracing::instrument;
 use trice::Instant;
-
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local as spawn;
 

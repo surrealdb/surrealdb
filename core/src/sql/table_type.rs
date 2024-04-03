@@ -8,6 +8,7 @@ use super::{Kind, Table};
 /// The type of records stored by a table
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum TableType {
 	#[default]
 	Any,
@@ -44,6 +45,7 @@ fn get_tables_from_kind(tables: &[Table]) -> String {
 
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,

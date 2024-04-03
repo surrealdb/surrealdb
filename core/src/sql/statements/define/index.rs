@@ -14,6 +14,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,

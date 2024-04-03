@@ -18,6 +18,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 #[serde(rename = "$surrealdb::private::sql::Expression")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Expression {
 	Unary {
 		o: Operator,

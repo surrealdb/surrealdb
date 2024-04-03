@@ -12,6 +12,7 @@ pub(crate) type Id = u32;
 // This doesn't do any variable-length encoding, so it's not as space efficient as it could be.
 // It is used to generate ids for any SurrealDB objects that need aliases (e.g. namespaces, databases, tables, indexes, etc.)
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct U32 {
 	state_key: Key,
 	available_ids: Option<RoaringBitmap>,

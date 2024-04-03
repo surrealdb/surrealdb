@@ -313,13 +313,13 @@ impl<'a> Processor<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		v: Table,
+		v: &Table,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
+		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns(), opt.db(), &v);
-		let end = thing::suffix(opt.ns(), opt.db(), &v);
+		let beg = thing::prefix(opt.ns(), opt.db(), v);
+		let end = thing::suffix(opt.ns(), opt.db(), v);
 		// Loop until no more keys
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
@@ -570,7 +570,7 @@ impl<'a> Processor<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		table: Table,
+		table: &Table,
 		ir: IteratorRef,
 	) -> Result<(), Error> {
 		// Check that the table exists

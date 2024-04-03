@@ -1,34 +1,66 @@
 use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
-use crate::dbs::store::StoreCollector;
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use crate::dbs::store::file_store::FileCollector;
+use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
-use crate::sql::Value;
-use reblessive::tree::Stk;
-use std::cmp::Ordering;
-use std::slice::IterMut;
+use crate::sql::{Orders, Value};
 
 pub(super) enum Results {
 	None,
-	Store(StoreCollector),
+	Memory(MemoryCollector),
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	File(Box<FileCollector>),
 	Groups(GroupsCollector),
 }
 
-impl Default for Results {
-	fn default() -> Self {
-		Self::None
-	}
-}
-
 impl Results {
-	pub(super) fn prepare(&mut self, stm: &Statement<'_>) -> Self {
+	pub(super) fn prepare(
+		&mut self,
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
+		ctx: &Context<'_>,
+		stm: &Statement<'_>,
+	) -> Result<Self, Error> {
 		if stm.expr().is_some() && stm.group().is_some() {
-			Self::Groups(GroupsCollector::new(stm))
-		} else {
-			Self::Store(StoreCollector::default())
+			return Ok(Self::Groups(GroupsCollector::new(stm)));
 		}
+		#[cfg(any(
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
+		if !ctx.is_memory() {
+			return Ok(Self::File(Box::new(FileCollector::new(ctx.temporary_directory())?)));
+		}
+		Ok(Self::Memory(Default::default()))
 	}
+
 	pub(super) async fn push(
 		&mut self,
 		stk: &mut Stk,
@@ -39,90 +71,126 @@ impl Results {
 		val: Value,
 	) -> Result<(), Error> {
 		match self {
-			Results::None => {}
-			Results::Store(s) => {
+			Self::None => {}
+			Self::Memory(s) => {
 				s.push(val);
 			}
-			Results::Groups(g) => {
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			Self::File(e) => {
+				e.push(val)?;
+			}
+			Self::Groups(g) => {
 				g.push(stk, ctx, opt, txn, stm, val).await?;
 			}
 		}
 		Ok(())
 	}
 
-	pub(super) fn sort_by<F>(&mut self, compare: F)
-	where
-		F: FnMut(&Value, &Value) -> Ordering,
-	{
-		if let Results::Store(s) = self {
-			s.sort_by(compare)
+	pub(super) fn sort(&mut self, orders: &Orders) {
+		match self {
+			Self::Memory(m) => m.sort(orders),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			Self::File(f) => f.sort(orders),
+			_ => {}
 		}
 	}
 
 	pub(super) fn start_limit(&mut self, start: Option<&usize>, limit: Option<&usize>) {
-		if let Results::Store(s) = self {
-			if let Some(&start) = start {
-				s.start(start);
-			}
-			if let Some(&limit) = limit {
-				s.limit(limit);
-			}
+		match self {
+			Self::None => {}
+			Self::Memory(m) => m.start_limit(start, limit),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			Self::File(f) => f.start_limit(start, limit),
+			Self::Groups(_) => {}
 		}
 	}
 
 	pub(super) fn len(&self) -> usize {
 		match self {
-			Results::None => 0,
-			Results::Store(s) => s.len(),
-			Results::Groups(g) => g.len(),
+			Self::None => 0,
+			Self::Memory(s) => s.len(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			Self::File(e) => e.len(),
+			Self::Groups(g) => g.len(),
 		}
 	}
 
-	pub(super) async fn group(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		stm: &Statement<'_>,
-	) -> Result<Self, Error> {
+	pub(super) fn take(&mut self) -> Result<Vec<Value>, Error> {
 		Ok(match self {
-			Self::None => Self::None,
-			Self::Store(s) => Self::Store(s.take_store()),
-			Self::Groups(g) => Self::Store(stk.run(|stk| g.output(stk, ctx, opt, txn, stm)).await?),
+			Self::Memory(m) => m.take_vec(),
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			Self::File(f) => f.take_vec()?,
+			_ => vec![],
 		})
-	}
-
-	pub(super) fn take(&mut self) -> Vec<Value> {
-		if let Self::Store(s) = self {
-			s.take_vec()
-		} else {
-			vec![]
-		}
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
 		match self {
-			Results::None => exp.add_collector("None", vec![]),
-			Results::Store(s) => {
+			Self::None => exp.add_collector("None", vec![]),
+			Self::Memory(s) => {
 				s.explain(exp);
 			}
-			Results::Groups(g) => {
+			#[cfg(any(
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
+			Self::File(e) => {
+				e.explain(exp);
+			}
+			Self::Groups(g) => {
 				g.explain(exp);
 			}
 		}
 	}
 }
 
-impl<'a> IntoIterator for &'a mut Results {
-	type Item = &'a mut Value;
-	type IntoIter = IterMut<'a, Value>;
+impl Default for Results {
+	fn default() -> Self {
+		Self::None
+	}
+}
 
-	fn into_iter(self) -> Self::IntoIter {
-		if let Results::Store(s) = self {
-			s.into_iter()
-		} else {
-			[].iter_mut()
-		}
+impl From<Vec<Value>> for Results {
+	fn from(value: Vec<Value>) -> Self {
+		Results::Memory(value.into())
 	}
 }

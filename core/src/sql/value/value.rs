@@ -33,6 +33,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -60,6 +61,7 @@ impl Display for Values {
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Value {
 	// These value types are simple values which
 	// can be used in query responses sent to
@@ -1914,18 +1916,7 @@ impl Value {
 			// Allow any decimal number
 			Value::Number(v) if v.is_decimal() => Ok(v),
 			// Attempt to convert an int number
-			// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
-			// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
-			#[allow(warnings)]
-			Value::Number(Number::Int(ref v)) => match Decimal::try_from(*v) {
-				// The Int can be represented as a Decimal
-				Ok(v) => Ok(Number::Decimal(v)),
-				// This Int does not convert to a Decimal
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "decimal".into(),
-				}),
-			},
+			Value::Number(Number::Int(ref v)) => Ok(Number::Decimal(Decimal::from(*v))),
 			// Attempt to convert an float number
 			Value::Number(Number::Float(ref v)) => match Decimal::try_from(*v) {
 				// The Float can be represented as a Decimal

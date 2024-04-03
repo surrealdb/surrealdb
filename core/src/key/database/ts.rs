@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 // Each Ts key is suffixed by a timestamp.
 // The value is the versionstamp that corresponds to the timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ts<'a> {
 	__: u8,
 	_a: u8,

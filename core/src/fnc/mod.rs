@@ -323,6 +323,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
+		"type::range" => r#type::range,
 		"type::is::array" => r#type::is::array,
 		"type::is::bool" => r#type::is::bool,
 		"type::is::bytes" => r#type::is::bytes,

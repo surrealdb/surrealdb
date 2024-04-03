@@ -8,25 +8,28 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::iam::Action;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
+use crate::ml::errors::error::SurrealError;
+#[cfg(feature = "ml")]
 use crate::ml::execution::compute::ModelComputation;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::ml::storage::surml_file::SurMlFile;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use crate::sql::Permission;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use futures::future::try_join_all;
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 use std::collections::HashMap;
 
-#[cfg(any(feature = "ml", feature = "ml2"))]
+#[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Model {
 	pub name: String,
 	pub version: String,
@@ -47,7 +50,7 @@ impl fmt::Display for Model {
 }
 
 impl Model {
-	#[cfg(any(feature = "ml", feature = "ml2"))]
+	#[cfg(feature = "ml")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -125,11 +128,15 @@ impl Model {
 				let bytes = crate::obs::get(&path).await?;
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.buffered_compute(&mut args).map_err(Error::ModelComputation)
+					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})
 				})
 				.await
 				.unwrap()?;
@@ -149,11 +156,15 @@ impl Model {
 				let tensor = ndarray::arr1::<f32>(&[args]).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})
 				})
 				.await
 				.unwrap()?;
@@ -177,11 +188,15 @@ impl Model {
 				let tensor = ndarray::arr1::<f32>(&args).into_dyn();
 				// Run the compute in a blocking task
 				let outcome = tokio::task::spawn_blocking(move || {
-					let mut file = SurMlFile::from_bytes(bytes).unwrap();
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(Error::ModelComputation)
+					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+						Error::ModelComputation(err.message.to_string())
+					})
 				})
 				.await
 				.unwrap()?;
@@ -196,7 +211,7 @@ impl Model {
 		}
 	}
 
-	#[cfg(not(any(feature = "ml", feature = "ml2")))]
+	#[cfg(not(feature = "ml"))]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
