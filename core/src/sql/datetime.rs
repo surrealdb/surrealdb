@@ -68,19 +68,6 @@ impl TryFrom<&str> for Datetime {
 	}
 }
 
-impl TryFrom<i128> for Datetime {
-	type Error = ();
-	fn try_from(v: i128) -> Result<Self, Self::Error> {
-		match i64::try_from(v) {
-			Ok(v) => match Utc.timestamp_opt(v, 0) {
-				LocalResult::Single(v) => Ok(Self(v)),
-				_ => Err(()),
-			},
-			_ => Err(()),
-		}
-	}
-}
-
 impl TryFrom<(i64, u32)> for Datetime {
 	type Error = ();
 	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
