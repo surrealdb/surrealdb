@@ -22,6 +22,7 @@ use super::DefineFieldStatement;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 3)]
+#[non_exhaustive]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,

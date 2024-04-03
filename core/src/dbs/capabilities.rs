@@ -10,6 +10,7 @@ pub trait Target {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
 
 impl std::fmt::Display for FuncTarget {
@@ -48,6 +49,7 @@ impl std::str::FromStr for FuncTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(ipnet::IpNet),
@@ -123,6 +125,7 @@ impl std::str::FromStr for NetTarget {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Targets<T: Target + Hash + Eq + PartialEq> {
 	None,
 	Some(HashSet<T>),
@@ -154,6 +157,7 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,

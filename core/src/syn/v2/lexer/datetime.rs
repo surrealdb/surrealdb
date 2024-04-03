@@ -11,6 +11,7 @@ use crate::{
 use super::{Error as LexError, Lexer};
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum PartError {
 	#[error("value outside of allowed range")]
 	OutsideRange,
@@ -21,6 +22,7 @@ pub enum PartError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	#[error("invalid year, {0}")]
 	Year(PartError),

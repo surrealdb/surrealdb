@@ -1,3 +1,13 @@
+#![cfg(any(
+	feature = "kv-mem",
+	feature = "kv-rocksdb",
+	feature = "kv-speedb",
+	feature = "kv-indxdb",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-surrealkv"
+))]
+
 #[cfg(feature = "kv-mem")]
 #[cfg(test)]
 mod ds_lqv2;

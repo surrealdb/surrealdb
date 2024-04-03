@@ -74,6 +74,7 @@ const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
+#[non_exhaustive]
 pub struct Datastore {
 	// The inner datastore type
 	inner: Inner,

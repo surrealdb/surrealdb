@@ -11,6 +11,7 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
 	#[revision(start = 2)]

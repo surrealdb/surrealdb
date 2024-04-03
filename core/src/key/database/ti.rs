@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Ti {
 	__: u8,
 	_a: u8,

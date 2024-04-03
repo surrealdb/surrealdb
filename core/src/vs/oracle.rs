@@ -15,6 +15,7 @@ use super::{u16_u64_to_versionstamp, u64_to_versionstamp, u64_u16_to_versionstam
 // generation strategy, varying in the trade-off between the monotonicity of the versionstamps
 // and the performance of the versionstamp generation.
 #[allow(unused)]
+#[non_exhaustive]
 pub enum Oracle {
 	// SysTimeCounter versionstamp oracle is a HLC based on system time in seconds as the physical time and the
 	// in-memory counter that resets every second as the logical time.
@@ -80,6 +81,7 @@ impl Oracle {
 	}
 }
 
+#[non_exhaustive]
 pub struct SysTimeCounter {
 	// The first element is the saved physical time of the last versionstamp.
 	// The second element is the in-memory counter that resets every second.
@@ -119,6 +121,7 @@ impl SysTimeCounter {
 // The epoch is supposed to be persisted in the underlying KVS and increased by one on each database restart.
 // The in-memory counter resets on each database restart and increased by one on each now() call.
 // TODO: Refer to a paper that describes this concept and use the correct terminology.
+#[non_exhaustive]
 pub struct EpochCounter {
 	// epoch is the first half of the versionstamp that persists
 	// until the database restarts.
