@@ -21,6 +21,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }

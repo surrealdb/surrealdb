@@ -6,7 +6,6 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::sql::Array;
 use crate::sql::Id;
 use crate::sql::Value;
 use crate::Surreal;
@@ -61,7 +60,7 @@ macro_rules! into_future {
 				for result in patches {
 					vec.push(result?);
 				}
-				let patches = Value::Array(Array(vec));
+				let patches = vec.into();
 				let mut conn = Client::new(Method::Patch);
 				conn.$method(client.router.extract()?, Param::new(vec![param, patches])).await
 			})

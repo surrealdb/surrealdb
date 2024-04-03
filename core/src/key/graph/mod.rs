@@ -101,6 +101,7 @@ impl<'a> PrefixFt<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
+#[non_exhaustive]
 pub struct Graph<'a> {
 	__: u8,
 	_a: u8,

@@ -13,13 +13,22 @@ use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
 
-const TAG_DATETIME: u64 = 0;
+// Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+const TAG_SPEC_DATETIME: u64 = 0;
+const TAG_SPEC_UUID: u64 = 37;
+
+// Custom tags
 const TAG_NONE: u64 = 6;
-const TAG_UUID: u64 = 7;
-const TAG_DECIMAL: u64 = 8;
-const TAG_DURATION: u64 = 9;
-const TAG_RECORDID: u64 = 10;
-const TAG_TABLE: u64 = 11;
+const TAG_TABLE: u64 = 7;
+const TAG_RECORDID: u64 = 8;
+const TAG_STRING_UUID: u64 = 9;
+const TAG_STRING_DECIMAL: u64 = 10;
+// const TAG_BINARY_DECIMAL: u64 = 11;
+const TAG_CUSTOM_DATETIME: u64 = 12;
+const TAG_STRING_DURATION: u64 = 13;
+const TAG_CUSTOM_DURATION: u64 = 14;
+
+// Custom Geometries
 const TAG_GEOMETRY_POINT: u64 = 88;
 const TAG_GEOMETRY_LINE: u64 = 89;
 const TAG_GEOMETRY_POLYGON: u64 = 90;
@@ -55,25 +64,61 @@ impl TryFrom<Cbor> for Value {
 			Data::Tag(t, v) => {
 				match t {
 					// A literal datetime
-					TAG_DATETIME => match *v {
+					TAG_SPEC_DATETIME => match *v {
 						Data::Text(v) => match Datetime::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Datetime value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
 					},
+					// A custom [seconds: i64, nanos: u32] datetime
+					TAG_CUSTOM_DATETIME => match *v {
+						Data::Array(v) if v.len() == 2 => {
+							let mut iter = v.into_iter();
+
+							let seconds = match iter.next() {
+								Some(Data::Integer(v)) => match i64::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => return Err("Expected a CBOR integer data type"),
+							};
+
+							let nanos = match iter.next() {
+								Some(Data::Integer(v)) => match u32::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => return Err("Expected a CBOR integer data type"),
+							};
+
+							match Datetime::try_from((seconds, nanos)) {
+								Ok(v) => Ok(v.into()),
+								_ => Err("Expected a valid Datetime value"),
+							}
+						}
+						_ => Err("Expected a CBOR array with 2 elements"),
+					},
 					// A literal NONE
 					TAG_NONE => Ok(Value::None),
 					// A literal uuid
-					TAG_UUID => match *v {
+					TAG_STRING_UUID => match *v {
 						Data::Text(v) => match Uuid::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid UUID value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
 					},
+					// A byte string uuid
+					TAG_SPEC_UUID => match *v {
+						Data::Bytes(v) if v.len() == 16 => match v.as_slice().try_into() {
+							Ok(v) => Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(v)))),
+							Err(_) => Err("Expected a CBOR byte array with 16 elements"),
+						},
+						_ => Err("Expected a CBOR byte array with 16 elements"),
+					},
 					// A literal decimal
-					TAG_DECIMAL => match *v {
+					TAG_STRING_DECIMAL => match *v {
 						Data::Text(v) => match Number::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
@@ -81,12 +126,37 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR text data type"),
 					},
 					// A literal duration
-					TAG_DURATION => match *v {
+					TAG_STRING_DURATION => match *v {
 						Data::Text(v) => match Duration::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Duration value"),
 						},
 						_ => Err("Expected a CBOR text data type"),
+					},
+					// A custom [seconds: Option<u64>, nanos: Option<u32>] duration
+					TAG_CUSTOM_DURATION => match *v {
+						Data::Array(v) if v.len() <= 2 => {
+							let mut iter = v.into_iter();
+
+							let seconds = match iter.next() {
+								Some(Data::Integer(v)) => match u64::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => 0,
+							};
+
+							let nanos = match iter.next() {
+								Some(Data::Integer(v)) => match u32::try_from(v) {
+									Ok(v) => v,
+									_ => return Err("Expected a CBOR integer data type"),
+								},
+								_ => 0,
+							};
+
+							Ok(Duration::new(seconds, nanos).into())
+						}
+						_ => Err("Expected a CBOR array with at most 2 elements"),
 					},
 					// A literal recordid
 					TAG_RECORDID => match *v {
@@ -204,7 +274,7 @@ impl TryFrom<Cbor> for Value {
 
 							Ok(Value::Geometry(Geometry::MultiLine(MultiLineString::new(lines))))
 						}
-						_ => Err("Expected a CBOR array with Geometry Point values"),
+						_ => Err("Expected a CBOR array with Geometry Line values"),
 					},
 					TAG_GEOMETRY_MULTIPOLYGON => match v.deref() {
 						Data::Array(v) => {
@@ -256,17 +326,41 @@ impl TryFrom<Value> for Cbor {
 				Number::Int(v) => Ok(Cbor(Data::Integer(v.into()))),
 				Number::Float(v) => Ok(Cbor(Data::Float(v))),
 				Number::Decimal(v) => {
-					Ok(Cbor(Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.to_string())))))
+					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
 				}
+				_ => unreachable!(),
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
 			Value::Duration(v) => {
-				Ok(Cbor(Data::Tag(TAG_DURATION, Box::new(Data::Text(v.to_raw())))))
+				let seconds = v.secs();
+				let nanos = v.subsec_nanos();
+
+				let tag_value = match (seconds, nanos) {
+					(0, 0) => Box::new(Data::Array(vec![])),
+					(_, 0) => Box::new(Data::Array(vec![Data::Integer(seconds.into())])),
+					_ => Box::new(Data::Array(vec![
+						Data::Integer(seconds.into()),
+						Data::Integer(nanos.into()),
+					])),
+				};
+
+				Ok(Cbor(Data::Tag(TAG_CUSTOM_DURATION, tag_value)))
 			}
 			Value::Datetime(v) => {
-				Ok(Cbor(Data::Tag(TAG_DATETIME, Box::new(Data::Text(v.to_raw())))))
+				let seconds = v.timestamp();
+				let nanos = v.timestamp_subsec_nanos();
+
+				Ok(Cbor(Data::Tag(
+					TAG_CUSTOM_DATETIME,
+					Box::new(Data::Array(vec![
+						Data::Integer(seconds.into()),
+						Data::Integer(nanos.into()),
+					])),
+				)))
 			}
-			Value::Uuid(v) => Ok(Cbor(Data::Tag(TAG_UUID, Box::new(Data::Text(v.to_raw()))))),
+			Value::Uuid(v) => {
+				Ok(Cbor(Data::Tag(TAG_SPEC_UUID, Box::new(Data::Bytes(v.into_bytes().into())))))
+			}
 			Value::Array(v) => Ok(Cbor(Data::Array(
 				v.into_iter()
 					.map(|v| {
@@ -297,6 +391,7 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
+						_ => unreachable!(),
 					},
 				])),
 			))),
@@ -313,8 +408,8 @@ fn encode_geometry(v: Geometry) -> Data {
 		Geometry::Point(v) => Data::Tag(
 			TAG_GEOMETRY_POINT,
 			Box::new(Data::Array(vec![
-				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
-				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
+				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
+				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
 			])),
 		),
 		Geometry::Line(v) => {
@@ -350,5 +445,6 @@ fn encode_geometry(v: Geometry) -> Data {
 
 			Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data)))
 		}
+		_ => unreachable!(),
 	}
 }

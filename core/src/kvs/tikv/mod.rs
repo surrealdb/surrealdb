@@ -11,10 +11,12 @@ use tikv::CheckLevel;
 use tikv::TimestampExt;
 use tikv::TransactionOptions;
 
+#[non_exhaustive]
 pub struct Datastore {
 	db: tikv::TransactionClient,
 }
 
+#[non_exhaustive]
 pub struct Transaction {
 	// Is the transaction complete?
 	done: bool,

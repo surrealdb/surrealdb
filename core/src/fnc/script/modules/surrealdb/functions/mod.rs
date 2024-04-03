@@ -26,6 +26,7 @@ mod time;
 mod r#type;
 mod vector;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

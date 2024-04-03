@@ -22,6 +22,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 #[serde(rename = "$surrealdb::private::sql::Object")]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {

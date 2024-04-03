@@ -7,6 +7,7 @@ use nom::{
 };
 
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[non_exhaustive]
 pub enum BuiltinName<I> {
 	Function(I),
 	Constant(constant::Constant),
@@ -457,6 +458,7 @@ pub(crate) fn builtin_name(i: &str) -> IResult<&str, BuiltinName<&str>, ParseErr
 			string => { fn },
 			table => { fn },
 			thing => { fn },
+			range => { fn },
 			is => {
 				array => { fn },
 				r#bool = "bool" => { fn },
