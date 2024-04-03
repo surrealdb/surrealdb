@@ -1,3 +1,13 @@
+#![cfg(any(
+	feature = "kv-mem",
+	feature = "kv-rocksdb",
+	feature = "kv-speedb",
+	feature = "kv-indxdb",
+	feature = "kv-tikv",
+	feature = "kv-fdb",
+	feature = "kv-surrealkv"
+))]
+
 use crate::kvs::clock::SizedClock;
 use std::sync::Arc;
 

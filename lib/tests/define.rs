@@ -1219,7 +1219,6 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn define_statement_analyzer() -> Result<(), Error> {
 	let sql = r#"
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
@@ -2175,7 +2174,6 @@ async fn redefining_existing_analyzer_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_analyzer_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE ANALYZER IF NOT EXISTS example TOKENIZERS blank;
@@ -2216,7 +2214,6 @@ async fn redefining_existing_database_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_database_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE DATABASE IF NOT EXISTS example;
@@ -2257,7 +2254,6 @@ async fn redefining_existing_event_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_event_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT IF NOT EXISTS example ON example THEN {};
@@ -2298,7 +2294,6 @@ async fn redefining_existing_field_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_field_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD IF NOT EXISTS example ON example;
@@ -2339,7 +2334,6 @@ async fn redefining_existing_function_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_function_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE FUNCTION IF NOT EXISTS fn::example() {};
@@ -2380,7 +2374,6 @@ async fn redefining_existing_index_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_index_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
@@ -2421,7 +2414,6 @@ async fn redefining_existing_namespace_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_namespace_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE NAMESPACE IF NOT EXISTS example;
@@ -2462,7 +2454,6 @@ async fn redefining_existing_param_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_param_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE PARAM IF NOT EXISTS $example VALUE 123;
@@ -2503,7 +2494,6 @@ async fn redefining_existing_scope_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_scope_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE SCOPE IF NOT EXISTS example;
@@ -2544,7 +2534,6 @@ async fn redefining_existing_table_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE IF NOT EXISTS example;
@@ -2585,7 +2574,6 @@ async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE \"example\";
@@ -2626,7 +2614,6 @@ async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
 		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER;
@@ -2647,7 +2634,6 @@ async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<()
 }
 
 #[tokio::test]
-#[cfg(feature = "sql2")]
 async fn define_table_relation() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE likes TYPE RELATION;

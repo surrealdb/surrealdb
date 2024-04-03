@@ -11,7 +11,7 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb_core2::test_helpers::{generate_versionstamp_sequences, to_u128_be};
+use surrealdb_core::test_helpers::{generate_versionstamp_sequences, to_u128_be};
 
 mod helpers;
 
@@ -180,7 +180,6 @@ async fn database_change_feeds() -> Result<(), Error> {
 	current_time += 1;
 	dbs.tick_at(current_time).await?;
 	let mut tx = dbs.transaction(Write, Optimistic).await?;
-	#[cfg(feature = "sql2")]
 	tx.print_all().await;
 	tx.cancel().await?;
 
