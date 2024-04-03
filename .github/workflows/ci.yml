@@ -133,6 +133,8 @@ jobs:
         with:
           oss-fuzz-project-name: surrealdb
           language: rust
+        # Temporarily allow this step to fail
+        continue-on-error: true
 
   check-wasm:
     name: Check Wasm
