@@ -12,6 +12,7 @@ use std::{
 };
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum IntErrorKind {
 	FloatToInt,
 	DecimalToInt,
@@ -19,6 +20,7 @@ pub enum IntErrorKind {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MissingKind {
 	Group,
 	Split,
@@ -26,6 +28,7 @@ pub enum MissingKind {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ParseErrorKind {
 	/// The parser encountered an unexpected token.
 	Unexpected {
@@ -81,6 +84,7 @@ pub enum ParseErrorKind {
 
 /// A parsing error.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct ParseError {
 	pub kind: ParseErrorKind,
 	pub at: Span,

@@ -3,6 +3,7 @@ use std::fmt;
 use std::io;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[non_exhaustive]
 pub enum Reason {
 	Timedout,
 	Canceled,

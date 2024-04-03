@@ -12,6 +12,7 @@ use crate::{
 use super::{Error as LexError, Lexer};
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	#[error("invalid duration suffix")]
 	InvalidSuffix,
