@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{statements::UpdateStatement, Base, Ident, Idioms, Index, Strand, Value, Values};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -27,6 +28,7 @@ impl DefineIndexStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -75,7 +77,7 @@ impl DefineIndexStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
 			..UpdateStatement::default()
 		};
-		stm.compute(ctx, opt, txn, doc).await?;
+		stm.compute(stk, ctx, opt, txn, doc).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

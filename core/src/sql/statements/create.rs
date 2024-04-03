@@ -47,7 +47,7 @@ impl CreateStatement {
 		// Loop over the create targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, ctx, opt, txn, doc).await?;
-			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
+			i.prepare(stk, ctx, opt, txn, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::CreateStatement {

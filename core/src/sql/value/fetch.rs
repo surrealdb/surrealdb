@@ -26,38 +26,46 @@ impl Value {
 				// Current path part is an object
 				Value::Object(v) => match p {
 					Part::Graph(_) => match v.rid() {
-						Some(v) => Value::Thing(v).fetch(stk, ctx, opt, txn, path.next()).await,
+						Some(v) => {
+							let mut v = Value::Thing(v);
+							stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await
+						}
 						None => Ok(()),
 					},
 					Part::Field(f) => match v.get_mut(f as &str) {
-						Some(v) => v.fetch(stk, ctx, opt, txn, path.next()).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) => v.fetch(stk, ctx, opt, txn, path.next()).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
 						None => Ok(()),
 					},
-					Part::All => self.fetch(stk, ctx, opt, txn, path.next()).await,
+					Part::All => stk.run(|stk| self.fetch(stk, ctx, opt, txn, path.next())).await,
 					_ => Ok(()),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.iter_mut().map(|v| v.fetch(stk, ctx, opt, txn, path));
-						try_join_all(futs).await?;
+						stk.scope(|scope| {
+							let futs = v
+								.iter_mut()
+								.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, txn, path)));
+							try_join_all(futs)
+						})
+						.await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
-						Some(v) => v.fetch(stk, ctx, opt, txn, path.next()).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Last => match v.last_mut() {
-						Some(v) => v.fetch(stk, ctx, opt, txn, path.next()).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => v.fetch(stk, ctx, opt, txn, path.next()).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
 						None => Ok(()),
 					},
 					Part::Where(w) => {
@@ -65,14 +73,19 @@ impl Value {
 						for v in v.iter_mut() {
 							let cur = v.into();
 							if w.compute(stk, ctx, opt, txn, Some(&cur)).await?.is_truthy() {
-								v.fetch(stk, ctx, opt, txn, path).await?;
+								stk.run(|stk| v.fetch(stk, ctx, opt, txn, path)).await?;
 							}
 						}
 						Ok(())
 					}
 					_ => {
-						let futs = v.iter_mut().map(|v| v.fetch(stk, ctx, opt, txn, path));
-						try_join_all(futs).await?;
+						stk.scope(|scope| {
+							let futs = v
+								.iter_mut()
+								.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, txn, path)));
+							try_join_all(futs)
+						})
+						.await?;
 						Ok(())
 					}
 				},
@@ -123,8 +136,13 @@ impl Value {
 			None => match self {
 				// Current path part is an array
 				Value::Array(v) => {
-					let futs = v.iter_mut().map(|v| v.fetch(stk, ctx, opt, txn, path));
-					try_join_all(futs).await?;
+					stk.scope(|scope| {
+						let futs = v
+							.iter_mut()
+							.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, txn, path)));
+						try_join_all(futs)
+					})
+					.await?;
 					Ok(())
 				}
 				// Current path part is a thing

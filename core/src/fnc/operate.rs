@@ -6,6 +6,7 @@ use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::TryRem;
 use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
 use crate::sql::{Expression, Thing};
+use reblessive::tree::Stk;
 
 pub fn neg(a: Value) -> Result<Value, Error> {
 	a.try_neg()
@@ -224,6 +225,7 @@ pub(crate) async fn matches(
 }
 
 pub(crate) async fn knn(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
 	txn: &Transaction,
@@ -233,7 +235,7 @@ pub(crate) async fn knn(
 	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.knn(ctx, opt, txn, thg, doc, exp).await,
+		ExecutorOption::Execute(exe, thg) => exe.knn(stk, ctx, opt, txn, thg, doc, exp).await,
 	}
 }
 

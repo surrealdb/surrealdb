@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::sql::function::OptimisedAggregate;
 use crate::sql::value::{TryAdd, TryDiv, Value};
 use crate::sql::{Array, Field, Idiom};
+use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::mem;
@@ -59,6 +60,7 @@ impl GroupsCollector {
 
 	pub(super) async fn push(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -80,12 +82,13 @@ impl GroupsCollector {
 				.grp
 				.entry(arr)
 				.or_insert_with(|| self.base.iter().map(|a| a.new_instance()).collect());
-			Self::pushes(ctx, opt, txn, agr, &self.idioms, obj).await?
+			Self::pushes(stk, ctx, opt, txn, agr, &self.idioms, obj).await?
 		}
 		Ok(())
 	}
 
 	async fn pushes(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -94,7 +97,7 @@ impl GroupsCollector {
 		obj: Value,
 	) -> Result<(), Error> {
 		for (agr, idiom) in agrs.iter_mut().zip(idioms) {
-			let val = obj.get(ctx, opt, txn, None, idiom).await?;
+			let val = stk.run(|stk| obj.get(stk, ctx, opt, txn, None, idiom)).await?;
 			agr.push(val)?;
 		}
 		Ok(())
@@ -106,6 +109,7 @@ impl GroupsCollector {
 
 	pub(super) async fn output(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -142,18 +146,18 @@ impl GroupsCollector {
 										let vals = agr.take();
 										let x = vals
 											.all()
-											.get(ctx, opt, txn, None, idiom.as_ref())
+											.get(stk, ctx, opt, txn, None, idiom.as_ref())
 											.await?;
-										f.aggregate(x).compute(ctx, opt, txn, None).await?
+										f.aggregate(x).compute(stk, ctx, opt, txn, None).await?
 									} else {
 										// The aggregation is optimised, just get the value
 										agr.compute(a)?
 									};
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
+									obj.set(stk, ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 								_ => {
 									let x = agr.take().first();
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
+									obj.set(stk, ctx, opt, txn, idiom.as_ref(), x).await?;
 								}
 							}
 						}

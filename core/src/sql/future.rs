@@ -35,7 +35,7 @@ impl Future {
 	) -> Result<Value, Error> {
 		// Process the future if enabled
 		match opt.futures {
-			true => self.0.compute(stk, ctx, opt, txn, doc).await?.ok(),
+			true => stk.run(|stk| self.0.compute(stk, ctx, opt, txn, doc)).await?.ok(),
 			false => Ok(self.clone().into()),
 		}
 	}

@@ -1,12 +1,12 @@
+use channel::{Receiver, Sender};
+use futures::{lock::Mutex, Future};
+use reblessive::{tree::Stk, TreeStack};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use channel::{Receiver, Sender};
-use futures::{lock::Mutex, Future};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
@@ -866,7 +866,11 @@ impl Datastore {
 	}
 
 	/// Poll change feeds for live query notifications
-	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
+	pub async fn process_lq_notifications(
+		&self,
+		stk: &mut Stk,
+		opt: &Options,
+	) -> Result<(), Error> {
 		// Runtime feature gate, as it is not production-ready
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			return Ok(());
@@ -967,6 +971,7 @@ impl Datastore {
 									let (sender, receiver) =
 										channel::bounded(notification_capacity);
 									doc.check_lqs_and_send_notifications(
+										stk,
 										opt,
 										&Statement::Live(&lq_value.stm),
 										&tx,
@@ -1427,6 +1432,9 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
+
+		let mut stack = TreeStack::new();
+
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
@@ -1465,7 +1473,7 @@ impl Datastore {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1510,6 +1518,8 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
+
+		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -1538,7 +1548,7 @@ impl Datastore {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable

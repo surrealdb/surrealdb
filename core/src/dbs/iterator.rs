@@ -17,7 +17,7 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use reblessive::tree::Stk;
+use reblessive::{tree::Stk, TreeStack};
 use std::cmp::Ordering;
 use std::mem;
 
@@ -96,6 +96,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub async fn prepare(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -108,7 +109,7 @@ impl Iterator {
 				// There is a data clause so fetch a record id
 				Some(data) => match stm {
 					Statement::Create(_) => {
-						let id = match data.rid(ctx, opt, txn).await? {
+						let id = match data.rid(stk, ctx, opt, txn).await? {
 							// Generate a new id from the id field
 							Some(id) => id.generate(&v, false)?,
 							// Generate a new random table id
@@ -137,7 +138,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
 						// Check to see the type of the id
 						match id {
 							// The id is a match, so don't error
@@ -165,7 +166,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -186,7 +187,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -205,7 +206,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -218,7 +219,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -241,7 +242,7 @@ impl Iterator {
 				// Check if there is a data clause
 				if let Some(data) = stm.data() {
 					// Check if there is an id field specified
-					if let Some(id) = data.rid(ctx, opt, txn).await? {
+					if let Some(id) = data.rid(stk, ctx, opt, txn).await? {
 						return Err(Error::IdMismatch {
 							value: id.to_string(),
 						});
@@ -293,9 +294,9 @@ impl Iterator {
 		let mut cancel_ctx = Context::new(ctx);
 		self.run = cancel_ctx.add_cancel();
 		// Process the query LIMIT clause
-		self.setup_limit(&cancel_ctx, opt, txn, stm).await?;
+		self.setup_limit(stk, &cancel_ctx, opt, txn, stm).await?;
 		// Process the query START clause
-		self.setup_start(&cancel_ctx, opt, txn, stm).await?;
+		self.setup_start(stk, &cancel_ctx, opt, txn, stm).await?;
 		// Prepare the results with possible optimisations on groups
 		self.results = self.results.prepare(stm);
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
@@ -307,11 +308,11 @@ impl Iterator {
 					let is_last = matches!(s, IterationStage::Iterate(_));
 					cancel_ctx.set_iteration_stage(s);
 					if !is_last {
-						self.clone().iterate(&cancel_ctx, opt, txn, stm).await?;
+						self.clone().iterate(stk, &cancel_ctx, opt, txn, stm).await?;
 					};
 				}
 			}
-			self.iterate(&cancel_ctx, opt, txn, stm).await?;
+			self.iterate(stk, &cancel_ctx, opt, txn, stm).await?;
 			// Return any document errors
 			if let Some(e) = self.error.take() {
 				return Err(e);
@@ -319,7 +320,7 @@ impl Iterator {
 			// Process any SPLIT clause
 			self.output_split(stk, ctx, opt, txn, stm).await?;
 			// Process any GROUP clause
-			self.results = self.results.group(ctx, opt, txn, stm).await?;
+			self.results = self.results.group(stk, ctx, opt, txn, stm).await?;
 			// Process any ORDER clause
 			self.output_order(ctx, opt, txn, stm).await?;
 			// Process any START & LIMIT clause
@@ -351,13 +352,14 @@ impl Iterator {
 	#[inline]
 	async fn setup_limit(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.limit() {
-			self.limit = Some(v.process(ctx, opt, txn, None).await?);
+			self.limit = Some(v.process(stk, ctx, opt, txn, None).await?);
 		}
 		Ok(())
 	}
@@ -365,13 +367,14 @@ impl Iterator {
 	#[inline]
 	async fn setup_start(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(v) = stm.start() {
-			self.start = Some(v.process(ctx, opt, txn, None).await?);
+			self.start = Some(v.process(stk, ctx, opt, txn, None).await?);
 		}
 		Ok(())
 	}
@@ -403,7 +406,7 @@ impl Iterator {
 								// Set the value at the path
 								obj.set(stk, ctx, opt, txn, split, val).await?;
 								// Add the object to the results
-								self.results.push(ctx, opt, txn, stm, obj).await?;
+								self.results.push(stk, ctx, opt, txn, stm, obj).await?;
 							}
 						}
 						_ => {
@@ -412,7 +415,7 @@ impl Iterator {
 							// Set the value at the path
 							obj.set(stk, ctx, opt, txn, split, val).await?;
 							// Add the object to the results
-							self.results.push(ctx, opt, txn, stm, obj).await?;
+							self.results.push(stk, ctx, opt, txn, stm, obj).await?;
 						}
 					}
 				}
@@ -473,7 +476,7 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut self.results {
 					// Fetch the value at the path
-					obj.fetch(stk, ctx, opt, txn, fetch).await?;
+					stk.run(|stk| obj.fetch(stk, ctx, opt, txn, fetch)).await?;
 				}
 			}
 		}
@@ -496,7 +499,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(ctx, opt, txn, stm, self, distinct.as_mut()).await?;
+			v.iterate(stk, ctx, opt, txn, stm, self, distinct.as_mut()).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -506,12 +509,14 @@ impl Iterator {
 	#[cfg(not(target_arch = "wasm32"))]
 	async fn iterate(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
+
 		let opt = &opt.dive(4)?;
 		// Check if iterating in parallel
 		match stm.parallel() {
@@ -521,7 +526,7 @@ impl Iterator {
 				let mut distinct = SyncDistinct::new(ctx);
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, txn, stm, self, distinct.as_mut()).await?;
+					v.iterate(stk, ctx, opt, txn, stm, self, distinct.as_mut()).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -543,9 +548,19 @@ impl Iterator {
 					// Process all prepared values
 					for v in vals {
 						// Distinct is passed only for iterators that really requires it
-						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone(), distinct.clone()))
-							// Ensure we detach the spawned task
-							.detach();
+						let chn_clone = chn.clone();
+						let distinct_clone = distinct.clone();
+						e.spawn(async move {
+							let mut stack = TreeStack::new();
+							stack
+								.enter(|stk| {
+									v.channel(stk, ctx, opt, txn, stm, chn_clone, distinct_clone)
+								})
+								.finish()
+								.await
+						})
+						// Ensure we detach the spawned task
+						.detach();
 					}
 					// Drop the uncloned channel instance
 					drop(chn);
@@ -556,9 +571,18 @@ impl Iterator {
 				let avals = async {
 					// Process all received values
 					while let Ok(pro) = docs.recv().await {
-						e.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), pro))
-							// Ensure we detach the spawned task
-							.detach();
+						let chn_clone = chn.clone();
+						e.spawn(async move {
+							let mut stack = TreeStack::new();
+							stack
+								.enter(|stk| {
+									Document::compute(stk, ctx, opt, txn, stm, chn_clone, pro)
+								})
+								.finish()
+								.await
+						})
+						// Ensure we detach the spawned task
+						.detach();
 					}
 					// Drop the uncloned channel instance
 					drop(chn);
@@ -567,7 +591,7 @@ impl Iterator {
 				let aproc = async {
 					// Process all processed values
 					while let Ok(r) = vals.recv().await {
-						self.result(ctx, opt, txn, stm, r).await;
+						self.result(stk, ctx, opt, txn, stm, r).await;
 					}
 					// Shutdown the executor
 					let _ = end.send(()).await;
@@ -587,6 +611,7 @@ impl Iterator {
 	/// Process a new record Thing and Value
 	pub async fn process(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -594,14 +619,15 @@ impl Iterator {
 		pro: Processed,
 	) {
 		// Process the document
-		let res = Document::process(ctx, opt, txn, stm, pro).await;
+		let res = stk.run(|stk| Document::process(stk, ctx, opt, txn, stm, pro)).await;
 		// Process the result
-		self.result(ctx, opt, txn, stm, res).await;
+		self.result(stk, ctx, opt, txn, stm, res).await;
 	}
 
 	/// Accept a processed record result
 	async fn result(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -619,7 +645,7 @@ impl Iterator {
 				return;
 			}
 			Ok(v) => {
-				if let Err(e) = self.results.push(ctx, opt, txn, stm, v).await {
+				if let Err(e) = self.results.push(stk, ctx, opt, txn, stm, v).await {
 					self.error = Some(e);
 					self.run.cancel();
 					return;

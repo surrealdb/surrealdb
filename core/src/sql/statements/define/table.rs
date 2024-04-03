@@ -1,3 +1,4 @@
+use super::DefineFieldStatement;
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
@@ -9,15 +10,13 @@ use crate::sql::{
 	statements::UpdateStatement,
 	Base, Ident, Permissions, Strand, Value, Values, View,
 };
-use std::sync::Arc;
-
 use crate::sql::{Idiom, Kind, Part, Table, TableType};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-
-use super::DefineFieldStatement;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -40,6 +39,7 @@ pub struct DefineTableStatement {
 impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -129,7 +129,7 @@ impl DefineTableStatement {
 					what: Values(vec![Value::Table(v.clone())]),
 					..UpdateStatement::default()
 				};
-				stm.compute(ctx, opt, txn, doc).await?;
+				stm.compute(stk, ctx, opt, txn, doc).await?;
 			}
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);

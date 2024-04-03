@@ -64,7 +64,7 @@ impl<'a> Document<'a> {
 					Index::Uniq => ic.index_unique(txn).await?,
 					Index::Idx => ic.index_non_unique(txn).await?,
 					Index::Search(p) => ic.index_full_text(stk, ctx, txn, p).await?,
-					Index::MTree(p) => ic.index_mtree(ctx, txn, p).await?,
+					Index::MTree(p) => ic.index_mtree(stk, ctx, txn, p).await?,
 				};
 			}
 		}
@@ -387,6 +387,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		txn: &Transaction,
 		p: &MTreeParams,
@@ -398,11 +399,11 @@ impl<'a> IndexOperation<'a> {
 				.await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			mt.remove_document(&mut tx, self.rid, o).await?;
+			mt.remove_document(stk, &mut tx, self.rid, o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			mt.index_document(&mut tx, self.rid, n).await?;
+			mt.index_document(stk, &mut tx, self.rid, n).await?;
 		}
 		mt.finish(&mut tx).await
 	}

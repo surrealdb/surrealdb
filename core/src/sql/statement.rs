@@ -143,7 +143,7 @@ impl Statement {
 			Self::Continue(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Create(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Delete(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Self::Define(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Define(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Foreach(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Ifelse(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Info(v) => v.compute(ctx, opt, txn, doc).await,

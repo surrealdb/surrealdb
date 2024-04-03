@@ -7,6 +7,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
 
+use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,7 @@ impl MTreeIndex {
 	}
 	pub(crate) async fn index_document(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		rid: &Thing,
 		content: Vec<Value>,
@@ -83,7 +85,7 @@ impl MTreeIndex {
 		for v in content {
 			// Extract the vector
 			let vector = self.extract_vector(v)?.into();
-			mtree.insert(tx, &mut self.store, vector, doc_id).await?;
+			mtree.insert(stk, tx, &mut self.store, vector, doc_id).await?;
 		}
 		Ok(())
 	}
@@ -152,6 +154,7 @@ impl MTreeIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		rid: &Thing,
 		content: Vec<Value>,
@@ -161,7 +164,7 @@ impl MTreeIndex {
 			for v in content {
 				// Extract the vector
 				let vector = self.extract_vector(v)?.into();
-				mtree.delete(tx, &mut self.store, vector, doc_id).await?;
+				mtree.delete(stk, tx, &mut self.store, vector, doc_id).await?;
 			}
 		}
 		Ok(())
@@ -385,6 +388,7 @@ impl MTree {
 
 	pub async fn insert(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		obj: SharedVector,
@@ -400,7 +404,7 @@ impl MTree {
 			let node = store.get_node_mut(tx, root_id).await?;
 			// Otherwise, we insert the object with possibly mutating the tree
 			if let InsertionResult::PromotedEntries(o1, p1, o2, p2) =
-				self.insert_at_node(tx, store, node, &None, obj, id).await?
+				self.insert_at_node(stk, tx, store, node, &None, obj, id).await?
 			{
 				self.create_new_internal_root(store, o1, p1, o2, p2).await?;
 			}
@@ -493,6 +497,7 @@ impl MTree {
 	/// Was marked recursive
 	async fn insert_at_node(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
@@ -510,6 +515,7 @@ impl MTree {
 			// Else
 			MTreeNode::Internal(n) => {
 				self.insert_node_internal(
+					stk,
 					tx,
 					store,
 					node.id,
@@ -527,6 +533,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_internal(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node_id: NodeId,
@@ -540,8 +547,13 @@ impl MTree {
 		let (best_entry_obj, mut best_entry) = self.find_closest(&node, &object)?;
 		let best_node = store.get_node_mut(tx, best_entry.node).await?;
 		// Insert(Oi, child(ObestSubstree), ObestSubtree);
-		match self
-			.insert_at_node(tx, store, best_node, &Some(best_entry_obj.clone()), object, doc_id)
+		let best_entry_obj_op = Some(best_entry_obj.clone());
+		let this = &mut *self;
+		match stk
+			.run(|stk| async {
+				this.insert_at_node(stk, tx, store, best_node, &best_entry_obj_op, object, doc_id)
+					.await
+			})
 			.await?
 		{
 			// If (entry returned)
@@ -834,6 +846,7 @@ impl MTree {
 
 	async fn delete(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		object: SharedVector,
@@ -843,7 +856,7 @@ impl MTree {
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(tx, store, root_node, &None, object, doc_id, &mut deleted)
+				.delete_at_node(stk, tx, store, root_node, &None, object, doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
@@ -879,6 +892,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_at_node(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
@@ -908,6 +922,7 @@ impl MTree {
 			// Else
 			MTreeNode::Internal(n) => {
 				self.delete_node_internal(
+					stk,
 					tx,
 					store,
 					node.id,
@@ -926,6 +941,7 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_node_internal(
 		&mut self,
+		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node_id: NodeId,
@@ -959,8 +975,20 @@ impl MTree {
 			let on_node = store.get_node_mut(tx, on_entry.node).await?;
 			#[cfg(debug_assertions)]
 			let d_id = on_node.id;
-			match self
-				.delete_at_node(tx, store, on_node, &Some(on_obj.clone()), od.clone(), id, deleted)
+			let on_obj_op = Some(on_obj.clone());
+			match stk
+				.run(|stk| {
+					self.delete_at_node(
+						stk,
+						tx,
+						store,
+						on_node,
+						&on_obj_op,
+						od.clone(),
+						id,
+						deleted,
+					)
+				})
 				.await?
 			{
 				DeletionResult::NotFound => {

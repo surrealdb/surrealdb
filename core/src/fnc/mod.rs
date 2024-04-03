@@ -53,7 +53,7 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		asynchronous(stk, ctx, Some(opt), Some(txn), doc, name, args).await
+		stk.run(|stk| asynchronous(stk, ctx, Some(opt), Some(txn), doc, name, args)).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -415,15 +415,15 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((ctx, txn, opt)).await,
+		"search::analyze" => search::analyze((stk,ctx, txn, opt)).await,
 		"search::score" => search::score((ctx, txn, doc)).await,
 		"search::highlight" => search::highlight((ctx,txn, doc)).await,
 		"search::offsets" => search::offsets((ctx, txn, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((ctx, opt, txn, doc)).await,
-		"type::fields" => r#type::fields((ctx, opt, txn, doc)).await,
+		"type::field" => r#type::field((stk,ctx, opt, txn, doc)).await,
+		"type::fields" => r#type::fields((stk,ctx, opt, txn, doc)).await,
 	)
 }
 

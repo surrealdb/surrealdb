@@ -39,15 +39,18 @@ impl Value {
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
 					Part::Field(f) if f.is_type() => {
-						Value::from(v.as_type()).get(stk, ctx, opt, txn, doc, path.next()).await
+						let v = Value::from(v.as_type());
+						stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
 					}
 					// If this is the 'coordinates' field then continue
 					Part::Field(f) if f.is_coordinates() && v.is_geometry() => {
-						v.as_coordinates().get(stk, ctx, opt, txn, doc, path.next()).await
+						let v = v.as_coordinates();
+						stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
 					}
 					// If this is the 'geometries' field then continue
 					Part::Field(f) if f.is_geometries() && v.is_collection() => {
-						v.as_coordinates().get(stk, ctx, opt, txn, doc, path.next()).await
+						let v = v.as_coordinates();
+						stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
 					}
 					// Otherwise return none
 					_ => Ok(Value::None),
@@ -65,7 +68,7 @@ impl Value {
 							// Get the future return value
 							let val = v.compute(stk, ctx, fut, txn, doc).await?;
 							// Fetch the embedded field
-							val.get(stk, ctx, opt, txn, doc, path).await
+							stk.run(|stk| val.get(stk, ctx, opt, txn, doc, path)).await
 						}
 					}
 				}
@@ -77,35 +80,46 @@ impl Value {
 							id: Id::Object(v),
 							..
 						})) => {
-							Value::Object(v.clone()).get(stk, ctx, opt, txn, doc, path.next()).await
+							let v = Value::Object(v.clone());
+							stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
 						}
 						Some(Value::Thing(Thing {
 							id: Id::Array(v),
 							..
-						})) => Value::Array(v.clone()).get(stk, ctx, opt, txn, doc, path.next()).await,
-						Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+						})) => {
+							let v = Value::Array(v.clone());
+							stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
+						}
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Graph(_) => match v.rid() {
-						Some(v) => Value::Thing(v).get(stk, ctx, opt, txn, doc, path).await,
+						Some(v) => {
+							let v = Value::Thing(v);
+							stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path)).await
+						}
 						None => Ok(Value::None),
 					},
 					Part::Field(f) => match v.get(f.as_str()) {
-						Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.get(&i.to_string()) {
-						Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Value(x) => match x.compute(stk, ctx, opt, txn, doc).await? {
 						Value::Strand(f) => match v.get(f.as_str()) {
-							Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+							Some(v) => {
+								stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
+							}
 							None => Ok(Value::None),
 						},
 						_ => Ok(Value::None),
 					},
-					Part::All => self.get(stk, ctx, opt, txn, doc, path.next()).await,
+					Part::All => {
+						stk.run(|stk| self.get(stk, ctx, opt, txn, doc, path.next())).await
+					}
 					_ => Ok(Value::None),
 				},
 				// Current value at path is an array
@@ -113,19 +127,25 @@ impl Value {
 					// Current path is an `*` part
 					Part::All | Part::Flatten => {
 						let path = path.next();
-						let futs = v.iter().map(|v| v.get(stk, ctx, opt, txn, doc, path));
-						try_join_all_buffered(futs).await.map(Into::into)
+						stk.scope(|scope| {
+							let futs = v
+								.iter()
+								.map(|v| scope.run(|stk| v.get(stk, ctx, opt, txn, doc, path)));
+							try_join_all_buffered(futs)
+						})
+						.await
+						.map(Into::into)
 					}
 					Part::First => match v.first() {
-						Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Last => match v.last() {
-						Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
 					Part::Where(w) => {
@@ -136,19 +156,27 @@ impl Value {
 								a.push(v.clone());
 							}
 						}
-						Value::from(a).get(stk, ctx, opt, txn, doc, path.next()).await
+						let v = Value::from(a);
+						stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
 					}
 					Part::Value(x) => match x.compute(stk, ctx, opt, txn, doc).await? {
 						Value::Number(i) => match v.get(i.to_usize()) {
-							Some(v) => v.get(stk, ctx, opt, txn, doc, path.next()).await,
+							Some(v) => {
+								stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
+							}
 							None => Ok(Value::None),
 						},
 						_ => Ok(Value::None),
 					},
-					_ => {
-						let futs = v.iter().map(|v| v.get(stk, ctx, opt, txn, doc, path));
-						try_join_all_buffered(futs).await.map(Into::into)
-					}
+					_ => stk
+						.scope(|scope| {
+							let futs = v
+								.iter()
+								.map(|v| scope.run(|stk| v.get(stk, ctx, opt, txn, doc, path)));
+							try_join_all_buffered(futs)
+						})
+						.await
+						.map(Into::into),
 				},
 				// Current value at path is an edges
 				Value::Edges(v) => {
@@ -165,11 +193,8 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							stm.compute(stk, ctx, opt, txn, None)
-								.await?
-								.first()
-								.get(stk, ctx, opt, txn, None, path)
-								.await
+							let v = stm.compute(stk, ctx, opt, txn, None).await?.first();
+							stk.run(|stk| v.get(stk, ctx, opt, txn, None, path)).await
 						}
 					}
 				}
@@ -196,22 +221,20 @@ impl Value {
 									..SelectStatement::default()
 								};
 								match path.len() {
-									1 => stm
-										.compute(stk, ctx, opt, txn, None)
-										.await?
-										.all()
-										.get(stk, ctx, opt, txn, None, ID.as_ref())
-										.await?
-										.flatten()
-										.ok(),
-									_ => stm
-										.compute(stk, ctx, opt, txn, None)
-										.await?
-										.all()
-										.get(stk, ctx, opt, txn, None, path.next())
-										.await?
-										.flatten()
-										.ok(),
+									1 => {
+										let v = stm.compute(stk, ctx, opt, txn, None).await?.all();
+										stk.run(|stk| v.get(stk, ctx, opt, txn, None, ID.as_ref()))
+											.await?
+											.flatten()
+											.ok()
+									}
+									_ => {
+										let v = stm.compute(stk, ctx, opt, txn, None).await?.all();
+										stk.run(|stk| v.get(stk, ctx, opt, txn, None, path.next()))
+											.await?
+											.flatten()
+											.ok()
+									}
 								}
 							}
 							// This is a remote field expression
@@ -221,18 +244,15 @@ impl Value {
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};
-								stm.compute(stk, ctx, opt, txn, None)
-									.await?
-									.first()
-									.get(stk, ctx, opt, txn, None, path)
-									.await
+								let v = stm.compute(stk, ctx, opt, txn, None).await?.first();
+								stk.run(|stk| v.get(stk, ctx, opt, txn, None, path)).await
 							}
 						},
 					}
 				}
 				v => {
 					if matches!(p, Part::Flatten) {
-						v.get(stk, ctx, opt, txn, None, path.next()).await
+						stk.run(|stk| v.get(stk, ctx, opt, txn, None, path.next())).await
 					} else {
 						// Ignore everything else
 						Ok(Value::None)

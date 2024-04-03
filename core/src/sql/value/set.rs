@@ -26,67 +26,81 @@ impl Value {
 				// Current value at path is an object
 				Value::Object(v) => match p {
 					Part::Graph(g) => match v.get_mut(g.to_raw().as_str()) {
-						Some(v) if v.is_some() => v.set(stk, ctx, opt, txn, path.next(), val).await,
+						Some(v) if v.is_some() => {
+							stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+						}
 						_ => {
 							let mut obj = Value::base();
-							obj.set(stk, ctx, opt, txn, path.next(), val).await?;
+							stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val)).await?;
 							v.insert(g.to_raw(), obj);
 							Ok(())
 						}
 					},
 					Part::Field(f) => match v.get_mut(f.as_str()) {
-						Some(v) if v.is_some() => v.set(stk, ctx, opt, txn, path.next(), val).await,
+						Some(v) if v.is_some() => {
+							stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+						}
 						_ => {
 							let mut obj = Value::base();
-							obj.set(stk, ctx, opt, txn, path.next(), val).await?;
+							stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val)).await?;
 							v.insert(f.to_raw(), obj);
 							Ok(())
 						}
 					},
 					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) if v.is_some() => v.set(stk, ctx, opt, txn, path.next(), val).await,
+						Some(v) if v.is_some() => {
+							stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+						}
 						_ => {
 							let mut obj = Value::base();
-							obj.set(stk, ctx, opt, txn, path.next(), val).await?;
+							stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val)).await?;
 							v.insert(i.to_string(), obj);
 							Ok(())
 						}
 					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, txn, None).await? {
-						Value::Strand(f) => match v.get_mut(f.as_str()) {
-							Some(v) if v.is_some() => {
-								v.set(stk, ctx, opt, txn, path.next(), val).await
-							}
-							_ => {
-								let mut obj = Value::base();
-								obj.set(stk, ctx, opt, txn, path.next(), val).await?;
-								v.insert(f.to_string(), obj);
-								Ok(())
-							}
-						},
-						_ => Ok(()),
-					},
+					Part::Value(x) => {
+						match stk.run(|stk| x.compute(stk, ctx, opt, txn, None)).await? {
+							Value::Strand(f) => match v.get_mut(f.as_str()) {
+								Some(v) if v.is_some() => {
+									stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+								}
+								_ => {
+									let mut obj = Value::base();
+									stk.run(|stk| obj.set(stk, ctx, opt, txn, path.next(), val))
+										.await?;
+									v.insert(f.to_string(), obj);
+									Ok(())
+								}
+							},
+							_ => Ok(()),
+						}
+					}
 					_ => Ok(()),
 				},
 				// Current value at path is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs =
-							v.iter_mut().map(|v| v.set(stk, ctx, opt, txn, path, val.clone()));
-						try_join_all_buffered(futs).await?;
+
+						stk.scope(|scope| {
+							let futs = v.iter_mut().map(|v| {
+								scope.run(|stk| v.set(stk, ctx, opt, txn, path, val.clone()))
+							});
+							try_join_all_buffered(futs)
+						})
+						.await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
-						Some(v) => v.set(stk, ctx, opt, txn, path.next(), val).await,
+						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await,
 						None => Ok(()),
 					},
 					Part::Last => match v.last_mut() {
-						Some(v) => v.set(stk, ctx, opt, txn, path.next(), val).await,
+						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => v.set(stk, ctx, opt, txn, path.next(), val).await,
+						Some(v) => stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await,
 						None => Ok(()),
 					},
 					Part::Where(w) => match path.next().first() {
@@ -104,7 +118,8 @@ impl Value {
 							// Convert the matched elements array to a value
 							let mut a = Value::from(a);
 							// Set the new value on the matches elements
-							a.set(stk, ctx, opt, txn, path.next(), val.clone()).await?;
+							stk.run(|stk| a.set(stk, ctx, opt, txn, path.next(), val.clone()))
+								.await?;
 							// Push the new values into the original array
 							for (i, p) in p.into_iter().enumerate() {
 								v[p] = a.pick(&[Part::Index(i.into())]);
@@ -116,7 +131,8 @@ impl Value {
 							for v in v.iter_mut() {
 								let cur = v.into();
 								if w.compute(stk, ctx, opt, txn, Some(&cur)).await?.is_truthy() {
-									v.set(stk, ctx, opt, txn, path, val.clone()).await?;
+									stk.run(|stk| v.set(stk, ctx, opt, txn, path, val.clone()))
+										.await?;
 								}
 							}
 							Ok(())
@@ -124,27 +140,34 @@ impl Value {
 					},
 					Part::Value(x) => match x.compute(stk, ctx, opt, txn, None).await? {
 						Value::Number(i) => match v.get_mut(i.to_usize()) {
-							Some(v) => v.set(stk, ctx, opt, txn, path.next(), val).await,
+							Some(v) => {
+								stk.run(|stk| v.set(stk, ctx, opt, txn, path.next(), val)).await
+							}
 							None => Ok(()),
 						},
 						_ => Ok(()),
 					},
 					_ => {
-						let futs =
-							v.iter_mut().map(|v| v.set(stk, ctx, opt, txn, path, val.clone()));
-						try_join_all_buffered(futs).await?;
+						stk.scope(|scope| {
+							let futs = v.iter_mut().map(|v| {
+								scope.run(|stk| v.set(stk, ctx, opt, txn, path, val.clone()))
+							});
+							try_join_all_buffered(futs)
+						})
+						.await?;
+
 						Ok(())
 					}
 				},
 				// Current value at path is empty
 				Value::Null => {
 					*self = Value::base();
-					self.set(stk, ctx, opt, txn, path, val).await
+					stk.run(|stk| self.set(stk, ctx, opt, txn, path, val)).await
 				}
 				// Current value at path is empty
 				Value::None => {
 					*self = Value::base();
-					self.set(stk, ctx, opt, txn, path, val).await
+					stk.run(|stk| self.set(stk, ctx, opt, txn, path, val)).await
 				}
 				// Ignore everything else
 				_ => Ok(()),

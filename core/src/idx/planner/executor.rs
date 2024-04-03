@@ -24,6 +24,7 @@ use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
+use reblessive::tree::Stk;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -76,6 +77,7 @@ impl IteratorEntry {
 }
 impl InnerQueryExecutor {
 	pub(super) async fn new(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -100,7 +102,7 @@ impl InnerQueryExecutor {
 						let mut ft_entry = None;
 						if let Some(ft) = ft_map.get(&ix_ref) {
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(ctx, opt, txn, ft, io).await?;
+								ft_entry = FtEntry::new(stk, ctx, opt, txn, ft, io).await?;
 							}
 						} else {
 							let ikb = IndexKeyBase::new(opt, idx_def);
@@ -115,7 +117,7 @@ impl InnerQueryExecutor {
 							)
 							.await?;
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(ctx, opt, txn, &ft, io).await?;
+								ft_entry = FtEntry::new(stk, ctx, opt, txn, &ft, io).await?;
 							}
 							ft_map.insert(ix_ref, ft);
 						}
@@ -183,6 +185,7 @@ impl InnerQueryExecutor {
 impl QueryExecutor {
 	pub(crate) async fn knn(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -203,7 +206,7 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_entries.get(exp) {
-				let v: Vec<Number> = id.compute(ctx, opt, txn, doc).await?.try_into()?;
+				let v: Vec<Number> = id.compute(stk, ctx, opt, txn, doc).await?.try_into()?;
 				let dist = dist.compute(&v, val.as_ref())?;
 				p.add(dist, thg).await;
 			}
@@ -515,6 +518,7 @@ struct Inner {
 
 impl FtEntry {
 	async fn new(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -522,7 +526,7 @@ impl FtEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
-			let terms = ft.extract_terms(ctx, opt, txn, qs.to_owned()).await?;
+			let terms = ft.extract_terms(stk, ctx, opt, txn, qs.to_owned()).await?;
 			let mut tx = txn.lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms).await?);
 			Ok(Some(Self(Arc::new(Inner {

@@ -13,11 +13,13 @@ use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
+use reblessive::tree::Stk;
 use std::ops::Bound;
 
 impl Iterable {
 	pub(crate) async fn iterate(
 		self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -26,7 +28,7 @@ impl Iterable {
 		dis: Option<&mut SyncDistinct>,
 	) -> Result<(), Error> {
 		if self.iteration_stage_check(ctx) {
-			Processor::Iterator(dis, ite).process_iterable(ctx, opt, txn, stm, self).await
+			Processor::Iterator(dis, ite).process_iterable(stk, ctx, opt, txn, stm, self).await
 		} else {
 			Ok(())
 		}
@@ -35,6 +37,7 @@ impl Iterable {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) async fn channel(
 		self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -43,7 +46,7 @@ impl Iterable {
 		dis: Option<AsyncDistinct>,
 	) -> Result<(), Error> {
 		if self.iteration_stage_check(ctx) {
-			Processor::Channel(dis, chn).process_iterable(ctx, opt, txn, stm, self).await
+			Processor::Channel(dis, chn).process_iterable(stk, ctx, opt, txn, stm, self).await
 		} else {
 			Ok(())
 		}
@@ -75,6 +78,7 @@ enum Processor<'a> {
 impl<'a> Processor<'a> {
 	async fn process(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -89,7 +93,7 @@ impl<'a> Processor<'a> {
 					false
 				};
 				if !is_processed {
-					ite.process(ctx, opt, txn, stm, pro).await;
+					ite.process(stk, ctx, opt, txn, stm, pro).await;
 				}
 			}
 			#[cfg(not(target_arch = "wasm32"))]
@@ -109,6 +113,7 @@ impl<'a> Processor<'a> {
 
 	async fn process_iterable(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -117,9 +122,9 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match iterable {
-				Iterable::Value(v) => self.process_value(ctx, opt, txn, stm, v).await?,
-				Iterable::Thing(v) => self.process_thing(ctx, opt, txn, stm, v).await?,
-				Iterable::Defer(v) => self.process_defer(ctx, opt, txn, stm, v).await?,
+				Iterable::Value(v) => self.process_value(stk, ctx, opt, txn, stm, v).await?,
+				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, txn, stm, v).await?,
+				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, txn, stm, v).await?,
 				Iterable::Table(v) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
@@ -127,13 +132,13 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_table(&ctx, opt, txn, stm, v).await;
+							return self.process_table(stk, &ctx, opt, txn, stm, v).await;
 						}
 					}
-					self.process_table(ctx, opt, txn, stm, v).await?
+					self.process_table(stk, ctx, opt, txn, stm, v).await?
 				}
-				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
-				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
+				Iterable::Range(v) => self.process_range(stk, ctx, opt, txn, stm, v).await?,
+				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, txn, stm, e).await?,
 				Iterable::Index(t, ir) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&t.0) {
@@ -141,16 +146,16 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_index(&ctx, opt, txn, stm, t, ir).await;
+							return self.process_index(stk, &ctx, opt, txn, stm, t, ir).await;
 						}
 					}
-					self.process_index(ctx, opt, txn, stm, t, ir).await?
+					self.process_index(stk, ctx, opt, txn, stm, t, ir).await?
 				}
 				Iterable::Mergeable(v, o) => {
-					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
+					self.process_mergeable(stk, ctx, opt, txn, stm, v, o).await?
 				}
 				Iterable::Relatable(f, v, w) => {
-					self.process_relatable(ctx, opt, txn, stm, f, v, w).await?
+					self.process_relatable(stk, ctx, opt, txn, stm, f, v, w).await?
 				}
 			}
 		}
@@ -159,6 +164,7 @@ impl<'a> Processor<'a> {
 
 	async fn process_value(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -173,11 +179,12 @@ impl<'a> Processor<'a> {
 			val: Operable::Value(v),
 		};
 		// Process the document record
-		self.process(ctx, opt, txn, stm, pro).await
+		self.process(stk, ctx, opt, txn, stm, pro).await
 	}
 
 	async fn process_thing(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -201,13 +208,14 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
 
 	async fn process_defer(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -223,13 +231,14 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val: Operable::Value(Value::None),
 		};
-		self.process(ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
 
 	async fn process_mergeable(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -256,7 +265,7 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -264,6 +273,7 @@ impl<'a> Processor<'a> {
 	#[allow(clippy::too_many_arguments)]
 	async fn process_relatable(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -291,13 +301,14 @@ impl<'a> Processor<'a> {
 			doc_id: None,
 			val,
 		};
-		self.process(ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, txn, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
 
 	async fn process_table(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -343,7 +354,7 @@ impl<'a> Processor<'a> {
 					doc_id: None,
 					val,
 				};
-				self.process(ctx, opt, txn, stm, pro).await?;
+				self.process(stk, ctx, opt, txn, stm, pro).await?;
 			}
 			continue;
 		}
@@ -353,6 +364,7 @@ impl<'a> Processor<'a> {
 
 	async fn process_range(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -415,7 +427,7 @@ impl<'a> Processor<'a> {
 					doc_id: None,
 					val,
 				};
-				self.process(ctx, opt, txn, stm, pro).await?;
+				self.process(stk, ctx, opt, txn, stm, pro).await?;
 			}
 			continue;
 		}
@@ -425,6 +437,7 @@ impl<'a> Processor<'a> {
 
 	async fn process_edge(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -540,7 +553,7 @@ impl<'a> Processor<'a> {
 						doc_id: None,
 						val,
 					};
-					self.process(ctx, opt, txn, stm, pro).await?;
+					self.process(stk, ctx, opt, txn, stm, pro).await?;
 				}
 				continue;
 			}
@@ -552,6 +565,7 @@ impl<'a> Processor<'a> {
 	#[allow(clippy::too_many_arguments)]
 	async fn process_index(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -597,7 +611,7 @@ impl<'a> Processor<'a> {
 							doc_id,
 							val,
 						};
-						self.process(ctx, opt, txn, stm, pro).await?;
+						self.process(stk, ctx, opt, txn, stm, pro).await?;
 					}
 
 					// Collect the next batch of ids

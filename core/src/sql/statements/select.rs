@@ -73,7 +73,7 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new(opt, &self.with, &self.cond);
 		// Used for ONLY: is the limit 1?
 		let limit_is_one_or_zero = match &self.limit {
-			Some(l) => l.process(ctx, opt, txn, doc).await? <= 1,
+			Some(l) => l.process(stk, ctx, opt, txn, doc).await? <= 1,
 			_ => false,
 		};
 		// Fail for multiple targets without a limit
@@ -89,7 +89,7 @@ impl SelectStatement {
 						return Err(Error::SingleOnlyOutput);
 					}
 
-					planner.add_iterables(ctx, txn, t, &mut i).await?;
+					planner.add_iterables(stk, ctx, txn, t, &mut i).await?;
 				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => {
@@ -123,7 +123,7 @@ impl SelectStatement {
 					for v in v {
 						match v {
 							Value::Table(t) => {
-								planner.add_iterables(ctx, txn, t, &mut i).await?;
+								planner.add_iterables(stk, ctx, txn, t, &mut i).await?;
 							}
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),

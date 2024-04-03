@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::number::Number;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -16,12 +17,13 @@ pub struct Start(pub Value);
 impl Start {
 	pub(crate) async fn process(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<usize, Error> {
-		match self.0.compute(ctx, opt, txn, doc).await {
+		match self.0.compute(stk, ctx, opt, txn, doc).await {
 			// This is a valid starting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as usize),
 			// An invalid value was specified

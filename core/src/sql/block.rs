@@ -97,7 +97,7 @@ impl Block {
 					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Define(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, txn, doc).await?;
 				}
 				Entry::Remove(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;

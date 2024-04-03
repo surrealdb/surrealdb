@@ -43,35 +43,54 @@ impl ForeachStatement {
 					let mut ctx = Context::new(ctx);
 					// Set the current parameter
 					let key = self.param.0.to_raw();
-					let val = v.compute(stk, &ctx, opt, txn, doc).await?;
+					let val = stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await?;
 					ctx.add_value(key, val);
 					// Loop over the code block statements
 					for v in self.block.iter() {
 						// Compute each block entry
 						let res = match v {
 							Entry::Set(v) => {
-								let val = v.compute(stk, &ctx, opt, txn, doc).await?;
+								let val =
+									stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await?;
 								ctx.add_value(v.name.to_owned(), val);
 								Ok(Value::None)
 							}
-							Entry::Value(v) => v.compute(stk, &ctx, opt, txn, doc).await,
+							Entry::Value(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
 							Entry::Break(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Continue(v) => v.compute(&ctx, opt, txn, doc).await,
-							Entry::Foreach(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Ifelse(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Select(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Create(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Update(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Delete(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Relate(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Insert(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Define(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Foreach(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Ifelse(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Select(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Create(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Update(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Delete(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Relate(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Insert(v) => {
+								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+							}
+							Entry::Define(v) => v.compute(stk, &ctx, opt, txn, doc).await,
 							Entry::Remove(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Output(v) => {
-								return v.compute(stk, &ctx, opt, txn, doc).await;
+								return stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await;
 							}
 							Entry::Throw(v) => {
-								return v.compute(stk, &ctx, opt, txn, doc).await;
+								return stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await;
 							}
 						};
 						// Catch any special errors

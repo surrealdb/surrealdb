@@ -32,7 +32,7 @@ impl Cast {
 }
 
 impl Cast {
-	/// Used recursively
+	/// Was marked recursively
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -42,7 +42,7 @@ impl Cast {
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
-		self.1.compute(stk, ctx, opt, txn, doc).await?.convert_to(&self.0)
+		stk.run(|stk| self.1.compute(stk, ctx, opt, txn, doc)).await?.convert_to(&self.0)
 	}
 }
 

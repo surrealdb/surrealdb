@@ -313,8 +313,9 @@ impl<'a> Executor<'a> {
 						// The transaction began successfully
 						false => {
 							// Check the statement
+							let txn = self.txn();
 							match stack
-								.enter(|stk| stm.compute(stk, &ctx, &opt, &self.txn(), None))
+								.enter(|stk| stm.compute(stk, &ctx, &opt, &txn, None))
 								.finish()
 								.await
 							{
@@ -384,10 +385,11 @@ impl<'a> Executor<'a> {
 										if let Err(err) = ctx.add_timeout(timeout) {
 											Err(err)
 										} else {
+											let txn = self.txn();
 											// Process the statement
 											let res = stack
 												.enter(|stk| {
-													stm.compute(stk, &ctx, &opt, &self.txn(), None)
+													stm.compute(stk, &ctx, &opt, &txn, None)
 												})
 												.finish()
 												.await;
@@ -400,10 +402,9 @@ impl<'a> Executor<'a> {
 									}
 									// There is no timeout clause
 									None => {
+										let txn = self.txn();
 										stack
-											.enter(|stk| {
-												stm.compute(stk, &ctx, &opt, &self.txn(), None)
-											})
+											.enter(|stk| stm.compute(stk, &ctx, &opt, &txn, None))
 											.finish()
 											.await
 									}

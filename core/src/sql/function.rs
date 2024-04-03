@@ -190,7 +190,7 @@ impl Function {
 				let a = stk
 					.scope(|scope| {
 						try_join_all(
-							x.iter().map(|v| stk.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
 						)
 					})
 					.await?;
@@ -224,7 +224,8 @@ impl Function {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Process the PERMISSION clause
-							if !e.compute(stk, ctx, opt, txn, doc).await?.is_truthy() {
+							if !stk.run(|stk| e.compute(stk, ctx, opt, txn, doc)).await?.is_truthy()
+							{
 								return Err(Error::FunctionPermissions {
 									name: s.to_owned(),
 								});
@@ -253,7 +254,13 @@ impl Function {
 					});
 				}
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(stk, ctx, opt, txn, doc))).await?;
+				let a = stk
+					.scope(|scope| {
+						try_join_all(
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+						)
+					})
+					.await?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
@@ -261,7 +268,7 @@ impl Function {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
 				}
 				// Run the custom function
-				val.block.compute(stk, &ctx, opt, txn, doc).await
+				stk.run(|stk| val.block.compute(stk, &ctx, opt, txn, doc)).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
@@ -270,8 +277,14 @@ impl Function {
 					// Check if scripting is allowed
 					ctx.check_allowed_scripting()?;
 					// Compute the function arguments
-					let a =
-						try_join_all(x.iter().map(|v| v.compute(stk, ctx, opt, txn, doc))).await?;
+					let a = stk
+						.scope(|scope| {
+							try_join_all(
+								x.iter()
+									.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+							)
+						})
+						.await?;
 					// Run the script function
 					fnc::script::run(ctx, opt, txn, doc, s, a).await
 				}

@@ -7,6 +7,7 @@ use crate::sql::statements::{
 	OutputStatement, RelateStatement, RemoveStatement, SelectStatement, UpdateStatement,
 };
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -60,6 +61,7 @@ impl Subquery {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -73,17 +75,17 @@ impl Subquery {
 		}
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Ifelse(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Output(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Define(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Value(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Ifelse(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Output(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Define(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
 			Self::Remove(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Select(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Create(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Update(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Delete(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Relate(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Insert(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Select(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Create(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Update(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Delete(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Relate(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Insert(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
 		}
 	}
 }

@@ -26,9 +26,9 @@ impl Tree {
 		cond: &Option<Cond>,
 		with: &Option<With>,
 	) -> Result<Option<(Node, IndexesMap, Vec<IndexRef>, KnnExpressions)>, Error> {
-		let mut b = TreeBuilder::new(stk, ctx, opt, txn, table, with);
+		let mut b = TreeBuilder::new(ctx, opt, txn, table, with);
 		if let Some(cond) = cond {
-			let node = b.eval_value(&cond.0).await?;
+			let node = b.eval_value(stk, &cond.0).await?;
 			Ok(Some((node, b.index_map, b.with_indexes, b.knn_expressions)))
 		} else {
 			Ok(None)
@@ -37,7 +37,6 @@ impl Tree {
 }
 
 struct TreeBuilder<'a> {
-	stk: &'a mut Stk,
 	ctx: &'a Context<'a>,
 	opt: &'a Options,
 	txn: &'a Transaction,
@@ -54,7 +53,6 @@ struct TreeBuilder<'a> {
 
 impl<'a> TreeBuilder<'a> {
 	fn new(
-		stk: &'a mut Stk,
 		ctx: &'a Context<'_>,
 		opt: &'a Options,
 		txn: &'a Transaction,
@@ -66,7 +64,6 @@ impl<'a> TreeBuilder<'a> {
 			_ => vec![],
 		};
 		Self {
-			stk,
 			ctx,
 			opt,
 			txn,
@@ -96,10 +93,10 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	/// Was marked recursive
-	async fn eval_value(&mut self, v: &Value) -> Result<Node, Error> {
+	async fn eval_value(&mut self, stk: &mut Stk, v: &Value) -> Result<Node, Error> {
 		match v {
-			Value::Expression(e) => self.eval_expression(e).await,
-			Value::Idiom(i) => self.eval_idiom(i).await,
+			Value::Expression(e) => self.eval_expression(stk, e).await,
+			Value::Idiom(i) => self.eval_idiom(stk, i).await,
 			Value::Strand(_)
 			| Value::Number(_)
 			| Value::Bool(_)
@@ -109,25 +106,25 @@ impl<'a> TreeBuilder<'a> {
 			| Value::Constant(_)
 			| Value::Geometry(_)
 			| Value::Datetime(_) => Ok(Node::Computed(Arc::new(v.to_owned()))),
-			Value::Array(a) => self.eval_array(a).await,
-			Value::Subquery(s) => self.eval_subquery(s).await,
+			Value::Array(a) => self.eval_array(stk, a).await,
+			Value::Subquery(s) => self.eval_subquery(stk, s).await,
 			Value::Param(p) => {
-				let v = p.compute(self.stk, self.ctx, self.opt, self.txn, None).await?;
-				self.eval_value(&v).await
+				let v = stk.run(|stk| p.compute(stk, self.ctx, self.opt, self.txn, None)).await?;
+				stk.run(|stk| self.eval_value(stk, &v)).await
 			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
 	}
 
-	async fn eval_array(&mut self, a: &Array) -> Result<Node, Error> {
+	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node, Error> {
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			values.push(v.compute(self.stk, self.ctx, self.opt, self.txn, None).await?);
+			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, self.txn, None)).await?);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
 
-	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
+	async fn eval_idiom(&mut self, stk: &mut Stk, i: &Idiom) -> Result<Node, Error> {
 		// Check if the idiom has already been resolved
 		if let Some(i) = self.resolved_idioms.get(i) {
 			if let Some(Some(irs)) = self.idioms_indexes.get(i).cloned() {
@@ -139,8 +136,8 @@ impl<'a> TreeBuilder<'a> {
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
-				let v = i.compute(self.stk, self.ctx, self.opt, self.txn, None).await?;
-				return self.eval_value(&v).await;
+				let v = stk.run(|stk| i.compute(stk, self.ctx, self.opt, self.txn, None)).await?;
+				return stk.run(|stk| self.eval_value(stk, &v)).await;
 			}
 		}
 
@@ -182,7 +179,7 @@ impl<'a> TreeBuilder<'a> {
 		res
 	}
 
-	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
+	async fn eval_expression(&mut self, stk: &mut Stk, e: &Expression) -> Result<Node, Error> {
 		match e {
 			Expression::Unary {
 				..
@@ -197,8 +194,8 @@ impl<'a> TreeBuilder<'a> {
 					return Ok(re.into());
 				}
 				let exp = Arc::new(e.clone());
-				let left = Arc::new(self.eval_value(l).await?);
-				let right = Arc::new(self.eval_value(r).await?);
+				let left = Arc::new(stk.run(|stk| self.eval_value(stk, l)).await?);
+				let right = Arc::new(stk.run(|stk| self.eval_value(stk, r)).await?);
 				let mut io = None;
 				if let Some((id, irs)) = left.is_indexed_field() {
 					io = self.lookup_index_option(
@@ -339,9 +336,9 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
-	async fn eval_subquery(&mut self, s: &Subquery) -> Result<Node, Error> {
+	async fn eval_subquery(&mut self, stk: &mut Stk, s: &Subquery) -> Result<Node, Error> {
 		match s {
-			Subquery::Value(v) => self.eval_value(v).await,
+			Subquery::Value(v) => stk.run(|stk| self.eval_value(stk, v)).await,
 			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
 		}
 	}

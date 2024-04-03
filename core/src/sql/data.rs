@@ -5,6 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -35,6 +36,7 @@ impl Data {
 	/// Fetch the 'id' field if one has been specified
 	pub(crate) async fn rid(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -42,20 +44,20 @@ impl Data {
 		match self {
 			Self::MergeExpression(v) => {
 				// This MERGE expression has an 'id' field
-				Ok(v.compute(ctx, opt, txn, None).await?.rid().some())
+				Ok(v.compute(stk, ctx, opt, txn, None).await?.rid().some())
 			}
 			Self::ReplaceExpression(v) => {
 				// This REPLACE expression has an 'id' field
-				Ok(v.compute(ctx, opt, txn, None).await?.rid().some())
+				Ok(v.compute(stk, ctx, opt, txn, None).await?.rid().some())
 			}
 			Self::ContentExpression(v) => {
 				// This CONTENT expression has an 'id' field
-				Ok(v.compute(ctx, opt, txn, None).await?.rid().some())
+				Ok(v.compute(stk, ctx, opt, txn, None).await?.rid().some())
 			}
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
 				Some((_, _, v)) => {
 					// This SET expression has an 'id' field
-					Ok(v.compute(ctx, opt, txn, None).await?.some())
+					Ok(v.compute(stk, ctx, opt, txn, None).await?.some())
 				}
 				// This SET expression had no 'id' field
 				_ => Ok(None),

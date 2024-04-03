@@ -5,6 +5,7 @@ use crate::dbs::store::StoreCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
 use crate::sql::Value;
+use reblessive::tree::Stk;
 use std::cmp::Ordering;
 use std::slice::IterMut;
 
@@ -30,6 +31,7 @@ impl Results {
 	}
 	pub(super) async fn push(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -42,7 +44,7 @@ impl Results {
 				s.push(val);
 			}
 			Results::Groups(g) => {
-				g.push(ctx, opt, txn, stm, val).await?;
+				g.push(stk, ctx, opt, txn, stm, val).await?;
 			}
 		}
 		Ok(())
@@ -78,6 +80,7 @@ impl Results {
 
 	pub(super) async fn group(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -86,7 +89,7 @@ impl Results {
 		Ok(match self {
 			Self::None => Self::None,
 			Self::Store(s) => Self::Store(s.take_store()),
-			Self::Groups(g) => Self::Store(g.output(ctx, opt, txn, stm).await?),
+			Self::Groups(g) => Self::Store(stk.run(|stk| g.output(stk, ctx, opt, txn, stm)).await?),
 		})
 	}
 
