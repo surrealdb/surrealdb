@@ -112,7 +112,7 @@ impl TryFrom<Cbor> for Value {
 						_ => Err("Expected a CBOR byte array with 16 elements"),
 					},
 					// A literal decimal
-					TAG_DECIMAL => match *v {
+					TAG_STRING_DECIMAL => match *v {
 						Data::Text(v) => match Number::try_from(v) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
@@ -320,7 +320,7 @@ impl TryFrom<Value> for Cbor {
 				Number::Int(v) => Ok(Cbor(Data::Integer(v.into()))),
 				Number::Float(v) => Ok(Cbor(Data::Float(v))),
 				Number::Decimal(v) => {
-					Ok(Cbor(Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.to_string())))))
+					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
 				}
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
@@ -400,8 +400,8 @@ fn encode_geometry(v: Geometry) -> Data {
 		Geometry::Point(v) => Data::Tag(
 			TAG_GEOMETRY_POINT,
 			Box::new(Data::Array(vec![
-				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
-				Data::Tag(TAG_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
+				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
+				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
 			])),
 		),
 		Geometry::Line(v) => {
