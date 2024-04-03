@@ -5703,6 +5703,42 @@ async fn function_type_thing() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_type_range() -> Result<(), Error> {
+	let sql = r#"
+		RETURN type::range('person');
+		RETURN type::range('person',1);
+		RETURN type::range('person',null,10);
+		RETURN type::range('person',1,10);
+		RETURN type::range('person',1,10, { begin: "excluded", end: "included"});
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:..");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:1..");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:..10");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:1..10");
+	assert_eq!(tmp, val);
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("person:1>..=10");
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_vector_add() -> Result<(), Error> {
 	test_queries(
 		r#"
