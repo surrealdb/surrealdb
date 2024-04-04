@@ -181,6 +181,7 @@ pub async fn init(
 		// Complete the request
 		match sql::parse(&line) {
 			Ok(query) => {
+				println!("{query:?}\n");
 				let mut namespace = None;
 				let mut database = None;
 				let mut vars = Vec::new();

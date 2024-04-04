@@ -1,5 +1,7 @@
 use reblessive::Stk;
 
+use crate::syn::v2::parser::mac::unexpected;
+use crate::syn::v2::parser::ParseError;
 use crate::{
 	sql::{statements::InsertStatement, Data, Value},
 	syn::v2::{
@@ -13,23 +15,57 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<InsertStatement> {
-		let ignore = self.eat(t!("IGNORE"));
-		expected!(self, t!("INTO"));
-		let next = self.next();
-		// TODO: Explain that more complicated expressions are not allowed here.
-		let into = match next.kind {
-			t!("$param") => {
-				let param = self.token_value(next)?;
-				Value::Param(param)
+		let mut ignore = false;
+		let mut relation = false;
+
+		for _ in 0..2 {
+			match self.peek_kind() {
+				t!("RELATION") => {
+					if relation {
+						break;
+					}
+					self.pop_peek();
+					relation = true;
+				}
+				t!("IGNORE") => {
+					if ignore {
+						break;
+					}
+					self.pop_peek();
+					ignore = true;
+				}
+				_ => {
+					break;
+				}
 			}
-			_ => {
-				let table = self.token_value(next)?;
-				Value::Table(table)
+		}
+
+		let into = if self.peek_kind() == t!("INTO") {
+			self.pop_peek();
+			let next = self.next();
+			match next.kind {
+				t!("$param") => {
+					let param = self.token_value(next)?;
+					Value::Param(param)
+				}
+				_ => {
+					let table = self.token_value(next)?;
+					Value::Table(table)
+				}
 			}
+		} else {
+			if !relation {
+				// TODO: This should always error, and there's probably a better way to do this
+				expected!(self, t!("INTO"));
+			}
+			Value::None
 		};
 
 		let data = match self.peek_kind() {
 			t!("(") => {
+				if relation {
+					unexpected!(self, t!("("), "an array of relations");
+				}
 				let start = self.pop_peek().span;
 				let fields = self.parse_idiom_list(ctx).await?;
 				self.expect_closing_delimiter(t!(")"), start)?;
@@ -82,6 +118,7 @@ impl Parser<'_> {
 			output,
 			timeout,
 			parallel,
+			relation: false,
 		})
 	}
 

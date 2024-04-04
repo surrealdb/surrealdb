@@ -10,7 +10,7 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct InsertStatement {
 	pub into: Value,
@@ -20,6 +20,8 @@ pub struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
+	#[revision(start = 2)]
+	pub relation: bool,
 }
 
 impl InsertStatement {

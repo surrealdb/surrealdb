@@ -85,6 +85,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
+		// Check if table has correct relation status
+		self.relation(ctx, opt, txn, stm).await?;
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
 		// Alter record data
