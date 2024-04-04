@@ -126,6 +126,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check fuzzers
+        env:
+          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo build --manifest-path lib/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
