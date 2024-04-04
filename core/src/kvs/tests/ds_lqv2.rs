@@ -60,7 +60,7 @@ mod test_check_lqs_and_send_notifications {
 	use crate::kvs::droppy_boy::DroppyBoy;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
-	use crate::sql::statements::{CreateStatement, LiveStatement};
+	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{parse, Fields, Object, Strand, Table, Thing, Value, Values};
 	use channel::Sender;
 	use futures::executor::block_on;
@@ -119,7 +119,7 @@ mod test_check_lqs_and_send_notifications {
 	}
 
 	#[test_log::test(tokio::test)]
-	async fn test_send_notification() {
+	async fn test_create() {
 		if !FFLAGS.change_feed_live_queries.enabled_test {
 			return;
 		}
@@ -162,6 +162,50 @@ mod test_check_lqs_and_send_notifications {
 		assert!(receiver.try_recv().is_err());
 	}
 
+	#[test_log::test(tokio::test)]
+	async fn test_delete() {
+		if !FFLAGS.change_feed_live_queries.enabled_test {
+			return;
+		}
+
+		// Setup channels used for listening to LQs
+		let (sender, receiver) = channel::unbounded();
+		let opt = a_usable_options(&sender);
+		let tx = SETUP
+			.ds
+			.transaction(TransactionType::Write, LockType::Optimistic)
+			.await
+			.unwrap()
+			.enclose();
+		let drop_tx = tx.clone();
+		let _a = DroppyBoy::new(async move {
+			drop_tx.lock().await.commit().await.unwrap();
+		});
+
+		// Construct document we are validating
+		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
+		let value = Value::Strand(Strand::from("value"));
+		let tb_mutation = TableMutation::Set(record_id.clone(), value);
+		let doc = ds::construct_document(&tb_mutation).unwrap();
+
+		// Perform "live query" on the constructed doc that we are checking
+		let live_statement = a_live_query_statement();
+		let executed_statement = a_delete_statement();
+		doc.check_lqs_and_send_notifications(
+			&opt,
+			&Statement::Delete(&executed_statement),
+			&tx,
+			&[&live_statement],
+			&sender,
+		)
+		.await
+		.unwrap();
+
+		// Asserts
+		let _notification = receiver.try_recv().expect("There should be a notification");
+		assert!(receiver.try_recv().is_err());
+	}
+
 	// Live queries will have authentication info associated with them
 	// This is a way to fake that
 	fn a_live_query_statement() -> LiveStatement {
@@ -178,15 +222,25 @@ mod test_check_lqs_and_send_notifications {
 
 	// Fake a create statement that does not involve parsing the query
 	fn a_create_statement() -> CreateStatement {
-		let mut stm = CreateStatement {
+		CreateStatement {
 			only: false,
 			what: Values(vec![Value::Table(Table::from(SETUP.tb.clone()))]),
 			data: None,
 			output: None,
 			timeout: None,
 			parallel: false,
-		};
-		stm
+		}
+	}
+
+	fn a_delete_statement() -> DeleteStatement {
+		DeleteStatement {
+			only: false,
+			what: Values(vec![Value::Table(Table::from(SETUP.tb.clone()))]),
+			cond: None,
+			output: None,
+			timeout: None,
+			parallel: false,
+		}
 	}
 
 	fn a_usable_options(sender: &Sender<Notification>) -> Options {
