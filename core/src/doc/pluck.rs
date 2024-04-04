@@ -11,6 +11,9 @@ use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
 impl<'a> Document<'a> {
+	/// Evaluates a doc that has been modified so that it can be further computed into a result Value
+	/// This includes some permissions handling, output format handling (as specified in statement),
+	/// field handling (like params, links etc).
 	pub async fn pluck(
 		&self,
 		ctx: &Context<'_>,
@@ -21,6 +24,7 @@ impl<'a> Document<'a> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
 		// Process the desired output
+		trace!("Processing output {:?} stm: {:?}", stm.output(), stm);
 		let mut out = match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
@@ -47,10 +51,24 @@ impl<'a> Document<'a> {
 				}
 			},
 			None => match stm {
-				Statement::Live(s) => match s.expr.len() {
-					0 => Ok(self.initial.doc.diff(&self.current.doc, Idiom::default()).into()),
-					_ => s.expr.compute(ctx, opt, txn, Some(&self.current), false).await,
-				},
+				Statement::Live(s) => {
+					trace!("Live part of pluck, expr: {:?}", s.expr);
+					trace!(
+						"PLUCK ATTENTION\ninitial doc: {:?}\ncurrent doc: {:?}\n",
+						self.initial.doc,
+						self.current.doc
+					);
+					match s.expr.len() {
+						0 => {
+							trace!("Len was 0");
+							Ok(self.initial.doc.diff(&self.current.doc, Idiom::default()).into())
+						}
+						_ => {
+							trace!("expr compute");
+							s.expr.compute(ctx, opt, txn, Some(&self.current), false).await
+						}
+					}
+				}
 				Statement::Select(s) => {
 					s.expr.compute(ctx, opt, txn, Some(&self.current), s.group.is_some()).await
 				}

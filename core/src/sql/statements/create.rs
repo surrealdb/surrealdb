@@ -51,7 +51,9 @@ impl CreateStatement {
 		let opt = &opt.new_with_futures(false);
 		// Loop over the create targets
 		for w in self.what.0.iter() {
+			trace!("Computing CreateStatement with doc {:?}", doc);
 			let v = w.compute(ctx, opt, txn, doc).await?;
+			trace!("Computed CreateStatement with value {:?} and post doc: {:?}", v, doc);
 			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
@@ -61,8 +63,9 @@ impl CreateStatement {
 				e => e,
 			})?;
 		}
+		trace!("CreateStatement after prepare, now doing output");
 		// Output the results
-		match i.output(ctx, opt, txn, &stm).await? {
+		let a = match i.output(ctx, opt, txn, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
@@ -72,7 +75,9 @@ impl CreateStatement {
 			},
 			// This is standard query result
 			v => Ok(v),
-		}
+		};
+		trace!("After CreateStatement prepare, doc is {:?}", doc);
+		a
 	}
 }
 

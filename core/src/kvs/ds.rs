@@ -59,7 +59,7 @@ use crate::kvs::lq_structs::{
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::options::EngineOptions;
 use crate::sql::statements::show::ShowSince;
-use crate::sql::{self, statements::DefineUserStatement, Base, Query, Strand, Uuid, Value};
+use crate::sql::{self, statements::DefineUserStatement, Base, Object, Query, Strand, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
 
@@ -71,6 +71,9 @@ const LQ_CHANNEL_SIZE: usize = 100;
 
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
+
+// const EMPTY_DOC: Value = Value::Object(Object(BTreeMap::new()));
+const EMPTY_DOC: Value = Value::None;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -1042,6 +1045,11 @@ impl Datastore {
 							// We track notifications as a separate channel in case we want to process
 							// for the current state we only forward
 							let (sender, receiver) = channel::bounded(notification_capacity);
+							trace!(
+								"DS ATTENTION\ninitial doc: {:?}\ncurrent doc: {:?}\n",
+								doc.initial.doc,
+								doc.current.doc
+							);
 							doc.check_lqs_and_send_notifications(
 								opt,
 								&Statement::Live(&lq_value.stm),
@@ -1061,6 +1069,8 @@ impl Datastore {
 							// TODO: evaluate if we want channel directly instead of proxy
 							while let Ok(notification) = receiver.try_recv() {
 								trace!("Sending notification to client");
+								#[cfg(debug_assertions)]
+								trace!("Notification: {:?}", notification);
 								self.notification_channel
 									.as_ref()
 									.unwrap()
@@ -1760,7 +1770,7 @@ pub(crate) fn construct_document(mutation: &TableMutation) -> Option<Document> {
 				Some(id),
 				None,
 				Cow::Borrowed(current_value),
-				Cow::Owned(Value::None),
+				Cow::Owned(EMPTY_DOC),
 				Workable::Normal,
 			);
 			Some(doc)

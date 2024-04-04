@@ -174,6 +174,11 @@ impl<'a> Document<'a> {
 			lqctx.add_value("value", self.current.doc.deref());
 			lqctx.add_value("after", self.current.doc.deref());
 			lqctx.add_value("before", self.initial.doc.deref());
+			trace!(
+				"LIVES ATTENTION\ninitial doc: {:?}\ncurrent doc: {:?}\n",
+				self.initial.doc,
+				self.current.doc
+			);
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
@@ -227,6 +232,12 @@ impl<'a> Document<'a> {
 								// Output the full document before any changes were applied
 								let mut value =
 									doc.doc.compute(&lqctx, lqopt, txn, Some(doc)).await?;
+
+								// TODO(SUR-349): We need an empty object instead of Value::None for serialisation
+								if value.is_none() {
+									value = Value::Object(Default::default());
+								}
+
 								// Remove metadata fields on output
 								value.del(&lqctx, lqopt, txn, &*META).await?;
 								// Output result
@@ -239,11 +250,14 @@ impl<'a> Document<'a> {
 				// Send a CREATE notification
 				if node_matches_live_query {
 					trace!("Sending lq create notification");
+					let value = self.pluck(&lqctx, &lqopt, txn, &lq).await?;
+					#[cfg(debug_assertions)]
+					trace!("Sending lq create notification with value: {:?}", value);
 					sender
 						.send(Notification {
 							id: lv.id,
 							action: Action::Create,
-							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
+							result: value,
 						})
 						.await?;
 				}

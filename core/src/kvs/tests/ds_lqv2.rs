@@ -17,6 +17,19 @@ mod test_construct_document {
 	}
 
 	#[test]
+	fn test_construct_document_empty_value_is_valid() {
+		let thing = Thing::from(("table", "id"));
+		let value = Value::None;
+		// TODO: throw panic on Set validation somehow? That way we can check if records really are being set to Value::None
+		let tb_mutation = TableMutation::Set(thing.clone(), value);
+		let doc = ds::construct_document(&tb_mutation);
+		let doc = doc.unwrap();
+		assert!(doc.is_new());
+		assert!(doc.initial_doc().is_none());
+		assert!(doc.current_doc().is_some());
+	}
+
+	#[test]
 	fn test_construct_document_update() {
 		let thing = Thing::from(("table", "id"));
 		let value = Value::Strand(Strand::from("value"));
@@ -48,20 +61,25 @@ mod test_construct_document {
 		let doc = ds::construct_document(&tb_mutation);
 		assert!(doc.is_none());
 	}
+
+	// TODO(phughk): The constructed docs need to be pluckable for LiveStatements
+	// The produced value is the notification value
+	// Testing this reuqires a KV - is it worth adding those?
 }
 
 #[cfg(feature = "kv-mem")]
 mod test_check_lqs_and_send_notifications {
 	use crate::cf::TableMutation;
 	use crate::ctx::Context;
-	use crate::dbs::{Notification, Options, Session, Statement};
+	use crate::dbs::fuzzy_eq::FuzzyEq;
+	use crate::dbs::{Action, Notification, Options, Session, Statement};
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
 	use crate::kvs::droppy_boy::DroppyBoy;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
-	use crate::sql::{parse, Fields, Object, Strand, Table, Thing, Value, Values};
+	use crate::sql::{parse, Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
 	use channel::Sender;
 	use futures::executor::block_on;
 	use once_cell::sync::Lazy;
@@ -138,12 +156,14 @@ mod test_check_lqs_and_send_notifications {
 			drop_tx.lock().await.commit().await.unwrap();
 		});
 
+		// WHEN:
 		// Construct document we are validating
 		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
 		let value = Value::Strand(Strand::from("value"));
 		let tb_mutation = TableMutation::Set(record_id.clone(), value);
 		let doc = ds::construct_document(&tb_mutation).unwrap();
 
+		// AND:
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_create_statement();
@@ -157,9 +177,19 @@ mod test_check_lqs_and_send_notifications {
 		.await
 		.unwrap();
 
-		// Asserts
-		let _notification = receiver.try_recv().expect("There should be a notification");
+		// THEN:
+		let notification = receiver.try_recv().expect("There should be a notification");
+		assert!(
+			notification.fuzzy_eq(&Notification::new(
+				Uuid::default(),
+				Action::Create,
+				Value::Strand(Strand::from("value"))
+			)),
+			"{:?}",
+			notification
+		);
 		assert!(receiver.try_recv().is_err());
+		panic!("failed successfully")
 	}
 
 	#[test_log::test(tokio::test)]
@@ -182,12 +212,14 @@ mod test_check_lqs_and_send_notifications {
 			drop_tx.lock().await.commit().await.unwrap();
 		});
 
+		// WHEN:
 		// Construct document we are validating
 		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
 		let value = Value::Strand(Strand::from("value"));
 		let tb_mutation = TableMutation::Set(record_id.clone(), value);
 		let doc = ds::construct_document(&tb_mutation).unwrap();
 
+		// AND:
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_delete_statement();
@@ -201,8 +233,19 @@ mod test_check_lqs_and_send_notifications {
 		.await
 		.unwrap();
 
-		// Asserts
-		let _notification = receiver.try_recv().expect("There should be a notification");
+		// THEN:
+		let notification = receiver.try_recv().expect("There should be a notification");
+		// TODO(SUR-349): Delete value should be the object that was just deleted
+		let expected_value = Value::Object(Object::default());
+		assert!(
+			notification.fuzzy_eq(&Notification::new(
+				Uuid::default(),
+				Action::Delete,
+				expected_value
+			)),
+			"{:?}",
+			notification
+		);
 		assert!(receiver.try_recv().is_err());
 	}
 

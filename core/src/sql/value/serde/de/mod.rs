@@ -293,13 +293,13 @@ where
 	T: DeserializeOwned,
 {
 	let json = into_json(value.clone(), false);
-	serde_json::from_value(json)
+	serde_json::from_value(json.clone())
 		.map_err(|error| FromValueError {
-			value,
+			value: value.clone(),
 			error: error.to_string(),
 		})
 		.map_err(|e| {
-			panic!("Failed to deserialize value: {:?}", e);
+			panic!("Failed to deserialize value {:?} as json {:?}: {:?}", value, json, e);
 			e
 		})
 }

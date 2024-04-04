@@ -388,6 +388,7 @@ impl<'a> Executor<'a> {
 									// There is no timeout clause
 									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								};
+								trace!("End of execute compute regarding doc creation");
 								// Catch global timeout
 								let res = match ctx.is_timedout() {
 									true => Err(Error::QueryTimedout),

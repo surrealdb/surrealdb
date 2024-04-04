@@ -21,11 +21,14 @@ use std::sync::Arc;
 pub(crate) struct Document<'a> {
 	pub(super) id: Option<&'a Thing>,
 	pub(super) extras: Workable,
-	pub(super) initial: CursorDoc<'a>,
-	pub(super) current: CursorDoc<'a>,
+	// pub(super) initial: CursorDoc<'a>,
+	// pub(super) current: CursorDoc<'a>,
+	pub initial: CursorDoc<'a>,
+	pub current: CursorDoc<'a>,
 }
 
 #[non_exhaustive]
+#[cfg_attr(debug_assertions, derive(Debug))]
 pub struct CursorDoc<'a> {
 	pub(crate) ir: Option<IteratorRef>,
 	pub(crate) rid: Option<&'a Thing>,
@@ -91,12 +94,14 @@ impl<'a> Document<'a> {
 		val: &'a Value,
 		extras: Workable,
 	) -> Self {
-		Document {
+		let doc = Document {
 			id,
 			extras,
 			current: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
 			initial: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
-		}
+		};
+		trace!("NEW DOCUMENT CREATED: {:?}, current={:?}", doc, doc.current);
+		doc
 	}
 
 	/// Create a new document that is not going through the standard lifecycle of documents
@@ -111,12 +116,19 @@ impl<'a> Document<'a> {
 		initial: Cow<'a, Value>,
 		extras: Workable,
 	) -> Self {
-		Document {
+		let doc = Document {
 			id,
 			extras,
 			current: CursorDoc::new(ir, id, doc_id, val),
 			initial: CursorDoc::new(ir, id, doc_id, initial),
-		}
+		};
+		trace!(
+			"NEW ARTIFICIAL DOCUMENT CREATED: {:?}, current={:?}, initial={:?}",
+			doc,
+			doc.current,
+			doc.initial
+		);
+		doc
 	}
 
 	#[cfg(test)]
