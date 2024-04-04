@@ -28,9 +28,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>, Distance);
-pub(super) type KnnExpressions =
-	HashMap<Arc<Expression>, (u32, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
+pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
+pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Idiom, Arc<Vec<Number>>, Distance)>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -60,16 +59,17 @@ pub(super) enum IteratorEntry {
 }
 
 impl IteratorEntry {
-	pub(super) fn explain(&self, e: &mut HashMap<&str, Value>) -> IndexRef {
+	pub(super) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
 		match self {
-			Self::Single(_, io) => {
-				io.explain(e);
-				io.ix_ref()
-			}
+			Self::Single(_, io) => io.explain(ix_def),
 			Self::Range(_, ir, from, to) => {
+				let mut e = HashMap::default();
+				if let Some(ix) = ix_def.get(*ir as usize) {
+					e.insert("index", Value::from(ix.name.0.to_owned()));
+				}
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
-				*ir
+				Value::from(Object::from(e))
 			}
 		}
 	}
@@ -238,14 +238,7 @@ impl QueryExecutor {
 
 	pub(crate) fn explain(&self, itr: IteratorRef) -> Value {
 		match self.0.it_entries.get(itr as usize) {
-			Some(ie) => {
-				let mut e = HashMap::default();
-				let ir = ie.explain(&mut e);
-				if let Some(ix) = self.0.index_definitions.get(ir as usize) {
-					e.insert("index", Value::from(ix.name.0.to_owned()));
-				}
-				Value::from(Object::from(e))
-			}
+			Some(ie) => ie.explain(self.0.index_definitions.as_slice()),
 			None => Value::None,
 		}
 	}

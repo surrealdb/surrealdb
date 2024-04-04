@@ -53,8 +53,7 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 		let mut is_knn = false;
-		let t = Arc::new(t);
-		match Tree::build(ctx, self.opt, txn, t.clone(), self.cond, self.with).await? {
+		match Tree::build(ctx, self.opt, txn, &t, self.cond, self.with).await? {
 			Some(tree) => {
 				is_knn = is_knn || !tree.knn_expressions.is_empty();
 				let mut exe = InnerQueryExecutor::new(
@@ -67,18 +66,18 @@ impl<'a> QueryPlanner<'a> {
 				)
 				.await?;
 				match PlanBuilder::build(tree.root, self.with, tree.with_indexes)? {
-					Plan::SingleIndex(exp, local_io, _remote_ios) => {
+					Plan::SingleIndex(exp, io) => {
 						// TODO join with remote_ios
-						if local_io.require_distinct() {
+						if io.require_distinct() {
 							self.requires_distinct = true;
 						}
-						let ir = exe.add_iterator(IteratorEntry::Single(exp, local_io));
+						let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 						self.add(t.clone(), Some(ir), exe, it);
 					}
 					Plan::MultiIndex(non_range_indexes, ranges_indexes) => {
-						for (exp, local_io, _remote_ios) in non_range_indexes {
+						for (exp, io) in non_range_indexes {
 							// TODO join with remote_ios
-							let ie = IteratorEntry::Single(exp, local_io);
+							let ie = IteratorEntry::Single(exp, io);
 							let ir = exe.add_iterator(ie);
 							it.ingest(Iterable::Index(t.clone(), ir));
 						}
@@ -119,7 +118,7 @@ impl<'a> QueryPlanner<'a> {
 
 	fn add(
 		&mut self,
-		tb: Arc<Table>,
+		tb: Table,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,

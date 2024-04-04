@@ -2011,34 +2011,30 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
-				{
-					detail: {
-						plan: {
-							index: 't_name_idx',
-							operator: '=',
-							value: 'h'
+					{
+						detail: {
+							plan: {
+								index: 'i_t_id',
+								joins: [
+									{
+										index: 't_name_idx',
+										operator: '=',
+										value: 'h'
+									}
+								],
+								operator: 'join'
+							},
+							table: 'i'
 						},
-						table: 't'
+						operation: 'Iterate Index'
 					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						plan: {
-							index: 'i_t_id',
-							operator: 'union',
+					{
+						detail: {
+							type: 'Memory'
 						},
-						table: 'i'
-					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]"#,
+						operation: 'Collector'
+					}
+				]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
