@@ -67,7 +67,6 @@ impl<'a> QueryPlanner<'a> {
 				.await?;
 				match PlanBuilder::build(tree.root, self.with, tree.with_indexes)? {
 					Plan::SingleIndex(exp, io) => {
-						// TODO join with remote_ios
 						if io.require_distinct() {
 							self.requires_distinct = true;
 						}
@@ -76,7 +75,6 @@ impl<'a> QueryPlanner<'a> {
 					}
 					Plan::MultiIndex(non_range_indexes, ranges_indexes) => {
 						for (exp, io) in non_range_indexes {
-							// TODO join with remote_ios
 							let ie = IteratorEntry::Single(exp, io);
 							let ir = exe.add_iterator(ie);
 							it.ingest(Iterable::Index(t.clone(), ir));

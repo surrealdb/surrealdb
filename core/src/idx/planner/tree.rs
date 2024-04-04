@@ -136,7 +136,7 @@ impl<'a> TreeBuilder<'a> {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
 				self.eval_value(group, &v).await
 			}
-			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v).into())),
+			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
 	}
 
@@ -262,7 +262,7 @@ impl<'a> TreeBuilder<'a> {
 		match e {
 			Expression::Unary {
 				..
-			} => Ok(Node::Unsupported(Arc::new("unary expressions not supported".to_string()))),
+			} => Ok(Node::Unsupported("unary expressions not supported".to_string())),
 			Expression::Binary {
 				l,
 				o,
@@ -465,7 +465,7 @@ impl<'a> TreeBuilder<'a> {
 		self.group_sequence += 1;
 		match s {
 			Subquery::Value(v) => self.eval_value(self.group_sequence, v).await,
-			_ => Ok(Node::Unsupported(Arc::new(format!("Unsupported subquery: {}", s)))),
+			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
 		}
 	}
 }
@@ -510,7 +510,7 @@ pub(super) enum Node {
 	RecordField(Idiom, RecordOptions),
 	NonIndexedField(Idiom),
 	Computed(Arc<Value>),
-	Unsupported(Arc<String>),
+	Unsupported(String),
 }
 
 impl Node {

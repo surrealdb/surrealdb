@@ -65,8 +65,8 @@ impl PlanBuilder {
 				}
 			}
 			// Otherwise we take the first single index option
-			if let Some((e, io)) = b.non_range_indexes.pop() {
-				return Ok(Plan::SingleIndex(e, io));
+			if let Some((e, i)) = b.non_range_indexes.pop() {
+				return Ok(Plan::SingleIndex(e, i));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
@@ -86,7 +86,7 @@ impl PlanBuilder {
 
 	// Check if we have an explicit list of index we can use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
-		if let Some(io) = io {
+		if let Some(io) = &io {
 			if !self.with_indexes.is_empty() && !self.with_indexes.contains(&io.ix_ref()) {
 				return None;
 			}
@@ -113,7 +113,7 @@ impl PlanBuilder {
 				self.eval_node(right)?;
 				Ok(())
 			}
-			Node::Unsupported(reason) => Err(reason.to_string()),
+			Node::Unsupported(reason) => Err(reason.to_owned()),
 			_ => Ok(()),
 		}
 	}
