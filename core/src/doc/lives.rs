@@ -79,16 +79,23 @@ impl<'a> Document<'a> {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into()) {
 			// Get the table
+			trace!("Checking define table stm");
 			let tb = self.tb(opt, txn).await?;
 			// Process the table permissions
+			trace!("Checking select permissions");
 			match &tb.permissions.select {
-				Permission::None => return Err(Error::Ignore),
+				Permission::None => {
+					trace!("Perms were none");
+					return Err(Error::Ignore);
+				}
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
+					trace!("Perms were specific");
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
 					if !e.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
+						trace!("Permissions clause failed check");
 						return Err(Error::Ignore);
 					}
 				}

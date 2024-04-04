@@ -1,4 +1,3 @@
-use futures::executor::block_on;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
@@ -81,7 +80,7 @@ mod test {
 	use tokio::sync::mpsc::channel;
 
 	#[test]
-	fn can_drop_sync() {
+	fn can_drop_sync_without_async_runtime() {
 		let counter = Arc::new(AtomicBool::new(false));
 		let counter_clone = counter.clone();
 		{
@@ -93,7 +92,7 @@ mod test {
 	}
 
 	#[tokio::test]
-	async fn can_drop_async() {
+	async fn can_drop_async_under_tokio() {
 		let (sender, mut receiver) = channel(1);
 		{
 			let _ = DroppyBoy::new(async move {

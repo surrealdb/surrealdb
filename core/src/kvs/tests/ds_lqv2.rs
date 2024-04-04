@@ -1,4 +1,4 @@
-mod check_construct {
+mod test_construct_document {
 	use crate::cf::TableMutation;
 	use crate::kvs::ds;
 	use crate::sql::statements::DefineTableStatement;
@@ -51,7 +51,7 @@ mod check_construct {
 }
 
 #[cfg(feature = "kv-mem")]
-mod check_send {
+mod test_check_lqs_and_send_notifications {
 	use crate::cf::TableMutation;
 	use crate::ctx::Context;
 	use crate::dbs::{Notification, Options, Session, Statement};
@@ -59,7 +59,6 @@ mod check_send {
 	use crate::iam::{Auth, Role};
 	use crate::kvs::droppy_boy::DroppyBoy;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
-	use crate::sql;
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, LiveStatement};
 	use crate::sql::{parse, Fields, Object, Strand, Table, Thing, Value, Values};
@@ -67,10 +66,9 @@ mod check_send {
 	use futures::executor::block_on;
 	use once_cell::sync::Lazy;
 	use std::collections::BTreeMap;
-	use std::future::Future;
 	use std::sync::Arc;
 
-	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(init_test_suite())));
+	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
 
 	struct TestSuite {
 		ds: Datastore,
@@ -80,7 +78,7 @@ mod check_send {
 		rid: Value,
 	}
 
-	async fn init_test_suite() -> TestSuite {
+	async fn setup_test_suite_init() -> TestSuite {
 		let ds = Datastore::new("memory").await.unwrap();
 		let ns = "the_namespace";
 		let db = "the_database";
@@ -93,7 +91,7 @@ mod check_send {
 				"
 				USE NAMESPACE {ns};
 				USE DATABASE {db};
-				DEFINE TABLE {tb} CHANGEFEED 1m INCLUDE ORIGINAL;
+				DEFINE TABLE {tb} CHANGEFEED 1m INCLUDE ORIGINAL PERMISSIONS FULL;
 				"
 			),
 			&Session::owner(),
@@ -128,7 +126,7 @@ mod check_send {
 
 		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
-		let (ctx, opt, stm) = ctx_opt_stm(&sender);
+		let opt = a_usable_options(&sender);
 		let tx = SETUP
 			.ds
 			.transaction(TransactionType::Write, LockType::Optimistic)
@@ -141,21 +139,14 @@ mod check_send {
 		});
 
 		// Construct document we are validating
-		let thing = Thing::from(("table", "id"));
+		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
 		let value = Value::Strand(Strand::from("value"));
-		let tb_mutation = TableMutation::Set(thing.clone(), value);
+		let tb_mutation = TableMutation::Set(record_id.clone(), value);
 		let doc = ds::construct_document(&tb_mutation).unwrap();
 
 		// Perform "live query" on the constructed doc that we are checking
-		let live_statement = LiveStatement::new(Fields::all());
-		let executed_statement = CreateStatement {
-			only: false,
-			what: Values(vec![Value::Table(Table::from(SETUP.tb.clone()))]),
-			data: None,
-			output: None,
-			timeout: None,
-			parallel: false,
-		};
+		let live_statement = a_live_query_statement();
+		let executed_statement = a_create_statement();
 		doc.check_lqs_and_send_notifications(
 			&opt,
 			&Statement::Create(&executed_statement),
@@ -171,25 +162,39 @@ mod check_send {
 		assert!(receiver.try_recv().is_err());
 	}
 
-	fn ctx_opt_stm(sender: &Sender<Notification>) -> (Context, Options, LiveStatement) {
-		let mut ctx = Context::default();
-		ctx.add_notifications(Some(sender));
-		let opt =
-			Options::default().with_ns(Some("namespace".into())).with_db(Some("database".into()));
-		let query = parse("LIVE SELECT * FROM table").unwrap().0;
-		assert_eq!(query.len(), 1);
-		let stm = query.0.into_iter().next().unwrap();
-		let mut live_stm = match stm {
-			sql::Statement::Live(live_stm) => live_stm,
-			_ => panic!("Expected live statement"),
-		};
+	// Live queries will have authentication info associated with them
+	// This is a way to fake that
+	fn a_live_query_statement() -> LiveStatement {
+		let mut stm = LiveStatement::new(Fields::all());
 		let mut session: BTreeMap<String, Value> = BTreeMap::new();
 		session.insert(OBJ_PATH_AUTH.to_string(), Value::Strand(Strand::from("auth")));
 		session.insert(OBJ_PATH_SCOPE.to_string(), Value::Strand(Strand::from("scope")));
 		session.insert(OBJ_PATH_TOKEN.to_string(), Value::Strand(Strand::from("token")));
 		let session = Value::Object(Object::from(session));
-		live_stm.session = Some(session);
-		live_stm.auth = Some(Auth::for_db(Role::Owner, "namespace", "database"));
-		(ctx, opt, live_stm)
+		stm.session = Some(session);
+		stm.auth = Some(Auth::for_db(Role::Owner, "namespace", "database"));
+		stm
+	}
+
+	// Fake a create statement that does not involve parsing the query
+	fn a_create_statement() -> CreateStatement {
+		let mut stm = CreateStatement {
+			only: false,
+			what: Values(vec![Value::Table(Table::from(SETUP.tb.clone()))]),
+			data: None,
+			output: None,
+			timeout: None,
+			parallel: false,
+		};
+		stm
+	}
+
+	fn a_usable_options(sender: &Sender<Notification>) -> Options {
+		let mut ctx = Context::default();
+		ctx.add_notifications(Some(sender));
+		let opt = Options::default()
+			.with_ns(Some(SETUP.ns.clone().into()))
+			.with_db(Some(SETUP.db.clone().into()));
+		opt
 	}
 }
