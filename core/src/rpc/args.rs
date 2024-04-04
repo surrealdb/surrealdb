@@ -81,7 +81,7 @@ impl Take for Array {
 		match (x.next(), x.next(), x.next(), x.next()) {
 			(Some(a), Some(b), Some(c), Some(d)) => Ok((a, b, c, d)),
 			(Some(a), Some(b), Some(c), None) => Ok((a, b, c, Value::None)),
-			(_, _, _, _) => Err(RpcError::InvalidParams),
+			(_, _, _, _) => Ok((Value::None, Value::None, Value::None, Value::None)),
 		}
 	}
 }
