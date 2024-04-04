@@ -108,15 +108,17 @@ impl Value {
 						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await,
 						None => Ok(Value::None),
 					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, txn, doc).await? {
-						Value::Strand(f) => match v.get(f.as_str()) {
-							Some(v) => {
-								stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
-							}
-							None => Ok(Value::None),
-						},
-						_ => Ok(Value::None),
-					},
+					Part::Value(x) => {
+						match stk.run(|stk| x.compute(stk, ctx, opt, txn, doc)).await? {
+							Value::Strand(f) => match v.get(f.as_str()) {
+								Some(v) => {
+									stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
+								}
+								None => Ok(Value::None),
+							},
+							_ => Ok(Value::None),
+						}
+					}
 					Part::All => {
 						stk.run(|stk| self.get(stk, ctx, opt, txn, doc, path.next())).await
 					}
@@ -152,22 +154,28 @@ impl Value {
 						let mut a = Vec::new();
 						for v in v.iter() {
 							let cur = v.into();
-							if w.compute(stk, ctx, opt, txn, Some(&cur)).await?.is_truthy() {
+							if stk
+								.run(|stk| w.compute(stk, ctx, opt, txn, Some(&cur)))
+								.await?
+								.is_truthy()
+							{
 								a.push(v.clone());
 							}
 						}
 						let v = Value::from(a);
 						stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
 					}
-					Part::Value(x) => match x.compute(stk, ctx, opt, txn, doc).await? {
-						Value::Number(i) => match v.get(i.to_usize()) {
-							Some(v) => {
-								stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
-							}
-							None => Ok(Value::None),
-						},
-						_ => Ok(Value::None),
-					},
+					Part::Value(x) => {
+						match stk.run(|stk| x.compute(stk, ctx, opt, txn, doc)).await? {
+							Value::Number(i) => match v.get(i.to_usize()) {
+								Some(v) => {
+									stk.run(|stk| v.get(stk, ctx, opt, txn, doc, path.next())).await
+								}
+								None => Ok(Value::None),
+							},
+							_ => Ok(Value::None),
+						}
+					}
 					_ => stk
 						.scope(|scope| {
 							let futs = v
@@ -193,7 +201,8 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							let v = stm.compute(stk, ctx, opt, txn, None).await?.first();
+							let v =
+								stk.run(|stk| stm.compute(stk, ctx, opt, txn, None)).await?.first();
 							stk.run(|stk| v.get(stk, ctx, opt, txn, None, path)).await
 						}
 					}
@@ -222,14 +231,20 @@ impl Value {
 								};
 								match path.len() {
 									1 => {
-										let v = stm.compute(stk, ctx, opt, txn, None).await?.all();
+										let v = stk
+											.run(|stk| stm.compute(stk, ctx, opt, txn, None))
+											.await?
+											.all();
 										stk.run(|stk| v.get(stk, ctx, opt, txn, None, ID.as_ref()))
 											.await?
 											.flatten()
 											.ok()
 									}
 									_ => {
-										let v = stm.compute(stk, ctx, opt, txn, None).await?.all();
+										let v = stk
+											.run(|stk| stm.compute(stk, ctx, opt, txn, None))
+											.await?
+											.all();
 										stk.run(|stk| v.get(stk, ctx, opt, txn, None, path.next()))
 											.await?
 											.flatten()
@@ -244,7 +259,10 @@ impl Value {
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};
-								let v = stm.compute(stk, ctx, opt, txn, None).await?.first();
+								let v = stk
+									.run(|stk| stm.compute(stk, ctx, opt, txn, None))
+									.await?
+									.first();
 								stk.run(|stk| v.get(stk, ctx, opt, txn, None, path)).await
 							}
 						},

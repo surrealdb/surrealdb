@@ -456,7 +456,7 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					obj.fetch(stk, ctx, opt, txn, fetch).await?;
+					stk.run(|stk| obj.fetch(stk, ctx, opt, txn, fetch)).await?;
 				}
 				self.results = values.into();
 			}
