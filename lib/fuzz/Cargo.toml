@@ -15,7 +15,7 @@ tokio = "1.33.0"
 
 [dependencies.surrealdb]
 path = ".."
-features = ["kv-mem", "arbitrary"]
+features = ["kv-mem", "arbitrary", "parser2"]
 default-features = false
 
 # Prevent this from interfering with workspaces
