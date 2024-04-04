@@ -511,9 +511,7 @@ pub trait RpcContext {
 		});
 
 		let mut res = self.kvs().execute(sql, self.session(), var).await?;
-		let out = res.remove(0).result?;
-
-		Ok(out)
+		res.remove(0).result.map_err(Into::into)
 	}
 
 	// ------------------------------
@@ -553,9 +551,7 @@ pub trait RpcContext {
 			.kvs()
 			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
 			.await?;
-		let out = res.remove(0).result?;
-
-		Ok(out)
+		res.remove(0).result.map_err(Into::into)
 	}
 
 	// ------------------------------
