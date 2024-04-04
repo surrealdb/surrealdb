@@ -74,7 +74,7 @@ impl Take for Array {
 	}
 	/// Convert the array to four arguments
 	fn needs_three_or_four(self) -> Result<(Value, Value, Value, Value), RpcError> {
-		if self.is_empty() || self.len() < 3 || self.len() > 4 {
+		if self.len() < 3 || self.len() > 4 {
 			return Err(RpcError::InvalidParams);
 		}
 		let mut x = self.into_iter();
