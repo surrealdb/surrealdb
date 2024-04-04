@@ -1931,17 +1931,24 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 		DEFINE FIELD name ON TABLE t TYPE string;
 		DEFINE FIELD t ON TABLE i TYPE record(t);
 		CREATE t:1 SET name = 'h';
+		CREATE t:2 SET name = 'h';
 		CREATE i:A SET t = t:1;
+		CREATE i:B SET t = t:2;
 		SELECT * FROM i WHERE t.name = 'h';
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 	";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
-	assert_eq!(res.len(), 6);
-	skip_ok(&mut res, 4)?;
+	assert_eq!(res.len(), 8);
+	skip_ok(&mut res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(r#"[{ "id": "i:A", "t": "t:1"}]"#);
+	let val = Value::parse(
+		r#"[
+				{ "id": "i:A", "t": "t:1"},
+				{ "id": "i:B", "t": "t:2"}
+			]"#,
+	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
@@ -1983,16 +1990,23 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 		DEFINE FIELD name ON TABLE t TYPE string;
 		DEFINE FIELD t ON TABLE i TYPE record(t);
 		CREATE t:1 SET name = 'h';
+		CREATE t:2 SET name = 'h';
 		CREATE i:A SET t = t:1;
+		CREATE i:B SET t = t:2;
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 		SELECT * FROM i WHERE t.name = 'h';
 	";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
-	assert_eq!(res.len(), 8);
-	skip_ok(&mut res, 6)?;
+	assert_eq!(res.len(), 10);
+	skip_ok(&mut res, 8)?;
 	//
-	let expected = Value::parse(r#"[{ "id": "i:A", "t": "t:1"}]"#);
+	let expected = Value::parse(
+		r#"[
+				{ "id": "i:A", "t": "t:1"},
+				{ "id": "i:B", "t": "t:2"}
+			]"#,
+	);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -2000,9 +2014,19 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 				{
 					detail: {
 						plan: {
-							index: 'i_t_id',
+							index: 't_name_idx',
 							operator: '=',
 							value: 'h'
+						},
+						table: 't'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						plan: {
+							index: 'i_t_id',
+							operator: 'union',
 						},
 						table: 'i'
 					},

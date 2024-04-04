@@ -14,7 +14,7 @@ pub(super) struct PlanBuilder {
 	/// Do we have at least one index?
 	has_indexes: bool,
 	/// List of expressions that are not ranges, backed by an index
-	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
+	non_range_indexes: Vec<(Arc<Expression>, IndexOption, Vec<IndexOption>)>,
 	/// List of indexes involved in this plan
 	with_indexes: Vec<IndexRef>,
 	/// Group each possible optimisations local to a SubQuery
@@ -64,8 +64,8 @@ impl PlanBuilder {
 				}
 			}
 			// Otherwise we take the first single index option
-			if let Some((e, i)) = b.non_range_indexes.pop() {
-				return Ok(Plan::SingleIndex(e, i));
+			if let Some((e, local, remotes)) = b.non_range_indexes.pop() {
+				return Ok(Plan::SingleIndex(e, local, remotes));
 			}
 		}
 		// If every expression is backed by an index with can use the MultiIndex plan
@@ -85,7 +85,7 @@ impl PlanBuilder {
 
 	// Check if we have an explicit list of index we can use
 	fn filter_index_option(&self, io: Option<&IndexOption>) -> Option<IndexOption> {
-		if let Some(io) = &io {
+		if let Some(io) = io {
 			if !self.with_indexes.is_empty() && !self.with_indexes.contains(&io.ix_ref()) {
 				return None;
 			}
@@ -97,14 +97,15 @@ impl PlanBuilder {
 		match node {
 			Node::Expression {
 				group,
-				io,
+				local_io,
+				remote_ios,
 				left,
 				right,
 				exp,
 			} => {
 				let is_bool = self.check_boolean_operator(*group, exp.operator());
-				if let Some(io) = self.filter_index_option(io.as_ref()) {
-					self.add_index_option(*group, exp.clone(), io);
+				if let Some(io) = self.filter_index_option(local_io.as_ref()) {
+					self.add_index_option(*group, exp.clone(), io, remote_ios.clone());
 				} else if self.all_exp_with_index && !is_bool {
 					self.all_exp_with_index = false;
 				}
@@ -112,7 +113,7 @@ impl PlanBuilder {
 				self.eval_node(right)?;
 				Ok(())
 			}
-			Node::Unsupported(reason) => Err(reason.to_owned()),
+			Node::Unsupported(reason) => Err(reason.to_string()),
 			_ => Ok(()),
 		}
 	}
@@ -137,19 +138,25 @@ impl PlanBuilder {
 		}
 	}
 
-	fn add_index_option(&mut self, group_ref: GroupRef, exp: Arc<Expression>, io: IndexOption) {
-		if let IndexOperator::RangePart(_, _) = io.op() {
+	fn add_index_option(
+		&mut self,
+		group_ref: GroupRef,
+		exp: Arc<Expression>,
+		local: IndexOption,
+		remote: Vec<IndexOption>,
+	) {
+		if let IndexOperator::RangePart(_, _) = local.op() {
 			let level = self.groups.entry(group_ref).or_default();
-			match level.ranges.entry(io.ix_ref()) {
+			match level.ranges.entry(local.ix_ref()) {
 				Entry::Occupied(mut e) => {
-					e.get_mut().push((exp, io));
+					e.get_mut().push((exp, local));
 				}
 				Entry::Vacant(e) => {
-					e.insert(vec![(exp, io)]);
+					e.insert(vec![(exp, local)]);
 				}
 			}
 		} else {
-			self.non_range_indexes.push((exp, io));
+			self.non_range_indexes.push((exp, local, remote));
 		}
 		self.has_indexes = true;
 	}
@@ -157,25 +164,27 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
-	SingleIndex(Arc<Expression>, IndexOption),
-	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
+	SingleIndex(Arc<Expression>, IndexOption, Vec<IndexOption>),
+	MultiIndex(
+		Vec<(Arc<Expression>, IndexOption, Vec<IndexOption>)>,
+		Vec<(IndexRef, UnionRangeQueryBuilder)>,
+	),
 	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub(crate) struct IndexOption(Arc<Inner>);
-
-#[derive(Debug, Eq, PartialEq, Hash)]
-pub(super) struct Inner {
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub(super) struct IndexOption {
+	/// A reference o the index definition
 	ir: IndexRef,
 	id: Arc<Idiom>,
-	op: IndexOperator,
+	op: Arc<IndexOperator>,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Value),
 	Union(Array),
+	Join(Vec<IndexOption>),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
 	Knn(Array, u32),
@@ -183,27 +192,27 @@ pub(super) enum IndexOperator {
 
 impl IndexOption {
 	pub(super) fn new(ir: IndexRef, id: Arc<Idiom>, op: IndexOperator) -> Self {
-		Self(Arc::new(Inner {
+		Self {
 			ir,
 			id,
-			op,
-		}))
+			op: Arc::new(op),
+		}
 	}
 
 	pub(super) fn require_distinct(&self) -> bool {
-		matches!(self.0.op, IndexOperator::Union(_))
+		matches!(self.op.as_ref(), IndexOperator::Union(_))
 	}
 
 	pub(super) fn ix_ref(&self) -> IndexRef {
-		self.0.ir
+		self.ir
 	}
 
 	pub(super) fn op(&self) -> &IndexOperator {
-		&self.0.op
+		self.op.as_ref()
 	}
 
 	pub(super) fn id_ref(&self) -> &Idiom {
-		self.0.id.as_ref()
+		self.id.as_ref()
 	}
 
 	fn reduce_array(v: &Value) -> Value {
@@ -224,6 +233,10 @@ impl IndexOption {
 			IndexOperator::Union(a) => {
 				e.insert("operator", Value::from("union"));
 				e.insert("value", Value::Array(a.clone()));
+			}
+			IndexOperator::Join(a) => {
+				e.insert("operator", Value::from("join"));
+				//TODO Detail sub plan
 			}
 			IndexOperator::Matches(qs, a) => {
 				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));
