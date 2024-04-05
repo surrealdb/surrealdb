@@ -10,7 +10,9 @@ use surrealdb::syn;
 
 pub fn req_ws(msg: Message) -> Result<Request, RpcError> {
 	match msg {
-		Message::Text(val) => syn::json_legacy_strand(&val).map_err(|_| RpcError::ParseError)?.try_into(),
+		Message::Text(val) => {
+			syn::json_legacy_strand(&val).map_err(|_| RpcError::ParseError)?.try_into()
+		}
 		_ => Err(RpcError::InvalidRequest),
 	}
 }
