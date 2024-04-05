@@ -1219,10 +1219,6 @@ criteria = "safe-to-deploy"
 version = "0.11.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.phf_macros]]
-version = "0.11.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.phf_shared]]
 version = "0.10.0"
 criteria = "safe-to-deploy"
