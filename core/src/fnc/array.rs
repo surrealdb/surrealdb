@@ -11,6 +11,7 @@ use crate::sql::array::Transpose;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
+use crate::sql::value::Windows;
 
 pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
