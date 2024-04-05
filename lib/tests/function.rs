@@ -369,8 +369,7 @@ async fn function_array_clump_zero_no_panic() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::clump([0, 1, 2, 3], 0);
 	"#;
-	let desired_responses =
-		["[]"];
+	let desired_responses = ["[]"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
@@ -380,8 +379,7 @@ async fn function_array_windows() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::windows([0, 1, 2, 3], 2);
 	"#;
-	let desired_responses =
-		["[[0, 1], [1, 2]]", "[[2, 3]"];
+	let desired_responses = ["[[0, 1], [1, 2]]", "[[2, 3]"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
@@ -391,8 +389,7 @@ async fn function_array_windows_zero_no_panic() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::windows([0, 1, 2, 3], 0);
 	"#;
-	let desired_responses =
-		["[]"];
+	let desired_responses = ["[]"];
 	test_queries(sql, &desired_responses).await?;
 	Ok(())
 }
