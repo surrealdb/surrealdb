@@ -11,7 +11,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
-use crate::idx::ft::analyzer::Analyzer;
+use crate::idx::ft::analyzer::{AnalyzedTerms, Analyzer, FilteringStage};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
@@ -39,7 +39,7 @@ use tokio::sync::RwLock;
 pub(crate) type MatchRef = u8;
 
 pub(crate) struct FtIndex {
-	analyzer: Analyzer,
+	analyzer: Arc<Analyzer>,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	state: State,
@@ -164,7 +164,7 @@ impl FtIndex {
 			index_key_base,
 			bm25,
 			highlighting: p.hl,
-			analyzer: az.into(),
+			analyzer: Arc::new(az.into()),
 			doc_ids,
 			doc_lengths,
 			postings,
@@ -176,6 +176,14 @@ impl FtIndex {
 
 	pub(super) fn doc_ids(&self) -> Arc<RwLock<DocIds>> {
 		self.doc_ids.clone()
+	}
+
+	pub(super) fn terms(&self) -> Arc<RwLock<Terms>> {
+		self.terms.clone()
+	}
+
+	pub(super) fn analyzer(&self) -> Arc<Analyzer> {
+		self.analyzer.clone()
 	}
 
 	pub(crate) async fn remove_document(
@@ -326,15 +334,18 @@ impl FtIndex {
 		Ok(())
 	}
 
-	pub(super) async fn extract_terms(
+	pub(super) async fn extract_query_terms(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		query_string: String,
-	) -> Result<Vec<Option<(TermId, u32)>>, Error> {
+	) -> Result<AnalyzedTerms, Error> {
 		let t = self.terms.read().await;
-		let terms = self.analyzer.extract_terms(ctx, opt, txn, &t, query_string).await?;
+		let terms = self
+			.analyzer
+			.extract_terms(ctx, opt, txn, &t, FilteringStage::Querying, query_string)
+			.await?;
 		Ok(terms)
 	}
 

@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::offsets::{Offset, OffsetRecords};
@@ -34,17 +33,29 @@ impl From<DefineAnalyzerStatement> for Analyzer {
 		}
 	}
 }
+
+#[derive(Clone, Copy)]
+pub(in crate::idx) enum FilteringStage {
+	Indexing,
+	Querying,
+}
+
+pub(in crate::idx) struct AnalyzedTerms {
+	pub(in crate::idx) list: Vec<Option<(TermId, u32)>>,
+	pub(in crate::idx) set: HashSet<TermId>,
+}
+
 impl Analyzer {
-	pub(super) async fn extract_terms(
+	pub(in crate::idx) async fn extract_terms(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		t: &Terms,
-		query_string: String,
-	) -> Result<Vec<Option<(TermId, u32)>>, Error> {
-		let tokens =
-			self.generate_tokens(ctx, opt, txn, FilteringStage::Querying, query_string).await?;
+		stage: FilteringStage,
+		content: String,
+	) -> Result<AnalyzedTerms, Error> {
+		let tokens = self.generate_tokens(ctx, opt, txn, stage, content).await?;
 		// We first collect every unique terms
 		// as it can contains duplicates
 		let mut terms = HashSet::new();
@@ -52,13 +63,20 @@ impl Analyzer {
 			terms.insert(token);
 		}
 		// Now we can extract the term ids
-		let mut res = Vec::with_capacity(terms.len());
+		let mut list = Vec::with_capacity(terms.len());
+		let mut set = HashSet::new();
 		let mut tx = txn.lock().await;
 		for term in terms {
 			let opt_term_id = t.get_term_id(&mut tx, tokens.get_token_string(term)?).await?;
-			res.push(opt_term_id.map(|tid| (tid, term.get_char_len())));
+			list.push(opt_term_id.map(|tid| (tid, term.get_char_len())));
+			if let Some(term_id) = opt_term_id {
+				set.insert(term_id);
+			}
 		}
-		Ok(res)
+		Ok(AnalyzedTerms {
+			list,
+			set,
+		})
 	}
 
 	/// This method is used for indexing.
@@ -164,7 +182,7 @@ impl Analyzer {
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	async fn analyze_value(
+	pub(in crate::idx) async fn analyze_value(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,

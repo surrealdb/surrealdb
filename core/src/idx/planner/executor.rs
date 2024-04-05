@@ -3,9 +3,10 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
+use crate::idx::ft::analyzer::{AnalyzedTerms, Analyzer, FilteringStage};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
@@ -15,7 +16,7 @@ use crate::idx::planner::iterators::{
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-use crate::idx::planner::tree::{IndexRef, IndexesMap};
+use crate::idx::planner::tree::{IdiomPosition, IndexRef, IndexesMap};
 use crate::idx::planner::{IterationStage, KnnSet};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
@@ -275,7 +276,7 @@ impl QueryExecutor {
 		it_ref: IteratorRef,
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
+		if let Some(ix) = self.get_index_def(io.ix_ref()) {
 			match ix.index {
 				Index::Idx => Ok(self.new_index_iterator(opt, it_ref, ix, io.clone()).await?),
 				Index::Uniq => {
@@ -321,7 +322,7 @@ impl QueryExecutor {
 		from: &RangeValue,
 		to: &RangeValue,
 	) -> Option<ThingIterator> {
-		if let Some(ix) = self.0.index_definitions.get(ir as usize) {
+		if let Some(ix) = self.get_index_def(ir) {
 			match ix.index {
 				Index::Idx => {
 					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
@@ -415,46 +416,82 @@ impl QueryExecutor {
 		Ok(iterators)
 	}
 
+	fn get_index_def(&self, ir: IndexRef) -> Option<&DefineIndexStatement> {
+		self.0.index_definitions.get(ir as usize)
+	}
+
 	pub(crate) async fn matches(
 		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
 		txn: &Transaction,
 		thg: &Thing,
 		exp: &Expression,
-	) -> Result<Value, Error> {
-		// Otherwise, we look for the first possible index options, and evaluate the expression
-		// Does the record id match this executor's table?
-		if thg.tb.eq(&self.0.table) {
-			if let Some(ft) = self.0.exp_entries.get(exp) {
-				let mut run = txn.lock().await;
-				let doc_key: Key = thg.into();
-				if let Some(doc_id) =
-					ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await?
-				{
-					let term_goals = ft.0.terms_docs.len();
-					// If there is no terms, it can't be a match
-					if term_goals == 0 {
-						return Ok(Value::Bool(false));
-					}
-					for opt_td in ft.0.terms_docs.iter() {
-						if let Some((_, docs)) = opt_td {
-							if !docs.contains(doc_id) {
-								return Ok(Value::Bool(false));
-							}
-						} else {
-							// If one of the term is missing, it can't be a match
-							return Ok(Value::Bool(false));
-						}
-					}
-					return Ok(Value::Bool(true));
+		l: Value,
+		r: Value,
+	) -> Result<bool, Error> {
+		if let Some(ft) = self.0.exp_entries.get(exp) {
+			if let Some(ix_def) = self.get_index_def(ft.0.index_option.ix_ref()) {
+				if self.0.table.eq(&ix_def.what.0) {
+					return self.matches_with_doc_id(txn, thg, ft).await;
 				}
-				return Ok(Value::Bool(false));
 			}
+			return self.matches_with_value(ctx, opt, txn, ft, l, r).await;
 		}
 
 		// If no previous case were successful, we end up with a user error
 		Err(Error::NoIndexFoundForMatch {
 			value: exp.to_string(),
 		})
+	}
+
+	async fn matches_with_doc_id(
+		&self,
+		txn: &Transaction,
+		thg: &Thing,
+		ft: &FtEntry,
+	) -> Result<bool, Error> {
+		let mut run = txn.lock().await;
+		let doc_key: Key = thg.into();
+		if let Some(doc_id) = ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await? {
+			let term_goals = ft.0.terms_docs.len();
+			// If there is no terms, it can't be a match
+			if term_goals == 0 {
+				return Ok(false);
+			}
+			for opt_td in ft.0.terms_docs.iter() {
+				if let Some((_, docs)) = opt_td {
+					if !docs.contains(doc_id) {
+						return Ok(false);
+					}
+				} else {
+					// If one of the term is missing, it can't be a match
+					return Ok(false);
+				}
+			}
+			return Ok(true);
+		}
+		Ok(false)
+	}
+
+	async fn matches_with_value(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		ft: &FtEntry,
+		l: Value,
+		r: Value,
+	) -> Result<bool, Error> {
+		let v = match ft.0.index_option.id_pos() {
+			IdiomPosition::Left => r,
+			IdiomPosition::Right => l,
+		};
+		let mut tokens = vec![];
+		ft.0.analyzer
+			.analyze_value(ctx, opt, txn, v, FilteringStage::Indexing, &mut tokens)
+			.await?;
+		todo!()
 	}
 
 	fn get_ft_entry(&self, match_ref: &Value) -> Option<&FtEntry> {
@@ -491,7 +528,7 @@ impl QueryExecutor {
 				.highlight(
 					&mut run,
 					thg,
-					&e.0.terms,
+					&e.0.analyzed_terms.list,
 					prefix,
 					suffix,
 					partial,
@@ -512,7 +549,7 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let mut run = txn.lock().await;
-			return ft.extract_offsets(&mut run, thg, &e.0.terms, partial).await;
+			return ft.extract_offsets(&mut run, thg, &e.0.analyzed_terms.list, partial).await;
 		}
 		Ok(Value::None)
 	}
@@ -549,7 +586,9 @@ struct FtEntry(Arc<Inner>);
 struct Inner {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<DocIds>>,
-	terms: Vec<Option<(TermId, u32)>>,
+	analyzer: Arc<Analyzer>,
+	analyzed_terms: AnalyzedTerms,
+	terms: Arc<RwLock<Terms>>,
 	terms_docs: TermsDocs,
 	scorer: Option<BM25Scorer>,
 }
@@ -563,14 +602,16 @@ impl FtEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
-			let terms = ft.extract_terms(ctx, opt, txn, qs.to_owned()).await?;
+			let analyzed_terms = ft.extract_query_terms(ctx, opt, txn, qs.to_owned()).await?;
 			let mut tx = txn.lock().await;
-			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms).await?);
+			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &analyzed_terms.list).await?);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),
+				analyzer: ft.analyzer(),
+				analyzed_terms,
 				scorer: ft.new_scorer(terms_docs.clone())?,
-				terms,
+				terms: ft.terms(),
 				terms_docs,
 			}))))
 		} else {

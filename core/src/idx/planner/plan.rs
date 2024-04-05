@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::tree::{GroupRef, IndexRef, Node};
+use crate::idx::planner::tree::{GroupRef, IdiomPosition, IndexRef, Node};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
 use crate::sql::{Array, Idiom, Object};
@@ -168,6 +168,7 @@ pub(super) struct IndexOption {
 	/// A reference o the index definition
 	ir: IndexRef,
 	id: Idiom,
+	id_pos: IdiomPosition,
 	op: Arc<IndexOperator>,
 }
 
@@ -182,10 +183,11 @@ pub(super) enum IndexOperator {
 }
 
 impl IndexOption {
-	pub(super) fn new(ir: IndexRef, id: Idiom, op: IndexOperator) -> Self {
+	pub(super) fn new(ir: IndexRef, id: Idiom, id_pos: IdiomPosition, op: IndexOperator) -> Self {
 		Self {
 			ir,
 			id,
+			id_pos,
 			op: Arc::new(op),
 		}
 	}
@@ -204,6 +206,10 @@ impl IndexOption {
 
 	pub(super) fn id_ref(&self) -> &Idiom {
 		&self.id
+	}
+
+	pub(super) fn id_pos(&self) -> IdiomPosition {
+		self.id_pos
 	}
 
 	fn reduce_array(v: &Value) -> Value {

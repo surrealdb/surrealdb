@@ -2233,3 +2233,55 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
+		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'h';
+		CREATE i:A SET t = t:1;
+		SELECT * FROM i WHERE t.name @@ 'h' EXPLAIN;
+		SELECT * FROM i WHERE t.name @@ 'h';
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 8);
+	skip_ok(&mut res, 6)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						detail: {
+							table: 'i'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							reason: 'NO INDEX FOUND'
+						},
+						operation: 'Fallback'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[{ "id": "i:A", "t": "t:1"}]"#);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	Ok(())
+}

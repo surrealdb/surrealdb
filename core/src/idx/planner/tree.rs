@@ -335,7 +335,7 @@ impl<'a> TreeBuilder<'a> {
 				}
 			}
 			if let Some(ir) = self.lookup_join_index_ref(local_irs.as_slice()) {
-				let io = IndexOption::new(ir, id.clone(), IndexOperator::Join(remote_ios));
+				let io = IndexOption::new(ir, id.clone(), p, IndexOperator::Join(remote_ios));
 				return Ok(Some(io));
 			}
 			return Ok(None);
@@ -364,7 +364,7 @@ impl<'a> TreeBuilder<'a> {
 					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id)?,
 				};
 				if let Some(op) = op {
-					let io = IndexOption::new(*ir, id.clone(), op);
+					let io = IndexOption::new(*ir, id.clone(), p, op);
 					self.index_map.options.push((e.clone(), io.clone()));
 					return Ok(Some(io));
 				}
@@ -527,13 +527,7 @@ impl Node {
 	) -> Option<(&Idiom, LocalIndexRefs, Option<RemoteIndexRefs>)> {
 		match self {
 			Node::IndexedField(id, irs) => Some((id, irs.clone(), None)),
-			Node::RecordField(id, ro) => {
-				if ro.locals.is_empty() {
-					None
-				} else {
-					Some((id, ro.locals.clone(), Some(ro.remotes.clone())))
-				}
-			}
+			Node::RecordField(id, ro) => Some((id, ro.locals.clone(), Some(ro.remotes.clone()))),
 			_ => None,
 		}
 	}
@@ -547,11 +541,12 @@ impl Node {
 	}
 }
 
-#[derive(Clone, Copy)]
-enum IdiomPosition {
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(super) enum IdiomPosition {
 	Left,
 	Right,
 }
+
 impl IdiomPosition {
 	// Reverses the operator for non-commutative operators
 	fn transform(&self, op: &Operator) -> Operator {

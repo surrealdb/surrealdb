@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) type TermId = u64;
 
-pub(super) struct Terms {
+pub(in crate::idx) struct Terms {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<FstKeys>,
