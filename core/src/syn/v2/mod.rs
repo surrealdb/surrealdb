@@ -59,7 +59,7 @@ pub fn value(input: &str) -> Result<Value, Error> {
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn value_legacy_strand(input: &str) -> Result<Value, Error> {
-	debug!("parsing value, input = {input}");
+	debug!("parsing value with legacy strings, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
@@ -86,7 +86,7 @@ pub fn json(input: &str) -> Result<Value, Error> {
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "debug", name = "parser", skip_all, fields(length = input.len()))]
 pub fn json_legacy_strand(input: &str) -> Result<Value, Error> {
-	debug!("parsing json, input = {input}");
+	debug!("parsing json with legacy strings, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
 	let mut stack = Stack::new();
 	parser.allow_legacy_strand(true);
