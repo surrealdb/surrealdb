@@ -307,7 +307,7 @@ impl QueryExecutor {
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, it_ref, ios).await?;
-				let index_join = Box::new(IndexJoinThingIterator::new(opt, ix, iterators).await?);
+				let index_join = Box::new(IndexJoinThingIterator::new(opt, ix, iterators));
 				Some(ThingIterator::IndexJoin(index_join))
 			}
 			_ => None,

@@ -286,40 +286,48 @@ impl IndexUnionThingIterator {
 pub(crate) struct IndexJoinThingIterator {
 	opt: Options,
 	ix: DefineIndexStatement,
-	_remote_iterators: VecDeque<ThingIterator>,
+	remote_iterators: VecDeque<ThingIterator>,
 	current_remote: Option<ThingIterator>,
 	current_remote_batch: VecDeque<(Thing, Option<DocId>)>,
 	current_local: Option<ThingIterator>,
 }
 
 impl IndexJoinThingIterator {
-	pub(super) async fn new(
+	pub(super) fn new(
 		opt: &Options,
 		ix: &DefineIndexStatement,
-		mut _remote_iterators: VecDeque<ThingIterator>,
-	) -> Result<Self, Error> {
-		let current_remote = _remote_iterators.pop_front();
-		let mut res = Self {
+		remote_iterators: VecDeque<ThingIterator>,
+	) -> Self {
+		Self {
 			opt: opt.clone(),
 			ix: ix.clone(),
-			current_remote,
+			current_remote: None,
 			current_remote_batch: VecDeque::with_capacity(0),
-			_remote_iterators,
+			remote_iterators,
 			current_local: None,
-		};
-		res.next_current_local().await?;
-		Ok(res)
+		}
 	}
 
-	async fn next_current_remote_batch(&mut self) -> Result<bool, Error> {
+	async fn next_current_remote_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<bool, Error> {
 		loop {
-			if let Some(_v) = &mut self.current_remote {
-				todo!()
+			if let Some(it) = &mut self.current_remote {
+				self.current_remote_batch.clear();
+				if it.next_batch(tx, limit, &mut self.current_remote_batch).await? > 0 {
+					return Ok(true);
+				}
+			}
+			self.current_remote = self.remote_iterators.pop_front();
+			if self.current_remote.is_none() {
+				return Ok(false);
 			}
 		}
 	}
 
-	async fn next_current_local(&mut self) -> Result<bool, Error> {
+	async fn next_current_local(&mut self, tx: &Transaction, limit: u32) -> Result<bool, Error> {
 		loop {
 			if let Some((thing, _)) = self.current_remote_batch.pop_front() {
 				let value = Value::from(thing);
@@ -327,7 +335,7 @@ impl IndexJoinThingIterator {
 				self.current_local = Some(ThingIterator::IndexEqual(it));
 				return Ok(true);
 			}
-			if !self.next_current_remote_batch().await? {
+			if !self.next_current_remote_batch(tx, limit).await? {
 				break;
 			}
 		}
@@ -340,16 +348,17 @@ impl IndexJoinThingIterator {
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
-		while let Some(current_local) = &mut self.current_local {
-			let n = current_local.next_batch(tx, limit, collector).await?;
-			if n > 0 {
-				return Ok(n);
+		loop {
+			if let Some(current_local) = &mut self.current_local {
+				let n = current_local.next_batch(tx, limit, collector).await?;
+				if n > 0 {
+					return Ok(n);
+				}
 			}
-			if !self.next_current_local().await? {
-				break;
+			if !self.next_current_local(tx, limit).await? {
+				return Ok(0);
 			}
 		}
-		Ok(0)
 	}
 }
 
