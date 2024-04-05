@@ -16,33 +16,50 @@ pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
 	IndexUnion(IndexUnionThingIterator),
-	IndexJoin(IndexJoinThingIterator),
+	IndexJoin(Box<IndexJoinThingIterator>),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
-	UniqueJoin(UniqueJoinThingIterator),
+	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
 	Knn(DocIdsIterator),
 }
 
 impl ThingIterator {
-	pub(crate) async fn next_batch(
+	pub(crate) async fn next_batch<T: ThingCollector>(
 		&mut self,
 		tx: &Transaction,
 		size: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		match self {
-			Self::IndexEqual(i) => i.next_batch(tx, size).await,
-			Self::UniqueEqual(i) => i.next_batch(tx).await,
-			Self::IndexRange(i) => i.next_batch(tx, size).await,
-			Self::UniqueRange(i) => i.next_batch(tx, size).await,
-			Self::IndexUnion(i) => i.next_batch(tx, size).await,
-			Self::UniqueUnion(i) => i.next_batch(tx, size).await,
-			Self::Matches(i) => i.next_batch(tx, size).await,
-			Self::Knn(i) => i.next_batch(tx, size).await,
-			Self::IndexJoin(i) => i.next_batch(tx, size).await,
-			Self::UniqueJoin(i) => i.next_batch(tx, size).await,
+			Self::IndexEqual(i) => i.next_batch(tx, size, collector).await,
+			Self::UniqueEqual(i) => i.next_batch(tx, collector).await,
+			Self::IndexRange(i) => i.next_batch(tx, size, collector).await,
+			Self::UniqueRange(i) => i.next_batch(tx, size, collector).await,
+			Self::IndexUnion(i) => i.next_batch(tx, size, collector).await,
+			Self::UniqueUnion(i) => i.next_batch(tx, size, collector).await,
+			Self::Matches(i) => i.next_batch(tx, size, collector).await,
+			Self::Knn(i) => i.next_batch(tx, size, collector).await,
+			Self::IndexJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
+			Self::UniqueJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
 		}
+	}
+}
+
+pub(crate) trait ThingCollector {
+	fn add(&mut self, thing: Thing, doc_id: Option<DocId>);
+}
+
+impl ThingCollector for Vec<(Thing, Option<DocId>)> {
+	fn add(&mut self, thing: Thing, doc_id: Option<DocId>) {
+		self.push((thing, doc_id));
+	}
+}
+
+impl ThingCollector for VecDeque<(Thing, Option<DocId>)> {
+	fn add(&mut self, thing: Thing, doc_id: Option<DocId>) {
+		self.push_back((thing, doc_id));
 	}
 }
 
@@ -62,12 +79,13 @@ impl IndexEqualThingIterator {
 		}
 	}
 
-	async fn next_scan(
+	async fn next_scan<T: ThingCollector>(
 		txn: &Transaction,
 		beg: &mut Vec<u8>,
 		end: &[u8],
 		limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		let min = beg.clone();
 		let max = end.to_owned();
 		let res = txn
@@ -87,16 +105,18 @@ impl IndexEqualThingIterator {
 			key.push(0x00);
 			*beg = key;
 		}
-		let res = res.iter().map(|(_, val)| (val.into(), None)).collect();
-		Ok(res)
+		let count = res.len();
+		res.into_iter().for_each(|(_, val)| collector.add(val.into(), None));
+		Ok(count)
 	}
 
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
-		Self::next_scan(txn, &mut self.beg, &self.end, limit).await
+		collector: &mut T,
+	) -> Result<usize, Error> {
+		Self::next_scan(txn, &mut self.beg, &self.end, limit, collector).await
 	}
 }
 
@@ -186,11 +206,12 @@ impl IndexRangeThingIterator {
 		}
 	}
 
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
 		let res = txn
@@ -209,13 +230,14 @@ impl IndexRangeThingIterator {
 			self.r.beg.clone_from(key);
 			self.r.beg.push(0x00);
 		}
-		let mut r = Vec::with_capacity(res.len());
+		let mut count = 0;
 		for (k, v) in res {
 			if self.r.matches(&k) {
-				r.push((v.into(), None));
+				collector.add(v.into(), None);
+				count += 1;
 			}
 		}
-		Ok(r)
+		Ok(count)
 	}
 }
 
@@ -243,39 +265,91 @@ impl IndexUnionThingIterator {
 		}
 	}
 
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		while let Some(r) = &mut self.current {
-			let res = IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit).await?;
-			if !res.is_empty() {
-				return Ok(res);
+			let count =
+				IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit, collector).await?;
+			if count != 0 {
+				return Ok(count);
 			}
 			self.current = self.values.pop_front();
 		}
-		Ok(vec![])
+		Ok(0)
 	}
 }
 
-pub(crate) struct IndexJoinThingIterator {}
+pub(crate) struct IndexJoinThingIterator {
+	opt: Options,
+	ix: DefineIndexStatement,
+	_remote_iterators: VecDeque<ThingIterator>,
+	current_remote: Option<ThingIterator>,
+	current_remote_batch: VecDeque<(Thing, Option<DocId>)>,
+	current_local: Option<ThingIterator>,
+}
 
 impl IndexJoinThingIterator {
-	pub(super) fn new(
-		_opt: &Options,
-		_ix: &DefineIndexStatement,
-		_ios: Vec<ThingIterator>,
-	) -> Self {
-		todo!()
+	pub(super) async fn new(
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		mut _remote_iterators: VecDeque<ThingIterator>,
+	) -> Result<Self, Error> {
+		let current_remote = _remote_iterators.pop_front();
+		let mut res = Self {
+			opt: opt.clone(),
+			ix: ix.clone(),
+			current_remote,
+			current_remote_batch: VecDeque::with_capacity(0),
+			_remote_iterators,
+			current_local: None,
+		};
+		res.next_current_local().await?;
+		Ok(res)
 	}
 
-	async fn next_batch(
+	async fn next_current_remote_batch(&mut self) -> Result<bool, Error> {
+		loop {
+			if let Some(_v) = &mut self.current_remote {
+				todo!()
+			}
+		}
+	}
+
+	async fn next_current_local(&mut self) -> Result<bool, Error> {
+		loop {
+			if let Some((thing, _)) = self.current_remote_batch.pop_front() {
+				let value = Value::from(thing);
+				let it = IndexEqualThingIterator::new(&self.opt, &self.ix, &value);
+				self.current_local = Some(ThingIterator::IndexEqual(it));
+				return Ok(true);
+			}
+			if !self.next_current_remote_batch().await? {
+				break;
+			}
+		}
+		Ok(false)
+	}
+
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		_txn: &Transaction,
-		_limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
-		todo!()
+		tx: &Transaction,
+		limit: u32,
+		collector: &mut T,
+	) -> Result<usize, Error> {
+		while let Some(current_local) = &mut self.current_local {
+			let n = current_local.next_batch(tx, limit, collector).await?;
+			if n > 0 {
+				return Ok(n);
+			}
+			if !self.next_current_local().await? {
+				break;
+			}
+		}
+		Ok(0)
 	}
 }
 
@@ -292,16 +366,19 @@ impl UniqueEqualThingIterator {
 		}
 	}
 
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		collector: &mut T,
+	) -> Result<usize, Error> {
+		let mut count = 0;
 		if let Some(key) = self.key.take() {
 			if let Some(val) = txn.lock().await.get(key).await? {
-				return Ok(vec![(val.into(), None)]);
+				collector.add(val.into(), None);
+				count += 1;
 			}
 		}
-		Ok(vec![])
+		Ok(count)
 	}
 }
 
@@ -350,13 +427,14 @@ impl UniqueRangeThingIterator {
 			.unwrap()
 	}
 
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
 		mut limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		if self.done {
-			return Ok(vec![]);
+			return Ok(0);
 		}
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
@@ -371,26 +449,27 @@ impl UniqueRangeThingIterator {
 				limit,
 			)
 			.await?;
-		let res = res.values;
-		let mut r = Vec::with_capacity(res.len());
-		for (k, v) in res {
+		let mut count = 0;
+		for (k, v) in res.values {
 			limit -= 1;
 			if limit == 0 {
 				self.r.beg = k;
-				return Ok(r);
+				return Ok(count);
 			}
 			if self.r.matches(&k) {
-				r.push((v.into(), None));
+				collector.add(v.into(), None);
+				count += 1;
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
 			if let Some(v) = tx.get(end).await? {
-				r.push((v.into(), None));
+				collector.add(v.into(), None);
+				count += 1;
 			}
 		}
 		self.done = true;
-		Ok(r)
+		Ok(count)
 	}
 }
 
@@ -414,41 +493,44 @@ impl UniqueUnionThingIterator {
 		}
 	}
 
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		let mut run = txn.lock().await;
-		let mut res = vec![];
+		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
 			if let Some(val) = run.get(key).await? {
-				res.push((val.into(), None));
-			}
-			if res.len() >= limit as usize {
-				return Ok(res);
+				collector.add(val.into(), None);
+				count += 1;
+				if count >= limit {
+					break;
+				}
 			}
 		}
-		Ok(res)
+		Ok(count as usize)
 	}
 }
 
 pub(crate) struct UniqueJoinThingIterator {}
 
 impl UniqueJoinThingIterator {
-	pub(super) fn new(
+	pub(super) async fn new(
 		_opt: &Options,
 		_ix: &DefineIndexStatement,
-		_ios: Vec<ThingIterator>,
-	) -> Self {
+		_ios: VecDeque<ThingIterator>,
+	) -> Result<Self, Error> {
 		todo!()
 	}
 
-	async fn next_batch(
+	async fn next_batch<T>(
 		&mut self,
 		_txn: &Transaction,
 		_limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		_collector: &mut T,
+	) -> Result<usize, Error> {
 		todo!()
 	}
 }
@@ -465,24 +547,25 @@ impl MatchesThingIterator {
 		})
 	}
 
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
-		mut limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
-		let mut res = vec![];
+		limit: u32,
+		collector: &mut T,
+	) -> Result<usize, Error> {
+		let mut count = 0;
 		if let Some(hits) = &mut self.hits {
 			let mut run = txn.lock().await;
-			while limit > 0 {
+			while limit > count {
 				if let Some((thg, doc_id)) = hits.next(&mut run).await? {
-					res.push((thg, Some(doc_id)));
+					collector.add(thg, Some(doc_id));
+					count += 1;
 				} else {
 					break;
 				}
-				limit -= 1;
 			}
 		}
-		Ok(res)
+		Ok(count as usize)
 	}
 }
 
@@ -498,25 +581,26 @@ impl DocIdsIterator {
 			res,
 		}
 	}
-	async fn next_batch(
+	async fn next_batch<T: ThingCollector>(
 		&mut self,
 		txn: &Transaction,
-		mut limit: u32,
-	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
-		let mut res = vec![];
+		limit: u32,
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		let mut tx = txn.lock().await;
-		while limit > 0 {
+		let mut count = 0;
+		while limit > count {
 			if let Some(doc_id) = self.res.pop_front() {
 				if let Some(doc_key) =
 					self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await?
 				{
-					res.push((doc_key.into(), Some(doc_id)));
-					limit -= 1;
+					collector.add(doc_key.into(), Some(doc_id));
+					count += 1;
 				}
 			} else {
 				break;
 			}
 		}
-		Ok(res)
+		Ok(count as usize)
 	}
 }

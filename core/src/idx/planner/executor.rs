@@ -305,9 +305,11 @@ impl QueryExecutor {
 			IndexOperator::Union(value) => {
 				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(opt, ix, value)))
 			}
-			IndexOperator::Join(ios) => Some(ThingIterator::IndexJoin(
-				IndexJoinThingIterator::new(opt, ix, self.build_iterators(opt, it_ref, ios).await?),
-			)),
+			IndexOperator::Join(ios) => {
+				let iterators = self.build_iterators(opt, it_ref, ios).await?;
+				let index_join = Box::new(IndexJoinThingIterator::new(opt, ix, iterators).await?);
+				Some(ThingIterator::IndexJoin(index_join))
+			}
 			_ => None,
 		})
 	}
@@ -352,11 +354,9 @@ impl QueryExecutor {
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(opt, ix, value)))
 			}
 			IndexOperator::Join(ios) => {
-				Some(ThingIterator::UniqueJoin(UniqueJoinThingIterator::new(
-					opt,
-					ix,
-					self.build_iterators(opt, it_ref, ios).await?,
-				)))
+				let iterators = self.build_iterators(opt, it_ref, ios).await?;
+				let unique_join = Box::new(UniqueJoinThingIterator::new(opt, ix, iterators).await?);
+				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			_ => None,
 		})
@@ -395,11 +395,11 @@ impl QueryExecutor {
 		opt: &Options,
 		it_ref: IteratorRef,
 		ios: &[IndexOption],
-	) -> Result<Vec<ThingIterator>, Error> {
-		let mut iterators = Vec::with_capacity(ios.len());
+	) -> Result<VecDeque<ThingIterator>, Error> {
+		let mut iterators = VecDeque::with_capacity(ios.len());
 		for io in ios {
 			if let Some(it) = Box::pin(self.new_single_iterator(opt, it_ref, io)).await? {
-				iterators.push(it);
+				iterators.push_back(it);
 			}
 		}
 		Ok(iterators)

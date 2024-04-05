@@ -563,7 +563,8 @@ impl<'a> Processor<'a> {
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, ir).await? {
-				let mut things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
+				let mut things = Vec::new();
+				iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut things).await?;
 				while !things.is_empty() {
 					// Check if the context is finished
 					if ctx.is_done() {
@@ -601,7 +602,8 @@ impl<'a> Processor<'a> {
 					}
 
 					// Collect the next batch of ids
-					things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
+					things = Vec::new();
+					iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut things).await?;
 				}
 				// Everything ok
 				return Ok(());
