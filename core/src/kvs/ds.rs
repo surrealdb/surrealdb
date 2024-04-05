@@ -1050,8 +1050,19 @@ impl Datastore {
 								doc.initial.doc,
 								doc.current.doc
 							);
+							if doc.initial.doc.is_none()
+								&& doc.current.doc.is_none() && !matches!(
+								mutation,
+								TableMutation::Del(_)
+							) {
+								panic!("Doc was wrong and the mutation was {:?}", mutation);
+							}
 							doc.check_lqs_and_send_notifications(
 								opt,
+								// TODO(phughk): this is incorrect - the "statement" is the "currently evaluated statement for lives"
+								// Which in this case - doesnt exist, it's off-transaction; Recreating it is pointless
+								// Recreating the doc is necessary anyway - we can probably remove this parameter
+								// In its current state it is harmless as the impl is doing a FFLAG check
 								&Statement::Live(&lq_value.stm),
 								&tx,
 								[&lq_value.stm].as_slice(),
@@ -1776,14 +1787,30 @@ pub(crate) fn construct_document(mutation: &TableMutation) -> Option<Document> {
 			Some(doc)
 		}
 		TableMutation::Del(id) => {
-			let doc = Document::new(None, Some(id), None, &Value::None, Workable::Normal);
+			let fake_previous_value_because_we_need_the_id_and_del_doesnt_store_value =
+				Value::Object(Object::from(map! {
+					"id" => Value::Thing(id.clone()),
+				}));
+			let doc = Document::new_artificial(
+				None,
+				Some(id),
+				None,
+				Cow::Owned(Value::None),
+				Cow::Owned(fake_previous_value_because_we_need_the_id_and_del_doesnt_store_value),
+				Workable::Normal,
+			);
 			Some(doc)
 		}
 		TableMutation::Def(_) => None,
 		TableMutation::SetWithDiff(id, current_value, _operations) => {
-			let todo_original_after_reverse_applying_patches = Value::Strand(Strand::from(
-				"placeholder until we can derive diffs from reversing patch operations",
-			));
+			// We need a previous value otherwise the Value::compute function won't work correctly
+			// This is also how IDs are carried into notifications, not via doc.rid
+			let todo_original_after_reverse_applying_patches = Value::Object(Object::from(map! {
+				"id" => Value::Thing(id.clone()),
+				// This value is included so that we know for sure it is placeholder
+				"fake_value" => Value::Strand(
+					Strand::from( "placeholder until we can derive diffs from reversing patch operations" ))
+			}));
 			let doc = Document::new_artificial(
 				None,
 				Some(id),

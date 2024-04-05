@@ -49,10 +49,17 @@ mod test_construct_document {
 		let doc = ds::construct_document(&tb_mutation);
 		let doc = doc.unwrap();
 		// The previous and current doc values are "None", so technically this is a new doc as per
-		// current==None
+		// current == None
 		assert!(doc.is_new(), "{:?}", doc);
 		assert!(doc.current_doc().is_none());
-		assert!(doc.initial_doc().is_none());
+		assert!(doc.initial_doc().is_some());
+		match doc.initial_doc() {
+			Value::Object(o) => {
+				assert!(o.contains_key("id"));
+				assert_eq!(o.get("id").unwrap(), &Value::Thing(thing));
+			}
+			_ => panic!("Initial doc should be an object"),
+		}
 	}
 
 	#[test]

@@ -147,10 +147,24 @@ impl<'a> Document<'a> {
 	pub fn changed(&self) -> bool {
 		self.initial.doc != self.current.doc
 	}
-	/// Check if document has changed
+
+	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
-		self.initial.doc.is_none()
+		trace!(
+			"CHECKING IS NEW: initial={:?} && current={:?}",
+			self.initial.doc.is_none(),
+			self.current.doc.is_some()
+		);
+		trace!("initial: {:?}", self.initial);
+		trace!("current: {:?}", self.current);
+		self.initial.doc.is_none() && self.current.doc.is_some()
 	}
+
+	/// Check if document is being deleted
+	pub fn is_delete(&self) -> bool {
+		self.current.doc.is_none()
+	}
+
 	/// Get the table for this document
 	pub async fn tb(
 		&self,

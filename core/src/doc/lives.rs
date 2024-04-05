@@ -118,11 +118,17 @@ impl<'a> Document<'a> {
 			"Called check_lqs_and_send_notifications with {} live statements",
 			live_statements.len()
 		);
+		// Technically this isnt the condition - the `lives` function is passing in the currently evaluated statement
+		// but the ds.rs invocation of this function is reconstructing this statement
+		let is_delete = match FFLAGS.change_feed_live_queries.enabled() {
+			true => self.is_delete(),
+			false => stm.is_delete(),
+		};
 		for lv in live_statements {
 			// Create a new statement
 			let lq = Statement::from(*lv);
 			// Get the event action
-			let met = if stm.is_delete() {
+			let met = if is_delete {
 				trace!("The statement is delete, {}", stm);
 				Value::from("DELETE")
 			} else if self.is_new() {
@@ -133,7 +139,7 @@ impl<'a> Document<'a> {
 				Value::from("UPDATE")
 			};
 			// Check if this is a delete statement
-			let doc = match stm.is_delete() {
+			let doc = match is_delete {
 				true => &self.initial,
 				false => &self.current,
 			};
@@ -218,10 +224,11 @@ impl<'a> Document<'a> {
 				node_id,
 				lv.node.0
 			);
-			if stm.is_delete() {
+			if is_delete {
 				// Send a DELETE notification
 				if node_matches_live_query {
-					trace!("Sending lq delete notification");
+					assert!(doc.rid.is_some());
+					trace!("Sending lq delete notification with rid {:?}", doc.rid);
 					sender
 						.send(Notification {
 							id: lv.id,
@@ -265,11 +272,14 @@ impl<'a> Document<'a> {
 				// Send a UPDATE notification
 				if node_matches_live_query {
 					trace!("Sending lq update notification");
+					let value = self.pluck(&lqctx, &lqopt, txn, &lq).await?;
+					#[cfg(debug_assertions)]
+					trace!("Sending lq update notification with value: {:?}", value);
 					sender
 						.send(Notification {
 							id: lv.id,
 							action: Action::Update,
-							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
+							result: value,
 						})
 						.await?;
 				}
