@@ -2079,7 +2079,7 @@ async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
 					{
 						detail: {
 							plan: {
-								index: 'i_t_id',
+								index: 'i_t_unique_id',
 								joins: [
 									{
 										index: 't_name_idx',
@@ -2202,6 +2202,17 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 		r#"[
 				{
 					detail: {
+						plan: {
+							index: 'i_t_id',
+							joins: [
+								{
+									index: 't_name_search_idx',
+									operator: '@@',
+									value: 'h'
+								}
+							],
+							operator: 'join'
+						},
 						table: 'i'
 					},
 					operation: 'Iterate Index'

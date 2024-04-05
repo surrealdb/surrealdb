@@ -299,12 +299,12 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(value) => {
-				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, value)))
-			}
-			IndexOperator::Union(value) => {
-				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(opt, ix, value)))
-			}
+			IndexOperator::Equality(value) => Some(ThingIterator::IndexEqual(
+				IndexEqualThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+			)),
+			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
+				IndexUnionThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+			)),
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, it_ref, ios).await?;
 				let index_join = Box::new(IndexJoinThingIterator::new(opt, ix, iterators));
@@ -325,12 +325,22 @@ impl QueryExecutor {
 			match ix.index {
 				Index::Idx => {
 					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
-						opt, ix, from, to,
+						opt.ns(),
+						opt.db(),
+						&ix.what,
+						&ix.name,
+						from,
+						to,
 					)))
 				}
 				Index::Uniq => {
 					return Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
-						opt, ix, from, to,
+						opt.ns(),
+						opt.db(),
+						&ix.what,
+						&ix.name,
+						from,
+						to,
 					)))
 				}
 				_ => {}
@@ -347,15 +357,15 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(value) => {
-				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)))
-			}
+			IndexOperator::Equality(value) => Some(ThingIterator::UniqueEqual(
+				UniqueEqualThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+			)),
 			IndexOperator::Union(value) => {
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(opt, ix, value)))
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, it_ref, ios).await?;
-				let unique_join = Box::new(UniqueJoinThingIterator::new(opt, ix, iterators).await?);
+				let unique_join = Box::new(UniqueJoinThingIterator::new(opt, ix, iterators));
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			_ => None,
