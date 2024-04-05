@@ -6,7 +6,7 @@ use crate::{
 	sql::{
 		Array, Constant, Id, Number, Object, Query, Statement, Statements, Strand, Thing, Value,
 	},
-	syn::v2::parser::{mac::test_parse, Parser},
+	syn::parser::{mac::test_parse, Parser},
 };
 
 #[test]

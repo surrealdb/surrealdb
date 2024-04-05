@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
 	sql::Datetime,
-	syn::v2::token::{Token, TokenKind},
+	syn::token::{Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};

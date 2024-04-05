@@ -1,7 +1,7 @@
 use crate::{
 	sql::change_feed_include::ChangeFeedInclude,
 	sql::{language::Language, Algorithm},
-	syn::v2::token::{DistanceKind, Keyword, TokenKind},
+	syn::token::{DistanceKind, Keyword, TokenKind},
 };
 use phf::{phf_map, phf_set};
 use unicase::UniCase;

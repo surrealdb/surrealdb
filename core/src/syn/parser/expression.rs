@@ -5,7 +5,7 @@ use reblessive::Stk;
 use super::mac::unexpected;
 use super::ParseError;
 use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
-use crate::syn::v2::{
+use crate::syn::{
 	parser::{mac::expected, ParseErrorKind, ParseResult, Parser},
 	token::{t, NumberKind, TokenKind},
 };

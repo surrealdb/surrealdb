@@ -6,7 +6,7 @@ use crate::{
 		Duration, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
 		SECONDS_PER_YEAR,
 	},
-	syn::v2::token::{Token, TokenKind},
+	syn::token::{Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};

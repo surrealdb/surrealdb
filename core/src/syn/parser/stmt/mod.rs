@@ -8,8 +8,8 @@ use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Fields, Ident, Param};
-use crate::syn::v2::parser::{ParseError, ParseErrorKind};
-use crate::syn::v2::token::{t, TokenKind};
+use crate::syn::parser::{ParseError, ParseErrorKind};
+use crate::syn::token::{t, TokenKind};
 use crate::{
 	sql::{
 		statements::{
@@ -19,7 +19,7 @@ use crate::{
 		},
 		Expression, Operator, Statement, Statements, Value,
 	},
-	syn::v2::parser::mac::unexpected,
+	syn::parser::mac::unexpected,
 };
 
 use super::{mac::expected, ParseResult, Parser};

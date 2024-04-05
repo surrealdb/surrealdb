@@ -1,11 +1,11 @@
 use reblessive::Stack;
 
-use super::super::Parse;
-use super::parse;
 use super::lexer::Lexer;
+use super::parse;
 use super::parser::Parser;
+use super::Parse;
 use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
-use crate::syn::v2::token::{t, TokenKind};
+use crate::syn::token::{t, TokenKind};
 
 impl Parse<Self> for Value {
 	fn parse(val: &str) -> Self {
@@ -63,11 +63,10 @@ impl Parse<Self> for Expression {
 }
 
 #[test]
-	fn test_error_in_lineterminator() {
-		let q = r#"
+fn test_error_in_lineterminator() {
+	let q = r#"
 select * from person
 CREATE person CONTENT { foo:'bar'};
 "#;
-		parse(q).unwrap_err();
-	}
-	
+	parse(q).unwrap_err();
+}

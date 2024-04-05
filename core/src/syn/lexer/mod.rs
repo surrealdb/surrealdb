@@ -1,6 +1,6 @@
 use crate::{
 	sql::{Datetime, Duration, Regex, Uuid},
-	syn::v2::token::{Span, Token, TokenKind},
+	syn::token::{Span, Token, TokenKind},
 };
 use thiserror::Error;
 

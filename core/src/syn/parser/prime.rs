@@ -8,7 +8,7 @@ use crate::{
 		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Part, Script, Strand, Subquery, Table,
 		Value,
 	},
-	syn::v2::{
+	syn::{
 		lexer::Lexer,
 		parser::{
 			mac::{expected, unexpected},

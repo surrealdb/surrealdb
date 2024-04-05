@@ -4,7 +4,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{Array, Ident, Object, Strand, Value},
-	syn::v2::{
+	syn::{
 		parser::mac::expected,
 		token::{t, Span, TokenKind},
 	},

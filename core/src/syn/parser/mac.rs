@@ -2,17 +2,17 @@
 macro_rules! unexpected {
 	($parser:expr, $found:expr, $expected:expr) => {
 		match $found {
-			$crate::syn::v2::token::TokenKind::Invalid => {
+			$crate::syn::token::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::v2::parser::ParseError::new(
-					$crate::syn::v2::parser::ParseErrorKind::InvalidToken(error),
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
 					$parser.recent_span(),
 				));
 			}
-			$crate::syn::v2::token::TokenKind::Eof => {
+			$crate::syn::token::TokenKind::Eof => {
 				let expected = $expected;
-				return Err($crate::syn::v2::parser::ParseError::new(
-					$crate::syn::v2::parser::ParseErrorKind::UnexpectedEof {
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
 						expected,
 					},
 					$parser.recent_span(),
@@ -20,8 +20,8 @@ macro_rules! unexpected {
 			}
 			x => {
 				let expected = $expected;
-				return Err($crate::syn::v2::parser::ParseError::new(
-					$crate::syn::v2::parser::ParseErrorKind::Unexpected {
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::Unexpected {
 						found: x,
 						expected,
 					},
@@ -38,27 +38,27 @@ macro_rules! expected {
 		let token = $parser.next();
 		match token.kind {
 			$($kind)* => token,
-			$crate::syn::v2::parser::TokenKind::Invalid => {
+			$crate::syn::parser::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
-				return Err($crate::syn::v2::parser::ParseError::new(
-					$crate::syn::v2::parser::ParseErrorKind::InvalidToken(error),
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
 					$parser.recent_span(),
 				));
 			}
 			x => {
 				let expected = $($kind)*.as_str();
-				let kind = if let $crate::syn::v2::token::TokenKind::Eof = x {
-					$crate::syn::v2::parser::ParseErrorKind::UnexpectedEof {
+				let kind = if let $crate::syn::token::TokenKind::Eof = x {
+					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
 						expected,
 					}
 				} else {
-					$crate::syn::v2::parser::ParseErrorKind::Unexpected {
+					$crate::syn::parser::ParseErrorKind::Unexpected {
 						found: x,
 						expected,
 					}
 				};
 
-				return Err($crate::syn::v2::parser::ParseError::new(kind, $parser.last_span()));
+				return Err($crate::syn::parser::ParseError::new(kind, $parser.last_span()));
 			}
 		}
 	}};
@@ -68,7 +68,7 @@ macro_rules! expected {
 #[macro_export]
 macro_rules! test_parse {
 	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:literal) => {{
-		let mut parser = $crate::syn::v2::parser::Parser::new($t.as_bytes());
+		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
 		let mut stack = reblessive::Stack::new();
 		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
 	}};
@@ -78,19 +78,19 @@ macro_rules! test_parse {
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
 		if $this.object_recursion == 0 {
-			return Err($crate::syn::v2::parser::ParseError::new(
-				$crate::syn::v2::parser::ParseErrorKind::ExceededObjectDepthLimit,
+			return Err($crate::syn::parser::ParseError::new(
+				$crate::syn::parser::ParseErrorKind::ExceededObjectDepthLimit,
 				$this.last_span(),
 			));
 		}
-		struct Dropper<'a, 'b>(&'a mut $crate::syn::v2::parser::Parser<'b>);
+		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>);
 		impl Drop for Dropper<'_, '_> {
 			fn drop(&mut self) {
 				self.0.object_recursion += 1;
 			}
 		}
 		impl<'a> ::std::ops::Deref for Dropper<'_,'a>{
-			type Target = $crate::syn::v2::parser::Parser<'a>;
+			type Target = $crate::syn::parser::Parser<'a>;
 
 			fn deref(&self) -> &Self::Target{
 				self.0
@@ -115,19 +115,19 @@ macro_rules! enter_object_recursion {
 macro_rules! enter_query_recursion {
 	($name:ident = $this:expr => { $($t:tt)* }) => {{
 		if $this.query_recursion == 0 {
-			return Err($crate::syn::v2::parser::ParseError::new(
-				$crate::syn::v2::parser::ParseErrorKind::ExceededQueryDepthLimit,
+			return Err($crate::syn::parser::ParseError::new(
+				$crate::syn::parser::ParseErrorKind::ExceededQueryDepthLimit,
 				$this.last_span(),
 			));
 		}
-		struct Dropper<'a, 'b>(&'a mut $crate::syn::v2::parser::Parser<'b>);
+		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>);
 		impl Drop for Dropper<'_, '_> {
 			fn drop(&mut self) {
 				self.0.query_recursion += 1;
 			}
 		}
 		impl<'a> ::std::ops::Deref for Dropper<'_,'a>{
-			type Target = $crate::syn::v2::parser::Parser<'a>;
+			type Target = $crate::syn::parser::Parser<'a>;
 
 			fn deref(&self) -> &Self::Target{
 				self.0

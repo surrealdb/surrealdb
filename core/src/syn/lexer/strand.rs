@@ -2,7 +2,7 @@
 
 use std::mem;
 
-use crate::syn::v2::token::{Token, TokenKind};
+use crate::syn::token::{Token, TokenKind};
 
 use super::{unicode::chars, Error, Lexer};
 

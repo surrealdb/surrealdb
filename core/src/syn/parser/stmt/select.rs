@@ -5,7 +5,7 @@ use crate::{
 		statements::SelectStatement, Explain, Field, Fields, Ident, Idioms, Limit, Order, Orders,
 		Split, Splits, Start, Values, Version, With,
 	},
-	syn::v2::{
+	syn::{
 		parser::{
 			error::MissingKind,
 			mac::{expected, unexpected},

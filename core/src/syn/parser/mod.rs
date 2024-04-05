@@ -19,7 +19,7 @@
 use self::token_buffer::TokenBuffer;
 use crate::{
 	sql,
-	syn::v2::{
+	syn::{
 		lexer::{Error as LexError, Lexer},
 		token::{t, Span, Token, TokenKind},
 	},

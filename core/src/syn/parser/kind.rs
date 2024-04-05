@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::Kind,
-	syn::v2::{
+	syn::{
 		parser::mac::expected,
 		token::{t, Keyword, Span, TokenKind},
 	},

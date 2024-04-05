@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{statements::InsertStatement, Data, Value},
-	syn::v2::{
+	syn::{
 		parser::{mac::expected, ParseResult, Parser},
 		token::t,
 	},

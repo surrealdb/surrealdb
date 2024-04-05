@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{Function, Ident, Model},
-	syn::v2::{
+	syn::{
 		parser::mac::{expected, unexpected},
 		token::{t, NumberKind, TokenKind},
 	},

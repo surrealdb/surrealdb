@@ -27,7 +27,7 @@ use crate::{
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
-	syn::v2::parser::mac::test_parse,
+	syn::parser::mac::test_parse,
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 

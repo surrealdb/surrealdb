@@ -23,7 +23,7 @@ use crate::{
 		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
 		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
-	syn::v2::parser::{Parser, PartialResult},
+	syn::parser::{Parser, PartialResult},
 };
 use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
 use reblessive::Stack;

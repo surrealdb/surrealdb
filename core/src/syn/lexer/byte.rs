@@ -1,4 +1,4 @@
-use crate::syn::v2::{
+use crate::syn::{
 	lexer::{
 		unicode::{byte, chars},
 		Error, Lexer,

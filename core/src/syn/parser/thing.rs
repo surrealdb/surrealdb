@@ -3,7 +3,7 @@ use reblessive::Stk;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{id::Gen, Id, Ident, Range, Thing, Value},
-	syn::v2::{
+	syn::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,

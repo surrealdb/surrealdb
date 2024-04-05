@@ -8,7 +8,7 @@ use crate::{
 		Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
 		Permission, Permissions, Tables, Timeout, Value, View,
 	},
-	syn::v2::{
+	syn::{
 		parser::{
 			error::MissingKind,
 			mac::{expected, unexpected},

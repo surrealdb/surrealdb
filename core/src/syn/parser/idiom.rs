@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{Dir, Edges, Field, Fields, Graph, Ident, Idiom, Part, Table, Tables, Value},
-	syn::v2::token::{t, Span, TokenKind},
+	syn::token::{t, Span, TokenKind},
 };
 
 use super::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser};

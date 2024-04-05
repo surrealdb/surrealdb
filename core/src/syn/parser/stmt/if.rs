@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::statements::IfelseStatement,
-	syn::v2::{
+	syn::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,

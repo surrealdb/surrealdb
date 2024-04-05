@@ -6,7 +6,7 @@ use reblessive::Stk;
 use crate::{
 	enter_object_recursion,
 	sql::{Block, Geometry, Object, Strand, Value},
-	syn::v2::{
+	syn::{
 		parser::{mac::expected, ParseError, ParseErrorKind, ParseResult, Parser},
 		token::{t, Span, TokenKind},
 	},

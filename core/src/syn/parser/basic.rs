@@ -2,7 +2,7 @@ use crate::{
 	sql::{
 		language::Language, Datetime, Duration, Ident, Number, Param, Regex, Strand, Table, Uuid,
 	},
-	syn::v2::{
+	syn::{
 		parser::mac::unexpected,
 		token::{t, NumberKind, Token, TokenKind},
 	},

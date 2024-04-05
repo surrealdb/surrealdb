@@ -1,7 +1,7 @@
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{Constant, Function, Ident, Value},
-	syn::v2::{
+	syn::{
 		parser::{mac::expected, ParseError, ParseErrorKind},
 		token::{t, Span},
 	},

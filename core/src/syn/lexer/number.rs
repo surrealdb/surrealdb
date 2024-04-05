@@ -1,4 +1,4 @@
-use crate::syn::v2::{
+use crate::syn::{
 	lexer::{unicode::U8Ext, Error as LexError, Lexer},
 	token::{NumberKind, Token, TokenKind},
 };

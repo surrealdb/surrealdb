@@ -1,10 +1,8 @@
 use crate::syn::{
 	common::Location,
 	error::{RenderedError, Snippet},
-	v2::{
-		lexer::Error as LexError,
-		token::{Span, TokenKind},
-	},
+	lexer::Error as LexError,
+	token::{Span, TokenKind},
 };
 use std::{
 	fmt::Write,

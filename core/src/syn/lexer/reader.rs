@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::syn::v2::token::Span;
+use crate::syn::token::Span;
 use std::fmt;
 
 #[derive(Error, Debug)]

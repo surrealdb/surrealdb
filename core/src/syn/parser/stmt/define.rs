@@ -14,7 +14,7 @@ use crate::{
 		tokenizer::Tokenizer,
 		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType, Values,
 	},
-	syn::v2::{
+	syn::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,

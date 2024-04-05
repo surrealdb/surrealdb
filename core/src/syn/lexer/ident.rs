@@ -2,8 +2,8 @@ use std::mem;
 
 use unicase::UniCase;
 
-use crate::syn::v2::lexer::{keywords::KEYWORDS, Error, Lexer};
-use crate::syn::v2::token::{NumberKind, Token, TokenKind};
+use crate::syn::lexer::{keywords::KEYWORDS, Error, Lexer};
+use crate::syn::token::{NumberKind, Token, TokenKind};
 
 use super::unicode::{chars, U8Ext};
 

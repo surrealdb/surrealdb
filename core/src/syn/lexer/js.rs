@@ -1,4 +1,4 @@
-use crate::syn::v2::token::Span;
+use crate::syn::token::Span;
 
 use super::{unicode::chars::JS_LINE_TERIMATORS, Error, Lexer};
 

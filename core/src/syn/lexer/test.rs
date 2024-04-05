@@ -1,10 +1,10 @@
 use chrono::{FixedOffset, NaiveDate, Offset, TimeZone, Utc};
 
-use crate::syn::v2::token::{t, NumberKind, TokenKind};
+use crate::syn::token::{t, NumberKind, TokenKind};
 
 macro_rules! test_case(
 	($source:expr => [$($token:expr),*$(,)?]) => {
-		let mut lexer = crate::syn::v2::lexer::Lexer::new($source.as_bytes());
+		let mut lexer = crate::syn::lexer::Lexer::new($source.as_bytes());
 		let mut i = 0;
 		$(
 			let next = lexer.next();
@@ -253,9 +253,8 @@ fn keyword() {
 
 #[test]
 fn uuid() {
-	let mut lexer = crate::syn::v2::lexer::Lexer::new(
-		r#" u"e72bee20-f49b-11ec-b939-0242ac120002" "#.as_bytes(),
-	);
+	let mut lexer =
+		crate::syn::lexer::Lexer::new(r#" u"e72bee20-f49b-11ec-b939-0242ac120002" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {} @ ", error);
@@ -264,9 +263,8 @@ fn uuid() {
 	let uuid = lexer.uuid.take().unwrap();
 	assert_eq!(uuid.0.to_string(), "e72bee20-f49b-11ec-b939-0242ac120002");
 
-	let mut lexer = crate::syn::v2::lexer::Lexer::new(
-		r#" u"b19bc00b-aa98-486c-ae37-c8e1c54295b1" "#.as_bytes(),
-	);
+	let mut lexer =
+		crate::syn::lexer::Lexer::new(r#" u"b19bc00b-aa98-486c-ae37-c8e1c54295b1" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {} @ ", error);
@@ -278,7 +276,7 @@ fn uuid() {
 
 #[test]
 fn date_time_just_date() {
-	let mut lexer = crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23" "#.as_bytes());
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2012-04-23" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {} @ ", error);
@@ -299,7 +297,7 @@ fn date_time_just_date() {
 
 #[test]
 fn date_zone_time() {
-	let mut lexer = crate::syn::v2::lexer::Lexer::new(r#" d"2020-01-01T00:00:00Z" "#.as_bytes());
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2020-01-01T00:00:00Z" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {} @ ", error);
@@ -320,7 +318,7 @@ fn date_zone_time() {
 
 #[test]
 fn date_time_with_time() {
-	let mut lexer = crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23T18:25:43Z" "#.as_bytes());
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43Z" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {} @ ", error);
@@ -341,8 +339,7 @@ fn date_time_with_time() {
 
 #[test]
 fn date_time_nanos() {
-	let mut lexer =
-		crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.5631Z" "#.as_bytes());
+	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.5631Z" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {} @ ", error);
@@ -366,7 +363,7 @@ fn date_time_nanos() {
 #[test]
 fn date_time_timezone_utc() {
 	let mut lexer =
-		crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.0000511Z" "#.as_bytes());
+		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.0000511Z" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {}", error);
@@ -390,7 +387,7 @@ fn date_time_timezone_utc() {
 #[test]
 fn date_time_timezone_pacific() {
 	let mut lexer =
-		crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.511-08:00" "#.as_bytes());
+		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.511-08:00" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {}", error);
@@ -414,7 +411,7 @@ fn date_time_timezone_pacific() {
 #[test]
 fn date_time_timezone_pacific_partial() {
 	let mut lexer =
-		crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.511+08:30" "#.as_bytes());
+		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.511+08:30" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {}", error);
@@ -438,7 +435,7 @@ fn date_time_timezone_pacific_partial() {
 #[test]
 fn date_time_timezone_utc_nanoseconds() {
 	let mut lexer =
-		crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.5110000Z" "#.as_bytes());
+		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.5110000Z" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {}", error);
@@ -462,7 +459,7 @@ fn date_time_timezone_utc_nanoseconds() {
 #[test]
 fn date_time_timezone_utc_sub_nanoseconds() {
 	let mut lexer =
-		crate::syn::v2::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.0000511Z" "#.as_bytes());
+		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.0000511Z" "#.as_bytes());
 	let token = lexer.next_token();
 	if let Some(error) = lexer.error {
 		println!("ERROR: {}", error);

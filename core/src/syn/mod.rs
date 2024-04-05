@@ -1,16 +1,16 @@
-//! Module containing the implementation of the surrealql tokens, lexer, and parser.
-
 #![allow(dead_code)]
+
+//! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
 use crate::{
 	err::Error,
 	sql::{Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
 };
 
-pub mod lexer;
-pub mod parser;
 pub mod common;
 pub mod error;
+pub mod lexer;
+pub mod parser;
 pub mod token;
 
 #[cfg(test)]
@@ -20,11 +20,6 @@ pub trait Parse<T> {
 
 #[cfg(test)]
 mod test;
-
-pub use self::{
-	datetime_raw, duration, idiom, json, json_legacy_strand, parse, range, subquery, thing, value,
-	value_legacy_strand,
-};
 
 use lexer::Lexer;
 use parser::{ParseError, ParseErrorKind, Parser};

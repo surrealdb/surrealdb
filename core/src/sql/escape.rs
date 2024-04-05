@@ -91,7 +91,7 @@ pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> 
 }
 
 pub fn escape_reserved_keyword(s: &str) -> Option<String> {
-	crate::syn::v2::could_be_reserved_keyword(s).then(|| format!("`{}`", s))
+	crate::syn::could_be_reserved_keyword(s).then(|| format!("`{}`", s))
 }
 
 #[inline]

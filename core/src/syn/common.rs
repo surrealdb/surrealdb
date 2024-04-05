@@ -1,4 +1,4 @@
-use super::v2::token::Span;
+use super::token::Span;
 use std::ops::Range;
 
 /// A human readable location inside a string.

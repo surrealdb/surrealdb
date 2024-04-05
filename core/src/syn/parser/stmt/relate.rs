@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{statements::RelateStatement, Subquery, Value},
-	syn::v2::{
+	syn::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,

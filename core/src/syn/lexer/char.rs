@@ -1,4 +1,4 @@
-use crate::syn::v2::{
+use crate::syn::{
 	lexer::{CharError, Lexer},
 	token::{t, Token},
 };

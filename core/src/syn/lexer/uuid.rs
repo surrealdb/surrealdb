@@ -1,6 +1,6 @@
 use crate::{
 	sql::Uuid,
-	syn::v2::token::{Token, TokenKind},
+	syn::token::{Token, TokenKind},
 };
 
 use super::{Error as LexError, Lexer};
