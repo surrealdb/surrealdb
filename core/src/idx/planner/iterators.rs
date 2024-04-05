@@ -16,9 +16,11 @@ pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
 	IndexUnion(IndexUnionThingIterator),
+	IndexJoin(IndexJoinThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
+	UniqueJoin(UniqueJoinThingIterator),
 	Matches(MatchesThingIterator),
 	Knn(DocIdsIterator),
 }
@@ -30,14 +32,16 @@ impl ThingIterator {
 		size: u32,
 	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
 		match self {
-			ThingIterator::IndexEqual(i) => i.next_batch(tx, size).await,
-			ThingIterator::UniqueEqual(i) => i.next_batch(tx).await,
-			ThingIterator::IndexRange(i) => i.next_batch(tx, size).await,
-			ThingIterator::UniqueRange(i) => i.next_batch(tx, size).await,
-			ThingIterator::IndexUnion(i) => i.next_batch(tx, size).await,
-			ThingIterator::UniqueUnion(i) => i.next_batch(tx, size).await,
-			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
-			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
+			Self::IndexEqual(i) => i.next_batch(tx, size).await,
+			Self::UniqueEqual(i) => i.next_batch(tx).await,
+			Self::IndexRange(i) => i.next_batch(tx, size).await,
+			Self::UniqueRange(i) => i.next_batch(tx, size).await,
+			Self::IndexUnion(i) => i.next_batch(tx, size).await,
+			Self::UniqueUnion(i) => i.next_batch(tx, size).await,
+			Self::Matches(i) => i.next_batch(tx, size).await,
+			Self::Knn(i) => i.next_batch(tx, size).await,
+			Self::IndexJoin(i) => i.next_batch(tx, size).await,
+			Self::UniqueJoin(i) => i.next_batch(tx, size).await,
 		}
 	}
 }
@@ -255,6 +259,26 @@ impl IndexUnionThingIterator {
 	}
 }
 
+pub(crate) struct IndexJoinThingIterator {}
+
+impl IndexJoinThingIterator {
+	pub(super) fn new(
+		_opt: &Options,
+		_ix: &DefineIndexStatement,
+		_ios: Vec<ThingIterator>,
+	) -> Self {
+		todo!()
+	}
+
+	async fn next_batch(
+		&mut self,
+		_txn: &Transaction,
+		_limit: u32,
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		todo!()
+	}
+}
+
 pub(crate) struct UniqueEqualThingIterator {
 	key: Option<Key>,
 }
@@ -406,6 +430,26 @@ impl UniqueUnionThingIterator {
 			}
 		}
 		Ok(res)
+	}
+}
+
+pub(crate) struct UniqueJoinThingIterator {}
+
+impl UniqueJoinThingIterator {
+	pub(super) fn new(
+		_opt: &Options,
+		_ix: &DefineIndexStatement,
+		_ios: Vec<ThingIterator>,
+	) -> Self {
+		todo!()
+	}
+
+	async fn next_batch(
+		&mut self,
+		_txn: &Transaction,
+		_limit: u32,
+	) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		todo!()
 	}
 }
 

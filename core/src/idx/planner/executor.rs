@@ -8,9 +8,9 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::TermId;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
-	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueRangeThingIterator,
-	UniqueUnionThingIterator,
+	DocIdsIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
+	IndexUnionThingIterator, MatchesThingIterator, ThingIterator, UniqueEqualThingIterator,
+	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -227,7 +227,7 @@ impl QueryExecutor {
 		!self.0.knn_entries.is_empty()
 	}
 
-	/// Returns `true` if either the expression is matching the current iterator.
+	/// Returns `true` if the expression is matching the current iterator.
 	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
 		match self.0.it_entries.get(ir as usize) {
 			Some(IteratorEntry::Single(e, ..)) => exp.eq(e.as_ref()),
@@ -277,8 +277,10 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
 			match ix.index {
-				Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
-				Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
+				Index::Idx => Ok(self.new_index_iterator(opt, it_ref, ix, io.clone()).await?),
+				Index::Uniq => {
+					Ok(self.new_unique_index_iterator(opt, it_ref, ix, io.clone()).await?)
+				}
 				Index::Search {
 					..
 				} => self.new_search_index_iterator(it_ref, io.clone()).await,
@@ -289,20 +291,25 @@ impl QueryExecutor {
 		}
 	}
 
-	fn new_index_iterator(
+	async fn new_index_iterator(
+		&self,
 		opt: &Options,
+		it_ref: IteratorRef,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
-	) -> Option<ThingIterator> {
-		match io.op() {
+	) -> Result<Option<ThingIterator>, Error> {
+		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, value)))
 			}
 			IndexOperator::Union(value) => {
 				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(opt, ix, value)))
 			}
+			IndexOperator::Join(ios) => Some(ThingIterator::IndexJoin(
+				IndexJoinThingIterator::new(opt, ix, self.build_iterators(opt, it_ref, ios).await?),
+			)),
 			_ => None,
-		}
+		})
 	}
 
 	fn new_range_iterator(
@@ -330,20 +337,29 @@ impl QueryExecutor {
 		None
 	}
 
-	fn new_unique_index_iterator(
+	async fn new_unique_index_iterator(
+		&self,
 		opt: &Options,
+		it_ref: IteratorRef,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
-	) -> Option<ThingIterator> {
-		match io.op() {
+	) -> Result<Option<ThingIterator>, Error> {
+		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)))
 			}
 			IndexOperator::Union(value) => {
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(opt, ix, value)))
 			}
+			IndexOperator::Join(ios) => {
+				Some(ThingIterator::UniqueJoin(UniqueJoinThingIterator::new(
+					opt,
+					ix,
+					self.build_iterators(opt, it_ref, ios).await?,
+				)))
+			}
 			_ => None,
-		}
+		})
 	}
 
 	async fn new_search_index_iterator(
@@ -372,6 +388,21 @@ impl QueryExecutor {
 			}
 		}
 		None
+	}
+
+	async fn build_iterators(
+		&self,
+		opt: &Options,
+		it_ref: IteratorRef,
+		ios: &[IndexOption],
+	) -> Result<Vec<ThingIterator>, Error> {
+		let mut iterators = Vec::with_capacity(ios.len());
+		for io in ios {
+			if let Some(it) = Box::pin(self.new_single_iterator(opt, it_ref, io)).await? {
+				iterators.push(it);
+			}
+		}
+		Ok(iterators)
 	}
 
 	pub(crate) async fn matches(
