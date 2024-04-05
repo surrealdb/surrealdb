@@ -248,10 +248,10 @@ impl Clump<Array> for Array {
 			Array::default()
 		} else {
 			self.0
-			.chunks(clump_size)
-			.map::<Value, _>(|chunk| chunk.to_vec().into())
-			.collect::<Vec<_>>()
-			.into()
+				.chunks(clump_size)
+				.map::<Value, _>(|chunk| chunk.to_vec().into())
+				.collect::<Vec<_>>()
+				.into()
 		}
 	}
 }
@@ -266,10 +266,10 @@ impl Windows<Array> for Array {
 			Array::default()
 		} else {
 			self.0
-			.chunks(clump_size)
-			.map::<Value, _>(|chunk| chunk.to_vec().into())
-			.collect::<Vec<_>>()
-			.into()
+				.windows(window_size)
+				.map::<Value, _>(|window| window.to_vec().into())
+				.collect::<Vec<_>>()
+				.into()
 		}
 	}
 }
