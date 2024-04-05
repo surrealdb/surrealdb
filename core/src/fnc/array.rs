@@ -390,6 +390,10 @@ pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.union(other).into())
 }
 
+pub fn windows((array, windows_size): (Array, i64)) -> Result<Value, Error> {
+	Ok(array.windows(windows_size as usize).into())
+}
+
 pub mod sort {
 
 	use crate::err::Error;
