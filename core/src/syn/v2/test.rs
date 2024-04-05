@@ -1,6 +1,7 @@
 use reblessive::Stack;
 
 use super::super::Parse;
+use super::parse;
 use super::lexer::Lexer;
 use super::parser::Parser;
 use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
@@ -60,3 +61,13 @@ impl Parse<Self> for Expression {
 		panic!("not an expression");
 	}
 }
+
+#[test]
+	fn test_error_in_lineterminator() {
+		let q = r#"
+select * from person
+CREATE person CONTENT { foo:'bar'};
+"#;
+		parse(q).unwrap_err();
+	}
+	
