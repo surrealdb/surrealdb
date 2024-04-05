@@ -11,6 +11,7 @@ use surrealdb::Notification;
 use surrealdb_core::sql::Object;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
+use tracing::info;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -210,6 +211,7 @@ async fn live_select_query() {
 		}
 
 		// Start listening
+		info!("Starting live query");
 		let users: QueryStream<Notification<RecordId>> = db
 			.query(format!("LIVE SELECT * FROM {table}"))
 			.await
@@ -219,6 +221,7 @@ async fn live_select_query() {
 		let users = Arc::new(RwLock::new(users));
 
 		// Create a record
+		info!("Creating record");
 		let created: Vec<RecordId> = db.create(table).await.unwrap();
 		// Pull the notification
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
@@ -233,6 +236,7 @@ async fn live_select_query() {
 		assert_eq!(created, vec![notifications[0].data.clone()]);
 
 		// Update the record
+		info!("Updating record");
 		let _: Option<RecordId> =
 			db.update(&notifications[0].data.id).content(json!({"foo": "bar"})).await.unwrap();
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
@@ -246,6 +250,7 @@ async fn live_select_query() {
 		);
 
 		// Delete the record
+		info!("Deleting record");
 		let _: Option<RecordId> = db.delete(&notifications[0].data.id).await.unwrap();
 		// Pull the notification
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;

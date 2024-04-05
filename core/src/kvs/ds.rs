@@ -906,7 +906,7 @@ impl Datastore {
 	// It is handy for testing, because it allows you to specify the timestamp,
 	// without depending on a system clock.
 	pub async fn tick_at(&self, ts: u64) -> Result<(), Error> {
-		trace!("Ticking at timestamp {}", ts);
+		trace!("Ticking at timestamp {} ({:?})", ts, conv::u64_to_versionstamp(ts));
 		let _vs = self.save_timestamp_for_versionstamp(ts).await?;
 		self.garbage_collect_stale_change_feeds(ts).await?;
 		// TODO Add LQ GC
@@ -966,6 +966,17 @@ impl Datastore {
 			// Now we update since we are no longer iterating immutably
 			let mut tracked_cfs = self.cf_watermarks.lock().await;
 			for (selector, vs) in tracked_cfs_updates {
+				// TODO(phughk): test these lines
+				let vs = conv::to_u128_be(vs) + 1;
+				let vs = conv::try_u128_to_versionstamp(vs).unwrap();
+				#[cfg(debug_assertions)]
+				trace!(
+					"Updating tracker for ns={} db={} tb={} vs={}",
+					selector.ns,
+					selector.db,
+					selector.tb,
+					conv::versionstamp_to_u64(&vs)
+				);
 				tracked_cfs.insert(selector, vs);
 			}
 		};
@@ -1113,6 +1124,7 @@ impl Datastore {
 
 		// Update watermarks
 		trace!("Updating watermark to {:?} for index key {:?}", change_vs, lq_key);
+		// panic!("This is where the problem is - the updates are happening in 2 places. Should the VS tracking be in one place?");
 		// For each live query we have processed we update the watermarks
 		self.local_live_queries.write().await.insert(
 			lq_key.clone(),
@@ -1735,6 +1747,14 @@ async fn find_required_cfs_to_catch_up(
 	let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
 	for (selector, vs) in tracked_cfs.iter() {
 		// Read the change feed for the selector
+		#[cfg(debug_assertions)]
+		trace!(
+			"Checking for new changes for ns={} db={} tb={} vs={}",
+			selector.ns,
+			selector.db,
+			selector.tb,
+			conv::versionstamp_to_u64(vs)
+		);
 		let res = cf::read(
 			&mut tx,
 			&selector.ns,
