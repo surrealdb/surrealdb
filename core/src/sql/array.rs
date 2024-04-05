@@ -244,11 +244,33 @@ pub(crate) trait Clump<T> {
 
 impl Clump<Array> for Array {
 	fn clump(self, clump_size: usize) -> Array {
-		self.0
+		if clump_size == 0 {
+			Array::default()
+		} else {
+			self.0
 			.chunks(clump_size)
 			.map::<Value, _>(|chunk| chunk.to_vec().into())
 			.collect::<Vec<_>>()
 			.into()
+		}
+	}
+}
+
+pub(crate) trait Windows<T> {
+	fn windows(self, window: usize) -> T;
+}
+
+impl Windows<Array> for Array {
+	fn windows(self, window_size: usize) -> Array {
+		if window_size == 0 {
+			Array::default()
+		} else {
+			self.0
+			.chunks(clump_size)
+			.map::<Value, _>(|chunk| chunk.to_vec().into())
+			.collect::<Vec<_>>()
+			.into()
+		}
 	}
 }
 
