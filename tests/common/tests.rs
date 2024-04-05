@@ -790,7 +790,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:two", "result: {:?}", res);
 	// Send QUERY command
-	let res = socket.send_request("query", json!([format!("KILL '{live2}'")])).await?;
+	let res = socket.send_request("query", json!([format!("KILL u'{live2}'")])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
