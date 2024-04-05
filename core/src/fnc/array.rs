@@ -10,8 +10,8 @@ use crate::sql::array::Matches;
 use crate::sql::array::Transpose;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
+use crate::sql::array::Windows;
 use crate::sql::value::Value;
-use crate::sql::value::Windows;
 
 pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
