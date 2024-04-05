@@ -118,7 +118,7 @@ impl Parser<'_> {
 			output,
 			timeout,
 			parallel,
-			relation: false,
+			relation,
 		})
 	}
 

@@ -3,10 +3,10 @@
 pub mod common;
 pub mod error;
 
-#[cfg(not(feature = "experimental-parser"))]
-pub mod v1;
-#[cfg(not(feature = "experimental-parser"))]
-pub use v1::{datetime_raw, duration, idiom, json, parse, range, subquery, thing, value};
+// #[cfg(not(feature = "experimental-parser"))]
+// pub mod v1;
+// #[cfg(not(feature = "experimental-parser"))]
+// pub use v1::{datetime_raw, duration, idiom, json, parse, range, subquery, thing, value};
 
 #[cfg(feature = "experimental-parser")]
 pub mod v2;

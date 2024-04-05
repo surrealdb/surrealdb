@@ -33,6 +33,7 @@ impl<'a> Document<'a> {
 				Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
 				Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,
 				Statement::Delete(_) => doc.delete(ctx, opt, txn, stm).await,
+				Statement::Insert(i) if i.relation => doc.insert(ctx, opt, txn, stm).await,
 				Statement::Insert(_) => doc.insert(ctx, opt, txn, stm).await,
 				_ => unreachable!(),
 			};

@@ -134,7 +134,10 @@ impl RelateStatement {
 				let w = w.clone();
 				match &self.kind {
 					// The relation has a specific record id
-					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w)),
+					Value::Thing(id) => {
+						println!("\nIterable::Relate({f}, {id}, {w})\n");
+						i.ingest(Iterable::Relatable(f, id.to_owned(), w))
+					}
 					// The relation does not have a specific record id
 					Value::Table(tb) => match &self.data {
 						// There is a data clause so check for a record id
@@ -143,10 +146,15 @@ impl RelateStatement {
 								Some(id) => id.generate(tb, false)?,
 								None => tb.generate(),
 							};
+							println!("\nIterable::Relate({f}, {id}, {w})\n");
 							i.ingest(Iterable::Relatable(f, id, w))
 						}
 						// There is no data clause so create a record id
-						None => i.ingest(Iterable::Relatable(f, tb.generate(), w)),
+						None => {
+							let id = tb.generate();
+							println!("\nIterable::Relate({f}, {id}, {w})\n");
+							i.ingest(Iterable::Relatable(f, id, w))
+						}
 					},
 					// The relation can not be any other type
 					_ => unreachable!(),

@@ -44,8 +44,8 @@ impl InsertStatement {
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_projections(false);
 		// Parse the expression
-		match self.into.compute(ctx, opt, txn, doc).await? {
-			Value::Table(into) => match &self.data {
+		match (self.relation, self.into.compute(ctx, opt, txn, doc).await?) {
+			(false, Value::Table(into)) => match &self.data {
 				// Check if this is a traditional statement
 				Data::ValuesExpression(v) => {
 					for v in v {
@@ -87,9 +87,61 @@ impl InsertStatement {
 						}
 					}
 				}
-				_ => unreachable!(),
+				v => {
+					return Err(Error::InsertStatement {
+						value: v.to_string(),
+					})
+				}
 			},
-			v => {
+			(true, val) => {
+				println!("Got to (true, val)");
+				let into = match val {
+					Value::None => None,
+					Value::Table(into) => Some(into),
+					_ => {
+						return Err(Error::InsertStatement {
+							value: val.to_string(),
+						})
+					}
+				};
+
+				match &self.data {
+					Data::SingleExpression(Value::Array(v)) => {
+						for r in v.iter() {
+							let Value::Object(o) = r else {
+								return Err(Error::InsertStatement {
+									value: r.to_string(),
+								});
+							};
+							let Some(Value::Thing(in_id)) = o.get("in") else {
+								return Err(Error::Thrown("No in specified".to_string()));
+							};
+							let Some(Value::Thing(out_id)) = o.get("out") else {
+								return Err(Error::Thrown("No out specified".to_string()));
+							};
+							let id = match (&into, o.get("id")) {
+								(_, Some(Value::Thing(id))) => id.clone(),
+								(Some(tb), _) => tb.generate(),
+								(_, _) => {
+									return Err(Error::Thrown(
+										"No id or table specified".to_string(),
+									))
+								}
+							};
+							// i.ingest(Iterable::Mergeable(id.clone(), Value::Object(o.to_owned())));
+							println!("\nIterable::Relate({in_id}, {id}, {out_id})\n");
+							i.ingest(Iterable::Relatable(in_id.clone(), id, out_id.clone()))
+						}
+					}
+					e => {
+						return Err(Error::InsertStatement {
+							value: e.to_string(),
+						})
+					}
+				}
+			}
+			// not relation and not table is error
+			(false, v) => {
 				return Err(Error::InsertStatement {
 					value: v.to_string(),
 				})
