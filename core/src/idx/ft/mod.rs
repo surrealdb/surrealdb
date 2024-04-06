@@ -11,14 +11,14 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
-use crate::idx::ft::analyzer::{AnalyzedTerms, Analyzer, FilteringStage};
+use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
-use crate::idx::ft::terms::{TermId, Terms};
+use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
@@ -334,25 +334,22 @@ impl FtIndex {
 		Ok(())
 	}
 
-	pub(super) async fn extract_query_terms(
+	pub(super) async fn extract_querying_terms(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		query_string: String,
-	) -> Result<AnalyzedTerms, Error> {
+	) -> Result<(TermsList, TermsSet), Error> {
 		let t = self.terms.read().await;
-		let terms = self
-			.analyzer
-			.extract_terms(ctx, opt, txn, &t, FilteringStage::Querying, query_string)
-			.await?;
-		Ok(terms)
+		let res = self.analyzer.extract_querying_terms(ctx, opt, txn, &t, query_string).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn get_terms_docs(
 		&self,
 		tx: &mut kvs::Transaction,
-		terms: &Vec<Option<(TermId, u32)>>,
+		terms: &TermsList,
 	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>, Error> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
 		for opt_term in terms {
@@ -413,7 +410,7 @@ impl FtIndex {
 		&self,
 		tx: &mut kvs::Transaction,
 		thg: &Thing,
-		terms: &[Option<(TermId, u32)>],
+		terms: &[Option<(TermId, TermLen)>],
 		prefix: Value,
 		suffix: Value,
 		partial: bool,
@@ -549,9 +546,10 @@ mod tests {
 		fti: &FtIndex,
 		qs: &str,
 	) -> (Option<HitsIterator>, BM25Scorer) {
-		let t = fti.extract_terms(ctx, opt, txn, qs.to_string()).await.unwrap();
+		let (term_list, _) =
+			fti.extract_querying_terms(ctx, opt, txn, qs.to_string()).await.unwrap();
 		let mut tx = txn.lock().await;
-		let td = Arc::new(fti.get_terms_docs(&mut tx, &t).await.unwrap());
+		let td = Arc::new(fti.get_terms_docs(&mut tx, &term_list).await.unwrap());
 		drop(tx);
 		let scr = fti.new_scorer(td.clone()).unwrap().unwrap();
 		let hits = fti.new_hits_iterator(td).unwrap();

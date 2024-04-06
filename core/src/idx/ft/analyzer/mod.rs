@@ -1,11 +1,12 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
-use crate::idx::ft::terms::{TermId, Terms};
+use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
@@ -34,48 +35,91 @@ impl From<DefineAnalyzerStatement> for Analyzer {
 	}
 }
 
-#[derive(Clone, Copy)]
-pub(in crate::idx) enum FilteringStage {
-	Indexing,
-	Querying,
+pub(in crate::idx) type TermsList = Vec<Option<(TermId, TermLen)>>;
+
+pub(in crate::idx) struct TermsSet {
+	set: HashSet<TermId>,
+	has_unknown_terms: bool,
 }
 
-pub(in crate::idx) struct AnalyzedTerms {
-	pub(in crate::idx) list: Vec<Option<(TermId, u32)>>,
-	pub(in crate::idx) set: HashSet<TermId>,
+impl TermsSet {
+	pub(in crate::idx) fn has_unknown_terms(&self) -> bool {
+		self.has_unknown_terms
+	}
+
+	pub(in crate::idx) fn is_subset(&self, other: &TermsSet) -> bool {
+		if self.has_unknown_terms {
+			return false;
+		}
+		self.set.is_subset(&other.set)
+	}
 }
 
 impl Analyzer {
-	pub(in crate::idx) async fn extract_terms(
+	pub(super) async fn extract_querying_terms(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		t: &Terms,
-		stage: FilteringStage,
 		content: String,
-	) -> Result<AnalyzedTerms, Error> {
-		let tokens = self.generate_tokens(ctx, opt, txn, stage, content).await?;
-		// We first collect every unique terms
-		// as it can contains duplicates
-		let mut terms = HashSet::new();
-		for token in tokens.list() {
-			terms.insert(token);
-		}
-		// Now we can extract the term ids
-		let mut list = Vec::with_capacity(terms.len());
+	) -> Result<(TermsList, TermsSet), Error> {
+		let tokens = self.generate_tokens(ctx, opt, txn, FilteringStage::Querying, content).await?;
+		// We extract the term ids
+		let mut list = Vec::with_capacity(tokens.list().len());
+		let mut unique_tokens = HashSet::new();
 		let mut set = HashSet::new();
 		let mut tx = txn.lock().await;
-		for term in terms {
-			let opt_term_id = t.get_term_id(&mut tx, tokens.get_token_string(term)?).await?;
-			list.push(opt_term_id.map(|tid| (tid, term.get_char_len())));
-			if let Some(term_id) = opt_term_id {
-				set.insert(term_id);
+		let mut has_unknown_terms = false;
+		for token in tokens.list() {
+			// Tokens can contains duplicated, not need to evaluate them again
+			if unique_tokens.insert(token) {
+				// Is the term known in the index?
+				let opt_term_id = t.get_term_id(&mut tx, tokens.get_token_string(token)?).await?;
+				list.push(opt_term_id.map(|tid| (tid, token.get_char_len())));
+				if let Some(term_id) = opt_term_id {
+					set.insert(term_id);
+				} else {
+					has_unknown_terms = true;
+				}
 			}
 		}
-		Ok(AnalyzedTerms {
+		Ok((
 			list,
+			TermsSet {
+				set,
+				has_unknown_terms,
+			},
+		))
+	}
+
+	pub(in crate::idx) async fn extract_indexing_terms(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		t: &Terms,
+		content: Value,
+	) -> Result<TermsSet, Error> {
+		let mut tv = Vec::new();
+		self.analyze_value(ctx, opt, txn, content, FilteringStage::Indexing, &mut tv).await?;
+		let mut set = HashSet::new();
+		let mut has_unknown_terms = false;
+		let mut tx = txn.lock().await;
+		for tokens in tv {
+			for token in tokens.list() {
+				if let Some(term_id) =
+					t.get_term_id(&mut tx, tokens.get_token_string(token)?).await?
+				{
+					set.insert(term_id);
+				} else {
+					has_unknown_terms = true;
+				}
+			}
+		}
+		Ok(TermsSet {
 			set,
+			has_unknown_terms,
 		})
 	}
 
@@ -182,7 +226,7 @@ impl Analyzer {
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(in crate::idx) async fn analyze_value(
+	async fn analyze_value(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,

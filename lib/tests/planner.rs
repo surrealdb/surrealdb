@@ -2187,10 +2187,10 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
 		DEFINE FIELD name ON TABLE t TYPE string;
 		DEFINE FIELD t ON TABLE i TYPE record(t);
-		CREATE t:1 SET name = 'h';
+		CREATE t:1 SET name = 'Hello World';
 		CREATE i:A SET t = t:1;
-		SELECT * FROM i WHERE t.name @@ 'h' EXPLAIN;
-		SELECT * FROM i WHERE t.name @@ 'h';
+		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
+		SELECT * FROM i WHERE t.name @@ 'world';
 	";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 
@@ -2208,7 +2208,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 								{
 									index: 't_name_search_idx',
 									operator: '@@',
-									value: 'h'
+									value: 'world'
 								}
 							],
 							operator: 'join'
@@ -2244,10 +2244,10 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
 		DEFINE FIELD name ON TABLE t TYPE string;
 		DEFINE FIELD t ON TABLE i TYPE record(t);
-		CREATE t:1 SET name = 'h';
+		CREATE t:1 SET name = 'Hello World';
 		CREATE i:A SET t = t:1;
-		SELECT * FROM i WHERE t.name @@ 'h' EXPLAIN;
-		SELECT * FROM i WHERE t.name @@ 'h';
+		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
+		SELECT * FROM i WHERE t.name @@ 'world';
 	";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 

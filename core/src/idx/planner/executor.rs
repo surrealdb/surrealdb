@@ -3,7 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
-use crate::idx::ft::analyzer::{AnalyzedTerms, Analyzer, FilteringStage};
+use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
@@ -420,6 +420,7 @@ impl QueryExecutor {
 		self.0.index_definitions.get(ir as usize)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn matches(
 		&self,
 		ctx: &Context<'_>,
@@ -483,15 +484,19 @@ impl QueryExecutor {
 		l: Value,
 		r: Value,
 	) -> Result<bool, Error> {
+		// If the query terms contains terms that are unknown in the index
+		// we are sure that it does not match any document
+		if ft.0.query_terms_set.has_unknown_terms() {
+			return Ok(false);
+		}
 		let v = match ft.0.index_option.id_pos() {
 			IdiomPosition::Left => r,
 			IdiomPosition::Right => l,
 		};
-		let mut tokens = vec![];
-		ft.0.analyzer
-			.analyze_value(ctx, opt, txn, v, FilteringStage::Indexing, &mut tokens)
-			.await?;
-		todo!()
+		let terms = ft.0.terms.read().await;
+		// Extract the terms set from the record
+		let t = ft.0.analyzer.extract_indexing_terms(ctx, opt, txn, &terms, v).await?;
+		Ok(ft.0.query_terms_set.is_subset(&t))
 	}
 
 	fn get_ft_entry(&self, match_ref: &Value) -> Option<&FtEntry> {
@@ -528,7 +533,7 @@ impl QueryExecutor {
 				.highlight(
 					&mut run,
 					thg,
-					&e.0.analyzed_terms.list,
+					&e.0.query_terms_list,
 					prefix,
 					suffix,
 					partial,
@@ -549,7 +554,7 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let mut run = txn.lock().await;
-			return ft.extract_offsets(&mut run, thg, &e.0.analyzed_terms.list, partial).await;
+			return ft.extract_offsets(&mut run, thg, &e.0.query_terms_list, partial).await;
 		}
 		Ok(Value::None)
 	}
@@ -587,7 +592,8 @@ struct Inner {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<DocIds>>,
 	analyzer: Arc<Analyzer>,
-	analyzed_terms: AnalyzedTerms,
+	query_terms_set: TermsSet,
+	query_terms_list: TermsList,
 	terms: Arc<RwLock<Terms>>,
 	terms_docs: TermsDocs,
 	scorer: Option<BM25Scorer>,
@@ -602,14 +608,16 @@ impl FtEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
-			let analyzed_terms = ft.extract_query_terms(ctx, opt, txn, qs.to_owned()).await?;
+			let (terms_list, terms_set) =
+				ft.extract_querying_terms(ctx, opt, txn, qs.to_owned()).await?;
 			let mut tx = txn.lock().await;
-			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &analyzed_terms.list).await?);
+			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),
 				analyzer: ft.analyzer(),
-				analyzed_terms,
+				query_terms_set: terms_set,
+				query_terms_list: terms_list,
 				scorer: ft.new_scorer(terms_docs.clone())?,
 				terms: ft.terms(),
 				terms_docs,
