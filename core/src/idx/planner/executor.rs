@@ -485,8 +485,9 @@ impl QueryExecutor {
 		r: Value,
 	) -> Result<bool, Error> {
 		// If the query terms contains terms that are unknown in the index
+		// of if there is not terms in the query
 		// we are sure that it does not match any document
-		if ft.0.query_terms_set.has_unknown_terms() {
+		if !ft.0.query_terms_set.is_matchable() {
 			return Ok(false);
 		}
 		let v = match ft.0.index_option.id_pos() {

@@ -43,8 +43,11 @@ pub(in crate::idx) struct TermsSet {
 }
 
 impl TermsSet {
-	pub(in crate::idx) fn has_unknown_terms(&self) -> bool {
-		self.has_unknown_terms
+	/// If the query TermsSet contains terms that are unknown in the index
+	/// of if there is no terms in the set then
+	/// we are sure that it does not match any document
+	pub(in crate::idx) fn is_matchable(&self) -> bool {
+		!(self.has_unknown_terms || self.set.is_empty())
 	}
 
 	pub(in crate::idx) fn is_subset(&self, other: &TermsSet) -> bool {

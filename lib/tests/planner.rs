@@ -1945,8 +1945,8 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
-				{ "id": "i:A", "t": "t:1"},
-				{ "id": "i:B", "t": "t:2"}
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
 			]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
@@ -2003,8 +2003,8 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 	//
 	let expected = Value::parse(
 		r#"[
-				{ "id": "i:A", "t": "t:1"},
-				{ "id": "i:B", "t": "t:2"}
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
 			]"#,
 	);
 	//
@@ -2068,8 +2068,8 @@ async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
 	//
 	let expected = Value::parse(
 		r#"[
-				{ "id": "i:A", "t": "t:1"},
-				{ "id": "i:B", "t": "t:2"}
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
 			]"#,
 	);
 	//
@@ -2132,8 +2132,8 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<(), Error> {
 	//
 	let expected = Value::parse(
 		r#"[
-				{ "id": "i:A", "t": "t:1"},
-				{ "id": "i:B", "t": "t:2"}
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
 			]"#,
 	);
 	//
@@ -2228,7 +2228,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(r#"[{ "id": "i:A", "t": "t:1"}]"#);
+	let val = Value::parse(r#"[{ "id": i:A, "t": t:1}]"#);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())
@@ -2280,7 +2280,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(r#"[{ "id": "i:A", "t": "t:1"}]"#);
+	let val = Value::parse(r#"[{ "id": i:A, "t": t:1}]"#);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())
