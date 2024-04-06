@@ -411,6 +411,7 @@ impl UnionRangeQueryBuilder {
 #[cfg(test)]
 mod tests {
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+	use crate::idx::planner::tree::IdiomPosition;
 	use crate::sql::{Array, Idiom, Value};
 	use crate::syn::Parse;
 	use std::collections::HashSet;
@@ -421,12 +422,14 @@ mod tests {
 		let io1 = IndexOption::new(
 			1,
 			Idiom::parse("test"),
+			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
 		let io2 = IndexOption::new(
 			1,
 			Idiom::parse("test"),
+			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"]))),
 		);
 
