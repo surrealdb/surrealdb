@@ -611,10 +611,6 @@ from.build.allow_apis = [
 allow_unsafe = true
 
 [pkg.wasm-bindgen-shared]
-build.allow_apis = [
-    "fs",
-    "process",
-]
 build.allow_build_instructions = [
     "cargo:rustc-env=SCHEMA_FILE_HASH=*",
 ]
@@ -719,9 +715,6 @@ allow_unsafe = true
 
 [pkg.wasm-bindgen-backend]
 allow_unsafe = true
-allow_apis = [
-    "fs",
-]
 
 [pkg.alloc-stdlib]
 allow_unsafe = true
@@ -1313,3 +1306,6 @@ allow_proc_macro = true
 allow_apis = [
     "fs",
 ]
+
+[pkg.phf_macros]
+allow_proc_macro = true
