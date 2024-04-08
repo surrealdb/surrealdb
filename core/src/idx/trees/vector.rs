@@ -5,7 +5,7 @@ use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -38,6 +38,15 @@ impl From<Vector> for HashedSharedVector {
 		let mut h = DefaultHasher::new();
 		v.hash(&mut h);
 		Self(v.into(), h.finish())
+	}
+}
+
+impl Serialize for HashedSharedVector {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		self.0.serialize(serializer)
 	}
 }
 

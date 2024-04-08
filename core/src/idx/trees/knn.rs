@@ -495,7 +495,7 @@ pub(super) mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{Ids64, KnnResultBuilder, PriorityNode};
-	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::idx::trees::vector::Vector;
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::{Array, Number};
 	use crate::syn::Parse;
@@ -510,7 +510,6 @@ pub(super) mod tests {
 	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
-	use std::sync::Arc;
 	use std::time::SystemTime;
 	use test_log::test;
 
@@ -562,14 +561,14 @@ pub(super) mod tests {
 		Ok(res)
 	}
 
-	pub(in crate::idx::trees) fn new_vec(mut n: i64, t: VectorType, dim: usize) -> SharedVector {
+	pub(in crate::idx::trees) fn new_vec(mut n: i64, t: VectorType, dim: usize) -> Vector {
 		let mut vec = Vector::new(t, dim);
 		vec.add(&Number::Int(n));
 		for _ in 1..dim {
 			n += 1;
 			vec.add(&Number::Int(n));
 		}
-		Arc::new(vec)
+		vec
 	}
 
 	pub(in crate::idx::trees) fn new_random_vec(
