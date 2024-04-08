@@ -14,6 +14,7 @@
 mod cache;
 mod clock;
 mod ds;
+mod export;
 mod fdb;
 mod indxdb;
 mod kv;
