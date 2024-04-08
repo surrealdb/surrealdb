@@ -525,23 +525,23 @@ pub(super) mod tests {
 	}
 
 	#[derive(Debug)]
-	pub(in crate::idx::trees) enum TestCollection {
-		Unique(Vec<(DocId, SharedVector)>),
-		NonUnique(Vec<(DocId, SharedVector)>),
+	pub(in crate::idx::trees) enum TestCollection<V: From<Vector>> {
+		Unique(Vec<(DocId, V)>),
+		NonUnique(Vec<(DocId, V)>),
 	}
 
-	impl AsRef<Vec<(DocId, SharedVector)>> for TestCollection {
-		fn as_ref(&self) -> &Vec<(DocId, SharedVector)> {
+	impl<V: From<Vector>> AsRef<Vec<(DocId, V)>> for TestCollection<V> {
+		fn as_ref(&self) -> &Vec<(DocId, V)> {
 			match self {
 				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
 			}
 		}
 	}
 
-	pub(in crate::idx::trees) fn new_vectors_from_file(
+	pub(in crate::idx::trees) fn new_vectors_from_file<V: From<Vector>>(
 		t: VectorType,
 		path: &str,
-	) -> Result<Vec<(DocId, SharedVector)>, Error> {
+	) -> Result<Vec<(DocId, V)>, Error> {
 		// Open the gzip file
 		let file = File::open(path)?;
 
@@ -556,7 +556,7 @@ pub(super) mod tests {
 		for (i, line_result) in reader.lines().enumerate() {
 			let line = line_result?;
 			let array = Array::parse(&line);
-			let vec = Arc::new(Vector::try_from_array(t, &array)?);
+			let vec = Vector::try_from_array(t, &array)?.into();
 			res.push((i as DocId, vec));
 		}
 		Ok(res)
@@ -577,7 +577,7 @@ pub(super) mod tests {
 		t: VectorType,
 		dim: usize,
 		gen: &RandomItemGenerator,
-	) -> SharedVector {
+	) -> Vector {
 		let mut vec = Vector::new(t, dim);
 		for _ in 0..dim {
 			vec.add(&gen.generate(rng));
@@ -586,7 +586,7 @@ pub(super) mod tests {
 			// Some similarities (cosine) is undefined for null vector.
 			new_random_vec(rng, t, dim, gen)
 		} else {
-			Arc::new(vec)
+			vec
 		}
 	}
 
@@ -602,7 +602,7 @@ pub(super) mod tests {
 		}
 	}
 
-	impl TestCollection {
+	impl<V: From<Vector>> TestCollection<V> {
 		pub(in crate::idx::trees) fn new(
 			unique: bool,
 			collection_size: usize,
@@ -619,7 +619,7 @@ pub(super) mod tests {
 			}
 		}
 
-		fn add(&mut self, doc: DocId, pt: SharedVector) {
+		fn add(&mut self, doc: DocId, pt: V) {
 			match self {
 				TestCollection::Unique(vec) => vec,
 				TestCollection::NonUnique(vec) => vec,
@@ -645,7 +645,7 @@ pub(super) mod tests {
 			}
 			let mut coll = TestCollection::Unique(Vec::with_capacity(vector_set.len()));
 			for (i, v) in vector_set.into_iter().enumerate() {
-				coll.add(i as DocId, v);
+				coll.add(i as DocId, v.into());
 			}
 			coll
 		}
@@ -660,7 +660,7 @@ pub(super) mod tests {
 			let mut coll = TestCollection::NonUnique(Vec::with_capacity(collection_size));
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen));
+				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen).into());
 			}
 			coll
 		}

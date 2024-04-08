@@ -6,9 +6,10 @@ use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::hash::Hash;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Mul, Sub};
 use std::sync::Arc;
 
@@ -29,6 +30,70 @@ pub enum Vector {
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
 pub type SharedVector = Arc<Vector>;
+
+#[derive(Debug, Clone)]
+pub struct HashedSharedVector(SharedVector, u64);
+impl From<Vector> for HashedSharedVector {
+	fn from(v: Vector) -> Self {
+		let mut h = DefaultHasher::new();
+		v.hash(&mut h);
+		Self(v.into(), h.finish())
+	}
+}
+
+impl From<SharedVector> for HashedSharedVector {
+	fn from(v: SharedVector) -> Self {
+		let mut h = DefaultHasher::new();
+		v.hash(&mut h);
+		Self(v, h.finish())
+	}
+}
+
+impl Borrow<Vector> for &HashedSharedVector {
+	fn borrow(&self) -> &Vector {
+		self.0.as_ref()
+	}
+}
+
+impl Hash for HashedSharedVector {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		state.write_u64(self.1);
+	}
+}
+
+impl PartialEq for HashedSharedVector {
+	fn eq(&self, other: &Self) -> bool {
+		self.1 == other.1 && self.0 == other.0
+	}
+}
+impl Eq for HashedSharedVector {}
+
+impl Hash for Vector {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		match self {
+			Vector::F64(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x.to_bits());
+				state.write_u64(h);
+			}
+			Vector::F32(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x.to_bits());
+				state.write_u32(h);
+			}
+			Vector::I64(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x);
+				state.write_i64(h);
+			}
+			Vector::I32(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x);
+				state.write_i32(h);
+			}
+			Vector::I16(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x);
+				state.write_i16(h);
+			}
+		}
+	}
+}
 
 impl PartialEq for Vector {
 	fn eq(&self, other: &Self) -> bool {
@@ -374,16 +439,21 @@ impl Vector {
 	}
 }
 impl Distance {
-	pub(super) fn calculate(&self, a: &Vector, b: &Vector) -> f64 {
+	pub(super) fn calculate<V>(&self, a: V, b: V) -> f64
+	where
+		V: Borrow<Vector>,
+	{
 		match self {
-			Distance::Chebyshev => a.chebyshev_distance(b),
-			Distance::Cosine => a.cosine_distance(b),
-			Distance::Euclidean => a.euclidean_distance(b),
-			Distance::Hamming => a.hamming_distance(b),
-			Distance::Jaccard => a.jaccard_similarity(b),
-			Distance::Manhattan => a.manhattan_distance(b),
-			Distance::Minkowski(order) => a.minkowski_distance(b, order.to_float()),
-			Distance::Pearson => a.pearson_similarity(b),
+			Distance::Chebyshev => a.borrow().chebyshev_distance(b.borrow()),
+			Distance::Cosine => a.borrow().cosine_distance(b.borrow()),
+			Distance::Euclidean => a.borrow().euclidean_distance(b.borrow()),
+			Distance::Hamming => a.borrow().hamming_distance(b.borrow()),
+			Distance::Jaccard => a.borrow().jaccard_similarity(b.borrow()),
+			Distance::Manhattan => a.borrow().manhattan_distance(b.borrow()),
+			Distance::Minkowski(order) => {
+				a.borrow().minkowski_distance(b.borrow(), order.to_float())
+			}
+			Distance::Pearson => a.borrow().pearson_similarity(b.borrow()),
 		}
 	}
 }

@@ -1826,7 +1826,7 @@ mod tests {
 	async fn insert_collection_one_by_one(
 		ds: &Datastore,
 		t: &mut MTree,
-		collection: &TestCollection,
+		collection: &TestCollection<SharedVector>,
 		cache_size: usize,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.as_ref().len());
@@ -1853,7 +1853,7 @@ mod tests {
 	async fn insert_collection_batch(
 		ds: &Datastore,
 		t: &mut MTree,
-		collection: &TestCollection,
+		collection: &TestCollection<SharedVector>,
 		cache_size: usize,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.as_ref().len());
@@ -1875,7 +1875,7 @@ mod tests {
 	async fn delete_collection(
 		ds: &Datastore,
 		t: &mut MTree,
-		collection: &TestCollection,
+		collection: &TestCollection<SharedVector>,
 		cache_size: usize,
 	) -> Result<(), Error> {
 		for (doc_id, obj) in collection.as_ref() {
@@ -1919,7 +1919,7 @@ mod tests {
 	async fn find_collection(
 		ds: &Datastore,
 		t: &mut MTree,
-		collection: &TestCollection,
+		collection: &TestCollection<SharedVector>,
 		cache_size: usize,
 	) -> Result<(), Error> {
 		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
@@ -1989,7 +1989,7 @@ mod tests {
 	async fn test_mtree_collection(
 		capacities: &[u16],
 		vector_type: VectorType,
-		collection: TestCollection,
+		collection: TestCollection<SharedVector>,
 		check_find: bool,
 		check_full: bool,
 		check_delete: bool,

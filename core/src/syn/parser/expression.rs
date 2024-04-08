@@ -5,12 +5,12 @@ use reblessive::Stk;
 use super::mac::unexpected;
 use super::ParseError;
 use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
+use crate::syn::token::Token;
 use crate::syn::{
 	parser::{mac::expected, ParseErrorKind, ParseResult, Parser},
 	token::{t, NumberKind, TokenKind},
 };
 use std::cmp::Ordering;
-use crate::syn::token::Token;
 
 impl Parser<'_> {
 	/// Parsers a generic value.

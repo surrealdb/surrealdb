@@ -40,7 +40,7 @@ pub(crate) struct ExpressionKey {
 
 impl PartialEq for ExpressionKey {
 	fn eq(&self, other: &Self) -> bool {
-		self.expr == other.expr
+		self.hash == other.hash && self.expr == other.expr
 	}
 }
 impl Eq for ExpressionKey {}
