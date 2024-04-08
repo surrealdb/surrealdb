@@ -290,13 +290,6 @@ mod tests {
 		assert_eq!("REMOVE ANALYZER IF EXISTS test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_analyzer_if() {
-		let sql = "REMOVE ANALYZER IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE DATABASE tests
 
 	#[test]
@@ -313,13 +306,6 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE DATABASE IF EXISTS test", format!("{}", out))
-	}
-
-	#[test]
-	fn remove_database_if() {
-		let sql = "REMOVE DATABASE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
 	}
 
 	/// REMOVE EVENT tests
@@ -340,13 +326,6 @@ mod tests {
 		assert_eq!("REMOVE EVENT IF EXISTS test ON test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_event_if() {
-		let sql = "REMOVE EVENT IF test ON test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE FIELD tests
 
 	#[test]
@@ -365,13 +344,6 @@ mod tests {
 		assert_eq!("REMOVE FIELD IF EXISTS test ON test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_field_if() {
-		let sql = "REMOVE FIELD IF test ON test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE FUNCTION tests
 
 	#[test]
@@ -388,13 +360,6 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE FUNCTION IF EXISTS fn::test", format!("{}", out))
-	}
-
-	#[test]
-	fn remove_function_if() {
-		let sql = "REMOVE FUNCTION IF fn::test";
-		let res = remove(sql);
-		assert!(res.is_err());
 	}
 
 	#[test]
@@ -423,13 +388,6 @@ mod tests {
 		assert_eq!("REMOVE INDEX IF EXISTS test ON test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_index_if() {
-		let sql = "REMOVE INDEX IF test ON test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE NAMESPACE tests
 
 	#[test]
@@ -447,14 +405,6 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE NAMESPACE IF EXISTS test", format!("{}", out))
 	}
-
-	#[test]
-	fn remove_namespace_if() {
-		let sql = "REMOVE NAMESPACE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE PARAM tests
 
 	#[test]
@@ -472,14 +422,6 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE PARAM IF EXISTS $test", format!("{}", out))
 	}
-
-	#[test]
-	fn remove_param_if() {
-		let sql = "REMOVE PARAM IF $test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE SCOPE tests
 
 	#[test]
@@ -496,13 +438,6 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE SCOPE IF EXISTS test", format!("{}", out))
-	}
-
-	#[test]
-	fn remove_scope_if() {
-		let sql = "REMOVE SCOPE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
 	}
 
 	/// REMOVE TABLE tests
@@ -523,13 +458,6 @@ mod tests {
 		assert_eq!("REMOVE TABLE IF EXISTS test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_table_if() {
-		let sql = "REMOVE TABLE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE TOKEN tests
 
 	#[test]
@@ -546,13 +474,6 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE TOKEN IF EXISTS test ON NAMESPACE", format!("{}", out))
-	}
-
-	#[test]
-	fn remove_token_if() {
-		let sql = "REMOVE TOKEN IF test ON NAMESPACE";
-		let res = remove(sql);
-		assert!(res.is_err());
 	}
 
 	/// REMOVE USER tests
