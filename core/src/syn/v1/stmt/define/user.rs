@@ -127,6 +127,6 @@ fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
 mod test {
 	fn test_define_user_exists() {
 		let (_, q) = super::user("USER IF ON NS").unwrap();
-		assert!(format("{}", q).starts_with("DEFINE USER IF ON NS"));
+		assert!(format!("{}", q).starts_with("DEFINE USER IF ON NS"));
 	}
 }
