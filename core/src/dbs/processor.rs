@@ -150,10 +150,10 @@ impl<'a> Processor<'a> {
 					self.process_index(stk, ctx, opt, stm, &t, irf).await?
 				}
 				Iterable::Mergeable(v, o) => {
-					self.process_mergeable(stk, ctx, opt, stm, v, o).await?
+					self.process_mergeable(stk, ctx, opt, stm, (v, o)).await?
 				}
 				Iterable::Relatable(f, v, w, o) => {
-					self.process_relatable(stk, ctx, opt, stm, f, v, w, o).await?
+					self.process_relatable(stk, ctx, opt, stm, (f, v, w, o)).await?
 				}
 			}
 		}
@@ -234,8 +234,7 @@ impl<'a> Processor<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		v: Thing,
-		o: Value,
+		(v, o): (Thing, Value),
 	) -> Result<(), Error> {
 		// Check that the table exists
 		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
@@ -260,17 +259,13 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn process_relatable(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		stm: &Statement<'_>,
-		f: Thing,
-		v: Thing,
-		w: Thing,
-		o: Option<Value>,
+		(f, v, w, o): (Thing, Thing, Thing, Option<Value>),
 	) -> Result<(), Error> {
 		// Check that the table exists
 		ctx.tx_lock().await.check_ns_db_tb(opt.ns()?, opt.db()?, &v.tb, opt.strict).await?;
