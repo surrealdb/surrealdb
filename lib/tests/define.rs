@@ -345,20 +345,9 @@ async fn define_statement_event() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	#[cfg(feature = "parser2")]
 	let val = Value::parse(
 		"{
 			events: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
-			fields: {},
-			tables: {},
-			indexes: {},
-			lives: {},
-		}",
-	);
-	#[cfg(not(feature = "parser2"))]
-	let val = Value::parse(
-		"{
-			events: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
 			fields: {},
 			tables: {},
 			indexes: {},
@@ -414,20 +403,9 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	#[cfg(feature = "parser2")]
 	let val = Value::parse(
 		r#"{
 			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)" },
-			fields: {},
-			tables: {},
-			indexes: {},
-			lives: {},
-		}"#,
-	);
-	#[cfg(not(feature = "parser2"))]
-	let val = Value::parse(
-		r#"{
-			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, value = $after.email, action = $event)" },
 			fields: {},
 			tables: {},
 			indexes: {},
@@ -483,20 +461,9 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result?;
-	#[cfg(feature = "parser2")]
 	let val = Value::parse(
 		"{
 			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
-			fields: {},
-			tables: {},
-			indexes: {},
-			lives: {},
-		}",
-	);
-	#[cfg(not(feature = "parser2"))]
-	let val = Value::parse(
-		"{
-			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
 			fields: {},
 			tables: {},
 			indexes: {},

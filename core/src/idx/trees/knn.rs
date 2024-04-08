@@ -505,7 +505,9 @@ pub(super) mod tests {
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
 	use std::cmp::Reverse;
-	use std::collections::{BTreeSet, BinaryHeap, HashMap, VecDeque};
+	#[cfg(debug_assertions)]
+	use std::collections::HashMap;
+	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
 	use std::sync::Arc;
@@ -696,7 +698,10 @@ pub(super) mod tests {
 		b.add(0.2, &Ids64::Vec3([0, 1, 2]));
 		b.add(0.2, &Ids64::One(3));
 		b.add(0.2, &Ids64::Vec2([6, 8]));
-		let res = b.build(HashMap::new());
+		let res = b.build(
+			#[cfg(debug_assertions)]
+			HashMap::new(),
+		);
 		assert_eq!(
 			res.docs,
 			VecDeque::from([(5, 0.0), (0, 0.2), (1, 0.2), (2, 0.2), (3, 0.2), (6, 0.2), (8, 0.2)])

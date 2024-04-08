@@ -710,7 +710,9 @@ mod tests {
 	use roaring::RoaringTreemap;
 	use serial_test::serial;
 	use std::collections::btree_map::Entry as BEntry;
-	use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+	#[cfg(debug_assertions)]
+	use std::collections::HashMap;
+	use std::collections::{BTreeMap, BTreeSet, HashSet};
 	use std::sync::Arc;
 
 	async fn insert_collection_hnsw(
@@ -1341,7 +1343,10 @@ mod tests {
 					b.add(d, &Ids64::One(*doc_id));
 				}
 			}
-			b.build(HashMap::new())
+			b.build(
+				#[cfg(debug_assertions)]
+				HashMap::new(),
+			)
 		}
 	}
 
