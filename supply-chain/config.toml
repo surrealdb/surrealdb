@@ -351,6 +351,10 @@ criteria = "safe-to-deploy"
 version = "0.4.33"
 criteria = "safe-to-deploy"
 
+[[exemptions.chrono]]
+version = "0.4.37"
+criteria = "safe-to-deploy"
+
 [[exemptions.ciborium]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -700,7 +704,15 @@ version = "0.3.24"
 criteria = "safe-to-deploy"
 
 [[exemptions.h2]]
+version = "0.3.26"
+criteria = "safe-to-deploy"
+
+[[exemptions.h2]]
 version = "0.4.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.h2]]
+version = "0.4.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.half]]
