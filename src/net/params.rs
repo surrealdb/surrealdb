@@ -49,11 +49,7 @@ impl From<Params> for BTreeMap<String, Value> {
 		v.inner
 			.into_iter()
 			.map(|(k, v)| {
-				#[cfg(feature = "parser2")]
 				let value = surrealdb::syn::json_legacy_strand(&v);
-				#[cfg(not(feature = "parser2"))]
-				let value = surrealdb::syn::json(&v);
-
 				(k, value.unwrap_or_else(|_| Value::from(v)))
 			})
 			.collect::<BTreeMap<_, _>>()
