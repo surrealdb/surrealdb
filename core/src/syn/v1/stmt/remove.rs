@@ -566,6 +566,14 @@ mod tests {
 	}
 
 	#[test]
+	fn remove_user_if_ident() {
+		let sql = "REMOVE USER IF";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE USER IF", format!("{}", out))
+	}
+
+	#[test]
 	fn remove_user_if_exists() {
 		let sql = "REMOVE USER IF EXISTS test ON ROOT";
 		let res = remove(sql);
