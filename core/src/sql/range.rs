@@ -42,6 +42,15 @@ impl TryFrom<&str> for Range {
 }
 
 impl Range {
+	/// Construct a new range
+	pub fn new(tb: String, beg: Bound<Id>, end: Bound<Id>) -> Self {
+		Self {
+			tb,
+			beg,
+			end,
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
