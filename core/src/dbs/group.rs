@@ -8,7 +8,6 @@ use crate::sql::value::{TryAdd, TryDiv, Value};
 use crate::sql::{Array, Field, Idiom};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::mem;
 
 pub(super) struct GroupsCollector {
 	base: Vec<Aggregator>,
@@ -113,9 +112,8 @@ impl GroupsCollector {
 	) -> Result<StoreCollector, Error> {
 		let mut results = StoreCollector::default();
 		if let Some(fields) = stm.expr() {
-			let grp = mem::take(&mut self.grp);
 			// Loop over each grouped collection
-			for (_, mut aggregator) in grp {
+			for aggregator in self.grp.values_mut() {
 				// Create a new value
 				let mut obj = Value::base();
 				// Loop over each group clause
@@ -133,27 +131,24 @@ impl GroupsCollector {
 						if let Some(idioms_pos) =
 							self.idioms.iter().position(|i| i.eq(idiom.as_ref()))
 						{
-							let agr = &mut aggregator[idioms_pos];
-							match expr {
-								Value::Function(f) if f.is_aggregate() => {
-									let a = f.get_optimised_aggregate();
-									let x = if matches!(a, OptimisedAggregate::None) {
-										// The aggregation is not optimised, let's compute it with the values
-										let vals = agr.take();
-										let x = vals
-											.all()
-											.get(ctx, opt, txn, None, idiom.as_ref())
-											.await?;
-										f.aggregate(x).compute(ctx, opt, txn, None).await?
-									} else {
-										// The aggregation is optimised, just get the value
-										agr.compute(a)?
-									};
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
-								}
-								_ => {
-									let x = agr.take().first();
-									obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
+							if let Some(agr) = aggregator.get_mut(idioms_pos) {
+								match expr {
+									Value::Function(f) if f.is_aggregate() => {
+										let a = f.get_optimised_aggregate();
+										let x = if matches!(a, OptimisedAggregate::None) {
+											// The aggregation is not optimised, let's compute it with the values
+											let vals = agr.take();
+											f.aggregate(vals).compute(ctx, opt, txn, None).await?
+										} else {
+											// The aggregation is optimised, just get the value
+											agr.compute(a)?
+										};
+										obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
+									}
+									_ => {
+										let x = agr.take().first();
+										obj.set(ctx, opt, txn, idiom.as_ref(), x).await?;
+									}
 								}
 							}
 						}
