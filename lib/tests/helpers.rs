@@ -8,6 +8,7 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::Response;
 
 pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -192,4 +193,12 @@ pub fn with_enough_stack(
 		.unwrap()
 		.join()
 		.unwrap()
+}
+
+#[allow(dead_code)]
+pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
+	for _ in 0..skip {
+		let _ = res.remove(0).result?;
+	}
+	Ok(())
 }
