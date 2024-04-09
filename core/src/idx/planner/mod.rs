@@ -53,20 +53,12 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 		let mut is_knn = false;
-		let t = Arc::new(t);
 		match Tree::build(ctx, self.opt, txn, &t, self.cond, self.with).await? {
-			Some(tree) => {
-				is_knn = is_knn || !tree.knn_expressions.is_empty();
-				let mut exe = InnerQueryExecutor::new(
-					ctx,
-					self.opt,
-					txn,
-					&t,
-					tree.index_map,
-					tree.knn_expressions,
-				)
-				.await?;
-				match PlanBuilder::build(tree.root, self.with, tree.with_indexes)? {
+			Some((node, im, with_indexes, knn_expressions)) => {
+				is_knn = is_knn || !knn_expressions.is_empty();
+				let mut exe =
+					InnerQueryExecutor::new(ctx, self.opt, txn, &t, im, knn_expressions).await?;
+				match PlanBuilder::build(node, self.with, with_indexes)? {
 					Plan::SingleIndex(exp, io) => {
 						if io.require_distinct() {
 							self.requires_distinct = true;
@@ -74,21 +66,15 @@ impl<'a> QueryPlanner<'a> {
 						let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 						self.add(t.clone(), Some(ir), exe, it);
 					}
-					Plan::MultiIndex(non_range_indexes, ranges_indexes) => {
-						for (exp, io) in non_range_indexes {
-							let ie = IteratorEntry::Single(exp, io);
-							let ir = exe.add_iterator(ie);
+					Plan::MultiIndex(v) => {
+						for (exp, io) in v {
+							let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 							it.ingest(Iterable::Index(t.clone(), ir));
+							self.requires_distinct = true;
 						}
-						for (ixn, rq) in ranges_indexes {
-							let ie = IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to);
-							let ir = exe.add_iterator(ie);
-							it.ingest(Iterable::Index(t.clone(), ir));
-						}
-						self.requires_distinct = true;
 						self.add(t.clone(), None, exe, it);
 					}
-					Plan::SingleIndexRange(ixn, rq) => {
+					Plan::SingleIndexMultiExpression(ixn, rq) => {
 						let ir =
 							exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
 						self.add(t.clone(), Some(ir), exe, it);
@@ -117,7 +103,7 @@ impl<'a> QueryPlanner<'a> {
 
 	fn add(
 		&mut self,
-		tb: Arc<Table>,
+		tb: Table,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
