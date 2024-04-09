@@ -57,6 +57,11 @@ allow_apis = [
     "fs",
 ]
 
+[pkg.walkdir]
+allow_apis = [
+    "fs",
+]
+
 [pkg.zstd-sys]
 build.allow_apis = [
     "fs",
