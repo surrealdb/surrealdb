@@ -12,12 +12,7 @@ use async_recursion::async_recursion;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(super) struct Tree {
-	pub(super) root: Node,
-	pub(super) index_map: IndexesMap,
-	pub(super) with_indexes: Vec<IndexRef>,
-	pub(super) knn_expressions: KnnExpressions,
-}
+pub(super) struct Tree {}
 
 impl Tree {
 	/// Traverse all the conditions and extract every expression
@@ -29,16 +24,11 @@ impl Tree {
 		table: &'a Table,
 		cond: &'a Option<Cond>,
 		with: &'a Option<With>,
-	) -> Result<Option<Self>, Error> {
+	) -> Result<Option<(Node, IndexesMap, Vec<IndexRef>, KnnExpressions)>, Error> {
 		let mut b = TreeBuilder::new(ctx, opt, txn, table, with);
 		if let Some(cond) = cond {
-			let root = b.eval_value(0, &cond.0).await?;
-			Ok(Some(Self {
-				root,
-				index_map: b.index_map,
-				with_indexes: b.with_indexes,
-				knn_expressions: b.knn_expressions,
-			}))
+			let node = b.eval_value(&cond.0).await?;
+			Ok(Some((node, b.index_map, b.with_indexes, b.knn_expressions)))
 		} else {
 			Ok(None)
 		}
@@ -58,7 +48,6 @@ struct TreeBuilder<'a> {
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 	knn_expressions: KnnExpressions,
-	group_sequence: GroupRef,
 }
 
 impl<'a> TreeBuilder<'a> {
@@ -86,10 +75,8 @@ impl<'a> TreeBuilder<'a> {
 			index_map: Default::default(),
 			with_indexes,
 			knn_expressions: Default::default(),
-			group_sequence: 0,
 		}
 	}
-
 	async fn lazy_cache_indexes(&mut self) -> Result<(), Error> {
 		if self.indexes.is_none() {
 			let indexes = self
@@ -106,10 +93,10 @@ impl<'a> TreeBuilder<'a> {
 
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	async fn eval_value(&mut self, group: GroupRef, v: &Value) -> Result<Node, Error> {
+	async fn eval_value(&mut self, v: &Value) -> Result<Node, Error> {
 		match v {
-			Value::Expression(e) => self.eval_expression(group, e).await,
-			Value::Idiom(i) => self.eval_idiom(group, i).await,
+			Value::Expression(e) => self.eval_expression(e).await,
+			Value::Idiom(i) => self.eval_idiom(i).await,
 			Value::Strand(_)
 			| Value::Number(_)
 			| Value::Bool(_)
@@ -123,7 +110,7 @@ impl<'a> TreeBuilder<'a> {
 			Value::Subquery(s) => self.eval_subquery(s).await,
 			Value::Param(p) => {
 				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
-				self.eval_value(group, &v).await
+				self.eval_value(&v).await
 			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
@@ -137,7 +124,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
 
-	async fn eval_idiom(&mut self, group: GroupRef, i: &Idiom) -> Result<Node, Error> {
+	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
 		// Check if the idiom has already been resolved
 		if let Some(i) = self.resolved_idioms.get(i) {
 			if let Some(Some(irs)) = self.idioms_indexes.get(i).cloned() {
@@ -150,7 +137,7 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
 				let v = i.compute(self.ctx, self.opt, self.txn, None).await?;
-				return self.eval_value(group, &v).await;
+				return self.eval_value(&v).await;
 			}
 		}
 
@@ -192,7 +179,7 @@ impl<'a> TreeBuilder<'a> {
 		res
 	}
 
-	async fn eval_expression(&mut self, group: GroupRef, e: &Expression) -> Result<Node, Error> {
+	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
 		match e {
 			Expression::Unary {
 				..
@@ -207,8 +194,8 @@ impl<'a> TreeBuilder<'a> {
 					return Ok(re.into());
 				}
 				let exp = Arc::new(e.clone());
-				let left = Arc::new(self.eval_value(group, l).await?);
-				let right = Arc::new(self.eval_value(group, r).await?);
+				let left = Arc::new(self.eval_value(l).await?);
+				let right = Arc::new(self.eval_value(r).await?);
 				let mut io = None;
 				if let Some((id, irs)) = left.is_indexed_field() {
 					io = self.lookup_index_option(
@@ -234,7 +221,6 @@ impl<'a> TreeBuilder<'a> {
 					self.eval_knn(id, &left, &exp)?;
 				}
 				let re = ResolvedExpression {
-					group,
 					exp: exp.clone(),
 					io: io.clone(),
 					left: left.clone(),
@@ -351,9 +337,8 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_subquery(&mut self, s: &Subquery) -> Result<Node, Error> {
-		self.group_sequence += 1;
 		match s {
-			Subquery::Value(v) => self.eval_value(self.group_sequence, v).await,
+			Subquery::Value(v) => self.eval_value(v).await,
 			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
 		}
 	}
@@ -367,12 +352,9 @@ pub(super) struct IndexesMap {
 	pub(super) definitions: Vec<DefineIndexStatement>,
 }
 
-pub(super) type GroupRef = u16;
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) enum Node {
 	Expression {
-		group: GroupRef,
 		io: Option<IndexOption>,
 		left: Arc<Node>,
 		right: Arc<Node>,
@@ -416,7 +398,7 @@ enum IdiomPosition {
 	Right,
 }
 impl IdiomPosition {
-	// Reverses the operator for non-commutative operators
+	// Reverses the operator for non commutative operators
 	fn transform(&self, op: &Operator) -> Operator {
 		match self {
 			IdiomPosition::Left => op.clone(),
@@ -433,7 +415,6 @@ impl IdiomPosition {
 
 #[derive(Clone)]
 struct ResolvedExpression {
-	group: GroupRef,
 	exp: Arc<Expression>,
 	io: Option<IndexOption>,
 	left: Arc<Node>,
@@ -442,7 +423,6 @@ struct ResolvedExpression {
 impl From<ResolvedExpression> for Node {
 	fn from(re: ResolvedExpression) -> Self {
 		Node::Expression {
-			group: re.group,
 			io: re.io,
 			left: re.left,
 			right: re.right,
