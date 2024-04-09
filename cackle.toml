@@ -768,6 +768,9 @@ allow_unsafe = true
 
 [pkg.same-file]
 allow_unsafe = true
+allow_apis = [
+    "fs",
+]
 
 [pkg.doc-comment]
 build.allow_apis = [
