@@ -5,6 +5,7 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
+#[cfg(feature = "sql2")]
 use crate::api::engine::local::DEFAULT_TICK_INTERVAL;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
@@ -17,6 +18,7 @@ use crate::iam::Level;
 use crate::kvs::Datastore;
 use crate::opt::auth::Root;
 use crate::opt::WaitFor;
+#[cfg(feature = "sql2")]
 use crate::options::EngineOptions;
 use flume::Receiver;
 use flume::Sender;
@@ -147,12 +149,17 @@ pub(crate) fn router(
 		let mut live_queries = HashMap::new();
 		let mut session = Session::default().with_rt(true);
 
-		let tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
-		let opt = EngineOptions {
-			tick_interval,
-			..Default::default()
-		};
-		let (_tasks, task_chans) = start_tasks(&opt, kvs.clone());
+		#[cfg(feature = "sql2")]
+		let mut opt = EngineOptions::default();
+		#[cfg(feature = "sql2")]
+		{
+			opt.tick_interval = address.config.tick_interval.unwrap_or(DEFAULT_TICK_INTERVAL);
+		}
+		let (_tasks, task_chans) = start_tasks(
+			#[cfg(feature = "sql2")]
+			&opt,
+			kvs.clone(),
+		);
 
 		let mut notifications = kvs.notifications();
 		let notification_stream = poll_fn(move |cx| match &mut notifications {
