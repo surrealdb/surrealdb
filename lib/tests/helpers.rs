@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::thread::Builder;
 
 use surrealdb::dbs::capabilities::Capabilities;
+use surrealdb::dbs::Response;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
-use surrealdb_core::dbs::Response;
 
 pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
