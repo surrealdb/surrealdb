@@ -5491,7 +5491,7 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "surreal"
-version = "1.4.0-beta.1"
+version = "1.4.0"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -5554,7 +5554,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.4.0-beta.1"
+version = "1.4.0"
 dependencies = [
  "async-channel 1.9.0",
  "bincode",
@@ -5585,7 +5585,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb-core 1.4.0",
- "surrealdb-core 2.0.0-1.4.0-beta.1",
+ "surrealdb-core 2.0.0-1.4.0",
  "temp-dir",
  "test-log",
  "thiserror",
@@ -5690,7 +5690,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "2.0.0-1.4.0-beta.1"
+version = "2.0.0-1.4.0"
 dependencies = [
  "addr",
  "any_ascii",
