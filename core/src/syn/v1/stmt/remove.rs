@@ -488,10 +488,10 @@ mod tests {
 
 	#[test]
 	fn remove_user_if_ident() {
-		let sql = "REMOVE USER IF";
+		let sql = "REMOVE USER IF ON ROOT";
 		let res = remove(sql);
 		let out = res.unwrap().1;
-		assert_eq!("REMOVE USER IF", format!("{}", out))
+		assert_eq!("REMOVE USER IF ON ROOT", format!("{}", out))
 	}
 
 	#[test]

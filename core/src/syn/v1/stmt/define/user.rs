@@ -128,6 +128,10 @@ mod test {
 	#[test]
 	fn test_define_user_exists() {
 		let (_, q) = super::user("USER IF ON NS").unwrap();
-		assert!(format!("{}", q).starts_with("DEFINE USER IF ON NS"));
+		assert!(
+			format!("{}", q).starts_with("DEFINE USER IF ON NAMESPACE"),
+			"got {}, expected it to start with 'DEFINE USER IF ON NAMESPACE'",
+			q
+		);
 	}
 }
