@@ -769,6 +769,9 @@ allow_apis = [
     "fs",
 ]
 
+[pkg.atomic-waker]
+allow_unsafe = true
+
 [pkg.doc-comment]
 build.allow_apis = [
     "process",
