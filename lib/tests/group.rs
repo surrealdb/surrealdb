@@ -625,9 +625,9 @@ async fn select_array_group_group_by() -> Result<(), Error> {
 #[tokio::test]
 async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 	let sql = r#"
-		CREATE table CONTENT { bar: "hello"};
+		CREATE table CONTENT { bar: "hello", foo: "Man"};
 		CREATE table CONTENT { bar: "hello", foo: "World"};
-		CREATE table CONTENT { bar: "hello"};
+		CREATE table CONTENT { bar: "world"};
 		SELECT COUNT(foo != none) FROM table GROUP ALL EXPLAIN;
 		SELECT COUNT(foo != none) FROM table GROUP ALL;
 	"#;
@@ -651,7 +651,7 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 					detail: {
 						idioms: {
 							count: [
-								'count'
+								'count+func'
 							]
 						},
 						type: 'Group'
