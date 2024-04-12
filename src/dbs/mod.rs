@@ -33,6 +33,8 @@ pub struct StartCommandDbsOptions {
 	#[arg(help = "Whether to enable authentication", help_heading = "Authentication")]
 	#[arg(env = "SURREAL_AUTH", long = "auth")]
 	#[arg(default_value_t = false)]
+	temporary_directory: Option<String>,
+	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY",long = "temporary-directory",help_heading = "Sets the directory for storing temporary database files")]
 	auth_enabled: bool,
 	// TODO(gguillemas): Remove this argument once the legacy authentication is deprecated in v2.0.0
 	#[arg(
