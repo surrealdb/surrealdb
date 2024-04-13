@@ -37,7 +37,10 @@ impl<'a> Document<'a> {
 			// Configure the context
 			let mut ctx = Context::new(ctx);
 			ctx.add_value("event", met);
-			ctx.add_value("value", self.current.doc.deref());
+			ctx.add_value("value", match stm.is_delete() {
+				true => self.initial.doc.deref(),
+				false => self.current.doc.deref(),
+			});
 			ctx.add_value("after", self.current.doc.deref());
 			ctx.add_value("before", self.initial.doc.deref());
 			// Process conditional clause
