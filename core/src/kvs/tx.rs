@@ -396,8 +396,9 @@ impl Transaction {
 	#[allow(unused_variables)]
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key> + Debug + AsRef<[u8]>,
+		K: Into<Key> + Debug,
 	{
+		let key = key.into();
 		#[cfg(debug_assertions)]
 		trace!("Exi {}", sprint_key(&key));
 		match self {
@@ -970,6 +971,7 @@ impl Transaction {
 		}
 		Ok(out)
 	}
+
 	/// Delete a range of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
@@ -1068,6 +1070,7 @@ impl Transaction {
 		}
 		Ok(out)
 	}
+
 	/// Delete a prefix of keys from the datastore.
 	///
 	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
