@@ -51,10 +51,7 @@ pub trait RpcContext {
 			Method::Live => self.live(params).await.map(Into::into).map_err(Into::into),
 			Method::Set => self.set(params).await.map(Into::into).map_err(Into::into),
 			Method::Unset => self.unset(params).await.map(Into::into).map_err(Into::into),
-			m => {
-				assert!(m.can_be_immut());
-				self.execute_immut(m, params).await
-			}
+			m => self.execute_immut(m, params).await,
 		}
 	}
 
@@ -728,7 +725,6 @@ enum InfoType {
 
 impl InfoType {
 	fn parse(text: impl AsRef<str>, extra: Value) -> Result<InfoType, RpcError> {
-		warn!("InfoType::parse : {:?}, {extra:?}", text.as_ref());
 		match (text.as_ref(), extra) {
 			("root", Value::None) => Ok(InfoType::Root),
 			("ns", Value::None) => Ok(InfoType::Ns),
@@ -757,15 +753,4 @@ where
 	T: InfoStructure + Clone,
 {
 	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
-}
-
-fn ser_to_val<S>(s: S) -> Value
-where
-	S: Serialize,
-{
-	// TODO: find better way to do Statement -> Value::Object conversion
-	let intermediate: serde_json::Value = serde_json::to_value(s).unwrap();
-	let intermediate_txt = intermediate.to_string();
-	let out = sql::value(&intermediate_txt).unwrap();
-	out
 }

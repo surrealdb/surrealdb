@@ -109,7 +109,7 @@ impl InfoStructure for DefineIndexStatement {
 			cols,
 			index,
 			comment,
-			if_not_exists,
+			..
 		} = self;
 		let mut acc = Object::default();
 		acc.insert("name".to_string(), Value::Strand(Strand(name.0)));
@@ -117,9 +117,8 @@ impl InfoStructure for DefineIndexStatement {
 		acc.insert("cols".to_string(), Value::Strand(Strand(format!("{cols}"))));
 		acc.insert("index".to_string(), Value::Strand(Strand(format!("{index}"))));
 		if let Some(comment) = comment {
-			acc.insert("index".to_string(), Value::Strand(Strand(format!("{index}"))));
+			acc.insert("comment".to_string(), Value::Strand(Strand(format!("{comment}"))));
 		}
-		acc.insert("if_not_exists".to_string(), Value::Bool(if_not_exists));
 
 		Value::Object(acc)
 	}

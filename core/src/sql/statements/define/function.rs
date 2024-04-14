@@ -120,6 +120,10 @@ impl InfoStructure for DefineFunctionStatement {
 			),
 		);
 
+		acc.insert("block".to_string(), block.into());
+
+		acc.insert("permissions".to_string(), format!("{permissions}").into());
+
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());
 		}

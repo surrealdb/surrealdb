@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::rpc::rpc_context::InfoStructure;
-use crate::sql::statements::LiveStatement;
 use crate::sql::{Base, Ident, Object, Strand, Value};
 use derive::Store;
 use revision::revisioned;

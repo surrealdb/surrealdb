@@ -212,6 +212,7 @@ impl Display for DefineTableStatement {
 		Ok(())
 	}
 }
+
 impl InfoStructure for DefineTableStatement {
 	fn structure(self) -> Value {
 		let Self {
@@ -237,6 +238,16 @@ impl InfoStructure for DefineTableStatement {
 		}
 
 		acc.insert("permissions".to_string(), format!("{permissions}").into());
+
+		if let Some(changefeed) = changefeed {
+			acc.insert("changefeed".to_string(), format!("{changefeed}").into());
+		}
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		acc.insert("kind".to_string(), format!("{kind}").into());
 
 		Value::Object(acc)
 	}
