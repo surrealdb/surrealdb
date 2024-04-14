@@ -23,6 +23,8 @@ pub enum Method {
 	Query,
 	Relate,
 	Run,
+	_InfoStructure,
+	_Validate,
 }
 
 impl Method {
@@ -53,6 +55,8 @@ impl Method {
 			"query" => Self::Query,
 			"relate" => Self::Relate,
 			"run" => Self::Run,
+			"_info_structure" => Self::_InfoStructure,
+			"_validate" => Self::_Validate,
 			_ => Self::Unknown,
 		}
 	}
@@ -84,6 +88,8 @@ impl Method {
 			Self::Query => "query",
 			Self::Relate => "relate",
 			Self::Run => "run",
+			Self::_InfoStructure => "_info_structure",
+			Self::_Validate => "_validate",
 		}
 	}
 }
@@ -94,21 +100,18 @@ impl Method {
 	}
 
 	pub fn needs_mut(&self) -> bool {
-		!self.can_be_immut()
-	}
-
-	// should be the same as execute_immut
-	pub fn can_be_immut(&self) -> bool {
 		matches!(
 			self,
-			Method::Ping
-				| Method::Info | Method::Select
-				| Method::Insert | Method::Create
-				| Method::Update | Method::Merge
-				| Method::Patch | Method::Delete
-				| Method::Version
-				| Method::Query | Method::Relate
-				| Method::Run | Method::Unknown
+			Method::Use
+				| Method::Signup | Method::Signin
+				| Method::Invalidate
+				| Method::Authenticate
+				| Method::Kill | Method::Live
+				| Method::Set | Method::Unset
 		)
+	}
+
+	pub fn can_be_immut(&self) -> bool {
+		!self.needs_mut()
 	}
 }
