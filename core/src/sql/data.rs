@@ -38,7 +38,7 @@ impl Data {
 			Data::SetExpression(v) => v.iter().map(|(i, _, _)| i.clone()).collect(),
 			Data::UnsetExpression(v) => v.clone(),
 			Data::ValuesExpression(v) => {
-				v.iter().map(|v| v.iter().map(|(i, _)| i.clone())).flatten().collect()
+				v.iter().flat_map(|v| v.iter().map(|(i, _)| i.clone())).collect()
 			}
 			Data::UpdateExpression(v) => v.iter().map(|(i, _, _)| i.clone()).collect(),
 			Data::SingleExpression(v) => names_from_value(v),
