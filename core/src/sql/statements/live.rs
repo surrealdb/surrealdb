@@ -203,15 +203,15 @@ impl InfoStructure for LiveStatement {
 			..
 		} = self;
 		let mut acc = Object::default();
-		// 	pub expr: Fields,
+
 		acc.insert("expr".to_string(), Value::Strand(Strand(format!("{expr}"))));
-		// 	pub what: Value,
+
 		acc.insert("what".to_string(), what);
-		// 	pub cond: Option<Cond>,
+
 		if let Some(cond) = cond {
 			acc.insert("cond".to_string(), Value::Strand(Strand(format!("{cond}"))));
 		}
-		// 	pub fetch: Option<Fetchs>,
+
 		if let Some(fetch) = fetch {
 			acc.insert("fetch".to_string(), Value::Strand(Strand(format!("{fetch}"))));
 		}
