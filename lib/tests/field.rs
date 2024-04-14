@@ -15,11 +15,11 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 		DEFINE FIELD age ON person TYPE number ASSERT $value > 0;
 		DEFINE FIELD email ON person TYPE string ASSERT string::is::email($value);
 		DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
-		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore';
-		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = NONE;
-		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = NULL;
-		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 0;
-		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 13;
+		CREATE person:test SET email = 'info@surrealdb.com';
+		CREATE person:test SET email = 'info@surrealdb.com', age = NONE;
+		CREATE person:test SET email = 'info@surrealdb.com', age = NULL;
+		CREATE person:test SET email = 'info@surrealdb.com', age = 0;
+		CREATE person:test SET email = 'info@surrealdb.com', age = 13;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -103,11 +103,12 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 		DEFINE FIELD email ON person TYPE string ASSERT string::is::email($value);
 		DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
 		CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 22;
+		CREATE person:test SET email = 'info@surrealdb.com', age = 22;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -120,6 +121,9 @@ async fn field_definition_value_assert_success() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -787,6 +791,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 async fn field_definition_edge_permissions() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
+		DEFINE FIELD name ON TABLE user TYPE string;
 		DEFINE TABLE business SCHEMAFULL;
 		DEFINE FIELD owner ON TABLE business TYPE record<user>;
 		DEFINE TABLE contact TYPE RELATION SCHEMAFULL PERMISSIONS FOR create WHERE in.owner.id = $auth.id;
@@ -796,7 +801,10 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -815,9 +823,11 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		"[
 			{
 				id: user:one,
+				name: 'John',
 			},
 			{
 				id: user:two,
+				name: 'Lucy',
 			},
 		]",
 	);
