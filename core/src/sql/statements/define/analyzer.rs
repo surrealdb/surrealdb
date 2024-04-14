@@ -3,6 +3,8 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::rpc::rpc_context::InfoStructure;
+use crate::sql::Object;
 use crate::sql::{filter::Filter, tokenizer::Tokenizer, Base, Ident, Strand, Value};
 use derive::Store;
 use revision::revisioned;
@@ -87,5 +89,45 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineAnalyzerStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			function,
+			tokenizers,
+			filters,
+			comment,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.0.into());
+
+		if let Some(function) = function {
+			acc.insert("function".to_string(), function.0.into());
+		}
+
+		if let Some(tokenizers) = tokenizers {
+			acc.insert(
+				"tokenizers".to_string(),
+				Value::Array(tokenizers.into_iter().map(|t| format!("{t}").into()).collect()),
+			);
+		}
+
+		if let Some(filters) = filters {
+			acc.insert(
+				"filters".to_string(),
+				Value::Array(filters.into_iter().map(|t| format!("{t}").into()).collect()),
+			);
+		}
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }

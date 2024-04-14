@@ -3,7 +3,10 @@ use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{statements::UpdateStatement, Base, Ident, Idioms, Index, Strand, Value, Values};
+use crate::rpc::rpc_context::InfoStructure;
+use crate::sql::{
+	statements::UpdateStatement, Base, Ident, Idioms, Index, Object, Strand, Value, Values,
+};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -96,5 +99,28 @@ impl Display for DefineIndexStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+impl InfoStructure for DefineIndexStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			what,
+			cols,
+			index,
+			comment,
+			if_not_exists,
+		} = self;
+		let mut acc = Object::default();
+		acc.insert("name".to_string(), Value::Strand(Strand(name.0)));
+		acc.insert("what".to_string(), Value::Strand(Strand(what.0)));
+		acc.insert("cols".to_string(), Value::Strand(Strand(format!("{cols}"))));
+		acc.insert("index".to_string(), Value::Strand(Strand(format!("{index}"))));
+		if let Some(comment) = comment {
+			acc.insert("index".to_string(), Value::Strand(Strand(format!("{index}"))));
+		}
+		acc.insert("if_not_exists".to_string(), Value::Bool(if_not_exists));
+
+		Value::Object(acc)
 	}
 }

@@ -3,8 +3,9 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::rpc::rpc_context::InfoStructure;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Base, Ident, Permission, Strand, Value};
+use crate::sql::{Base, Ident, Object, Permission, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -82,5 +83,30 @@ impl Display for DefineParamStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineParamStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			value,
+			comment,
+			permissions,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.0.into());
+
+		acc.insert("value".to_string(), value);
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		acc.insert("permissions".to_string(), format!("{permissions}").into());
+
+		Value::Object(acc)
 	}
 }

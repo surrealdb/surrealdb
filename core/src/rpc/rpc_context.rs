@@ -728,12 +728,17 @@ enum InfoType {
 
 impl InfoType {
 	fn parse(text: impl AsRef<str>, extra: Value) -> Result<InfoType, RpcError> {
+		warn!("InfoType::parse : {:?}, {extra:?}", text.as_ref());
 		match (text.as_ref(), extra) {
 			("root", Value::None) => Ok(InfoType::Root),
 			("ns", Value::None) => Ok(InfoType::Ns),
+			("namespace", Value::None) => Ok(InfoType::Ns),
 			("db", Value::None) => Ok(InfoType::Db),
+			("database", Value::None) => Ok(InfoType::Db),
 			("sc", Value::Strand(sc)) => Ok(InfoType::Sc(Ident(sc.0))),
+			("scope", Value::Strand(sc)) => Ok(InfoType::Sc(Ident(sc.0))),
 			("tb", Value::Strand(tb)) => Ok(InfoType::Tb(Ident(tb.0))),
+			("table", Value::Strand(tb)) => Ok(InfoType::Tb(Ident(tb.0))),
 			_ => Err(RpcError::InvalidParams),
 		}
 	}
@@ -743,20 +748,15 @@ use crate::sql::{Ident, Object};
 use serde::Serialize;
 use std::sync::Arc;
 
-// fn process_arr<T>(a: Arc<[T]>) -> Value
-// where
-// 	T: Into<Statement> + Clone,
-// {
-// 	// Value::Array(a.iter().map(ser_to_val).collect())
-// 	let statements: Vec<Statement> = a.iter().map(|s| s.into()).collect();
-// 	Value::Query(Query(Statements(statements)))
-// }
+pub(crate) trait InfoStructure {
+	fn structure(self) -> Value;
+}
 
 fn process_arr<T>(a: Arc<[T]>) -> Value
 where
-	T: Serialize,
+	T: InfoStructure + Clone,
 {
-	Value::Array(a.iter().map(ser_to_val).collect())
+	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
 }
 
 fn ser_to_val<S>(s: S) -> Value

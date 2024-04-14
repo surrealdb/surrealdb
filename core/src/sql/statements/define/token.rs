@@ -3,6 +3,8 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::rpc::rpc_context::InfoStructure;
+use crate::sql::Object;
 use crate::sql::{escape::quote_str, Algorithm, Base, Ident, Strand, Value};
 use derive::Store;
 use revision::revisioned;
@@ -141,5 +143,33 @@ impl Display for DefineTokenStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineTokenStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			base,
+			kind,
+			code,
+			comment,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.0.into());
+
+		acc.insert("base".to_string(), format!("{base}").into());
+
+		acc.insert("kind".to_string(), format!("{kind}").into());
+
+		acc.insert("code".to_string(), code.into());
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }
