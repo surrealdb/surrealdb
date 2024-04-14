@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
+use crate::sql::Part;
 
 impl<'a> Document<'a> {
 	pub async fn field(
@@ -38,6 +39,10 @@ impl<'a> Document<'a> {
 			let stm_fd_names = data.as_ref().map_or(vec![], |d| d.field_names());
 			let fd_names = fds.iter().map(|fd| fd.name.clone()).collect::<Vec<_>>();
 			for stm_name in stm_fd_names {
+				if stm_name.0.starts_with(&[Part::Field("id".into())]) {
+					continue;
+				}
+
 				if !fd_names.contains(&stm_name) {
 					return Err(Error::UndefinedField {
 						table: rid.tb.clone(),
