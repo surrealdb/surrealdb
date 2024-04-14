@@ -561,6 +561,13 @@ pub enum Error {
 		check: String,
 	},
 
+	/// The specified field on a SCHEMAFUL table was not defined
+	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	UndefinedField {
+		table: String,
+		field: Idiom,
+	},
+
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
 		"Found changed value for field `{field}`, with record `{thing}`, but field is readonly"
