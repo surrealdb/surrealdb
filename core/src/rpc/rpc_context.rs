@@ -6,7 +6,6 @@ use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql,
 	sql::{Array, Function, Model, Statement, Strand, Value},
 	syn,
 };
@@ -741,7 +740,6 @@ impl InfoType {
 }
 
 use crate::sql::{Ident, Object};
-use serde::Serialize;
 use std::sync::Arc;
 
 pub(crate) trait InfoStructure {
