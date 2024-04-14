@@ -8,6 +8,7 @@ use crate::{
 	rpc::args::Take,
 	sql,
 	sql::{Array, Function, Model, Statement, Strand, Value},
+	syn,
 };
 use uuid::Uuid;
 
@@ -58,7 +59,6 @@ pub trait RpcContext {
 	}
 
 	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
-		warn!("method: {}", method.to_str());
 		match method {
 			Method::Ping => Ok(Value::None.into()),
 			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
@@ -664,9 +664,12 @@ pub trait RpcContext {
 		out.map_err(Into::into)
 	}
 
-	async fn validate(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
-		let out: Result<Value, RpcError> = Err(RpcError::MethodNotFound);
-		out
+	async fn validate(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok(Value::Strand(Strand(query))) = params.needs_one() else {
+			return Err(RpcError::InvalidParams);
+		};
+		let q = syn::parse(&query)?;
+		Ok(Value::Query(q))
 	}
 
 	// ------------------------------
@@ -736,8 +739,7 @@ impl InfoType {
 	}
 }
 
-use crate::sql::statements::DefineStatement;
-use crate::sql::{Ident, Object, Query, Statements};
+use crate::sql::{Ident, Object};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -755,13 +757,6 @@ where
 	T: Serialize,
 {
 	Value::Array(a.iter().map(ser_to_val).collect())
-}
-
-fn vec_to_val<V>(v: Vec<V>) -> Value
-where
-	V: Into<Value>,
-{
-	Value::Array(v.into_iter().map(|i| i.into()).collect())
 }
 
 fn ser_to_val<S>(s: S) -> Value
