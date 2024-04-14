@@ -36,7 +36,6 @@ use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::clock::SizedClock;
 use crate::kvs::lq_structs::{LqValue, TrackedResult};
-use crate::kvs::Check;
 use crate::options::EngineOptions;
 use crate::sql;
 use crate::sql::thing::Thing;
@@ -49,6 +48,15 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
+
+/// Used to determine the behaviour when a transaction is not handled correctly
+#[derive(Default)]
+pub enum Check {
+	#[default]
+	None,
+	Warn,
+	Panic,
+}
 
 #[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
