@@ -97,6 +97,7 @@ impl InfoStructure for DefineModelStatement {
 			name,
 			version,
 			comment,
+			permissions,
 			..
 		} = self;
 		let mut acc = Object::default();
@@ -108,6 +109,8 @@ impl InfoStructure for DefineModelStatement {
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());
 		}
+
+		acc.insert("permissions".to_string(), permissions.structure());
 
 		Value::Object(acc)
 	}

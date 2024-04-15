@@ -237,7 +237,7 @@ impl InfoStructure for DefineTableStatement {
 			acc.insert("view".to_string(), format!("{view}").into());
 		}
 
-		acc.insert("permissions".to_string(), format!("{permissions}").into());
+		acc.insert("permissions".to_string(), permissions.structure());
 
 		if let Some(changefeed) = changefeed {
 			acc.insert("changefeed".to_string(), format!("{changefeed}").into());

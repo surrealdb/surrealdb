@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
+use crate::rpc::rpc_context::InfoStructure;
+
+use super::Object;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -164,5 +167,34 @@ impl Display for Permission {
 			Self::Full => f.write_str("FULL"),
 			Self::Specific(ref v) => write!(f, "WHERE {v}"),
 		}
+	}
+}
+
+impl InfoStructure for Permission {
+	fn structure(self) -> Value {
+		match self {
+			Permission::None => Value::Bool(false),
+			Permission::Full => Value::Bool(true),
+			Permission::Specific(v) => Value::Strand(v.to_string().into()),
+		}
+	}
+}
+
+impl InfoStructure for Permissions {
+	fn structure(self) -> Value {
+		let Self {
+			select,
+			create,
+			update,
+			delete,
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("select".to_string(), select.structure());
+		acc.insert("create".to_string(), create.structure());
+		acc.insert("update".to_string(), update.structure());
+		acc.insert("delete".to_string(), delete.structure());
+
+		Value::Object(acc)
 	}
 }

@@ -105,7 +105,7 @@ impl InfoStructure for DefineParamStatement {
 			acc.insert("comment".to_string(), comment.into());
 		}
 
-		acc.insert("permissions".to_string(), format!("{permissions}").into());
+		acc.insert("permissions".to_string(), permissions.structure());
 
 		Value::Object(acc)
 	}

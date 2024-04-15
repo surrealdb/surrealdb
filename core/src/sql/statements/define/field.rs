@@ -247,7 +247,7 @@ impl InfoStructure for DefineFieldStatement {
 			acc.insert("default".to_string(), default);
 		}
 
-		acc.insert("permissions".to_string(), format!("{permissions}").into());
+		acc.insert("permissions".to_string(), permissions.structure());
 
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());
