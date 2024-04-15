@@ -11,7 +11,7 @@ use surrealdb::sql;
 pub fn req_ws(msg: Message) -> Result<Request, RpcError> {
 	match msg {
 		Message::Text(val) => {
-			surrealdb::sql::value(&val).map_err(|_| RpcError::ParseError)?.try_into()
+			surrealdb::syn::value_legacy_strand(&val).map_err(|_| RpcError::ParseError)?.try_into()
 		}
 		_ => Err(RpcError::InvalidRequest),
 	}

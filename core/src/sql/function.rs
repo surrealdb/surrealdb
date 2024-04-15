@@ -35,6 +35,7 @@ pub enum Function {
 pub(crate) enum OptimisedAggregate {
 	None,
 	Count,
+	CountFunction,
 	MathMax,
 	MathMin,
 	MathSum,
@@ -156,7 +157,13 @@ impl Function {
 	}
 	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
 		match self {
-			Self::Normal(f, _) if f == "count" => OptimisedAggregate::Count,
+			Self::Normal(f, v) if f == "count" => {
+				if v.is_empty() {
+					OptimisedAggregate::Count
+				} else {
+					OptimisedAggregate::CountFunction
+				}
+			}
 			Self::Normal(f, _) if f == "math::max" => OptimisedAggregate::MathMax,
 			Self::Normal(f, _) if f == "math::mean" => OptimisedAggregate::MathMean,
 			Self::Normal(f, _) if f == "math::min" => OptimisedAggregate::MathMin,

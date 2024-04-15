@@ -113,11 +113,6 @@
 #[cfg(all(target_arch = "wasm32", feature = "ml"))]
 compile_error!("The `ml` feature is not supported on the `wasm32` architecture.");
 
-#[cfg(all(not(surrealdb_unstable), feature = "parser2"))]
-compile_error!(
-	"`parser2` is currently unstable. You need to enable the `surrealdb_unstable` flag to use it."
-);
-
 #[macro_use]
 extern crate tracing;
 

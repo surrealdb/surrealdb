@@ -15,7 +15,7 @@ async fn live_select_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db.select(&table).live().await.unwrap();
@@ -48,7 +48,7 @@ async fn live_select_table() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db.select(Resource::from(&table)).live().await.unwrap();
@@ -133,7 +133,7 @@ async fn live_select_record_ranges() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db.select(&table).range("jane".."john").live().await.unwrap();
@@ -167,7 +167,7 @@ async fn live_select_record_ranges() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users =
@@ -194,7 +194,7 @@ async fn live_select_query() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db
@@ -234,7 +234,7 @@ async fn live_select_query() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db
@@ -256,7 +256,7 @@ async fn live_select_query() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db
@@ -295,7 +295,7 @@ async fn live_select_query() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db
