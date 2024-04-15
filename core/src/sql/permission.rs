@@ -1,3 +1,4 @@
+use crate::rpc::rpc_context::InfoStructure;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::fmt::pretty_sequence_item;
@@ -7,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
-use crate::rpc::rpc_context::InfoStructure;
 
 use super::Object;
 
