@@ -15,7 +15,10 @@ pub fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+		shouldbespace,
+		tag_no_case("NOT"),
+		shouldbespace,
+		cut(tag_no_case("EXISTS")),
 	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;

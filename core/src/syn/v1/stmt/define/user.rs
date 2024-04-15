@@ -25,7 +25,10 @@ pub fn user(i: &str) -> IResult<&str, DefineUserStatement> {
 	let (i, if_not_exists) = opt(tuple((
 		shouldbespace,
 		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("NOT"), shouldbespace, tag_no_case("EXISTS")))),
+		shouldbespace,
+		tag_no_case("NOT"),
+		shouldbespace,
+		cut(tag_no_case("EXISTS")),
 	)))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, (name, base, opts)) = cut(|i| {
@@ -118,4 +121,17 @@ fn user_roles(i: &str) -> IResult<&str, DefineUserOption> {
 	})(i)?;
 
 	Ok((i, DefineUserOption::Roles(roles)))
+}
+
+#[cfg(test)]
+mod test {
+	#[test]
+	fn test_define_user_exists() {
+		let (_, q) = super::user("USER IF ON NS").unwrap();
+		assert!(
+			format!("{}", q).starts_with("DEFINE USER IF ON NAMESPACE"),
+			"got {}, expected it to start with 'DEFINE USER IF ON NAMESPACE'",
+			q
+		);
+	}
 }

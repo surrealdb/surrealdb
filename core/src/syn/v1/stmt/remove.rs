@@ -41,11 +41,8 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 
 pub fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 	let (i, _) = tag_no_case("ANALYZER")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
@@ -59,11 +56,8 @@ pub fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 
 pub fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 	let (i, _) = alt((tag_no_case("DB"), tag_no_case("DATABASE")))(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
@@ -77,11 +71,8 @@ pub fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 
 pub fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 	let (i, _) = tag_no_case("EVENT")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -101,11 +92,8 @@ pub fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 
 pub fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	let (i, _) = tag_no_case("FIELD")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(idiom::local)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -125,11 +113,8 @@ pub fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 
 pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
 	let (i, name) = ident_path(i)?;
@@ -151,11 +136,8 @@ pub fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 
 pub fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 	let (i, _) = tag_no_case("INDEX")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -175,11 +157,8 @@ pub fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 
 pub fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 	let (i, _) = alt((tag_no_case("NS"), tag_no_case("NAMESPACE")))(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
@@ -193,11 +172,8 @@ pub fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 
 pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 	let (i, _) = tag_no_case("PARAM")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = cut(char('$'))(i)?;
 	let (i, name) = cut(ident)(i)?;
@@ -212,11 +188,8 @@ pub fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 
 pub fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 	let (i, _) = tag_no_case("SCOPE")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
@@ -230,11 +203,8 @@ pub fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 
 pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 	let (i, _) = tag_no_case("TABLE")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	Ok((
@@ -248,11 +218,8 @@ pub fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 
 pub fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 	let (i, _) = tag_no_case("TOKEN")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -271,11 +238,8 @@ pub fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 
 pub fn user(i: &str) -> IResult<&str, RemoveUserStatement> {
 	let (i, _) = tag_no_case("USER")(i)?;
-	let (i, if_exists) = opt(tuple((
-		shouldbespace,
-		tag_no_case("IF"),
-		cut(tuple((shouldbespace, tag_no_case("EXISTS")))),
-	)))(i)?;
+	let (i, if_exists) =
+		opt(tuple((shouldbespace, tag_no_case("IF"), shouldbespace, tag_no_case("EXISTS"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = cut(ident)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -326,13 +290,6 @@ mod tests {
 		assert_eq!("REMOVE ANALYZER IF EXISTS test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_analyzer_if() {
-		let sql = "REMOVE ANALYZER IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE DATABASE tests
 
 	#[test]
@@ -349,13 +306,6 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE DATABASE IF EXISTS test", format!("{}", out))
-	}
-
-	#[test]
-	fn remove_database_if() {
-		let sql = "REMOVE DATABASE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
 	}
 
 	/// REMOVE EVENT tests
@@ -376,13 +326,6 @@ mod tests {
 		assert_eq!("REMOVE EVENT IF EXISTS test ON test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_event_if() {
-		let sql = "REMOVE EVENT IF test ON test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE FIELD tests
 
 	#[test]
@@ -401,13 +344,6 @@ mod tests {
 		assert_eq!("REMOVE FIELD IF EXISTS test ON test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_field_if() {
-		let sql = "REMOVE FIELD IF test ON test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE FUNCTION tests
 
 	#[test]
@@ -424,13 +360,6 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE FUNCTION IF EXISTS fn::test", format!("{}", out))
-	}
-
-	#[test]
-	fn remove_function_if() {
-		let sql = "REMOVE FUNCTION IF fn::test";
-		let res = remove(sql);
-		assert!(res.is_err());
 	}
 
 	#[test]
@@ -459,13 +388,6 @@ mod tests {
 		assert_eq!("REMOVE INDEX IF EXISTS test ON test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_index_if() {
-		let sql = "REMOVE INDEX IF test ON test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE NAMESPACE tests
 
 	#[test]
@@ -483,14 +405,6 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE NAMESPACE IF EXISTS test", format!("{}", out))
 	}
-
-	#[test]
-	fn remove_namespace_if() {
-		let sql = "REMOVE NAMESPACE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE PARAM tests
 
 	#[test]
@@ -508,14 +422,6 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE PARAM IF EXISTS $test", format!("{}", out))
 	}
-
-	#[test]
-	fn remove_param_if() {
-		let sql = "REMOVE PARAM IF $test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE SCOPE tests
 
 	#[test]
@@ -532,13 +438,6 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE SCOPE IF EXISTS test", format!("{}", out))
-	}
-
-	#[test]
-	fn remove_scope_if() {
-		let sql = "REMOVE SCOPE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
 	}
 
 	/// REMOVE TABLE tests
@@ -559,13 +458,6 @@ mod tests {
 		assert_eq!("REMOVE TABLE IF EXISTS test", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_table_if() {
-		let sql = "REMOVE TABLE IF test";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE TOKEN tests
 
 	#[test]
@@ -584,13 +476,6 @@ mod tests {
 		assert_eq!("REMOVE TOKEN IF EXISTS test ON NAMESPACE", format!("{}", out))
 	}
 
-	#[test]
-	fn remove_token_if() {
-		let sql = "REMOVE TOKEN IF test ON NAMESPACE";
-		let res = remove(sql);
-		assert!(res.is_err());
-	}
-
 	/// REMOVE USER tests
 
 	#[test]
@@ -599,6 +484,14 @@ mod tests {
 		let res = remove(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REMOVE USER test ON ROOT", format!("{}", out))
+	}
+
+	#[test]
+	fn remove_user_if_ident() {
+		let sql = "REMOVE USER IF ON ROOT";
+		let res = remove(sql);
+		let out = res.unwrap().1;
+		assert_eq!("REMOVE USER IF ON ROOT", format!("{}", out))
 	}
 
 	#[test]
