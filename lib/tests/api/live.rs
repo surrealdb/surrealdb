@@ -13,7 +13,8 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::info;
 
-const LQ_TIMEOUT: Duration = Duration::from_secs(10);
+// const LQ_TIMEOUT: Duration = Duration::from_secs(10);
+const LQ_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[test_log::test(tokio::test)]
 async fn live_select_table() {

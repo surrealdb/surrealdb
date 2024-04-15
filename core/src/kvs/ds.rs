@@ -107,6 +107,8 @@ pub struct Datastore {
 	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, Vec<LqIndexValue>>>>,
 	// Set of tracked change feeds with associated watermarks
 	// This is updated with new/removed live queries and improves cf request performance
+	// The Versionstamp associated is scanned inclusive of first value, so it must contain the earliest NOT read value
+	// So if VS=2 has been processed, the correct value here is VS=3
 	cf_watermarks: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
@@ -953,35 +955,39 @@ impl Datastore {
 		}
 
 		// Change map includes a mapping of selector to changesets, ordered by versionstamp
-		let mut change_map: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
+		let mut relevant_changesets: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
 		{
 			let tx = self.transaction(Read, Optimistic).await?;
 			let tracked_cfs_updates = find_required_cfs_to_catch_up(
 				tx,
 				self.cf_watermarks.clone(),
 				self.engine_options.live_query_catchup_size,
-				&mut change_map,
+				&mut relevant_changesets,
 			)
 			.await?;
-			// Now we update since we are no longer iterating immutably
-			let mut tracked_cfs = self.cf_watermarks.lock().await;
-			for (selector, vs) in tracked_cfs_updates {
-				// TODO(phughk): test these lines
-				let vs = conv::to_u128_be(vs) + 1;
-				let vs = conv::try_u128_to_versionstamp(vs).unwrap();
-				#[cfg(debug_assertions)]
-				trace!(
-					"Updating tracker for ns={} db={} tb={} vs={}",
-					selector.ns,
-					selector.db,
-					selector.tb,
-					conv::versionstamp_to_u64(&vs)
-				);
-				tracked_cfs.insert(selector, vs);
+
+			// TODO commenting this out because the updates now happen inside the find_required_cfs_to_catch_up function
+			{
+				// // Now we update since we are no longer iterating immutably
+				// let mut tracked_cfs = self.cf_watermarks.lock().await;
+				// for (selector, vs) in tracked_cfs_updates {
+				// 	// TODO(phughk): test these lines
+				// 	let vs = conv::to_u128_be(vs) + 1;
+				// 	let vs = conv::try_u128_to_versionstamp(vs).unwrap();
+				// 	#[cfg(debug_assertions)]
+				// 	trace!(
+				// 		"Updating tracker for ns={} db={} tb={} vs={:?}",
+				// 		selector.ns,
+				// 		selector.db,
+				// 		selector.tb,
+				// 		&vs
+				// 	);
+				// 	tracked_cfs.insert(selector, vs);
+				// }
 			}
 		};
 
-		for (selector, change_sets) in change_map {
+		for (selector, change_sets) in relevant_changesets {
 			// find matching live queries
 			let lq_pairs: Vec<(LqIndexKey, LqIndexValue)> = {
 				let lq_lock = self.local_live_queries.read().await;
@@ -1120,7 +1126,7 @@ impl Datastore {
 	) {
 		// We increase the watermark because scans are inclusive of first result
 		// And we have already processed the input watermark - it is derived from the event
-		// let change_vs = conv::try_u128_to_versionstamp(conv::to_u128_be(*change_vs) + 1).unwrap();
+		let change_vs = conv::try_u128_to_versionstamp(conv::to_u128_be(*change_vs) + 1).unwrap();
 
 		// Update watermarks
 		trace!("Updating watermark to {:?} for index key {:?}", change_vs, lq_key);
@@ -1129,15 +1135,18 @@ impl Datastore {
 		self.local_live_queries.write().await.insert(
 			lq_key.clone(),
 			vec![LqIndexValue {
-				vs: *change_vs,
+				vs: change_vs,
 				..lq_value.clone()
 			}],
 		);
 
-		// TODO(phugk) We also update the tracked_cfs with a minimum watermark
-		let mut tracked_cfs = self.cf_watermarks.lock().await;
-		// TODO we may be able to re-use the key without cloning...
-		tracked_cfs.insert(lq_key.selector.clone(), *change_vs).unwrap();
+		// Commented this all because it was overwriting bookmark - evaluate if that was necessary
+		{
+			// // TODO(phugk) We also update the tracked_cfs with a minimum watermark
+			// let mut tracked_cfs = self.cf_watermarks.lock().await;
+			// // TODO we may be able to re-use the key without cloning...
+			// tracked_cfs.insert(lq_key.selector.clone(), *change_vs).unwrap();
+		}
 	}
 
 	/// Add and kill live queries being track on the datastore
@@ -1739,22 +1748,32 @@ impl Datastore {
 
 async fn find_required_cfs_to_catch_up(
 	mut tx: Transaction,
-	tracked_cfs: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
+	cf_watermarks: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
 	catchup_size: u32,
-	change_map: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
+	relevant_changesets: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
 ) -> Result<Vec<(LqSelector, Versionstamp)>, Error> {
-	let tracked_cfs = tracked_cfs.lock().await;
+	let mut tracked_cfs = cf_watermarks.lock().await;
+	// We are going to track the latest observed versionstamp here
+	let mut update_watermarks: BTreeMap<LqSelector, Versionstamp> = BTreeMap::new();
 	let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
 	for (selector, vs) in tracked_cfs.iter() {
 		// Read the change feed for the selector
+		let simple_vs = conv::versionstamp_to_u64(vs);
+		let observed_vs =
+			conv::versionstamp_to_u64(update_watermarks.get(selector).unwrap_or(&[0; 10]));
 		#[cfg(debug_assertions)]
 		trace!(
 			"Checking for new changes for ns={} db={} tb={} vs={}",
 			selector.ns,
 			selector.db,
 			selector.tb,
-			conv::versionstamp_to_u64(vs)
+			// TODO this is what is incorrect - it is 2 instead of 3
+			simple_vs
 		);
+		if observed_vs <= simple_vs {
+			let observed_vs = simple_vs + 1;
+			update_watermarks.insert(selector.clone(), conv::u64_to_versionstamp(observed_vs));
+		}
 		let res = cf::read(
 			&mut tx,
 			&selector.ns,
@@ -1783,10 +1802,18 @@ async fn find_required_cfs_to_catch_up(
 				// We shouldn't use a read lock because of consistency between watermark scans
 				tracked_cfs_updates.push((selector.clone(), change_set.0));
 				// This does not guarantee a notification, as a changeset an include many tables and many changes
-				change_map.insert(selector.clone(), res);
+				relevant_changesets.insert(selector.clone(), res);
 			}
 		}
 	}
+	// We still have the lock and we will update the globally tracked watermarks with the latest observed
+	// It is assumed at this point that the latest observed has been incremented so that the first value is ignored
+	for (k, v) in update_watermarks.iter() {
+		// We are going to update the global watermarks
+		trace!("Correcting watermark for {:?} to {:?}", k, v);
+		tracked_cfs.insert(k.clone(), *v);
+	}
+
 	tx.cancel().await?;
 	Ok(tracked_cfs_updates)
 }
