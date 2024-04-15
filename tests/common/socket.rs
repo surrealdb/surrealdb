@@ -117,7 +117,7 @@ impl Socket {
 				// First of all we convert the JSON type to a string.
 				let json = message.to_string();
 				// Then we parse the JSON in to SurrealQL.
-				let surrealql = surrealdb::sql::value(&json)?;
+				let surrealql = surrealdb::syn::value_legacy_strand(&json)?;
 				// Then we convert the SurrealQL in to CBOR.
 				let cbor = try_from_impls::Cbor::try_from(surrealql)?;
 				// Then serialize the CBOR as binary data.
@@ -136,7 +136,7 @@ impl Socket {
 				// First of all we convert the JSON type to a string.
 				let json = message.to_string();
 				// Then we parse the JSON in to SurrealQL.
-				let surrealql = surrealdb::sql::value(&json)?;
+				let surrealql = surrealdb::syn::value_legacy_strand(&json)?;
 				// Then we convert the SurrealQL in to MessagePack.
 				let pack = try_from_impls::Pack::try_from(surrealql)?;
 				// Then serialize the MessagePack as binary data.
@@ -421,6 +421,34 @@ impl Socket {
 				.as_str()
 				.ok_or(TestError::AssertionError {
 					message: format!("expected the result object to be a string for the received ws message, got this instead: {:?}", obj.get("result")).to_string(),
+				})?
+				.to_owned()),
+			_ => {
+				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+				Err(format!("unexpected response: {:?}", msg).into())
+			}
+		}
+	}
+	pub async fn send_message_run(
+		&mut self,
+		fn_name: &str,
+		version: Option<&str>,
+		args: Vec<serde_json::Value>,
+	) -> Result<serde_json::Value> {
+		// Send message and receive response
+		let msg = self.send_request("run", json!([fn_name, version, args])).await?;
+		// Check response message structure
+		match msg.as_object() {
+			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
+				Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
+			}
+			Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => Ok(obj
+				.get("result")
+				.ok_or(TestError::AssertionError {
+					message: format!(
+						"expected a result from the received object, got this instead: {:?}",
+						obj
+					),
 				})?
 				.to_owned()),
 			_ => {

@@ -1,9 +1,9 @@
 use crate::cf::{TableMutation, TableMutations};
-use crate::fflags::FFLAGS;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Idiom;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -16,15 +16,18 @@ use std::collections::HashMap;
 // value = serialized table mutations
 type PreparedWrite = (Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val);
 
+#[non_exhaustive]
 pub struct Writer {
 	buf: Buffer,
 }
 
+#[non_exhaustive]
 pub struct Buffer {
 	pub b: HashMap<ChangeKey, TableMutations>,
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
+#[non_exhaustive]
 pub struct ChangeKey {
 	pub ns: String,
 	pub db: String,
@@ -60,23 +63,34 @@ impl Writer {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn update(
 		&mut self,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		id: Thing,
-		p: Cow<'_, Value>,
-		v: Cow<'_, Value>,
+		previous: Cow<'_, Value>,
+		current: Cow<'_, Value>,
+		store_difference: bool,
 	) {
-		if v.is_some() {
+		if current.is_some() {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
 				tb.to_string(),
-				match FFLAGS.change_feed_live_queries.enabled() {
-					true => TableMutation::SetPrevious(id, p.into_owned(), v.into_owned()),
-					false => TableMutation::Set(id, v.into_owned()),
+				match store_difference {
+					true => {
+						let patches = current.diff(&previous, Idiom(Vec::new()));
+						let new_record = !previous.is_some();
+						trace!("The record is new_record={new_record} because previous is {previous:?}");
+						if previous.is_none() {
+							TableMutation::Set(id, current.into_owned())
+						} else {
+							TableMutation::SetWithDiff(id, current.into_owned(), patches)
+						}
+					}
+					false => TableMutation::Set(id, current.into_owned()),
 				},
 			);
 		} else {
@@ -136,6 +150,8 @@ mod tests {
 	use crate::sql::value::Value;
 	use crate::vs;
 
+	const DONT_STORE_PREVIOUS: bool = false;
+
 	#[tokio::test]
 	async fn test_changefeed_read_write() {
 		let ts = crate::sql::Datetime::default();
@@ -150,6 +166,7 @@ mod tests {
 			name: crate::sql::Ident(db.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
+				store_original: false,
 			}),
 			..Default::default()
 		};
@@ -157,6 +174,7 @@ mod tests {
 			name: tb.into(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
+				store_original: false,
 			}),
 			..Default::default()
 		};
@@ -191,9 +209,16 @@ mod tests {
 			id: Id::String("A".to_string()),
 		};
 		let value_a: super::Value = "a".into();
-		// TODO(for this PR): This was just added to resolve compile issues but test should be fixed
 		let previous = Cow::from(Value::None);
-		tx1.record_change(ns, db, tb, &thing_a, previous.clone(), Cow::Borrowed(&value_a));
+		tx1.record_change(
+			ns,
+			db,
+			tb,
+			&thing_a,
+			previous.clone(),
+			Cow::Borrowed(&value_a),
+			DONT_STORE_PREVIOUS,
+		);
 		tx1.complete_changes(true).await.unwrap();
 		tx1.commit().await.unwrap();
 
@@ -203,7 +228,15 @@ mod tests {
 			id: Id::String("C".to_string()),
 		};
 		let value_c: Value = "c".into();
-		tx2.record_change(ns, db, tb, &thing_c, previous.clone(), Cow::Borrowed(&value_c));
+		tx2.record_change(
+			ns,
+			db,
+			tb,
+			&thing_c,
+			previous.clone(),
+			Cow::Borrowed(&value_c),
+			DONT_STORE_PREVIOUS,
+		);
 		tx2.complete_changes(true).await.unwrap();
 		tx2.commit().await.unwrap();
 
@@ -214,13 +247,29 @@ mod tests {
 			id: Id::String("B".to_string()),
 		};
 		let value_b: Value = "b".into();
-		tx3.record_change(ns, db, tb, &thing_b, previous.clone(), Cow::Borrowed(&value_b));
+		tx3.record_change(
+			ns,
+			db,
+			tb,
+			&thing_b,
+			previous.clone(),
+			Cow::Borrowed(&value_b),
+			DONT_STORE_PREVIOUS,
+		);
 		let thing_c2 = Thing {
 			tb: tb.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c2: Value = "c2".into();
-		tx3.record_change(ns, db, tb, &thing_c2, previous.clone(), Cow::Borrowed(&value_c2));
+		tx3.record_change(
+			ns,
+			db,
+			tb,
+			&thing_c2,
+			previous.clone(),
+			Cow::Borrowed(&value_c2),
+			DONT_STORE_PREVIOUS,
+		);
 		tx3.complete_changes(true).await.unwrap();
 		tx3.commit().await.unwrap();
 
@@ -243,10 +292,10 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					"mytb".to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
-						true => vec![TableMutation::SetPrevious(
+						true => vec![TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "A".to_string())),
 							Value::None,
-							Value::from("a"),
+							vec![],
 						)],
 						false => vec![TableMutation::Set(
 							Thing::from(("mytb".to_string(), "A".to_string())),
@@ -260,10 +309,10 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					"mytb".to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
-						true => vec![TableMutation::SetPrevious(
+						true => vec![TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "C".to_string())),
 							Value::None,
-							Value::from("c"),
+							vec![],
 						)],
 						false => vec![TableMutation::Set(
 							Thing::from(("mytb".to_string(), "C".to_string())),
@@ -278,15 +327,15 @@ mod tests {
 					"mytb".to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
 						true => vec![
-							TableMutation::SetPrevious(
+							TableMutation::SetWithDiff(
 								Thing::from(("mytb".to_string(), "B".to_string())),
 								Value::None,
-								Value::from("b"),
+								vec![],
 							),
-							TableMutation::SetPrevious(
+							TableMutation::SetWithDiff(
 								Thing::from(("mytb".to_string(), "C".to_string())),
 								Value::None,
-								Value::from("c2"),
+								vec![],
 							),
 						],
 						false => vec![
@@ -326,15 +375,15 @@ mod tests {
 				"mytb".to_string(),
 				match FFLAGS.change_feed_live_queries.enabled() {
 					true => vec![
-						TableMutation::SetPrevious(
+						TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "B".to_string())),
 							Value::None,
-							Value::from("b"),
+							vec![],
 						),
-						TableMutation::SetPrevious(
+						TableMutation::SetWithDiff(
 							Thing::from(("mytb".to_string(), "C".to_string())),
 							Value::None,
-							Value::from("c2"),
+							vec![],
 						),
 					],
 					false => vec![

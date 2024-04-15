@@ -9,6 +9,7 @@ use std::collections::HashMap;
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[non_exhaustive]
 pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iat: Option<i64>,
@@ -18,6 +19,8 @@ pub struct Claims {
 	pub exp: Option<i64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub iss: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub jti: Option<String>,
 	#[serde(alias = "ns")]
 	#[serde(alias = "NS")]
 	#[serde(rename = "NS")]
@@ -85,6 +88,10 @@ impl From<Claims> for Value {
 		// Add exp field if set
 		if let Some(exp) = v.exp {
 			out.insert("exp".to_string(), exp.into());
+		}
+		// Add jti field if set
+		if let Some(jti) = v.jti {
+			out.insert("jti".to_string(), jti.into());
 		}
 		// Add NS field if set
 		if let Some(ns) = v.ns {

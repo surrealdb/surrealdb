@@ -14,11 +14,7 @@ use crate::method::Stats;
 use crate::method::WithStats;
 use crate::sql;
 use crate::sql::to_value;
-use crate::sql::Array;
-use crate::sql::Object;
 use crate::sql::Statement;
-use crate::sql::Statements;
-use crate::sql::Strand;
 use crate::sql::Value;
 use crate::Notification;
 use crate::Surreal;
@@ -79,7 +75,8 @@ where
 				statements.extend(query?);
 			}
 			// Build the query and execute it
-			let query = sql::Query(Statements(statements.clone()));
+			let mut query = sql::Query::default();
+			query.0 .0 = statements.clone();
 			let param = Param::query(query, self.bindings?);
 			let mut conn = Client::new(Method::Query);
 			let mut response = conn.execute_query(router, param).await?;
@@ -106,6 +103,7 @@ where
 											rx: Some(rx),
 											client: Surreal {
 												router: self.client.router.clone(),
+												waiter: self.client.waiter.clone(),
 												engine: PhantomData,
 											},
 											response_type: PhantomData,
@@ -128,6 +126,7 @@ where
 			}
 			response.client = Surreal {
 				router: self.client.router.clone(),
+				waiter: self.client.waiter.clone(),
 				engine: PhantomData,
 			};
 			Ok(response)
@@ -210,15 +209,15 @@ where
 		if let Ok(current) = &mut self.bindings {
 			match to_value(bindings) {
 				Ok(mut bindings) => {
-					if let Value::Array(Array(array)) = &mut bindings {
-						if let [Value::Strand(Strand(key)), value] = &mut array[..] {
+					if let Value::Array(array) = &mut bindings {
+						if let [Value::Strand(key), value] = &mut array.0[..] {
 							let mut map = BTreeMap::new();
-							map.insert(mem::take(key), mem::take(value));
+							map.insert(mem::take(&mut key.0), mem::take(value));
 							bindings = map.into();
 						}
 					}
 					match &mut bindings {
-						Value::Object(Object(map)) => current.append(map),
+						Value::Object(map) => current.append(&mut map.0),
 						_ => {
 							self.bindings = Err(Error::InvalidBindings(bindings).into());
 						}

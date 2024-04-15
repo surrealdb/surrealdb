@@ -19,11 +19,7 @@ async fn config(
 	de_code: String,
 	_token_header: Header,
 ) -> Result<(DecodingKey, Validation), Error> {
-	#[cfg(feature = "sql2")]
-	let is_jwks = de_kind == Algorithm::Jwks;
-	#[cfg(not(feature = "sql2"))]
-	let is_jwks = false;
-	if is_jwks {
+	if de_kind == Algorithm::Jwks {
 		#[cfg(not(feature = "jwks"))]
 		{
 			warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
@@ -95,7 +91,6 @@ fn config_alg(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation)
 			DecodingKey::from_rsa_pem(code.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
-		#[cfg(feature = "sql2")]
 		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here
 	}
 }
@@ -127,6 +122,8 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
+				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+				session.exp = None;
 				session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 				Ok(())
 			}
@@ -136,6 +133,8 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
+				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+				session.exp = None;
 				session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 				Ok(())
 			}
@@ -145,6 +144,8 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
+				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+				session.exp = None;
 				session.au = Arc::new((&u, Level::Root).into());
 				Ok(())
 			}
@@ -167,16 +168,22 @@ pub async fn basic_legacy(
 	match verify_creds_legacy(kvs, session.ns.as_ref(), session.db.as_ref(), user, pass).await {
 		Ok((au, _)) if au.is_root() => {
 			debug!("Authenticated as root user '{}'", user);
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+			session.exp = None;
 			session.au = Arc::new(au);
 			Ok(())
 		}
 		Ok((au, _)) if au.is_ns() => {
 			debug!("Authenticated as namespace user '{}'", user);
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+			session.exp = None;
 			session.au = Arc::new(au);
 			Ok(())
 		}
 		Ok((au, _)) if au.is_db() => {
 			debug!("Authenticated as database user '{}'", user);
+			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
+			session.exp = None;
 			session.au = Arc::new(au);
 			Ok(())
 		}
@@ -240,6 +247,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.sc = Some(sc.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				Default::default(),
@@ -274,6 +282,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.db = Some(db.to_owned());
 			session.sc = Some(sc.to_owned());
 			session.sd = Some(Value::from(id.to_owned()));
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				Default::default(),
@@ -316,6 +325,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				roles,
@@ -348,6 +358,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
@@ -388,6 +399,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au =
 				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
 			Ok(())
@@ -415,6 +427,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
@@ -443,6 +456,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticated to root level with user `{}`", id);
 			// Set the session
 			session.tk = Some(value);
+			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
@@ -567,7 +581,7 @@ pub async fn verify_creds_legacy(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{iam::token::Claims, iam::token::HEADER, iam::verify::token, kvs::Datastore};
+	use crate::iam::token::HEADER;
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{encode, EncodingKey};
@@ -597,6 +611,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		//
@@ -624,6 +639,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		// Test invalid password
@@ -667,6 +683,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		//
@@ -695,6 +712,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		// Test invalid password
@@ -739,6 +757,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		//
@@ -768,6 +787,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
 		}
 
 		// Test invalid password
@@ -831,6 +851,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -855,6 +876,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -938,6 +960,7 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -963,6 +986,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -1049,6 +1073,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -1076,6 +1101,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//
@@ -1154,7 +1180,7 @@ mod tests {
 		// Test with custom user numeric identifiers of varying sizes
 		//
 		{
-			let ids = vec!["1", "2", "100", "10000000"];
+			let ids = ["1", "2", "100", "10000000"];
 			for id in ids.iter() {
 				let resource_id = format!("user:{id}");
 				// Prepare the claims object
@@ -1181,7 +1207,7 @@ mod tests {
 		// Test with custom user string identifiers of varying lengths
 		//
 		{
-			let ids = vec!["username", "username1", "username10", "username100"];
+			let ids = ["username", "username1", "username10", "username100"];
 			for id in ids.iter() {
 				let resource_id = format!("user:{id}");
 				// Prepare the claims object
@@ -1208,7 +1234,7 @@ mod tests {
 		// Test with custom user string identifiers of varying lengths with special characters
 		//
 		{
-			let ids = vec!["user.name", "user.name1", "user.name10", "user.name100"];
+			let ids = ["user.name", "user.name1", "user.name10", "user.name100"];
 			for id in ids.iter() {
 				// Enclose special characters in "⟨brackets⟩"
 				let resource_id = format!("user:⟨{id}⟩");
@@ -1333,6 +1359,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 			let tk = match sess.tk {
 				Some(Value::Object(tk)) => tk,
 				_ => panic!("Session token is not an object"),
@@ -1340,7 +1367,7 @@ mod tests {
 			let string_claim = tk.get("string_claim").unwrap();
 			assert_eq!(*string_claim, Value::Strand("test".into()));
 			let bool_claim = tk.get("bool_claim").unwrap();
-			assert_eq!(*bool_claim, Value::Bool(true.into()));
+			assert_eq!(*bool_claim, Value::Bool(true));
 			let int_claim = tk.get("int_claim").unwrap();
 			assert_eq!(*int_claim, Value::Number(123456.into()));
 			let float_claim = tk.get("float_claim").unwrap();
@@ -1362,7 +1389,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-		use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
 		use rand::{distributions::Alphanumeric, Rng};
 		use wiremock::matchers::{method, path};
@@ -1475,6 +1502,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
 		}
 
 		//

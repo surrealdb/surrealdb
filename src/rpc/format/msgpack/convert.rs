@@ -114,6 +114,7 @@ impl TryFrom<Value> for Pack {
 				Number::Decimal(v) => {
 					Ok(Pack(Data::Ext(TAG_DECIMAL, v.to_string().as_bytes().to_vec())))
 				}
+				_ => unreachable!(),
 			},
 			Value::Strand(v) => Ok(Pack(Data::String(v.0.into()))),
 			Value::Duration(v) => Ok(Pack(Data::Ext(TAG_DURATION, v.to_raw().as_bytes().to_vec()))),
@@ -139,7 +140,7 @@ impl TryFrom<Value> for Pack {
 			Value::Bytes(v) => Ok(Pack(Data::Binary(v.into_inner()))),
 			Value::Thing(v) => Ok(Pack(Data::Ext(TAG_RECORDID, v.to_raw().as_bytes().to_vec()))),
 			// We shouldn't reach here
-			_ => unreachable!(),
+			_ => Err("Found unsupported SurrealQL value being encoded into a msgpack value"),
 		}
 	}
 }

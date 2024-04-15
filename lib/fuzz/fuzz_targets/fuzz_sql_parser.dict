@@ -393,6 +393,7 @@
 "type::string("
 "type::table("
 "type::thing("
+"type::range("
 "vector::add("
 "vector::angle("
 "vector::cross("

@@ -127,10 +127,10 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_table(&ctx, opt, txn, stm, v).await;
+							return self.process_table(&ctx, opt, txn, stm, v.as_ref()).await;
 						}
 					}
-					self.process_table(ctx, opt, txn, stm, v).await?
+					self.process_table(ctx, opt, txn, stm, v.as_ref()).await?
 				}
 				Iterable::Range(v) => self.process_range(ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(ctx, opt, txn, stm, e).await?,
@@ -141,10 +141,10 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_index(&ctx, opt, txn, stm, t, ir).await;
+							return self.process_index(&ctx, opt, txn, stm, t.as_ref(), ir).await;
 						}
 					}
-					self.process_index(ctx, opt, txn, stm, t, ir).await?
+					self.process_index(ctx, opt, txn, stm, t.as_ref(), ir).await?
 				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(ctx, opt, txn, stm, v, o).await?
@@ -302,13 +302,13 @@ impl<'a> Processor<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		v: Table,
+		v: &Table,
 	) -> Result<(), Error> {
 		// Check that the table exists
-		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
+		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), v, opt.strict).await?;
 		// Prepare the start and end keys
-		let beg = thing::prefix(opt.ns(), opt.db(), &v);
-		let end = thing::suffix(opt.ns(), opt.db(), &v);
+		let beg = thing::prefix(opt.ns(), opt.db(), v);
+		let end = thing::suffix(opt.ns(), opt.db(), v);
 		// Loop until no more keys
 		let mut next_page = Some(ScanPage::from(beg..end));
 		while let Some(page) = next_page {
@@ -556,7 +556,7 @@ impl<'a> Processor<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		table: Table,
+		table: &Table,
 		ir: IteratorRef,
 	) -> Result<(), Error> {
 		// Check that the table exists
@@ -605,6 +605,10 @@ impl<'a> Processor<'a> {
 				}
 				// Everything ok
 				return Ok(());
+			} else {
+				return Err(Error::QueryNotExecutedDetail {
+					message: "No Iterator has been found.".to_string(),
+				});
 			}
 		}
 		Err(Error::QueryNotExecutedDetail {

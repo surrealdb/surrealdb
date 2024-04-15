@@ -1,4 +1,13 @@
 use crate::{dbs::Capabilities, iam::Level};
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
@@ -17,6 +26,15 @@ pub struct Config {
 	pub(crate) password: String,
 	pub(crate) tick_interval: Option<Duration>,
 	pub(crate) capabilities: Capabilities,
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	pub(crate) temporary_directory: Option<PathBuf>,
 }
 
 impl Config {
@@ -72,8 +90,8 @@ impl Config {
 	/// Set the default user
 	pub fn user(mut self, user: crate::opt::auth::Root<'_>) -> Self {
 		self.auth = Level::Root;
-		self.username = user.username.to_owned();
-		self.password = user.password.to_owned();
+		user.username.clone_into(&mut self.username);
+		user.password.clone_into(&mut self.password);
 		self
 	}
 
@@ -102,6 +120,18 @@ impl Config {
 	/// Set the capabilities for the database
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
 		self.capabilities = capabilities;
+		self
+	}
+	#[cfg(any(
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
+		self.temporary_directory = path;
 		self
 	}
 }

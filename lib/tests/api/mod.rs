@@ -1,6 +1,8 @@
 // Tests common to all protocols and storage engines
 
-use surrealdb_core::fflags::FFLAGS;
+use surrealdb::fflags::FFLAGS;
+use surrealdb::sql::value;
+use surrealdb::Response;
 
 static PERMITS: Semaphore = Semaphore::const_new(1);
 
@@ -401,12 +403,12 @@ async fn query_chaining() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let response = db
-		.query(BeginStatement)
+		.query(BeginStatement::default())
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
 		.query("UPDATE account:one SET balance += 300.00")
 		.query("UPDATE account:two SET balance -= 300.00")
-		.query(CommitStatement)
+		.query(CommitStatement::default())
 		.await
 		.unwrap();
 	response.check().unwrap();
@@ -487,6 +489,44 @@ async fn create_record_with_id_with_content() {
 }
 
 #[test_log::test(tokio::test)]
+async fn insert_table() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let table = "user";
+	let _: Vec<RecordId> = db.insert(table).await.unwrap();
+	let _: Vec<RecordId> = db.insert(table).content(json!({ "foo": "bar" })).await.unwrap();
+	let _: Vec<RecordId> = db.insert(table).content(json!([{ "foo": "bar" }])).await.unwrap();
+	let _: Value = db.insert(Resource::from(table)).await.unwrap();
+	let _: Value = db.insert(Resource::from(table)).content(json!({ "foo": "bar" })).await.unwrap();
+	let _: Value =
+		db.insert(Resource::from(table)).content(json!([{ "foo": "bar" }])).await.unwrap();
+	let users: Vec<RecordId> = db.insert(table).await.unwrap();
+	assert!(!users.is_empty());
+}
+
+#[test_log::test(tokio::test)]
+async fn insert_thing() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let table = "user";
+	let _: Option<RecordId> = db.insert((table, "user1")).await.unwrap();
+	let _: Option<RecordId> =
+		db.insert((table, "user1")).content(json!({ "foo": "bar" })).await.unwrap();
+	let _: Value = db.insert(Resource::from((table, "user2"))).await.unwrap();
+	let _: Value =
+		db.insert(Resource::from((table, "user2"))).content(json!({ "foo": "bar" })).await.unwrap();
+	let user: Option<RecordId> = db.insert((table, "user3")).await.unwrap();
+	assert_eq!(
+		user,
+		Some(RecordId {
+			id: thing("user:user3").unwrap(),
+		})
+	);
+}
+
+#[test_log::test(tokio::test)]
 async fn select_table() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -548,6 +588,160 @@ async fn select_record_ranges() {
 	let users: Vec<RecordId> =
 		db.select(table).range((Bound::Excluded("jane"), Bound::Included("john"))).await.unwrap();
 	assert_eq!(convert(users), vec!["john"]);
+}
+
+#[test_log::test(tokio::test)]
+async fn select_records_order_by_start_limit() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sql = "
+        CREATE user:john SET name = 'John';
+        CREATE user:zoey SET name = 'Zoey';
+    	CREATE user:amos SET name = 'Amos';
+        CREATE user:jane SET name = 'Jane';
+    ";
+	db.query(sql).await.unwrap().check().unwrap();
+
+	let check_start_limit = |mut response: Response, expected: Vec<&str>| {
+		let users: Vec<RecordName> = response.take(0).unwrap();
+		let users: Vec<String> = users.into_iter().map(|user| user.name).collect();
+		assert_eq!(users, expected);
+	};
+
+	let response =
+		db.query("SELECT name FROM user ORDER BY name DESC START 1 LIMIT 2").await.unwrap();
+	check_start_limit(response, vec!["John", "Jane"]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC START 1").await.unwrap();
+	check_start_limit(response, vec!["John", "Jane", "Amos"]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC START 4").await.unwrap();
+	check_start_limit(response, vec![]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC LIMIT 2").await.unwrap();
+	check_start_limit(response, vec!["Zoey", "John"]);
+
+	let response = db.query("SELECT name FROM user ORDER BY name DESC LIMIT 10").await.unwrap();
+	check_start_limit(response, vec!["Zoey", "John", "Jane", "Amos"]);
+}
+
+#[test_log::test(tokio::test)]
+async fn select_records_order_by() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sql = "
+        CREATE user:john SET name = 'John';
+        CREATE user:zoey SET name = 'Zoey';
+    	CREATE user:amos SET name = 'Amos';
+        CREATE user:jane SET name = 'Jane';
+    ";
+	db.query(sql).await.unwrap().check().unwrap();
+	let sql = "SELECT name FROM user ORDER BY name DESC";
+	let mut response = db.query(sql).await.unwrap();
+	let users: Vec<RecordName> = response.take(0).unwrap();
+	let convert = |users: Vec<RecordName>| -> Vec<String> {
+		users.into_iter().map(|user| user.name).collect()
+	};
+	assert_eq!(convert(users), vec!["Zoey", "John", "Jane", "Amos"]);
+}
+
+#[test_log::test(tokio::test)]
+async fn select_records_fetch() {
+	let (permit, db) = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+	let sql = "
+        CREATE tag:rs SET name = 'Rust';
+		CREATE tag:go SET name = 'Golang';
+		CREATE tag:js SET name = 'JavaScript';
+		CREATE person:tobie SET tags = [tag:rs, tag:go, tag:js];
+		CREATE person:jaime SET tags = [tag:js];
+    ";
+	db.query(sql).await.unwrap().check().unwrap();
+
+	let check_fetch = |mut response: Response, expected: &str| {
+		let val: Value = response.take(0).unwrap();
+		let exp = value(expected).unwrap();
+		assert_eq!(format!("{val:#}"), format!("{exp:#}"));
+	};
+
+	let sql = "SELECT * FROM person LIMIT 1 FETCH tags;";
+	let response = db.query(sql).await.unwrap();
+	check_fetch(
+		response,
+		"[
+					{
+						id: person:jaime,
+						tags: [
+							{
+								id: tag:js,
+								name: 'JavaScript'
+							}
+						]
+					}
+				]",
+	);
+
+	let sql = "SELECT * FROM person START 1 LIMIT 1 FETCH tags;";
+	let response = db.query(sql).await.unwrap();
+	check_fetch(
+		response,
+		"[
+					{
+						id: person:tobie,
+						tags: [
+							{
+								id: tag:rs,
+								name: 'Rust'
+							},
+							{
+								id: tag:go,
+								name: 'Golang'
+							},
+							{
+								id: tag:js,
+								name: 'JavaScript'
+							}
+						]
+					}
+				]",
+	);
+
+	let sql = "SELECT * FROM person ORDER BY id FETCH tags;";
+	let response = db.query(sql).await.unwrap();
+	check_fetch(
+		response,
+		"[
+					{
+						id: person:jaime,
+						tags: [
+							{
+								id: tag:js,
+								name: 'JavaScript'
+							}
+						]
+					},
+					{
+						id: person:tobie,
+						tags: [
+							{
+								id: tag:rs,
+								name: 'Rust'
+							},
+							{
+								id: tag:go,
+								name: 'Golang'
+							},
+							{
+								id: tag:js,
+								name: 'JavaScript'
+							}
+						]
+					}
+				]",
+	);
 }
 
 #[test_log::test(tokio::test)]
@@ -925,7 +1119,7 @@ async fn changefeed() {
 	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
-	let a = array.get(0).unwrap();
+	let a = array.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};

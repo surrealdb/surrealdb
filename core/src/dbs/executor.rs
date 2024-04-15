@@ -1,5 +1,18 @@
+use std::sync::Arc;
+
+use channel::Receiver;
+use futures::lock::Mutex;
+use futures::StreamExt;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
+use tracing::instrument;
+use trice::Instant;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
 use crate::ctx::Context;
 use crate::dbs::response::Response;
+use crate::dbs::Force;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
@@ -7,6 +20,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::kvs::lq_structs::TrackedResult;
 use crate::kvs::TransactionType;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::paths::DB;
@@ -15,16 +29,6 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Base;
-use channel::Receiver;
-use futures::lock::Mutex;
-use futures::StreamExt;
-use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::spawn;
-use tracing::instrument;
-use trice::Instant;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_futures::spawn_local as spawn;
 
 pub(crate) struct Executor<'a> {
 	err: bool,
@@ -83,7 +87,19 @@ impl<'a> Executor<'a> {
 					let _ = txn.cancel().await;
 				} else {
 					let r = match txn.complete_changes(false).await {
-						Ok(_) => txn.commit().await,
+						Ok(_) => {
+							match txn.commit().await {
+								Ok(()) => {
+									// Commit succeeded, do post commit operations that do not matter to the tx
+									let lqs: Vec<TrackedResult> =
+										txn.consume_pending_live_queries();
+									// Track the live queries in the data store
+									self.kvs.adapt_tracked_live_queries(&lqs).await?;
+									Ok(())
+								}
+								Err(e) => Err(e),
+							}
+						}
 						r => r,
 					};
 					if let Err(e) = r {
@@ -151,6 +167,7 @@ impl<'a> Executor<'a> {
 
 	/// Flush notifications from a buffer channel (live queries) to the committed notification channel.
 	/// This is because we don't want to broadcast notifications to the user for failed transactions.
+	/// TODO we can delete this once we migrate to lq v2
 	async fn flush(&self, ctx: &Context<'_>, mut rcv: Receiver<Notification>) {
 		let sender = ctx.notifications();
 		spawn(async move {
@@ -162,6 +179,17 @@ impl<'a> Executor<'a> {
 				}
 			}
 		});
+	}
+
+	/// A transaction collects created live queries which can then be consumed when a transaction is committed
+	/// We use this function to get these transactions and send them to the invoker without channels
+	async fn consume_committed_live_query_registrations(&self) -> Option<Vec<TrackedResult>> {
+		if let Some(txn) = self.txn.as_ref() {
+			let txn = txn.lock().await;
+			Some(txn.consume_pending_live_queries())
+		} else {
+			None
+		}
 	}
 
 	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
@@ -184,7 +212,7 @@ impl<'a> Executor<'a> {
 		mut ctx: Context<'_>,
 		opt: Options,
 		qry: Query,
-	) -> Result<Vec<Response>, Error> {
+	) -> Result<(Vec<Response>, Vec<TrackedResult>), Error> {
 		// Create a notification channel
 		let (send, recv) = channel::unbounded();
 		// Set the notification channel
@@ -193,6 +221,7 @@ impl<'a> Executor<'a> {
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
+		let mut live_queries: Vec<TrackedResult> = vec![];
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
@@ -219,11 +248,12 @@ impl<'a> Executor<'a> {
 					stm.name.0.make_ascii_uppercase();
 					// Process the option
 					opt = match stm.name.0.as_str() {
-						"FIELDS" => opt.with_fields(stm.what),
-						"EVENTS" => opt.with_events(stm.what),
-						"TABLES" => opt.with_tables(stm.what),
 						"IMPORT" => opt.with_import(stm.what),
-						"FORCE" => opt.with_force(stm.what),
+						"FORCE" => opt.with_force(if stm.what {
+							Force::All
+						} else {
+							Force::None
+						}),
 						_ => break,
 					};
 					// Continue
@@ -249,6 +279,9 @@ impl<'a> Executor<'a> {
 					let commit_error = self.commit(true).await.err();
 					buf = buf.into_iter().map(|v| self.buf_commit(v, &commit_error)).collect();
 					self.flush(&ctx, recv.clone()).await;
+					if let Some(lqs) = self.consume_committed_live_query_registrations().await {
+						live_queries.extend(lqs);
+					}
 					out.append(&mut buf);
 					debug_assert!(self.txn.is_none(), "commit(true) should have unset txn");
 					self.txn = None;
@@ -294,6 +327,12 @@ impl<'a> Executor<'a> {
 											Ok(_) => {
 												// Flush live query notifications
 												self.flush(&ctx, recv.clone()).await;
+												if let Some(lqs) = self
+													.consume_committed_live_query_registrations()
+													.await
+												{
+													live_queries.extend(lqs);
+												}
 												Ok(Value::None)
 											}
 										}
@@ -366,7 +405,11 @@ impl<'a> Executor<'a> {
 									} else {
 										// Flush the live query change notifications
 										self.flush(&ctx, recv.clone()).await;
-										// Successful, committed result
+										if let Some(lqs) =
+											self.consume_committed_live_query_registrations().await
+										{
+											live_queries.extend(lqs);
+										}
 										res
 									}
 								} else {
@@ -392,8 +435,18 @@ impl<'a> Executor<'a> {
 					e
 				}),
 				query_type: match (is_stm_live, is_stm_kill) {
-					(true, _) => QueryType::Live,
-					(_, true) => QueryType::Kill,
+					(true, _) => {
+						if let Some(lqs) = self.consume_committed_live_query_registrations().await {
+							live_queries.extend(lqs);
+						}
+						QueryType::Live
+					}
+					(_, true) => {
+						if let Some(lqs) = self.consume_committed_live_query_registrations().await {
+							live_queries.extend(lqs);
+						}
+						QueryType::Kill
+					}
 					_ => QueryType::Other,
 				},
 			};
@@ -408,7 +461,7 @@ impl<'a> Executor<'a> {
 			}
 		}
 		// Return responses
-		Ok(out)
+		Ok((out, live_queries))
 	}
 }
 
@@ -419,28 +472,28 @@ mod tests {
 	#[tokio::test]
 	async fn check_execute_option_permissions() {
 		let tests = vec![
-			// Root level
-			(Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at root level should be able to set options"),
-			(Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at root level should be able to set options"),
-			(Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at root level should not be able to set options"),
+            // Root level
+            (Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at root level should be able to set options"),
+            (Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at root level should be able to set options"),
+            (Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at root level should not be able to set options"),
 
-			// Namespace level
-			(Session::for_level(("NS",).into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at namespace level should be able to set options on its namespace"),
-			(Session::for_level(("NS",).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at namespace level should not be able to set options on another namespace"),
-			(Session::for_level(("NS",).into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at namespace level should be able to set options on its namespace"),
-			(Session::for_level(("NS",).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at namespace level should not be able to set options on another namespace"),
-			(Session::for_level(("NS",).into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at namespace level should not be able to set options on its namespace"),
+            // Namespace level
+            (Session::for_level(("NS", ).into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at namespace level should be able to set options on its namespace"),
+            (Session::for_level(("NS", ).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at namespace level should not be able to set options on another namespace"),
+            (Session::for_level(("NS", ).into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at namespace level should be able to set options on its namespace"),
+            (Session::for_level(("NS", ).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at namespace level should not be able to set options on another namespace"),
+            (Session::for_level(("NS", ).into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at namespace level should not be able to set options on its namespace"),
 
-			// Database level
-			(Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at database level should be able to set options on its database"),
-			(Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("OTHER_DB"), false, "owner at database level should not be able to set options on another database"),
-			(Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at database level should not be able to set options on another namespace even if the database name matches"),
-			(Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at database level should be able to set options on its database"),
-			(Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("OTHER_DB"), false, "editor at database level should not be able to set options on another database"),
-			(Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at database level should not be able to set options on another namespace even if the database name matches"),
-			(Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at database level should not be able to set options on its database"),
-		];
-		let statement = "OPTION FIELDS = false";
+            // Database level
+            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at database level should be able to set options on its database"),
+            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("OTHER_DB"), false, "owner at database level should not be able to set options on another database"),
+            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at database level should not be able to set options on another namespace even if the database name matches"),
+            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at database level should be able to set options on its database"),
+            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("OTHER_DB"), false, "editor at database level should not be able to set options on another database"),
+            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at database level should not be able to set options on another namespace even if the database name matches"),
+            (Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at database level should not be able to set options on its database"),
+        ];
+		let statement = "OPTION IMPORT = false";
 
 		for test in tests.iter() {
 			let (session, should_succeed, msg) = test;

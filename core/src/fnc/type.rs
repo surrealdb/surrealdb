@@ -1,3 +1,5 @@
+use std::ops::Bound;
+
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
@@ -5,6 +7,7 @@ use crate::err::Error;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::{Id, Range, Strand};
 use crate::syn;
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
@@ -126,6 +129,93 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 		}?
 		.into()
 	})
+}
+
+pub fn range(args: Vec<Value>) -> Result<Value, Error> {
+	if args.len() > 4 || args.is_empty() {
+		return Err(Error::InvalidArguments {
+			name: "type::range".to_owned(),
+			message: "Expected atleast 1 and at most 4 arguments".to_owned(),
+		});
+	}
+	let mut args = args.into_iter();
+
+	// Unwrap will never trigger since length is checked above.
+	let id = args.next().unwrap().as_string();
+	let start = args.next().and_then(|x| match x {
+		Value::Thing(v) => Some(v.id),
+		Value::Array(v) => Some(v.into()),
+		Value::Object(v) => Some(v.into()),
+		Value::Number(v) => Some(v.into()),
+		Value::Null | Value::None => None,
+		v => Some(Id::from(v.as_string())),
+	});
+	let end = args.next().and_then(|x| match x {
+		Value::Thing(v) => Some(v.id),
+		Value::Array(v) => Some(v.into()),
+		Value::Object(v) => Some(v.into()),
+		Value::Number(v) => Some(v.into()),
+		Value::Null | Value::None => None,
+		v => Some(Id::from(v.as_string())),
+	});
+	let (begin, end) = if let Some(x) = args.next() {
+		let Value::Object(x) = x else {
+			return Err(Error::ConvertTo {
+				from: x,
+				into: "object".to_owned(),
+			});
+		};
+		let begin = if let Some(x) = x.get("begin") {
+			let start = start.ok_or_else(|| Error::InvalidArguments {
+				name: "type::range".to_string(),
+				message: "Can't define an inclusion for begin if there is no begin bound"
+					.to_string(),
+			})?;
+			match x {
+				Value::Strand(Strand(x)) if x == "included" => Bound::Included(start),
+				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(start),
+				x => {
+					return Err(Error::ConvertTo {
+						from: x.clone(),
+						into: r#""included" | "excluded""#.to_owned(),
+					})
+				}
+			}
+		} else {
+			start.map(Bound::Included).unwrap_or(Bound::Unbounded)
+		};
+		let end = if let Some(x) = x.get("end") {
+			let end = end.ok_or_else(|| Error::InvalidArguments {
+				name: "type::range".to_string(),
+				message: "Can't define an inclusion for end if there is no end bound".to_string(),
+			})?;
+			match x {
+				Value::Strand(Strand(x)) if x == "included" => Bound::Included(end),
+				Value::Strand(Strand(x)) if x == "excluded" => Bound::Excluded(end),
+				x => {
+					return Err(Error::ConvertTo {
+						from: x.clone(),
+						into: r#""included" | "excluded""#.to_owned(),
+					})
+				}
+			}
+		} else {
+			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded)
+		};
+		(begin, end)
+	} else {
+		(
+			start.map(Bound::Included).unwrap_or(Bound::Unbounded),
+			end.map(Bound::Excluded).unwrap_or(Bound::Unbounded),
+		)
+	};
+
+	Ok(Range {
+		tb: id,
+		beg: begin,
+		end,
+	}
+	.into())
 }
 
 pub mod is {

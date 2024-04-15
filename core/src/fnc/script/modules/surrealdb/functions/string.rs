@@ -6,6 +6,7 @@ mod is;
 mod semver;
 mod similarity;
 
+#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(

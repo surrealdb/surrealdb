@@ -1,10 +1,11 @@
 use rand::{thread_rng, Rng};
 use std::error::Error;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 use tokio::time;
+use tokio_stream::StreamExt;
 use tracing::{debug, error, info};
 
 pub const USER: &str = "root";
@@ -33,8 +34,13 @@ impl Child {
 		self
 	}
 
-	pub fn finish(mut self) {
-		self.inner.take().unwrap().kill().unwrap();
+	pub fn finish(&mut self) -> Result<&mut Self, String> {
+		let a = self
+			.inner
+			.as_mut()
+			.map(|child| child.kill().map_err(|e| format!("failed to kill: {}", e)))
+			.unwrap_or(Err("no inner".to_string()));
+		a.map(|_ok| self)
 	}
 
 	pub fn send_signal(&self, signal: nix::sys::signal::Signal) -> nix::Result<()> {
@@ -58,8 +64,8 @@ impl Child {
 
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
-	pub fn output(mut self) -> Result<String, String> {
-		let status = self.inner.take().unwrap().wait().unwrap();
+	pub fn output(&mut self) -> Result<String, String> {
+		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
 
 		let mut buf = self.stdout();
 		buf.push_str(&self.stderr());
@@ -140,22 +146,26 @@ pub fn tmp_file(name: &str) -> String {
 }
 
 pub struct StartServerArguments {
+	pub path: Option<String>,
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
 	pub enable_auth_level: bool,
 	pub tick_interval: time::Duration,
+	pub temporary_directory: Option<String>,
 	pub args: String,
 }
 
 impl Default for StartServerArguments {
 	fn default() -> Self {
 		Self {
+			path: None,
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
 			enable_auth_level: false,
 			tick_interval: time::Duration::new(1, 0),
+			temporary_directory: None,
 			args: "--allow-all".to_string(),
 		}
 	}
@@ -183,15 +193,19 @@ pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Err
 
 pub async fn start_server(
 	StartServerArguments {
+		path,
 		auth,
 		tls,
 		wait_is_ready,
 		enable_auth_level,
 		tick_interval,
+		temporary_directory,
 		args,
 	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
 	let mut rng = thread_rng();
+
+	let path = path.unwrap_or("memory".to_string());
 
 	let mut extra_args = args.clone();
 	if tls {
@@ -219,11 +233,15 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --tick-interval {sec}s").as_str());
 	}
 
+	if let Some(path) = temporary_directory {
+		extra_args.push_str(format!(" --temporary-directory {path}").as_str());
+	}
+
 	'retry: for _ in 0..3 {
 		let port: u16 = rng.gen_range(13000..24000);
 		let addr = format!("127.0.0.1:{port}");
 
-		let start_args = format!("start --bind {addr} memory --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+		let start_args = format!("start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
 		info!("starting server with args: {start_args}");
 

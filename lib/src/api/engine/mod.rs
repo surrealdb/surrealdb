@@ -13,15 +13,16 @@ pub mod any;
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
+#[doc(hidden)]
+pub mod tasks;
 
 use crate::sql::statements::CreateStatement;
 use crate::sql::statements::DeleteStatement;
+use crate::sql::statements::InsertStatement;
 use crate::sql::statements::SelectStatement;
 use crate::sql::statements::UpdateStatement;
-use crate::sql::Array;
 use crate::sql::Data;
 use crate::sql::Field;
-use crate::sql::Fields;
 use crate::sql::Output;
 use crate::sql::Value;
 use crate::sql::Values;
@@ -48,8 +49,16 @@ fn split_params(params: &mut [Value]) -> (bool, Values, Value) {
 	};
 	let one = what.is_thing();
 	let what = match what {
-		Value::Array(Array(vec)) => Values(vec),
-		value => Values(vec![value]),
+		Value::Array(vec) => {
+			let mut values = Values::default();
+			values.0 = vec.0;
+			values
+		}
+		value => {
+			let mut values = Values::default();
+			values.0 = vec![value];
+			values
+		}
 	};
 	(one, what, data)
 }
@@ -61,12 +70,11 @@ fn create_statement(params: &mut [Value]) -> CreateStatement {
 		Value::None | Value::Null => None,
 		value => Some(Data::ContentExpression(value)),
 	};
-	CreateStatement {
-		what,
-		data,
-		output: Some(Output::After),
-		..Default::default()
-	}
+	let mut stmt = CreateStatement::default();
+	stmt.what = what;
+	stmt.data = data;
+	stmt.output = Some(Output::After);
+	stmt
 }
 
 #[allow(dead_code)] // used by the the embedded database and `http`
@@ -76,15 +84,25 @@ fn update_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 		Value::None | Value::Null => None,
 		value => Some(Data::ContentExpression(value)),
 	};
-	(
-		one,
-		UpdateStatement {
-			what,
-			data,
-			output: Some(Output::After),
-			..Default::default()
-		},
-	)
+	let mut stmt = UpdateStatement::default();
+	stmt.what = what;
+	stmt.data = data;
+	stmt.output = Some(Output::After);
+	(one, stmt)
+}
+
+#[allow(dead_code)] // used by the the embedded database and `http`
+fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
+	let (what, data) = match params {
+		[what, data] => (mem::take(what), mem::take(data)),
+		_ => unreachable!(),
+	};
+	let one = !data.is_array();
+	let mut stmt = InsertStatement::default();
+	stmt.into = what;
+	stmt.data = Data::SingleExpression(data);
+	stmt.output = Some(Output::After);
+	(one, stmt)
 }
 
 #[allow(dead_code)] // used by the the embedded database and `http`
@@ -94,15 +112,11 @@ fn patch_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 		Value::None | Value::Null => None,
 		value => Some(Data::PatchExpression(value)),
 	};
-	(
-		one,
-		UpdateStatement {
-			what,
-			data,
-			output: Some(Output::After),
-			..Default::default()
-		},
-	)
+	let mut stmt = UpdateStatement::default();
+	stmt.what = what;
+	stmt.data = data;
+	stmt.output = Some(Output::After);
+	(one, stmt)
 }
 
 #[allow(dead_code)] // used by the the embedded database and `http`
@@ -112,41 +126,29 @@ fn merge_statement(params: &mut [Value]) -> (bool, UpdateStatement) {
 		Value::None | Value::Null => None,
 		value => Some(Data::MergeExpression(value)),
 	};
-	(
-		one,
-		UpdateStatement {
-			what,
-			data,
-			output: Some(Output::After),
-			..Default::default()
-		},
-	)
+	let mut stmt = UpdateStatement::default();
+	stmt.what = what;
+	stmt.data = data;
+	stmt.output = Some(Output::After);
+	(one, stmt)
 }
 
 #[allow(dead_code)] // used by the the embedded database and `http`
 fn select_statement(params: &mut [Value]) -> (bool, SelectStatement) {
 	let (one, what, _) = split_params(params);
-	(
-		one,
-		SelectStatement {
-			what,
-			expr: Fields(vec![Field::All], false),
-			..Default::default()
-		},
-	)
+	let mut stmt = SelectStatement::default();
+	stmt.what = what;
+	stmt.expr.0 = vec![Field::All];
+	(one, stmt)
 }
 
 #[allow(dead_code)] // used by the the embedded database and `http`
 fn delete_statement(params: &mut [Value]) -> (bool, DeleteStatement) {
 	let (one, what, _) = split_params(params);
-	(
-		one,
-		DeleteStatement {
-			what,
-			output: Some(Output::Before),
-			..Default::default()
-		},
-	)
+	let mut stmt = DeleteStatement::default();
+	stmt.what = what;
+	stmt.output = Some(Output::Before);
+	(one, stmt)
 }
 
 struct IntervalStream {

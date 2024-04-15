@@ -15,8 +15,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check fields
-		if !opt.fields {
+		// Check import
+		if opt.import {
 			return Ok(());
 		}
 		// Get the record id
@@ -32,7 +32,6 @@ impl<'a> Document<'a> {
 				// Get the input value
 				let inp = inp.pick(&k);
 				// Check for READONLY clause
-				#[cfg(feature = "sql2")]
 				if fd.readonly && !self.is_new() && val != old {
 					return Err(Error::FieldReadonly {
 						field: fd.name.clone(),
@@ -80,11 +79,7 @@ impl<'a> Document<'a> {
 				// Check for a VALUE clause
 				if let Some(expr) = &fd.value {
 					// Only run value clause for mutable and new fields
-					#[cfg(feature = "sql2")]
-					let readonly = fd.readonly;
-					#[cfg(not(feature = "sql2"))]
-					let readonly = false;
-					if !readonly || self.is_new() {
+					if !fd.readonly || self.is_new() {
 						// Configure the context
 						let mut ctx = Context::new(ctx);
 						ctx.add_value("input", &inp);

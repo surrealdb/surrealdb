@@ -3,7 +3,9 @@ use crate::cnf;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
-use crate::sql::Base;
+use crate::sql::{
+	statements::define::DefineIndexStatement, statements::define::DefineTableStatement, Base,
+};
 use channel::Sender;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -15,6 +17,7 @@ use uuid::Uuid;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Options {
 	/// Current Node ID
 	id: Option<Uuid>,
@@ -31,19 +34,13 @@ pub struct Options {
 	/// Whether live queries are allowed?
 	pub live: bool,
 	/// Should we force tables/events to re-run?
-	pub force: bool,
+	pub force: Force,
 	/// Should we run permissions checks?
 	pub perms: bool,
 	/// Should we error if tables don't exist?
 	pub strict: bool,
 	/// Should we process field queries?
-	pub fields: bool,
-	/// Should we process event queries?
-	pub events: bool,
-	/// Should we process table queries?
-	pub tables: bool,
-	/// Should we process index queries?
-	pub indexes: bool,
+	pub import: bool,
 	/// Should we process function futures?
 	pub futures: bool,
 	/// Should we process variable field projections?
@@ -52,6 +49,25 @@ pub struct Options {
 	pub sender: Option<Sender<Notification>>,
 	/// Datastore capabilities
 	pub capabilities: Arc<Capabilities>,
+}
+
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum Force {
+	All,
+	None,
+	Table(Arc<[DefineTableStatement]>),
+	Index(Arc<[DefineIndexStatement]>),
+}
+
+impl Force {
+	pub fn is_none(&self) -> bool {
+		matches!(self, Force::None)
+	}
+
+	pub fn is_forced(&self) -> bool {
+		!matches!(self, Force::None)
+	}
 }
 
 impl Default for Options {
@@ -70,12 +86,9 @@ impl Options {
 			dive: 0,
 			live: false,
 			perms: true,
-			force: false,
+			force: Force::None,
 			strict: false,
-			fields: true,
-			events: true,
-			tables: true,
-			indexes: true,
+			import: false,
 			futures: false,
 			projections: false,
 			auth_enabled: true,
@@ -160,59 +173,33 @@ impl Options {
 		self
 	}
 
-	///
-	pub fn with_force(mut self, force: bool) -> Self {
+	/// Specify wether tables/events should re-run
+	pub fn with_force(mut self, force: Force) -> Self {
 		self.force = force;
 		self
 	}
 
-	///
+	/// Sepecify if we should error when a table does not exist
 	pub fn with_strict(mut self, strict: bool) -> Self {
 		self.strict = strict;
 		self
 	}
 
-	///
-	pub fn with_fields(mut self, fields: bool) -> Self {
-		self.fields = fields;
+	/// Specify if we are currently importing data
+	pub fn with_import(mut self, import: bool) -> Self {
+		self.import = import;
 		self
 	}
 
-	///
-	pub fn with_events(mut self, events: bool) -> Self {
-		self.events = events;
-		self
-	}
-
-	///
-	pub fn with_tables(mut self, tables: bool) -> Self {
-		self.tables = tables;
-		self
-	}
-
-	///
-	pub fn with_indexes(mut self, indexes: bool) -> Self {
-		self.indexes = indexes;
-		self
-	}
-
-	///
+	/// Specify if we should process futures
 	pub fn with_futures(mut self, futures: bool) -> Self {
 		self.futures = futures;
 		self
 	}
 
-	///
+	/// Specify if we should process field projections
 	pub fn with_projections(mut self, projections: bool) -> Self {
 		self.projections = projections;
-		self
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn with_import(mut self, import: bool) -> Self {
-		self.fields = !import;
-		self.events = !import;
-		self.tables = !import;
 		self
 	}
 
@@ -238,13 +225,14 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			force: self.force.clone(),
 			perms,
 			..*self
 		}
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_force(&self, force: bool) -> Self {
+	pub fn new_with_force(&self, force: Force) -> Self {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
@@ -264,59 +252,22 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			force: self.force.clone(),
 			strict,
 			..*self
 		}
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_fields(&self, fields: bool) -> Self {
+	pub fn new_with_import(&self, import: bool) -> Self {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
-			fields,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_events(&self, events: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			events,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_tables(&self, tables: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			tables,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_indexes(&self, indexes: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			indexes,
+			force: self.force.clone(),
+			import,
 			..*self
 		}
 	}
@@ -329,6 +280,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			force: self.force.clone(),
 			futures,
 			..*self
 		}
@@ -342,22 +294,8 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			force: self.force.clone(),
 			projections,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_import(&self, import: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			fields: !import,
-			events: !import,
-			tables: !import,
 			..*self
 		}
 	}
@@ -369,6 +307,7 @@ impl Options {
 			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			force: self.force.clone(),
 			sender: Some(sender),
 			..*self
 		}
@@ -397,6 +336,7 @@ impl Options {
 				capabilities: self.capabilities.clone(),
 				ns: self.ns.clone(),
 				db: self.db.clone(),
+				force: self.force.clone(),
 				dive,
 				..*self
 			})

@@ -24,7 +24,6 @@ use crate::sql::Operator;
 use crate::sql::Part;
 use crate::sql::Statement;
 use crate::sql::Table;
-use crate::sql::Thing;
 use crate::sql::Value;
 use crate::Notification;
 use crate::Surreal;
@@ -35,7 +34,6 @@ use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::mem;
-use std::ops::Bound;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -60,24 +58,35 @@ macro_rules! into_future {
 				if !router.features.contains(&ExtraFeatures::LiveQueries) {
 					return Err(Error::LiveQueriesNotSupported.into());
 				}
-				let mut stmt = LiveStatement::new(Fields(vec![Field::All], false));
+				let mut fields = Fields::default();
+				fields.0 = vec![Field::All];
+				let mut stmt = LiveStatement::new(fields);
+				let mut table = Table::default();
 				match range {
 					Some(range) => {
 						let range = resource?.with_range(range)?;
-						stmt.what = Table(range.tb.clone()).into();
-						stmt.cond = cond_from_range(range);
+						table.0 = range.tb.clone();
+						stmt.what = table.into();
+						stmt.cond = range.to_cond();
 					}
 					None => match resource? {
 						Resource::Table(table) => {
 							stmt.what = table.into();
 						}
 						Resource::RecordId(record) => {
-							stmt.what = Table(record.tb.clone()).into();
-							stmt.cond = Some(Cond(Value::Expression(Box::new(Expression::new(
-								Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
+							table.0 = record.tb.clone();
+							stmt.what = table.into();
+							let mut ident = Ident::default();
+							ident.0 = ID.to_owned();
+							let mut idiom = Idiom::default();
+							idiom.0 = vec![Part::from(ident)];
+							let mut cond = Cond::default();
+							cond.0 = Value::Expression(Box::new(Expression::new(
+								idiom.into(),
 								Operator::Equal,
 								record.into(),
-							)))));
+							)));
+							stmt.cond = Some(cond);
 						}
 						Resource::Object(object) => return Err(Error::LiveOnObject(object).into()),
 						Resource::Array(array) => return Err(Error::LiveOnArray(array).into()),
@@ -97,6 +106,7 @@ macro_rules! into_future {
 					rx: Some(rx),
 					client: Surreal {
 						router: client.router.clone(),
+						waiter: client.waiter.clone(),
 						engine: PhantomData,
 					},
 					response_type: PhantomData,
@@ -120,100 +130,6 @@ where
 	param.other = vec![id];
 	conn.execute_unit(router, param).await?;
 	Ok(rx)
-}
-
-fn cond_from_range(range: crate::sql::Range) -> Option<Cond> {
-	match (range.beg, range.end) {
-		(Bound::Unbounded, Bound::Unbounded) => None,
-		(Bound::Unbounded, Bound::Excluded(id)) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-				Operator::LessThan,
-				Thing::from((range.tb, id)).into(),
-			)))))
-		}
-		(Bound::Unbounded, Bound::Included(id)) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-				Operator::LessThanOrEqual,
-				Thing::from((range.tb, id)).into(),
-			)))))
-		}
-		(Bound::Excluded(id), Bound::Unbounded) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-				Operator::MoreThan,
-				Thing::from((range.tb, id)).into(),
-			)))))
-		}
-		(Bound::Included(id), Bound::Unbounded) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-				Operator::MoreThanOrEqual,
-				Thing::from((range.tb, id)).into(),
-			)))))
-		}
-		(Bound::Included(lid), Bound::Included(rid)) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::MoreThanOrEqual,
-					Thing::from((range.tb.clone(), lid)).into(),
-				))),
-				Operator::And,
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::LessThanOrEqual,
-					Thing::from((range.tb, rid)).into(),
-				))),
-			)))))
-		}
-		(Bound::Included(lid), Bound::Excluded(rid)) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::MoreThanOrEqual,
-					Thing::from((range.tb.clone(), lid)).into(),
-				))),
-				Operator::And,
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::LessThan,
-					Thing::from((range.tb, rid)).into(),
-				))),
-			)))))
-		}
-		(Bound::Excluded(lid), Bound::Included(rid)) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::MoreThan,
-					Thing::from((range.tb.clone(), lid)).into(),
-				))),
-				Operator::And,
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::LessThanOrEqual,
-					Thing::from((range.tb, rid)).into(),
-				))),
-			)))))
-		}
-		(Bound::Excluded(lid), Bound::Excluded(rid)) => {
-			Some(Cond(Value::Expression(Box::new(Expression::new(
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::MoreThan,
-					Thing::from((range.tb.clone(), lid)).into(),
-				))),
-				Operator::And,
-				Value::Expression(Box::new(Expression::new(
-					Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-					Operator::LessThan,
-					Thing::from((range.tb, rid)).into(),
-				))),
-			)))))
-		}
-	}
 }
 
 impl<'r, Client> IntoFuture for Select<'r, Client, Value, Live>

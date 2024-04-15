@@ -13,6 +13,7 @@
 //! - `tikv`: [TiKV](https://github.com/tikv/tikv) a distributed, and transactional key-value database
 //! - `mem`: in-memory database
 mod cache;
+mod clock;
 mod ds;
 mod fdb;
 mod indxdb;
@@ -24,18 +25,9 @@ mod surrealkv;
 mod tikv;
 mod tx;
 
-mod clock;
 pub(crate) mod lq_structs;
+
 #[cfg(test)]
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-speedb",
-	feature = "kv-indxdb",
-	feature = "kv-tikv",
-	feature = "kv-fdb",
-	feature = "kv-surrealkv"
-))]
 mod tests;
 
 pub use self::ds::*;

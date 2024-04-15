@@ -13,6 +13,7 @@ mod delete;
 mod export;
 mod health;
 mod import;
+mod insert;
 mod invalidate;
 mod merge;
 mod patch;
@@ -45,6 +46,7 @@ pub use export::Backup;
 pub use export::Export;
 pub use health::Health;
 pub use import::Import;
+pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use live::Stream;
 pub use merge::Merge;
@@ -55,6 +57,7 @@ pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
+use tokio::sync::watch;
 pub use unset::Unset;
 pub use update::Update;
 pub use use_db::UseDb;
@@ -72,6 +75,7 @@ use crate::api::Connection;
 use crate::api::OnceLockExt;
 use crate::api::Surreal;
 use crate::opt::IntoExportDestination;
+use crate::opt::WaitFor;
 use crate::sql::to_value;
 use crate::sql::Value;
 use serde::Serialize;
@@ -111,6 +115,7 @@ impl Method {
 			Method::Health => "health",
 			Method::Import => "import",
 			Method::Invalidate => "invalidate",
+			Method::Insert => "insert",
 			Method::Kill => "kill",
 			Method::Live => "live",
 			Method::Merge => "merge",
@@ -135,9 +140,10 @@ where
 	/// Initialises a new unconnected instance of the client
 	///
 	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// ensures that a single database instance is available across very large or complicated
-	/// applications. With the singleton, only one connection to the database is instantiated,
-	/// and the database connection does not have to be shared across components or controllers.
+	/// pattern in the example below ensures that a single database instance is available
+	/// across very large or complicated applications. With the singleton, only one connection
+	/// to the database is instantiated, and the database connection does not have to be shared
+	/// across components or controllers.
 	///
 	/// # Examples
 	///
@@ -146,7 +152,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::engine::remote::ws::Ws;
@@ -157,7 +162,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -189,7 +194,6 @@ where
 	/// ```no_run
 	/// use once_cell::sync::Lazy;
 	/// use serde::{Serialize, Deserialize};
-	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
@@ -199,7 +203,7 @@ where
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
-	///     name: Cow<'static, str>,
+	///     name: String,
 	/// }
 	///
 	/// #[tokio::main]
@@ -228,6 +232,7 @@ where
 	pub fn init() -> Self {
 		Self {
 			router: Arc::new(OnceLock::new()),
+			waiter: Arc::new(watch::channel(None)),
 			engine: PhantomData,
 		}
 	}
@@ -258,6 +263,7 @@ where
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
+			waiter: Arc::new(watch::channel(None)),
 			response_type: PhantomData,
 		}
 	}
@@ -316,9 +322,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -327,8 +333,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -356,9 +362,9 @@ where
 	/// use serde::Serialize;
 	///
 	/// #[derive(Serialize)]
-	/// struct Name<'a> {
-	///     first: &'a str,
-	///     last: &'a str,
+	/// struct Name {
+	///     first: String,
+	///     last: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -367,8 +373,8 @@ where
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
-	///     first: "Tobie",
-	///     last: "Morgan Hitchcock",
+	///     first: "Tobie".into(),
+	///     last: "Morgan Hitchcock".into(),
 	/// }).await?;
 	///
 	/// // Use the variable in a subsequent query
@@ -398,9 +404,9 @@ where
 	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -431,8 +437,8 @@ where
 	///     database: "database",
 	///     scope: "user_scope",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
@@ -532,9 +538,9 @@ where
 	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
-	/// struct AuthParams<'a> {
-	///     email: &'a str,
-	///     password: &'a str,
+	/// struct AuthParams {
+	///     email: String,
+	///     password: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -550,8 +556,8 @@ where
 	///     database: "database",
 	///     scope: "user_scope",
 	///     params: AuthParams {
-	///         email: "john.doe@example.com",
-	///         password: "password123",
+	///         email: "john.doe@example.com".into(),
+	///         password: "password123".into(),
 	///     },
 	/// }).await?;
 	/// #
@@ -632,6 +638,25 @@ where
 	///
 	/// // Get all of the results from the second query
 	/// let people: Vec<Person> = result.take(1)?;
+	///
+	/// #[derive(serde::Deserialize)]
+	/// struct Country {
+	///     name: String
+	/// }
+	///
+	/// // The .take() method can be used for error handling
+	///
+	/// // If the table has no defined schema, this query will
+	/// // create a `country` on the SurrealDB side, but...
+	/// let mut result = db
+	///     .query("CREATE country")
+	///     .await?;
+	///
+	/// // It won't deserialize into a Country struct
+	/// if let Err(e) = result.take::<Option<Country>>(0) {
+	///     println!("Failed to make a country: {e:#?}");
+	///     assert!(e.to_string().contains("missing field `name`"));
+	/// }
 	/// #
 	/// # Ok(())
 	/// # }
@@ -711,8 +736,8 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///
@@ -748,6 +773,107 @@ where
 		}
 	}
 
+	/// Insert a record or records into a table
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use serde::Serialize;
+	/// use surrealdb::sql;
+	///
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
+	/// #[derive(Serialize)]
+	/// struct Settings {
+	///     active: bool,
+	///     marketing: bool,
+	/// }
+	///
+	/// #[derive(Serialize)]
+	/// struct User<'a> {
+	///     name: &'a str,
+	///     settings: Settings,
+	/// }
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
+	/// // Insert a record with a specific ID
+	/// let person: Option<Person> = db.insert(("person", "tobie"))
+	///     .content(User {
+	///         name: "Tobie",
+	///         settings: Settings {
+	///             active: true,
+	///             marketing: true,
+	///         },
+	///     })
+	///     .await?;
+	///
+	/// // Insert multiple records into the table
+	/// let people: Vec<Person> = db.insert("person")
+	///     .content(vec![
+	///         User {
+	///             name: "Tobie",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: false,
+	///             },
+	///         },
+	///         User {
+	///             name: "Jaime",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: true,
+	///             },
+	///         },
+	///     ])
+	///     .await?;
+	///
+	/// // Insert multiple records with pre-defined IDs
+	/// #[derive(Serialize)]
+	/// struct UserWithId<'a> {
+	///     id: sql::Thing,
+	///     name: &'a str,
+	///     settings: Settings,
+	/// }
+	///
+	/// let people: Vec<Person> = db.insert("person")
+	///     .content(vec![
+	///         UserWithId {
+	///             id: sql::thing("person:tobie")?,
+	///             name: "Tobie",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: false,
+	///             },
+	///         },
+	///         UserWithId {
+	///             id: sql::thing("person:jaime")?,
+	///             name: "Jaime",
+	///             settings: Settings {
+	///                 active: true,
+	///                 marketing: true,
+	///             },
+	///         },
+	///     ])
+	///     .await?;
+	/// #
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn insert<R>(&self, resource: impl opt::IntoResource<R>) -> Insert<C, R> {
+		Insert {
+			client: Cow::Borrowed(self),
+			resource: resource.into_resource(),
+			response_type: PhantomData,
+		}
+	}
+
 	/// Updates all records in a table, or a specific record
 	///
 	/// # Examples
@@ -767,8 +893,8 @@ where
 	/// }
 	///
 	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// struct User {
+	///     name: &'static str,
 	///     settings: Settings,
 	/// }
 	///
@@ -974,6 +1100,21 @@ where
 		Health {
 			client: Cow::Borrowed(self),
 		}
+	}
+
+	/// Wait for the selected event to happen before proceeding
+	pub async fn wait_for(&self, event: WaitFor) {
+		let mut rx = self.waiter.0.subscribe();
+		rx.wait_for(|current| match current {
+			// The connection hasn't been initialised yet.
+			None => false,
+			// The connection has been initialised. Only the connection even matches.
+			Some(WaitFor::Connection) => matches!(event, WaitFor::Connection),
+			// The database has been selected. Connection and database events both match.
+			Some(WaitFor::Database) => matches!(event, WaitFor::Connection | WaitFor::Database),
+		})
+		.await
+		.ok();
 	}
 
 	/// Dumps the database contents to a file

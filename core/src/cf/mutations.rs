@@ -1,8 +1,10 @@
+use crate::fflags::FFLAGS;
 use crate::sql::array::Array;
 use crate::sql::object::Object;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Operation;
 use crate::vs::to_u128_be;
 use derive::Store;
 use revision::revisioned;
@@ -13,6 +15,7 @@ use std::fmt::{self, Display, Formatter};
 // Mutation is a single mutation to a table.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[non_exhaustive]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
 	// we do include it in the first field for convenience.
@@ -20,8 +23,11 @@ pub enum TableMutation {
 	Del(Thing),
 	Def(DefineTableStatement),
 	#[revision(start = 2)]
-	// Includes the previous value that may be None
-	SetPrevious(Thing, Value, Value),
+	/// Includes the ID, current value (after change), changes that were applied to achieve this
+	/// value, and if this is a new record (i.e. create = true vs update = false)
+	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
+	/// Means that we have already applied the add "/note" operation to achieve the recorded result
+	SetWithDiff(Thing, Value, Vec<Operation>),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -38,6 +44,7 @@ impl From<DefineTableStatement> for Value {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
 
 impl TableMutations {
@@ -48,6 +55,7 @@ impl TableMutations {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct DatabaseMutation(pub Vec<TableMutations>);
 
 impl DatabaseMutation {
@@ -61,29 +69,54 @@ impl Default for DatabaseMutation {
 		Self::new()
 	}
 }
+
 // Change is a set of mutations made to a table at the specific timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct ChangeSet(pub [u8; 10], pub DatabaseMutation);
 
 impl TableMutation {
+	/// Convert a stored change feed table mutation (record change) into a
+	/// Value that can be used in the storage of change feeds and their transmission to consumers
 	pub fn into_value(self) -> Value {
-		let (k, v) = match self {
-			TableMutation::Set(_t, v) => ("update".to_string(), v),
-			TableMutation::SetPrevious(_t, Value::None, v) => ("create".to_string(), v),
-			TableMutation::SetPrevious(_t, _previous, v) => ("update".to_string(), v),
-			TableMutation::Del(t) => {
-				// TODO(phughk): Future PR for lq on cf feature, store update in delete for diff and notification
-				let mut h = BTreeMap::<String, Value>::new();
-				h.insert("id".to_string(), Value::Thing(t));
-				let o = Object::from(h);
-				("delete".to_string(), Value::Object(o))
-			}
-			TableMutation::Def(t) => ("define_table".to_string(), Value::from(t)),
-		};
-
 		let mut h = BTreeMap::<String, Value>::new();
-		h.insert(k, v);
+		let h = match self {
+			TableMutation::Set(_thing, v) => {
+				if FFLAGS.change_feed_live_queries.enabled() {
+					h.insert("create".to_string(), v);
+				} else {
+					h.insert("update".to_string(), v);
+				}
+				h
+			}
+			TableMutation::SetWithDiff(_thing, current, operations) => {
+				h.insert("current".to_string(), current);
+				h.insert(
+					"update".to_string(),
+					Value::Array(Array(
+						operations
+							.clone()
+							.into_iter()
+							.map(|x| Value::Object(Object::from(x)))
+							.collect(),
+					)),
+				);
+				h
+			}
+			TableMutation::Del(t) => {
+				// TODO(SUR-329): Store update in delete for diff and notification
+				let mut other = BTreeMap::<String, Value>::new();
+				other.insert("id".to_string(), Value::Thing(t));
+				let o = Object::from(other);
+				h.insert("delete".to_string(), Value::Object(o));
+				h
+			}
+			TableMutation::Def(t) => {
+				h.insert("define_table".to_string(), Value::from(t));
+				h
+			}
+		};
 		let o = crate::sql::object::Object::from(h);
 		Value::Object(o)
 	}
@@ -116,7 +149,7 @@ impl Display for TableMutation {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
-			TableMutation::SetPrevious(id, _previous, v) => write!(f, "SET {} {}", id, v),
+			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::Def(t) => write!(f, "{}", t),
 		}
@@ -149,8 +182,9 @@ impl Display for ChangeSet {
 }
 
 // WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[non_exhaustive]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 
 impl WriteMutationSet {
@@ -167,14 +201,12 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::Strand;
-
 	#[test]
 	fn serialization() {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
@@ -200,7 +232,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
+			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
 		);
 	}
 
@@ -209,13 +241,12 @@ mod tests {
 		use super::*;
 		use std::collections::HashMap;
 		let cs = ChangeSet(
-			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+			[0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
-					TableMutation::SetPrevious(
+					TableMutation::SetWithDiff(
 						Thing::from(("mytb".to_string(), "tobie".to_string())),
-						Value::None,
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
@@ -223,10 +254,13 @@ mod tests {
 							),
 							("note", Value::from("surreal")),
 						]))),
+						vec![Operation::Add {
+							path: "/note".into(),
+							value: Value::from("surreal"),
+						}],
 					),
-					TableMutation::SetPrevious(
+					TableMutation::SetWithDiff(
 						Thing::from(("mytb".to_string(), "tobie".to_string())),
-						Value::Strand(Strand::from("this would normally be an object")),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
@@ -237,6 +271,9 @@ mod tests {
 							),
 							("note", Value::from("surreal")),
 						]))),
+						vec![Operation::Remove {
+							path: "/temp".into(),
+						}],
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
 					TableMutation::Def(DefineTableStatement {
@@ -250,7 +287,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"create":{"id":"mytb:tobie","note":"surreal"}},{"update":{"id":"mytb:tobie2","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":1}"#
+			r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
 		);
 	}
 }

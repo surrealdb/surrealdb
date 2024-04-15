@@ -8,9 +8,10 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::Response;
 
 pub async fn new_ds() -> Result<Datastore, Error> {
-	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()))
+	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
 }
 
 #[allow(dead_code)]
@@ -18,7 +19,7 @@ pub async fn iam_run_case(
 	prepare: &str,
 	test: &str,
 	check: &str,
-	check_expected_result: &Vec<&str>,
+	check_expected_result: &[&str],
 	ds: &Datastore,
 	sess: &Session,
 	should_succeed: bool,
@@ -111,7 +112,7 @@ pub async fn iam_check_cases(
 		println!("* Testing '{test}' for '{level}Actor({role})' on '({ns}, {db})'");
 		let sess = Session::for_level(level.to_owned(), role.to_owned()).with_ns(ns).with_db(db);
 		let expected_result = if *should_succeed {
-			check_results.get(0).unwrap()
+			check_results.first().unwrap()
 		} else {
 			check_results.get(1).unwrap()
 		};
@@ -147,7 +148,7 @@ pub async fn iam_check_cases(
 			let expected_result = if auth_enabled {
 				check_results.get(1).unwrap()
 			} else {
-				check_results.get(0).unwrap()
+				check_results.first().unwrap()
 			};
 			iam_run_case(
 				prepare,
@@ -192,4 +193,12 @@ pub fn with_enough_stack(
 		.unwrap()
 		.join()
 		.unwrap()
+}
+
+#[allow(dead_code)]
+pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
+	for _ in 0..skip {
+		let _ = res.remove(0).result?;
+	}
+	Ok(())
 }

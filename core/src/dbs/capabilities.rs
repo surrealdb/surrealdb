@@ -10,6 +10,7 @@ pub trait Target {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
 
 impl std::fmt::Display for FuncTarget {
@@ -48,6 +49,7 @@ impl std::str::FromStr for FuncTarget {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(ipnet::IpNet),
@@ -123,6 +125,7 @@ impl std::str::FromStr for NetTarget {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Targets<T: Target + Hash + Eq + PartialEq> {
 	None,
 	Some(HashSet<T>),
@@ -154,6 +157,7 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display fo
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,
@@ -168,10 +172,10 @@ pub struct Capabilities {
 impl std::fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
-			f,
-			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
-			self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
-		)
+            f,
+            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net
+        )
 	}
 }
 
