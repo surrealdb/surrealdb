@@ -1,4 +1,5 @@
-use crate::sql::{fmt::Fmt, Table};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{fmt::Fmt, Idiom, Table, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -128,5 +129,11 @@ impl Display for Kind {
 			},
 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 		}
+	}
+}
+
+impl InfoStructure for Kind {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

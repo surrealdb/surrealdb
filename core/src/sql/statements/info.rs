@@ -351,11 +351,16 @@ impl InfoStatement {
 impl fmt::Display for InfoStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Root | Self::RootStructure => f.write_str("INFO FOR ROOT"),
-			Self::Ns | Self::NsStructure => f.write_str("INFO FOR NAMESPACE"),
-			Self::Db | Self::DbStructure => f.write_str("INFO FOR DATABASE"),
-			Self::Sc(ref s) | Self::ScStructure(ref s) => write!(f, "INFO FOR SCOPE {s}"),
-			Self::Tb(ref t) | Self::TbStructure(ref t) => write!(f, "INFO FOR TABLE {t}"),
+			Self::Root => f.write_str("INFO FOR ROOT"),
+			Self::RootStructure => f.write_str("INFO FOR ROOT STRUCTURE"),
+			Self::Ns => f.write_str("INFO FOR NAMESPACE"),
+			Self::NsStructure => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
+			Self::Db => f.write_str("INFO FOR DATABASE"),
+			Self::DbStructure => f.write_str("INFO FOR DATABASE STRUCTURE"),
+			Self::Sc(ref s) => write!(f, "INFO FOR SCOPE {s}"),
+			Self::ScStructure(ref s) => write!(f, "INFO FOR SCOPE {s} STRUCTURE"),
+			Self::Tb(ref t) => write!(f, "INFO FOR TABLE {t}"),
+			Self::TbStructure(ref t) => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
 			Self::User(ref u, ref b) => match b {
 				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
 				None => write!(f, "INFO FOR USER {u}"),
@@ -366,24 +371,13 @@ impl fmt::Display for InfoStatement {
 
 use std::sync::Arc;
 
+pub(crate) trait InfoStructure {
+	fn structure(self) -> Value;
+}
+
 fn process_arr<T>(a: Arc<[T]>) -> Value
 where
-	T: Serialize,
+	T: InfoStructure + Clone,
 {
-	Value::Array(a.iter().map(ser_to_val).collect())
-}
-
-fn vec_to_val<V>(v: Vec<V>) -> Value
-where
-	V: Into<Value>,
-{
-	Value::Array(v.into_iter().map(|i| i.into()).collect())
-}
-
-fn ser_to_val<S>(s: S) -> Value
-where
-	S: Serialize,
-{
-	let intermediate: serde_json::Value = serde_json::to_value(s).unwrap();
-	serde_json::from_value(intermediate).unwrap()
+	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
 }

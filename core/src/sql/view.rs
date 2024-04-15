@@ -1,4 +1,5 @@
-use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -24,5 +25,10 @@ impl fmt::Display for View {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+impl InfoStructure for View {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
