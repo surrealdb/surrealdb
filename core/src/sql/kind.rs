@@ -1,5 +1,5 @@
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{fmt::Fmt, Idiom, Table, Value};
+use crate::sql::{fmt::Fmt, Table, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

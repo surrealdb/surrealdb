@@ -6,7 +6,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Object, Strand, Value, Values};
 use derive::Store;
-use futures::StreamExt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
