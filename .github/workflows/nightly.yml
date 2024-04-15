@@ -11,7 +11,7 @@ on:
         required: true
         type: string
         description: "The github ref of this nightly version (i.e. main, 1234567)"
-        default: main
+        default: 1.x
       publish:
         required: false
         type: boolean
