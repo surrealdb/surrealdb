@@ -79,6 +79,7 @@ pub(crate) struct LqIndexKey {
 pub(crate) struct LqIndexValue {
 	pub(crate) stm: LiveStatement,
 	pub(crate) vs: Versionstamp,
+	// TODO: unused?
 	pub(crate) ts: Timestamp,
 }
 

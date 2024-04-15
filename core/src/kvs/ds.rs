@@ -53,6 +53,7 @@ use crate::key::root::hb::Hb;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
+use crate::kvs::lq_cf::LiveQueryTracker;
 use crate::kvs::lq_structs::{
 	LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
 };
@@ -102,14 +103,6 @@ pub struct Datastore {
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
 	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
-	// Map of Live Query identifier (ns+db+tb) for change feed tracking
-	// the mapping is to a list of affected live queries
-	local_live_queries: Arc<RwLock<BTreeMap<LqIndexKey, Vec<LqIndexValue>>>>,
-	// Set of tracked change feeds with associated watermarks
-	// This is updated with new/removed live queries and improves cf request performance
-	// The Versionstamp associated is scanned inclusive of first value, so it must contain the earliest NOT read value
-	// So if VS=2 has been processed, the correct value here is VS=3
-	cf_watermarks: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -127,6 +120,7 @@ pub struct Datastore {
 	))]
 	// The temporary directory
 	temporary_directory: Arc<PathBuf>,
+	lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
 }
 
 /// We always want to be circulating the live query information
@@ -397,8 +391,6 @@ impl Datastore {
 			versionstamp_oracle: Arc::new(Mutex::new(Oracle::systime_counter())),
 			clock,
 			index_stores: IndexStores::default(),
-			local_live_queries: Arc::new(RwLock::new(BTreeMap::new())),
-			cf_watermarks: Arc::new(Mutex::new(BTreeMap::new())),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(any(
@@ -410,6 +402,7 @@ impl Datastore {
 				feature = "kv-speedb"
 			))]
 			temporary_directory: Arc::new(env::temp_dir()),
+			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
 	}
 
@@ -949,7 +942,7 @@ impl Datastore {
 			trace!("Channels is none, short-circuiting");
 			return Ok(());
 		}
-		if self.local_live_queries.read().await.is_empty() {
+		if self.lq_cf_store.read().await.is_empty() {
 			trace!("No live queries, short-circuiting");
 			return Ok(());
 		}
@@ -960,7 +953,7 @@ impl Datastore {
 			let tx = self.transaction(Read, Optimistic).await?;
 			let tracked_cfs_updates = find_required_cfs_to_catch_up(
 				tx,
-				self.cf_watermarks.clone(),
+				self.lq_cf_store.clone(),
 				self.engine_options.live_query_catchup_size,
 				&mut relevant_changesets,
 			)
@@ -989,17 +982,7 @@ impl Datastore {
 
 		for (selector, change_sets) in relevant_changesets {
 			// find matching live queries
-			let lq_pairs: Vec<(LqIndexKey, LqIndexValue)> = {
-				let lq_lock = self.local_live_queries.read().await;
-				lq_lock
-					.iter()
-					.filter(|(k, _)| k.selector == selector)
-					.flat_map(|(lq_index, lq_values)| {
-						lq_values.iter().cloned().map(|x| (lq_index.clone(), x))
-					})
-					.to_owned()
-					.collect()
-			};
+			let lq_pairs = self.lq_cf_store.read().await.live_queries_for_selector(&selector);
 
 			// Find relevant changes
 			let tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
@@ -1118,37 +1101,6 @@ impl Datastore {
 		Ok(())
 	}
 
-	async fn update_versionstamp(
-		&self,
-		change_vs: &Versionstamp,
-		lq_key: &LqIndexKey,
-		lq_value: &LqIndexValue,
-	) {
-		// We increase the watermark because scans are inclusive of first result
-		// And we have already processed the input watermark - it is derived from the event
-		let change_vs = conv::try_u128_to_versionstamp(conv::to_u128_be(*change_vs) + 1).unwrap();
-
-		// Update watermarks
-		trace!("Updating watermark to {:?} for index key {:?}", change_vs, lq_key);
-		// panic!("This is where the problem is - the updates are happening in 2 places. Should the VS tracking be in one place?");
-		// For each live query we have processed we update the watermarks
-		self.local_live_queries.write().await.insert(
-			lq_key.clone(),
-			vec![LqIndexValue {
-				vs: change_vs,
-				..lq_value.clone()
-			}],
-		);
-
-		// Commented this all because it was overwriting bookmark - evaluate if that was necessary
-		{
-			// // TODO(phugk) We also update the tracked_cfs with a minimum watermark
-			// let mut tracked_cfs = self.cf_watermarks.lock().await;
-			// // TODO we may be able to re-use the key without cloning...
-			// tracked_cfs.insert(lq_key.selector.clone(), *change_vs).unwrap();
-		}
-	}
-
 	/// Add and kill live queries being track on the datastore
 	/// These get polled by the change feed tick
 	pub(crate) async fn adapt_tracked_live_queries(
@@ -1156,8 +1108,9 @@ impl Datastore {
 		lqs: &Vec<TrackedResult>,
 	) -> Result<(), Error> {
 		// Lock the local live queries
-		let mut lq_map = self.local_live_queries.write().await;
-		let mut cf_watermarks = self.cf_watermarks.lock().await;
+		let lq_cf_store = self.lq_cf_store.write().await;
+		// let mut lq_map = self.local_live_queries.write().await;
+		// let mut cf_watermarks = self.cf_watermarks.lock().await;
 		let mut watermarks_to_check: Vec<LqIndexKey> = vec![];
 		for lq in lqs {
 			match lq {
@@ -1748,19 +1701,21 @@ impl Datastore {
 
 async fn find_required_cfs_to_catch_up(
 	mut tx: Transaction,
-	cf_watermarks: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
+	// cf_watermarks: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
+	live_query_tracker: Arc<RwLock<LiveQueryTracker>>,
 	catchup_size: u32,
 	relevant_changesets: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
 ) -> Result<Vec<(LqSelector, Versionstamp)>, Error> {
-	let mut tracked_cfs = cf_watermarks.lock().await;
+	let mut live_query_tracker = live_query_tracker.write().await;
+	let mut tracked_cfs = live_query_tracker.get_watermarks().len();
 	// We are going to track the latest observed versionstamp here
-	let mut update_watermarks: BTreeMap<LqSelector, Versionstamp> = BTreeMap::new();
-	let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs.len());
-	for (selector, vs) in tracked_cfs.iter() {
+	let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs);
+	for current in 0..tracked_cfs {
+		// The reason we iterate this way (len+index) is because we "know" that the list won't change, but we
+		// want mutable access to it so we can update it while iterating
+		let (selector, vs) = live_query_tracker.get_watermark_by_enum_index(current).unwrap();
+
 		// Read the change feed for the selector
-		let simple_vs = conv::versionstamp_to_u64(vs);
-		let observed_vs =
-			conv::versionstamp_to_u64(update_watermarks.get(selector).unwrap_or(&[0; 10]));
 		#[cfg(debug_assertions)]
 		trace!(
 			"Checking for new changes for ns={} db={} tb={} vs={}",
@@ -1768,12 +1723,9 @@ async fn find_required_cfs_to_catch_up(
 			selector.db,
 			selector.tb,
 			// TODO this is what is incorrect - it is 2 instead of 3
-			simple_vs
+			vs
 		);
-		if observed_vs <= simple_vs {
-			let observed_vs = simple_vs + 1;
-			update_watermarks.insert(selector.clone(), conv::u64_to_versionstamp(observed_vs));
-		}
+		live_query_tracker.update_watermark(selector, vs);
 		let res = cf::read(
 			&mut tx,
 			&selector.ns,
@@ -1805,13 +1757,6 @@ async fn find_required_cfs_to_catch_up(
 				relevant_changesets.insert(selector.clone(), res);
 			}
 		}
-	}
-	// We still have the lock and we will update the globally tracked watermarks with the latest observed
-	// It is assumed at this point that the latest observed has been incremented so that the first value is ignored
-	for (k, v) in update_watermarks.iter() {
-		// We are going to update the global watermarks
-		trace!("Correcting watermark for {:?} to {:?}", k, v);
-		tracked_cfs.insert(k.clone(), *v);
 	}
 
 	tx.cancel().await?;
