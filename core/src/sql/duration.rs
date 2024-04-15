@@ -77,6 +77,10 @@ impl Deref for Duration {
 }
 
 impl Duration {
+	/// Create a duration from both seconds and nanoseconds components
+	pub fn new(secs: u64, nanos: u32) -> Duration {
+		time::Duration::new(secs, nanos).into()
+	}
 	/// Convert the Duration to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
