@@ -375,6 +375,20 @@ pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;
 }
 
+impl InfoStatement {
+	pub(crate) fn structurize(self) -> Result<Self, ()> {
+		let out = match self {
+			InfoStatement::Root => InfoStatement::RootStructure,
+			InfoStatement::Ns => InfoStatement::NsStructure,
+			InfoStatement::Db => InfoStatement::DbStructure,
+			InfoStatement::Sc(s) => InfoStatement::ScStructure(s),
+			InfoStatement::Tb(t) => InfoStatement::TbStructure(t),
+			_ => return Err(()),
+		};
+		Ok(out)
+	}
+}
+
 fn process_arr<T>(a: Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,
