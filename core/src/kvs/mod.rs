@@ -20,6 +20,7 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
+mod store;
 mod surrealkv;
 mod tikv;
 mod tx;

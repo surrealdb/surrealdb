@@ -400,6 +400,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested record does not exist
+	#[error("The record '{value}' does not exist")]
+	IdNotFound {
+		value: String,
+	},
+
 	#[error("Unsupported distance: {0}")]
 	UnsupportedDistance(Distance),
 
