@@ -1,3 +1,4 @@
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::value::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,5 +21,10 @@ impl Deref for Cond {
 impl fmt::Display for Cond {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "WHERE {}", self.0)
+	}
+}
+impl InfoStructure for Cond {
+	fn structure(self) -> Value {
+		self.0.structure()
 	}
 }

@@ -3,6 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::{
 	BreakStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
 	ForeachStatement, IfelseStatement, InsertStatement, OutputStatement, RelateStatement,
@@ -166,6 +167,11 @@ impl Display for Block {
 	}
 }
 
+impl InfoStructure for Block {
+	fn structure(self) -> Value {
+		self.to_string().into()
+	}
+}
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

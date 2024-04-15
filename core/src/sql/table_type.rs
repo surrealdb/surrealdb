@@ -1,9 +1,11 @@
+use crate::sql::array::Concat;
+use crate::sql::statements::info::InfoStructure;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-use super::{Kind, Table};
+use super::{Kind, Table, Value};
 
 /// The type of records stored by a table
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
@@ -37,6 +39,26 @@ impl Display for TableType {
 			}
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for TableType {
+	fn structure(self) -> Value {
+		match self {
+			TableType::Normal => "NORMAL".to_string(),
+			TableType::Relation(rel) => {
+				let mut acc = "RELATION".to_string();
+				if let Some(Kind::Record(kind)) = &rel.from {
+					acc = acc.concat(format!(" IN {}", get_tables_from_kind(kind)));
+				}
+				if let Some(Kind::Record(kind)) = &rel.to {
+					acc = acc.concat(format!(" OUT {}", get_tables_from_kind(kind)));
+				}
+				acc
+			}
+			TableType::Any => "ANY".to_string(),
+		}
+		.into()
 	}
 }
 
