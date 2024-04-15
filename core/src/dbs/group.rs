@@ -5,7 +5,7 @@ use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
 use crate::sql::function::OptimisedAggregate;
 use crate::sql::value::{TryAdd, TryDiv, Value};
-use crate::sql::{Array, Field, Idiom};
+use crate::sql::{Array, Field, Function, Idiom};
 use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
@@ -60,6 +60,7 @@ impl GroupsCollector {
 
 	pub(super) async fn push(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -97,7 +98,7 @@ impl GroupsCollector {
 	) -> Result<(), Error> {
 		for (agr, idiom) in agrs.iter_mut().zip(idioms) {
 			let val = stk.run(|stk| obj.get(stk, ctx, opt, txn, None, idiom)).await?;
-			agr.push(ctx, opt, txn, val).await?;
+			agr.push(stk, ctx, opt, txn, val).await?;
 		}
 		Ok(())
 	}
@@ -108,6 +109,7 @@ impl GroupsCollector {
 
 	pub(super) async fn output(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -141,7 +143,9 @@ impl GroupsCollector {
 										let x = if matches!(a, OptimisedAggregate::None) {
 											// The aggregation is not optimised, let's compute it with the values
 											let vals = agr.take();
-											f.aggregate(vals).compute(ctx, opt, txn, None).await?
+											f.aggregate(vals)
+												.compute(stk, ctx, opt, txn, None)
+												.await?
 										} else {
 											// The aggregation is optimised, just get the value
 											agr.compute(a)?
@@ -256,6 +260,7 @@ impl Aggregator {
 
 	async fn push(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -265,7 +270,7 @@ impl Aggregator {
 			*c += 1;
 		}
 		if let Some((ref f, ref mut c)) = self.count_function {
-			if f.aggregate(val.clone()).compute(ctx, opt, txn, None).await?.is_truthy() {
+			if f.aggregate(val.clone()).compute(stk, ctx, opt, txn, None).await?.is_truthy() {
 				*c += 1;
 			}
 		}
