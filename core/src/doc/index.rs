@@ -409,11 +409,11 @@ impl<'a> IndexOperation<'a> {
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(self.rid, &o).await?;
+			hnsw.remove_document(self.rid, &o)?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(self.rid, &n).await?;
+			hnsw.index_document(self.rid, &n)?;
 		}
 		Ok(())
 	}

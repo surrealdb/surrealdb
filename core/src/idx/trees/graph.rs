@@ -58,13 +58,13 @@ impl UndirectedGraph {
 		let (to_add, to_remove) = match self.nodes.entry(node) {
 			HEntry::Occupied(mut e) => {
 				let old_edges = e.get();
-				let mut to_remove = Vec::with_capacity(1);
+				let mut to_remove = Vec::new();
 				for old_edge in old_edges {
 					if !edges.contains(old_edge) {
 						to_remove.push(*old_edge);
 					}
 				}
-				let mut to_add = Vec::with_capacity(1);
+				let mut to_add = Vec::new();
 				for new_edge in &edges {
 					if !old_edges.contains(new_edge) {
 						to_add.push(*new_edge);

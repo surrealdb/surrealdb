@@ -1,21 +1,37 @@
 use crate::idx::docids::DocId;
 #[cfg(debug_assertions)]
 use crate::idx::trees::store::NodeId;
+use keyed_priority_queue::{
+	KeyedPriorityQueue, KeyedPriorityQueueBorrowIter, KeyedPriorityQueueIterator,
+};
 use roaring::RoaringTreemap;
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 #[cfg(debug_assertions)]
 use std::collections::HashMap;
 use std::collections::{BTreeMap, VecDeque};
+
 #[derive(Debug, Clone, Copy)]
-pub(super) struct PriorityNode {
-	pub(super) dist: f64,
-	pub(super) doc: u64,
-}
+pub(super) struct PriorityNode(f64, u64);
 
 impl PartialEq<Self> for PriorityNode {
 	fn eq(&self, other: &Self) -> bool {
-		self.dist.total_cmp(&other.dist) == Ordering::Equal && self.doc == other.doc
+		self.0.total_cmp(&other.0) == Ordering::Equal && self.1 == other.1
+	}
+}
+
+impl PriorityNode {
+	pub(super) fn new(dist: f64, doc: u64) -> Self {
+		Self(dist, doc)
+	}
+
+	pub(super) fn doc(&self) -> u64 {
+		self.1
+	}
+
+	pub(super) fn dist(&self) -> f64 {
+		self.0
 	}
 }
 
@@ -29,11 +45,155 @@ impl PartialOrd for PriorityNode {
 
 impl Ord for PriorityNode {
 	fn cmp(&self, other: &Self) -> Ordering {
-		let o = self.dist.total_cmp(&other.dist);
+		let o = self.0.total_cmp(&other.0);
 		if o != Ordering::Equal {
 			return o;
 		}
-		self.doc.cmp(&other.doc)
+		self.1.cmp(&other.1)
+	}
+}
+
+impl From<(f64, u64)> for PriorityNode {
+	fn from(t: (f64, u64)) -> Self {
+		PriorityNode(t.0, t.1)
+	}
+}
+
+#[derive(Clone)]
+pub(super) struct DoublePriorityQueue {
+	asc: KeyedPriorityQueue<u64, AscF64>,
+	desc: KeyedPriorityQueue<u64, DescF64>,
+}
+
+impl DoublePriorityQueue {
+	pub(super) fn with_capacity(capacity: usize) -> Self {
+		Self {
+			asc: KeyedPriorityQueue::with_capacity(capacity),
+			desc: KeyedPriorityQueue::with_capacity(capacity),
+		}
+	}
+	pub(super) fn len(&self) -> usize {
+		self.asc.len()
+	}
+
+	pub(super) fn push(&mut self, dist: f64, key: u64) {
+		self.desc.push(key, dist.into());
+		self.asc.push(key, AscF64(dist));
+	}
+
+	pub(super) fn pop_first(&mut self) -> Option<(f64, u64)> {
+		if let Some((doc, dist)) = self.asc.pop() {
+			self.desc.remove(&doc);
+			Some((dist.0, doc))
+		} else {
+			None
+		}
+	}
+
+	pub(super) fn pop_last(&mut self) -> Option<(f64, u64)> {
+		if let Some((doc, dist)) = self.desc.pop() {
+			self.asc.remove(&doc);
+			Some((dist.0, doc))
+		} else {
+			None
+		}
+	}
+
+	pub(super) fn first(&self) -> Option<(f64, u64)> {
+		self.asc.peek().map(|(&key, dist)| (dist.0, key))
+	}
+	pub(super) fn last(&self) -> Option<(f64, u64)> {
+		self.desc.peek().map(|(&key, dist)| (dist.0, key))
+	}
+
+	pub(super) fn into_iter(self) -> KeyedPriorityQueueIterator<u64, AscF64> {
+		self.asc.into_iter()
+	}
+
+	pub(super) fn iter(&self) -> KeyedPriorityQueueBorrowIter<u64, AscF64> {
+		self.asc.iter()
+	}
+}
+
+impl From<(f64, u64)> for DoublePriorityQueue {
+	fn from(f: (f64, u64)) -> Self {
+		let mut q = DoublePriorityQueue::with_capacity(1);
+		q.push(f.0, f.1);
+		q
+	}
+}
+
+impl From<PriorityNode> for DoublePriorityQueue {
+	fn from(pn: PriorityNode) -> Self {
+		Self::from((pn.0, pn.1))
+	}
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct AscF64(f64);
+
+impl From<AscF64> for f64 {
+	fn from(v: AscF64) -> Self {
+		v.0
+	}
+}
+
+impl AsRef<f64> for AscF64 {
+	fn as_ref(&self) -> &f64 {
+		&self.0
+	}
+}
+
+impl Borrow<f64> for AscF64 {
+	fn borrow(&self) -> &f64 {
+		&self.0
+	}
+}
+
+impl Eq for AscF64 {}
+
+impl PartialEq for AscF64 {
+	fn eq(&self, other: &Self) -> bool {
+		other.0.total_cmp(&self.0) == Ordering::Equal
+	}
+}
+impl PartialOrd for AscF64 {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(other.0.total_cmp(&self.0))
+	}
+}
+
+impl Ord for AscF64 {
+	fn cmp(&self, other: &Self) -> Ordering {
+		other.0.total_cmp(&self.0)
+	}
+}
+
+#[derive(Clone)]
+struct DescF64(f64);
+
+impl Eq for DescF64 {}
+
+impl PartialEq for DescF64 {
+	fn eq(&self, other: &Self) -> bool {
+		self.0.total_cmp(&other.0) == Ordering::Equal
+	}
+}
+impl PartialOrd for DescF64 {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.0.total_cmp(&other.0))
+	}
+}
+
+impl Ord for DescF64 {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.0.total_cmp(&other.0)
+	}
+}
+
+impl From<f64> for DescF64 {
+	fn from(val: f64) -> Self {
+		Self(val)
 	}
 }
 
@@ -494,7 +654,7 @@ pub struct KnnResult {
 pub(super) mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
-	use crate::idx::trees::knn::{Ids64, KnnResultBuilder, PriorityNode};
+	use crate::idx::trees::knn::{DoublePriorityQueue, Ids64, KnnResultBuilder, PriorityNode};
 	use crate::idx::trees::vector::Vector;
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::{Array, Number};
@@ -757,20 +917,8 @@ pub(super) mod tests {
 
 	#[test]
 	fn test_priority_node() {
-		let (n1, n2, n3) = (
-			PriorityNode {
-				dist: 1.0,
-				doc: 1,
-			},
-			PriorityNode {
-				dist: 2.0,
-				doc: 2,
-			},
-			PriorityNode {
-				dist: 3.0,
-				doc: 3,
-			},
-		);
+		let (n1, n2, n3) =
+			(PriorityNode::new(1.0, 1), PriorityNode::new(2.0, 2), PriorityNode::new(3.0, 3));
 		let mut q = BinaryHeap::from([n3, n1, n2]);
 
 		assert_eq!(q.pop(), Some(n3));
@@ -786,6 +934,29 @@ pub(super) mod tests {
 	}
 
 	#[test]
+	fn test_double_priority_queue() {
+		let mut q = DoublePriorityQueue::from((2.0, 2));
+		q.push(3.0, 3);
+		q.push(1.0, 1);
+
+		assert_eq!(q.len(), 3);
+		assert_eq!(q.first(), Some((1.0, 1)));
+		assert_eq!(q.last(), Some((3.0, 3)));
+
+		assert_eq!(q.pop_first(), Some((1.0, 1)));
+		assert_eq!(q.pop_first(), Some((2.0, 2)));
+		assert_eq!(q.pop_first(), Some((3.0, 3)));
+
+		let mut q = DoublePriorityQueue::from((2.0, 2));
+		q.push(3.0, 3);
+		q.push(1.0, 1);
+
+		assert_eq!(q.pop_last(), Some((3.0, 3)));
+		assert_eq!(q.pop_last(), Some((2.0, 2)));
+		assert_eq!(q.pop_last(), Some((1.0, 1)));
+	}
+
+	#[test]
 	// In HNSW we are maintaining a candidate list that requires both to know the first element
 	// and the last element of a set.
 	// There is two possible options.
@@ -798,10 +969,7 @@ pub(super) mod tests {
 		const TOTAL: usize = 500;
 		let mut pns = Vec::with_capacity(TOTAL);
 		for i in 0..TOTAL {
-			pns.push(PriorityNode {
-				dist: i as f64,
-				doc: i as u64,
-			});
+			pns.push(PriorityNode::new(i as f64, i as u64));
 		}
 
 		// Test BTreeSet

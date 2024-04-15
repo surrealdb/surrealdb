@@ -3032,6 +3032,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyed_priority_queue"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ee7893dab2e44ae5f9d0173f26ff4aa327c10b01b06a72b52dd9405b628640d"
+dependencies = [
+ "indexmap 2.2.6",
+]
+
+[[package]]
 name = "lalrpop"
 version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5927,6 +5936,7 @@ dependencies = [
  "hex",
  "indxdb",
  "ipnet",
+ "keyed_priority_queue",
  "lexicmp",
  "md-5",
  "nanoid",

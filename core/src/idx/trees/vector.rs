@@ -29,11 +29,10 @@ pub enum Vector {
 /// So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-pub type SharedVector = Arc<Vector>;
-
+/// This structures also caches the hashcode to avoid recomputing it.
 #[derive(Debug, Clone)]
-pub struct HashedSharedVector(SharedVector, u64);
-impl From<Vector> for HashedSharedVector {
+pub struct SharedVector(Arc<Vector>, u64);
+impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
 		let mut h = DefaultHasher::new();
 		v.hash(&mut h);
@@ -41,7 +40,7 @@ impl From<Vector> for HashedSharedVector {
 	}
 }
 
-impl Serialize for HashedSharedVector {
+impl Serialize for SharedVector {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
@@ -50,32 +49,24 @@ impl Serialize for HashedSharedVector {
 	}
 }
 
-impl From<SharedVector> for HashedSharedVector {
-	fn from(v: SharedVector) -> Self {
-		let mut h = DefaultHasher::new();
-		v.hash(&mut h);
-		Self(v, h.finish())
-	}
-}
-
-impl Borrow<Vector> for &HashedSharedVector {
+impl Borrow<Vector> for &SharedVector {
 	fn borrow(&self) -> &Vector {
 		self.0.as_ref()
 	}
 }
 
-impl Hash for HashedSharedVector {
+impl Hash for SharedVector {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		state.write_u64(self.1);
 	}
 }
 
-impl PartialEq for HashedSharedVector {
+impl PartialEq for SharedVector {
 	fn eq(&self, other: &Self) -> bool {
 		self.1 == other.1 && self.0 == other.0
 	}
 }
-impl Eq for HashedSharedVector {}
+impl Eq for SharedVector {}
 
 impl Hash for Vector {
 	fn hash<H: Hasher>(&self, state: &mut H) {

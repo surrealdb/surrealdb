@@ -1,6 +1,6 @@
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
-use crate::idx::trees::vector::HashedSharedVector;
+use crate::idx::trees::vector::SharedVector;
 use crate::key::error::KeyCategory;
 use crate::sql::idiom::Idiom;
 use crate::sql::index::Distance;
@@ -239,8 +239,8 @@ pub enum Error {
 	/// The size of the vector is incorrect
 	#[error("Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
 	InvalidVectorDistance {
-		left: HashedSharedVector,
-		right: HashedSharedVector,
+		left: SharedVector,
+		right: SharedVector,
 		dist: f64,
 	},
 

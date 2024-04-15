@@ -663,7 +663,7 @@ pub(super) struct HnswEntry {
 
 impl HnswEntry {
 	async fn new(h: SharedHnswIndex, a: &Array, n: usize, ef: usize) -> Result<Self, Error> {
-		let res = h.read().await.knn_search(a, n, ef).await?;
+		let res = h.read().await.knn_search(a, n, ef)?;
 		Ok(Self {
 			res,
 		})
