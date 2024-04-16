@@ -53,5 +53,5 @@ pub fn res_http(res: Response) -> Result<AxumResponse, RpcError> {
 	// Serialize the value into CBOR binary data
 	ciborium::into_writer(&val.0, &mut res).unwrap();
 	// Return the message length, and message as binary
-	Ok(([(CONTENT_TYPE, HeaderValue::from(ContentType::Surrealdb))], res).into_response())
+	Ok(([(CONTENT_TYPE, HeaderValue::from(ContentType::ApplicationCbor))], res).into_response())
 }
