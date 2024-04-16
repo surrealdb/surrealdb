@@ -8,7 +8,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f7b0a21988c1bf877cf4759ef5ddaac04c1c9fe808c9142ecb78ba97d97a28a"
 dependencies = [
- "bitflags 2.5.0",
+ "bitflags 2.4.2",
  "bytes",
  "futures-core",
  "futures-sink",
@@ -371,9 +371,9 @@ dependencies = [
 
 [[package]]
 name = "arc-swap"
-version = "1.6.0"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bddcadddf5e9015d310179a59bb28c4d4b9920ad0f11e8e14dbadf654890c9a6"
+checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
 name = "argon2"
@@ -1769,9 +1769,9 @@ dependencies = [
 
 [[package]]
 name = "echodb"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "312221c0bb46e82cd250c818404ef9dce769a4d5a62915c0249b577762eec34a"
+checksum = "1ac31e38aeac770dd01b9d6c9ab2a6d7f025815f71105911cf6de073a5db8ee1"
 dependencies = [
  "arc-swap",
  "imbl",
@@ -5846,6 +5846,7 @@ dependencies = [
  "bytes",
  "cedar-policy",
  "chrono",
+ "ciborium",
  "criterion",
  "deunicode",
  "dmp",
@@ -5882,7 +5883,7 @@ dependencies = [
  "regex-syntax 0.8.2",
  "reqwest",
  "revision",
- "ring 0.17.8",
+ "ring 0.17.7",
  "rmpv",
  "roaring",
  "rocksdb",
@@ -5982,9 +5983,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85fd66fd1b355d38cab3204504b44c17702517b20407db0dbe79f197ec4dac9a"
+checksum = "80716f4dc05f98c00f5da30adcb5e86fe4f04b7ebaf21317f58b8c840f7f2c94"
 dependencies = [
  "async-channel 2.1.1",
  "bytes",
@@ -6303,9 +6304,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.36.0"
+version = "1.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61285f6515fa018fb2d1e46eb21223fff441ee8db5d0f1435e8ab4f5cdb80931"
+checksum = "1adbebffeca75fcfd058afa480fb6c0b81e165a0323f9c9d39c9697e37c46787"
 dependencies = [
  "backtrace",
  "bytes",
@@ -6901,9 +6902,9 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "vart"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e273ebe2c2eaad64b95aaeccbae6b95d0ba235564b062a13b8ef134c5cae9f6a"
+checksum = "5d56828f4bc2743d165217540c06f4d24fffae77846b381fa7ec52ddd1cb5adc"
 dependencies = [
  "hashbrown 0.14.3",
 ]
