@@ -62,6 +62,12 @@ impl Response {
 	}
 }
 
+impl From<Response> for Value {
+	fn from(value: Response) -> Self {
+		value.into_value()
+	}
+}
+
 /// Create a JSON RPC result response
 pub fn success<T: Into<Data>>(id: Option<Value>, data: T) -> Response {
 	Response {

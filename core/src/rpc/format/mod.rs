@@ -4,6 +4,9 @@ mod json;
 pub mod msgpack;
 mod revision;
 
+use ::revision::Revisioned;
+use serde::Serialize;
+
 use super::{request::Request, RpcError};
 use crate::sql::Value;
 
@@ -26,6 +29,9 @@ pub enum Format {
 	Revision,    // For full versioned serialisation
 	Unsupported, // Unsupported format
 }
+
+pub trait ResTrait: Serialize + Into<Value> + Revisioned {}
+impl<T: Serialize + Into<Value> + Revisioned> ResTrait for T {}
 
 impl From<&str> for Format {
 	fn from(v: &str) -> Self {
@@ -62,7 +68,7 @@ impl Format {
 	}
 
 	/// Process a response using the specified format
-	pub fn res(&self, val: Value) -> Result<Vec<u8>, RpcError> {
+	pub fn res(&self, val: impl ResTrait) -> Result<Vec<u8>, RpcError> {
 		match self {
 			Self::None => Err(RpcError::InvalidRequest),
 			Self::Unsupported => Err(RpcError::InvalidRequest),

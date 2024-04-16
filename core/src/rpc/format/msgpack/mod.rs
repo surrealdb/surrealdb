@@ -1,5 +1,6 @@
 mod convert;
 
+use crate::rpc::format::ResTrait;
 use crate::rpc::RpcError;
 pub use convert::Pack;
 
@@ -13,9 +14,10 @@ pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
 		.try_into()
 }
 
-pub fn res(res: Value) -> Result<Vec<u8>, RpcError> {
+pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
 	// Convert the response into a value
-	let val: Pack = res.try_into()?;
+	let val: Value = res.into();
+	let val: Pack = val.try_into()?;
 	// Create a new vector for encoding output
 	let mut res = Vec::new();
 	// Serialize the value into MsgPack binary data

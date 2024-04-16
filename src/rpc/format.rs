@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use crate::net::headers::{Accept, ContentType};
 use crate::rpc::failure::Failure;
 use crate::rpc::response::Response;
@@ -6,9 +8,12 @@ use axum::response::IntoResponse;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::StatusCode;
+use revision::Revisioned;
+use serde::de::DeserializeOwned;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
 use surrealdb::rpc::RpcError;
+use surrealdb::sql;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
@@ -48,8 +53,7 @@ impl WsFormat for Format {
 	}
 
 	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
-		let val = res.into_value();
-		let res = self.res(val).map_err(Failure::from)?;
+		let res = self.res(res).map_err(Failure::from)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be replaced with unsafe { String::from_utf8_unchecked(res) }
 			// This would be safe as in the case of JSON res come from a call to Into::<Vec<u8>> for String
