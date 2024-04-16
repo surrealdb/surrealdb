@@ -1,10 +1,8 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::graph::UndirectedGraph;
-use crate::idx::trees::knn::{
-	DoublePriorityQueue, Ids64, KnnResult, KnnResultBuilder, PriorityNode,
-};
-use crate::idx::trees::vector::{SharedVector, Vector};
+use crate::idx::trees::knn::{DoublePriorityQueue, Ids64, KnnResult, KnnResultBuilder};
+use crate::idx::trees::vector::{HashedSharedVector, Vector};
 use crate::kvs::Key;
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::{Array, Thing, Value};
@@ -20,7 +18,7 @@ pub struct HnswIndex {
 	vector_type: VectorType,
 	hnsw: Hnsw,
 	docs: HnswDocs,
-	vec_docs: HashMap<SharedVector, (Ids64, ElementId)>,
+	vec_docs: HashMap<HashedSharedVector, (Ids64, ElementId)>,
 }
 
 impl HnswIndex {
@@ -47,7 +45,7 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	fn insert(&mut self, o: SharedVector, d: DocId) {
+	fn insert(&mut self, o: HashedSharedVector, d: DocId) {
 		match self.vec_docs.entry(o) {
 			Entry::Occupied(mut e) => {
 				let (docs, element_id) = e.get_mut();
@@ -64,7 +62,7 @@ impl HnswIndex {
 		}
 	}
 
-	fn remove(&mut self, o: SharedVector, d: DocId) {
+	fn remove(&mut self, o: HashedSharedVector, d: DocId) {
 		if let Entry::Occupied(mut e) = self.vec_docs.entry(o) {
 			let (docs, e_id) = e.get_mut();
 			if let Some(new_docs) = docs.remove(d) {
@@ -117,7 +115,7 @@ impl HnswIndex {
 			.collect()
 	}
 
-	fn search(&self, o: &SharedVector, n: usize, ef: usize) -> KnnResult {
+	fn search(&self, o: &HashedSharedVector, n: usize, ef: usize) -> KnnResult {
 		let neighbors = self.hnsw.knn_search(o, n, ef);
 
 		let mut builder = KnnResultBuilder::new(n);
@@ -197,7 +195,7 @@ struct Hnsw {
 	dist: Distance,
 	layers: Vec<UndirectedGraph>,
 	enter_point: Option<ElementId>,
-	elements: HashMap<ElementId, SharedVector>,
+	elements: HashMap<ElementId, HashedSharedVector>,
 	next_element_id: ElementId,
 	rng: SmallRng,
 	neighbors: SelectNeighbors,
@@ -222,12 +220,12 @@ impl Hnsw {
 		}
 	}
 
-	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
+	fn insert(&mut self, q_pt: HashedSharedVector) -> ElementId {
 		let q_level = self.get_random_level();
 		self.insert_level(q_pt, q_level)
 	}
 
-	fn insert_level(&mut self, q_pt: SharedVector, q_level: usize) -> ElementId {
+	fn insert_level(&mut self, q_pt: HashedSharedVector, q_level: usize) -> ElementId {
 		let q_id = self.next_element_id;
 		let layers = self.layers.len();
 
@@ -269,8 +267,7 @@ impl Hnsw {
 			// Are we deleting the current enter point?
 			if Some(e_id) == self.enter_point {
 				let layer = &self.layers[layers - 1];
-				let ep = PriorityNode::new(0.0, e_id);
-				new_enter_point = self.search_layer_single_ignore_ep(&e_pt, ep, layer);
+				new_enter_point = self.search_layer_single_ignore_ep(&e_pt, e_id, layer);
 			}
 
 			self.elements.remove(&e_id);
@@ -284,9 +281,8 @@ impl Hnsw {
 				if let Some(f_ids) = self.layers[lc].remove_node(&e_id) {
 					for q_id in f_ids {
 						if let Some(q_pt) = self.elements.get(&q_id) {
-							let q_pn = PriorityNode::new(0.0, q_id);
 							let layer = &self.layers[lc];
-							let c = self.search_layer_multi_ignore_ep(q_pt, q_pn, self.efc, layer);
+							let c = self.search_layer_multi_ignore_ep(q_pt, q_id, self.efc, layer);
 							let neighbors =
 								self.neighbors.select(self, layer, q_id, q_pt, c, m_max);
 							assert!(
@@ -326,24 +322,23 @@ impl Hnsw {
 	fn insert_element(
 		&mut self,
 		q_id: ElementId,
-		q_pt: &SharedVector,
+		q_pt: &HashedSharedVector,
 		q_level: usize,
-		ep_id: ElementId,
+		mut ep_id: ElementId,
 		top_layer_level: usize,
 	) {
 		#[cfg(debug_assertions)]
 		debug!("insert_element q_pt: {q_pt:?} - q_id: {q_id} - level: {q_level} -  ep_id: {ep_id:?} - top-layer: {top_layer_level}");
-		let mut ep = self.get_pn(q_pt, ep_id);
+		let mut ep_dist = self.get_dist(q_pt, ep_id);
 		for lc in ((q_level + 1)..=top_layer_level).rev() {
-			ep = self
-				.search_layer_single(q_pt, ep, 1, &self.layers[lc])
-				.first()
+			(ep_dist, ep_id) = self
+				.search_layer_single(q_pt, ep_dist, ep_id, 1, &self.layers[lc])
+				.peek_first()
 				.unwrap_or_else(|| unreachable!())
-				.into()
 		}
 
 		let mut m_max = self.m;
-		let mut eps = DoublePriorityQueue::from(ep);
+		let mut eps = DoublePriorityQueue::from(ep_dist, ep_id);
 		for lc in (0..=top_layer_level.min(q_level)).rev() {
 			if lc == 0 {
 				m_max = self.m0;
@@ -395,7 +390,7 @@ impl Hnsw {
 		neighbors: &HashSet<ElementId>,
 	) -> DoublePriorityQueue {
 		let e_pt = &self.elements[&e_id];
-		let mut w = DoublePriorityQueue::with_capacity(neighbors.len());
+		let mut w = DoublePriorityQueue::default();
 		for n_id in neighbors {
 			if let Some(n_pt) = self.elements.get(n_id) {
 				let dist = self.dist.calculate(e_pt, n_pt);
@@ -405,21 +400,21 @@ impl Hnsw {
 		w
 	}
 
-	fn get_pn(&self, q: &SharedVector, e_id: ElementId) -> (f64, u64) {
+	fn get_dist(&self, q: &HashedSharedVector, e_id: ElementId) -> f64 {
 		let e_pt = &self.elements[&e_id];
-		let dist = self.dist.calculate(e_pt, q);
-		(dist, e_id)
+		self.dist.calculate(e_pt, q)
 	}
 
 	fn search_layer_single(
 		&self,
-		q: &SharedVector,
-		ep: (f64, u64),
+		q: &HashedSharedVector,
+		ep_dist: f64,
+		ep_id: ElementId,
 		ef: usize,
 		l: &UndirectedGraph,
 	) -> DoublePriorityQueue {
-		let visited = HashSet::from([ep.1]);
-		let candidates = DoublePriorityQueue::from(ep);
+		let visited = HashSet::from([ep_id]);
+		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
 		self.search_layer(q, candidates, visited, w, ef, l)
 	}
@@ -432,56 +427,52 @@ impl Hnsw {
 	/// Output: ef closest neighbors to q
 	fn search_layer_multi(
 		&self,
-		q: &SharedVector,
+		q: &HashedSharedVector,
 		candidates: DoublePriorityQueue,
 		ef: usize,
 		l: &UndirectedGraph,
 	) -> DoublePriorityQueue {
-		let mut visited: HashSet<ElementId> = HashSet::with_capacity(candidates.len());
-		let mut w = DoublePriorityQueue::with_capacity(candidates.len());
-		for (&e_id, dist) in candidates.iter() {
-			visited.insert(e_id);
-			w.push((*dist).into(), e_id);
-		}
+		let w = candidates.clone();
+		let visited = w.to_set();
 		self.search_layer(q, candidates, visited, w, ef, l)
 	}
 
 	fn search_layer_single_ignore_ep(
 		&self,
-		q: &SharedVector,
-		ep: PriorityNode,
+		q: &HashedSharedVector,
+		ep_id: ElementId,
 		l: &UndirectedGraph,
-	) -> Option<(f64, u64)> {
-		let visited = HashSet::from([ep.doc()]);
-		let candidates = DoublePriorityQueue::from(ep);
+	) -> Option<(f64, ElementId)> {
+		let visited = HashSet::from([ep_id]);
+		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = candidates.clone();
 		let q = self.search_layer(q, candidates, visited, w, 1, l);
-		q.first()
+		q.peek_first()
 	}
 
 	fn search_layer_multi_ignore_ep(
 		&self,
-		q: &SharedVector,
-		ep: PriorityNode,
+		q: &HashedSharedVector,
+		ep_id: ElementId,
 		ef: usize,
 		l: &UndirectedGraph,
 	) -> DoublePriorityQueue {
-		let candidates = DoublePriorityQueue::from(ep);
-		let visited: HashSet<ElementId> = candidates.iter().map(|(&e_id, _)| e_id).collect();
-		let w = DoublePriorityQueue::with_capacity(ef);
+		let visited = HashSet::from([ep_id]);
+		let candidates = DoublePriorityQueue::from(0.0, ep_id);
+		let w = DoublePriorityQueue::default();
 		self.search_layer(q, candidates, visited, w, ef, l)
 	}
 
 	fn search_layer(
 		&self,
-		q: &SharedVector,
+		q: &HashedSharedVector,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
 		ef: usize,
 		l: &UndirectedGraph,
 	) -> DoublePriorityQueue {
-		let mut f_dist = w.last().map(|(e_dist, _)| e_dist).unwrap_or_else(|| unreachable!());
+		let mut f_dist = w.peek_last_dist().unwrap_or_else(|| unreachable!());
 		while let Some((dist, doc)) = candidates.pop_first() {
 			if dist > f_dist {
 				break;
@@ -497,10 +488,7 @@ impl Hnsw {
 								if w.len() > ef {
 									w.pop_last();
 								}
-								f_dist = w
-									.last()
-									.map(|(e_dist, _)| e_dist)
-									.unwrap_or_else(|| unreachable!());
+								f_dist = w.peek_last_dist().unwrap_or_else(|| unreachable!());
 							}
 						}
 					}
@@ -510,28 +498,28 @@ impl Hnsw {
 		w
 	}
 
-	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, u64)> {
+	fn knn_search(&self, q: &HashedSharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
 		#[cfg(debug_assertions)]
 		let expected_w_len = self.elements.len().min(k);
-		if let Some(ep_id) = self.enter_point {
-			let mut ep = self.get_pn(q, ep_id);
+		if let Some(mut ep_id) = self.enter_point {
+			let mut ep_dist = self.get_dist(q, ep_id);
 			let l = self.layers.len();
 			for lc in (1..l).rev() {
-				ep = self
-					.search_layer_single(q, ep, 1, &self.layers[lc])
-					.first()
+				(ep_dist, ep_id) = self
+					.search_layer_single(q, ep_dist, ep_id, 1, &self.layers[lc])
+					.peek_first()
 					.unwrap_or_else(|| unreachable!());
 			}
 			{
-				let w = self.search_layer_single(q, ep, efs, &self.layers[0]);
+				let w = self.search_layer_single(q, ep_dist, ep_id, efs, &self.layers[0]);
 				#[cfg(debug_assertions)]
 				if w.len() < expected_w_len {
 					debug!(
-						"0 search_layer - ep: {ep:?} - ef_search: {efs} - k: {k} - w.len: {} < {expected_w_len}",
+						"0 search_layer - ep_id: {ep_id:?} - ef_search: {efs} - k: {k} - w.len: {} < {expected_w_len}",
 						w.len()
 					);
 				}
-				w.into_iter().take(k).map(|(e_id, e_dist)| (e_dist.into(), e_id)).collect()
+				w.to_vec_limit(k)
 			}
 		} else {
 			vec![]
@@ -574,7 +562,7 @@ impl SelectNeighbors {
 		h: &Hnsw,
 		lc: &UndirectedGraph,
 		q_id: ElementId,
-		q_pt: &SharedVector,
+		q_pt: &HashedSharedVector,
 		c: DoublePriorityQueue,
 		m_max: usize,
 	) -> HashSet<ElementId> {
@@ -588,7 +576,7 @@ impl SelectNeighbors {
 	}
 
 	fn simple(w: DoublePriorityQueue, m_max: usize) -> HashSet<ElementId> {
-		w.into_iter().take(m_max).map(|(e_id, _)| e_id).collect()
+		w.to_set_limit(m_max)
 	}
 
 	fn heuristic(mut c: DoublePriorityQueue, m_max: usize) -> HashSet<ElementId> {
@@ -634,15 +622,15 @@ impl SelectNeighbors {
 		h: &Hnsw,
 		lc: &UndirectedGraph,
 		q_id: ElementId,
-		q_pt: &SharedVector,
+		q_pt: &HashedSharedVector,
 		c: &mut DoublePriorityQueue,
 		m_max: usize,
 	) {
-		let mut ex: HashSet<ElementId> = c.iter().map(|(&e_id, _)| e_id).collect();
+		let mut ex = c.to_set();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
-		for (e_id, _) in c.iter() {
+		for (_, e_id) in c.to_vec().into_iter() {
 			for &e_adj in
-				lc.get_edges(e_id).unwrap_or_else(|| unreachable!("Missing element {}", e_id))
+				lc.get_edges(&e_id).unwrap_or_else(|| unreachable!("Missing element {}", e_id))
 			{
 				if e_adj != q_id && ex.insert(e_adj) {
 					if let Some(pt) = h.elements.get(&e_adj) {
@@ -660,7 +648,7 @@ impl SelectNeighbors {
 		h: &Hnsw,
 		lc: &UndirectedGraph,
 		q_id: ElementId,
-		q_pt: &SharedVector,
+		q_pt: &HashedSharedVector,
 		mut c: DoublePriorityQueue,
 		m_max: usize,
 	) -> HashSet<ElementId> {
@@ -672,7 +660,7 @@ impl SelectNeighbors {
 		h: &Hnsw,
 		lc: &UndirectedGraph,
 		q_id: ElementId,
-		q_pt: &SharedVector,
+		q_pt: &HashedSharedVector,
 		mut c: DoublePriorityQueue,
 		m_max: usize,
 	) -> HashSet<ElementId> {
@@ -688,7 +676,7 @@ mod tests {
 	use crate::idx::trees::hnsw::{Hnsw, HnswIndex};
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
-	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::idx::trees::vector::{HashedSharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use roaring::RoaringTreemap;
 	use serial_test::serial;
@@ -697,11 +685,11 @@ mod tests {
 
 	fn insert_collection_hnsw(
 		h: &mut Hnsw,
-		collection: &TestCollection<SharedVector>,
-	) -> HashSet<SharedVector> {
+		collection: &TestCollection<HashedSharedVector>,
+	) -> HashSet<HashedSharedVector> {
 		let mut set = HashSet::new();
 		for (_, obj) in collection.as_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: HashedSharedVector = obj.clone().into();
 			h.insert(obj.clone());
 			set.insert(obj);
 			check_hnsw_properties(h, set.len());
@@ -709,7 +697,7 @@ mod tests {
 		}
 		set
 	}
-	fn find_collection_hnsw(h: &mut Hnsw, collection: &TestCollection<SharedVector>) {
+	fn find_collection_hnsw(h: &mut Hnsw, collection: &TestCollection<HashedSharedVector>) {
 		let max_knn = 20.min(collection.as_ref().len());
 		for (_, obj) in collection.as_ref() {
 			let obj = obj.clone().into();
@@ -751,7 +739,7 @@ mod tests {
 		}
 	}
 
-	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection<SharedVector>) {
+	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection<HashedSharedVector>) {
 		let mut h = Hnsw::new(p);
 		insert_collection_hnsw(&mut h, collection);
 		find_collection_hnsw(&mut h, &collection);
@@ -879,11 +867,11 @@ mod tests {
 
 	fn insert_collection_hnsw_index(
 		h: &mut HnswIndex,
-		collection: &TestCollection<SharedVector>,
-	) -> HashMap<SharedVector, HashSet<DocId>> {
-		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::new();
+		collection: &TestCollection<HashedSharedVector>,
+	) -> HashMap<HashedSharedVector, HashSet<DocId>> {
+		let mut map: HashMap<HashedSharedVector, HashSet<DocId>> = HashMap::new();
 		for (doc_id, obj) in collection.as_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: HashedSharedVector = obj.clone().into();
 			h.insert(obj.clone(), *doc_id);
 			match map.entry(obj) {
 				Entry::Occupied(mut e) => {
@@ -898,11 +886,14 @@ mod tests {
 		map
 	}
 
-	fn find_collection_hnsw_index(h: &mut HnswIndex, collection: &TestCollection<SharedVector>) {
+	fn find_collection_hnsw_index(
+		h: &mut HnswIndex,
+		collection: &TestCollection<HashedSharedVector>,
+	) {
 		let max_knn = 20.min(collection.as_ref().len());
 		for (doc_id, obj) in collection.as_ref() {
 			for knn in 1..max_knn {
-				let obj: SharedVector = obj.clone().into();
+				let obj: HashedSharedVector = obj.clone().into();
 				let res = h.search(&obj, knn, 500);
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
@@ -933,11 +924,11 @@ mod tests {
 
 	fn delete_hnsw_index_collection(
 		h: &mut HnswIndex,
-		collection: &TestCollection<SharedVector>,
-		mut map: HashMap<SharedVector, HashSet<DocId>>,
+		collection: &TestCollection<HashedSharedVector>,
+		mut map: HashMap<HashedSharedVector, HashSet<DocId>>,
 	) {
 		for (doc_id, obj) in collection.as_ref() {
-			let obj: SharedVector = obj.clone().into();
+			let obj: HashedSharedVector = obj.clone().into();
 			h.remove(obj.clone(), *doc_id);
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
@@ -1226,7 +1217,7 @@ mod tests {
 	fn test_recall() -> Result<(), Error> {
 		let (dim, vt, m) = (20, VectorType::F32, 24);
 		info!("Build data collection");
-		let collection: TestCollection<SharedVector> =
+		let collection: TestCollection<HashedSharedVector> =
 			TestCollection::NonUnique(new_vectors_from_file(
 				VectorType::F32,
 				"../tests/data/hnsw-random-9000-20-euclidean.gz",
@@ -1311,8 +1302,8 @@ mod tests {
 		// }
 	}
 
-	impl TestCollection<SharedVector> {
-		fn knn(&self, pt: &SharedVector, dist: Distance, n: usize) -> KnnResult {
+	impl TestCollection<HashedSharedVector> {
+		fn knn(&self, pt: &HashedSharedVector, dist: Distance, n: usize) -> KnnResult {
 			let mut b = KnnResultBuilder::new(n);
 			for (doc_id, doc_pt) in self.as_ref() {
 				let d = dist.calculate(doc_pt, pt);
@@ -1343,7 +1334,7 @@ mod tests {
 		}
 	}
 
-	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
+	fn new_i16_vec(x: isize, y: isize) -> HashedSharedVector {
 		let mut vec = Vector::new(VectorType::I16, 2);
 		vec.add(&x.into());
 		vec.add(&y.into());

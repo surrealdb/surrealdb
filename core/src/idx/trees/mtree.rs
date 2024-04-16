@@ -1,5 +1,4 @@
-use std::cmp::Reverse;
-use std::collections::hash_map::Entry;
+use std::collections::btree_map::Entry;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, BinaryHeap, HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
@@ -180,16 +179,17 @@ impl MTree {
 		let mut queue = BinaryHeap::new();
 		let mut res = KnnResultBuilder::new(k);
 		if let Some(root_id) = self.state.root {
-			queue.push(Reverse(PriorityNode::new(0.0, root_id)));
+			queue.push(PriorityNode::new(0.0, root_id));
 		}
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
-		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, current.0.doc()).await?;
+		while let Some(e) = queue.pop() {
+			let id = e.id();
+			let node = store.get_node(tx, id).await?;
 			#[cfg(debug_assertions)]
 			{
-				debug!("Visit node id: {} - dist: {}", current.0.doc(), current.0.dist());
-				if visited_nodes.insert(current.0.doc(), node.n.len()).is_some() {
+				debug!("Visit node id: {}", id);
+				if visited_nodes.insert(id, node.n.len()).is_some() {
 					return Err(Error::Unreachable("MTree::knn_search"));
 				}
 			}
@@ -214,7 +214,7 @@ impl MTree {
 						let min_dist = (d - p.radius).max(0.0);
 						if res.check_add(min_dist) {
 							debug!("Queue add - dist: {} - node: {}", min_dist, p.node);
-							queue.push(Reverse(PriorityNode::new(min_dist, p.node)));
+							queue.push(PriorityNode::new(min_dist, p.node));
 						}
 					}
 				}
@@ -1119,9 +1119,9 @@ struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
 pub(in crate::idx) type MTreeStore = TreeStore<MTreeNode>;
 type MStoredNode = StoredNode<MTreeNode>;
 
-type InternalMap = HashMap<SharedVector, RoutingProperties>;
+type InternalMap = BTreeMap<SharedVector, RoutingProperties>;
 
-type LeafMap = HashMap<SharedVector, ObjectProperties>;
+type LeafMap = BTreeMap<SharedVector, ObjectProperties>;
 
 #[derive(Debug, Clone)]
 /// A node in this tree structure holds entries.
@@ -1301,17 +1301,13 @@ impl TreeNode for MTreeNode {
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		match node_type {
 			1u8 => {
-				let objects: BTreeMap<Vector, ObjectProperties> = bincode::deserialize_from(c)?;
-				// TODO Replace
-				let objects: HashMap<SharedVector, ObjectProperties> =
-					objects.into_iter().map(|(v, o)| (v.into(), o)).collect();
+				let objects: BTreeMap<SharedVector, ObjectProperties> =
+					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Leaf(objects))
 			}
 			2u8 => {
-				let entries: BTreeMap<Vector, RoutingProperties> = bincode::deserialize_from(c)?;
-				// TODO Replace
-				let entries: HashMap<SharedVector, RoutingProperties> =
-					entries.into_iter().map(|(v, o)| (v.into(), o)).collect();
+				let entries: BTreeMap<SharedVector, RoutingProperties> =
+					bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Internal(entries))
 			}
 			_ => Err(Error::CorruptedIndex("MTreeNode::try_from_val")),
@@ -1408,7 +1404,7 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
-	use std::collections::{HashMap, HashSet, VecDeque};
+	use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 	use crate::err::Error;
 	use test_log::test;
@@ -1416,7 +1412,7 @@ mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::tests::{new_vec, TestCollection};
 	use crate::idx::trees::mtree::{
-		InternalMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
+		InternalMap, LeafMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::SharedVector;
@@ -1801,7 +1797,7 @@ mod tests {
 			let res = t.knn_search(&mut tx, &st, &vec4, 2).await?;
 			check_knn(&res.docs, vec![4, 3]);
 			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 6);
+			assert_eq!(res.visited_nodes.len(), 7);
 		}
 
 		// vec10 knn(2)
@@ -2199,7 +2195,7 @@ mod tests {
 	}
 
 	fn check_leaf_vec(
-		m: &HashMap<SharedVector, ObjectProperties>,
+		m: &BTreeMap<SharedVector, ObjectProperties>,
 		obj: &SharedVector,
 		parent_dist: f64,
 		docs: &[DocId],
@@ -2221,7 +2217,7 @@ mod tests {
 	) {
 		let p = m.get(center).unwrap();
 		assert_eq!(parent_dist, p.parent_dist);
-		assert_eq!(node_id, p.node);
+		assert_eq!(node_id, p.node, "{:?}", m);
 		assert_eq!(radius, p.radius);
 	}
 
@@ -2256,7 +2252,7 @@ mod tests {
 		node_id: NodeId,
 		check_func: F,
 	) where
-		F: FnOnce(&HashMap<SharedVector, ObjectProperties>),
+		F: FnOnce(&BTreeMap<SharedVector, ObjectProperties>),
 	{
 		check_node_read(tx, st, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
@@ -2274,7 +2270,7 @@ mod tests {
 		node_id: NodeId,
 		check_func: F,
 	) where
-		F: FnOnce(&HashMap<SharedVector, ObjectProperties>),
+		F: FnOnce(&LeafMap),
 	{
 		check_node_write(tx, st, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {

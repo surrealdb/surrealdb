@@ -5,7 +5,7 @@ use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
 use revision::revisioned;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -29,10 +29,18 @@ pub enum Vector {
 /// So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-/// This structures also caches the hashcode to avoid recomputing it.
+pub(crate) type SharedVector = Arc<Vector>;
+
+impl Borrow<Vector> for &SharedVector {
+	fn borrow(&self) -> &Vector {
+		self.as_ref()
+	}
+}
+
+/// This structures caches the hashcode to avoid recomputing it.
 #[derive(Debug, Clone)]
-pub struct SharedVector(Arc<Vector>, u64);
-impl From<Vector> for SharedVector {
+pub struct HashedSharedVector(Arc<Vector>, u64);
+impl From<Vector> for HashedSharedVector {
 	fn from(v: Vector) -> Self {
 		let mut h = DefaultHasher::new();
 		v.hash(&mut h);
@@ -40,33 +48,24 @@ impl From<Vector> for SharedVector {
 	}
 }
 
-impl Serialize for SharedVector {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		self.0.serialize(serializer)
-	}
-}
-
-impl Borrow<Vector> for &SharedVector {
+impl Borrow<Vector> for &HashedSharedVector {
 	fn borrow(&self) -> &Vector {
 		self.0.as_ref()
 	}
 }
 
-impl Hash for SharedVector {
+impl Hash for HashedSharedVector {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		state.write_u64(self.1);
 	}
 }
 
-impl PartialEq for SharedVector {
+impl PartialEq for HashedSharedVector {
 	fn eq(&self, other: &Self) -> bool {
 		self.1 == other.1 && self.0 == other.0
 	}
 }
-impl Eq for SharedVector {}
+impl Eq for HashedSharedVector {}
 
 impl Hash for Vector {
 	fn hash<H: Hasher>(&self, state: &mut H) {

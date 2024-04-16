@@ -99,7 +99,6 @@ js = { version = "0.5.1", package = "rquickjs", features = [
     "rust-alloc",
 ], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
-keyed_priority_queue = "0.4.2"
 lexicmp = "0.1.0"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
