@@ -152,6 +152,7 @@ keyword! {
 	Snowball => "SNOWBALL",
 	Split => "SPLIT",
 	Start => "START",
+	Structure => "STRUCTURE",
 	Table => "TABLE",
 	TermsCache => "TERMS_CACHE",
 	TermsOrder => "TERMS_ORDER",

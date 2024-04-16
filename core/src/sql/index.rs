@@ -5,7 +5,8 @@ use crate::fnc::util::math::vector::{
 };
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
-use crate::sql::Number;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Number, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -238,5 +239,11 @@ impl Display for Index {
 				Ok(())
 			}
 		}
+	}
+}
+
+impl InfoStructure for Index {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

@@ -1775,9 +1775,9 @@ dependencies = [
 
 [[package]]
 name = "echodb"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "312221c0bb46e82cd250c818404ef9dce769a4d5a62915c0249b577762eec34a"
+checksum = "1ac31e38aeac770dd01b9d6c9ab2a6d7f025815f71105911cf6de073a5db8ee1"
 dependencies = [
  "arc-swap",
  "imbl",
