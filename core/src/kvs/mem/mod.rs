@@ -345,7 +345,7 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.inner.scan(rng, limit)?;
+		let res = self.inner.scan(rng, limit as usize)?;
 		// Return result
 		Ok(res)
 	}
