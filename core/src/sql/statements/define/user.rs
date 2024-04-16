@@ -3,7 +3,6 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::rpc::rpc_context::InfoStructure;
 use crate::sql::Object;
 use crate::sql::{escape::quote_str, fmt::Fmt, Base, Ident, Strand, Value};
 use argon2::{
@@ -199,36 +198,5 @@ impl Display for DefineUserStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineUserStatement {
-	fn structure(self) -> Value {
-		let Self {
-			name,
-			base,
-			code,
-			roles,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.0.into());
-
-		acc.insert("base".to_string(), format!("{base}").into());
-
-		acc.insert("code".to_string(), code.into());
-
-		acc.insert(
-			"roles".to_string(),
-			Value::Array(roles.into_iter().map(|r| r.0.into()).collect()),
-		);
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
 	}
 }

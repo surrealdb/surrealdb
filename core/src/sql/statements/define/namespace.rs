@@ -3,7 +3,6 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::rpc::rpc_context::InfoStructure;
 use crate::sql::{Base, Ident, Object, Strand, Value};
 use derive::Store;
 use revision::revisioned;
@@ -79,23 +78,5 @@ impl Display for DefineNamespaceStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-impl InfoStructure for DefineNamespaceStatement {
-	fn structure(self) -> Value {
-		let Self {
-			name,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.0.into());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
 	}
 }

@@ -3,7 +3,6 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::rpc::rpc_context::InfoStructure;
 use crate::sql::{Base, Ident, Object, Strand, Value, Values};
 use derive::Store;
 use revision::revisioned;
@@ -79,33 +78,5 @@ impl Display for DefineEventStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineEventStatement {
-	fn structure(self) -> Value {
-		let Self {
-			name,
-			what,
-			when,
-			then,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.0.into());
-
-		acc.insert("what".to_string(), what.0.into());
-
-		acc.insert("when".to_string(), when);
-
-		acc.insert("then".to_string(), then.0.into());
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		Value::Object(acc)
 	}
 }

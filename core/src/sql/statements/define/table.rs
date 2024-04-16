@@ -11,7 +11,6 @@ use crate::sql::{
 };
 use std::sync::Arc;
 
-use crate::rpc::rpc_context::InfoStructure;
 use crate::sql::{Idiom, Kind, Part, Table, TableType};
 use derive::Store;
 use revision::revisioned;
@@ -210,45 +209,5 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineTableStatement {
-	fn structure(self) -> Value {
-		let Self {
-			name,
-			drop,
-			full,
-			view,
-			permissions,
-			changefeed,
-			comment,
-			kind,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.0.into());
-
-		acc.insert("drop".to_string(), drop.into());
-		acc.insert("full".to_string(), full.into());
-
-		if let Some(view) = view {
-			acc.insert("view".to_string(), format!("{view}").into());
-		}
-
-		acc.insert("permissions".to_string(), permissions.structure());
-
-		if let Some(changefeed) = changefeed {
-			acc.insert("changefeed".to_string(), format!("{changefeed}").into());
-		}
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), comment.into());
-		}
-
-		acc.insert("kind".to_string(), format!("{kind}").into());
-
-		Value::Object(acc)
 	}
 }

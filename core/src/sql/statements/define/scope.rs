@@ -3,7 +3,6 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::rpc::rpc_context::InfoStructure;
 use crate::sql::{Base, Duration, Ident, Object, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
@@ -92,33 +91,5 @@ impl Display for DefineScopeStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
-	}
-}
-impl InfoStructure for DefineScopeStatement {
-	fn structure(self) -> Value {
-		let Self {
-			name,
-			signup,
-			signin,
-			comment,
-			..
-		} = self;
-		let mut acc = Object::default();
-
-		acc.insert("name".to_string(), name.0.into());
-
-		if let Some(signup) = signup {
-			acc.insert("signup".to_string(), format!("{signup}").into());
-		}
-
-		if let Some(signin) = signin {
-			acc.insert("signin".to_string(), format!("{signin}").into());
-		}
-
-		if let Some(comment) = comment {
-			acc.insert("comment".to_string(), format!("{comment}").into());
-		}
-
-		Value::Object(acc)
 	}
 }

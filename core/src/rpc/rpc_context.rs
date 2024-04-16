@@ -69,9 +69,6 @@ pub trait RpcContext {
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
 			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
-			Method::_InfoStructure => {
-				self.info_structure(params).await.map(Into::into).map_err(Into::into)
-			}
 			Method::_Validate => self.validate(params).await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
@@ -531,135 +528,6 @@ pub trait RpcContext {
 	// Private utility methods
 	// ------------------------------
 
-	async fn info_structure(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
-		let Ok((Value::Strand(Strand(t)), extra)) = params.needs_one_or_two() else {
-			return Err(RpcError::InvalidParams);
-		};
-		let info_type = InfoType::parse(t, extra)?;
-		let mut tx = self.kvs().transaction(Read, Optimistic).await?;
-		let ns = self.session().ns.clone();
-		let db = self.session().db.clone();
-
-		// TODO(raphaeldarley): fix is_allowed
-		let out = match &info_type {
-			InfoType::Root => {
-				// Allowed to run?
-				// opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
-				// Create the result set
-				let mut res = Object::default();
-				// Process the namespaces
-				res.insert("namespaces".to_owned(), process_arr(tx.all_ns().await?));
-				// Process the users
-				res.insert("users".to_owned(), process_arr(tx.all_root_users().await?));
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoType::Ns => {
-				// Allowed to run?
-				// opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
-				// get ns
-				let Some(ns) = ns else {
-					return Err(RpcError::InvalidParams);
-				};
-				// Create the result set
-				let mut res = Object::default();
-				// Process the databases
-				res.insert("databases".to_owned(), process_arr(tx.all_db(&ns).await?));
-				// Process the users
-				res.insert("users".to_owned(), process_arr(tx.all_ns_users(&ns).await?));
-				// Process the tokens
-				res.insert("tokens".to_owned(), process_arr(tx.all_ns_tokens(&ns).await?));
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoType::Db => {
-				// Allowed to run?
-				// opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// get ns and db
-				let Some(ns) = ns else {
-					return Err(RpcError::InvalidParams);
-				};
-				let Some(db) = db else {
-					return Err(RpcError::InvalidParams);
-				};
-				// Create the result set
-				let mut res = Object::default();
-				// Process the users
-				res.insert("users".to_owned(), process_arr(tx.all_db_users(&ns, &db).await?));
-				// Process the tokens
-				res.insert("tokens".to_owned(), process_arr(tx.all_db_tokens(&ns, &db).await?));
-				// Process the functions
-				res.insert(
-					"functions".to_owned(),
-					process_arr(tx.all_db_functions(&ns, &db).await?),
-				);
-				// Process the models
-				res.insert("models".to_owned(), process_arr(tx.all_db_models(&ns, &db).await?));
-				// Process the params
-				res.insert("params".to_owned(), process_arr(tx.all_db_params(&ns, &db).await?));
-				// Process the scopes
-				res.insert("scopes".to_owned(), process_arr(tx.all_sc(&ns, &db).await?));
-				// Process the tables
-				res.insert("tables".to_owned(), process_arr(tx.all_tb(&ns, &db).await?));
-				// Process the analyzers
-				res.insert(
-					"analyzers".to_owned(),
-					process_arr(tx.all_db_analyzers(&ns, &db).await?),
-				);
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoType::Sc(sc) => {
-				// Allowed to run?
-				// opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// get ns and db
-				let Some(ns) = ns else {
-					return Err(RpcError::InvalidParams);
-				};
-				let Some(db) = db else {
-					return Err(RpcError::InvalidParams);
-				};
-				// Create the result set
-				let mut res = Object::default();
-				// Process the tokens
-				res.insert("tokens".to_owned(), process_arr(tx.all_sc_tokens(&ns, &db, sc).await?));
-				// Ok all good
-				Value::from(res).ok()
-			}
-			InfoType::Tb(tb) => {
-				// Allowed to run?
-				// opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
-				// get ns and db
-				let Some(ns) = ns else {
-					return Err(RpcError::InvalidParams);
-				};
-				let Some(db) = db else {
-					return Err(RpcError::InvalidParams);
-				};
-				// Create the result set
-				let mut res = Object::default();
-				// Process the events
-				res.insert("events".to_owned(), process_arr(tx.all_tb_events(&ns, &db, tb).await?));
-				// Process the fields
-				res.insert("fields".to_owned(), process_arr(tx.all_tb_fields(&ns, &db, tb).await?));
-				// Process the tables
-				res.insert("tables".to_owned(), process_arr(tx.all_tb_views(&ns, &db, tb).await?));
-				// Process the indexes
-				res.insert(
-					"indexes".to_owned(),
-					process_arr(tx.all_tb_indexes(&ns, &db, tb).await?),
-				);
-				// Process the live queries
-				res.insert("lives".to_owned(), process_arr(tx.all_tb_lives(&ns, &db, tb).await?));
-				// Ok all good
-				Value::from(res).ok()
-			}
-		};
-
-		// let out: Result<Value, RpcError> = Err(RpcError::MethodNotFound);
-		out.map_err(Into::into)
-	}
-
 	async fn validate(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
 		let Ok(Value::Strand(Strand(query))) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
@@ -712,43 +580,4 @@ pub trait RpcContext {
 			_ => {}
 		}
 	}
-}
-
-enum InfoType {
-	Root,
-	Ns,
-	Db,
-	Sc(Ident),
-	Tb(Ident),
-}
-
-impl InfoType {
-	fn parse(text: impl AsRef<str>, extra: Value) -> Result<InfoType, RpcError> {
-		match (text.as_ref(), extra) {
-			("root", Value::None) => Ok(InfoType::Root),
-			("ns", Value::None) => Ok(InfoType::Ns),
-			("namespace", Value::None) => Ok(InfoType::Ns),
-			("db", Value::None) => Ok(InfoType::Db),
-			("database", Value::None) => Ok(InfoType::Db),
-			("sc", Value::Strand(sc)) => Ok(InfoType::Sc(Ident(sc.0))),
-			("scope", Value::Strand(sc)) => Ok(InfoType::Sc(Ident(sc.0))),
-			("tb", Value::Strand(tb)) => Ok(InfoType::Tb(Ident(tb.0))),
-			("table", Value::Strand(tb)) => Ok(InfoType::Tb(Ident(tb.0))),
-			_ => Err(RpcError::InvalidParams),
-		}
-	}
-}
-
-use crate::sql::{Ident, Object};
-use std::sync::Arc;
-
-pub(crate) trait InfoStructure {
-	fn structure(self) -> Value;
-}
-
-fn process_arr<T>(a: Arc<[T]>) -> Value
-where
-	T: InfoStructure + Clone,
-{
-	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
 }

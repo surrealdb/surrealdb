@@ -23,7 +23,6 @@ pub enum Method {
 	Query,
 	Relate,
 	Run,
-	_InfoStructure,
 	_Validate,
 }
 
@@ -55,7 +54,6 @@ impl Method {
 			"query" => Self::Query,
 			"relate" => Self::Relate,
 			"run" => Self::Run,
-			"_info_structure" => Self::_InfoStructure,
 			"_validate" => Self::_Validate,
 			_ => Self::Unknown,
 		}
@@ -88,7 +86,6 @@ impl Method {
 			Self::Query => "query",
 			Self::Relate => "relate",
 			Self::Run => "run",
-			Self::_InfoStructure => "_info_structure",
 			Self::_Validate => "_validate",
 		}
 	}
