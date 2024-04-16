@@ -1,17 +1,20 @@
 #![cfg(feature = "kv-mem")]
 
 use crate::err::Error;
-#[cfg(debug_assertions)]
-use crate::key::debug::sprint_key;
+use crate::key::error::KeyCategory;
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
+
 use std::ops::Range;
+use surrealkv::Options;
+use surrealkv::Store;
+use surrealkv::Transaction as Tx;
 
 #[non_exhaustive]
 pub struct Datastore {
-	db: echodb::Db<Key, Val>,
+	db: Store,
 }
 
 #[non_exhaustive]
@@ -23,7 +26,7 @@ pub struct Transaction {
 	/// Should we check unhandled transactions?
 	check: Check,
 	/// The underlying datastore transaction
-	inner: echodb::Tx<Key, Val>,
+	inner: Tx,
 }
 
 impl Drop for Transaction {
@@ -59,9 +62,15 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new() -> Result<Datastore, Error> {
-		Ok(Datastore {
-			db: echodb::db::new(),
-		})
+		let mut opts = Options::new();
+		opts.disk_persistence = false;
+
+		match Store::new(opts) {
+			Ok(db) => Ok(Datastore {
+				db,
+			}),
+			Err(e) => Err(Error::Ds(e.to_string())),
+		}
 	}
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
@@ -71,7 +80,7 @@ impl Datastore {
 		#[cfg(debug_assertions)]
 		let check = Check::Panic;
 		// Create a new transaction
-		match self.db.begin(write).await {
+		match self.db.begin() {
 			Ok(inner) => Ok(Transaction {
 				done: false,
 				check,
@@ -84,119 +93,129 @@ impl Datastore {
 }
 
 impl Transaction {
-	/// Behaviour if unclosed
-	pub(crate) fn check_level(&mut self, check: Check) {
+	/// Sets the behavior of the transaction if it's not closed.
+	pub(crate) fn set_check_level(&mut self, check: Check) {
 		self.check = check;
 	}
-	/// Check if closed
-	pub(crate) fn closed(&self) -> bool {
+
+	/// Checks if the transaction is closed.
+	pub(crate) fn is_closed(&self) -> bool {
 		self.done
 	}
-	/// Cancel a transaction
-	pub(crate) fn cancel(&mut self) -> Result<(), Error> {
-		// Check to see if transaction is closed
-		if self.done {
+
+	/// Cancels the transaction.
+	pub(crate) async fn cancel(&mut self) -> Result<(), Error> {
+		// If the transaction is already closed, return an error.
+		if self.is_closed() {
 			return Err(Error::TxFinished);
 		}
-		// Mark this transaction as done
+
+		// Mark the transaction as done.
 		self.done = true;
-		// Cancel this transaction
-		self.inner.cancel()?;
-		// Continue
+
+		// Rollback the transaction.
+		self.inner.rollback();
+
 		Ok(())
 	}
-	/// Commit a transaction
-	pub(crate) fn commit(&mut self) -> Result<(), Error> {
-		// Check to see if transaction is closed
-		if self.done {
+
+	/// Commits the transaction.
+	pub(crate) async fn commit(&mut self) -> Result<(), Error> {
+		// If the transaction is already closed or is read-only, return an error.
+		if self.is_closed() {
 			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
+		} else if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Mark this transaction as done
+
+		// Mark the transaction as done.
 		self.done = true;
-		// Cancel this transaction
-		self.inner.commit()?;
-		// Continue
-		Ok(())
+
+		// Commit the transaction.
+		self.inner.commit().await.map_err(Into::into)
 	}
-	/// Check if a key exists
-	pub(crate) fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+
+	/// Checks if a key exists in the database.
+	pub(crate) async fn exists<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
 	{
-		// Check to see if transaction is closed
-		if self.done {
+		// If the transaction is already closed, return an error.
+		if self.is_closed() {
 			return Err(Error::TxFinished);
 		}
-		// Check the key
-		let res = self.inner.exi(key.into())?;
-		// Return result
-		Ok(res)
+
+		// Check if the key exists in the database.
+		self.inner
+			.get(key.into().as_slice())
+			.map(|opt| opt.is_some())
+			.map_err(|e| Error::Tx(format!("Unable to get kv from SurrealKV: {}", e)))
 	}
-	/// Fetch a key from the database
-	pub(crate) fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+
+	/// Fetches a value from the database by key.
+	pub(crate) async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
 	{
-		// Check to see if transaction is closed
-		if self.done {
+		// If the transaction is already closed, return an error.
+		if self.is_closed() {
 			return Err(Error::TxFinished);
 		}
-		// Get the key
-		let res = self.inner.get(key.into())?;
-		// Return result
+
+		// Fetch the value from the database.
+		let res = self.inner.get(key.into().as_slice())?;
+
 		Ok(res)
 	}
-	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is committed.
-	/// NOTE: This should be called when composing the change feed entries for this transaction,
+
+	/// Obtains a new change timestamp for a key.
+	/// This timestamp is replaced with the current timestamp when the transaction is committed.
+	/// This method should be called when composing the change feed entries for this transaction,
 	/// which should be done immediately before the transaction commit.
-	/// That is to keep other transactions commit delay(pessimistic) or conflict(optimistic) as less as possible.
+	/// This is to minimize the delay or conflict of other transactions.
 	#[allow(unused)]
-	pub(crate) fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
+	pub(crate) async fn get_timestamp<K>(&mut self, key: K) -> Result<Versionstamp, Error>
 	where
 		K: Into<Key>,
 	{
-		// Check to see if transaction is closed
-		if self.done {
+		// If the transaction is already closed, return an error.
+		if self.is_closed() {
 			return Err(Error::TxFinished);
 		}
-		// Write the timestamp to the "last-write-timestamp" key
-		// to ensure that no other transactions can commit with older timestamps.
-		let k: Key = key.into();
-		let prev = self.inner.get(k.clone())?;
+
+		// Convert the key into a vector.
+		let key_vec = key.into();
+		let k = key_vec.as_slice();
+
+		// Get the previous value of the key.
+		let prev = self.inner.get(k)?;
+
+		// Calculate the new version.
 		let ver = match prev {
 			Some(prev) => {
 				let slice = prev.as_slice();
 				let res: Result<[u8; 10], Error> = match slice.try_into() {
-					Ok(ba) => {
-						#[cfg(debug_assertions)]
-						trace!(
-							"Previous timestamp for key {} is {}",
-							sprint_key(&k),
-							sprint_key(&ba)
-						);
-						Ok(ba)
-					}
+					Ok(ba) => Ok(ba),
 					Err(e) => Err(Error::Ds(e.to_string())),
 				};
 				let array = res?;
-				let prev = try_to_u64_be(array)?;
+				let prev: u64 = try_to_u64_be(array)?;
 				prev + 1
 			}
 			None => 1,
 		};
 
+		// Convert the version to a versionstamp.
 		let verbytes = u64_to_versionstamp(ver);
 
-		self.inner.set(k, verbytes.to_vec())?;
-		// Return the uint64 representation of the timestamp as the result
+		// Set the new versionstamp.
+		self.inner.set(k, verbytes.as_slice())?;
+
+		// Return the versionstamp.
 		Ok(verbytes)
 	}
-	/// Obtain a new key that is suffixed with the change timestamp
+
+	/// Obtains a new key that is suffixed with the change timestamp.
 	pub(crate) async fn get_versionstamped_key<K>(
 		&mut self,
 		ts_key: K,
@@ -206,147 +225,174 @@ impl Transaction {
 	where
 		K: Into<Key>,
 	{
-		// Check to see if transaction is closed
-		if self.done {
+		// If the transaction is already closed or is read-only, return an error.
+		if self.is_closed() {
 			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
+		} else if !self.write {
 			return Err(Error::TxReadonly);
 		}
 
-		let ts_key: Key = ts_key.into();
-		#[cfg(debug_assertions)]
-		let dbg_ts = sprint_key(&ts_key);
-		let prefix: Key = prefix.into();
-		#[cfg(debug_assertions)]
-		let dbg_prefix = sprint_key(&prefix);
-		let mut suffix: Key = suffix.into();
-		#[cfg(debug_assertions)]
-		let dbg_suffix = sprint_key(&suffix);
+		// Get the timestamp.
+		let ts = self.get_timestamp(ts_key).await?;
 
-		let ts = self.get_timestamp(ts_key)?;
-		let mut k: Vec<u8> = prefix;
+		// Create the new key.
+		let mut k: Vec<u8> = prefix.into();
 		k.append(&mut ts.to_vec());
-		k.append(&mut suffix);
+		k.append(&mut suffix.into());
 
-		#[cfg(debug_assertions)]
-		trace!("get_versionstamped_key; prefix={dbg_prefix} ts={dbg_ts} suff={dbg_suffix}");
-
+		// Return the new key.
 		Ok(k)
 	}
 
-	/// Insert or update a key in the database
-	pub(crate) fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	/// Inserts or updates a key in the database.
+	pub(crate) async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
-		// Check to see if transaction is closed
-		if self.done {
+		// If the transaction is already closed or is read-only, return an error.
+		if self.is_closed() {
 			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
+		} else if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		self.inner.set(key.into(), val.into())?;
-		// Return result
-		Ok(())
+
+		// Set the key.
+		self.inner.set(key.into().as_slice(), &val.into()).map_err(Into::into)
 	}
-	/// Insert a key if it doesn't exist in the database
-	pub(crate) fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+
+	/// Inserts a key-value pair into the database if the key doesn't already exist.
+	pub(crate) async fn put<K, V>(
+		&mut self,
+		category: KeyCategory,
+		key: K,
+		val: V,
+	) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
-		// Check to see if transaction is closed
+		// Ensure the transaction is open and writable.
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Check to see if transaction is writable
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		self.inner.put(key.into(), val.into())?;
-		// Return result
-		Ok(())
+
+		// Check if the key already exists.
+		let key: Vec<u8> = key.into();
+		if self.exists(key.clone().as_slice()).await? {
+			return Err(Error::TxKeyAlreadyExistsCategory(category));
+		}
+
+		// Insert the key-value pair.
+		self.inner.set(&key, &val.into()).map_err(Into::into)
 	}
-	/// Insert a key if it doesn't exist in the database
-	pub(crate) fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+
+	/// Inserts a key-value pair into the database if the key doesn't already exist,
+	/// or if the existing value matches the provided check value.
+	pub(crate) async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
-		// Check to see if transaction is closed
+		// Ensure the transaction is open and writable.
 		if self.done {
 			return Err(Error::TxFinished);
 		}
-		// Check to see if transaction is writable
 		if !self.write {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		self.inner.putc(key.into(), val.into(), chk.map(Into::into))?;
-		// Return result
-		Ok(())
-	}
-	/// Delete a key
-	pub(crate) fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		// Remove the key
-		self.inner.del(key.into())?;
-		// Return result
-		Ok(())
-	}
-	/// Delete a key
-	pub(crate) fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		// Remove the key
-		self.inner.delc(key.into(), chk.map(Into::into))?;
-		// Return result
-		Ok(())
-	}
-	/// Retrieve a range of keys from the databases
-	pub(crate) fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+
+		// Convert the check value.
+		let chk = chk.map(Into::into);
+
+		// Insert the key-value pair if the key doesn't exist or the existing value matches the check value.
+		let key_slice = key.into();
+		let val_vec = val.into();
+		let res = self.inner.get(key_slice.as_slice())?;
+
+		match (res, chk) {
+			(Some(v), Some(w)) if v == w => self.inner.set(key_slice.as_slice(), &val_vec)?,
+			(None, None) => self.inner.set(key_slice.as_slice(), &val_vec)?,
+			_ => return Err(Error::TxConditionNotMet),
 		};
-		// Scan the keys
-		let res = self.inner.scan(rng, limit as usize)?;
-		// Return result
+
+		Ok(())
+	}
+
+	/// Deletes a key from the database.
+	pub(crate) async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Ensure the transaction is open and writable.
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+
+		// Delete the key.
+		let key_slice = key.into();
+		self.inner.delete(key_slice.as_slice()).map_err(Into::into)
+	}
+
+	/// Deletes a key from the database if the existing value matches the provided check value.
+	pub(crate) async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		// Ensure the transaction is open and writable.
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+		if !self.write {
+			return Err(Error::TxReadonly);
+		}
+
+		// Convert the check value.
+		let chk: Option<Val> = chk.map(Into::into);
+
+		// Delete the key if the existing value matches the check value.
+		let key_slice = key.into();
+		let res = self.inner.get(key_slice.as_slice())?;
+
+		match (res, chk) {
+			(Some(v), Some(w)) if v == w => self.inner.delete(key_slice.as_slice())?,
+			(None, None) => self.inner.delete(key_slice.as_slice())?,
+			_ => return Err(Error::TxConditionNotMet),
+		};
+
+		Ok(())
+	}
+
+	/// Retrieves a range of key-value pairs from the database.
+	pub(crate) async fn scan<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key>,
+	{
+		// Ensure the transaction is open.
+		if self.done {
+			return Err(Error::TxFinished);
+		}
+
+		// Convert the range to byte slices.
+		let start_range = rng.start.into();
+		let end_range = rng.end.into();
+
+		// Retrieve the key-value pairs.
+		let res =
+			self.inner.scan(start_range.as_slice()..end_range.as_slice(), Some(limit as usize))?;
+		let res = res.into_iter().map(|kv| (Key::from(kv.0), kv.1)).collect();
+
 		Ok(res)
 	}
 }

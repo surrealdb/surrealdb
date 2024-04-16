@@ -967,15 +967,9 @@ impl From<regex::Error> for Error {
 }
 
 #[cfg(feature = "kv-mem")]
-impl From<echodb::err::Error> for Error {
-	fn from(e: echodb::err::Error) -> Error {
-		match e {
-			echodb::err::Error::KeyAlreadyExists => {
-				Error::TxKeyAlreadyExistsCategory(crate::key::error::KeyCategory::Unknown)
-			}
-			echodb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
-		}
+impl From<surrealkv::Error> for Error {
+	fn from(e: surrealkv::Error) -> Error {
+		Error::Tx(e.to_string())
 	}
 }
 

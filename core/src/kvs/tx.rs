@@ -206,7 +206,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.closed(),
+			} => v.is_closed(),
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -253,7 +253,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.cancel(),
+			} => v.cancel().await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -300,7 +300,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.commit(),
+			} => v.commit().await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -375,7 +375,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.del(key),
+			} => v.del(key).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -424,7 +424,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.exi(key),
+			} => v.exists(key).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -474,7 +474,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.get(key),
+			} => v.get(key).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -525,7 +525,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.set(key, val),
+			} => v.set(key, val).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -580,7 +580,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.get_timestamp(key),
+			} => v.get_timestamp(key).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -669,7 +669,7 @@ impl Transaction {
 				..
 			} => {
 				let k = v.get_versionstamped_key(ts_key, prefix, suffix).await?;
-				v.set(k, val)
+				v.set(k, val).await
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
@@ -733,7 +733,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.put(key, val),
+			} => v.put(category, key, val).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -788,7 +788,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.scan(rng, limit),
+			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -844,7 +844,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.scan(range, batch_limit),
+			} => v.scan(range, batch_limit).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -917,7 +917,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.putc(key, val, chk),
+			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -968,7 +968,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(v),
 				..
-			} => v.delc(key, chk),
+			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
@@ -2975,7 +2975,7 @@ impl Transaction {
 			Transaction {
 				inner: Inner::Mem(ref mut v),
 				..
-			} => v.check_level(check),
+			} => v.set_check_level(check),
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(ref mut v),
