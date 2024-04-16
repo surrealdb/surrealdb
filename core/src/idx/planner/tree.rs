@@ -33,7 +33,7 @@ impl Tree {
 	) -> Result<Option<Self>, Error> {
 		let mut b = TreeBuilder::new(ctx, opt, txn, table, with);
 		if let Some(cond) = cond {
-			let root = b.eval_value(stk,0, &cond.0).await?;
+			let root = b.eval_value(stk, 0, &cond.0).await?;
 			Ok(Some(Self {
 				root,
 				index_map: b.index_map,
@@ -106,7 +106,12 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	/// Was marked recursive
-	async fn eval_value(&mut self, stk: &mut Stk, group: GroupRef, v: &Value) -> Result<Node, Error> {
+	async fn eval_value(
+		&mut self,
+		stk: &mut Stk,
+		group: GroupRef,
+		v: &Value,
+	) -> Result<Node, Error> {
 		match v {
 			Value::Expression(e) => self.eval_expression(stk, group, e).await,
 			Value::Idiom(i) => self.eval_idiom(stk, group, i).await,
@@ -137,7 +142,12 @@ impl<'a> TreeBuilder<'a> {
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
 
-	async fn eval_idiom(&mut self, stk: &mut Stk, group: GroupRef, i: &Idiom) -> Result<Node, Error> {
+	async fn eval_idiom(
+		&mut self,
+		stk: &mut Stk,
+		group: GroupRef,
+		i: &Idiom,
+	) -> Result<Node, Error> {
 		// Check if the idiom has already been resolved
 		if let Some(i) = self.resolved_idioms.get(i) {
 			if let Some(Some(irs)) = self.idioms_indexes.get(i).cloned() {
@@ -192,7 +202,12 @@ impl<'a> TreeBuilder<'a> {
 		res
 	}
 
-	async fn eval_expression(&mut self, stk: &mut Stk, group: GroupRef, e: &Expression) -> Result<Node, Error> {
+	async fn eval_expression(
+		&mut self,
+		stk: &mut Stk,
+		group: GroupRef,
+		e: &Expression,
+	) -> Result<Node, Error> {
 		match e {
 			Expression::Unary {
 				..
