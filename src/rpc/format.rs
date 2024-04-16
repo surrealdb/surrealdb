@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use crate::net::headers::{Accept, ContentType};
 use crate::rpc::failure::Failure;
 use crate::rpc::response::Response;
@@ -8,12 +6,9 @@ use axum::response::IntoResponse;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::StatusCode;
-use revision::Revisioned;
-use serde::de::DeserializeOwned;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
 use surrealdb::rpc::RpcError;
-use surrealdb::sql;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
