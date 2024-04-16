@@ -1,8 +1,8 @@
-# This workflow triggers nightly releases
+# This workflow triggers next releases
 
-name: Nightly release
+name: Next release
 
-run-name: "Nightly release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
+run-name: "Next release '${{ inputs.git-ref || github.ref_name }}' (publish: ${{ inputs.publish || github.event_name == 'schedule' }})"
 
 on:
   workflow_dispatch:
@@ -10,13 +10,13 @@ on:
       git-ref:
         required: true
         type: string
-        description: "The github ref of this nightly version (i.e. main, 1234567)"
-        default: 1.x
+        description: "The github ref of this next version (i.e. main, 1234567)"
+        default: next
       publish:
         required: false
         type: boolean
         default: false
-        description: "Publish the nightly release"
+        description: "Publish the next release"
   schedule:
     - cron: '0 0 * * *'
 
@@ -29,10 +29,10 @@ permissions:
 
 jobs:
   release:
-    name: Prepare nightly release
+    name: Prepare next release
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
-      environment: nightly
+      environment: next
       extra-features: storage-surrealkv
       git-ref: ${{ inputs.git-ref || github.ref_name }}
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
