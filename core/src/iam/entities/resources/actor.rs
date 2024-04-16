@@ -10,12 +10,12 @@ use super::{Level, Resource, ResourceKind};
 use crate::iam::Role;
 use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
 
+#[revisioned(revision = 1)]
 //
 // User
 //
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct Actor {
 	res: Resource,

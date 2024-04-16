@@ -5,11 +5,11 @@ use crate::sql::Value;
 use revision::revisioned;
 use serde::Serialize;
 
+#[revisioned(revision = 1)]
 /// The data returned by the database
 // The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`
 // In future, they will possibly be merged to avoid having to keep them in sync.
 #[derive(Debug, Serialize)]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Data {
 	/// Generally methods return a `sql::Value`
