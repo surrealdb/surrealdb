@@ -36,6 +36,8 @@ impl LiveQueryTracker {
 		lq_index_key: &LqEntry,
 		live_query_vs: Versionstamp,
 	) -> Result<(), &'static str> {
+		#[cfg(debug_assertions)]
+		info!("Registering live query {}", lq_index_key.stm.id);
 		// See if we are already tracking the query
 		let k = lq_index_key.as_key();
 		if self.local_live_queries.contains_key(&k) {
@@ -65,6 +67,8 @@ impl LiveQueryTracker {
 	}
 
 	pub(crate) fn unregister_live_query(&mut self, kill_entry: &KillEntry) {
+		#[cfg(debug_assertions)]
+		info!("Unregistering live query {}", kill_entry.live_id);
 		// Because the information available from a kill statement is limited, we need to find a relevant kill query
 
 		let found: Option<(LqIndexKey, LqIndexValue)> = self
@@ -86,19 +90,15 @@ impl LiveQueryTracker {
 		match found {
 			None => {
 				// TODO(SUR-336): Make Live Query ID validation available at statement level, perhaps via transaction
-				trace!(
+				info!(
 					"Could not find live query {:?} to kill in ns/db pair {:?} / {:?}",
-					&kill_entry,
-					&kill_entry.ns,
-					&kill_entry.db
+					&kill_entry, &kill_entry.ns, &kill_entry.db
 				);
 			}
 			Some(found) => {
-				trace!(
+				info!(
 					"Killed live query {:?} with found key {:?} and found value {:?}",
-					&kill_entry,
-					&found.0,
-					&found.1
+					&kill_entry, &found.0, &found.1
 				);
 				self.local_live_queries.remove(&found.0);
 				// TODO remove the watermarks
@@ -112,6 +112,8 @@ impl LiveQueryTracker {
 		live_query: &LqIndexKey,
 		watermark: &Versionstamp,
 	) -> Result<(), &'static str> {
+		#[cfg(debug_assertions)]
+		info!("Updating watermark for live query {} to {:?}", live_query.lq, watermark);
 		let lq_data = self.local_live_queries.get_mut(live_query).ok_or("Live query not found")?;
 		let current_lq_vs = conv::to_u128_be(lq_data.vs);
 		let proposed_vs = conv::to_u128_be(*watermark);

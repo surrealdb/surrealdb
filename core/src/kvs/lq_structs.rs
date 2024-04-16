@@ -70,7 +70,7 @@ pub(crate) struct LqSelector {
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Debug)]
 pub(crate) struct LqIndexKey {
 	pub(crate) selector: LqSelector,
-	lq: Uuid,
+	pub(crate) lq: Uuid,
 }
 
 /// Internal only struct

@@ -952,7 +952,7 @@ impl Datastore {
 		let mut relevant_changesets: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
 		{
 			let tx = self.transaction(Read, Optimistic).await?;
-			let tracked_cfs_updates = find_required_cfs_to_catch_up(
+			populate_relevant_changesets(
 				tx,
 				self.lq_cf_store.clone(),
 				self.engine_options.live_query_catchup_size,
@@ -1078,21 +1078,17 @@ impl Datastore {
 							trace!("Ended notification sending")
 						}
 						// Progress the live query watermark
-						self.lq_cf_store
-							.write()
-							.await
-							.update_watermark_live_query(lq_key, &change_vs)
-							.unwrap();
 					}
 				}
 			}
+			self.lq_cf_store.write().await.update_watermark_live_query(lq_key, &change_vs).unwrap();
 		}
 		Ok(())
 	}
 
 	/// Add and kill live queries being track on the datastore
 	/// These get polled by the change feed tick
-	pub(crate) async fn adapt_tracked_live_queries(
+	pub(crate) async fn handle_postprocessing_of_statements(
 		&self,
 		lqs: &Vec<TrackedResult>,
 	) -> Result<(), Error> {
@@ -1387,7 +1383,7 @@ impl Datastore {
 		match res {
 			Ok((responses, lives)) => {
 				// Register live queries
-				self.adapt_tracked_live_queries(&lives).await?;
+				self.handle_postprocessing_of_statements(&lives).await?;
 				Ok(responses)
 			}
 			Err(e) => Err(e),
@@ -1618,22 +1614,21 @@ impl Datastore {
 	}
 }
 
-async fn find_required_cfs_to_catch_up(
+async fn populate_relevant_changesets(
 	mut tx: Transaction,
-	// cf_watermarks: Arc<Mutex<BTreeMap<LqSelector, Versionstamp>>>,
 	live_query_tracker: Arc<RwLock<LiveQueryTracker>>,
 	catchup_size: u32,
 	relevant_changesets: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
-) -> Result<Vec<(LqSelector, Versionstamp)>, Error> {
+) -> Result<(), Error> {
 	let mut live_query_tracker = live_query_tracker.write().await;
 	let mut tracked_cfs = live_query_tracker.get_watermarks().len();
 	// We are going to track the latest observed versionstamp here
-	let mut tracked_cfs_updates = Vec::with_capacity(tracked_cfs);
 	for current in 0..tracked_cfs {
 		// The reason we iterate this way (len+index) is because we "know" that the list won't change, but we
 		// want mutable access to it so we can update it while iterating
 		let (selector, vs) = live_query_tracker.get_watermark_by_enum_index(current).unwrap();
 		// We need a mutable borrow of the tracker to update, hence we need to own
+		// TODO refactor, as we no longer need
 		let (selector, vs) = (selector.clone(), vs.clone());
 
 		// Read the change feed for the selector
@@ -1668,19 +1663,12 @@ async fn find_required_cfs_to_catch_up(
 		if let Some(change_set) = res.last() {
 			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(&vs) {
 				trace!("Adding a change set for lq notification processing");
-				// Update the cf watermark so we can progress scans
-				// If the notifications fail from here-on, they are lost
-				// this is a separate vec that we later insert to because we are iterating immutably
-				// We shouldn't use a read lock because of consistency between watermark scans
-				tracked_cfs_updates.push((selector.clone(), change_set.0));
 				// This does not guarantee a notification, as a changeset an include many tables and many changes
 				relevant_changesets.insert(selector.clone(), res);
 			}
 		}
 	}
-
-	tx.cancel().await?;
-	Ok(tracked_cfs_updates)
+	tx.cancel().await
 }
 
 /// Construct a document from a Change Feed mutation
