@@ -5,6 +5,9 @@ use std::thread::current;
 use crate::kvs::lq_structs::{KillEntry, LqEntry, LqIndexKey, LqIndexValue, LqSelector};
 use crate::vs::{conv, Versionstamp};
 
+/// We often want to increment by 1, but the 2 least significant bytes are unused
+const ONE_SHIFTED: u128 = 1 << 16;
+
 /// The datastore needs to track live queries that it owns as an engine. The db API and drivers
 /// start tasks that poll the database for changes that are broadcast to relevant live queries.
 ///
@@ -119,7 +122,7 @@ impl LiveQueryTracker {
 		let proposed_vs = conv::to_u128_be(*watermark);
 		if proposed_vs >= current_lq_vs {
 			// We now need to increase the watermark so that scanning does not pick up the current observed
-			let new_proposed = proposed_vs + 1;
+			let new_proposed = proposed_vs + ONE_SHIFTED;
 			lq_data.vs = conv::try_u128_to_versionstamp(new_proposed)
 				.map_err(|_| "Could not convert to versionstamp")?;
 
@@ -276,7 +279,7 @@ mod test {
 		let proposed_watermark = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 		tracker.update_watermark_live_query(&lq_entry.as_key(), &proposed_watermark).unwrap();
 		let mut modified_watermark = proposed_watermark;
-		modified_watermark[9] += 1;
+		modified_watermark[7] += 1;
 		assert_tracker_has_watermark(
 			&tracker,
 			lq_selector.ns.clone(),
@@ -394,7 +397,7 @@ mod test {
 
 	fn increment_versionstamp(vs: Versionstamp) -> Versionstamp {
 		let u128_be = conv::to_u128_be(vs);
-		let incremented = u128_be + 1;
+		let incremented = u128_be + ONE_SHIFTED;
 		conv::try_u128_to_versionstamp(incremented).unwrap()
 	}
 }
