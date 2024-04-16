@@ -128,11 +128,11 @@ impl LqEntry {
 		}
 	}
 
-	pub(crate) fn as_value(&self) -> LqIndexValue {
+	pub(crate) fn as_value(&self, vs: Versionstamp, ts: Timestamp) -> LqIndexValue {
 		LqIndexValue {
 			stm: self.stm.clone(),
-			vs: Versionstamp::default(),
-			ts: Timestamp::default(),
+			vs,
+			ts,
 		}
 	}
 }

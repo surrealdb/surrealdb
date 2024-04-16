@@ -943,6 +943,7 @@ impl Datastore {
 			return Ok(());
 		}
 		if self.lq_cf_store.read().await.is_empty() {
+			// This is safe - just a shortcut
 			trace!("No live queries, short-circuiting");
 			return Ok(());
 		}
@@ -1044,7 +1045,10 @@ impl Datastore {
 							let notification_capacity = 1;
 							// We track notifications as a separate channel in case we want to process
 							// for the current state we only forward
-							let (sender, receiver) = channel::bounded(notification_capacity);
+							let (
+								local_notification_channel_sender,
+								local_notification_channel_recv,
+							) = channel::bounded(notification_capacity);
 							trace!(
 								"DS ATTENTION\ninitial doc: {:?}\ncurrent doc: {:?}\n",
 								doc.initial.doc,
@@ -1066,7 +1070,7 @@ impl Datastore {
 								&Statement::Live(&lq_value.stm),
 								&tx,
 								[&lq_value.stm].as_slice(),
-								&sender,
+								&local_notification_channel_sender,
 							)
 							.await
 							.map_err(|e| {
@@ -1078,7 +1082,8 @@ impl Datastore {
 
 							// Send the notifications to driver or api
 							// TODO: evaluate if we want channel directly instead of proxy
-							while let Ok(notification) = receiver.try_recv() {
+							while let Ok(notification) = local_notification_channel_recv.try_recv()
+							{
 								trace!("Sending notification to client");
 								#[cfg(debug_assertions)]
 								trace!("Notification: {:?}", notification);
@@ -1092,8 +1097,12 @@ impl Datastore {
 							}
 							trace!("Ended notification sending")
 						}
-
-						self.update_versionstamp(&change_vs, lq_key, lq_value).await;
+						// Progress the live query watermark
+						self.lq_cf_store
+							.write()
+							.await
+							.update_watermark_live_query(lq_key, &change_vs)
+							.unwrap();
 					}
 				}
 			}
@@ -1108,84 +1117,14 @@ impl Datastore {
 		lqs: &Vec<TrackedResult>,
 	) -> Result<(), Error> {
 		// Lock the local live queries
-		let lq_cf_store = self.lq_cf_store.write().await;
-		// let mut lq_map = self.local_live_queries.write().await;
-		// let mut cf_watermarks = self.cf_watermarks.lock().await;
-		let mut watermarks_to_check: Vec<LqIndexKey> = vec![];
+		let mut lq_cf_store = self.lq_cf_store.write().await;
 		for lq in lqs {
 			match lq {
 				TrackedResult::LiveQuery(lq) => {
-					let lq_index_key: LqIndexKey = lq.as_key();
-					let m = lq_map.get_mut(&lq_index_key);
-					match m {
-						Some(lq_index_value) => lq_index_value.push(lq.as_value()),
-						None => {
-							let lq_vec = vec![lq.as_value()];
-							lq_map.insert(lq_index_key.clone(), lq_vec);
-						}
-					}
-					let selector = lq_index_key.selector;
-					// TODO(phughk): - read watermark for catchup
-					// We insert the current watermark.
-					cf_watermarks.entry(selector).or_insert_with(Versionstamp::default);
+					lq_cf_store.register_live_query(lq, Versionstamp::default()).unwrap();
 				}
 				TrackedResult::KillQuery(kill_entry) => {
-					let found: Option<(LqIndexKey, LqIndexValue)> = lq_map
-						.iter_mut()
-						.filter(|(k, _)| {
-							// Get all the live queries in the ns/db pair. We don't know table
-							k.selector.ns == kill_entry.ns && k.selector.db == kill_entry.db
-						})
-						.filter_map(|(k, v)| {
-							let index = v.iter().position(|a| a.stm.id == kill_entry.live_id);
-							match index {
-								Some(i) => {
-									let v = v.remove(i);
-									// Sadly we do need to clone out of mutable reference, because of Strings
-									Some((k.clone(), v))
-								}
-								None => None,
-							}
-						})
-						.next();
-					match found {
-						None => {
-							// TODO(SUR-336): Make Live Query ID validation available at statement level, perhaps via transaction
-							trace!(
-								"Could not find live query {:?} to kill in ns/db pair {:?}",
-								&kill_entry,
-								&kill_entry.ns
-							);
-						}
-						Some(found) => {
-							trace!(
-								"Killed live query {:?} with found key {:?} and found value {:?}",
-								&kill_entry,
-								&found.0,
-								&found.1
-							);
-							// Check if we need to remove the LQ key from tracking
-							let empty = match lq_map.get(&found.0) {
-								None => false,
-								Some(v) => v.is_empty(),
-							};
-							if empty {
-								trace!("Removing live query index key {:?}", &found.0);
-								lq_map.remove(&found.0);
-							}
-							// Now add the LQ to tracked watermarks
-							watermarks_to_check.push(found.0.clone());
-						}
-					};
-				}
-			}
-		}
-		// Now check if we can stop tracking watermarks
-		for watermark in watermarks_to_check {
-			if let Some(lq) = lq_map.get(&watermark) {
-				if lq.is_empty() {
-					trace!("Removing watermark for {:?}", watermark);
-					cf_watermarks.remove(&watermark.selector);
+					lq_cf_store.unregister_live_query(kill_entry);
 				}
 			}
 		}
@@ -1714,18 +1653,19 @@ async fn find_required_cfs_to_catch_up(
 		// The reason we iterate this way (len+index) is because we "know" that the list won't change, but we
 		// want mutable access to it so we can update it while iterating
 		let (selector, vs) = live_query_tracker.get_watermark_by_enum_index(current).unwrap();
+		// We need a mutable borrow of the tracker to update, hence we need to own
+		let (selector, vs) = (selector.clone(), vs.clone());
 
 		// Read the change feed for the selector
 		#[cfg(debug_assertions)]
 		trace!(
-			"Checking for new changes for ns={} db={} tb={} vs={}",
+			"Checking for new changes for ns={} db={} tb={} vs={:?}",
 			selector.ns,
 			selector.db,
 			selector.tb,
 			// TODO this is what is incorrect - it is 2 instead of 3
 			vs
 		);
-		live_query_tracker.update_watermark(selector, vs);
 		let res = cf::read(
 			&mut tx,
 			&selector.ns,
@@ -1733,7 +1673,7 @@ async fn find_required_cfs_to_catch_up(
 			// Technically, we can not fetch by table and do the per-table filtering this side.
 			// That is an improvement though
 			Some(&selector.tb),
-			ShowSince::versionstamp(vs),
+			ShowSince::versionstamp(&vs),
 			Some(catchup_size),
 		)
 		.await?;
@@ -1742,11 +1682,11 @@ async fn find_required_cfs_to_catch_up(
 			trace!(
 				"There were no changes in the change feed for {:?} from versionstamp {:?}",
 				selector,
-				conv::versionstamp_to_u64(vs)
+				conv::versionstamp_to_u64(&vs)
 			)
 		}
 		if let Some(change_set) = res.last() {
-			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
+			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(&vs) {
 				trace!("Adding a change set for lq notification processing");
 				// Update the cf watermark so we can progress scans
 				// If the notifications fail from here-on, they are lost
