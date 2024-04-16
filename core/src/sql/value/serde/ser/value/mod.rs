@@ -35,7 +35,6 @@ use serde::ser::Serialize;
 use serde::ser::SerializeMap as _;
 use serde::ser::SerializeSeq as _;
 use std::fmt::Display;
-use storekey::encode::Error as EncodeError;
 use vec::SerializeValueVec;
 
 /// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
@@ -51,7 +50,7 @@ impl serde::ser::Error for Error {
 	where
 		T: Display,
 	{
-		Self::Encode(EncodeError::Message(msg.to_string()))
+		Self::Serialization(msg.to_string())
 	}
 }
 

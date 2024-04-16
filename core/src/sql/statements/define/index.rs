@@ -3,7 +3,10 @@ use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{statements::UpdateStatement, Base, Ident, Idioms, Index, Strand, Value, Values};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{
+	statements::UpdateStatement, Base, Ident, Idioms, Index, Object, Strand, Value, Values,
+};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -98,5 +101,33 @@ impl Display for DefineIndexStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineIndexStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			what,
+			cols,
+			index,
+			comment,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		acc.insert("what".to_string(), what.structure());
+
+		acc.insert("cols".to_string(), cols.structure());
+
+		acc.insert("index".to_string(), index.structure());
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }
