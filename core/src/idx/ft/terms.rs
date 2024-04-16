@@ -9,6 +9,8 @@ use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 pub(crate) type TermId = u64;
+pub(crate) type TermLen = u32;
+
 pub(in crate::idx) struct Terms {
 	ixs: IndexStores,
 	state_key: Key,

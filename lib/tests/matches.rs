@@ -37,11 +37,11 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 						},
 						operation: 'Iterate Index'
 					},
-						{
-							detail: {
-								type: 'Memory'
-							},
-							operation: 'Collector'
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
 					}
 			]",
 	);
