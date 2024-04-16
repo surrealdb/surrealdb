@@ -1,4 +1,5 @@
-use crate::sql::{escape::escape_ident, strand::no_nul_bytes};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{escape::escape_ident, strand::no_nul_bytes, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -56,5 +57,11 @@ impl Ident {
 impl Display for Ident {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&escape_ident(&self.0), f)
+	}
+}
+
+impl InfoStructure for Ident {
+	fn structure(self) -> Value {
+		self.0.into()
 	}
 }

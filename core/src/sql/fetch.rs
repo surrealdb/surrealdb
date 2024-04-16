@@ -1,5 +1,7 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -32,6 +34,11 @@ impl fmt::Display for Fetchs {
 	}
 }
 
+impl InfoStructure for Fetchs {
+	fn structure(self) -> Value {
+		Value::Array(self.0.into_iter().map(|f| f.0.structure()).collect())
+	}
+}
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
