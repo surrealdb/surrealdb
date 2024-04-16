@@ -959,26 +959,6 @@ impl Datastore {
 				&mut relevant_changesets,
 			)
 			.await?;
-
-			// TODO commenting this out because the updates now happen inside the find_required_cfs_to_catch_up function
-			{
-				// // Now we update since we are no longer iterating immutably
-				// let mut tracked_cfs = self.cf_watermarks.lock().await;
-				// for (selector, vs) in tracked_cfs_updates {
-				// 	// TODO(phughk): test these lines
-				// 	let vs = conv::to_u128_be(vs) + 1;
-				// 	let vs = conv::try_u128_to_versionstamp(vs).unwrap();
-				// 	#[cfg(debug_assertions)]
-				// 	trace!(
-				// 		"Updating tracker for ns={} db={} tb={} vs={:?}",
-				// 		selector.ns,
-				// 		selector.db,
-				// 		selector.tb,
-				// 		&vs
-				// 	);
-				// 	tracked_cfs.insert(selector, vs);
-				// }
-			}
 		};
 
 		for (selector, change_sets) in relevant_changesets {
@@ -986,7 +966,7 @@ impl Datastore {
 			let lq_pairs = self.lq_cf_store.read().await.live_queries_for_selector(&selector);
 
 			// Find relevant changes
-			let tx = Arc::new(Mutex::new(self.transaction(Read, Optimistic).await?));
+			let tx = self.transaction(Read, Optimistic).await?.enclose();
 			trace!("There are {} change sets", change_sets.len());
 			trace!(
 				"\n{}",
