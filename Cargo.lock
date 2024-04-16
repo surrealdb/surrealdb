@@ -8,7 +8,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f7b0a21988c1bf877cf4759ef5ddaac04c1c9fe808c9142ecb78ba97d97a28a"
 dependencies = [
- "bitflags 2.4.2",
+ "bitflags 2.5.0",
  "bytes",
  "futures-core",
  "futures-sink",
@@ -5846,7 +5846,6 @@ dependencies = [
  "bytes",
  "cedar-policy",
  "chrono",
- "ciborium",
  "criterion",
  "deunicode",
  "dmp",
@@ -5883,7 +5882,7 @@ dependencies = [
  "regex-syntax 0.8.2",
  "reqwest",
  "revision",
- "ring 0.17.7",
+ "ring 0.17.8",
  "rmpv",
  "roaring",
  "rocksdb",

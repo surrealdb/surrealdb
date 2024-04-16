@@ -2,7 +2,7 @@ mod parse;
 
 use parse::Parse;
 mod helpers;
-use helpers::new_ds;
+use helpers::{new_ds, skip_ok};
 use surrealdb::dbs::{Response, Session};
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
@@ -153,13 +153,6 @@ async fn execute_test(
 	let res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
-}
-
-fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
-	for _ in 0..skip {
-		let _ = res.remove(0).result?;
-	}
-	Ok(())
 }
 
 fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<(), Error> {

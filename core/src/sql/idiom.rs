@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
 	part::Next,
@@ -197,5 +198,17 @@ impl Display for Idiom {
 			),
 			f,
 		)
+	}
+}
+
+impl InfoStructure for Idioms {
+	fn structure(self) -> Value {
+		self.to_string().into()
+	}
+}
+
+impl InfoStructure for Idiom {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
