@@ -8,24 +8,34 @@ use crate::sql::{Base, Ident, Object, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::fmt;
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum InfoStatement {
+	#[revision(end = 2, convert_fn = "root_migrate")]
+	Root,
+	#[revision(start = 2)]
 	Root,
 	Ns,
 	Db,
 	Sc(Ident),
 	Tb(Ident),
 	User(Ident, Option<Base>),
-	RootStructure,
-	NsStructure,
-	DbStructure,
-	ScStructure(Ident),
-	TbStructure(Ident),
+	// RootStructure,
+	// NsStructure,
+	// DbStructure,
+	// ScStructure(Ident),
+	// TbStructure(Ident),
+}
+
+impl InfoStatement {
+	fn root_migrate(_revision: u16, _: ()) -> Result<Self, Infallible> {
+		Self::Root(false)
+	}
 }
 
 impl InfoStatement {

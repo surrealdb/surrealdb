@@ -2305,23 +2305,6 @@ dependencies = [
 
 [[package]]
 name = "geo"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1645cf1d7fea7dac1a66f7357f3df2677ada708b8d9db8e9b043878930095a96"
-dependencies = [
- "earcutr",
- "float_next_after",
- "geo-types",
- "geographiclib-rs",
- "log",
- "num-traits",
- "robust",
- "rstar 0.11.0",
- "serde",
-]
-
-[[package]]
-name = "geo"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4841b40fdbccd4b7042bd6195e4de91da54af34c50632e371bcbfcdfb558b873"
@@ -4702,27 +4685,21 @@ checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
 
 [[package]]
 name = "revision"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87eb86913082f8976b06d07a59f17df9120e6f38b882cf3fc5a45b4499e224b6"
+checksum = "dc7bf0f048e5ea02ad4a2a0d11981825e3611606702a9851a2df89e24893c084"
 dependencies = [
  "bincode",
- "chrono",
- "geo 0.26.0",
- "regex",
  "revision-derive",
- "roaring",
- "rust_decimal",
  "serde",
  "thiserror",
- "uuid",
 ]
 
 [[package]]
 name = "revision-derive"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf996fc5f61f1dbec35799b5c00c6dda12e8862e8cb782ed24e10d0292e60ed3"
+checksum = "c5b5c90c7861d72ead61f9632bc0190afc5b8a4405d46bfbe32f52698c7d9189"
 dependencies = [
  "darling",
  "proc-macro-error",
