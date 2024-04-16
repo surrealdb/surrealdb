@@ -1,7 +1,7 @@
 use flume::Sender;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge;
-use reblessive::{tree::Stk, TreeStack};
+use reblessive::TreeStack;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

@@ -113,7 +113,7 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.4.0"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
-reblessive = { version = "0.3.2", features = ["tree"], path = "../../reblessive" }
+reblessive = { version = "0.3.3", features = ["tree"] }
 regex = "1.10.2"
 regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.11.22", default-features = false, features = [
