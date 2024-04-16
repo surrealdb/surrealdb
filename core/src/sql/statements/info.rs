@@ -21,6 +21,11 @@ pub enum InfoStatement {
 	Sc(Ident),
 	Tb(Ident),
 	User(Ident, Option<Base>),
+	RootStructure,
+	NsStructure,
+	DbStructure,
+	ScStructure(Ident),
+	TbStructure(Ident),
 }
 
 impl InfoStatement {
@@ -215,6 +220,130 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res.to_string()).ok()
 			}
+			InfoStatement::RootStructure => {
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the namespaces
+				res.insert("namespaces".to_owned(), process_arr(run.all_ns().await?));
+				// Process the users
+				res.insert("users".to_owned(), process_arr(run.all_root_users().await?));
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::NsStructure => {
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the databases
+				res.insert("databases".to_owned(), process_arr(run.all_db(opt.ns()).await?));
+				// Process the users
+				res.insert("users".to_owned(), process_arr(run.all_ns_users(opt.ns()).await?));
+				// Process the tokens
+				res.insert("tokens".to_owned(), process_arr(run.all_ns_tokens(opt.ns()).await?));
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::DbStructure => {
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the users
+				res.insert(
+					"users".to_owned(),
+					process_arr(run.all_db_users(opt.ns(), opt.db()).await?),
+				);
+				// Process the tokens
+				res.insert(
+					"tokens".to_owned(),
+					process_arr(run.all_db_tokens(opt.ns(), opt.db()).await?),
+				);
+				// Process the functions
+				res.insert(
+					"functions".to_owned(),
+					process_arr(run.all_db_functions(opt.ns(), opt.db()).await?),
+				);
+				// Process the models
+				res.insert(
+					"models".to_owned(),
+					process_arr(run.all_db_models(opt.ns(), opt.db()).await?),
+				);
+				// Process the params
+				res.insert(
+					"params".to_owned(),
+					process_arr(run.all_db_params(opt.ns(), opt.db()).await?),
+				);
+				// Process the scopes
+				res.insert("scopes".to_owned(), process_arr(run.all_sc(opt.ns(), opt.db()).await?));
+				// Process the tables
+				res.insert("tables".to_owned(), process_arr(run.all_tb(opt.ns(), opt.db()).await?));
+				// Process the analyzers
+				res.insert(
+					"analyzers".to_owned(),
+					process_arr(run.all_db_analyzers(opt.ns(), opt.db()).await?),
+				);
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::ScStructure(sc) => {
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the tokens
+				res.insert(
+					"tokens".to_owned(),
+					process_arr(run.all_sc_tokens(opt.ns(), opt.db(), sc).await?),
+				);
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::TbStructure(tb) => {
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the events
+				res.insert(
+					"events".to_owned(),
+					process_arr(run.all_tb_events(opt.ns(), opt.db(), tb).await?),
+				);
+				// Process the fields
+				res.insert(
+					"fields".to_owned(),
+					process_arr(run.all_tb_fields(opt.ns(), opt.db(), tb).await?),
+				);
+				// Process the tables
+				res.insert(
+					"tables".to_owned(),
+					process_arr(run.all_tb_views(opt.ns(), opt.db(), tb).await?),
+				);
+				// Process the indexes
+				res.insert(
+					"indexes".to_owned(),
+					process_arr(run.all_tb_indexes(opt.ns(), opt.db(), tb).await?),
+				);
+				// Process the live queries
+				res.insert(
+					"lives".to_owned(),
+					process_arr(run.all_tb_lives(opt.ns(), opt.db(), tb).await?),
+				);
+				// Ok all good
+				Value::from(res).ok()
+			}
 		}
 	}
 }
@@ -223,14 +352,46 @@ impl fmt::Display for InfoStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Root => f.write_str("INFO FOR ROOT"),
+			Self::RootStructure => f.write_str("INFO FOR ROOT STRUCTURE"),
 			Self::Ns => f.write_str("INFO FOR NAMESPACE"),
+			Self::NsStructure => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
 			Self::Db => f.write_str("INFO FOR DATABASE"),
+			Self::DbStructure => f.write_str("INFO FOR DATABASE STRUCTURE"),
 			Self::Sc(ref s) => write!(f, "INFO FOR SCOPE {s}"),
+			Self::ScStructure(ref s) => write!(f, "INFO FOR SCOPE {s} STRUCTURE"),
 			Self::Tb(ref t) => write!(f, "INFO FOR TABLE {t}"),
+			Self::TbStructure(ref t) => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
 			Self::User(ref u, ref b) => match b {
 				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
 				None => write!(f, "INFO FOR USER {u}"),
 			},
 		}
 	}
+}
+
+use std::sync::Arc;
+
+pub(crate) trait InfoStructure {
+	fn structure(self) -> Value;
+}
+
+impl InfoStatement {
+	pub(crate) fn structurize(self) -> Result<Self, ()> {
+		let out = match self {
+			InfoStatement::Root => InfoStatement::RootStructure,
+			InfoStatement::Ns => InfoStatement::NsStructure,
+			InfoStatement::Db => InfoStatement::DbStructure,
+			InfoStatement::Sc(s) => InfoStatement::ScStructure(s),
+			InfoStatement::Tb(t) => InfoStatement::TbStructure(t),
+			_ => return Err(()),
+		};
+		Ok(out)
+	}
+}
+
+fn process_arr<T>(a: Arc<[T]>) -> Value
+where
+	T: InfoStructure + Clone,
+{
+	Value::Array(a.iter().cloned().map(InfoStructure::structure).collect())
 }

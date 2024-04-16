@@ -425,7 +425,7 @@ impl Parser<'_> {
 	/// Expects `INFO` to already be consumed.
 	pub(crate) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
 		expected!(self, t!("FOR"));
-		let stmt = match self.next().kind {
+		let mut stmt = match self.next().kind {
 			t!("ROOT") => InfoStatement::Root,
 			t!("NAMESPACE") => InfoStatement::Ns,
 			t!("DATABASE") => InfoStatement::Db,
@@ -443,6 +443,18 @@ impl Parser<'_> {
 				InfoStatement::User(ident, base)
 			}
 			x => unexpected!(self, x, "an info target"),
+		};
+
+		if self.peek_kind() == t!("STRUCTURE") {
+			stmt = match stmt.structurize() {
+				Ok(s) => {
+					self.pop_peek();
+					s
+				}
+				Err(_) => {
+					unexpected!(self, t!("STRUCTURE"), "not STRUCTURE")
+				}
+			}
 		};
 		Ok(stmt)
 	}

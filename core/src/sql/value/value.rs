@@ -5,6 +5,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	array::Uniq,
 	fmt::{Fmt, Pretty},
@@ -2602,6 +2603,12 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 		}
+	}
+}
+
+impl InfoStructure for Value {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
 

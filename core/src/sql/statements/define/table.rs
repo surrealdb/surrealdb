@@ -7,10 +7,11 @@ use crate::sql::{
 	changefeed::ChangeFeed,
 	fmt::{is_pretty, pretty_indent},
 	statements::UpdateStatement,
-	Base, Ident, Permissions, Strand, Value, Values, View,
+	Base, Ident, Object, Permissions, Strand, Value, Values, View,
 };
 use std::sync::Arc;
 
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Kind, Part, Table, TableType};
 use derive::Store;
 use revision::revisioned;
@@ -209,5 +210,45 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineTableStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			drop,
+			full,
+			view,
+			permissions,
+			changefeed,
+			comment,
+			kind,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		acc.insert("drop".to_string(), drop.into());
+		acc.insert("full".to_string(), full.into());
+
+		if let Some(view) = view {
+			acc.insert("view".to_string(), view.structure());
+		}
+
+		acc.insert("permissions".to_string(), permissions.structure());
+
+		if let Some(changefeed) = changefeed {
+			acc.insert("changefeed".to_string(), changefeed.structure());
+		}
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		acc.insert("kind".to_string(), kind.structure());
+
+		Value::Object(acc)
 	}
 }

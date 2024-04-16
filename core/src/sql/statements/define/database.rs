@@ -3,7 +3,8 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{changefeed::ChangeFeed, Base, Ident, Strand, Value};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{changefeed::ChangeFeed, Base, Ident, Object, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -85,5 +86,24 @@ impl Display for DefineDatabaseStatement {
 			write!(f, " {v}")?;
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineDatabaseStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			comment,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }

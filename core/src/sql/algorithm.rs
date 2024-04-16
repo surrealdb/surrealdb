@@ -1,3 +1,5 @@
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -47,5 +49,10 @@ impl fmt::Display for Algorithm {
 			Self::Rs512 => "RS512",
 			Self::Jwks => "JWKS", // Not an algorithm.
 		})
+	}
+}
+impl InfoStructure for Algorithm {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
