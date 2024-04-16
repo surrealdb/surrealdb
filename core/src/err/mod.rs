@@ -966,13 +966,6 @@ impl From<regex::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-mem")]
-impl From<surrealkv::Error> for Error {
-	fn from(e: surrealkv::Error) -> Error {
-		Error::Tx(e.to_string())
-	}
-}
-
 #[cfg(feature = "kv-indxdb")]
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
@@ -1014,7 +1007,7 @@ impl From<rocksdb::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-surrealkv")]
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
 		Error::Tx(e.to_string())
