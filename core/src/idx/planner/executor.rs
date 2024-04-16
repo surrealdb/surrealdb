@@ -3,19 +3,21 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
+use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	DocIdsIterator, IndexEqualThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
-	MatchesThingIterator, ThingIterator, ThingsIterator, UniqueEqualThingIterator,
-	UniqueRangeThingIterator, UniqueUnionThingIterator,
+	DocIdsIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
+	IndexUnionThingIterator, MatchesThingIterator, ThingIterator, ThingsIterator,
+	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
+	UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-use crate::idx::planner::tree::{IndexRef, IndexesMap};
+use crate::idx::planner::tree::{IdiomPosition, IndexRef, IndexesMap};
 use crate::idx::planner::{IterationStage, KnnSet};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
@@ -84,11 +86,9 @@ impl Borrow<Expression> for ExpressionKey {
 	}
 }
 
-pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>, Distance);
-pub(super) type KnnExpressions =
-	HashMap<ExpressionKey, (u32, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
-pub(super) type AnnExpressions =
-	HashMap<ExpressionKey, (usize, Arc<Idiom>, Arc<Vec<Number>>, usize)>;
+pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
+pub(super) type KnnExpressions = HashMap<ExpressionKey, (u32, Idiom, Arc<Vec<Number>>, Distance)>;
+pub(super) type AnnExpressions = HashMap<ExpressionKey, (usize, Idiom, Arc<Vec<Number>>, usize)>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -119,16 +119,17 @@ pub(super) enum IteratorEntry {
 }
 
 impl IteratorEntry {
-	pub(super) fn explain(&self, e: &mut HashMap<&str, Value>) -> IndexRef {
+	pub(super) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
 		match self {
-			Self::Single(_, io) => {
-				io.explain(e);
-				io.ix_ref()
-			}
+			Self::Single(_, io) => io.explain(ix_def),
 			Self::Range(_, ir, from, to) => {
+				let mut e = HashMap::default();
+				if let Some(ix) = ix_def.get(*ir as usize) {
+					e.insert("index", Value::from(ix.name.0.to_owned()));
+				}
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
-				*ir
+				Value::from(Object::from(e))
 			}
 		}
 	}
@@ -303,7 +304,7 @@ impl QueryExecutor {
 		!self.0.knn_entries.is_empty()
 	}
 
-	/// Returns `true` if either the expression is matching the current iterator.
+	/// Returns `true` if the expression is matching the current iterator.
 	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
 		match self.0.it_entries.get(ir as usize) {
 			Some(IteratorEntry::Single(e, ..)) => exp.eq(e),
@@ -314,14 +315,7 @@ impl QueryExecutor {
 
 	pub(crate) fn explain(&self, itr: IteratorRef) -> Value {
 		match self.0.it_entries.get(itr as usize) {
-			Some(ie) => {
-				let mut e = HashMap::default();
-				let ir = ie.explain(&mut e);
-				if let Some(ix) = self.0.index_definitions.get(ir as usize) {
-					e.insert("index", Value::from(ix.name.0.to_owned()));
-				}
-				Value::from(Object::from(e))
-			}
+			Some(ie) => ie.explain(self.0.index_definitions.as_slice()),
 			None => Value::None,
 		}
 	}
@@ -358,10 +352,12 @@ impl QueryExecutor {
 		it_ref: IteratorRef,
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(ix) = self.0.index_definitions.get(io.ix_ref() as usize) {
+		if let Some(ix) = self.get_index_def(io.ix_ref()) {
 			match ix.index {
-				Index::Idx => Ok(Self::new_index_iterator(opt, ix, io.clone())),
-				Index::Uniq => Ok(Self::new_unique_index_iterator(opt, ix, io.clone())),
+				Index::Idx => Ok(self.new_index_iterator(opt, it_ref, ix, io.clone()).await?),
+				Index::Uniq => {
+					Ok(self.new_unique_index_iterator(opt, it_ref, ix, io.clone()).await?)
+				}
 				Index::Search {
 					..
 				} => self.new_search_index_iterator(it_ref, io.clone()).await,
@@ -373,20 +369,27 @@ impl QueryExecutor {
 		}
 	}
 
-	fn new_index_iterator(
+	async fn new_index_iterator(
+		&self,
 		opt: &Options,
+		it_ref: IteratorRef,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
-	) -> Option<ThingIterator> {
-		match io.op() {
-			IndexOperator::Equality(value) => {
-				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(opt, ix, value)))
-			}
-			IndexOperator::Union(value) => {
-				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(opt, ix, value)))
+	) -> Result<Option<ThingIterator>, Error> {
+		Ok(match io.op() {
+			IndexOperator::Equality(value) => Some(ThingIterator::IndexEqual(
+				IndexEqualThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+			)),
+			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
+				IndexUnionThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+			)),
+			IndexOperator::Join(ios) => {
+				let iterators = self.build_iterators(opt, it_ref, ios).await?;
+				let index_join = Box::new(IndexJoinThingIterator::new(opt, ix, iterators));
+				Some(ThingIterator::IndexJoin(index_join))
 			}
 			_ => None,
-		}
+		})
 	}
 
 	fn new_range_iterator(
@@ -396,16 +399,26 @@ impl QueryExecutor {
 		from: &RangeValue,
 		to: &RangeValue,
 	) -> Option<ThingIterator> {
-		if let Some(ix) = self.0.index_definitions.get(ir as usize) {
+		if let Some(ix) = self.get_index_def(ir) {
 			match ix.index {
 				Index::Idx => {
 					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
-						opt, ix, from, to,
+						opt.ns(),
+						opt.db(),
+						&ix.what,
+						&ix.name,
+						from,
+						to,
 					)))
 				}
 				Index::Uniq => {
 					return Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
-						opt, ix, from, to,
+						opt.ns(),
+						opt.db(),
+						&ix.what,
+						&ix.name,
+						from,
+						to,
 					)))
 				}
 				_ => {}
@@ -414,20 +427,27 @@ impl QueryExecutor {
 		None
 	}
 
-	fn new_unique_index_iterator(
+	async fn new_unique_index_iterator(
+		&self,
 		opt: &Options,
+		it_ref: IteratorRef,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
-	) -> Option<ThingIterator> {
-		match io.op() {
-			IndexOperator::Equality(value) => {
-				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(opt, ix, value)))
-			}
+	) -> Result<Option<ThingIterator>, Error> {
+		Ok(match io.op() {
+			IndexOperator::Equality(value) => Some(ThingIterator::UniqueEqual(
+				UniqueEqualThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+			)),
 			IndexOperator::Union(value) => {
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(opt, ix, value)))
 			}
+			IndexOperator::Join(ios) => {
+				let iterators = self.build_iterators(opt, it_ref, ios).await?;
+				let unique_join = Box::new(UniqueJoinThingIterator::new(opt, ix, iterators));
+				Some(ThingIterator::UniqueJoin(unique_join))
+			}
 			_ => None,
-		}
+		})
 	}
 
 	async fn new_search_index_iterator(
@@ -471,46 +491,103 @@ impl QueryExecutor {
 		None
 	}
 
+	async fn build_iterators(
+		&self,
+		opt: &Options,
+		it_ref: IteratorRef,
+		ios: &[IndexOption],
+	) -> Result<VecDeque<ThingIterator>, Error> {
+		let mut iterators = VecDeque::with_capacity(ios.len());
+		for io in ios {
+			if let Some(it) = Box::pin(self.new_single_iterator(opt, it_ref, io)).await? {
+				iterators.push_back(it);
+			}
+		}
+		Ok(iterators)
+	}
+
+	fn get_index_def(&self, ir: IndexRef) -> Option<&DefineIndexStatement> {
+		self.0.index_definitions.get(ir as usize)
+	}
+
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn matches(
 		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
 		txn: &Transaction,
 		thg: &Thing,
 		exp: &Expression,
-	) -> Result<Value, Error> {
-		// Otherwise, we look for the first possible index options, and evaluate the expression
-		// Does the record id match this executor's table?
-		if thg.tb.eq(&self.0.table) {
-			if let Some(ft) = self.0.exp_entries.get(exp) {
-				let mut run = txn.lock().await;
-				let doc_key: Key = thg.into();
-				if let Some(doc_id) =
-					ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await?
-				{
-					let term_goals = ft.0.terms_docs.len();
-					// If there is no terms, it can't be a match
-					if term_goals == 0 {
-						return Ok(Value::Bool(false));
-					}
-					for opt_td in ft.0.terms_docs.iter() {
-						if let Some((_, docs)) = opt_td {
-							if !docs.contains(doc_id) {
-								return Ok(Value::Bool(false));
-							}
-						} else {
-							// If one of the term is missing, it can't be a match
-							return Ok(Value::Bool(false));
-						}
-					}
-					return Ok(Value::Bool(true));
+		l: Value,
+		r: Value,
+	) -> Result<bool, Error> {
+		if let Some(ft) = self.0.exp_entries.get(exp) {
+			if let Some(ix_def) = self.get_index_def(ft.0.index_option.ix_ref()) {
+				if self.0.table.eq(&ix_def.what.0) {
+					return self.matches_with_doc_id(txn, thg, ft).await;
 				}
-				return Ok(Value::Bool(false));
 			}
+			return self.matches_with_value(ctx, opt, txn, ft, l, r).await;
 		}
 
 		// If no previous case were successful, we end up with a user error
 		Err(Error::NoIndexFoundForMatch {
 			value: exp.to_string(),
 		})
+	}
+
+	async fn matches_with_doc_id(
+		&self,
+		txn: &Transaction,
+		thg: &Thing,
+		ft: &FtEntry,
+	) -> Result<bool, Error> {
+		let mut run = txn.lock().await;
+		let doc_key: Key = thg.into();
+		if let Some(doc_id) = ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await? {
+			let term_goals = ft.0.terms_docs.len();
+			// If there is no terms, it can't be a match
+			if term_goals == 0 {
+				return Ok(false);
+			}
+			for opt_td in ft.0.terms_docs.iter() {
+				if let Some((_, docs)) = opt_td {
+					if !docs.contains(doc_id) {
+						return Ok(false);
+					}
+				} else {
+					// If one of the term is missing, it can't be a match
+					return Ok(false);
+				}
+			}
+			return Ok(true);
+		}
+		Ok(false)
+	}
+
+	async fn matches_with_value(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		ft: &FtEntry,
+		l: Value,
+		r: Value,
+	) -> Result<bool, Error> {
+		// If the query terms contains terms that are unknown in the index
+		// of if there is not terms in the query
+		// we are sure that it does not match any document
+		if !ft.0.query_terms_set.is_matchable() {
+			return Ok(false);
+		}
+		let v = match ft.0.index_option.id_pos() {
+			IdiomPosition::Left => r,
+			IdiomPosition::Right => l,
+		};
+		let terms = ft.0.terms.read().await;
+		// Extract the terms set from the record
+		let t = ft.0.analyzer.extract_indexing_terms(ctx, opt, txn, &terms, v).await?;
+		Ok(ft.0.query_terms_set.is_subset(&t))
 	}
 
 	fn get_ft_entry(&self, match_ref: &Value) -> Option<&FtEntry> {
@@ -547,7 +624,7 @@ impl QueryExecutor {
 				.highlight(
 					&mut run,
 					thg,
-					&e.0.terms,
+					&e.0.query_terms_list,
 					prefix,
 					suffix,
 					partial,
@@ -568,7 +645,7 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let mut run = txn.lock().await;
-			return ft.extract_offsets(&mut run, thg, &e.0.terms, partial).await;
+			return ft.extract_offsets(&mut run, thg, &e.0.query_terms_list, partial).await;
 		}
 		Ok(Value::None)
 	}
@@ -605,7 +682,10 @@ struct FtEntry(Arc<Inner>);
 struct Inner {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<DocIds>>,
-	terms: Vec<Option<(TermId, u32)>>,
+	analyzer: Arc<Analyzer>,
+	query_terms_set: TermsSet,
+	query_terms_list: TermsList,
+	terms: Arc<RwLock<Terms>>,
 	terms_docs: TermsDocs,
 	scorer: Option<BM25Scorer>,
 }
@@ -619,14 +699,18 @@ impl FtEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
-			let terms = ft.extract_terms(ctx, opt, txn, qs.to_owned()).await?;
+			let (terms_list, terms_set) =
+				ft.extract_querying_terms(ctx, opt, txn, qs.to_owned()).await?;
 			let mut tx = txn.lock().await;
-			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms).await?);
+			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),
+				analyzer: ft.analyzer(),
+				query_terms_set: terms_set,
+				query_terms_list: terms_list,
 				scorer: ft.new_scorer(terms_docs.clone())?,
-				terms,
+				terms: ft.terms(),
 				terms_docs,
 			}))))
 		} else {
