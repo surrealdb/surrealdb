@@ -8,7 +8,7 @@ use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 
 use std::ops::Range;
-use surrealkv::Options;
+use surrealkv::{Options, IsolationLevel};
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
 
@@ -64,6 +64,7 @@ impl Datastore {
 	pub(crate) async fn new() -> Result<Datastore, Error> {
 		let mut opts = Options::new();
 		opts.disk_persistence = false;
+		opts.isolation_level = IsolationLevel::SerializableSnapshotIsolation;
 
 		match Store::new(opts) {
 			Ok(db) => Ok(Datastore {
