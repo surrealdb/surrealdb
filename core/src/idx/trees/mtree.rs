@@ -1550,8 +1550,8 @@ impl From<MtStatistics> for Value {
 	}
 }
 
-#[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct MState {
 	capacity: u16,

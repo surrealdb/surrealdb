@@ -28,8 +28,8 @@ where
 	bk: PhantomData<BK>,
 }
 
-#[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct BState {
 	minimum_degree: u32,
@@ -57,16 +57,16 @@ impl VersionedSerdeState for BState {
 	}
 }
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub(in crate::idx) struct BState1 {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Serialize, Deserialize)]
+#[revisioned(revision = 1)]
 pub(in crate::idx) struct BState1skip {
 	minimum_degree: u32,
 	root: Option<NodeId>,

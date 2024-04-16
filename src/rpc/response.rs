@@ -12,8 +12,8 @@ use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
 use tracing::Span;
 
-#[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]
+#[revisioned(revision = 1)]
 pub struct Response {
 	id: Option<Value>,
 	result: Result<Data, Failure>,

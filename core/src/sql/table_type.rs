@@ -7,10 +7,10 @@ use std::fmt::Display;
 
 use super::{Kind, Object, Table, Value};
 
-#[revisioned(revision = 1)]
 /// The type of records stored by a table
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum TableType {
 	#[default]
@@ -80,9 +80,9 @@ fn get_tables_from_kind(tables: &[Table]) -> Vec<&str> {
 	tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>()
 }
 
-#[revisioned(revision = 1)]
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,

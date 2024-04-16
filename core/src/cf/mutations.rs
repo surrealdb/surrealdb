@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
 // Mutation is a single mutation to a table.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
@@ -42,8 +42,8 @@ impl From<DefineTableStatement> for Value {
 	}
 }
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
 
@@ -53,8 +53,8 @@ impl TableMutations {
 	}
 }
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct DatabaseMutation(pub Vec<TableMutations>);
 
@@ -70,9 +70,9 @@ impl Default for DatabaseMutation {
 	}
 }
 
-#[revisioned(revision = 1)]
 // Change is a set of mutations made to a table at the specific timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct ChangeSet(pub [u8; 10], pub DatabaseMutation);
 
@@ -181,8 +181,8 @@ impl Display for ChangeSet {
 	}
 }
 
-#[revisioned(revision = 1)]
 // WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[non_exhaustive]
 pub struct WriteMutationSet(pub Vec<TableMutations>);

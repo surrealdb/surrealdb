@@ -84,15 +84,15 @@ impl Surreal<Client> {
 	}
 }
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Deserialize)]
+#[revisioned(revision = 1)]
 pub(crate) struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: String,
 }
 
-#[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
+#[revisioned(revision = 1)]
 pub(crate) enum Data {
 	Other(Value),
 	Query(Vec<QueryMethodResponse>),
@@ -150,8 +150,8 @@ impl DbResponse {
 	}
 }
 
-#[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
+#[revisioned(revision = 1)]
 pub(crate) struct Response {
 	id: Option<Value>,
 	pub(crate) result: ServerResult,

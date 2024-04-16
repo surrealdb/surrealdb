@@ -12,8 +12,8 @@ pub struct Failure {
 	pub(crate) message: Cow<'static, str>,
 }
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize)]
+#[revisioned(revision = 1)]
 struct Inner {
 	code: i64,
 	message: String,

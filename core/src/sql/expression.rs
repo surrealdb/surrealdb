@@ -12,10 +12,10 @@ use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 
-#[revisioned(revision = 1)]
 /// Binary expressions.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
+#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Expression {
