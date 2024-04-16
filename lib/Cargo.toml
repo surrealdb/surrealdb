@@ -10,7 +10,13 @@ description = "A scalable, distributed, collaborative, document-graph database, 
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb/"
-keywords = ["database", "embedded-database", "key-value", "key-value-store", "kv-store"]
+keywords = [
+    "database",
+    "embedded-database",
+    "key-value",
+    "key-value-store",
+    "kv-store",
+]
 categories = ["database-implementations", "data-structures", "embedded"]
 license-file = "../LICENSE"
 resolver = "2"
@@ -85,7 +91,14 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
     "multipart",
 ], optional = true }
-revision = "0.6.0"
+revision = { version = "0.6.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
 rustls = { version = "0.21.10", optional = true }
 semver = { version = "1.0.20", features = ["serde"] }

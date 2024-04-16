@@ -7,9 +7,9 @@ use std::{
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Level {
 	#[default]

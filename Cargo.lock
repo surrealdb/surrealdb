@@ -2305,6 +2305,23 @@ dependencies = [
 
 [[package]]
 name = "geo"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1645cf1d7fea7dac1a66f7357f3df2677ada708b8d9db8e9b043878930095a96"
+dependencies = [
+ "earcutr",
+ "float_next_after",
+ "geo-types",
+ "geographiclib-rs",
+ "log",
+ "num-traits",
+ "robust",
+ "rstar 0.11.0",
+ "serde",
+]
+
+[[package]]
+name = "geo"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4841b40fdbccd4b7042bd6195e4de91da54af34c50632e371bcbfcdfb558b873"
@@ -4690,9 +4707,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc7bf0f048e5ea02ad4a2a0d11981825e3611606702a9851a2df89e24893c084"
 dependencies = [
  "bincode",
+ "chrono",
+ "geo 0.26.0",
+ "regex",
  "revision-derive",
+ "roaring",
+ "rust_decimal",
  "serde",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]

@@ -150,8 +150,8 @@ struct State1 {
 
 impl VersionedSerdeState for State1 {}
 
-#[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 struct State1skip {
 	btree: BState1skip,
 	available_ids: Option<RoaringTreemap>,
