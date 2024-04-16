@@ -11,7 +11,7 @@ on:
         required: true
         type: string
         description: "The github ref of this next version (i.e. main, 1234567)"
-        default: next
+        default: main
       publish:
         required: false
         type: boolean
