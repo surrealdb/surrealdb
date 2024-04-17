@@ -25,8 +25,9 @@ mod surrealkv;
 mod tikv;
 mod tx;
 
+#[cfg(test)]
+mod droppy_boy;
 pub(crate) mod lq_structs;
-
 #[cfg(test)]
 mod tests;
 
