@@ -1,14 +1,22 @@
 use crate::rpc::request::Request;
 use crate::rpc::RpcError;
 use crate::sql::Value;
+#[cfg(not(feature = "experimental-parser"))]
+use crate::sql;
+#[cfg(feature = "experimental-parser")]
 use crate::syn;
 
 use super::ResTrait;
 
 pub fn req(val: &[u8]) -> Result<Request, RpcError> {
-	syn::value_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
+	#[cfg(not(feature = "experimental-parser"))]
+	return sql::value(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
 		.or(Err(RpcError::ParseError))?
-		.try_into()
+		.try_into();
+	#[cfg(feature = "experimental-parser")]
+	return syn::value_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
+		.or(Err(RpcError::ParseError))?
+		.try_into();
 }
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
