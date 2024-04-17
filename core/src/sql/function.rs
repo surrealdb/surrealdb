@@ -20,9 +20,9 @@ use super::Kind;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
@@ -35,6 +35,7 @@ pub enum Function {
 pub(crate) enum OptimisedAggregate {
 	None,
 	Count,
+	CountFunction,
 	MathMax,
 	MathMin,
 	MathSum,
@@ -156,7 +157,13 @@ impl Function {
 	}
 	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
 		match self {
-			Self::Normal(f, _) if f == "count" => OptimisedAggregate::Count,
+			Self::Normal(f, v) if f == "count" => {
+				if v.is_empty() {
+					OptimisedAggregate::Count
+				} else {
+					OptimisedAggregate::CountFunction
+				}
+			}
 			Self::Normal(f, _) if f == "math::max" => OptimisedAggregate::MathMax,
 			Self::Normal(f, _) if f == "math::mean" => OptimisedAggregate::MathMean,
 			Self::Normal(f, _) if f == "math::min" => OptimisedAggregate::MathMin,
