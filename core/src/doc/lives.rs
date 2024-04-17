@@ -67,6 +67,7 @@ impl<'a> Document<'a> {
 		// Carry on
 		Ok(())
 	}
+
 	/// Check any PERRMISSIONS for a LIVE query
 	async fn lq_allow(
 		&self,

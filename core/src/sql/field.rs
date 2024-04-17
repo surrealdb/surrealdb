@@ -82,11 +82,9 @@ impl Fields {
 		group: bool,
 	) -> Result<Value, Error> {
 		if let Some(doc) = doc {
-			trace!("Computing value on some doc: {:?}", doc);
 			self.compute_value(ctx, opt, txn, doc, group).await
 		} else {
 			let doc = (&Value::None).into();
-			trace!("Computing value on none doc: {:?}", &doc);
 			self.compute_value(ctx, opt, txn, &doc, group).await
 		}
 	}
