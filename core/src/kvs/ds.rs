@@ -1620,8 +1620,8 @@ async fn populate_relevant_changesets(
 	catchup_size: u32,
 	relevant_changesets: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
 ) -> Result<(), Error> {
-	let mut live_query_tracker = live_query_tracker.write().await;
-	let mut tracked_cfs = live_query_tracker.get_watermarks().len();
+	let live_query_tracker = live_query_tracker.write().await;
+	let tracked_cfs = live_query_tracker.get_watermarks().len();
 	// We are going to track the latest observed versionstamp here
 	for current in 0..tracked_cfs {
 		// The reason we iterate this way (len+index) is because we "know" that the list won't change, but we

@@ -1,6 +1,5 @@
 use crate::dbs::node::Timestamp;
 use std::collections::BTreeMap;
-use std::thread::current;
 
 use crate::kvs::lq_structs::{KillEntry, LqEntry, LqIndexKey, LqIndexValue, LqSelector};
 use crate::vs::{conv, Versionstamp};
@@ -148,7 +147,7 @@ impl LiveQueryTracker {
 	}
 
 	pub(crate) fn get_watermarks(&self) -> &BTreeMap<LqSelector, Versionstamp> {
-		return &self.cf_watermarks;
+		&self.cf_watermarks;
 	}
 
 	/// This is to iterate the change feed trackers by index
@@ -187,6 +186,7 @@ impl LiveQueryTracker {
 	}
 }
 
+#[cfg(test)]
 mod test {
 	use super::*;
 	use crate::sql::statements::LiveStatement;

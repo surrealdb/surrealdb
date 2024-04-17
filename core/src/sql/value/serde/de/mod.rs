@@ -293,15 +293,10 @@ where
 	T: DeserializeOwned,
 {
 	let json = into_json(value.clone(), false);
-	serde_json::from_value(json.clone())
-		.map_err(|error| FromValueError {
-			value: value.clone(),
-			error: error.to_string(),
-		})
-		.map_err(|e| {
-			panic!("Failed to deserialize value {:?} as json {:?}: {:?}", value, json, e);
-			e
-		})
+	serde_json::from_value(json).map_err(|error| FromValueError {
+		value,
+		error: error.to_string(),
+	})
 }
 
 #[cfg(test)]
