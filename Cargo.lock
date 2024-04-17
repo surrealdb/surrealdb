@@ -4702,9 +4702,9 @@ checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
 
 [[package]]
 name = "revision"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc7bf0f048e5ea02ad4a2a0d11981825e3611606702a9851a2df89e24893c084"
+checksum = "f6b16e3848e4ff8a63fad00a7816e53c8ff56742c2f4df3f93b4e8df0d8d4e21"
 dependencies = [
  "bincode",
  "chrono",

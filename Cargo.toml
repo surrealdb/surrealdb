@@ -76,7 +76,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "blocking",
     "gzip",
 ] }
-revision = { version = "0.6.0", features = [
+revision = { version = "0.6.1", features = [
     "chrono",
     "geo",
     "roaring",
