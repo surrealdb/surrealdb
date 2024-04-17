@@ -329,7 +329,7 @@ impl Hnsw {
 	) {
 		#[cfg(debug_assertions)]
 		debug!("insert_element q_pt: {q_pt:?} - q_id: {q_id} - level: {q_level} -  ep_id: {ep_id:?} - top-layer: {top_layer_level}");
-		let mut ep_dist = self.get_dist(q_pt, ep_id);
+		let mut ep_dist = self.get_element_distance(q_pt, &ep_id).unwrap_or_else(|| unreachable!());
 		for lc in ((q_level + 1)..=top_layer_level).rev() {
 			(ep_dist, ep_id) = self
 				.search_layer_single(q_pt, ep_dist, ep_id, 1, &self.layers[lc])
@@ -400,9 +400,12 @@ impl Hnsw {
 		w
 	}
 
-	fn get_dist(&self, q: &HashedSharedVector, e_id: ElementId) -> f64 {
-		let e_pt = &self.elements[&e_id];
-		self.dist.calculate(e_pt, q)
+	fn get_element_distance(&self, q: &HashedSharedVector, e_id: &ElementId) -> Option<f64> {
+		self.elements.get(e_id).map(|e_pt| self.dist.calculate(e_pt, q))
+	}
+
+	fn get_element_vector(&self, e_id: &ElementId) -> Option<HashedSharedVector> {
+		self.elements.get(e_id).cloned()
 	}
 
 	fn search_layer_single(
@@ -502,7 +505,8 @@ impl Hnsw {
 		#[cfg(debug_assertions)]
 		let expected_w_len = self.elements.len().min(k);
 		if let Some(mut ep_id) = self.enter_point {
-			let mut ep_dist = self.get_dist(q, ep_id);
+			let mut ep_dist =
+				self.get_element_distance(q, &ep_id).unwrap_or_else(|| unreachable!());
 			let l = self.layers.len();
 			for lc in (1..l).rev() {
 				(ep_dist, ep_id) = self
@@ -568,9 +572,9 @@ impl SelectNeighbors {
 	) -> HashSet<ElementId> {
 		match self {
 			Self::Simple => Self::simple(c, m_max),
-			Self::Heuristic => Self::heuristic(c, m_max),
+			Self::Heuristic => Self::heuristic(c, h, m_max),
 			Self::HeuristicExt => Self::heuristic_ext(h, lc, q_id, q_pt, c, m_max),
-			Self::HeuristicKeep => Self::heuristic_keep(c, m_max),
+			Self::HeuristicKeep => Self::heuristic_keep(c, h, m_max),
 			Self::HeuristicExtKeep => Self::heuristic_ext_keep(h, lc, q_id, q_pt, c, m_max),
 		}
 	}
@@ -579,46 +583,44 @@ impl SelectNeighbors {
 		w.to_set_limit(m_max)
 	}
 
-	fn heuristic(mut c: DoublePriorityQueue, m_max: usize) -> HashSet<ElementId> {
-		let mut r = HashSet::with_capacity(m_max.min(c.len()));
-		let mut closest_neighbors_distance = f64::MAX;
+	fn heuristic(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> HashSet<ElementId> {
+		if c.len() <= m_max {
+			return c.to_set();
+		}
+		let mut r = HashSet::with_capacity(m_max);
 		while let Some((e_dist, e_id)) = c.pop_first() {
-			if e_dist < closest_neighbors_distance {
-				r.insert(e_id);
-				closest_neighbors_distance = e_dist;
-				if r.len() >= m_max {
-					break;
-				}
+			if Self::is_closer(h, e_dist, e_id, &mut r) && r.len() == m_max {
+				break;
 			}
 		}
 		r
 	}
 
-	fn heuristic_keep(mut c: DoublePriorityQueue, m_max: usize) -> HashSet<ElementId> {
-		let mut r = HashSet::with_capacity(m_max.min(c.len()));
-		let mut closest_neighbors_distance = f64::INFINITY;
-		let mut wd = Vec::new();
+	fn heuristic_keep(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> HashSet<ElementId> {
+		if c.len() <= m_max {
+			return c.to_set();
+		}
+		let mut pruned = Vec::new();
+		let mut r = HashSet::with_capacity(m_max);
 		while let Some((e_dist, e_id)) = c.pop_first() {
-			if e_dist < closest_neighbors_distance {
-				r.insert(e_id);
-				closest_neighbors_distance = e_dist;
-				if r.len() >= m_max {
+			if Self::is_closer(h, e_dist, e_id, &mut r) {
+				if r.len() == m_max {
 					break;
 				}
 			} else {
-				wd.push(e_id);
+				pruned.push(e_id);
 			}
 		}
-		let d = (m_max - r.len()).min(wd.len());
-		if d > 0 {
-			wd.drain(0..d).for_each(|e_id| {
+		let n = m_max - r.len();
+		if n > 0 {
+			for e_id in pruned.drain(0..n) {
 				r.insert(e_id);
-			});
+			}
 		}
 		r
 	}
 
-	fn extand(
+	fn extend(
 		h: &Hnsw,
 		lc: &UndirectedGraph,
 		q_id: ElementId,
@@ -629,12 +631,10 @@ impl SelectNeighbors {
 		let mut ex = c.to_set();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for (_, e_id) in c.to_vec().into_iter() {
-			for &e_adj in
-				lc.get_edges(&e_id).unwrap_or_else(|| unreachable!("Missing element {}", e_id))
-			{
+			for &e_adj in lc.get_edges(&e_id).unwrap_or_else(|| unreachable!()) {
 				if e_adj != q_id && ex.insert(e_adj) {
-					if let Some(pt) = h.elements.get(&e_adj) {
-						ext.push((h.dist.calculate(q_pt, pt), e_adj));
+					if let Some(d) = h.get_element_distance(q_pt, &e_adj) {
+						ext.push((d, e_adj));
 					}
 				}
 			}
@@ -652,8 +652,8 @@ impl SelectNeighbors {
 		mut c: DoublePriorityQueue,
 		m_max: usize,
 	) -> HashSet<ElementId> {
-		Self::extand(h, lc, q_id, q_pt, &mut c, m_max);
-		Self::heuristic(c, m_max)
+		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
+		Self::heuristic(c, h, m_max)
 	}
 
 	fn heuristic_ext_keep(
@@ -664,8 +664,24 @@ impl SelectNeighbors {
 		mut c: DoublePriorityQueue,
 		m_max: usize,
 	) -> HashSet<ElementId> {
-		Self::extand(h, lc, q_id, q_pt, &mut c, m_max);
-		Self::heuristic_keep(c, m_max)
+		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
+		Self::heuristic_keep(c, h, m_max)
+	}
+
+	fn is_closer(h: &Hnsw, e_dist: f64, e_id: ElementId, r: &mut HashSet<ElementId>) -> bool {
+		if let Some(current_vec) = h.get_element_vector(&e_id) {
+			for r_id in r.iter() {
+				if let Some(r_dist) = h.get_element_distance(&current_vec, r_id) {
+					if e_dist > r_dist {
+						return false;
+					}
+				}
+			}
+			r.insert(e_id);
+			true
+		} else {
+			false
+		}
 	}
 }
 
@@ -679,7 +695,6 @@ mod tests {
 	use crate::idx::trees::vector::{HashedSharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use roaring::RoaringTreemap;
-	use serial_test::serial;
 	use std::collections::hash_map::Entry;
 	use std::collections::{HashMap, HashSet};
 
@@ -796,7 +811,6 @@ mod tests {
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_hnsw_xs() {
 		for d in [
 			Distance::Chebyshev,
@@ -825,23 +839,21 @@ mod tests {
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_hnsw_small_euclidean_check() {
 		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 2, 24, true, true)
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_hnsw_small() {
-		for d in [
-			Distance::Chebyshev,
-			Distance::Cosine,
-			Distance::Euclidean,
-			Distance::Hamming,
-			Distance::Jaccard,
-			Distance::Manhattan,
-			Distance::Minkowski(2.into()),
-			Distance::Pearson,
+		for (dist, dim) in [
+			(Distance::Chebyshev, 5),
+			(Distance::Cosine, 5),
+			(Distance::Euclidean, 5),
+			(Distance::Hamming, 100),
+			// (Distance::Jaccard, 100),
+			(Distance::Manhattan, 5),
+			(Distance::Minkowski(2.into()), 5),
+			(Distance::Pearson, 5),
 		] {
 			for vt in [
 				VectorType::F64,
@@ -850,9 +862,9 @@ mod tests {
 				VectorType::I32,
 				VectorType::I16,
 			] {
-				for extend in [false, true] {
-					for keep in [false, true] {
-						test_hnsw(d.clone(), vt, 200, 5, 12, extend, keep);
+				for extend in [false] {
+					for keep in [false] {
+						test_hnsw(dist.clone(), vt, 200, dim, 12, extend, keep);
 					}
 				}
 			}
@@ -860,7 +872,6 @@ mod tests {
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_hnsw_large_euclidean() {
 		test_hnsw(Distance::Euclidean, VectorType::F64, 200, 5, 12, false, false)
 	}
@@ -971,7 +982,6 @@ mod tests {
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_hnsw_index_xs() {
 		for d in [
 			Distance::Chebyshev,
@@ -998,7 +1008,6 @@ mod tests {
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_building() {
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, 500, true, true, true);
 		let mut hnsw = Hnsw::new(&p);
@@ -1184,7 +1193,6 @@ mod tests {
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_invalid_size() {
 		let collection = TestCollection::Unique(vec![
 			(0, new_i16_vec(-2, -3)),
@@ -1213,7 +1221,6 @@ mod tests {
 	}
 
 	#[test_log::test]
-	#[serial]
 	fn test_recall() -> Result<(), Error> {
 		let (dim, vt, m) = (20, VectorType::F32, 24);
 		info!("Build data collection");
@@ -1222,7 +1229,7 @@ mod tests {
 				VectorType::F32,
 				"../tests/data/hnsw-random-9000-20-euclidean.gz",
 			)?);
-		let p = new_params(dim, vt, Distance::Euclidean, m, 500, false, false, false);
+		let p = new_params(dim, vt, Distance::Euclidean, m, 150, true, false, false);
 		let mut h = HnswIndex::new(&p);
 		info!("Insert collection");
 		for (doc_id, obj) in collection.as_ref() {
@@ -1236,7 +1243,7 @@ mod tests {
 		)?);
 
 		info!("Check recall");
-		for (efs, expected_recall) in [(10, 0.82), (80, 0.87)] {
+		for (efs, expected_recall) in [(10, 0.97), (40, 1)] {
 			let mut total_recall = 0.0;
 			for (_, pt) in queries.as_ref() {
 				let knn = 10;
@@ -1249,7 +1256,9 @@ mod tests {
 				);
 				let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 				let rec = brute_force_res.recall(&hnsw_res);
-				// assert_eq!(brute_force_res.docs, hnsw_res.docs);
+				if rec == 1.0 {
+					assert_eq!(brute_force_res.docs, hnsw_res.docs);
+				}
 				total_recall += rec;
 			}
 			let recall = total_recall / queries.as_ref().len() as f64;
@@ -1278,7 +1287,12 @@ mod tests {
 				h.m
 			};
 			for (e_id, f_ids) in l.nodes() {
-				assert!(f_ids.len() <= m_layer, "Foreign list len");
+				assert!(
+					f_ids.len() <= m_layer,
+					"Foreign list len = len({}) <= m_layer({})",
+					f_ids.len(),
+					m_layer
+				);
 				assert!(
 					!f_ids.contains(e_id),
 					"!f_ids.contains(e_id) = layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"

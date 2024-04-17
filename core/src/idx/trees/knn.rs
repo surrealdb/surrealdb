@@ -752,7 +752,7 @@ pub(super) mod tests {
 				vector_set.insert(new_random_vec(rng, vector_type, dimension, gen));
 				attempts -= 1;
 				if attempts == 0 {
-					panic!("Fail generating a unique random collection");
+					panic!("Fail generating a unique random collection {vector_type} {dimension}");
 				}
 			}
 			let mut coll = TestCollection::Unique(Vec::with_capacity(vector_set.len()));
@@ -790,7 +790,7 @@ pub(super) mod tests {
 	impl RandomItemGenerator {
 		pub(in crate::idx::trees) fn new(dist: &Distance, dim: usize) -> Self {
 			match dist {
-				Distance::Jaccard => Self::Int(0, (dim * 3) as i64),
+				Distance::Jaccard => Self::Int(0, (dim / 2) as i64),
 				Distance::Hamming => Self::Int(0, 2),
 				_ => Self::Float(-20.0, 20.0),
 			}
