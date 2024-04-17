@@ -111,14 +111,14 @@ pub(super) async fn config(
 
 	// Use algorithm provided, if specified
 	// This parameter is not required to be present, although is usually expected
-	// When missing, tokens must be validated using only the required "kty" parameter
-	// This is discouraged, as it requires trusting the algorithm present on the token
+	// When missing, tokens must be validated using only the required key type parameter
+	// This is discouraged, as it requires relying on the algorithm specified in the token
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
 	let alg = match jwk.common.algorithm {
 		Some(alg) => alg,
 		// If not specified, use the algorithm provided in the token header
 		// It is critical that the JWT library prevents the "none" algorithm from being used
-		// Reference: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
+		// Reference: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/#Meet-the--None--Algorithm
 		// In the case of "jsonwebtoken", the "none" algorithm is not part of the enumeration
 		// Source: https://docs.rs/jsonwebtoken/latest/jsonwebtoken/enum.Algorithm.html
 		// Confirmation: https://github.com/Keats/jsonwebtoken/issues/381
