@@ -332,7 +332,7 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
+			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
 			.finish()
 			.await
 			.unwrap();
@@ -347,7 +347,7 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
+			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
 			.finish()
 			.await
 			.unwrap();
@@ -362,7 +362,7 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
+			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
 			.finish()
 			.await
 			.unwrap();
@@ -377,7 +377,7 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
+			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
 			.finish()
 			.await
 			.unwrap();
@@ -392,7 +392,7 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 34 }, 21] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
+			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
 			.finish()
 			.await
 			.unwrap();
@@ -407,7 +407,7 @@ mod tests {
 		let res = Value::parse("{ test: { something: [21, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
+			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
 			.finish()
 			.await
 			.unwrap();
@@ -422,7 +422,7 @@ mod tests {
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(999)))
+			.enter(|stk| val.set(stk, &ctx, &opt, &txn, &idi, Value::from(21)))
 			.finish()
 			.await
 			.unwrap();

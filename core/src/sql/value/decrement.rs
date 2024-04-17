@@ -98,7 +98,7 @@ mod tests {
 		let res = Value::parse("{ test: [100, 300] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::from(200)))
 			.finish()
 			.await
 			.unwrap();
@@ -113,7 +113,7 @@ mod tests {
 		let res = Value::parse("{ test: [200] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &txn, &idi, Value::parse("[100,300]")))
 			.finish()
 			.await
 			.unwrap();
