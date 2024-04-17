@@ -87,7 +87,8 @@ async fn live_query_sends_registered_lq_details() -> Result<(), Error> {
 	let result = res.remove(0);
 	assert!(result.result.is_ok());
 
-	stack.enter(|stk| dbs.process_lq_notifications(stk, &Default::default())).finish().await?;
+	let def = Default::default();
+	stack.enter(|stk| dbs.process_lq_notifications(stk, &def)).finish().await?;
 
 	let notifications_chan = dbs.notifications().unwrap();
 
