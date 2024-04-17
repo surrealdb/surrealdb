@@ -152,6 +152,10 @@ mod tests {
 
 	const DONT_STORE_PREVIOUS: bool = false;
 
+	const NS: &str = "myns";
+	const DB: &str = "mydb";
+	const TB: &str = "mytb";
+
 	#[tokio::test]
 	async fn test_changefeed_read_write() {
 		let ts = crate::sql::Datetime::default();
@@ -205,15 +209,15 @@ mod tests {
 
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap();
 		let thing_a = Thing {
-			tb: tb.to_owned(),
+			tb: TB.to_owned(),
 			id: Id::String("A".to_string()),
 		};
 		let value_a: super::Value = "a".into();
 		let previous = Cow::from(Value::None);
 		tx1.record_change(
-			ns,
-			db,
-			tb,
+			NS,
+			DB,
+			TB,
 			&thing_a,
 			previous.clone(),
 			Cow::Borrowed(&value_a),
@@ -224,14 +228,14 @@ mod tests {
 
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let thing_c = Thing {
-			tb: tb.to_owned(),
+			tb: TB.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c: Value = "c".into();
 		tx2.record_change(
-			ns,
-			db,
-			tb,
+			NS,
+			DB,
+			TB,
 			&thing_c,
 			previous.clone(),
 			Cow::Borrowed(&value_c),
@@ -243,28 +247,28 @@ mod tests {
 		let x = ds.transaction(Write, Optimistic).await;
 		let mut tx3 = x.unwrap();
 		let thing_b = Thing {
-			tb: tb.to_owned(),
+			tb: TB.to_owned(),
 			id: Id::String("B".to_string()),
 		};
 		let value_b: Value = "b".into();
 		tx3.record_change(
-			ns,
-			db,
-			tb,
+			NS,
+			DB,
+			TB,
 			&thing_b,
 			previous.clone(),
 			Cow::Borrowed(&value_b),
 			DONT_STORE_PREVIOUS,
 		);
 		let thing_c2 = Thing {
-			tb: tb.to_owned(),
+			tb: TB.to_owned(),
 			id: Id::String("C".to_string()),
 		};
 		let value_c2: Value = "c2".into();
 		tx3.record_change(
-			ns,
-			db,
-			tb,
+			NS,
+			DB,
+			TB,
 			&thing_c2,
 			previous.clone(),
 			Cow::Borrowed(&value_c2),
@@ -281,7 +285,7 @@ mod tests {
 
 		let mut tx4 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r =
-			crate::cf::read(&mut tx4, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
+			crate::cf::read(&mut tx4, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
 				.await
 				.unwrap();
 		tx4.commit().await.unwrap();
@@ -357,14 +361,14 @@ mod tests {
 
 		let mut tx5 = ds.transaction(Write, Optimistic).await.unwrap();
 		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_db(&mut tx5, ns, db, vs::u64_to_versionstamp(4), Some(10)).await.unwrap();
+		crate::cf::gc_db(&mut tx5, NS, DB, vs::u64_to_versionstamp(4), Some(10)).await.unwrap();
 		// We now commit tx5, which should persist the gc_all resullts
 		tx5.commit().await.unwrap();
 
 		// Now we should see the gc_all results
 		let mut tx6 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r =
-			crate::cf::read(&mut tx6, ns, db, Some(tb), ShowSince::Versionstamp(start), Some(10))
+			crate::cf::read(&mut tx6, NS, DB, Some(TB), ShowSince::Versionstamp(start), Some(10))
 				.await
 				.unwrap();
 		tx6.commit().await.unwrap();
@@ -405,7 +409,7 @@ mod tests {
 		ds.tick_at((ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
 		let mut tx7 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(&mut tx7, ns, db, Some(tb), ShowSince::Timestamp(ts), Some(10))
+		let r = crate::cf::read(&mut tx7, NS, DB, Some(TB), ShowSince::Timestamp(ts), Some(10))
 			.await
 			.unwrap();
 		tx7.commit().await.unwrap();
