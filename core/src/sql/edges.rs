@@ -7,10 +7,10 @@ use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Edges")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct Edges {
 	pub dir: Dir,
