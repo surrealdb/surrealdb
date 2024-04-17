@@ -1498,7 +1498,7 @@ async fn run_functions() {
 	assert!(matches!(res, serde_json::Value::String(s) if &s == "fn::bar called with: string_val"));
 
 	// normal functions
-	let res = socket.send_message_run("math::abs", None, vec![(-42).into()]).await.unwrap();
+	let res = socket.send_message_run("math::abs", None, vec![42.into()]).await.unwrap();
 	assert!(matches!(res, serde_json::Value::Number(n) if n.as_u64() == Some(42)));
 	let res = socket
 		.send_message_run("math::max", None, vec![vec![1, 2, 3, 4, 5, 6].into()])
