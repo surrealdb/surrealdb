@@ -456,6 +456,9 @@ impl<'a> TreeBuilder<'a> {
 				(Operator::Contain, v, IdiomPosition::Left) => {
 					Some(IndexOperator::Equality(v.clone()))
 				}
+				(Operator::Inside, v, IdiomPosition::Right) => {
+					Some(IndexOperator::Equality(v.clone()))
+				}
 				(
 					Operator::ContainAny | Operator::ContainAll | Operator::Inside,
 					Value::Array(a),

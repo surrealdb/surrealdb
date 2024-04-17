@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Scoring {
 	Bm {

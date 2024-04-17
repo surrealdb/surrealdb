@@ -1,15 +1,3 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::value::Value;
-use derive::Store;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
 mod analyzer;
 mod database;
 mod event;
@@ -38,9 +26,20 @@ pub use table::DefineTableStatement;
 pub use token::DefineTokenStatement;
 pub use user::DefineUserStatement;
 
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::sql::value::Value;
+use derive::Store;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),

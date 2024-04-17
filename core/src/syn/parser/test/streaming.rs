@@ -433,10 +433,10 @@ fn statements() -> Vec<Statement> {
 				vec![Part::Field(Ident("baq".to_owned()))],
 			)))])))),
 		}),
-		Statement::Info(InfoStatement::Root),
-		Statement::Info(InfoStatement::Ns),
-		Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()))),
-		Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns))),
+		Statement::Info(InfoStatement::Root(false)),
+		Statement::Info(InfoStatement::Ns(false)),
+		Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()), false)),
+		Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns), false)),
 		Statement::Select(SelectStatement {
 			expr: Fields(
 				vec![

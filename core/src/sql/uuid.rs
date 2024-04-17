@@ -8,11 +8,11 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
+#[revisioned(revision = 1)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash,
 )]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Uuid(pub uuid::Uuid);
