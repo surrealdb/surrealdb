@@ -7,6 +7,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::tag_no_case,
 	combinator::{cut, opt},
+	sequence::preceded,
 };
 
 pub fn info(i: &str) -> IResult<&str, InfoStatement> {
@@ -19,12 +20,12 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 		cut(alt((root, ns, db, sc, tb, user))),
 	)(i)?;
 
-	let (i, structure) = opt(tag_no_case("STRUCTURE"))(i)?;
+	let (i, structure) = opt(preceded(shouldbespace, tag_no_case("STRUCTURE")))(i)?;
 	Ok((
 		i,
 		match structure {
 			Some(_) => stm.structurize(),
-			None => stm,
+			_ => stm,
 		},
 	))
 }
@@ -162,6 +163,6 @@ mod tests {
 		let res = info(sql);
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Root(true));
-		assert_eq!("INFO FOR ROOT", format!("{}", out));
+		assert_eq!("INFO FOR ROOT STRUCTURE", format!("{}", out));
 	}
 }
