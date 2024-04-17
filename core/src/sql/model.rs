@@ -95,7 +95,7 @@ impl Model {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(stk, ctx, opt, txn, doc).await?.is_truthy() {
+					if !stk.run(|stk| e.compute(stk, ctx, opt, txn, doc)).await?.is_truthy() {
 						return Err(Error::FunctionPermissions {
 							name: self.name.to_owned(),
 						});
@@ -104,8 +104,13 @@ impl Model {
 			}
 		}
 		// Compute the function arguments
-		let mut args =
-			try_join_all(self.args.iter().map(|v| v.compute(stk, ctx, opt, txn, doc))).await?;
+		let mut args = stk
+			.scope(|stk| {
+				try_join_all(
+					self.args.iter().map(|v| stk.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+				)
+			})
+			.await?;
 		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(Error::InvalidArguments {

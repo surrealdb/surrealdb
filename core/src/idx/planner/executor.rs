@@ -184,6 +184,7 @@ impl InnerQueryExecutor {
 }
 
 impl QueryExecutor {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn knn(
 		&self,
 		stk: &mut Stk,
