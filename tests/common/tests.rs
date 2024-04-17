@@ -1527,10 +1527,12 @@ async fn relate_rpc() {
 		.await
 		.unwrap();
 	// test
-	let mut res = socket.send_message_query("foo:a->bar.val").await.unwrap();
+
+	let mut res = socket.send_message_query("RETURN foo:a->bar.val").await.unwrap();
 	let expected = json!(42);
 	assert_eq!(res.remove(0)["result"], expected);
-	let mut res = socket.send_message_query("foo:a->bar->foo").await.unwrap();
+
+	let mut res = socket.send_message_query("RETURN foo:a->bar->foo").await.unwrap();
 	let expected = json!(["foo:b"]);
 	assert_eq!(res.remove(0)["result"], expected);
 
