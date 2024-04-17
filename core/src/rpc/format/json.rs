@@ -1,8 +1,8 @@
 use crate::rpc::request::Request;
 use crate::rpc::RpcError;
-use crate::sql::Value;
 #[cfg(not(feature = "experimental-parser"))]
 use crate::sql;
+use crate::sql::Value;
 #[cfg(feature = "experimental-parser")]
 use crate::syn;
 
