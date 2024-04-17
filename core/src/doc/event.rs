@@ -52,7 +52,7 @@ impl<'a> Document<'a> {
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(stk, &ctx, opt, txn, Some(&self.current)).await?;
+					v.compute(stk, &ctx, opt, txn, Some(doc)).await?;
 				}
 			}
 		}
