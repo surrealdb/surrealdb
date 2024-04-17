@@ -4,11 +4,12 @@ use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use std::thread;
 use std::time::Duration;
 
-/// Blocking future handling that should be avoided.
-/// It is required for this code because otherwise you need to detect if you are (or are not) in tokio,
-/// get the tokio runtime (needs to passed down), and then _NOT_ create a blocking future - because
-/// that is still async... trust me this is the best way to synchronously handle async code without
-/// knowing the runtime and without creating more async code
+/// This is a blocking function to complete a future.
+/// The reason we have this instead of utilising the runtime blocking code, is because
+/// a) we don't know the runtime (tokio, wasm, other) - they behave differently and are accessed differently
+/// b) there might not be a runtime that is accessible/available, such as tokio runtimes not being statically accessible
+///
+/// Consequently, this is a "cheap" implementation of a runtime.
 fn block_on_special<F: Future>(mut future: F) -> F::Output {
 	// Create a RawWakerVTable that does nothing (since we don't need to wake anything for this example)
 	static VTABLE: RawWakerVTable =
