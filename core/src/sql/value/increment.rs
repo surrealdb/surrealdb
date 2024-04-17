@@ -55,6 +55,7 @@ mod tests {
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.increment(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.finish()
 			.await
 			.unwrap();
 		assert_eq!(res, val);
@@ -69,6 +70,7 @@ mod tests {
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.increment(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.finish()
 			.await
 			.unwrap();
 		assert_eq!(res, val);
@@ -83,6 +85,7 @@ mod tests {
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.increment(stk, &ctx, &opt, &txn, &idi, Value::from(10)))
+			.finish()
 			.await
 			.unwrap();
 		assert_eq!(res, val);
@@ -97,6 +100,7 @@ mod tests {
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.increment(stk, &ctx, &opt, &txn, &idi, Value::from(200)))
+			.finish()
 			.await
 			.unwrap();
 		assert_eq!(res, val);
@@ -113,6 +117,7 @@ mod tests {
 			.enter(|stk| {
 				val.increment(stk, &ctx, &opt, &txn, &idi, Value::parse("[100, 300, 400, 500]"))
 			})
+			.finish()
 			.await
 			.unwrap();
 		assert_eq!(res, val);

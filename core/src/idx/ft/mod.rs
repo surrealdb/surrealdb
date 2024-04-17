@@ -508,6 +508,7 @@ mod tests {
 	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
 	use futures::lock::Mutex;
+	use reblessive::tree::Stk;
 	use std::collections::HashMap;
 	use std::sync::Arc;
 	use test_log::test;
@@ -718,18 +719,15 @@ mod tests {
 			.finish()
 			.await;
 
-		stack
-			.enter(|stk| async {
-				// Remove documents
-				let (_, _, txn, mut fti) =
-					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-				fti.remove_document(&txn, &doc1).await.unwrap();
-				fti.remove_document(&txn, &doc2).await.unwrap();
-				fti.remove_document(&txn, &doc3).await.unwrap();
-				finish(&txn, fti).await;
-			})
-			.finish()
-			.await;
+		{
+			// Remove documents
+			let (_, _, txn, mut fti) =
+				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
+			fti.remove_document(&txn, &doc1).await.unwrap();
+			fti.remove_document(&txn, &doc2).await.unwrap();
+			fti.remove_document(&txn, &doc3).await.unwrap();
+			finish(&txn, fti).await;
+		}
 
 		stack
 			.enter(|stk| async {

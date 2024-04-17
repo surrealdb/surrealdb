@@ -230,7 +230,7 @@ mod tests {
 		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		let stack = reblessive::TreeStack::new();
+		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &txn, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -241,7 +241,7 @@ mod tests {
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ }");
-		let stack = reblessive::TreeStack::new();
+		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &txn, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -252,7 +252,7 @@ mod tests {
 		let idi = Idiom::parse("test.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null } }");
-		let stack = reblessive::TreeStack::new();
+		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &txn, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -263,7 +263,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.wrong");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		let stack = reblessive::TreeStack::new();
+		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &txn, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -274,7 +274,7 @@ mod tests {
 		let idi = Idiom::parse("test.other.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		let stack = reblessive::TreeStack::new();
+		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &txn, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}

@@ -296,7 +296,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -305,7 +307,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
@@ -319,7 +323,9 @@ mod tests {
 			"{ test: ".repeat(depth),
 			"}".repeat(depth)
 		));
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
@@ -329,7 +335,12 @@ mod tests {
 		let depth = 2000;
 		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
 		let val = Value::parse("{}"); // A deep enough object cannot be parsed.
-		let err = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap_err();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err = stack
+			.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi))
+			.finish()
+			.await
+			.unwrap_err();
 		assert!(
 			matches!(err, Error::ComputationDepthExceeded),
 			"expected computation depth exceeded, got {:?}",
@@ -342,7 +353,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.other");
 		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -357,7 +370,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(456));
 	}
 
@@ -366,7 +381,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -381,7 +398,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(36));
 	}
 
@@ -390,7 +409,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
@@ -399,7 +420,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something.age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
@@ -408,7 +431,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
 	}
 
@@ -417,7 +442,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
@@ -431,7 +458,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 30][0]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(map! {
@@ -445,7 +474,9 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }");
-		let res = val.get(stk, &ctx, &opt, &txn, None, &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.get(stk, &ctx, &opt, &txn, None, &idi)).finish().await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
@@ -461,7 +492,12 @@ mod tests {
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: <future> { { something: something } } }");
 		let cur = (&doc).into();
-		let res = val.get(stk, &ctx, &opt, &txn, Some(&cur), &idi).await.unwrap();
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| val.get(stk, &ctx, &opt, &txn, Some(&cur), &idi))
+			.finish()
+			.await
+			.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {

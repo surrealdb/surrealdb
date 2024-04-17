@@ -155,7 +155,10 @@ mod test {
 		let ds = Datastore::new("memory").await.unwrap();
 		let tx =
 			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
-		res.compute(stk, &ctx, &opt, &tx, None).await.unwrap();
+
+		let mut stack = reblessive::tree::TreeStack::new();
+
+		stack.enter(|stk| res.compute(stk, &ctx, &opt, &tx, None)).finish().await.unwrap();
 
 		let mut tx = tx.lock().await;
 		tx.commit().await.unwrap();

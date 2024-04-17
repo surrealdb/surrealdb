@@ -198,12 +198,12 @@ impl Analyzer {
 			}
 			Value::Array(a) => {
 				for v in a.0 {
-					self.analyze_value(stk, ctx, opt, txn, v, stage, tks).await?;
+					stk.run(|stk| self.analyze_value(stk, ctx, opt, txn, v, stage, tks)).await?;
 				}
 			}
 			Value::Object(o) => {
 				for (_, v) in o.0 {
-					self.analyze_value(stk, ctx, opt, txn, v, stage, tks).await?;
+					stk.run(|stk| self.analyze_value(stk, ctx, opt, txn, v, stage, tks)).await?;
 				}
 			}
 			_ => {}
@@ -280,14 +280,16 @@ mod tests {
 		};
 		let a: Analyzer = az.into();
 
-		let stack = reblessive::TreeStack::new();
+		let mut stack = reblessive::TreeStack::new();
 
+		let ctx = Context::default();
+		let opts = Options::default();
 		stack
 			.enter(|stk| {
 				a.generate_tokens(
 					stk,
-					&Context::default(),
-					&Options::default(),
+					&ctx,
+					&opts,
 					&txn,
 					FilteringStage::Indexing,
 					input.to_string(),
