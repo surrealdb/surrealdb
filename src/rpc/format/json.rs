@@ -27,10 +27,7 @@ pub fn res_ws(res: Response) -> Result<(usize, Message), RpcError> {
 }
 
 pub fn req_http(val: &Bytes) -> Result<Request, RpcError> {
-	#[cfg(feature = "parser2")]
 	let value = syn::json_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?);
-	#[cfg(not(feature = "parser2"))]
-	let value = syn::json(std::str::from_utf8(val).or(Err(RpcError::ParseError))?);
 
 	value.or(Err(RpcError::ParseError))?.try_into()
 }
