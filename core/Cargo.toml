@@ -72,6 +72,7 @@ base64_lib = { version = "0.21.5", package = "base64" }
 bcrypt = "0.15.0"
 bincode = "1.3.3"
 bytes = "1.5.0"
+ciborium = "0.2.1"
 cedar-policy = "2.4.2"
 channel = { version = "1.9.0", package = "async-channel" }
 chrono = { version = "0.4.31", features = ["serde"] }
@@ -123,6 +124,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "multipart",
 ], optional = true }
 revision = { version = "0.7.0", features = ["chrono", "geo", "roaring", "regex", "rust_decimal", "uuid"] }
+rmpv = "1.0.1"
 roaring = { version = "0.10.2", features = ["serde"] }
 rocksdb = { version = "0.21.0", features = ["lz4", "snappy"], optional = true }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
