@@ -1,13 +1,13 @@
 use crate::rpc::failure::Failure;
-use crate::rpc::format::Format;
+use crate::rpc::format::WsFormat;
 use crate::telemetry::metrics::ws::record_rpc;
 use axum::extract::ws::Message;
 use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
-use serde_json::Value as Json;
 use std::sync::Arc;
 use surrealdb::channel::Sender;
+use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
 use surrealdb::sql::Value;
 use tracing::Span;
@@ -20,12 +20,6 @@ pub struct Response {
 }
 
 impl Response {
-	/// Convert and simplify the value into JSON
-	#[inline]
-	pub fn into_json(self) -> Json {
-		Json::from(self.into_value())
-	}
-
 	#[inline]
 	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
@@ -65,6 +59,12 @@ impl Response {
 		if chn.send(msg).await.is_ok() {
 			record_rpc(cx.as_ref(), len, is_error);
 		};
+	}
+}
+
+impl From<Response> for Value {
+	fn from(value: Response) -> Self {
+		value.into_value()
 	}
 }
 
