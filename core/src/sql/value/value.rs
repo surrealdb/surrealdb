@@ -2644,7 +2644,7 @@ impl Value {
 			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Value::Model(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Model(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
 			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
 			_ => Ok(self.to_owned()),

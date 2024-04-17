@@ -53,6 +53,7 @@ impl Model {
 	#[cfg(feature = "ml")]
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -93,7 +94,7 @@ impl Model {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+					if !e.compute(stk, ctx, opt, txn, doc).await?.is_truthy() {
 						return Err(Error::FunctionPermissions {
 							name: self.name.to_owned(),
 						});
@@ -103,7 +104,7 @@ impl Model {
 		}
 		// Compute the function arguments
 		let mut args =
-			try_join_all(self.args.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+			try_join_all(self.args.iter().map(|v| v.compute(stk, ctx, opt, txn, doc))).await?;
 		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(Error::InvalidArguments {
@@ -214,6 +215,7 @@ impl Model {
 	#[cfg(not(feature = "ml"))]
 	pub(crate) async fn compute(
 		&self,
+		_stk: &mut Stk,
 		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,

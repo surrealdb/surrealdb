@@ -225,6 +225,7 @@ impl Analyzer {
 	}
 
 	/// Was marked recursive
+	#[allow(clippy::too_many_arguments)]
 	async fn analyze_content(
 		&self,
 		stk: &mut Stk,
@@ -242,6 +243,7 @@ impl Analyzer {
 	}
 
 	/// Was marked recursive
+	#[allow(clippy::too_many_arguments)]
 	async fn analyze_value(
 		&self,
 		stk: &mut Stk,

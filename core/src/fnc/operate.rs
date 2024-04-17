@@ -211,6 +211,7 @@ fn get_executor_option<'a>(
 	ExecutorOption::None
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn matches(
 	stk: &mut Stk,
 	ctx: &Context<'_>,

@@ -479,6 +479,7 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn matches_with_value(
 		&self,
 		stk: &mut Stk,

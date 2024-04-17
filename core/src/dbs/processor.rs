@@ -17,6 +17,7 @@ use reblessive::tree::Stk;
 use std::ops::Bound;
 
 impl Iterable {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn iterate(
 		self,
 		stk: &mut Stk,
@@ -35,6 +36,7 @@ impl Iterable {
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn channel(
 		self,
 		stk: &mut Stk,
@@ -236,6 +238,7 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn process_mergeable(
 		&mut self,
 		stk: &mut Stk,
