@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::sql::statements::InfoStatement;
 use crate::sql::value::serde::ser;
-use crate::sql::value::serde::ser::statement::info::Which::{Sc, Tb};
 use crate::sql::Base;
 use crate::sql::Ident;
 use ser::Serializer as _;
@@ -161,42 +160,42 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let stmt = InfoStatement::Root;
+		let stmt = InfoStatement::Root(Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}
 
 	#[test]
 	fn ns() {
-		let stmt = InfoStatement::Ns;
+		let stmt = InfoStatement::Ns(Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}
 
 	#[test]
 	fn db() {
-		let stmt = InfoStatement::Db;
+		let stmt = InfoStatement::Db(Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}
 
 	#[test]
 	fn sc() {
-		let stmt = InfoStatement::Sc(Default::default());
+		let stmt = InfoStatement::Sc(Default::default(), Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}
 
 	#[test]
 	fn tb() {
-		let stmt = InfoStatement::Tb(Default::default());
+		let stmt = InfoStatement::Tb(Default::default(), Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}
 
 	#[test]
 	fn user() {
-		let stmt = InfoStatement::User(Default::default(), Default::default());
+		let stmt = InfoStatement::User(Default::default(), Default::default(), Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}
