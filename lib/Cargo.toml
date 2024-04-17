@@ -10,7 +10,13 @@ description = "A scalable, distributed, collaborative, document-graph database, 
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb/"
-keywords = ["database", "embedded-database", "key-value", "key-value-store", "kv-store"]
+keywords = [
+    "database",
+    "embedded-database",
+    "key-value",
+    "key-value-store",
+    "kv-store",
+]
 categories = ["database-implementations", "data-structures", "embedded"]
 license-file = "../LICENSE"
 resolver = "2"
@@ -37,14 +43,14 @@ kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
 native-tls = [
-	"dep:native-tls",
-	"reqwest?/native-tls",
-	"tokio-tungstenite?/native-tls",
+    "dep:native-tls",
+    "reqwest?/native-tls",
+    "tokio-tungstenite?/native-tls",
 ]
 rustls = [
-	"dep:rustls",
-	"reqwest?/rustls-tls",
-	"tokio-tungstenite?/rustls-tls-webpki-roots",
+    "dep:rustls",
+    "reqwest?/rustls-tls",
+    "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
 ml = ["surrealdb-core/ml"]
 jwks = ["surrealdb-core/jwks"]
@@ -56,14 +62,14 @@ kv-fdb = ["tokio/time"]
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
-	"protocol-ws",
-	"protocol-http",
-	"kv-mem",
-	"kv-rocksdb",
-	"rustls",
-	"native-tls",
-	"http",
-	"scripting",
+    "protocol-ws",
+    "protocol-http",
+    "kv-mem",
+    "kv-rocksdb",
+    "rustls",
+    "native-tls",
+    "http",
+    "scripting",
 ]
 targets = []
 
@@ -81,11 +87,18 @@ native-tls = { version = "0.2.11", optional = true }
 once_cell = "1.18.0"
 path-clean = "1.0.1"
 reqwest = { version = "0.11.22", default-features = false, features = [
-	"json",
-	"stream",
-	"multipart",
+    "json",
+    "stream",
+    "multipart",
 ], optional = true }
-revision = "0.5.0"
+revision = { version = "0.7.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
 rustls = { version = "0.21.10", optional = true }
 semver = { version = "1.0.20", features = ["serde"] }
@@ -118,25 +131,25 @@ wiremock = "0.5.22"
 pharos = "0.5.3"
 ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }
 tokio = { version = "1.34.0", default-features = false, features = [
-	"rt",
-	"sync",
+    "rt",
+    "sync",
 ] }
 uuid = { version = "1.6.1", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false, features = [
-	"tokio",
+    "tokio",
 ] }
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.34.0", default-features = false, features = [
-	"macros",
-	"io-util",
-	"io-std",
-	"fs",
-	"rt-multi-thread",
-	"time",
-	"sync",
+    "macros",
+    "io-util",
+    "io-std",
+    "fs",
+    "rt-multi-thread",
+    "time",
+    "sync",
 ] }
 tokio-tungstenite = { version = "0.20.1", optional = true }
 uuid = { version = "1.6.1", features = ["serde", "v4", "v7"] }

@@ -10,22 +10,64 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum InfoStatement {
+	#[revision(end = 2, convert_fn = "root_migrate")]
 	Root,
+	#[revision(start = 2)]
+	Root(bool),
+	#[revision(end = 2, convert_fn = "ns_migrate")]
 	Ns,
+	#[revision(start = 2)]
+	Ns(bool),
+	#[revision(end = 2, convert_fn = "db_migrate")]
 	Db,
+	#[revision(start = 2)]
+	Db(bool),
+	#[revision(end = 2, convert_fn = "sc_migrate")]
 	Sc(Ident),
+	#[revision(start = 2)]
+	Sc(Ident, bool),
+	#[revision(end = 2, convert_fn = "tb_migrate")]
 	Tb(Ident),
+	#[revision(start = 2)]
+	Tb(Ident, bool),
+	#[revision(end = 2, convert_fn = "user_migrate")]
 	User(Ident, Option<Base>),
-	RootStructure,
-	NsStructure,
-	DbStructure,
-	ScStructure(Ident),
-	TbStructure(Ident),
+	#[revision(start = 2)]
+	User(Ident, Option<Base>, bool),
+}
+
+impl InfoStatement {
+	fn root_migrate(_revision: u16, _: ()) -> Result<Self, revision::Error> {
+		Ok(Self::Root(false))
+	}
+
+	fn ns_migrate(_revision: u16, _: ()) -> Result<Self, revision::Error> {
+		Ok(Self::Ns(false))
+	}
+
+	fn db_migrate(_revision: u16, _: ()) -> Result<Self, revision::Error> {
+		Ok(Self::Db(false))
+	}
+
+	fn sc_migrate(_revision: u16, i: (Ident,)) -> Result<Self, revision::Error> {
+		Ok(Self::Sc(i.0, false))
+	}
+
+	fn tb_migrate(_revision: u16, n: (Ident,)) -> Result<Self, revision::Error> {
+		Ok(Self::Tb(n.0, false))
+	}
+
+	fn user_migrate(
+		_revision: u16,
+		(i, b): (Ident, Option<Base>),
+	) -> Result<Self, revision::Error> {
+		Ok(Self::User(i, b, false))
+	}
 }
 
 impl InfoStatement {
@@ -39,7 +81,7 @@ impl InfoStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self {
-			InfoStatement::Root => {
+			InfoStatement::Root(false) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
 				// Claim transaction
@@ -61,7 +103,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::Ns => {
+			InfoStatement::Ns(false) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Claim transaction
@@ -89,7 +131,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::Db => {
+			InfoStatement::Db(false) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
@@ -147,7 +189,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::Sc(sc) => {
+			InfoStatement::Sc(sc, false) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
@@ -163,7 +205,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::Tb(tb) => {
+			InfoStatement::Tb(tb, false) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
@@ -203,7 +245,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::User(user, base) => {
+			InfoStatement::User(user, base, false) => {
 				let base = base.clone().unwrap_or(opt.selected_base()?);
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
@@ -220,7 +262,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res.to_string()).ok()
 			}
-			InfoStatement::RootStructure => {
+			InfoStatement::Root(true) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Root)?;
 				// Claim transaction
@@ -234,7 +276,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::NsStructure => {
+			InfoStatement::Ns(true) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Claim transaction
@@ -250,7 +292,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::DbStructure => {
+			InfoStatement::Db(true) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
@@ -294,7 +336,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::ScStructure(sc) => {
+			InfoStatement::Sc(sc, true) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
@@ -309,7 +351,7 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
-			InfoStatement::TbStructure(tb) => {
+			InfoStatement::Tb(tb, true) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Claim transaction
@@ -344,6 +386,23 @@ impl InfoStatement {
 				// Ok all good
 				Value::from(res).ok()
 			}
+			InfoStatement::User(user, base, true) => {
+				let base = base.clone().unwrap_or(opt.selected_base()?);
+				// Allowed to run?
+				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
+
+				// Claim transaction
+				let mut run = txn.lock().await;
+				// Process the user
+				let res = match base {
+					Base::Root => run.get_root_user(user).await?,
+					Base::Ns => run.get_ns_user(opt.ns(), user).await?,
+					Base::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
+					_ => return Err(Error::InvalidLevel(base.to_string())),
+				};
+				// Ok all good
+				Ok(res.structure())
+			}
 		}
 	}
 }
@@ -351,19 +410,23 @@ impl InfoStatement {
 impl fmt::Display for InfoStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Root => f.write_str("INFO FOR ROOT"),
-			Self::RootStructure => f.write_str("INFO FOR ROOT STRUCTURE"),
-			Self::Ns => f.write_str("INFO FOR NAMESPACE"),
-			Self::NsStructure => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
-			Self::Db => f.write_str("INFO FOR DATABASE"),
-			Self::DbStructure => f.write_str("INFO FOR DATABASE STRUCTURE"),
-			Self::Sc(ref s) => write!(f, "INFO FOR SCOPE {s}"),
-			Self::ScStructure(ref s) => write!(f, "INFO FOR SCOPE {s} STRUCTURE"),
-			Self::Tb(ref t) => write!(f, "INFO FOR TABLE {t}"),
-			Self::TbStructure(ref t) => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
-			Self::User(ref u, ref b) => match b {
+			Self::Root(false) => f.write_str("INFO FOR ROOT"),
+			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),
+			Self::Ns(false) => f.write_str("INFO FOR NAMESPACE"),
+			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
+			Self::Db(false) => f.write_str("INFO FOR DATABASE"),
+			Self::Db(true) => f.write_str("INFO FOR DATABASE STRUCTURE"),
+			Self::Sc(ref s, false) => write!(f, "INFO FOR SCOPE {s}"),
+			Self::Sc(ref s, true) => write!(f, "INFO FOR SCOPE {s} STRUCTURE"),
+			Self::Tb(ref t, false) => write!(f, "INFO FOR TABLE {t}"),
+			Self::Tb(ref t, true) => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
+			Self::User(ref u, ref b, false) => match b {
 				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
 				None => write!(f, "INFO FOR USER {u}"),
+			},
+			Self::User(ref u, ref b, true) => match b {
+				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
+				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
 			},
 		}
 	}
@@ -376,16 +439,15 @@ pub(crate) trait InfoStructure {
 }
 
 impl InfoStatement {
-	pub(crate) fn structurize(self) -> Result<Self, ()> {
-		let out = match self {
-			InfoStatement::Root => InfoStatement::RootStructure,
-			InfoStatement::Ns => InfoStatement::NsStructure,
-			InfoStatement::Db => InfoStatement::DbStructure,
-			InfoStatement::Sc(s) => InfoStatement::ScStructure(s),
-			InfoStatement::Tb(t) => InfoStatement::TbStructure(t),
-			_ => return Err(()),
-		};
-		Ok(out)
+	pub(crate) fn structurize(self) -> Self {
+		match self {
+			InfoStatement::Root(_) => InfoStatement::Root(true),
+			InfoStatement::Ns(_) => InfoStatement::Ns(true),
+			InfoStatement::Db(_) => InfoStatement::Db(true),
+			InfoStatement::Sc(s, _) => InfoStatement::Sc(s, true),
+			InfoStatement::Tb(t, _) => InfoStatement::Tb(t, true),
+			InfoStatement::User(u, b, _) => InfoStatement::User(u, b, true),
+		}
 	}
 }
 
