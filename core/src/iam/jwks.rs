@@ -123,7 +123,7 @@ pub(super) async fn config(
 		// Source: https://docs.rs/jsonwebtoken/latest/jsonwebtoken/enum.Algorithm.html
 		// Confirmation: https://github.com/Keats/jsonwebtoken/issues/381
 		_ => {
-			// Ensure that algorithm specified in the token matches the key type defined in the JWK.
+			// Ensure that the algorithm specified in the token matches the key type defined in the JWK
 			match (&jwk.algorithm, token_alg) {
 				(RSA(_), RS256 | RS384 | RS512 | PS256 | PS384 | PS512) => token_alg,
 				(RSA(key), _) => {
@@ -683,6 +683,7 @@ mod tests {
 			&ds,
 			"test_1",
 			&format!("{}/{}", &url, &jwks_path),
+			// The token is signed using HMAC
 			jsonwebtoken::Algorithm::HS256,
 		)
 		.await;
