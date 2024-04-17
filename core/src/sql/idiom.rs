@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
 	part::Next,
@@ -17,8 +18,8 @@ use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idioms(pub Vec<Idiom>);
 
@@ -43,9 +44,9 @@ impl Display for Idioms {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idiom(pub Vec<Part>);
 
@@ -195,5 +196,17 @@ impl Display for Idiom {
 			),
 			f,
 		)
+	}
+}
+
+impl InfoStructure for Idioms {
+	fn structure(self) -> Value {
+		self.to_string().into()
+	}
+}
+
+impl InfoStructure for Idiom {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

@@ -1,11 +1,12 @@
-use crate::sql::Ident;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Ident, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum Base {
 	Root,
 	Ns,
@@ -27,5 +28,10 @@ impl fmt::Display for Base {
 			Self::Sc(sc) => write!(f, "SCOPE {sc}"),
 			Self::Root => f.write_str("ROOT"),
 		}
+	}
+}
+impl InfoStructure for Base {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

@@ -3,7 +3,8 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Duration, Ident, Strand, Value};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Base, Duration, Ident, Object, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -11,9 +12,9 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -90,5 +91,34 @@ impl Display for DefineScopeStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineScopeStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			signup,
+			signin,
+			comment,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		if let Some(signup) = signup {
+			acc.insert("signup".to_string(), signup.structure());
+		}
+
+		if let Some(signin) = signin {
+			acc.insert("signin".to_string(), signin.structure());
+		}
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }

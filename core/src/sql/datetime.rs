@@ -14,9 +14,9 @@ use super::escape::quote_str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
-#[revisioned(revision = 1)]
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {

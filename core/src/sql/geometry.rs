@@ -15,10 +15,10 @@ use std::{fmt, hash};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Geometry")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
