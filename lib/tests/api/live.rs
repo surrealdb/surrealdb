@@ -201,7 +201,7 @@ async fn live_select_query() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-        let table = format!("table_{}", Ulid::new());
+		let table = format!("table_{}", Ulid::new());
 		if FFLAGS.change_feed_live_queries.enabled() {
 			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
 				.await
@@ -265,7 +265,7 @@ async fn live_select_query() {
 	}
 
 	{
-        let table = format!("table_{}", Ulid::new());
+		let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
@@ -288,7 +288,7 @@ async fn live_select_query() {
 	}
 
 	{
-        let table = format!("table_{}", Ulid::new());
+		let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
@@ -328,7 +328,7 @@ async fn live_select_query() {
 	}
 
 	{
-        let table = format!("table_{}", Ulid::new());
+		let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
