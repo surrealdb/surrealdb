@@ -9,9 +9,9 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 
 /// A string that doesn't contain NUL bytes.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Strand")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);

@@ -42,9 +42,9 @@ impl Response {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[revisioned(revision = 1)]
 #[doc(hidden)]
 #[non_exhaustive]
 pub enum Status {
@@ -73,8 +73,8 @@ impl Serialize for Response {
 	}
 }
 
-#[derive(Debug, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize)]
 #[doc(hidden)]
 #[non_exhaustive]
 pub struct QueryMethodResponse {
