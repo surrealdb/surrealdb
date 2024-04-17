@@ -4,7 +4,9 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Number, Value};
+use tokio_util::bytes::buf;
+use tracing::Value;
 
 #[tokio::test]
 async fn query_basic() -> Result<(), Error> {
@@ -160,4 +162,33 @@ async fn query_root_record() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	Ok(())
+}
+
+#[tokio::test]
+pub async fn very_deep_query() {
+	use reblessive::{Stack, Stk};
+
+	// build query manually to bypass query limits.
+	let mut stack = Stack::new();
+	async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+		if depth == 0 {
+			Value::Expression(Box::new(surrealdb::sql::Expression::Binary {
+				l: Value::Number(Number::Int(1)),
+				o: surrealdb::sql::Operator::Add,
+				r: Value::Number(Number::Int(1)),
+			}))
+		} else {
+			let q = stk.run(|stk| build_query(stk, depth - 1)).await;
+			Value::Future(Box::new(surrealdb::sql::Future(surrealdb::sql::Block(vec![
+				surrealdb::sql::block::Entry::Value(q),
+			]))))
+		}
+	}
+	let query = stack.enter(|stk| build_query(stk, 1000)).finish();
+
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = dbs.process(query, &ses, None).await?;
+	let v = res.remove(0);
+	assert_eq!(res, Value::Number(surrealdb::sql::Number::Int(2)));
 }
