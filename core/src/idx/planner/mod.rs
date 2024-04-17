@@ -55,7 +55,6 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 		let mut is_knn = false;
-		let t = Arc::new(t);
 		match Tree::build(stk, ctx, self.opt, txn, &t, self.cond, self.with).await? {
 			Some(tree) => {
 				is_knn = is_knn || !tree.knn_expressions.is_empty();
@@ -120,7 +119,7 @@ impl<'a> QueryPlanner<'a> {
 
 	fn add(
 		&mut self,
-		tb: Arc<Table>,
+		tb: Table,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,

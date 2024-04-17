@@ -132,10 +132,10 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_table(stk, &ctx, opt, txn, stm, v.as_ref()).await;
+							return self.process_table(stk, &ctx, opt, txn, stm, &v).await;
 						}
 					}
-					self.process_table(stk, ctx, opt, txn, stm, v.as_ref()).await?
+					self.process_table(stk, ctx, opt, txn, stm, &v).await?
 				}
 				Iterable::Range(v) => self.process_range(stk, ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, txn, stm, e).await?,
@@ -147,11 +147,11 @@ impl<'a> Processor<'a> {
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
 							return self
-								.process_index(stk, &ctx, opt, txn, stm, t.as_ref(), ir)
+								.process_index(stk, &ctx, opt, txn, stm, &t, ir)
 								.await;
 						}
 					}
-					self.process_index(stk, ctx, opt, txn, stm, t.as_ref(), ir).await?
+					self.process_index(stk, ctx, opt, txn, stm, &t, ir).await?
 				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(stk, ctx, opt, txn, stm, v, o).await?
@@ -579,7 +579,8 @@ impl<'a> Processor<'a> {
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, ir).await? {
-				let mut things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
+				let mut things = Vec::new();
+				iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut things).await?;
 				while !things.is_empty() {
 					// Check if the context is finished
 					if ctx.is_done() {
@@ -617,7 +618,8 @@ impl<'a> Processor<'a> {
 					}
 
 					// Collect the next batch of ids
-					things = iterator.next_batch(txn, PROCESSOR_BATCH_SIZE).await?;
+					things = Vec::new();
+					iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut things).await?;
 				}
 				// Everything ok
 				return Ok(());
