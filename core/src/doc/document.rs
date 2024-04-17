@@ -21,10 +21,8 @@ use std::sync::Arc;
 pub(crate) struct Document<'a> {
 	pub(super) id: Option<&'a Thing>,
 	pub(super) extras: Workable,
-	// pub(super) initial: CursorDoc<'a>,
-	// pub(super) current: CursorDoc<'a>,
-	pub initial: CursorDoc<'a>,
-	pub current: CursorDoc<'a>,
+	pub(super) initial: CursorDoc<'a>,
+	pub(super) current: CursorDoc<'a>,
 }
 
 #[non_exhaustive]
@@ -94,14 +92,12 @@ impl<'a> Document<'a> {
 		val: &'a Value,
 		extras: Workable,
 	) -> Self {
-		let doc = Document {
+		Document {
 			id,
 			extras,
 			current: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
 			initial: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
-		};
-		trace!("NEW DOCUMENT CREATED: {:?}, current={:?}", doc, doc.current);
-		doc
+		}
 	}
 
 	/// Create a new document that is not going through the standard lifecycle of documents
@@ -116,19 +112,12 @@ impl<'a> Document<'a> {
 		initial: Cow<'a, Value>,
 		extras: Workable,
 	) -> Self {
-		let doc = Document {
+		Document {
 			id,
 			extras,
 			current: CursorDoc::new(ir, id, doc_id, val),
 			initial: CursorDoc::new(ir, id, doc_id, initial),
-		};
-		trace!(
-			"NEW ARTIFICIAL DOCUMENT CREATED: {:?}, current={:?}, initial={:?}",
-			doc,
-			doc.current,
-			doc.initial
-		);
-		doc
+		}
 	}
 
 	#[cfg(test)]
@@ -150,13 +139,6 @@ impl<'a> Document<'a> {
 
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
-		trace!(
-			"CHECKING IS NEW: initial={:?} && current={:?}",
-			self.initial.doc.is_none(),
-			self.current.doc.is_some()
-		);
-		trace!("initial: {:?}", self.initial);
-		trace!("current: {:?}", self.current);
 		self.initial.doc.is_none() && self.current.doc.is_some()
 	}
 
