@@ -4739,7 +4739,25 @@ dependencies = [
  "chrono",
  "geo 0.26.0",
  "regex",
- "revision-derive",
+ "revision-derive 0.5.0",
+ "roaring",
+ "rust_decimal",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "revision"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "588784c1d9453cfd2ce1b7aff06c903513677cf0e63779a0a3085ee8a44f5b17"
+dependencies = [
+ "bincode",
+ "chrono",
+ "geo 0.26.0",
+ "regex",
+ "revision-derive 0.7.0",
  "roaring",
  "rust_decimal",
  "serde",
@@ -4752,6 +4770,19 @@ name = "revision-derive"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf996fc5f61f1dbec35799b5c00c6dda12e8862e8cb782ed24e10d0292e60ed3"
+dependencies = [
+ "darling",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.58",
+]
+
+[[package]]
+name = "revision-derive"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "854ff0b6794d4e0aab5e4486870941caefe9f258e63cad2f21b49a6302377c85"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -5841,7 +5872,7 @@ dependencies = [
  "rand 0.8.5",
  "rcgen",
  "reqwest",
- "revision",
+ "revision 0.7.0",
  "rmp-serde",
  "rmpv",
  "rustyline",
@@ -5894,7 +5925,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "reqwest",
- "revision",
+ "revision 0.7.0",
  "ring 0.17.8",
  "rust_decimal",
  "rustls 0.21.10",
@@ -5972,7 +6003,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.3",
  "reqwest",
- "revision",
+ "revision 0.5.0",
  "ring 0.17.8",
  "roaring",
  "rocksdb",
@@ -6058,7 +6089,7 @@ dependencies = [
  "regex",
  "regex-syntax 0.8.3",
  "reqwest",
- "revision",
+ "revision 0.7.0",
  "ring 0.17.8",
  "roaring",
  "rocksdb",
