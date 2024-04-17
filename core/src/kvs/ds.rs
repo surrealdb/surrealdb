@@ -1629,7 +1629,7 @@ async fn populate_relevant_changesets(
 		let (selector, vs) = live_query_tracker.get_watermark_by_enum_index(current).unwrap();
 		// We need a mutable borrow of the tracker to update, hence we need to own
 		// TODO refactor, as we no longer need
-		let (selector, vs) = (selector.clone(), vs.clone());
+		let (selector, vs) = (selector.clone(), *vs);
 
 		// Read the change feed for the selector
 		#[cfg(debug_assertions)]

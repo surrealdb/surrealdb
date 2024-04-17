@@ -147,7 +147,7 @@ impl LiveQueryTracker {
 	}
 
 	pub(crate) fn get_watermarks(&self) -> &BTreeMap<LqSelector, Versionstamp> {
-		&self.cf_watermarks;
+		&self.cf_watermarks
 	}
 
 	/// This is to iterate the change feed trackers by index

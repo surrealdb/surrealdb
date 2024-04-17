@@ -1,3 +1,4 @@
+#[cfg(test)]
 use crate::dbs::fuzzy_eq::FuzzyEq;
 use crate::sql::{Object, Uuid, Value};
 use revision::revisioned;
