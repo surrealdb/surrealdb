@@ -60,20 +60,6 @@ args = [
     "--skip", "database_upgrade"
 ]
 
-
-[tasks.test-experimental-parser]
-category = "CI - INTEGRATION TESTS"
-command = "cargo"
-env = { RUST_BACKTRACE = 1, RUSTFLAGS = "--cfg surrealdb_unstable", RUSTDOCFLAGS = "--cfg surrealdb_unstable" }
-args = [
-    "test", "--locked", "--no-default-features", "--features", "storage-mem,scripting,http,parser2", "--workspace", "--",
-    "--skip", "api_integration",
-    "--skip", "cli_integration",
-    "--skip", "http_integration",
-    "--skip", "ws_integration",
-    "--skip", "database_upgrade"
-]
-
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"

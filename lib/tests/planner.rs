@@ -2,7 +2,7 @@ mod parse;
 
 use parse::Parse;
 mod helpers;
-use helpers::new_ds;
+use helpers::{new_ds, skip_ok};
 use surrealdb::dbs::{Response, Session};
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
@@ -153,13 +153,6 @@ async fn execute_test(
 	let res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
-}
-
-fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
-	for _ in 0..skip {
-		let _ = res.remove(0).result?;
-	}
-	Ok(())
 }
 
 fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<(), Error> {
@@ -1919,5 +1912,369 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 			]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_record_id_link_no_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'h';
+		CREATE t:2 SET name = 'h';
+		CREATE i:A SET t = t:1;
+		CREATE i:B SET t = t:2;
+		SELECT * FROM i WHERE t.name = 'h';
+		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+	//
+	assert_eq!(res.len(), 8);
+	skip_ok(&mut res, 6)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						table: 'i'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						reason: 'NO INDEX FOUND'
+					},
+					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_record_id_link_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
+		DEFINE INDEX t_name_idx ON TABLE t COLUMNS name;
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'h';
+		CREATE t:2 SET name = 'h';
+		CREATE i:A SET t = t:1;
+		CREATE i:B SET t = t:2;
+		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
+		SELECT * FROM i WHERE t.name = 'h';
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+	//
+	assert_eq!(res.len(), 10);
+	skip_ok(&mut res, 8)?;
+	//
+	let expected = Value::parse(
+		r#"[
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
+			]"#,
+	);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						detail: {
+							plan: {
+								index: 'i_t_id',
+								joins: [
+									{
+										index: 't_name_idx',
+										operator: '=',
+										value: 'h'
+									}
+								],
+								operator: 'join'
+							},
+							table: 'i'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE INDEX i_t_unique_id ON TABLE i COLUMNS t UNIQUE;
+		DEFINE INDEX t_name_idx ON TABLE t COLUMNS name;
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'h';
+		CREATE t:2 SET name = 'h';
+		CREATE i:A SET t = t:1;
+		CREATE i:B SET t = t:2;
+		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
+		SELECT * FROM i WHERE t.name = 'h';
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+	//
+	assert_eq!(res.len(), 10);
+	skip_ok(&mut res, 8)?;
+	//
+	let expected = Value::parse(
+		r#"[
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
+			]"#,
+	);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						detail: {
+							plan: {
+								index: 'i_t_unique_id',
+								joins: [
+									{
+										index: 't_name_idx',
+										operator: '=',
+										value: 'h'
+									}
+								],
+								operator: 'join'
+							},
+							table: 'i'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	//
+	Ok(())
+}
+#[tokio::test]
+async fn select_with_record_id_link_unique_remote_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
+		DEFINE INDEX t_name_unique_idx ON TABLE t COLUMNS name UNIQUE;
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'a';
+		CREATE t:2 SET name = 'b';
+		CREATE i:A SET t = t:1;
+		CREATE i:B SET t = t:2;
+		SELECT * FROM i WHERE t.name IN ['a', 'b'] EXPLAIN;
+		SELECT * FROM i WHERE t.name IN ['a', 'b'];
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+	//
+	assert_eq!(res.len(), 10);
+	skip_ok(&mut res, 8)?;
+	//
+	let expected = Value::parse(
+		r#"[
+				{ "id": i:A, "t": t:1 },
+				{ "id": i:B, "t": t:2 }
+			]"#,
+	);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						detail: {
+							plan: {
+								index: 'i_t_id',
+								joins: [
+									{
+										index: 't_name_unique_idx',
+										operator: 'union',
+										value: [
+											'a',
+											'b'
+										]
+									}
+								],
+								operator: 'join'
+							},
+							table: 'i'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
+		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
+		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'Hello World';
+		CREATE i:A SET t = t:1;
+		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
+		SELECT * FROM i WHERE t.name @@ 'world';
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 9);
+	skip_ok(&mut res, 7)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'i_t_id',
+							joins: [
+								{
+									index: 't_name_search_idx',
+									operator: '@@',
+									value: 'world'
+								}
+							],
+							operator: 'join'
+						},
+						table: 'i'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[{ "id": i:A, "t": t:1}]"#);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
+		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
+		DEFINE FIELD name ON TABLE t TYPE string;
+		DEFINE FIELD t ON TABLE i TYPE record(t);
+		CREATE t:1 SET name = 'Hello World';
+		CREATE i:A SET t = t:1;
+		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
+		SELECT * FROM i WHERE t.name @@ 'world';
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	assert_eq!(res.len(), 8);
+	skip_ok(&mut res, 6)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+					{
+						detail: {
+							table: 'i'
+						},
+						operation: 'Iterate Table'
+					},
+					{
+						detail: {
+							reason: 'NO INDEX FOUND'
+						},
+						operation: 'Fallback'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"[{ "id": i:A, "t": t:1}]"#);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
 	Ok(())
 }

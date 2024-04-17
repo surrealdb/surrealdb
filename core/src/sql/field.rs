@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{fmt::Fmt, Idiom, Part, Value};
 use crate::syn;
 use revision::revisioned;
@@ -65,6 +66,11 @@ impl Display for Fields {
 	}
 }
 
+impl InfoStructure for Fields {
+	fn structure(self) -> Value {
+		self.to_string().into()
+	}
+}
 impl Fields {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(

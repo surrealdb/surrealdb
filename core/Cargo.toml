@@ -49,7 +49,6 @@ arbitrary = [
 	"geo-types/arbitrary",
 	"uuid/arbitrary",
 ]
-experimental-parser = ["dep:phf", "dep:unicase"]
 # Private features
 kv-fdb = ["tokio/time"]
 
@@ -74,7 +73,7 @@ chrono = { version = "0.4.31", features = ["serde"] }
 derive = { version = "0.12.0", package = "surrealdb-derive" }
 deunicode = "1.4.1"
 dmp = "0.2.0"
-echodb = { version = "0.4.0", optional = true }
+echodb = { version = "0.6.0", optional = true }
 executor = { version = "1.8.0", package = "async-executor" }
 ext-sort = { version = "^0.1.4", optional = true }
 foundationdb = { version = "0.8.0", default-features = false, features = [
@@ -109,7 +108,7 @@ num_cpus = "1.16.0"
 object_store = { version = "0.8.0", optional = false }
 once_cell = "1.18.0"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
-phf = { version = "0.11.2", features = ["macros", "unicase"], optional = true }
+phf = { version = "0.11.2", features = ["macros", "unicase"] }
 pin-project-lite = "0.2.13"
 quick_cache = "0.4.0"
 radix_trie = { version = "0.2.1", features = ["serde"] }
@@ -136,7 +135,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
-surrealkv = { version = "0.1.3", optional = true }
+surrealkv = { version = "0.1.4", optional = true }
 surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
@@ -144,7 +143,7 @@ tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surre
 tracing = "0.1.40"
 trice = "0.4.0"
 ulid = { version = "1.1.0", features = ["serde"] }
-unicase = { version = "2.7.0", optional = true }
+unicase = "2.7.0"
 url = "2.5.0"
 
 [dev-dependencies]

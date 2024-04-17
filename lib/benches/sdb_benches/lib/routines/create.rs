@@ -13,7 +13,7 @@ impl Create {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", Id::rand()),
+			table_name: format!("table_{}", Id::rand().to_raw()),
 		}
 	}
 }

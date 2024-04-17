@@ -25,5 +25,6 @@ impl_module_def!(
 	"regex" => run,
 	"string" => run,
 	"table" => run,
-	"thing" => run
+	"thing" => run,
+	"range" => run
 );

@@ -13,7 +13,6 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::info;
 
-// const LQ_TIMEOUT: Duration = Duration::from_secs(10);
 const LQ_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[test_log::test(tokio::test)]
@@ -23,7 +22,7 @@ async fn live_select_table() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db.select(&table).live().await.unwrap();
@@ -56,7 +55,7 @@ async fn live_select_table() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db.select(Resource::from(&table)).live().await.unwrap();
@@ -141,7 +140,7 @@ async fn live_select_record_ranges() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users = db.select(&table).range("jane".."john").live().await.unwrap();
@@ -175,7 +174,7 @@ async fn live_select_record_ranges() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+		let table = format!("table_{}", Ulid::new());
 
 		// Start listening
 		let mut users =
@@ -202,7 +201,7 @@ async fn live_select_query() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-		let table = Ulid::new().to_string();
+        let table = format!("table_{}", Ulid::new());
 		if FFLAGS.change_feed_live_queries.enabled() {
 			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
 				.await
@@ -266,7 +265,7 @@ async fn live_select_query() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+        let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
@@ -289,7 +288,7 @@ async fn live_select_query() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+        let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
@@ -329,7 +328,7 @@ async fn live_select_query() {
 	}
 
 	{
-		let table = Ulid::new().to_string();
+        let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
 
 		// Start listening
