@@ -159,15 +159,12 @@ mod tests {
 	#[tokio::test]
 	async fn test_changefeed_read_write() {
 		let ts = crate::sql::Datetime::default();
-		let ns = "myns";
-		let db = "mydb";
-		let tb = "mytb";
 		let dns = DefineNamespaceStatement {
-			name: crate::sql::Ident(ns.to_string()),
+			name: crate::sql::Ident(NS.to_string()),
 			..Default::default()
 		};
 		let ddb = DefineDatabaseStatement {
-			name: crate::sql::Ident(db.to_string()),
+			name: crate::sql::Ident(DB.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_original: false,
@@ -175,7 +172,7 @@ mod tests {
 			..Default::default()
 		};
 		let dtb = DefineTableStatement {
-			name: tb.into(),
+			name: TB.into(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_original: false,
@@ -191,11 +188,11 @@ mod tests {
 		//
 
 		let mut tx0 = ds.transaction(Write, Optimistic).await.unwrap();
-		let ns_root = crate::key::root::ns::new(ns);
+		let ns_root = crate::key::root::ns::new(NS);
 		tx0.put(ns_root.key_category(), &ns_root, dns).await.unwrap();
-		let db_root = crate::key::namespace::db::new(ns, db);
+		let db_root = crate::key::namespace::db::new(NS, DB);
 		tx0.put(db_root.key_category(), &db_root, ddb).await.unwrap();
-		let tb_root = crate::key::database::tb::new(ns, db, tb);
+		let tb_root = crate::key::database::tb::new(NS, DB, TB);
 		tx0.put(tb_root.key_category(), &tb_root, dtb.clone()).await.unwrap();
 		tx0.commit().await.unwrap();
 
@@ -294,15 +291,15 @@ mod tests {
 			ChangeSet(
 				vs::u64_to_versionstamp(2),
 				DatabaseMutation(vec![TableMutations(
-					"mytb".to_string(),
+					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
 						true => vec![TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "A".to_string())),
+							Thing::from((TB.to_string(), "A".to_string())),
 							Value::None,
 							vec![],
 						)],
 						false => vec![TableMutation::Set(
-							Thing::from(("mytb".to_string(), "A".to_string())),
+							Thing::from((TB.to_string(), "A".to_string())),
 							Value::from("a"),
 						)],
 					},
@@ -311,15 +308,15 @@ mod tests {
 			ChangeSet(
 				vs::u64_to_versionstamp(3),
 				DatabaseMutation(vec![TableMutations(
-					"mytb".to_string(),
+					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
 						true => vec![TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::None,
 							vec![],
 						)],
 						false => vec![TableMutation::Set(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::from("c"),
 						)],
 					},
@@ -328,27 +325,27 @@ mod tests {
 			ChangeSet(
 				vs::u64_to_versionstamp(4),
 				DatabaseMutation(vec![TableMutations(
-					"mytb".to_string(),
+					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
 						true => vec![
 							TableMutation::SetWithDiff(
-								Thing::from(("mytb".to_string(), "B".to_string())),
+								Thing::from((TB.to_string(), "B".to_string())),
 								Value::None,
 								vec![],
 							),
 							TableMutation::SetWithDiff(
-								Thing::from(("mytb".to_string(), "C".to_string())),
+								Thing::from((TB.to_string(), "C".to_string())),
 								Value::None,
 								vec![],
 							),
 						],
 						false => vec![
 							TableMutation::Set(
-								Thing::from(("mytb".to_string(), "B".to_string())),
+								Thing::from((TB.to_string(), "B".to_string())),
 								Value::from("b"),
 							),
 							TableMutation::Set(
-								Thing::from(("mytb".to_string(), "C".to_string())),
+								Thing::from((TB.to_string(), "C".to_string())),
 								Value::from("c2"),
 							),
 						],
@@ -376,27 +373,27 @@ mod tests {
 		let want: Vec<ChangeSet> = vec![ChangeSet(
 			vs::u64_to_versionstamp(4),
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				TB.to_string(),
 				match FFLAGS.change_feed_live_queries.enabled() {
 					true => vec![
 						TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "B".to_string())),
+							Thing::from((TB.to_string(), "B".to_string())),
 							Value::None,
 							vec![],
 						),
 						TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::None,
 							vec![],
 						),
 					],
 					false => vec![
 						TableMutation::Set(
-							Thing::from(("mytb".to_string(), "B".to_string())),
+							Thing::from((TB.to_string(), "B".to_string())),
 							Value::from("b"),
 						),
 						TableMutation::Set(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::from("c2"),
 						),
 					],
