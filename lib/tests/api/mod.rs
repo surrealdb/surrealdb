@@ -1190,10 +1190,26 @@ async fn changefeed() {
 	};
 	assert!(versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
+	if FFLAGS.change_feed_live_queries.enabled() {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				"[
+					{
+						 create: {
+							 id: user:jane,
+							 name: 'Jane'
+						 }
+					}
+				]"
+			)
+			.unwrap()
+		);
+	} else {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				"[
 					{
 						 update: {
 							 id: user:jane,
@@ -1201,9 +1217,10 @@ async fn changefeed() {
 						 }
 					}
 				]"
-		)
-		.unwrap()
-	);
+			)
+			.unwrap()
+		);
+	}
 	// UPDATE user:amos
 	let a = array.get(3).unwrap();
 	let Value::Object(a) = a else {
@@ -1214,10 +1231,26 @@ async fn changefeed() {
 	};
 	assert!(versionstamp2 < versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
+	if FFLAGS.change_feed_live_queries.enabled() {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				"[
+		{
+			create: {
+				id: user:amos,
+				name: 'AMOS'
+			}
+		}
+	]"
+			)
+			.unwrap()
+		);
+	} else {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				"[
 		{
 			update: {
 				id: user:amos,
@@ -1225,9 +1258,10 @@ async fn changefeed() {
 			}
 		}
 	]"
-		)
-		.unwrap()
-	);
+			)
+			.unwrap()
+		);
+	}
 	// UPDATE table
 	let a = array.get(4).unwrap();
 	let Value::Object(a) = a else {

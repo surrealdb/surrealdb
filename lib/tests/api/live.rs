@@ -94,7 +94,15 @@ async fn live_select_record_id() {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
-		let record_id = Thing::from((Ulid::new().to_string(), "john".to_owned()));
+		let table = format!("table_{}", Ulid::new());
+		if FFLAGS.change_feed_live_queries.enabled() {
+			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
+				.await
+				.unwrap();
+		} else {
+			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+		}
+		let record_id = Thing::from((table, "john".to_owned()));
 
 		// Start listening
 		let mut users = db.select(&record_id).live().await.unwrap();
@@ -128,7 +136,15 @@ async fn live_select_record_id() {
 	}
 
 	{
-		let record_id = Thing::from((Ulid::new().to_string(), "john".to_owned()));
+		let table = format!("table_{}", Ulid::new());
+		if FFLAGS.change_feed_live_queries.enabled() {
+			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
+				.await
+				.unwrap();
+		} else {
+			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+		}
+		let record_id = Thing::from((table, "john".to_owned()));
 
 		// Start listening
 		let mut users = db.select(Resource::from(&record_id)).live().await.unwrap();
