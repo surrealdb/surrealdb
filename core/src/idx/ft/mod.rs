@@ -345,7 +345,8 @@ impl FtIndex {
 		query_string: String,
 	) -> Result<(TermsList, TermsSet), Error> {
 		let t = self.terms.read().await;
-		let res = self.analyzer.extract_querying_terms(stk, ctx, opt, txn, &t, query_string).await?;
+		let res =
+			self.analyzer.extract_querying_terms(stk, ctx, opt, txn, &t, query_string).await?;
 		Ok(res)
 	}
 

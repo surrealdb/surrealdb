@@ -146,9 +146,7 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self
-								.process_index(stk, &ctx, opt, txn, stm, &t, ir)
-								.await;
+							return self.process_index(stk, &ctx, opt, txn, stm, &t, ir).await;
 						}
 					}
 					self.process_index(stk, ctx, opt, txn, stm, &t, ir).await?
