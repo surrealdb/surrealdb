@@ -3,14 +3,15 @@ use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use std::iter::once;
 use std::ops::Deref;
-use surrealdb::sql::Datetime;
-use surrealdb::sql::Duration;
-use surrealdb::sql::Geometry;
-use surrealdb::sql::Id;
-use surrealdb::sql::Number;
-use surrealdb::sql::Thing;
-use surrealdb::sql::Uuid;
-use surrealdb::sql::Value;
+
+use crate::sql::Datetime;
+use crate::sql::Duration;
+use crate::sql::Geometry;
+use crate::sql::Id;
+use crate::sql::Number;
+use crate::sql::Thing;
+use crate::sql::Uuid;
+use crate::sql::Value;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
@@ -327,7 +328,6 @@ impl TryFrom<Value> for Cbor {
 				Number::Decimal(v) => {
 					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
 				}
-				_ => Err("Found an unsupported Number type being converted to CBOR"),
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
 			Value::Duration(v) => {
@@ -390,7 +390,6 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
-						_ => return Err("Found an unsupported Id type being converted to CBOR"),
 					},
 				])),
 			))),
@@ -459,6 +458,5 @@ fn encode_geometry(v: Geometry) -> Result<Data, &'static str> {
 
 			Ok(Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data))))
 		}
-		_ => Err("Found an unsupported Geometry type being converted to CBOR"),
 	}
 }
