@@ -23,6 +23,13 @@ async fn live_select_table() {
 
 	{
 		let table = format!("table_{}", Ulid::new());
+		if FFLAGS.change_feed_live_queries.enabled() {
+			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
+				.await
+				.unwrap();
+		} else {
+			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+		}
 
 		// Start listening
 		let mut users = db.select(&table).live().await.unwrap();
@@ -56,6 +63,13 @@ async fn live_select_table() {
 
 	{
 		let table = format!("table_{}", Ulid::new());
+		if FFLAGS.change_feed_live_queries.enabled() {
+			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
+				.await
+				.unwrap();
+		} else {
+			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+		}
 
 		// Start listening
 		let mut users = db.select(Resource::from(&table)).live().await.unwrap();
@@ -141,6 +155,13 @@ async fn live_select_record_ranges() {
 
 	{
 		let table = format!("table_{}", Ulid::new());
+		if FFLAGS.change_feed_live_queries.enabled() {
+			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
+				.await
+				.unwrap();
+		} else {
+			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+		}
 
 		// Start listening
 		let mut users = db.select(&table).range("jane".."john").live().await.unwrap();
@@ -175,6 +196,13 @@ async fn live_select_record_ranges() {
 
 	{
 		let table = format!("table_{}", Ulid::new());
+		if FFLAGS.change_feed_live_queries.enabled() {
+			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
+				.await
+				.unwrap();
+		} else {
+			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+		}
 
 		// Start listening
 		let mut users =
