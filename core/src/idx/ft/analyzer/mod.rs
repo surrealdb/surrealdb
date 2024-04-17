@@ -68,7 +68,8 @@ impl Analyzer {
 		t: &Terms,
 		content: String,
 	) -> Result<(TermsList, TermsSet), Error> {
-		let tokens = self.generate_tokens(stk, ctx, opt, txn, FilteringStage::Querying, content).await?;
+		let tokens =
+			self.generate_tokens(stk, ctx, opt, txn, FilteringStage::Querying, content).await?;
 		// We extract the term ids
 		let mut list = Vec::with_capacity(tokens.list().len());
 		let mut unique_tokens = HashSet::new();
@@ -99,6 +100,7 @@ impl Analyzer {
 
 	pub(in crate::idx) async fn extract_indexing_terms(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -106,7 +108,7 @@ impl Analyzer {
 		content: Value,
 	) -> Result<TermsSet, Error> {
 		let mut tv = Vec::new();
-		self.analyze_value(ctx, opt, txn, content, FilteringStage::Indexing, &mut tv).await?;
+		self.analyze_value(stk, ctx, opt, txn, content, FilteringStage::Indexing, &mut tv).await?;
 		let mut set = HashSet::new();
 		let mut has_unknown_terms = false;
 		let mut tx = txn.lock().await;
@@ -142,8 +144,16 @@ impl Analyzer {
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let mut inputs = vec![];
-		self.analyze_content(stk, ctx, opt, txn, field_content, FilteringStage::Indexing, &mut inputs)
-			.await?;
+		self.analyze_content(
+			stk,
+			ctx,
+			opt,
+			txn,
+			field_content,
+			FilteringStage::Indexing,
+			&mut inputs,
+		)
+		.await?;
 		// We then collect every unique terms and count the frequency
 		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
 		for tks in &inputs {

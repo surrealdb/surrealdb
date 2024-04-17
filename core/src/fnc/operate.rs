@@ -212,6 +212,7 @@ fn get_executor_option<'a>(
 }
 
 pub(crate) async fn matches(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
 	txn: &Transaction,
@@ -223,7 +224,9 @@ pub(crate) async fn matches(
 	let res = match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => true,
 		ExecutorOption::None => false,
-		ExecutorOption::Execute(exe, thg) => exe.matches(ctx, opt, txn, thg, exp, l, r).await?,
+		ExecutorOption::Execute(exe, thg) => {
+			exe.matches(stk, ctx, opt, txn, thg, exp, l, r).await?
+		}
 	};
 	Ok(res.into())
 }

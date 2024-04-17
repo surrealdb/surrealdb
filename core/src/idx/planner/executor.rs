@@ -25,6 +25,7 @@ use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
+use reblessive::tree::Stk;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -425,6 +426,7 @@ impl QueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn matches(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -438,9 +440,8 @@ impl QueryExecutor {
 				if self.0.table.eq(&ix_def.what.0) {
 					return self.matches_with_doc_id(txn, thg, ft).await;
 				}
-				return Ok(Value::Bool(false));
 			}
-			return self.matches_with_value(ctx, opt, txn, ft, l, r).await;
+			return self.matches_with_value(stk, ctx, opt, txn, ft, l, r).await;
 		}
 
 		// If no previous case were successful, we end up with a user error
@@ -480,6 +481,7 @@ impl QueryExecutor {
 
 	async fn matches_with_value(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -499,7 +501,7 @@ impl QueryExecutor {
 		};
 		let terms = ft.0.terms.read().await;
 		// Extract the terms set from the record
-		let t = ft.0.analyzer.extract_indexing_terms(ctx, opt, txn, &terms, v).await?;
+		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, txn, &terms, v).await?;
 		Ok(ft.0.query_terms_set.is_subset(&t))
 	}
 
@@ -614,7 +616,7 @@ impl FtEntry {
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
 			let (terms_list, terms_set) =
-				ft.extract_querying_terms(stk,ctx, opt, txn, qs.to_owned()).await?;
+				ft.extract_querying_terms(stk, ctx, opt, txn, qs.to_owned()).await?;
 			let mut tx = txn.lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
 			Ok(Some(Self(Arc::new(Inner {
