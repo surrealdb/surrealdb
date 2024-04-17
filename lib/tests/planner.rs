@@ -2384,8 +2384,10 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'idx',
-							operator: '=',
-							value: a:2
+							operator: 'union',
+							value: [
+								a:2
+							]
 						},
 						table: 't'
 					},
@@ -2411,10 +2413,8 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'idx',
-							operator: 'union',
-							value: [
-								a:2
-							]
+							operator: '=',
+							value: a:2
 						},
 						table: 't'
 					},
