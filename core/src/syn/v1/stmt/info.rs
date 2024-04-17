@@ -20,10 +20,13 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	)(i)?;
 
 	let (i, structure) = opt(tag_no_case("STRUCTURE"))(i)?;
-	Ok((i, match structure {
-		Some(_) => stm.structurize(),
-		None => stm,
-	}))
+	Ok((
+		i,
+		match structure {
+			Some(_) => stm.structurize(),
+			None => stm,
+		},
+	))
 }
 
 fn root(i: &str) -> IResult<&str, InfoStatement> {
