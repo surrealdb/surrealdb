@@ -328,7 +328,6 @@ impl TryFrom<Value> for Cbor {
 				Number::Decimal(v) => {
 					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
 				}
-				_ => Err("Found an unsupported Number type being converted to CBOR"),
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
 			Value::Duration(v) => {
@@ -391,7 +390,6 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
-						_ => return Err("Found an unsupported Id type being converted to CBOR"),
 					},
 				])),
 			))),
@@ -460,6 +458,5 @@ fn encode_geometry(v: Geometry) -> Result<Data, &'static str> {
 
 			Ok(Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data))))
 		}
-		_ => Err("Found an unsupported Geometry type being converted to CBOR"),
 	}
 }
