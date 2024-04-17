@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub enum Index {
 	/// (Basic) non unique
@@ -31,9 +31,9 @@ pub enum Index {
 	Hnsw(HnswParams),
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct SearchParams {
 	pub az: Ident,
@@ -53,9 +53,9 @@ pub struct SearchParams {
 	pub terms_cache: u32,
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct MTreeParams {
 	pub dimension: u16,
@@ -89,9 +89,9 @@ impl MTreeParams {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Distance1 {
 	#[default]
@@ -102,25 +102,26 @@ pub enum Distance1 {
 	Minkowski(Number),
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct HnswParams {
-	pub dimension: u16,
-	pub distance: Distance,
-	pub vector_type: VectorType,
-	pub m: u16,
-	pub m0: u16,
-	pub ef_construction: u16,
-	pub heuristic: bool,
-	pub extend_candidates: bool,
-	pub keep_pruned_connections: bool,
-	pub ml: Number,
+    pub dimension: u16,
+    pub distance: Distance,
+    pub vector_type: VectorType,
+    pub m: u16,
+    pub m0: u16,
+    pub ef_construction: u16,
+    pub heuristic: bool,
+    pub extend_candidates: bool,
+    pub keep_pruned_connections: bool,
+    pub ml: Number,
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Distance {
 	Chebyshev,
@@ -164,9 +165,9 @@ impl Display for Distance {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum VectorType {
 	#[default]

@@ -426,35 +426,28 @@ impl Parser<'_> {
 	pub(crate) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
 		expected!(self, t!("FOR"));
 		let mut stmt = match self.next().kind {
-			t!("ROOT") => InfoStatement::Root,
-			t!("NAMESPACE") => InfoStatement::Ns,
-			t!("DATABASE") => InfoStatement::Db,
+			t!("ROOT") => InfoStatement::Root(false),
+			t!("NAMESPACE") => InfoStatement::Ns(false),
+			t!("DATABASE") => InfoStatement::Db(false),
 			t!("SCOPE") => {
 				let ident = self.next_token_value()?;
-				InfoStatement::Sc(ident)
+				InfoStatement::Sc(ident, false)
 			}
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
-				InfoStatement::Tb(ident)
+				InfoStatement::Tb(ident, false)
 			}
 			t!("USER") => {
 				let ident = self.next_token_value()?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
-				InfoStatement::User(ident, base)
+				InfoStatement::User(ident, base, false)
 			}
 			x => unexpected!(self, x, "an info target"),
 		};
 
 		if self.peek_kind() == t!("STRUCTURE") {
-			stmt = match stmt.structurize() {
-				Ok(s) => {
-					self.pop_peek();
-					s
-				}
-				Err(_) => {
-					unexpected!(self, t!("STRUCTURE"), "not STRUCTURE")
-				}
-			}
+			self.pop_peek();
+			stmt = stmt.structurize();
 		};
 		Ok(stmt)
 	}

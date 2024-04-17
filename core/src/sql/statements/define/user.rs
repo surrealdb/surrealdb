@@ -15,9 +15,9 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct DefineUserStatement {
 	pub name: Ident,
@@ -206,7 +206,7 @@ impl InfoStructure for DefineUserStatement {
 		let Self {
 			name,
 			base,
-			code,
+			hash,
 			roles,
 			comment,
 			..
@@ -217,7 +217,7 @@ impl InfoStructure for DefineUserStatement {
 
 		acc.insert("base".to_string(), base.structure());
 
-		acc.insert("code".to_string(), code.into());
+		acc.insert("passhash".to_string(), hash.into());
 
 		acc.insert(
 			"roles".to_string(),

@@ -161,7 +161,7 @@ mod tests {
 
 	#[test]
 	fn info() {
-		let statement = Statement::Info(InfoStatement::Ns);
+		let statement = Statement::Info(InfoStatement::Ns(Default::default()));
 		let serialized = statement.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(statement, serialized);
 	}

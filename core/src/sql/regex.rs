@@ -15,8 +15,8 @@ use std::{env, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 
-#[derive(Clone)]
 #[revisioned(revision = 1)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct Regex(pub regex::Regex);
 
