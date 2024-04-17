@@ -5,16 +5,17 @@ use crate::err::{Error, LiveQueryCause};
 use crate::fflags::FFLAGS;
 use crate::iam::Auth;
 use crate::kvs::lq_structs::{LqEntry, TrackedResult};
-use crate::sql::{Cond, Fetchs, Fields, Table, Uuid, Value};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Cond, Fetchs, Fields, Object, Table, Uuid, Value};
 use derive::Store;
 use futures::lock::MutexGuard;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct LiveStatement {
 	pub id: Uuid,
@@ -189,5 +190,32 @@ impl fmt::Display for LiveStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for LiveStatement {
+	fn structure(self) -> Value {
+		let Self {
+			expr,
+			what,
+			cond,
+			fetch,
+			..
+		} = self;
+
+		let mut acc = Object::default();
+
+		acc.insert("expr".to_string(), expr.structure());
+
+		acc.insert("what".to_string(), what.structure());
+
+		if let Some(cond) = cond {
+			acc.insert("cond".to_string(), cond.structure());
+		}
+
+		if let Some(fetch) = fetch {
+			acc.insert("fetch".to_string(), fetch.structure());
+		}
+		Value::Object(acc)
 	}
 }

@@ -1,12 +1,14 @@
 use crate::sql::duration::Duration;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::str;
 use std::time;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
@@ -29,5 +31,10 @@ impl Default for ChangeFeed {
 			expiry: time::Duration::from_secs(0),
 			store_original: false,
 		}
+	}
+}
+impl InfoStructure for ChangeFeed {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

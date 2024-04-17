@@ -21,10 +21,10 @@ use std::str::FromStr;
 const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Range")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct Range {
 	#[serde(with = "no_nul_bytes")]

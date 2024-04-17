@@ -13,9 +13,9 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 
 /// Binary expressions.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Expression")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Expression {
@@ -185,7 +185,7 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
-			Operator::Matches(_) => fnc::operate::matches(ctx, txn, doc, self).await,
+			Operator::Matches(_) => fnc::operate::matches(ctx, opt, txn, doc, self, l, r).await,
 			Operator::Knn(_, _) => fnc::operate::knn(ctx, opt, txn, doc, self).await,
 			_ => unreachable!(),
 		}

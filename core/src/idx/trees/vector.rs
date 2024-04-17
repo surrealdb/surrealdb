@@ -9,8 +9,8 @@ use std::ops::Mul;
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Vector {
 	F64(Vec<f64>),
