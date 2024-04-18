@@ -29,7 +29,7 @@ impl Value {
 		path: &[Part],
 	) -> Result<Self, Error> {
 		// Limit recursion depth.
-		if path.len() > (*MAX_COMPUTATION_DEPTH).into() {
+		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
 			return Err(Error::ComputationDepthExceeded);
 		}
 		match path.first() {

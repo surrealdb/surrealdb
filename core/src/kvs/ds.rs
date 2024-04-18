@@ -1796,3 +1796,56 @@ async fn find_required_cfs_to_catch_up(
 	tx.cancel().await?;
 	Ok(tracked_cfs_updates)
 }
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[tokio::test]
+	pub async fn very_deep_query() -> Result<(), Error> {
+		use crate::kvs::Datastore;
+		use crate::sql::{Expression, Future, Number, Operator, Value};
+		use reblessive::{Stack, Stk};
+
+		// build query manually to bypass query limits.
+		let mut stack = Stack::new();
+		async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+			if depth == 0 {
+				Value::Expression(Box::new(Expression::Binary {
+					l: Value::Number(Number::Int(1)),
+					o: Operator::Add,
+					r: Value::Number(Number::Int(1)),
+				}))
+			} else {
+				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
+				Value::Future(Box::new(Future::from(q)))
+			}
+		}
+		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
+
+		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+
+		let opt = Options::default()
+			.with_id(dbs.id.0)
+			.with_ns(Some("test".into()))
+			.with_db(Some("test".into()))
+			.with_live(false)
+			.with_strict(false)
+			.with_auth_enabled(false)
+			.with_max_computation_depth(u32::MAX)
+			.with_futures(true);
+
+		// Create a default context
+		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(dbs.capabilities.clone());
+		// Start a new transaction
+		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		// Compute the value
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await.unwrap();
+		assert_eq!(res, Value::Number(Number::Int(2)));
+		Ok(())
+	}
+}
