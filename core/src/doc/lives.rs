@@ -80,23 +80,16 @@ impl<'a> Document<'a> {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into()) {
 			// Get the table
-			trace!("Checking define table stm");
 			let tb = self.tb(opt, txn).await?;
 			// Process the table permissions
-			trace!("Checking select permissions");
 			match &tb.permissions.select {
-				Permission::None => {
-					trace!("Perms were none");
-					return Err(Error::Ignore);
-				}
+				Permission::None => return Err(Error::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
-					trace!("Perms were specific");
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
 					if !e.compute(ctx, opt, txn, Some(doc)).await?.is_truthy() {
-						trace!("Permissions clause failed check");
 						return Err(Error::Ignore);
 					}
 				}
@@ -130,13 +123,10 @@ impl<'a> Document<'a> {
 			let lq = Statement::from(*lv);
 			// Get the event action
 			let met = if is_delete {
-				trace!("The statement is delete, {}", stm);
 				Value::from("DELETE")
 			} else if self.is_new() {
-				trace!("The self doc is new, {:?}", self);
 				Value::from("CREATE")
 			} else {
-				trace!("Neither stm {} is delete or doc {:?} is new, so update", stm, self);
 				Value::from("UPDATE")
 			};
 			// Check if this is a delete statement
@@ -181,11 +171,6 @@ impl<'a> Document<'a> {
 			lqctx.add_value("value", self.current.doc.deref());
 			lqctx.add_value("after", self.current.doc.deref());
 			lqctx.add_value("before", self.initial.doc.deref());
-			trace!(
-				"LIVES ATTENTION\ninitial doc: {:?}\ncurrent doc: {:?}\n",
-				self.initial.doc,
-				self.current.doc
-			);
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
@@ -228,8 +213,6 @@ impl<'a> Document<'a> {
 			if is_delete {
 				// Send a DELETE notification
 				if node_matches_live_query {
-					assert!(doc.rid.is_some());
-					trace!("Sending lq delete notification with rid {:?}", doc.rid);
 					sender
 						.send(Notification {
 							id: lv.id,
@@ -258,14 +241,11 @@ impl<'a> Document<'a> {
 				// Send a CREATE notification
 				if node_matches_live_query {
 					trace!("Sending lq create notification");
-					let value = self.pluck(&lqctx, &lqopt, txn, &lq).await?;
-					#[cfg(debug_assertions)]
-					trace!("Sending lq create notification with value: {:?}", value);
 					sender
 						.send(Notification {
 							id: lv.id,
 							action: Action::Create,
-							result: value,
+							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
 						.await?;
 				}
@@ -273,14 +253,11 @@ impl<'a> Document<'a> {
 				// Send a UPDATE notification
 				if node_matches_live_query {
 					trace!("Sending lq update notification");
-					let value = self.pluck(&lqctx, &lqopt, txn, &lq).await?;
-					#[cfg(debug_assertions)]
-					trace!("Sending lq update notification with value: {:?}", value);
 					sender
 						.send(Notification {
 							id: lv.id,
 							action: Action::Update,
-							result: value,
+							result: self.pluck(&lqctx, &lqopt, txn, &lq).await?,
 						})
 						.await?;
 				}
