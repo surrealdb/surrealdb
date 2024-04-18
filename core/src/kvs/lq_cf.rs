@@ -42,7 +42,6 @@ impl LiveQueryTracker {
 		lq_index_key: &LqEntry,
 		live_query_vs: Versionstamp,
 	) -> Result<(), &'static str> {
-		#[cfg(debug_assertions)]
 		// See if we are already tracking the query
 		let k = lq_index_key.as_key();
 		if self.local_live_queries.contains_key(&k) {

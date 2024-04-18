@@ -1,6 +1,5 @@
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
-#[cfg(debug_assertions)]
 use crate::idx::trees::store::NodeId;
 use roaring::RoaringTreemap;
 use std::cmp::{Ordering, Reverse};
