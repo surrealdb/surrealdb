@@ -82,9 +82,6 @@ async fn populate_relevant_changesets(
 		// The reason we iterate this way (len+index) is because we "know" that the list won't change, but we
 		// want mutable access to it so we can update it while iterating
 		let (selector, vs) = live_query_tracker.get_watermark_by_enum_index(current).unwrap();
-		// We need a mutable borrow of the tracker to update, hence we need to own
-		// TODO refactor, as we no longer need
-		let (selector, vs) = (selector.clone(), *vs);
 
 		// Read the change feed for the selector
 		#[cfg(debug_assertions)]
@@ -93,7 +90,6 @@ async fn populate_relevant_changesets(
 			selector.ns,
 			selector.db,
 			selector.tb,
-			// TODO this is what is incorrect - it is 2 instead of 3
 			vs
 		);
 		let res = cf::read(
@@ -133,7 +129,6 @@ async fn process_change_set_for_notifications(
 	change_set: ChangeSet,
 	lq_pairs: &[(LqIndexKey, LqIndexValue)],
 ) -> Result<(), Error> {
-	// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
 	trace!("Moving to next change set, {:?}", change_set);
 	for (lq_key, lq_value) in lq_pairs.iter() {
 		trace!("Processing live query for notification key={:?} and value={:?}", lq_key, lq_value);
@@ -166,10 +161,6 @@ async fn process_change_set_for_notifications(
 						}
 						doc.check_lqs_and_send_notifications(
 							opt,
-							// TODO(phughk): this is incorrect - the "statement" is the "currently evaluated statement for lives"
-							// Which in this case - doesnt exist, it's off-transaction; Recreating it is pointless
-							// Recreating the doc is necessary anyway - we can probably remove this parameter
-							// In its current state it is harmless as the impl is doing a FFLAG check
 							&Statement::Live(&lq_value.stm),
 							&tx,
 							[&lq_value.stm].as_slice(),
@@ -184,7 +175,6 @@ async fn process_change_set_for_notifications(
 						})?;
 
 						// Send the notifications to driver or api
-						// TODO: evaluate if we want channel directly instead of proxy
 						while let Ok(notification) = local_notification_channel_recv.try_recv() {
 							trace!("Sending notification to client");
 							#[cfg(debug_assertions)]
