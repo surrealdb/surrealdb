@@ -76,7 +76,6 @@ impl Writer {
 		store_difference: bool,
 	) {
 		if current.is_some() {
-			trace!("New current so weird stuff happening. Store difference is {store_difference}");
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
@@ -96,7 +95,6 @@ impl Writer {
 				},
 			);
 		} else {
-			trace!("Not current, delete this trace");
 			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
 	}
@@ -261,15 +259,15 @@ mod tests {
 			ChangeSet(
 				vs::u64_to_versionstamp(2),
 				DatabaseMutation(vec![TableMutations(
-					"mytb".to_string(),
+					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
 						true => vec![TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "A".to_string())),
+							Thing::from((TB.to_string(), "A".to_string())),
 							Value::None,
 							vec![],
 						)],
 						false => vec![TableMutation::Set(
-							Thing::from(("mytb".to_string(), "A".to_string())),
+							Thing::from((TB.to_string(), "A".to_string())),
 							Value::from("a"),
 						)],
 					},
@@ -278,15 +276,15 @@ mod tests {
 			ChangeSet(
 				vs::u64_to_versionstamp(3),
 				DatabaseMutation(vec![TableMutations(
-					"mytb".to_string(),
+					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
 						true => vec![TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::None,
 							vec![],
 						)],
 						false => vec![TableMutation::Set(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::from("c"),
 						)],
 					},
@@ -295,27 +293,27 @@ mod tests {
 			ChangeSet(
 				vs::u64_to_versionstamp(4),
 				DatabaseMutation(vec![TableMutations(
-					"mytb".to_string(),
+					TB.to_string(),
 					match FFLAGS.change_feed_live_queries.enabled() {
 						true => vec![
 							TableMutation::SetWithDiff(
-								Thing::from(("mytb".to_string(), "B".to_string())),
+								Thing::from((TB.to_string(), "B".to_string())),
 								Value::None,
 								vec![],
 							),
 							TableMutation::SetWithDiff(
-								Thing::from(("mytb".to_string(), "C".to_string())),
+								Thing::from((TB.to_string(), "C".to_string())),
 								Value::None,
 								vec![],
 							),
 						],
 						false => vec![
 							TableMutation::Set(
-								Thing::from(("mytb".to_string(), "B".to_string())),
+								Thing::from((TB.to_string(), "B".to_string())),
 								Value::from("b"),
 							),
 							TableMutation::Set(
-								Thing::from(("mytb".to_string(), "C".to_string())),
+								Thing::from((TB.to_string(), "C".to_string())),
 								Value::from("c2"),
 							),
 						],
@@ -343,27 +341,27 @@ mod tests {
 		let want: Vec<ChangeSet> = vec![ChangeSet(
 			vs::u64_to_versionstamp(4),
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				TB.to_string(),
 				match FFLAGS.change_feed_live_queries.enabled() {
 					true => vec![
 						TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "B".to_string())),
+							Thing::from((TB.to_string(), "B".to_string())),
 							Value::None,
 							vec![],
 						),
 						TableMutation::SetWithDiff(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::None,
 							vec![],
 						),
 					],
 					false => vec![
 						TableMutation::Set(
-							Thing::from(("mytb".to_string(), "B".to_string())),
+							Thing::from((TB.to_string(), "B".to_string())),
 							Value::from("b"),
 						),
 						TableMutation::Set(
-							Thing::from(("mytb".to_string(), "C".to_string())),
+							Thing::from((TB.to_string(), "C".to_string())),
 							Value::from("c2"),
 						),
 					],

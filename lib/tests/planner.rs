@@ -2278,3 +2278,156 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_with_record_id_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		CREATE t:1 SET links = [a:2, a:1];
+		CREATE t:2 SET links = [a:3, a:4];
+		SELECT * FROM t WHERE links CONTAINS a:2;
+		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
+		SELECT * FROM t WHERE links CONTAINSANY [a:2];
+		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
+		SELECT * FROM t WHERE a:2 IN links;
+		SELECT * FROM t WHERE a:2 IN links EXPLAIN;
+		DEFINE INDEX idx ON t FIELDS links;
+		SELECT * FROM t WHERE links CONTAINS a:2;
+		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
+		SELECT * FROM t WHERE links CONTAINSANY [a:2];
+		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
+		SELECT * FROM t WHERE a:2 IN links;
+		SELECT * FROM t WHERE a:2 IN links EXPLAIN;
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+
+	let expected = Value::parse(
+		r#"[
+			{
+				id: t:1,
+				links: [ a:2, a:1 ]
+			}
+		]"#,
+	);
+	//
+	assert_eq!(res.len(), 15);
+	skip_ok(&mut res, 2)?;
+	//
+	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
+		let tmp = res.remove(0).result?;
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+					detail: {
+						table: 't'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						reason: 'NO INDEX FOUND'
+					},
+					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	}
+	//
+	skip_ok(&mut res, 1)?;
+	// CONTAINS
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	// CONTAINS EXPLAIN
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'idx',
+							operator: '=',
+							value: a:2
+						},
+						table: 't'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	// CONTAINSANY
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	// CONTAINSANY EXPLAIN
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'idx',
+							operator: 'union',
+							value: [
+								a:2
+							]
+						},
+						table: 't'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	// IN
+	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	// IN EXPLAIN
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'idx',
+							operator: '=',
+							value: a:2
+						},
+						table: 't'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}

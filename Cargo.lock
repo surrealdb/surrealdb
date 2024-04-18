@@ -4702,9 +4702,9 @@ checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
 
 [[package]]
 name = "revision"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87eb86913082f8976b06d07a59f17df9120e6f38b882cf3fc5a45b4499e224b6"
+checksum = "588784c1d9453cfd2ce1b7aff06c903513677cf0e63779a0a3085ee8a44f5b17"
 dependencies = [
  "bincode",
  "chrono",
@@ -4720,9 +4720,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf996fc5f61f1dbec35799b5c00c6dda12e8862e8cb782ed24e10d0292e60ed3"
+checksum = "854ff0b6794d4e0aab5e4486870941caefe9f258e63cad2f21b49a6302377c85"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -5910,6 +5910,7 @@ dependencies = [
  "bytes",
  "cedar-policy",
  "chrono",
+ "ciborium",
  "criterion",
  "deunicode",
  "dmp",
@@ -5947,6 +5948,7 @@ dependencies = [
  "reqwest",
  "revision",
  "ring 0.17.8",
+ "rmpv",
  "roaring",
  "rocksdb",
  "rquickjs",

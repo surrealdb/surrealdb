@@ -14,10 +14,10 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Subquery {
 	Value(Value),

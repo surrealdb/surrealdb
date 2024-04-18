@@ -5,9 +5,9 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Action {
 	Create,
@@ -25,8 +25,8 @@ impl Display for Action {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs

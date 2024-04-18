@@ -14,6 +14,7 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(1);
+const MAX_NOTIFICATIONS: usize = 100;
 
 #[test_log::test(tokio::test)]
 async fn live_select_table() {
@@ -298,7 +299,6 @@ async fn live_select_query() {
 		let _: Option<RecordId> = db.delete(&notifications[0].data.id).await.unwrap();
 		// Pull the notification
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
-		// TODO the problem is with delete not sending or sending `none`; Basically the document fed into `lives` is bad
 		// It should be deleted
 		assert_eq!(
 			notifications.iter().map(|n| n.action).collect::<Vec<_>>(),
@@ -397,8 +397,6 @@ async fn live_select_query() {
 
 	drop(permit);
 }
-
-const MAX_NOTIFICATIONS: usize = 100;
 
 async fn receive_all_pending_notifications<
 	S: Stream<Item = Result<Notification<I>, Error>> + Unpin,
