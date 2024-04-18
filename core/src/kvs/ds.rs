@@ -1153,9 +1153,11 @@ impl Datastore {
 					let lq_index_key: LqIndexKey = lq.as_key();
 					let m = lq_map.get_mut(&lq_index_key);
 					match m {
-						Some(lq_index_value) => lq_index_value.push(lq.as_value()),
+						Some(lq_index_value) => lq_index_value
+							.push(lq.as_value(Versionstamp::default(), Timestamp::default())),
 						None => {
-							let lq_vec = vec![lq.as_value()];
+							let lq_vec =
+								vec![lq.as_value(Versionstamp::default(), Timestamp::default())];
 							lq_map.insert(lq_index_key.clone(), lq_vec);
 						}
 					}
