@@ -8,9 +8,9 @@ use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 
 use std::ops::Range;
-use surrealkv::{Options, IsolationLevel};
 use surrealkv::Store;
 use surrealkv::Transaction as Tx;
+use surrealkv::{IsolationLevel, Options};
 
 #[non_exhaustive]
 pub struct Datastore {

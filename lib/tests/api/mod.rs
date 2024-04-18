@@ -539,7 +539,7 @@ async fn select_table() {
 	assert_eq!(users.len(), 3);
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn select_record_id() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -554,7 +554,7 @@ async fn select_record_id() {
 	assert_eq!(value.record(), thing("user:john").ok());
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn select_record_ranges() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -590,7 +590,7 @@ async fn select_record_ranges() {
 	assert_eq!(convert(users), vec!["john"]);
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn select_records_order_by_start_limit() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
@@ -626,7 +626,7 @@ async fn select_records_order_by_start_limit() {
 	check_start_limit(response, vec!["Zoey", "John", "Jane", "Amos"]);
 }
 
-#[test_log::test(tokio::test)]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn select_records_order_by() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
