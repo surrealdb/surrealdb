@@ -75,3 +75,61 @@ macro_rules! lazy_env_parse_or_else {
 		})
 	};
 }
+
+#[cfg(test)]
+#[macro_export]
+macro_rules! async_defer{
+	$(let $bind:ident = ($capture:expr) defer { $($d:tt)* } after { $($t:tt)* }) => {
+		async {
+
+			// unwraps are save cause the value can only be taken by consuming captured.
+			pub struct Captured<'a,T>(&'a mut Option<T>);
+			impl<T> ::std::ops::Deref for Captured<'_,T>{
+				type Target = T;
+
+				fn deref(&self) -> &T{
+					self.0.as_ref().unwrap()
+				}
+			}
+			impl<T> ::std::ops::DerefMut for Captured<'_,T>{
+				fn deref_mut(&mut self) -> &mut T{
+					self.0.as_mut().unwrap()
+				}
+			}
+			impl<T> Captured<'_,T>{
+				pub fn take(self) -> T{
+					self.0.take().unwrap()
+				}
+			}
+
+			struct CatchUnwindFuture<F>(F);
+			impl<F,R> ::std::future::Future for <F>
+				where F: ::std::future::Future<Output = R>,
+			{
+				type Output = ::std::thread::Result<R>;
+
+				fn poll(self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context<'_>) -> ::std::task::Poll<Self::Output>{
+					let pin = unsafe{ self.map_unchecked_mut(|x| &mut x.0) };
+					match ::std::panic::catch_unwind(||{
+						pin.poll(cx)
+					}) {
+						Ok(x) => x.map(Ok),
+						Err(e) => Poll::Ready(Err(e))
+					}
+				}
+			}
+
+			let mut v = Some($capture);
+			let mut $bind = Captured(&mut v);
+			let res = CatchUnwindFuture(async { $($t)* }).await;
+			if let Some($bind) = v.take(){
+				async { $($d)* }.await;
+			}
+			match res{
+				Ok(x) => x,
+				Err(e) => ::std::panic::resume_unwind(e)
+			}
+
+		}
+	};
+}
