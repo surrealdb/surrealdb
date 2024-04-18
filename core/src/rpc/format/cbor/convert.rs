@@ -1,6 +1,7 @@
 use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
+use rust_decimal::Decimal;
 use std::iter::once;
 use std::ops::Deref;
 
