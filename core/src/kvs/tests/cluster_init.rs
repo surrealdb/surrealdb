@@ -106,7 +106,10 @@ async fn expired_nodes_get_live_queries_archived() {
 		.with_id(old_node);
 	let opt = Options::new_with_sender(&opt, sender);
 	let tx = Arc::new(Mutex::new(test.db.transaction(Write, Optimistic).await.unwrap()));
-	let res = lq.compute(&ctx, &opt, &tx, None).await.unwrap();
+	let res = {
+		let mut stack = reblessive::tree::TreeStack::new();
+		stack.enter(|stk| lq.compute(stk, &ctx, &opt, &tx, None)).finish().await.unwrap()
+	};
 	match res {
 		Value::Uuid(_) => {}
 		_ => {
@@ -138,6 +141,7 @@ async fn expired_nodes_get_live_queries_archived() {
 #[serial]
 async fn single_live_queries_are_garbage_collected() {
 	// Test parameters
+	let mut stack = reblessive::tree::TreeStack::new();
 	let ctx = context::Context::background();
 	let node_id = Uuid::parse_str("b1a08614-a826-4581-938d-bea17f00e253").unwrap();
 	let time = Timestamp {
@@ -178,8 +182,9 @@ async fn single_live_queries_are_garbage_collected() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	live_st
-		.compute(&ctx, &options, &tx, None)
+	stack
+		.enter(|stk| live_st.compute(stk, &ctx, &options, &tx, None))
+		.finish()
 		.await
 		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
 		.unwrap();
@@ -195,8 +200,9 @@ async fn single_live_queries_are_garbage_collected() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	live_st
-		.compute(&ctx, &options, &tx, None)
+	stack
+		.enter(|stk| live_st.compute(stk, &ctx, &options, &tx, None))
+		.finish()
 		.await
 		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
 		.unwrap();
@@ -222,6 +228,7 @@ async fn single_live_queries_are_garbage_collected() {
 #[serial]
 async fn bootstrap_does_not_error_on_missing_live_queries() {
 	// Test parameters
+	let mut stack = reblessive::tree::TreeStack::new();
 	let ctx = context::Context::background();
 	let old_node_id = Uuid::parse_str("5f644f02-7c1a-4f8b-babd-bd9e92c1836a").unwrap();
 	let t1 = Timestamp {
@@ -265,8 +272,9 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 		session: Some(Value::None),
 		auth: Some(Auth::for_root(Role::Owner)),
 	};
-	live_st
-		.compute(&ctx, &options, &tx, None)
+	stack
+		.enter(|stk| live_st.compute(stk, &ctx, &options, &tx, None))
+		.finish()
 		.await
 		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
 		.unwrap();

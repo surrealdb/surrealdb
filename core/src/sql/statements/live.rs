@@ -9,6 +9,7 @@ use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, Object, Table, Uuid, Value};
 use derive::Store;
 use futures::lock::MutexGuard;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -76,6 +77,7 @@ impl LiveStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -103,7 +105,7 @@ impl LiveStatement {
 		match FFLAGS.change_feed_live_queries.enabled() {
 			true => {
 				let mut run = txn.lock().await;
-				match stm.what.compute(ctx, opt, txn, doc).await? {
+				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
 					Value::Table(tb) => {
 						let ns = opt.ns().to_string();
 						let db = opt.db().to_string();
@@ -128,7 +130,7 @@ impl LiveStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the live query table
-				match stm.what.compute(ctx, opt, txn, doc).await? {
+				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
 					Value::Table(tb) => {
 						// Store the current Node ID
 						stm.node = nid.into();

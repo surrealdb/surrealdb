@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::fetch::Fetchs;
 use crate::sql::value::Value;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -26,6 +27,7 @@ impl OutputStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -34,11 +36,11 @@ impl OutputStatement {
 		// Ensure futures are processed
 		let opt = &opt.new_with_futures(true);
 		// Process the output value
-		let mut val = self.what.compute(ctx, opt, txn, doc).await?;
+		let mut val = self.what.compute(stk, ctx, opt, txn, doc).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			for fetch in fetchs.iter() {
-				val.fetch(ctx, opt, txn, fetch).await?;
+				val.fetch(stk, ctx, opt, txn, fetch).await?;
 			}
 		}
 		//

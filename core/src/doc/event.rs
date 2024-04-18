@@ -4,11 +4,13 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use std::ops::Deref;
 
 impl<'a> Document<'a> {
 	pub async fn event(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -46,11 +48,11 @@ impl<'a> Document<'a> {
 			ctx.add_value("after", self.current.doc.deref());
 			ctx.add_value("before", self.initial.doc.deref());
 			// Process conditional clause
-			let val = ev.when.compute(&ctx, opt, txn, Some(doc)).await?;
+			let val = ev.when.compute(stk, &ctx, opt, txn, Some(doc)).await?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(&ctx, opt, txn, Some(doc)).await?;
+					v.compute(stk, &ctx, opt, txn, Some(doc)).await?;
 				}
 			}
 		}

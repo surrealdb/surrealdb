@@ -9,7 +9,7 @@ use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
 	Array, Cond, Expression, Idiom, Kind, Number, Operator, Part, Subquery, Table, Value, With,
 };
-use async_recursion::async_recursion;
+use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -24,6 +24,7 @@ impl Tree {
 	/// Traverse all the conditions and extract every expression
 	/// that can be resolved by an index.
 	pub(super) async fn build<'a>(
+		stk: &mut Stk,
 		ctx: &'a Context<'_>,
 		opt: &'a Options,
 		txn: &'a Transaction,
@@ -33,7 +34,7 @@ impl Tree {
 	) -> Result<Option<Self>, Error> {
 		let mut b = TreeBuilder::new(ctx, opt, txn, table, with);
 		if let Some(cond) = cond {
-			let root = b.eval_value(0, &cond.0).await?;
+			let root = b.eval_value(stk, 0, &cond.0).await?;
 			Ok(Some(Self {
 				root,
 				index_map: b.index_map,
@@ -115,12 +116,16 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	async fn eval_value(&mut self, group: GroupRef, v: &Value) -> Result<Node, Error> {
+	/// Was marked recursive
+	async fn eval_value(
+		&mut self,
+		stk: &mut Stk,
+		group: GroupRef,
+		v: &Value,
+	) -> Result<Node, Error> {
 		match v {
-			Value::Expression(e) => self.eval_expression(group, e).await,
-			Value::Idiom(i) => self.eval_idiom(group, i).await,
+			Value::Expression(e) => self.eval_expression(stk, group, e).await,
+			Value::Idiom(i) => self.eval_idiom(stk, group, i).await,
 			Value::Strand(_)
 			| Value::Number(_)
 			| Value::Bool(_)
@@ -130,25 +135,30 @@ impl<'a> TreeBuilder<'a> {
 			| Value::Constant(_)
 			| Value::Geometry(_)
 			| Value::Datetime(_) => Ok(Node::Computed(Arc::new(v.to_owned()))),
-			Value::Array(a) => self.eval_array(a).await,
-			Value::Subquery(s) => self.eval_subquery(s).await,
+			Value::Array(a) => self.eval_array(stk, a).await,
+			Value::Subquery(s) => self.eval_subquery(stk, s).await,
 			Value::Param(p) => {
-				let v = p.compute(self.ctx, self.opt, self.txn, None).await?;
-				self.eval_value(group, &v).await
+				let v = stk.run(|stk| p.compute(stk, self.ctx, self.opt, self.txn, None)).await?;
+				stk.run(|stk| self.eval_value(stk, group, &v)).await
 			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
 	}
 
-	async fn eval_array(&mut self, a: &Array) -> Result<Node, Error> {
+	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node, Error> {
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			values.push(v.compute(self.ctx, self.opt, self.txn, None).await?);
+			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, self.txn, None)).await?);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
 
-	async fn eval_idiom(&mut self, group: GroupRef, i: &Idiom) -> Result<Node, Error> {
+	async fn eval_idiom(
+		&mut self,
+		stk: &mut Stk,
+		group: GroupRef,
+		i: &Idiom,
+	) -> Result<Node, Error> {
 		// Check if the idiom has already been resolved
 		if let Some(node) = self.resolved_idioms.get(i).cloned() {
 			return Ok(node);
@@ -157,8 +167,8 @@ impl<'a> TreeBuilder<'a> {
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
-				let v = i.compute(self.ctx, self.opt, self.txn, None).await?;
-				return self.eval_value(group, &v).await;
+				let v = stk.run(|stk| i.compute(stk, self.ctx, self.opt, self.txn, None)).await?;
+				return stk.run(|stk| self.eval_value(stk, group, &v)).await;
 			}
 		}
 
@@ -258,7 +268,12 @@ impl<'a> TreeBuilder<'a> {
 		Ok(None)
 	}
 
-	async fn eval_expression(&mut self, group: GroupRef, e: &Expression) -> Result<Node, Error> {
+	async fn eval_expression(
+		&mut self,
+		stk: &mut Stk,
+		group: GroupRef,
+		e: &Expression,
+	) -> Result<Node, Error> {
 		match e {
 			Expression::Unary {
 				..
@@ -273,8 +288,8 @@ impl<'a> TreeBuilder<'a> {
 					return Ok(re.into());
 				}
 				let exp = Arc::new(e.clone());
-				let left = Arc::new(self.eval_value(group, l).await?);
-				let right = Arc::new(self.eval_value(group, r).await?);
+				let left = Arc::new(stk.run(|stk| self.eval_value(stk, group, l)).await?);
+				let right = Arc::new(stk.run(|stk| self.eval_value(stk, group, r)).await?);
 				let mut io = None;
 				if let Some((id, local_irs, remote_irs)) = left.is_indexed_field() {
 					io = self.lookup_index_options(
@@ -464,10 +479,10 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
-	async fn eval_subquery(&mut self, s: &Subquery) -> Result<Node, Error> {
+	async fn eval_subquery(&mut self, stk: &mut Stk, s: &Subquery) -> Result<Node, Error> {
 		self.group_sequence += 1;
 		match s {
-			Subquery::Value(v) => self.eval_value(self.group_sequence, v).await,
+			Subquery::Value(v) => stk.run(|stk| self.eval_value(stk, self.group_sequence, v)).await,
 			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
 		}
 	}

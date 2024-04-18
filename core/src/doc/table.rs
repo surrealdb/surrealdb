@@ -19,6 +19,7 @@ use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use futures::future::try_join_all;
+use reblessive::tree::Stk;
 
 type Ops = Vec<(Idiom, Operator, Value)>;
 
@@ -32,6 +33,7 @@ enum Action {
 impl<'a> Document<'a> {
 	pub async fn table(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -78,33 +80,42 @@ impl<'a> Document<'a> {
 			match &tb.group {
 				// There is a GROUP BY clause specified
 				Some(group) => {
+					let id = stk
+						.scope(|scope| {
+							try_join_all(group.iter().map(|v| {
+								scope.run(|stk| v.compute(stk, ctx, opt, txn, Some(&self.initial)))
+							}))
+						})
+						.await?
+						.into_iter()
+						.collect::<Vec<_>>()
+						.into();
 					// Set the previous record id
 					let old = Thing {
 						tb: ft.name.to_raw(),
-						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.initial))),
-						)
+						id,
+					};
+
+					let id = stk
+						.scope(|scope| {
+							try_join_all(group.iter().map(|v| {
+								scope.run(|stk| v.compute(stk, ctx, opt, txn, Some(&self.current)))
+							}))
+						})
 						.await?
 						.into_iter()
 						.collect::<Vec<_>>()
-						.into(),
-					};
+						.into();
 					// Set the current record id
 					let rid = Thing {
 						tb: ft.name.to_raw(),
-						id: try_join_all(
-							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.current))),
-						)
-						.await?
-						.into_iter()
-						.collect::<Vec<_>>()
-						.into(),
+						id,
 					};
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
+							match cond.compute(stk, ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									if !targeted_force && act != Action::Create {
 										// Delete the old value
@@ -113,12 +124,13 @@ impl<'a> Document<'a> {
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(old)]),
 											data: Some(
-												self.data(ctx, opt, txn, act, &tb.expr).await?,
+												self.data(stk, ctx, opt, txn, act, &tb.expr)
+													.await?,
 											),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, None).await?;
+										stm.compute(stk, ctx, opt, txn, None).await?;
 									}
 									if act != Action::Delete {
 										// Update the new value
@@ -127,12 +139,13 @@ impl<'a> Document<'a> {
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
 											data: Some(
-												self.data(ctx, opt, txn, act, &tb.expr).await?,
+												self.data(stk, ctx, opt, txn, act, &tb.expr)
+													.await?,
 											),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, None).await?;
+										stm.compute(stk, ctx, opt, txn, None).await?;
 									}
 								}
 								_ => {
@@ -143,12 +156,13 @@ impl<'a> Document<'a> {
 										let stm = UpdateStatement {
 											what: Values(vec![Value::from(old)]),
 											data: Some(
-												self.data(ctx, opt, txn, act, &tb.expr).await?,
+												self.data(stk, ctx, opt, txn, act, &tb.expr)
+													.await?,
 											),
 											..UpdateStatement::default()
 										};
 										// Execute the statement
-										stm.compute(ctx, opt, txn, None).await?;
+										stm.compute(stk, ctx, opt, txn, None).await?;
 									}
 								}
 							}
@@ -161,11 +175,11 @@ impl<'a> Document<'a> {
 								// Modify the value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(old)]),
-									data: Some(self.data(ctx, opt, txn, act, &tb.expr).await?),
+									data: Some(self.data(stk, ctx, opt, txn, act, &tb.expr).await?),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt, txn, None).await?;
+								stm.compute(stk, ctx, opt, txn, None).await?;
 							}
 							if act != Action::Delete {
 								// Update the new value
@@ -173,11 +187,11 @@ impl<'a> Document<'a> {
 								// Modify the value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
-									data: Some(self.data(ctx, opt, txn, act, &tb.expr).await?),
+									data: Some(self.data(stk, ctx, opt, txn, act, &tb.expr).await?),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(ctx, opt, txn, None).await?;
+								stm.compute(stk, ctx, opt, txn, None).await?;
 							}
 						}
 					}
@@ -193,7 +207,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
+							match cond.compute(stk, ctx, opt, txn, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
@@ -205,12 +219,14 @@ impl<'a> Document<'a> {
 										// Update the value in the table
 										_ => Query::Update(UpdateStatement {
 											what: Values(vec![Value::from(rid)]),
-											data: Some(self.full(ctx, opt, txn, &tb.expr).await?),
+											data: Some(
+												self.full(stk, ctx, opt, txn, &tb.expr).await?,
+											),
 											..UpdateStatement::default()
 										}),
 									};
 									// Execute the statement
-									stm.compute(ctx, opt, txn, None).await?;
+									stm.compute(stk, ctx, opt, txn, None).await?;
 								}
 								_ => {
 									// Delete the value in the table
@@ -219,7 +235,7 @@ impl<'a> Document<'a> {
 										..DeleteStatement::default()
 									};
 									// Execute the statement
-									stm.compute(ctx, opt, txn, None).await?;
+									stm.compute(stk, ctx, opt, txn, None).await?;
 								}
 							}
 						}
@@ -235,12 +251,12 @@ impl<'a> Document<'a> {
 								// Update the value in the table
 								_ => Query::Update(UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
-									data: Some(self.full(ctx, opt, txn, &tb.expr).await?),
+									data: Some(self.full(stk, ctx, opt, txn, &tb.expr).await?),
 									..UpdateStatement::default()
 								}),
 							};
 							// Execute the statement
-							stm.compute(ctx, opt, txn, None).await?;
+							stm.compute(stk, ctx, opt, txn, None).await?;
 						}
 					}
 				}
@@ -252,18 +268,20 @@ impl<'a> Document<'a> {
 	//
 	async fn full(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		exp: &Fields,
 	) -> Result<Data, Error> {
-		let mut data = exp.compute(ctx, opt, txn, Some(&self.current), false).await?;
+		let mut data = exp.compute(stk, ctx, opt, txn, Some(&self.current), false).await?;
 		data.cut(ID.as_ref());
 		Ok(Data::ReplaceExpression(data))
 	}
 	//
 	async fn data(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -296,29 +314,29 @@ impl<'a> Document<'a> {
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						Some("count") => {
-							let val = f.compute(ctx, opt, txn, doc).await?;
+							let val = f.compute(stk, ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
 						Some("math::sum") => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, txn, doc).await?;
 							self.chg(&mut ops, &act, idiom, val);
 						}
 						Some("math::min") | Some("time::min") => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, txn, doc).await?;
 							self.min(&mut ops, &act, idiom, val);
 						}
 						Some("math::max") | Some("time::max") => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, txn, doc).await?;
 							self.max(&mut ops, &act, idiom, val);
 						}
 						Some("math::mean") => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(stk, ctx, opt, txn, doc).await?;
 							self.mean(&mut ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = expr.compute(ctx, opt, txn, doc).await?;
+						let val = expr.compute(stk, ctx, opt, txn, doc).await?;
 						self.set(&mut ops, idiom, val);
 					}
 				}
