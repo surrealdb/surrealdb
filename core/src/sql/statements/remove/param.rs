@@ -25,7 +25,7 @@ impl RemoveParamStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let r = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 			// Claim transaction
@@ -40,8 +40,8 @@ impl RemoveParamStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match r {
 			Err(Error::PaNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

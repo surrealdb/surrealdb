@@ -25,7 +25,7 @@ impl RemoveScopeStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let r = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Scope, &Base::Db)?;
 			// Claim transaction
@@ -43,8 +43,8 @@ impl RemoveScopeStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match r {
 			Err(Error::ScNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

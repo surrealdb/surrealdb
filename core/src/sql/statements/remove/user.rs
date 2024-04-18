@@ -26,7 +26,7 @@ impl RemoveUserStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let r = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
@@ -73,8 +73,8 @@ impl RemoveUserStatement {
 				_ => Err(Error::InvalidLevel(self.base.to_string())),
 			}
 		}
-		.await
-		{
+		.await;
+		match r {
 			Err(e) if self.if_exists => match e {
 				Error::UserRootNotFound {
 					..

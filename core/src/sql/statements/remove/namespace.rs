@@ -25,7 +25,7 @@ impl RemoveNamespaceStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let r = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 			// Claim transaction
@@ -44,8 +44,8 @@ impl RemoveNamespaceStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match r {
 			Err(Error::NsNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

@@ -24,7 +24,7 @@ impl RemoveAnalyzerStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let r = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 			// Claim transaction
@@ -40,8 +40,8 @@ impl RemoveAnalyzerStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match r {
 			Err(Error::AzNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),
