@@ -70,7 +70,6 @@ const LQ_CHANNEL_SIZE: usize = 100;
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
-// const EMPTY_DOC: Value = Value::Object(Object(BTreeMap::new()));
 const EMPTY_DOC: Value = Value::None;
 
 /// The underlying datastore instance which stores the dataset.

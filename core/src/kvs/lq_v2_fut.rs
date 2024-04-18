@@ -51,7 +51,9 @@ pub async fn process_lq_notifications(ds: &Datastore, opt: &Options) -> Result<(
 
 		// Find relevant changes
 		let tx = ds.transaction(Read, Optimistic).await?.enclose();
+		#[cfg(debug_assertions)]
 		trace!("There are {} change sets", change_sets.len());
+		#[cfg(debug_assertions)]
 		trace!(
 			"\n{}",
 			change_sets
@@ -105,6 +107,7 @@ async fn populate_relevant_changesets(
 		.await?;
 		// Confirm we do need to change watermark - this is technically already handled by the cf range scan
 		if res.is_empty() {
+			#[cfg(debug_assertions)]
 			trace!(
 				"There were no changes in the change feed for {:?} from versionstamp {:?}",
 				selector,
@@ -113,6 +116,7 @@ async fn populate_relevant_changesets(
 		}
 		if let Some(change_set) = res.last() {
 			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
+				#[cfg(debug_assertions)]
 				trace!("Adding a change set for lq notification processing");
 				// This does not guarantee a notification, as a changeset an include many tables and many changes
 				relevant_changesets.insert(selector.clone(), res);
@@ -129,8 +133,10 @@ async fn process_change_set_for_notifications(
 	change_set: ChangeSet,
 	lq_pairs: &[(LqIndexKey, LqIndexValue)],
 ) -> Result<(), Error> {
+	#[cfg(debug_assertions)]
 	trace!("Moving to next change set, {:?}", change_set);
 	for (lq_key, lq_value) in lq_pairs.iter() {
+		#[cfg(debug_assertions)]
 		trace!("Processing live query for notification key={:?} and value={:?}", lq_key, lq_value);
 		let change_vs = change_set.0;
 		let database_mutation = &change_set.1;
@@ -139,13 +145,14 @@ async fn process_change_set_for_notifications(
 				// Create a doc of the table value
 				// Run the 'lives' logic on the doc, while providing live queries instead of reading from storage
 				// This will generate and send notifications
+				#[cfg(debug_assertions)]
 				trace!(
 					"There are {} table mutations being prepared for notifications",
 					table_mutations.1.len()
 				);
 				for (i, mutation) in table_mutations.1.iter().enumerate() {
-					trace!("[{} @ {:?}] Processing table mutation: {:?}", i, change_vs, mutation);
-					trace!("Constructing document from mutation");
+					#[cfg(debug_assertions)]
+					trace!("[{} @ {:?}] Processing table mutation: {:?}   Constructing document from mutation", i, change_vs, mutation);
 					if let Some(doc) = construct_document(mutation) {
 						// We know we are only processing a single LQ at a time, so we can limit notifications to 1
 						let notification_capacity = 1;
@@ -157,6 +164,7 @@ async fn process_change_set_for_notifications(
 							&& doc.current_doc().is_none()
 							&& !matches!(mutation, TableMutation::Del(_))
 						{
+							// If we have a None to None mutation, and it isn't delete, then it indicates a bad document
 							panic!("Doc was wrong and the mutation was {:?}", mutation);
 						}
 						doc.check_lqs_and_send_notifications(
@@ -176,9 +184,8 @@ async fn process_change_set_for_notifications(
 
 						// Send the notifications to driver or api
 						while let Ok(notification) = local_notification_channel_recv.try_recv() {
-							trace!("Sending notification to client");
 							#[cfg(debug_assertions)]
-							trace!("Notification: {:?}", notification);
+							trace!("Sending notification to client: {:?}", notification);
 							ds.notification_channel
 								.as_ref()
 								.unwrap()
@@ -187,7 +194,6 @@ async fn process_change_set_for_notifications(
 								.await
 								.unwrap();
 						}
-						trace!("Ended notification sending")
 					}
 					// Progress the live query watermark
 				}
