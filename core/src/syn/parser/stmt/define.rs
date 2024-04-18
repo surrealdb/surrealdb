@@ -639,32 +639,41 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
-					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
-					let vector_type = self.try_parse_vector_type()?.unwrap_or(VectorType::F64);
-					let capacity = self
-						.eat(t!("CAPACITY"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(40);
-
-					let doc_ids_order = self
-						.eat(t!("DOC_IDS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let doc_ids_cache = self
-						.eat(t!("DOC_IDS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let mtree_cache = self
-						.eat(t!("MTREE_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
+					let mut distance = Distance::Euclidean;
+					let mut vector_type = VectorType::F64;
+					let mut capacity = 40;
+					let mut doc_ids_cache = 100;
+					let mut doc_ids_order = 100;
+					let mut mtree_cache = 100;
+					loop {
+						match self.peek_kind() {
+							t!("DISTANCE") => {
+								self.pop_peek();
+								distance = self.parse_distance()?
+							}
+							t!("TYPE") => {
+								self.pop_peek();
+								vector_type = self.parse_vector_type()?
+							}
+							t!("CAPACITY") => {
+								self.pop_peek();
+								capacity = self.next_token_value()?
+							}
+							t!("DOC_IDS_CACHE") => {
+								self.pop_peek();
+								doc_ids_cache = self.next_token_value()?
+							}
+							t!("DOC_IDS_ORDER") => {
+								self.pop_peek();
+								doc_ids_order = self.next_token_value()?
+							}
+							t!("MTREE_CACHE") => {
+								self.pop_peek();
+								mtree_cache = self.next_token_value()?
+							}
+							_ => break,
+						}
+					}
 					res.index = Index::MTree(crate::sql::index::MTreeParams {
 						dimension,
 						_distance: Default::default(),
@@ -680,32 +689,56 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
-					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
-					let vector_type = self.try_parse_vector_type()?.unwrap_or(VectorType::F64);
-					let m = self
-						.eat(t!("M"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(12);
-					let m0 = self
-						.eat(t!("M0"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(m * 2);
-					let ml = self
-						.eat(t!("ML"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(1.0 / (m as f64).ln())
-						.into();
-					let ef_construction = self
-						.eat(t!("EFC"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(150);
-					let heuristic = self.eat(t!("HEURISTIC"));
-					let extend_candidates = self.eat(t!("EXTEND_CANDIDATES"));
-					let keep_pruned_connections = self.eat(t!("KEEP_PRUNED_CONNECTIONS"));
+					let mut distance = Distance::Euclidean;
+					let mut vector_type = VectorType::F64;
+					let mut m = 12;
+					let mut m0 = 24;
+					let mut ml = 1.0 / (m as f64).ln();
+					let mut ef_construction = 150;
+					let mut heuristic = false;
+					let mut extend_candidates = false;
+					let mut keep_pruned_connections = false;
+					loop {
+						match self.peek_kind() {
+							t!("DISTANCE") => {
+								self.pop_peek();
+								distance = self.parse_distance()?
+							}
+							t!("TYPE") => {
+								self.pop_peek();
+								vector_type = self.parse_vector_type()?
+							}
+							t!("M") => {
+								self.pop_peek();
+								m = self.next_token_value()?
+							}
+							t!("M0") => {
+								self.pop_peek();
+								m0 = self.next_token_value()?
+							}
+							t!("ML") => {
+								self.pop_peek();
+								ml = self.next_token_value()?
+							}
+							t!("EFC") => {
+								self.pop_peek();
+								ef_construction = self.next_token_value()?
+							}
+							t!("HEURISTIC") => {
+								self.pop_peek();
+								heuristic = true
+							}
+							t!("EXTEND_CANDIDATES") => {
+								self.pop_peek();
+								extend_candidates = true
+							}
+							t!("KEEP_PRUNED_CONNECTIONS") => {
+								self.pop_peek();
+								keep_pruned_connections = true
+							}
+							_ => break,
+						}
+					}
 
 					res.index = Index::Hnsw(crate::sql::index::HnswParams {
 						dimension,
@@ -717,7 +750,7 @@ impl Parser<'_> {
 						heuristic,
 						extend_candidates,
 						keep_pruned_connections,
-						ml,
+						ml: ml.into(),
 					})
 				}
 				t!("COMMENT") => {

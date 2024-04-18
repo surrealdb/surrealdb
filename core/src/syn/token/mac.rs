@@ -305,6 +305,23 @@ macro_rules! t {
 		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::Pearson)
 	};
 
+	// VectorType
+	("F64") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::F64)
+	};
+	("F32") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::F32)
+	};
+	("I64") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I64)
+	};
+	("I32") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I32)
+	};
+	("I16") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I16)
+	};
+
 	($t:tt) => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::keyword_t!($t))
 	};

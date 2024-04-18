@@ -222,6 +222,7 @@ impl DistanceKind {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[non_exhaustive]
 pub enum VectorTypeKind {
 	F64,
 	F32,

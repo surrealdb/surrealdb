@@ -399,35 +399,24 @@ impl Parser<'_> {
 		Ok(dist)
 	}
 
-	pub fn try_parse_distance(&mut self) -> ParseResult<Option<Distance>> {
-		if !self.eat(t!("DISTANCE")) {
-			return Ok(None);
-		}
-		let dist = match self.next().kind {
+	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
+		match self.next().kind {
 			TokenKind::Distance(k) => self.convert_distance(&k),
 			x => unexpected!(self, x, "a distance measure"),
-		};
-		dist.map(Some)
+		}
 	}
 
 	pub fn parse_vector_type(&mut self) -> ParseResult<VectorType> {
-		let vt = match self.next().kind {
-			TokenKind::VectorType(x) => match x {
+		match self.next().kind {
+			TokenKind::VectorType(x) => Ok(match x {
 				VectorTypeKind::F64 => VectorType::F64,
 				VectorTypeKind::F32 => VectorType::F32,
 				VectorTypeKind::I64 => VectorType::I64,
 				VectorTypeKind::I32 => VectorType::I32,
 				VectorTypeKind::I16 => VectorType::I16,
-			},
+			}),
 			x => unexpected!(self, x, "a vector type"),
-		};
-		Ok(vt)
-	}
-	pub fn try_parse_vector_type(&mut self) -> ParseResult<Option<VectorType>> {
-		if !self.eat(t!("TYPE")) {
-			return Ok(None);
 		}
-		self.parse_vector_type().map(Some)
 	}
 
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
