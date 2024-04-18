@@ -1243,7 +1243,7 @@ mod tests {
 		)?);
 
 		info!("Check recall");
-		for (efs, expected_recall) in [(10, 0.97), (40, 1)] {
+		for (efs, expected_recall) in [(10, 0.97), (40, 1.0)] {
 			let mut total_recall = 0.0;
 			for (_, pt) in queries.as_ref() {
 				let knn = 10;
