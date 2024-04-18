@@ -99,7 +99,7 @@ async fn populate_relevant_changesets(
 			// Technically, we can not fetch by table and do the per-table filtering this side.
 			// That is an improvement though
 			Some(&selector.tb),
-			ShowSince::versionstamp(&vs),
+			ShowSince::versionstamp(vs),
 			Some(catchup_size),
 		)
 		.await?;
@@ -108,11 +108,11 @@ async fn populate_relevant_changesets(
 			trace!(
 				"There were no changes in the change feed for {:?} from versionstamp {:?}",
 				selector,
-				conv::versionstamp_to_u64(&vs)
+				conv::versionstamp_to_u64(vs)
 			)
 		}
 		if let Some(change_set) = res.last() {
-			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(&vs) {
+			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(vs) {
 				trace!("Adding a change set for lq notification processing");
 				// This does not guarantee a notification, as a changeset an include many tables and many changes
 				relevant_changesets.insert(selector.clone(), res);

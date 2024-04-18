@@ -140,6 +140,7 @@ impl<'a> Document<'a> {
 	}
 
 	/// Check if document is being deleted
+	#[allow(dead_code)]
 	pub fn is_delete(&self) -> bool {
 		self.current.doc.is_none()
 	}
