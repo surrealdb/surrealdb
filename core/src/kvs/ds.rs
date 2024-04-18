@@ -928,6 +928,11 @@ impl Datastore {
         }
 	}
 
+	/// Poll change feeds for live query notifications
+	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
+		process_lq_notifications(self, opt).await
+	}
+
 	/// Add and kill live queries being track on the datastore
 	/// These get polled by the change feed tick
 	pub(crate) async fn handle_postprocessing_of_statements(
@@ -1019,11 +1024,6 @@ impl Datastore {
 		node_id: Uuid,
 	) -> Result<(), Error> {
 		tx.set_hb(timestamp, node_id.0).await
-	}
-
-	/// Poll change feeds for live query notifications
-	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
-		process_lq_notifications(self, opt).await
 	}
 
 	// -----
