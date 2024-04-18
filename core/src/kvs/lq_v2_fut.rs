@@ -1,0 +1,209 @@
+use crate::cf;
+use crate::cf::{ChangeSet, TableMutation};
+use crate::dbs::{Options, Statement};
+use crate::err::Error;
+use crate::fflags::FFLAGS;
+use crate::kvs::lq_cf::LiveQueryTracker;
+use crate::kvs::lq_structs::{LqIndexKey, LqIndexValue, LqSelector};
+use crate::kvs::LockType::Optimistic;
+use crate::kvs::TransactionType::Read;
+use crate::kvs::{construct_document, Datastore, Transaction};
+use crate::sql::statements::show::ShowSince;
+use crate::vs::conv;
+use futures::lock::Mutex;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// Poll change feeds for live query notifications
+pub async fn process_lq_notifications(ds: &Datastore, opt: &Options) -> Result<(), Error> {
+	// Runtime feature gate, as it is not production-ready
+	if !FFLAGS.change_feed_live_queries.enabled() {
+		return Ok(());
+	}
+	// Return if there are no live queries
+	if ds.notification_channel.is_none() {
+		trace!("Channels is none, short-circuiting");
+		return Ok(());
+	}
+	if ds.lq_cf_store.read().await.is_empty() {
+		// This is safe - just a shortcut
+		trace!("No live queries, short-circuiting");
+		return Ok(());
+	}
+
+	// Change map includes a mapping of selector to changesets, ordered by versionstamp
+	let mut relevant_changesets: BTreeMap<LqSelector, Vec<ChangeSet>> = BTreeMap::new();
+	{
+		let tx = ds.transaction(Read, Optimistic).await?;
+		populate_relevant_changesets(
+			tx,
+			ds.lq_cf_store.clone(),
+			ds.engine_options.live_query_catchup_size,
+			&mut relevant_changesets,
+		)
+		.await?;
+	};
+
+	for (selector, change_sets) in relevant_changesets {
+		// find matching live queries
+		let lq_pairs = ds.lq_cf_store.read().await.live_queries_for_selector(&selector);
+
+		// Find relevant changes
+		let tx = ds.transaction(Read, Optimistic).await?.enclose();
+		trace!("There are {} change sets", change_sets.len());
+		trace!(
+			"\n{}",
+			change_sets
+				.iter()
+				.enumerate()
+				.map(|(i, x)| format!("[{i}] {:?}", x))
+				.collect::<Vec<String>>()
+				.join("\n")
+		);
+		for change_set in change_sets {
+			process_change_set_for_notifications(ds, tx.clone(), opt, change_set, &lq_pairs)
+				.await?;
+		}
+	}
+	trace!("Finished process lq successfully");
+	Ok(())
+}
+async fn populate_relevant_changesets(
+	mut tx: Transaction,
+	live_query_tracker: Arc<RwLock<LiveQueryTracker>>,
+	catchup_size: u32,
+	relevant_changesets: &mut BTreeMap<LqSelector, Vec<ChangeSet>>,
+) -> Result<(), Error> {
+	let live_query_tracker = live_query_tracker.write().await;
+	let tracked_cfs = live_query_tracker.get_watermarks().len();
+	// We are going to track the latest observed versionstamp here
+	for current in 0..tracked_cfs {
+		// The reason we iterate this way (len+index) is because we "know" that the list won't change, but we
+		// want mutable access to it so we can update it while iterating
+		let (selector, vs) = live_query_tracker.get_watermark_by_enum_index(current).unwrap();
+		// We need a mutable borrow of the tracker to update, hence we need to own
+		// TODO refactor, as we no longer need
+		let (selector, vs) = (selector.clone(), *vs);
+
+		// Read the change feed for the selector
+		#[cfg(debug_assertions)]
+		trace!(
+			"Checking for new changes for ns={} db={} tb={} vs={:?}",
+			selector.ns,
+			selector.db,
+			selector.tb,
+			// TODO this is what is incorrect - it is 2 instead of 3
+			vs
+		);
+		let res = cf::read(
+			&mut tx,
+			&selector.ns,
+			&selector.db,
+			// Technically, we can not fetch by table and do the per-table filtering this side.
+			// That is an improvement though
+			Some(&selector.tb),
+			ShowSince::versionstamp(&vs),
+			Some(catchup_size),
+		)
+		.await?;
+		// Confirm we do need to change watermark - this is technically already handled by the cf range scan
+		if res.is_empty() {
+			trace!(
+				"There were no changes in the change feed for {:?} from versionstamp {:?}",
+				selector,
+				conv::versionstamp_to_u64(&vs)
+			)
+		}
+		if let Some(change_set) = res.last() {
+			if conv::versionstamp_to_u64(&change_set.0) > conv::versionstamp_to_u64(&vs) {
+				trace!("Adding a change set for lq notification processing");
+				// This does not guarantee a notification, as a changeset an include many tables and many changes
+				relevant_changesets.insert(selector.clone(), res);
+			}
+		}
+	}
+	tx.cancel().await
+}
+
+async fn process_change_set_for_notifications(
+	ds: &Datastore,
+	tx: Arc<Mutex<Transaction>>,
+	opt: &Options,
+	change_set: ChangeSet,
+	lq_pairs: &[(LqIndexKey, LqIndexValue)],
+) -> Result<(), Error> {
+	// TODO(phughk): this loop can be on the inside so we are only checking lqs relavant to cf change
+	trace!("Moving to next change set, {:?}", change_set);
+	for (lq_key, lq_value) in lq_pairs.iter() {
+		trace!("Processing live query for notification key={:?} and value={:?}", lq_key, lq_value);
+		let change_vs = change_set.0;
+		let database_mutation = &change_set.1;
+		for table_mutations in database_mutation.0.iter() {
+			if table_mutations.0 == lq_key.selector.tb {
+				// Create a doc of the table value
+				// Run the 'lives' logic on the doc, while providing live queries instead of reading from storage
+				// This will generate and send notifications
+				trace!(
+					"There are {} table mutations being prepared for notifications",
+					table_mutations.1.len()
+				);
+				for (i, mutation) in table_mutations.1.iter().enumerate() {
+					trace!("[{} @ {:?}] Processing table mutation: {:?}", i, change_vs, mutation);
+					trace!("Constructing document from mutation");
+					if let Some(doc) = construct_document(mutation) {
+						// We know we are only processing a single LQ at a time, so we can limit notifications to 1
+						let notification_capacity = 1;
+						// We track notifications as a separate channel in case we want to process
+						// for the current state we only forward
+						let (local_notification_channel_sender, local_notification_channel_recv) =
+							channel::bounded(notification_capacity);
+						if doc.initial_doc().is_none()
+							&& doc.current_doc().is_none()
+							&& !matches!(mutation, TableMutation::Del(_))
+						{
+							panic!("Doc was wrong and the mutation was {:?}", mutation);
+						}
+						doc.check_lqs_and_send_notifications(
+							opt,
+							// TODO(phughk): this is incorrect - the "statement" is the "currently evaluated statement for lives"
+							// Which in this case - doesnt exist, it's off-transaction; Recreating it is pointless
+							// Recreating the doc is necessary anyway - we can probably remove this parameter
+							// In its current state it is harmless as the impl is doing a FFLAG check
+							&Statement::Live(&lq_value.stm),
+							&tx,
+							[&lq_value.stm].as_slice(),
+							&local_notification_channel_sender,
+						)
+						.await
+						.map_err(|e| {
+							Error::Internal(format!(
+								"Error checking lqs for notifications: {:?}",
+								e
+							))
+						})?;
+
+						// Send the notifications to driver or api
+						// TODO: evaluate if we want channel directly instead of proxy
+						while let Ok(notification) = local_notification_channel_recv.try_recv() {
+							trace!("Sending notification to client");
+							#[cfg(debug_assertions)]
+							trace!("Notification: {:?}", notification);
+							ds.notification_channel
+								.as_ref()
+								.unwrap()
+								.0
+								.send(notification)
+								.await
+								.unwrap();
+						}
+						trace!("Ended notification sending")
+					}
+					// Progress the live query watermark
+				}
+			}
+		}
+		ds.lq_cf_store.write().await.update_watermark_live_query(lq_key, &change_vs).unwrap();
+	}
+	Ok(())
+}

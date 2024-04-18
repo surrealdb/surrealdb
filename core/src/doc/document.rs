@@ -120,12 +120,10 @@ impl<'a> Document<'a> {
 		}
 	}
 
-	#[cfg(test)]
 	pub(crate) fn current_doc(&self) -> &Value {
 		self.current.doc.as_ref()
 	}
 
-	#[cfg(test)]
 	pub(crate) fn initial_doc(&self) -> &Value {
 		self.initial.doc.as_ref()
 	}
