@@ -41,7 +41,7 @@ impl Parser<'_> {
 			t!("<-") => false,
 			x => unexpected!(self, x, "a relation arrow"),
 		};
-		let kind = self.parse_thing_or_table(stk).await?;
+		let kind = self.parse_relate_kind(stk).await?;
 		if is_o {
 			expected!(self, t!("->"))
 		} else {
@@ -55,6 +55,20 @@ impl Parser<'_> {
 		}
 	}
 
+	pub async fn parse_relate_kind(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		match self.peek_kind() {
+			t!("$param") => self.next_token_value().map(Value::Param),
+			t!("(") => {
+				let span = self.pop_peek().span;
+				let res = self
+					.parse_inner_subquery(ctx, Some(span))
+					.await
+					.map(|x| Value::Subquery(Box::new(x)))?;
+				Ok(res)
+			}
+			_ => self.parse_thing_or_table(ctx).await,
+		}
+	}
 	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		match self.peek_kind() {
 			t!("[") => {
