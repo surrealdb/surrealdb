@@ -347,6 +347,15 @@ impl InfoStatement {
 					"tokens".to_owned(),
 					process_arr(run.all_sc_tokens(opt.ns(), opt.db(), sc).await?),
 				);
+
+				let def = run.get_sc(opt.ns(), opt.db(), sc).await?;
+				let Value::Object(o) = def.structure() else {
+					return Err(Error::Thrown(
+						"InfoStructure should return Value::Object".to_string(),
+					));
+				};
+				res.extend(o);
+
 				// Ok all good
 				Value::from(res).ok()
 			}

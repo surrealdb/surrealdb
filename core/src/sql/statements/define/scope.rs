@@ -101,6 +101,7 @@ impl InfoStructure for DefineScopeStatement {
 			signup,
 			signin,
 			comment,
+			session,
 			..
 		} = self;
 		let mut acc = Object::default();
@@ -117,6 +118,10 @@ impl InfoStructure for DefineScopeStatement {
 
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());
+		}
+
+		if let Some(duration) = session {
+			acc.insert("duration".to_string(), duration.into());
 		}
 
 		Value::Object(acc)
