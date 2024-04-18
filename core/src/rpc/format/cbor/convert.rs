@@ -119,7 +119,7 @@ impl TryFrom<Cbor> for Value {
 					},
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
-						Data::Text(v) => match Number::try_from(v) {
+						Data::Text(v) => match Decimal::from_str(v.as_str()) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
 						},
