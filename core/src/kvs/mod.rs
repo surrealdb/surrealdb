@@ -27,8 +27,6 @@ mod tx;
 
 pub(crate) mod lq_structs;
 
-#[cfg(test)]
-mod droppy_boy;
 mod lq_cf;
 mod lq_v2_fut;
 #[cfg(test)]

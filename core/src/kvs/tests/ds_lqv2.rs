@@ -82,7 +82,6 @@ mod test_check_lqs_and_send_notifications {
 	use crate::dbs::{Action, Notification, Options, Session, Statement};
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
-	use crate::kvs::droppy_boy::DroppyBoy;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
@@ -128,12 +127,6 @@ mod test_check_lqs_and_send_notifications {
 		.map(|r| r.result.unwrap())
 		.for_each(drop);
 
-		let tx =
-			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
-		let drop_tx = tx.clone();
-		let _foo = DroppyBoy::new(async move {
-			drop_tx.lock().await.commit().await.unwrap();
-		});
 		TestSuite {
 			ds,
 			ns: ns.to_string(),
@@ -158,10 +151,6 @@ mod test_check_lqs_and_send_notifications {
 			.await
 			.unwrap()
 			.enclose();
-		let drop_tx = tx.clone();
-		let _a = DroppyBoy::new(async move {
-			drop_tx.lock().await.commit().await.unwrap();
-		});
 
 		// WHEN:
 		// Construct document we are validating
@@ -196,7 +185,7 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
-		panic!("failed successfully")
+		tx.cancel().await.unwrap();
 	}
 
 	#[test_log::test(tokio::test)]
@@ -214,10 +203,6 @@ mod test_check_lqs_and_send_notifications {
 			.await
 			.unwrap()
 			.enclose();
-		let drop_tx = tx.clone();
-		let _a = DroppyBoy::new(async move {
-			drop_tx.lock().await.commit().await.unwrap();
-		});
 
 		// WHEN:
 		// Construct document we are validating
@@ -254,6 +239,7 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
+		tx.cancel().await.unwrap();
 	}
 
 	// Live queries will have authentication info associated with them
