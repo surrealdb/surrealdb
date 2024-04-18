@@ -6,6 +6,7 @@ use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
 	Number, Operation, Value,
 };
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -133,6 +134,7 @@ impl Array {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -140,7 +142,7 @@ impl Array {
 	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
-			match v.compute(ctx, opt, txn, doc).await {
+			match v.compute(stk, ctx, opt, txn, doc).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};

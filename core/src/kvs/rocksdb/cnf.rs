@@ -1,4 +1,3 @@
-use crate::{lazy_env_parse, lazy_env_parse_or_else};
 use once_cell::sync::Lazy;
 
 pub static ROCKSDB_THREAD_COUNT: Lazy<i32> =

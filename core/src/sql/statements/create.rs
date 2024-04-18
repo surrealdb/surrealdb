@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Data, Output, Timeout, Value, Values};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -30,6 +31,7 @@ impl CreateStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -45,8 +47,8 @@ impl CreateStatement {
 		let opt = &opt.new_with_futures(false);
 		// Loop over the create targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
-			i.prepare(ctx, opt, txn, &stm, v).await.map_err(|e| match e {
+			let v = w.compute(stk, ctx, opt, txn, doc).await?;
+			i.prepare(stk, ctx, opt, txn, &stm, v).await.map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::CreateStatement {
@@ -56,7 +58,7 @@ impl CreateStatement {
 			})?;
 		}
 		// Output the results
-		match i.output(ctx, opt, txn, &stm).await? {
+		match i.output(stk, ctx, opt, txn, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result

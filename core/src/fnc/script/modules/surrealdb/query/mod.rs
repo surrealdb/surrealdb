@@ -3,6 +3,7 @@ use js::{
 	prelude::{Coerced, Opt},
 	Ctx, Exception, FromJs, Result, Value,
 };
+use reblessive::tree::Stk;
 
 use crate::{
 	ctx::Context,
@@ -77,10 +78,9 @@ pub async fn query<'js>(
 		.attach(context)
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 
-	let value = query
-		.query
-		.compute(&context, this.opt, this.txn, this.doc)
-		.await
-		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let value =
+		Stk::enter_run(|stk| query.query.compute(stk, &context, this.opt, this.txn, this.doc))
+			.await
+			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 	Result::Ok(value)
 }

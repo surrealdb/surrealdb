@@ -7,10 +7,12 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
 use channel::Sender;
+use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
 	#[allow(dead_code)]
 	pub(crate) async fn compute(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -34,12 +36,12 @@ impl<'a> Document<'a> {
 			let mut doc = Document::new(pro.ir, pro.rid.as_ref(), pro.doc_id, &ins.0, ins.1);
 			// Process the statement
 			let res = match stm {
-				Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
-				Statement::Create(_) => doc.create(ctx, opt, txn, stm).await,
-				Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
-				Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,
-				Statement::Delete(_) => doc.delete(ctx, opt, txn, stm).await,
-				Statement::Insert(_) => doc.insert(ctx, opt, txn, stm).await,
+				Statement::Select(_) => doc.select(stk, ctx, opt, txn, stm).await,
+				Statement::Create(_) => doc.create(stk, ctx, opt, txn, stm).await,
+				Statement::Update(_) => doc.update(stk, ctx, opt, txn, stm).await,
+				Statement::Relate(_) => doc.relate(stk, ctx, opt, txn, stm).await,
+				Statement::Delete(_) => doc.delete(stk, ctx, opt, txn, stm).await,
+				Statement::Insert(_) => doc.insert(stk, ctx, opt, txn, stm).await,
 				_ => unreachable!(),
 			};
 			// Check the result

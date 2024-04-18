@@ -11,12 +11,17 @@ use crate::kvs::{construct_document, Datastore, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs::conv;
 use futures::lock::Mutex;
+use reblessive::Stk;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Poll change feeds for live query notifications
-pub async fn process_lq_notifications(ds: &Datastore, opt: &Options) -> Result<(), Error> {
+pub async fn process_lq_notifications(
+	ds: &Datastore,
+	stk: &Stk,
+	opt: &Options,
+) -> Result<(), Error> {
 	// Runtime feature gate, as it is not production-ready
 	if !FFLAGS.change_feed_live_queries.enabled() {
 		return Ok(());
@@ -64,7 +69,7 @@ pub async fn process_lq_notifications(ds: &Datastore, opt: &Options) -> Result<(
 				.join("\n")
 		);
 		for change_set in change_sets {
-			process_change_set_for_notifications(ds, tx.clone(), opt, change_set, &lq_pairs)
+			process_change_set_for_notifications(ds, stk, tx.clone(), opt, change_set, &lq_pairs)
 				.await?;
 		}
 	}
@@ -128,6 +133,7 @@ async fn populate_relevant_changesets(
 
 async fn process_change_set_for_notifications(
 	ds: &Datastore,
+	stk: &Stk,
 	tx: Arc<Mutex<Transaction>>,
 	opt: &Options,
 	change_set: ChangeSet,
@@ -168,6 +174,7 @@ async fn process_change_set_for_notifications(
 							panic!("Doc was wrong and the mutation was {:?}", mutation);
 						}
 						doc.check_lqs_and_send_notifications(
+							stk,
 							opt,
 							&Statement::Live(&lq_value.stm),
 							&tx,

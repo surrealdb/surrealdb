@@ -7,6 +7,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Object, Permission, Strand, Value};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -28,6 +29,7 @@ impl DefineParamStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -53,7 +55,7 @@ impl DefineParamStatement {
 			key,
 			DefineParamStatement {
 				// Compute the param
-				value: self.value.compute(ctx, opt, txn, doc).await?,
+				value: self.value.compute(stk, ctx, opt, txn, doc).await?,
 				// Don't persist the "IF NOT EXISTS" clause to schema
 				if_not_exists: false,
 				..self.clone()
