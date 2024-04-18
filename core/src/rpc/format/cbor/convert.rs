@@ -13,6 +13,7 @@ use crate::sql::Number;
 use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
+use std::str::FromStr;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
