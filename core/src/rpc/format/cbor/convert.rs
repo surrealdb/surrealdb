@@ -1,6 +1,7 @@
 use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
+use rust_decimal::Decimal;
 use std::iter::once;
 use std::ops::Deref;
 
@@ -12,6 +13,7 @@ use crate::sql::Number;
 use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
+use std::str::FromStr;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
@@ -119,7 +121,7 @@ impl TryFrom<Cbor> for Value {
 					},
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
-						Data::Text(v) => match Number::try_from(v) {
+						Data::Text(v) => match Decimal::from_str(v.as_str()) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
 						},

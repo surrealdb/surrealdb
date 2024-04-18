@@ -79,7 +79,7 @@ pub(crate) struct LqIndexKey {
 pub(crate) struct LqIndexValue {
 	pub(crate) stm: LiveStatement,
 	pub(crate) vs: Versionstamp,
-	// TODO: unused?
+	// TODO(phughk, pre-2.0): unused? added because we have access to timestamp checkpoints but they arent used and this can be deleted
 	pub(crate) ts: Timestamp,
 }
 
