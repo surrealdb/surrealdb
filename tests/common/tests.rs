@@ -1498,13 +1498,43 @@ async fn run_functions() {
 	assert!(matches!(res, serde_json::Value::String(s) if &s == "fn::bar called with: string_val"));
 
 	// normal functions
-	let res = socket.send_message_run("math::abs", None, vec![(-42).into()]).await.unwrap();
+	let res = socket.send_message_run("math::abs", None, vec![42.into()]).await.unwrap();
 	assert!(matches!(res, serde_json::Value::Number(n) if n.as_u64() == Some(42)));
 	let res = socket
 		.send_message_run("math::max", None, vec![vec![1, 2, 3, 4, 5, 6].into()])
 		.await
 		.unwrap();
 	assert!(matches!(res, serde_json::Value::Number(n) if n.as_u64() == Some(6)));
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn relate_rpc() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// create records and relate
+	socket.send_message_query("CREATE foo:a, foo:b").await.unwrap();
+	socket
+		.send_message_relate("foo:a".into(), "bar".into(), "foo:b".into(), Some(json!({"val": 42})))
+		.await
+		.unwrap();
+	// test
+
+	let mut res = socket.send_message_query("RETURN foo:a->bar.val").await.unwrap();
+	let expected = json!(42);
+	assert_eq!(res.remove(0)["result"], expected);
+
+	let mut res = socket.send_message_query("RETURN foo:a->bar->foo").await.unwrap();
+	let expected = json!(["foo:b"]);
+	assert_eq!(res.remove(0)["result"], expected);
 
 	// Test passed
 	server.finish().unwrap();

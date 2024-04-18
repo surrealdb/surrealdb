@@ -421,6 +421,7 @@ impl Socket {
 			}
 		}
 	}
+
 	pub async fn send_message_run(
 		&mut self,
 		fn_name: &str,
@@ -429,6 +430,40 @@ impl Socket {
 	) -> Result<serde_json::Value> {
 		// Send message and receive response
 		let msg = self.send_request("run", json!([fn_name, version, args])).await?;
+		// Check response message structure
+		match msg.as_object() {
+			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
+				Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
+			}
+			Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => Ok(obj
+				.get("result")
+				.ok_or(TestError::AssertionError {
+					message: format!(
+						"expected a result from the received object, got this instead: {:?}",
+						obj
+					),
+				})?
+				.to_owned()),
+			_ => {
+				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+				Err(format!("unexpected response: {:?}", msg).into())
+			}
+		}
+	}
+
+	pub async fn send_message_relate(
+		&mut self,
+		from: serde_json::Value,
+		kind: serde_json::Value,
+		with: serde_json::Value,
+		content: Option<serde_json::Value>,
+	) -> Result<serde_json::Value> {
+		// Send message and receive response
+		let msg = if let Some(content) = content {
+			self.send_request("relate", json!([from, kind, with, content])).await?
+		} else {
+			self.send_request("relate", json!([from, kind, with])).await?
+		};
 		// Check response message structure
 		match msg.as_object() {
 			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
