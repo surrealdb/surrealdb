@@ -93,12 +93,12 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
-	pub(crate) engine_options: EngineOptions,
+	pub(super) engine_options: EngineOptions,
 	// The versionstamp oracle for this datastore.
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	pub(crate) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	pub(super) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
