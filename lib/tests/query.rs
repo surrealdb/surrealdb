@@ -5,7 +5,6 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
-use tokio_util::bytes::buf;
 
 #[tokio::test]
 async fn query_basic() -> Result<(), Error> {
