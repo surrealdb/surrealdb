@@ -5,7 +5,7 @@ use axum::extract::ws::Message;
 use axum::response::IntoResponse;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
-use http::StatusCode;
+use http::header::{HeaderValue, CONTENT_TYPE};
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
 use surrealdb::rpc::RpcError;
@@ -32,6 +32,19 @@ impl From<&ContentType> for Format {
 			ContentType::ApplicationPack => Format::Msgpack,
 			ContentType::ApplicationOctetStream => Format::Unsupported,
 			ContentType::Surrealdb => Format::Bincode,
+		}
+	}
+}
+
+impl From<&Format> for Accept {
+	fn from(format: &Format) -> Self {
+		match format {
+			Format::Json => Accept::ApplicationJson,
+			Format::Cbor => Accept::ApplicationCbor,
+			Format::Msgpack => Accept::ApplicationPack,
+			Format::Unsupported => Accept::ApplicationOctetStream,
+			Format::Bincode => Accept::Surrealdb,
+			_ => Accept::TextPlain,
 		}
 	}
 }
@@ -75,9 +88,13 @@ impl HttpFormat for Format {
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be replaced with unsafe { String::from_utf8_unchecked(res) }
 			// This would be safe as in the case of JSON res come from a call to Into::<Vec<u8>> for String
-			Ok((StatusCode::OK, String::from_utf8(res).unwrap()).into_response())
+			Ok((
+				[(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationJson))],
+				String::from_utf8(res).unwrap(),
+			)
+				.into_response())
 		} else {
-			Ok((StatusCode::OK, res).into_response())
+			Ok(([(CONTENT_TYPE, HeaderValue::from(Accept::from(self)))], res).into_response())
 		}
 	}
 }
