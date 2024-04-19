@@ -22,9 +22,9 @@ use std::{
 	time::Duration,
 };
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub struct Statements(pub Vec<Statement>);
 
 impl Deref for Statements {
@@ -51,9 +51,9 @@ impl Display for Statements {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum Statement {
 	Value(Value),
 	Analyze(AnalyzeStatement),

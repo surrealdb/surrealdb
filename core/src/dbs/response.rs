@@ -40,9 +40,9 @@ impl Response {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[revisioned(revision = 1)]
 #[doc(hidden)]
 pub enum Status {
 	Ok,
@@ -70,8 +70,8 @@ impl Serialize for Response {
 	}
 }
 
-#[derive(Debug, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize)]
 #[doc(hidden)]
 pub struct QueryMethodResponse {
 	pub time: String,

@@ -9,9 +9,9 @@ use super::Level;
 use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum ResourceKind {
 	#[default]
 	Any,
@@ -78,9 +78,9 @@ impl ResourceKind {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub struct Resource(String, ResourceKind, Level);
 
 impl std::fmt::Display for Resource {

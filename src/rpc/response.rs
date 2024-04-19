@@ -17,8 +17,8 @@ use tracing::Span;
 /// The data returned by the database
 // The variants here should be in exactly the same order as `surrealdb::engine::remote::ws::Data`
 // In future, they will possibly be merged to avoid having to keep them in sync.
-#[derive(Debug, Serialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Serialize)]
 pub enum Data {
 	/// Generally methods return a `sql::Value`
 	Other(Value),
@@ -63,8 +63,8 @@ impl From<Data> for Value {
 	}
 }
 
-#[derive(Debug, Serialize)]
 #[revisioned(revision = 1)]
+#[derive(Debug, Serialize)]
 pub struct Response {
 	id: Option<Value>,
 	result: Result<Data, Failure>,

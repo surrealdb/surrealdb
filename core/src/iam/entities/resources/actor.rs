@@ -13,9 +13,9 @@ use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
 //
 // User
 //
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub struct Actor {
 	res: Resource,
 	roles: Vec<Role>,

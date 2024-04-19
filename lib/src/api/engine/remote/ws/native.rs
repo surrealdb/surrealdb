@@ -423,8 +423,8 @@ pub(crate) fn router(
 											}
 										}
 										Err(error) => {
-											#[derive(Deserialize)]
 											#[revisioned(revision = 1)]
+											#[derive(Deserialize)]
 											struct Response {
 												id: Option<Value>,
 											}
