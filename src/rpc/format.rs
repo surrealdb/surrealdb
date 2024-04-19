@@ -36,15 +36,15 @@ impl From<&ContentType> for Format {
 	}
 }
 
-impl From<&Format> for Accept {
+impl From<&Format> for ContentType {
 	fn from(format: &Format) -> Self {
 		match format {
-			Format::Json => Accept::ApplicationJson,
-			Format::Cbor => Accept::ApplicationCbor,
-			Format::Msgpack => Accept::ApplicationPack,
-			Format::Unsupported => Accept::ApplicationOctetStream,
-			Format::Bincode => Accept::Surrealdb,
-			_ => Accept::TextPlain,
+			Format::Json => ContentType::ApplicationJson,
+			Format::Cbor => ContentType::ApplicationCbor,
+			Format::Msgpack => ContentType::ApplicationPack,
+			Format::Unsupported => ContentType::ApplicationOctetStream,
+			Format::Bincode => ContentType::Surrealdb,
+			_ => ContentType::TextPlain,
 		}
 	}
 }
@@ -89,12 +89,12 @@ impl HttpFormat for Format {
 			// If this has significant performance overhead it could be replaced with unsafe { String::from_utf8_unchecked(res) }
 			// This would be safe as in the case of JSON res come from a call to Into::<Vec<u8>> for String
 			Ok((
-				[(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationJson))],
+				[(CONTENT_TYPE, HeaderValue::from(ContentType::ApplicationJson))],
 				String::from_utf8(res).unwrap(),
 			)
 				.into_response())
 		} else {
-			Ok(([(CONTENT_TYPE, HeaderValue::from(Accept::from(self)))], res).into_response())
+			Ok(([(CONTENT_TYPE, HeaderValue::from(ContentType::from(self)))], res).into_response())
 		}
 	}
 }
