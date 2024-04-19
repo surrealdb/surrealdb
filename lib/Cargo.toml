@@ -100,7 +100,7 @@ revision = { version = "0.7.0", features = [
     "uuid",
 ] }
 rust_decimal = { version = "1.33.1", features = ["maths", "serde-str"] }
-rustls = { version = "0.21.10", optional = true }
+rustls = { version = "0.21.11", optional = true }
 semver = { version = "1.0.20", features = ["serde"] }
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
