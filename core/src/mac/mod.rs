@@ -81,7 +81,8 @@ macro_rules! lazy_env_parse_or_else {
 macro_rules! async_defer{
 	(let $bind:ident = ($capture:expr) defer { $($d:tt)* } after { $($t:tt)* }) => {
 		async {
-			async_defer!(@types);
+			async_defer!(@captured);
+			async_defer!(@catch_unwind);
 
 			#[allow(unused_mut)]
 			let mut v = Some($capture);
@@ -102,7 +103,7 @@ macro_rules! async_defer{
 
 	(defer { $($d:tt)* } after { $($t:tt)* }) => {
 		async {
-			async_defer!(@types);
+			async_defer!(@catch_unwind);
 
 			let res = CatchUnwindFuture(async { $($t)* }).await;
 			#[allow(unused_variables)]
@@ -115,7 +116,7 @@ macro_rules! async_defer{
 		}
 	};
 
-	(@types) => {
+	(@captured) => {
 		// unwraps are save cause the value can only be taken by consuming captured.
 		pub struct Captured<'a,T>(&'a mut Option<T>);
 		impl<T> ::std::ops::Deref for Captured<'_,T>{
@@ -136,7 +137,9 @@ macro_rules! async_defer{
 				self.0.take().unwrap()
 			}
 		}
+	};
 
+	(@catch_unwind) => {
 		struct CatchUnwindFuture<F>(F);
 		impl<F,R> ::std::future::Future for CatchUnwindFuture<F>
 			where F: ::std::future::Future<Output = R>,
@@ -153,7 +156,7 @@ macro_rules! async_defer{
 				}
 			}
 		}
-	}
+	};
 }
 
 #[cfg(test)]
