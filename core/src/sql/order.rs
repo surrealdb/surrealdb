@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Orders(pub Vec<Order>);
 
@@ -31,8 +31,8 @@ impl fmt::Display for Orders {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Order {
 	pub order: Idiom,

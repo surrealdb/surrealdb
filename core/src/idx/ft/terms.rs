@@ -132,16 +132,16 @@ impl Terms {
 	}
 }
 
-#[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 struct State {
 	btree: BState,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 }
 
-#[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 struct State1 {
 	btree: BState1,
 	available_ids: Option<RoaringTreemap>,
@@ -150,8 +150,8 @@ struct State1 {
 
 impl VersionedSerdeState for State1 {}
 
-#[derive(Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
 struct State1skip {
 	btree: BState1skip,
 	available_ids: Option<RoaringTreemap>,

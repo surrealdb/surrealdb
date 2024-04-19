@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -26,9 +26,9 @@ pub enum Index {
 	MTree(MTreeParams),
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -47,9 +47,9 @@ pub struct SearchParams {
 	pub terms_cache: u32,
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 pub struct MTreeParams {
 	pub dimension: u16,
 	#[revision(start = 1, end = 2, convert_fn = "convert_old_distance")]
@@ -82,9 +82,9 @@ impl MTreeParams {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum Distance1 {
 	#[default]
 	Euclidean,
@@ -94,9 +94,9 @@ pub enum Distance1 {
 	Minkowski(Number),
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum Distance {
 	Chebyshev,
 	Cosine,
@@ -139,9 +139,9 @@ impl Display for Distance {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 pub enum VectorType {
 	#[default]
 	F64,

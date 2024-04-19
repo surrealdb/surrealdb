@@ -86,8 +86,8 @@ impl From<FtStatistics> for Value {
 	}
 }
 
-#[derive(Default, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Default, Serialize, Deserialize)]
 struct State {
 	total_docs_lengths: u128,
 	doc_count: u64,
