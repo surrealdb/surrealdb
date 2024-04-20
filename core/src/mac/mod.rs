@@ -19,6 +19,14 @@ macro_rules! map {
     }};
 }
 
+/// Extends a b-tree map of key-value pairs
+macro_rules! mrg {
+	($($m:expr, $x:expr)+) => {{
+		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
+		$($m)+
+	}};
+}
+
 /// Matches on a specific config environment
 #[macro_export]
 #[doc(hidden)]
