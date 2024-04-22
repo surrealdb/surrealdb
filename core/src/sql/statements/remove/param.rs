@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct RemoveParamStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -25,7 +26,7 @@ impl RemoveParamStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 			// Claim transaction
@@ -40,8 +41,8 @@ impl RemoveParamStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::PaNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

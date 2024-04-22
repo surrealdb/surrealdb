@@ -33,13 +33,15 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -64,6 +66,7 @@ impl DefineStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -75,11 +78,11 @@ impl DefineStatement {
 			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Param(ref v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Table(ref v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Index(ref v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Model(ref v) => v.compute(ctx, opt, txn, doc).await,

@@ -6,6 +6,7 @@ use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
 	Number, Operation, Value,
 };
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -16,10 +17,11 @@ use std::ops::DerefMut;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Array")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
@@ -132,6 +134,7 @@ impl Array {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -139,7 +142,7 @@ impl Array {
 	) -> Result<Value, Error> {
 		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
-			match v.compute(ctx, opt, txn, doc).await {
+			match v.compute(stk, ctx, opt, txn, doc).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};

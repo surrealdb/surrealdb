@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct RemoveModelStatement {
 	pub name: Ident,
 	pub version: String,
@@ -26,7 +27,7 @@ impl RemoveModelStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 			// Claim transaction
@@ -41,8 +42,8 @@ impl RemoveModelStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::MlNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

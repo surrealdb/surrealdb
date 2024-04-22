@@ -45,8 +45,8 @@ use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use crate::vs::{conv, Oracle};
 
 use super::kv::Add;
 use super::kv::Convert;
@@ -54,11 +54,13 @@ use super::Key;
 use super::Val;
 
 #[derive(Copy, Clone, Debug)]
+#[non_exhaustive]
 pub enum Limit {
 	Unlimited,
 	Limited(u32),
 }
 
+#[non_exhaustive]
 pub struct ScanPage<K>
 where
 	K: Into<Key> + Debug,
@@ -76,6 +78,7 @@ impl From<Range<Vec<u8>>> for ScanPage<Vec<u8>> {
 	}
 }
 
+#[non_exhaustive]
 pub struct ScanResult<K>
 where
 	K: Into<Key> + Debug,
@@ -86,6 +89,7 @@ where
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
+#[non_exhaustive]
 pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
@@ -115,6 +119,7 @@ pub(super) enum Inner {
 }
 
 #[derive(Copy, Clone)]
+#[non_exhaustive]
 pub enum TransactionType {
 	Read,
 	Write,
@@ -129,6 +134,7 @@ impl From<bool> for TransactionType {
 	}
 }
 
+#[non_exhaustive]
 pub enum LockType {
 	Pessimistic,
 	Optimistic,
@@ -2901,7 +2907,7 @@ impl Transaction {
 		trace!(
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
 			ts,
-			conv::versionstamp_to_u64(&vs),
+			crate::vs::conv::versionstamp_to_u64(&vs),
 			ns,
 			db
 		);

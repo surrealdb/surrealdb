@@ -1,19 +1,23 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::err::{Error, LiveQueryCause};
 use crate::fflags::FFLAGS;
 use crate::iam::Auth;
 use crate::kvs::lq_structs::{LqEntry, TrackedResult};
-use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Cond, Fetchs, Fields, Object, Table, Uuid, Value};
 use derive::Store;
+use futures::lock::MutexGuard;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
@@ -73,6 +77,7 @@ impl LiveStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -100,13 +105,16 @@ impl LiveStatement {
 		match FFLAGS.change_feed_live_queries.enabled() {
 			true => {
 				let mut run = txn.lock().await;
-				match stm.what.compute(ctx, opt, txn, doc).await? {
-					Value::Table(_tb) => {
+				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
+					Value::Table(tb) => {
+						let ns = opt.ns().to_string();
+						let db = opt.db().to_string();
+						self.validate_change_feed_valid(&mut run, &ns, &db, &tb).await?;
 						// Send the live query registration hook to the transaction pre-commit channel
 						run.pre_commit_register_async_event(TrackedResult::LiveQuery(LqEntry {
 							live_id: stm.id,
-							ns: opt.ns().to_string(),
-							db: opt.db().to_string(),
+							ns,
+							db,
 							stm,
 						}))?;
 					}
@@ -122,7 +130,7 @@ impl LiveStatement {
 				// Claim transaction
 				let mut run = txn.lock().await;
 				// Process the live query table
-				match stm.what.compute(ctx, opt, txn, doc).await? {
+				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
 					Value::Table(tb) => {
 						// Store the current Node ID
 						stm.node = nid.into();
@@ -143,6 +151,31 @@ impl LiveStatement {
 		}
 	}
 
+	async fn validate_change_feed_valid(
+		&self,
+		tx: &mut MutexGuard<'_, crate::kvs::Transaction>,
+		ns: &str,
+		db: &str,
+		tb: &Table,
+	) -> Result<(), Error> {
+		// Find the table definition
+		let tb_definition = tx.get_and_cache_tb(ns, db, tb).await.map_err(|e| match e {
+			Error::TbNotFound {
+				value: _tb,
+			} => Error::LiveQueryError(LiveQueryCause::MissingChangeFeed),
+			_ => e,
+		})?;
+		// check it has a change feed
+		let cf = tb_definition
+			.changefeed
+			.ok_or(Error::LiveQueryError(LiveQueryCause::MissingChangeFeed))?;
+		// check the change feed includes the original - required for differentiating between CREATE and UPDATE
+		if !cf.store_original {
+			return Err(Error::LiveQueryError(LiveQueryCause::ChangeFeedNoOriginal));
+		}
+		Ok(())
+	}
+
 	pub(crate) fn archive(mut self, node_id: Uuid) -> LiveStatement {
 		self.archived = Some(node_id);
 		self
@@ -159,5 +192,32 @@ impl fmt::Display for LiveStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for LiveStatement {
+	fn structure(self) -> Value {
+		let Self {
+			expr,
+			what,
+			cond,
+			fetch,
+			..
+		} = self;
+
+		let mut acc = Object::default();
+
+		acc.insert("expr".to_string(), expr.structure());
+
+		acc.insert("what".to_string(), what.structure());
+
+		if let Some(cond) = cond {
+			acc.insert("cond".to_string(), cond.structure());
+		}
+
+		if let Some(fetch) = fetch {
+			acc.insert("fetch".to_string(), fetch.structure());
+		}
+		Value::Object(acc)
 	}
 }

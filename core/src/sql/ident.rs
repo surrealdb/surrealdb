@@ -1,13 +1,15 @@
-use crate::sql::{escape::escape_ident, strand::no_nul_bytes};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{escape::escape_ident, strand::no_nul_bytes, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Ident(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Ident {
@@ -55,5 +57,11 @@ impl Ident {
 impl Display for Ident {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&escape_ident(&self.0), f)
+	}
+}
+
+impl InfoStructure for Ident {
+	fn structure(self) -> Value {
+		self.0.into()
 	}
 }

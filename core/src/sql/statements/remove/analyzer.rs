@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -24,7 +25,7 @@ impl RemoveAnalyzerStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 			// Claim transaction
@@ -40,8 +41,8 @@ impl RemoveAnalyzerStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::AzNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

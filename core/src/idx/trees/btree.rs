@@ -18,6 +18,7 @@ pub type Payload = u64;
 type BStoredNode<BK> = StoredNode<BTreeNode<BK>>;
 pub(in crate::idx) type BTreeStore<BK> = TreeStore<BTreeNode<BK>>;
 
+#[non_exhaustive]
 pub struct BTree<BK>
 where
 	BK: BKeys,
@@ -27,8 +28,9 @@ where
 	bk: PhantomData<BK>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct BState {
 	minimum_degree: u32,
 	root: Option<NodeId>,
@@ -55,16 +57,16 @@ impl VersionedSerdeState for BState {
 	}
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(in crate::idx) struct BState1 {
 	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
 #[revisioned(revision = 1)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(in crate::idx) struct BState1skip {
 	minimum_degree: u32,
 	root: Option<NodeId>,
@@ -143,6 +145,7 @@ impl From<BStatistics> for Value {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum BTreeNode<BK>
 where
 	BK: BKeys + Clone,

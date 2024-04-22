@@ -1,5 +1,5 @@
 use super::capabilities::Capabilities;
-use crate::cnf;
+use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind, Role};
@@ -17,6 +17,7 @@ use uuid::Uuid;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Options {
 	/// Current Node ID
 	id: Option<Uuid>,
@@ -25,7 +26,7 @@ pub struct Options {
 	/// Currently selected DB
 	db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
-	dive: u8,
+	dive: u32,
 	/// Connection authentication data
 	pub auth: Arc<Auth>,
 	/// Is authentication enabled?
@@ -51,6 +52,7 @@ pub struct Options {
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Force {
 	All,
 	None,
@@ -81,7 +83,7 @@ impl Options {
 			id: None,
 			ns: None,
 			db: None,
-			dive: 0,
+			dive: *MAX_COMPUTATION_DEPTH,
 			live: false,
 			perms: true,
 			force: Force::None,
@@ -126,6 +128,12 @@ impl Options {
 		self.ns = ns;
 		self.db = db;
 		self.auth = auth;
+		self
+	}
+
+	/// Set the maximum depth a computation can reach.
+	pub fn with_max_computation_depth(mut self, depth: u32) -> Self {
+		self.dive = depth;
 		self
 	}
 
@@ -326,21 +334,19 @@ impl Options {
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
 	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
-		let dive = self.dive.saturating_add(cost);
-		if dive <= *cnf::MAX_COMPUTATION_DEPTH {
-			Ok(Self {
-				sender: self.sender.clone(),
-				auth: self.auth.clone(),
-				capabilities: self.capabilities.clone(),
-				ns: self.ns.clone(),
-				db: self.db.clone(),
-				force: self.force.clone(),
-				dive,
-				..*self
-			})
-		} else {
-			Err(Error::ComputationDepthExceeded)
+		if self.dive < cost as u32 {
+			return Err(Error::ComputationDepthExceeded);
 		}
+		Ok(Self {
+			sender: self.sender.clone(),
+			auth: self.auth.clone(),
+			capabilities: self.capabilities.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			force: self.force.clone(),
+			dive: self.dive - cost as u32,
+			..*self
+		})
 	}
 
 	// --------------------------------------------------
@@ -353,13 +359,11 @@ impl Options {
 	/// Get currently selected NS
 	pub fn ns(&self) -> &str {
 		self.ns.as_ref().map(AsRef::as_ref).unwrap()
-		// self.ns.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
 	}
 
 	/// Get currently selected DB
 	pub fn db(&self) -> &str {
 		self.db.as_ref().map(AsRef::as_ref).unwrap()
-		// self.db.as_ref().map(AsRef::as_ref).ok_or(Error::Unreachable)
 	}
 
 	/// Check whether this request supports realtime queries

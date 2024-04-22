@@ -4,16 +4,25 @@
 //! and executors to process the operations. This module also gives a `context` to the transaction.
 mod distinct;
 mod executor;
+mod group;
 mod iterator;
 mod notification;
 mod options;
 mod plan;
+mod processor;
 mod response;
+mod result;
 mod session;
 mod statement;
+mod store;
 mod transaction;
 mod variables;
 
+pub mod capabilities;
+pub mod lifecycle;
+pub mod node;
+
+pub use self::capabilities::Capabilities;
 pub use self::lifecycle::*;
 pub use self::notification::*;
 pub use self::options::*;
@@ -26,15 +35,7 @@ pub(crate) use self::statement::*;
 pub(crate) use self::transaction::*;
 pub(crate) use self::variables::*;
 
-pub mod capabilities;
-pub use self::capabilities::Capabilities;
-pub mod node;
-
-mod group;
 #[doc(hidden)]
-pub mod lifecycle;
-mod processor;
-mod result;
-mod store;
+pub mod fuzzy_eq;
 #[cfg(test)]
 pub(crate) mod test;

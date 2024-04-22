@@ -5,6 +5,7 @@ use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 
 pub mod args;
 pub mod array;
@@ -34,6 +35,7 @@ pub mod vector;
 
 /// Attempts to run any function
 pub async fn run(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
 	txn: &Transaction,
@@ -51,7 +53,7 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		asynchronous(ctx, Some(opt), Some(txn), doc, name, args).await
+		stk.run(|stk| asynchronous(stk, ctx, Some(opt), Some(txn), doc, name, args)).await
 	} else {
 		synchronous(ctx, name, args)
 	}
@@ -321,6 +323,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
+		"type::range" => r#type::range,
 		"type::is::array" => r#type::is::array,
 		"type::is::bool" => r#type::is::bool,
 		"type::is::bytes" => r#type::is::bytes,
@@ -370,6 +373,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 
 /// Attempts to run any asynchronous function.
 pub async fn asynchronous(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: Option<&Options>,
 	txn: Option<&Transaction>,
@@ -412,15 +416,15 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((ctx, txn, opt)).await,
+		"search::analyze" => search::analyze((stk,ctx, txn, opt)).await,
 		"search::score" => search::score((ctx, txn, doc)).await,
 		"search::highlight" => search::highlight((ctx,txn, doc)).await,
 		"search::offsets" => search::offsets((ctx, txn, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((ctx, opt, txn, doc)).await,
-		"type::fields" => r#type::fields((ctx, opt, txn, doc)).await,
+		"type::field" => r#type::field((stk,ctx, opt, txn, doc)).await,
+		"type::fields" => r#type::fields((stk,ctx, opt, txn, doc)).await,
 	)
 }
 

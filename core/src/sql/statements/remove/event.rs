@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -26,7 +27,7 @@ impl RemoveEventStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 			// Claim transaction
@@ -44,8 +45,8 @@ impl RemoveEventStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::EvNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

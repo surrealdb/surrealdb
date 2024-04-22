@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
 	#[revision(start = 2)]
@@ -25,7 +26,7 @@ impl RemoveFunctionStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
 			// Claim transaction
@@ -40,8 +41,8 @@ impl RemoveFunctionStatement {
 			// Ok all good
 			Ok(Value::None)
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(Error::FcNotFound {
 				..
 			}) if self.if_exists => Ok(Value::None),

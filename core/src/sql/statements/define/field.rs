@@ -3,20 +3,22 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::Part;
 use crate::sql::{
 	fmt::is_pretty, fmt::pretty_indent, Base, Ident, Idiom, Kind, Permissions, Strand, Value,
 };
+use crate::sql::{Object, Part};
 use crate::sql::{Relation, TableType};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 3)]
+#[non_exhaustive]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -201,5 +203,56 @@ impl Display for DefineFieldStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineFieldStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			what,
+			flex,
+			kind,
+			readonly,
+			value,
+			assert,
+			default,
+			permissions,
+			comment,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		acc.insert("what".to_string(), what.structure());
+
+		acc.insert("flex".to_string(), flex.into());
+
+		if let Some(kind) = kind {
+			acc.insert("kind".to_string(), kind.structure());
+		}
+
+		acc.insert("readonly".to_string(), readonly.into());
+
+		if let Some(value) = value {
+			acc.insert("value".to_string(), value.structure());
+		}
+
+		if let Some(assert) = assert {
+			acc.insert("assert".to_string(), assert.structure());
+		}
+
+		if let Some(default) = default {
+			acc.insert("default".to_string(), default.structure());
+		}
+
+		acc.insert("permissions".to_string(), permissions.structure());
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }

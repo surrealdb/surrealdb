@@ -17,9 +17,8 @@ pub const MAX_CONCURRENT_TASKS: usize = 64;
 /// During query execution, all potentially-recursive code paths count against this limit. Whereas
 /// parsing assigns equal weight to each recursion, certain expensive code paths are allowed to
 /// count for more than one unit of depth during execution.
-pub static MAX_COMPUTATION_DEPTH: Lazy<u8> = Lazy::new(|| {
-	option_env!("SURREAL_MAX_COMPUTATION_DEPTH").and_then(|s| s.parse::<u8>().ok()).unwrap_or(120)
-});
+pub static MAX_COMPUTATION_DEPTH: Lazy<u32> =
+	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
 /// Specifies the names of parameters which can not be specified in a query.
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];
@@ -37,8 +36,18 @@ pub const SERVER_NAME: &str = "SurrealDB";
 pub const PROCESSOR_BATCH_SIZE: u32 = 50;
 
 /// Forward all signup/signin query errors to a client trying authenticate to a scope. Do not use in production.
-pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> = Lazy::new(|| {
-	option_env!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS")
-		.and_then(|s| s.parse::<bool>().ok())
-		.unwrap_or(false)
-});
+pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> =
+	lazy_env_parse!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS", bool, false);
+
+#[cfg(any(
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
+/// Specifies the buffer limit for external sorting.
+/// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
+pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =
+	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);

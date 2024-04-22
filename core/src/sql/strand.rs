@@ -9,10 +9,11 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 
 /// A string that doesn't contain NUL bytes.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Strand")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Strand {
@@ -124,24 +125,5 @@ pub(crate) mod no_nul_bytes {
 		}
 
 		deserializer.deserialize_string(NoNulBytesVisitor)
-	}
-}
-
-#[cfg(test)]
-mod test {
-
-	#[cfg(not(feature = "experimental-parser"))]
-	#[test]
-	fn ensure_strands_are_prefixed() {
-		use super::Strand;
-
-		let strand = Strand("a:b".to_owned());
-		assert_eq!(strand.to_string().as_str(), "s'a:b'");
-
-		let strand = Strand("2012-04-23T18:25:43.0000511Z".to_owned());
-		assert_eq!(strand.to_string().as_str(), "s'2012-04-23T18:25:43.0000511Z'");
-
-		let strand = Strand("b19bc00b-aa98-486c-ae37-c8e1c54295b1".to_owned());
-		assert_eq!(strand.to_string().as_str(), "s'b19bc00b-aa98-486c-ae37-c8e1c54295b1'");
 	}
 }

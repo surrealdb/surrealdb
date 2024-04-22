@@ -4,16 +4,18 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::Block;
 use crate::sql::value::Value;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Future")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct Future(pub Block);
 
 impl From<Value> for Future {
@@ -26,6 +28,7 @@ impl Future {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -33,7 +36,7 @@ impl Future {
 	) -> Result<Value, Error> {
 		// Process the future if enabled
 		match opt.futures {
-			true => self.0.compute(ctx, opt, txn, doc).await?.ok(),
+			true => stk.run(|stk| self.0.compute(stk, ctx, opt, txn, doc)).await?.ok(),
 			false => Ok(self.clone().into()),
 		}
 	}

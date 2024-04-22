@@ -14,6 +14,7 @@ pub fn platform() -> &'static str {
 	crate::env::os()
 }
 
+#[non_exhaustive]
 pub struct Package;
 
 impl ModuleDef for Package {

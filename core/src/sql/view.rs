@@ -1,11 +1,13 @@
-use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct View {
 	pub expr: Fields,
 	pub what: Tables,
@@ -23,5 +25,10 @@ impl fmt::Display for View {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+impl InfoStructure for View {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

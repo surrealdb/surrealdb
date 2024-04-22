@@ -1,7 +1,7 @@
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{offset::LocalResult, DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -14,9 +14,10 @@ use super::escape::quote_str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {
@@ -63,6 +64,16 @@ impl TryFrom<&str> for Datetime {
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::datetime_raw(v) {
 			Ok(v) => Ok(v),
+			_ => Err(()),
+		}
+	}
+}
+
+impl TryFrom<(i64, u32)> for Datetime {
+	type Error = ();
+	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
+		match Utc.timestamp_opt(v.0, v.1) {
+			LocalResult::Single(v) => Ok(Self(v)),
 			_ => Err(()),
 		}
 	}

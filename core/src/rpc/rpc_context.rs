@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
+use uuid::Uuid;
+
 use crate::{
 	dbs::{QueryType, Response, Session},
 	kvs::Datastore,
 	rpc::args::Take,
-	sql::{Array, Value},
+	sql::{Array, Function, Model, Statement, Strand, Value},
 };
-use uuid::Uuid;
 
 use super::{method::Method, response::Data, rpc_error::RpcError};
 
@@ -59,6 +60,7 @@ pub trait RpcContext {
 			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
+			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -77,6 +79,7 @@ pub trait RpcContext {
 			Method::Version => self.version(params).await.map(Into::into).map_err(Into::into),
 			Method::Query => self.query(params).await.map(Into::into).map_err(Into::into),
 			Method::Relate => self.relate(params).await.map(Into::into).map_err(Into::into),
+			Method::Run => self.run(params).await.map(Into::into).map_err(Into::into),
 			Method::Unknown => Err(RpcError::MethodNotFound),
 			_ => Err(RpcError::MethodNotFound),
 		}
@@ -416,6 +419,41 @@ pub trait RpcContext {
 	}
 
 	// ------------------------------
+	// Methods for relating
+	// ------------------------------
+
+	async fn relate(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((from, kind, to, data)) = params.needs_three_or_four() else {
+			return Err(RpcError::InvalidParams);
+		};
+		// Return a single result?
+		let one = kind.is_thing();
+		// Specify the SQL query string
+		let sql = if data.is_none_or_null() {
+			"RELATE $from->$kind->$to"
+		} else {
+			"RELATE $from->$kind->$to CONTENT $data"
+		};
+		// Specify the query parameters
+		let var = Some(map! {
+			String::from("from") => from,
+			String::from("kind") => kind.could_be_table(),
+			String::from("to") => to,
+			String::from("data") => data,
+			=> &self.vars()
+		});
+		// Execute the query on the database
+		let mut res = self.kvs().execute(sql, self.session(), var).await?;
+		// Extract the first query result
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
 	// Methods for deleting
 	// ------------------------------
 
@@ -481,12 +519,43 @@ pub trait RpcContext {
 	}
 
 	// ------------------------------
-	// Methods for querying
+	// Methods for running functions
 	// ------------------------------
 
-	async fn relate(&self, _params: Array) -> Result<impl Into<Data>, RpcError> {
-		let out: Result<Value, RpcError> = Err(RpcError::MethodNotFound);
-		out
+	async fn run(&self, params: Array) -> Result<impl Into<Data>, RpcError> {
+		let Ok((Value::Strand(Strand(func_name)), version, args)) = params.needs_one_two_or_three()
+		else {
+			return Err(RpcError::InvalidParams);
+		};
+
+		let version = match version {
+			Value::Strand(Strand(v)) => Some(v),
+			Value::None | Value::Null => None,
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let args = match args {
+			Value::Array(Array(arr)) => arr,
+			Value::None | Value::Null => vec![],
+			_ => return Err(RpcError::InvalidParams),
+		};
+
+		let func: Value = match &func_name[0..4] {
+			"fn::" => Function::Custom(func_name.chars().skip(4).collect(), args).into(),
+			"ml::" => Model {
+				name: func_name.chars().skip(4).collect(),
+				version: version.ok_or(RpcError::InvalidParams)?,
+				args,
+			}
+			.into(),
+			_ => Function::Normal(func_name, args).into(),
+		};
+
+		let mut res = self
+			.kvs()
+			.process(Statement::Value(func).into(), self.session(), Some(self.vars().clone()))
+			.await?;
+		res.remove(0).result.map_err(Into::into)
 	}
 
 	// ------------------------------

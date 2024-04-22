@@ -9,10 +9,12 @@ use crate::kvs::Val;
 use crate::vs::{try_to_u64_be, u64_to_versionstamp, Versionstamp};
 use std::ops::Range;
 
+#[non_exhaustive]
 pub struct Datastore {
 	db: echodb::Db<Key, Val>,
 }
 
+#[non_exhaustive]
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: bool,
@@ -343,7 +345,7 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let res = self.inner.scan(rng, limit)?;
+		let res = self.inner.scan(rng, limit as usize)?;
 		// Return result
 		Ok(res)
 	}

@@ -13,10 +13,11 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Number {
 	Int(i64),
 	Float(f64),
@@ -318,11 +319,8 @@ impl Number {
 
 	pub fn to_decimal(&self) -> Decimal {
 		match self {
-			// #[allow(clippy::unnecessary_fallible_conversions)] // `Decimal::from` can panic
-			// `clippy::unnecessary_fallible_conversions` not available on Rust < v1.75
-			#[allow(warnings)]
-			Number::Int(v) => Decimal::try_from(*v).unwrap_or_default(),
-			Number::Float(v) => Decimal::try_from(*v).unwrap_or_default(),
+			Number::Int(v) => Decimal::from(*v),
+			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
 		}
 	}
@@ -722,6 +720,7 @@ impl<'a> Product<&'a Self> for Number {
 	}
 }
 
+#[non_exhaustive]
 pub struct Sorted<T>(pub T);
 
 pub trait Sort {

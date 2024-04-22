@@ -7,21 +7,24 @@ use crate::sql::{
 	changefeed::ChangeFeed,
 	fmt::{is_pretty, pretty_indent},
 	statements::UpdateStatement,
-	Base, Ident, Permissions, Strand, Value, Values, View,
+	Base, Ident, Object, Permissions, Strand, Value, Values, View,
 };
 use std::sync::Arc;
 
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Kind, Part, Table, TableType};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 use super::DefineFieldStatement;
 
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 3)]
+#[non_exhaustive]
 pub struct DefineTableStatement {
 	pub id: Option<u32>,
 	pub name: Ident,
@@ -40,6 +43,7 @@ pub struct DefineTableStatement {
 impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -129,7 +133,7 @@ impl DefineTableStatement {
 					what: Values(vec![Value::Table(v.clone())]),
 					..UpdateStatement::default()
 				};
-				stm.compute(ctx, opt, txn, doc).await?;
+				stm.compute(stk, ctx, opt, txn, doc).await?;
 			}
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);
@@ -208,5 +212,45 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineTableStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			drop,
+			full,
+			view,
+			permissions,
+			changefeed,
+			comment,
+			kind,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		acc.insert("drop".to_string(), drop.into());
+		acc.insert("full".to_string(), full.into());
+
+		if let Some(view) = view {
+			acc.insert("view".to_string(), view.structure());
+		}
+
+		acc.insert("permissions".to_string(), permissions.structure());
+
+		if let Some(changefeed) = changefeed {
+			acc.insert("changefeed".to_string(), changefeed.structure());
+		}
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		acc.insert("kind".to_string(), kind.structure());
+
+		Value::Object(acc)
 	}
 }

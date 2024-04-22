@@ -9,8 +9,8 @@ use crate::sql::idiom::Idiom;
 use crate::sql::script::Script;
 use crate::sql::value::Value;
 use crate::sql::Permission;
-use async_recursion::async_recursion;
 use futures::future::try_join_all;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -20,10 +20,11 @@ use super::Kind;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub enum Function {
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
@@ -34,6 +35,7 @@ pub enum Function {
 pub(crate) enum OptimisedAggregate {
 	None,
 	Count,
+	CountFunction,
 	MathMax,
 	MathMin,
 	MathSum,
@@ -155,7 +157,13 @@ impl Function {
 	}
 	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
 		match self {
-			Self::Normal(f, _) if f == "count" => OptimisedAggregate::Count,
+			Self::Normal(f, v) if f == "count" => {
+				if v.is_empty() {
+					OptimisedAggregate::Count
+				} else {
+					OptimisedAggregate::CountFunction
+				}
+			}
 			Self::Normal(f, _) if f == "math::max" => OptimisedAggregate::MathMax,
 			Self::Normal(f, _) if f == "math::mean" => OptimisedAggregate::MathMean,
 			Self::Normal(f, _) if f == "math::min" => OptimisedAggregate::MathMin,
@@ -169,14 +177,15 @@ impl Function {
 
 impl Function {
 	/// Process this type returning a computed simple Value
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	///
+	/// Was marked recursive
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&'async_recursion CursorDoc<'_>>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -186,9 +195,15 @@ impl Function {
 				// Check this function is allowed
 				ctx.check_allowed_function(s)?;
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				let a = stk
+					.scope(|scope| {
+						try_join_all(
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+						)
+					})
+					.await?;
 				// Run the normal function
-				fnc::run(ctx, opt, txn, doc, s, a).await
+				fnc::run(stk, ctx, opt, txn, doc, s, a).await
 			}
 			Self::Custom(s, x) => {
 				// Check that a database is set to prevent a panic
@@ -217,7 +232,8 @@ impl Function {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Process the PERMISSION clause
-							if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+							if !stk.run(|stk| e.compute(stk, ctx, opt, txn, doc)).await?.is_truthy()
+							{
 								return Err(Error::FunctionPermissions {
 									name: s.to_owned(),
 								});
@@ -246,7 +262,13 @@ impl Function {
 					});
 				}
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				let a = stk
+					.scope(|scope| {
+						try_join_all(
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+						)
+					})
+					.await?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
@@ -254,7 +276,7 @@ impl Function {
 					ctx.add_value(name.to_raw(), val.coerce_to(kind)?);
 				}
 				// Run the custom function
-				val.block.compute(&ctx, opt, txn, doc).await
+				stk.run(|stk| val.block.compute(stk, &ctx, opt, txn, doc)).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
@@ -263,7 +285,14 @@ impl Function {
 					// Check if scripting is allowed
 					ctx.check_allowed_scripting()?;
 					// Compute the function arguments
-					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+					let a = stk
+						.scope(|scope| {
+							try_join_all(
+								x.iter()
+									.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+							)
+						})
+						.await?;
 					// Run the script function
 					fnc::script::run(ctx, opt, txn, doc, s, a).await
 				}

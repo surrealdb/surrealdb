@@ -5,15 +5,17 @@ use crate::fnc::util::math::vector::{
 };
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
-use crate::sql::Number;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Number, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -26,9 +28,10 @@ pub enum Index {
 	MTree(MTreeParams),
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -47,9 +50,10 @@ pub struct SearchParams {
 	pub terms_cache: u32,
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct MTreeParams {
 	pub dimension: u16,
 	#[revision(start = 1, end = 2, convert_fn = "convert_old_distance")]
@@ -82,9 +86,10 @@ impl MTreeParams {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Distance1 {
 	#[default]
 	Euclidean,
@@ -94,9 +99,10 @@ pub enum Distance1 {
 	Minkowski(Number),
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum Distance {
 	Chebyshev,
 	Cosine,
@@ -139,9 +145,10 @@ impl Display for Distance {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
+#[non_exhaustive]
 pub enum VectorType {
 	#[default]
 	F64,
@@ -196,5 +203,11 @@ impl Display for Index {
 				)
 			}
 		}
+	}
+}
+
+impl InfoStructure for Index {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

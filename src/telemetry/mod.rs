@@ -108,7 +108,7 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, tracing_subscriber::filte
 		"error" => Ok(EnvFilter::default().add_directive(Level::ERROR.into())),
 		// Specify the log level for each code area
 		"warn" | "info" | "debug" | "trace" => EnvFilter::builder()
-			.parse(format!("error,surreal={v},surrealdb={v},surrealdb::kvs::tx=error")),
+			.parse(format!("error,surreal={v},surrealdb={v},surrealdb::core::kvs::tx=error")),
 		// Let's try to parse the custom log level
 		_ => EnvFilter::builder().parse(v),
 	}

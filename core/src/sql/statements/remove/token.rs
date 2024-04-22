@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
+#[non_exhaustive]
 pub struct RemoveTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -26,7 +27,7 @@ impl RemoveTokenStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
@@ -73,8 +74,8 @@ impl RemoveTokenStatement {
 				_ => Err(Error::InvalidLevel(self.base.to_string())),
 			}
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(e) if self.if_exists => match e {
 				Error::NtNotFound {
 					..

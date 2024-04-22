@@ -8,9 +8,10 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[revisioned(revision = 2)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct RemoveUserStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -26,7 +27,7 @@ impl RemoveUserStatement {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Value, Error> {
-		match async {
+		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
@@ -73,8 +74,8 @@ impl RemoveUserStatement {
 				_ => Err(Error::InvalidLevel(self.base.to_string())),
 			}
 		}
-		.await
-		{
+		.await;
+		match future {
 			Err(e) if self.if_exists => match e {
 				Error::UserRootNotFound {
 					..

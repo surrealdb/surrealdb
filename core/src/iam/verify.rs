@@ -28,7 +28,7 @@ async fn config(
 		#[cfg(feature = "jwks")]
 		// The key identifier header must be present
 		if let Some(kid) = _token_header.kid {
-			jwks::config(_kvs, &kid, &de_code).await
+			jwks::config(_kvs, &kid, &de_code, _token_header.alg).await
 		} else {
 			Err(Error::MissingTokenHeader("kid".to_string()))
 		}
@@ -1389,7 +1389,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-		use base64_lib::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
 		use rand::{distributions::Alphanumeric, Rng};
 		use wiremock::matchers::{method, path};

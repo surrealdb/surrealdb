@@ -790,7 +790,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:two", "result: {:?}", res);
 	// Send QUERY command
-	let res = socket.send_request("query", json!([format!("KILL '{live2}'")])).await?;
+	let res = socket.send_request("query", json!([format!("KILL u'{live2}'")])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
@@ -1460,6 +1460,82 @@ async fn session_reauthentication_expired() {
 	// Check that we have root access and the session is not expired
 	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
 	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn run_functions() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Define function
+	socket
+		.send_message_query("DEFINE FUNCTION fn::foo() {RETURN 'fn::foo called';}")
+		.await
+		.unwrap();
+	socket
+		.send_message_query(
+			"DEFINE FUNCTION fn::bar($val: string) {RETURN 'fn::bar called with: ' + $val;}",
+		)
+		.await
+		.unwrap();
+	// call functions
+	let res = socket.send_message_run("fn::foo", None, vec![]).await.unwrap();
+	assert!(matches!(res, serde_json::Value::String(s) if &s == "fn::foo called"));
+	let res = socket.send_message_run("fn::bar", None, vec![]).await;
+	assert!(res.is_err());
+	let res = socket.send_message_run("fn::bar", None, vec![42.into()]).await;
+	assert!(res.is_err());
+	let res = socket.send_message_run("fn::bar", None, vec!["first".into(), "second".into()]).await;
+	assert!(res.is_err());
+	let res = socket.send_message_run("fn::bar", None, vec!["string_val".into()]).await.unwrap();
+	assert!(matches!(res, serde_json::Value::String(s) if &s == "fn::bar called with: string_val"));
+
+	// normal functions
+	let res = socket.send_message_run("math::abs", None, vec![42.into()]).await.unwrap();
+	assert!(matches!(res, serde_json::Value::Number(n) if n.as_u64() == Some(42)));
+	let res = socket
+		.send_message_run("math::max", None, vec![vec![1, 2, 3, 4, 5, 6].into()])
+		.await
+		.unwrap();
+	assert!(matches!(res, serde_json::Value::Number(n) if n.as_u64() == Some(6)));
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn relate_rpc() {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// create records and relate
+	socket.send_message_query("CREATE foo:a, foo:b").await.unwrap();
+	socket
+		.send_message_relate("foo:a".into(), "bar".into(), "foo:b".into(), Some(json!({"val": 42})))
+		.await
+		.unwrap();
+	// test
+
+	let mut res = socket.send_message_query("RETURN foo:a->bar.val").await.unwrap();
+	let expected = json!(42);
+	assert_eq!(res.remove(0)["result"], expected);
+
+	let mut res = socket.send_message_query("RETURN foo:a->bar->foo").await.unwrap();
+	let expected = json!(["foo:b"]);
+	assert_eq!(res.remove(0)["result"], expected);
+
 	// Test passed
 	server.finish().unwrap();
 }
