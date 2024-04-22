@@ -25,6 +25,7 @@ use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
+use reblessive::tree::Stk;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -77,6 +78,7 @@ impl IteratorEntry {
 }
 impl InnerQueryExecutor {
 	pub(super) async fn new(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -101,7 +103,7 @@ impl InnerQueryExecutor {
 						let mut ft_entry = None;
 						if let Some(ft) = ft_map.get(&ix_ref) {
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(ctx, opt, txn, ft, io).await?;
+								ft_entry = FtEntry::new(stk, ctx, opt, txn, ft, io).await?;
 							}
 						} else {
 							let ikb = IndexKeyBase::new(opt, idx_def);
@@ -116,7 +118,7 @@ impl InnerQueryExecutor {
 							)
 							.await?;
 							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(ctx, opt, txn, &ft, io).await?;
+								ft_entry = FtEntry::new(stk, ctx, opt, txn, &ft, io).await?;
 							}
 							ft_map.insert(ix_ref, ft);
 						}
@@ -182,8 +184,10 @@ impl InnerQueryExecutor {
 }
 
 impl QueryExecutor {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn knn(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -204,7 +208,7 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_entries.get(exp) {
-				let v: Vec<Number> = id.compute(ctx, opt, txn, doc).await?.try_into()?;
+				let v: Vec<Number> = id.compute(stk, ctx, opt, txn, doc).await?.try_into()?;
 				let dist = dist.compute(&v, val.as_ref())?;
 				p.add(dist, thg).await;
 			}
@@ -423,6 +427,7 @@ impl QueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn matches(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -437,7 +442,7 @@ impl QueryExecutor {
 					return self.matches_with_doc_id(txn, thg, ft).await;
 				}
 			}
-			return self.matches_with_value(ctx, opt, txn, ft, l, r).await;
+			return self.matches_with_value(stk, ctx, opt, txn, ft, l, r).await;
 		}
 
 		// If no previous case were successful, we end up with a user error
@@ -475,8 +480,10 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn matches_with_value(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -496,7 +503,7 @@ impl QueryExecutor {
 		};
 		let terms = ft.0.terms.read().await;
 		// Extract the terms set from the record
-		let t = ft.0.analyzer.extract_indexing_terms(ctx, opt, txn, &terms, v).await?;
+		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, txn, &terms, v).await?;
 		Ok(ft.0.query_terms_set.is_subset(&t))
 	}
 
@@ -602,6 +609,7 @@ struct Inner {
 
 impl FtEntry {
 	async fn new(
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -610,7 +618,7 @@ impl FtEntry {
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
 			let (terms_list, terms_set) =
-				ft.extract_querying_terms(ctx, opt, txn, qs.to_owned()).await?;
+				ft.extract_querying_terms(stk, ctx, opt, txn, qs.to_owned()).await?;
 			let mut tx = txn.lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
 			Ok(Some(Self(Arc::new(Inner {

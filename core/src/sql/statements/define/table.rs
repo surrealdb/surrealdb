@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Kind, Part, Table, TableType};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -42,6 +43,7 @@ pub struct DefineTableStatement {
 impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -131,7 +133,7 @@ impl DefineTableStatement {
 					what: Values(vec![Value::Table(v.clone())]),
 					..UpdateStatement::default()
 				};
-				stm.compute(ctx, opt, txn, doc).await?;
+				stm.compute(stk, ctx, opt, txn, doc).await?;
 			}
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);

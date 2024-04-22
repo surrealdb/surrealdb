@@ -17,8 +17,8 @@ pub const MAX_CONCURRENT_TASKS: usize = 64;
 /// During query execution, all potentially-recursive code paths count against this limit. Whereas
 /// parsing assigns equal weight to each recursion, certain expensive code paths are allowed to
 /// count for more than one unit of depth during execution.
-pub static MAX_COMPUTATION_DEPTH: Lazy<u8> =
-	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u8, 120);
+pub static MAX_COMPUTATION_DEPTH: Lazy<u32> =
+	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
 /// Specifies the names of parameters which can not be specified in a query.
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];

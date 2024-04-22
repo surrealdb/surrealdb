@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::Value;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -24,12 +25,13 @@ impl ThrowStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Thrown(self.error.compute(ctx, opt, txn, doc).await?.to_raw_string()))
+		Err(Error::Thrown(self.error.compute(stk, ctx, opt, txn, doc).await?.to_raw_string()))
 	}
 }
 
