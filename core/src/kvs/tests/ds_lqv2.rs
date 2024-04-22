@@ -85,6 +85,7 @@ mod test_check_lqs_and_send_notifications {
 	use channel::Sender;
 	use futures::executor::block_on;
 	use once_cell::sync::Lazy;
+	use reblessive::TreeStack;
 	use std::collections::BTreeMap;
 	use std::sync::Arc;
 
@@ -159,15 +160,19 @@ mod test_check_lqs_and_send_notifications {
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_create_statement();
-		doc.check_lqs_and_send_notifications(
-			&opt,
-			&Statement::Create(&executed_statement),
-			&tx,
-			&[&live_statement],
-			&sender,
-		)
-		.await
-		.unwrap();
+		let mut stack = TreeStack::new();
+		stack.enter(|stk| async {
+			doc.check_lqs_and_send_notifications(
+				stk,
+				&opt,
+				&Statement::Create(&executed_statement),
+				&tx,
+				&[&live_statement],
+				&sender,
+			)
+			.await
+			.unwrap();
+		});
 
 		// THEN:
 		let notification = receiver.try_recv().expect("There should be a notification");
@@ -181,7 +186,7 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
-		tx.cancel().await.unwrap();
+		tx.lock().await.cancel().await.unwrap();
 	}
 
 	#[test_log::test(tokio::test)]
@@ -211,15 +216,19 @@ mod test_check_lqs_and_send_notifications {
 		// Perform "live query" on the constructed doc that we are checking
 		let live_statement = a_live_query_statement();
 		let executed_statement = a_delete_statement();
-		doc.check_lqs_and_send_notifications(
-			&opt,
-			&Statement::Delete(&executed_statement),
-			&tx,
-			&[&live_statement],
-			&sender,
-		)
-		.await
-		.unwrap();
+		let mut stack = TreeStack::new();
+		stack.enter(|stk| async {
+			doc.check_lqs_and_send_notifications(
+				stk,
+				&opt,
+				&Statement::Delete(&executed_statement),
+				&tx,
+				&[&live_statement],
+				&sender,
+			)
+			.await
+			.unwrap();
+		});
 
 		// THEN:
 		let notification = receiver.try_recv().expect("There should be a notification");
@@ -235,7 +244,7 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
-		tx.cancel().await.unwrap();
+		tx.lock().await.cancel().await.unwrap();
 	}
 
 	// Live queries will have authentication info associated with them
