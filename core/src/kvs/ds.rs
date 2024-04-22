@@ -26,6 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use channel::{Receiver, Sender};
 use futures::{lock::Mutex, Future};
+use reblessive::{tree::Stk, TreeStack};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use tracing::trace;
@@ -33,18 +34,18 @@ use tracing::trace;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use super::tx::Transaction;
 use crate::cf;
-use crate::cf::{ChangeSet, TableMutation};
+use crate::cf::TableMutation;
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Statement, Variables, Workable,
+	Variables, Workable,
 };
 use crate::doc::Document;
 use crate::err::Error;
-use crate::fflags::FFLAGS;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -54,18 +55,13 @@ use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::lq_cf::LiveQueryTracker;
-use crate::kvs::lq_structs::{
-	LqIndexKey, LqIndexValue, LqSelector, LqValue, TrackedResult, UnreachableLqType,
-};
+use crate::kvs::lq_structs::{LqValue, TrackedResult, UnreachableLqType};
 use crate::kvs::lq_v2_fut::process_lq_notifications;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::options::EngineOptions;
-use crate::sql::statements::show::ShowSince;
 use crate::sql::{self, statements::DefineUserStatement, Base, Object, Query, Strand, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
-
-use super::tx::Transaction;
 
 // If there are an infinite number of heartbeats, then we want to go batch-by-batch spread over several checks
 const HEARTBEAT_BATCH_SIZE: u32 = 1000;
@@ -74,7 +70,6 @@ const LQ_CHANNEL_SIZE: usize = 100;
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
-// const EMPTY_DOC: Value = Value::Object(Object(BTreeMap::new()));
 const EMPTY_DOC: Value = Value::None;
 
 /// The underlying datastore instance which stores the dataset.
@@ -98,12 +93,12 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	// Capabilities for this datastore
 	capabilities: Capabilities,
-	pub(crate) engine_options: EngineOptions,
+	pub(super) engine_options: EngineOptions,
 	// The versionstamp oracle for this datastore.
 	// Used only in some datastores, such as tikv.
 	versionstamp_oracle: Arc<Mutex<Oracle>>,
 	// Whether this datastore enables live query notifications to subscribers
-	pub(crate) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	pub(super) notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
 	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
 	clock: Arc<SizedClock>,
 	// The index store cache
@@ -932,6 +927,15 @@ impl Datastore {
         }
 	}
 
+	/// Poll change feeds for live query notifications
+	pub async fn process_lq_notifications(
+		&self,
+		stk: &mut Stk,
+		opt: &Options,
+	) -> Result<(), Error> {
+		process_lq_notifications(self, stk, opt).await
+	}
+
 	/// Add and kill live queries being track on the datastore
 	/// These get polled by the change feed tick
 	pub(crate) async fn handle_postprocessing_of_statements(
@@ -1023,11 +1027,6 @@ impl Datastore {
 		node_id: Uuid,
 	) -> Result<(), Error> {
 		tx.set_hb(timestamp, node_id.0).await
-	}
-
-	/// Poll change feeds for live query notifications
-	pub async fn process_lq_notifications(&self, opt: &Options) -> Result<(), Error> {
-		process_lq_notifications(self, opt).await
 	}
 
 	// -----
@@ -1270,6 +1269,9 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
+
+		let mut stack = TreeStack::new();
+
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if self.auth_enabled && !self.capabilities.allows_guest_access() {
@@ -1308,7 +1310,7 @@ impl Datastore {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1353,6 +1355,8 @@ impl Datastore {
 		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
+
+		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = Options::default()
 			.with_id(self.id.0)
@@ -1381,7 +1385,7 @@ impl Datastore {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1517,5 +1521,58 @@ pub(crate) fn construct_document(mutation: &TableMutation) -> Option<Document> {
 			// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 			Some(doc)
 		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[tokio::test]
+	pub async fn very_deep_query() -> Result<(), Error> {
+		use crate::kvs::Datastore;
+		use crate::sql::{Expression, Future, Number, Operator, Value};
+		use reblessive::{Stack, Stk};
+
+		// build query manually to bypass query limits.
+		let mut stack = Stack::new();
+		async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+			if depth == 0 {
+				Value::Expression(Box::new(Expression::Binary {
+					l: Value::Number(Number::Int(1)),
+					o: Operator::Add,
+					r: Value::Number(Number::Int(1)),
+				}))
+			} else {
+				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
+				Value::Future(Box::new(Future::from(q)))
+			}
+		}
+		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
+
+		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+
+		let opt = Options::default()
+			.with_id(dbs.id.0)
+			.with_ns(Some("test".into()))
+			.with_db(Some("test".into()))
+			.with_live(false)
+			.with_strict(false)
+			.with_auth_enabled(false)
+			.with_max_computation_depth(u32::MAX)
+			.with_futures(true);
+
+		// Create a default context
+		let mut ctx = Context::default();
+		// Set context capabilities
+		ctx.add_capabilities(dbs.capabilities.clone());
+		// Start a new transaction
+		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		// Compute the value
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res =
+			stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await.unwrap();
+		assert_eq!(res, Value::Number(Number::Int(2)));
+		Ok(())
 	}
 }

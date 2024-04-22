@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Data, Output, Timeout, Value};
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -33,6 +34,7 @@ impl RelateStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -47,7 +49,7 @@ impl RelateStatement {
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(ctx, opt, txn, doc).await? {
+			match self.from.compute(stk, ctx, opt, txn, doc).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -89,7 +91,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(ctx, opt, txn, doc).await? {
+			match self.with.compute(stk, ctx, opt, txn, doc).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -132,14 +134,14 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.kind.compute(ctx, opt, txn, doc).await? {
+				match &self.kind.compute(stk, ctx, opt, txn, doc).await? {
 					// The relation has a specific record id
 					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w)),
 					// The relation does not have a specific record id
 					Value::Table(tb) => match &self.data {
 						// There is a data clause so check for a record id
 						Some(data) => {
-							let id = match data.rid(ctx, opt, txn).await? {
+							let id = match data.rid(stk, ctx, opt, txn).await? {
 								Some(id) => id.generate(tb, false)?,
 								None => tb.generate(),
 							};
@@ -160,7 +162,7 @@ impl RelateStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		match i.output(ctx, opt, txn, &stm).await? {
+		match i.output(stk, ctx, opt, txn, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result

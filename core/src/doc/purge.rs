@@ -11,10 +11,12 @@ use crate::sql::paths::OUT;
 use crate::sql::statements::DeleteStatement;
 use crate::sql::table::Tables;
 use crate::sql::value::{Value, Values};
+use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
 	pub async fn purge(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -68,7 +70,7 @@ impl<'a> Document<'a> {
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
-					stm.compute(ctx, opt, txn, None).await?;
+					stm.compute(stk, ctx, opt, txn, None).await?;
 				}
 			}
 		}

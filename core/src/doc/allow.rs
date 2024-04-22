@@ -4,10 +4,12 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::permission::Permission;
+use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
 	pub async fn allow(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -39,6 +41,7 @@ impl<'a> Document<'a> {
 						// Process the PERMISSION clause
 						if !e
 							.compute(
+								stk,
 								ctx,
 								opt,
 								txn,
