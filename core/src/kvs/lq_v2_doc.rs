@@ -1,9 +1,10 @@
+use std::borrow::Cow;
+
 use crate::cf::TableMutation;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::{Array, Object, Strand, Value};
-use std::borrow::Cow;
+use crate::sql::{Array, Object, Value};
 
 const EMPTY_DOC: Value = Value::None;
 
@@ -140,6 +141,14 @@ mod test {
 #[cfg(feature = "kv-mem")]
 #[cfg(test)]
 mod test_check_lqs_and_send_notifications {
+	use std::collections::BTreeMap;
+	use std::sync::Arc;
+
+	use channel::Sender;
+	use futures::executor::block_on;
+	use once_cell::sync::Lazy;
+	use reblessive::TreeStack;
+
 	use crate::cf::TableMutation;
 	use crate::ctx::Context;
 	use crate::dbs::fuzzy_eq::FuzzyEq;
@@ -147,16 +156,10 @@ mod test_check_lqs_and_send_notifications {
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
 	use crate::kvs::lq_v2_doc::construct_document;
-	use crate::kvs::{ds, Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
-	use crate::sql::{parse, Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
-	use channel::Sender;
-	use futures::executor::block_on;
-	use once_cell::sync::Lazy;
-	use reblessive::TreeStack;
-	use std::collections::BTreeMap;
-	use std::sync::Arc;
+	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
 
 	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
 

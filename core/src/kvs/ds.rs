@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(any(
 	feature = "kv-surrealkv",
@@ -36,15 +35,13 @@ use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
 use super::tx::Transaction;
 use crate::cf;
-use crate::cf::TableMutation;
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{
 	node::Timestamp, Attach, Capabilities, Executor, Notification, Options, Response, Session,
-	Variables, Workable,
+	Variables,
 };
-use crate::doc::Document;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
@@ -59,7 +56,7 @@ use crate::kvs::lq_structs::{LqValue, TrackedResult, UnreachableLqType};
 use crate::kvs::lq_v2_fut::process_lq_notifications;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::options::EngineOptions;
-use crate::sql::{self, statements::DefineUserStatement, Base, Object, Query, Strand, Uuid, Value};
+use crate::sql::{self, statements::DefineUserStatement, Base, Query, Uuid, Value};
 use crate::syn;
 use crate::vs::{conv, Oracle, Versionstamp};
 
