@@ -11,7 +11,7 @@ use crate::kvs::{construct_document, Datastore, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs::conv;
 use futures::lock::Mutex;
-use reblessive::Stk;
+use reblessive::tree::Stk;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -19,7 +19,7 @@ use tokio::sync::RwLock;
 /// Poll change feeds for live query notifications
 pub async fn process_lq_notifications(
 	ds: &Datastore,
-	stk: &Stk,
+	stk: &mut Stk,
 	opt: &Options,
 ) -> Result<(), Error> {
 	// Runtime feature gate, as it is not production-ready
@@ -133,7 +133,7 @@ async fn populate_relevant_changesets(
 
 async fn process_change_set_for_notifications(
 	ds: &Datastore,
-	stk: &Stk,
+	stk: &mut Stk,
 	tx: Arc<Mutex<Transaction>>,
 	opt: &Options,
 	change_set: ChangeSet,

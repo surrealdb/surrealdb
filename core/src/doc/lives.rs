@@ -16,7 +16,6 @@ use crate::sql::statements::LiveStatement;
 use crate::sql::Value;
 use channel::Sender;
 use reblessive::tree::Stk;
-use reblessive::Stk;
 use std::ops::Deref;
 use std::sync::Arc;
 use uuid::Uuid;
