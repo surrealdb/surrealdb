@@ -8,6 +8,10 @@
 	feature = "kv-surrealkv"
 ))]
 
+#[cfg(feature = "kv-mem")]
+#[cfg(test)]
+mod ds_lqv2;
+
 use crate::kvs::clock::SizedClock;
 use std::sync::Arc;
 
