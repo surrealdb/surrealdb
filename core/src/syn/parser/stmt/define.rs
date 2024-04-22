@@ -691,9 +691,9 @@ impl Parser<'_> {
 					let dimension = self.next_token_value()?;
 					let mut distance = Distance::Euclidean;
 					let mut vector_type = VectorType::F64;
-					let mut m = 12;
-					let mut m0 = 24;
-					let mut ml = 1.0 / (m as f64).ln();
+					let mut m = None;
+					let mut m0 = None;
+					let mut ml = None;
 					let mut ef_construction = 150;
 					let mut heuristic = false;
 					let mut extend_candidates = false;
@@ -702,44 +702,47 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("DISTANCE") => {
 								self.pop_peek();
-								distance = self.parse_distance()?
+								distance = self.parse_distance()?;
 							}
 							t!("TYPE") => {
 								self.pop_peek();
-								vector_type = self.parse_vector_type()?
+								vector_type = self.parse_vector_type()?;
 							}
 							t!("M") => {
 								self.pop_peek();
-								m = self.next_token_value()?
+								m = Some(self.next_token_value()?);
 							}
 							t!("M0") => {
 								self.pop_peek();
-								m0 = self.next_token_value()?
+								m0 = Some(self.next_token_value()?);
 							}
 							t!("ML") => {
 								self.pop_peek();
-								ml = self.next_token_value()?
+								ml = Some(self.next_token_value()?);
 							}
 							t!("EFC") => {
 								self.pop_peek();
-								ef_construction = self.next_token_value()?
+								ef_construction = self.next_token_value()?;
 							}
 							t!("HEURISTIC") => {
 								self.pop_peek();
-								heuristic = true
+								heuristic = true;
 							}
 							t!("EXTEND_CANDIDATES") => {
 								self.pop_peek();
-								extend_candidates = true
+								extend_candidates = true;
 							}
 							t!("KEEP_PRUNED_CONNECTIONS") => {
 								self.pop_peek();
-								keep_pruned_connections = true
+								keep_pruned_connections = true;
 							}
 							_ => break,
 						}
 					}
 
+					let m = m.unwrap_or(12);
+					let m0 = m0.unwrap_or(m * 2);
+					let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
 					res.index = Index::Hnsw(crate::sql::index::HnswParams {
 						dimension,
 						distance,
@@ -750,7 +753,7 @@ impl Parser<'_> {
 						heuristic,
 						extend_candidates,
 						keep_pruned_connections,
-						ml: ml.into(),
+						ml,
 					})
 				}
 				t!("COMMENT") => {

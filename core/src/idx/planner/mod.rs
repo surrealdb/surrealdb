@@ -8,12 +8,12 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::{
-	ExpressionKey, InnerQueryExecutor, IteratorEntry, IteratorRef, QueryExecutor,
+	InnerQueryExecutor, IteratorEntry, IteratorRef, QueryExecutor,
 };
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
-use crate::sql::{Cond, Table, Thing};
+use crate::sql::{Cond, Expression, Table, Thing};
 use reblessive::tree::Stk;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -164,7 +164,7 @@ impl<'a> QueryPlanner<'a> {
 	}
 }
 
-pub(crate) type KnnSet = HashMap<ExpressionKey, HashSet<Arc<Thing>>>;
+pub(crate) type KnnSet = HashMap<Arc<Expression>, HashSet<Arc<Thing>>>;
 pub(crate) type KnnSets = Arc<HashMap<String, KnnSet>>;
 
 #[derive(Clone)]

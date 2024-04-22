@@ -26,70 +26,15 @@ use crate::kvs;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Idiom, Number, Object, Operator, Table, Thing, Value};
+use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
 use reblessive::tree::Stk;
-use std::borrow::Borrow;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone)]
-pub(crate) struct ExpressionKey {
-	hash: u64,
-	expr: Arc<Expression>,
-}
-
-impl PartialEq for ExpressionKey {
-	fn eq(&self, other: &Self) -> bool {
-		self.hash == other.hash && self.expr == other.expr
-	}
-}
-impl Eq for ExpressionKey {}
-
-impl PartialEq<Expression> for ExpressionKey {
-	fn eq(&self, other: &Expression) -> bool {
-		self.expr.as_ref().eq(other)
-	}
-}
-impl PartialEq<ExpressionKey> for Expression {
-	fn eq(&self, other: &ExpressionKey) -> bool {
-		other.expr.as_ref().eq(self)
-	}
-}
-
-impl From<Expression> for ExpressionKey {
-	fn from(exp: Expression) -> Self {
-		let mut h = DefaultHasher::new();
-		exp.hash(&mut h);
-		Self {
-			hash: h.finish(),
-			expr: Arc::new(exp),
-		}
-	}
-}
-impl ExpressionKey {
-	pub(super) fn operator(&self) -> &Operator {
-		self.expr.operator()
-	}
-}
-
-impl Hash for ExpressionKey {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		state.write_u64(self.hash)
-	}
-}
-
-impl Borrow<Expression> for ExpressionKey {
-	fn borrow(&self) -> &Expression {
-		&self.expr
-	}
-}
-
 pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
-pub(super) type KnnExpressions = HashMap<ExpressionKey, (u32, Idiom, Arc<Vec<Number>>, Distance)>;
-pub(super) type AnnExpressions = HashMap<ExpressionKey, (usize, Idiom, Arc<Vec<Number>>, usize)>;
+pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Idiom, Arc<Vec<Number>>, Distance)>;
+pub(super) type AnnExpressions = HashMap<Arc<Expression>, (usize, Idiom, Arc<Vec<Number>>, usize)>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -98,12 +43,12 @@ pub(super) struct InnerQueryExecutor {
 	table: String,
 	ft_map: HashMap<IndexRef, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
-	exp_entries: HashMap<ExpressionKey, FtEntry>,
+	exp_entries: HashMap<Arc<Expression>, FtEntry>,
 	it_entries: Vec<IteratorEntry>,
 	index_definitions: Vec<DefineIndexStatement>,
-	mt_entries: HashMap<ExpressionKey, MtEntry>,
-	hnsw_entries: HashMap<ExpressionKey, HnswEntry>,
-	knn_entries: HashMap<ExpressionKey, KnnEntry>,
+	mt_entries: HashMap<Arc<Expression>, MtEntry>,
+	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
+	knn_entries: HashMap<Arc<Expression>, KnnEntry>,
 }
 
 impl From<InnerQueryExecutor> for QueryExecutor {
@@ -115,8 +60,8 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 pub(crate) type IteratorRef = u16;
 
 pub(super) enum IteratorEntry {
-	Single(ExpressionKey, IndexOption),
-	Range(HashSet<ExpressionKey>, IndexRef, RangeValue, RangeValue),
+	Single(Arc<Expression>, IndexOption),
+	Range(HashSet<Arc<Expression>>, IndexRef, RangeValue, RangeValue),
 }
 
 impl IteratorEntry {
@@ -311,7 +256,7 @@ impl QueryExecutor {
 	/// Returns `true` if the expression is matching the current iterator.
 	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
 		match self.0.it_entries.get(ir as usize) {
-			Some(IteratorEntry::Single(e, ..)) => exp.eq(e),
+			Some(IteratorEntry::Single(e, ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
 			_ => false,
 		}

@@ -1,10 +1,9 @@
 use crate::err::Error;
 use crate::idx::ft::MatchRef;
-use crate::idx::planner::executor::ExpressionKey;
 use crate::idx::planner::tree::{GroupRef, IdiomPosition, IndexRef, Node};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
-use crate::sql::{Array, Idiom, Object};
+use crate::sql::{Array, Expression, Idiom, Object};
 use crate::sql::{Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -16,7 +15,7 @@ pub(super) struct PlanBuilder {
 	/// Do we have at least one index?
 	has_indexes: bool,
 	/// List of expressions that are not ranges, backed by an index
-	non_range_indexes: Vec<(ExpressionKey, IndexOption)>,
+	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
 	/// List of indexes involved in this plan
 	with_indexes: Vec<IndexRef>,
 	/// Group each possible optimisations local to a SubQuery
@@ -139,7 +138,7 @@ impl PlanBuilder {
 		}
 	}
 
-	fn add_index_option(&mut self, group_ref: GroupRef, exp: ExpressionKey, io: IndexOption) {
+	fn add_index_option(&mut self, group_ref: GroupRef, exp: Arc<Expression>, io: IndexOption) {
 		if let IndexOperator::RangePart(_, _) = io.op() {
 			let level = self.groups.entry(group_ref).or_default();
 			match level.ranges.entry(io.ix_ref()) {
@@ -159,8 +158,8 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	TableIterator(Option<String>),
-	SingleIndex(ExpressionKey, IndexOption),
-	MultiIndex(Vec<(ExpressionKey, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
+	SingleIndex(Arc<Expression>, IndexOption),
+	MultiIndex(Vec<(Arc<Expression>, IndexOption)>, Vec<(IndexRef, UnionRangeQueryBuilder)>),
 	SingleIndexRange(IndexRef, UnionRangeQueryBuilder),
 }
 
@@ -340,7 +339,7 @@ impl From<&RangeValue> for Value {
 
 #[derive(Default)]
 pub(super) struct Group {
-	ranges: HashMap<IndexRef, Vec<(ExpressionKey, IndexOption)>>,
+	ranges: HashMap<IndexRef, Vec<(Arc<Expression>, IndexOption)>>,
 }
 
 impl Group {
@@ -373,13 +372,13 @@ impl Group {
 
 #[derive(Default, Debug)]
 pub(super) struct UnionRangeQueryBuilder {
-	pub(super) exps: HashSet<ExpressionKey>,
+	pub(super) exps: HashSet<Arc<Expression>>,
 	pub(super) from: RangeValue,
 	pub(super) to: RangeValue,
 }
 
 impl UnionRangeQueryBuilder {
-	fn new_aggregate(exp_ios: Vec<(ExpressionKey, IndexOption)>) -> Option<Self> {
+	fn new_aggregate(exp_ios: Vec<(Arc<Expression>, IndexOption)>) -> Option<Self> {
 		if exp_ios.is_empty() {
 			return None;
 		}
@@ -390,7 +389,7 @@ impl UnionRangeQueryBuilder {
 		Some(b)
 	}
 
-	fn new(exp: ExpressionKey, io: IndexOption) -> Option<Self> {
+	fn new(exp: Arc<Expression>, io: IndexOption) -> Option<Self> {
 		let mut b = Self::default();
 		if b.add(exp, io) {
 			Some(b)
@@ -399,7 +398,7 @@ impl UnionRangeQueryBuilder {
 		}
 	}
 
-	fn add(&mut self, exp: ExpressionKey, io: IndexOption) -> bool {
+	fn add(&mut self, exp: Arc<Expression>, io: IndexOption) -> bool {
 		if let IndexOperator::RangePart(op, val) = io.op() {
 			match op {
 				Operator::LessThan => self.to.set_to(val),

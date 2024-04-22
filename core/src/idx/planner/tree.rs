@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::{AnnExpressions, ExpressionKey, KnnExpressions};
+use crate::idx::planner::executor::{AnnExpressions, KnnExpressions};
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::kvs;
 use crate::sql::index::{Distance, Index};
@@ -55,7 +55,7 @@ struct TreeBuilder<'a> {
 	with: &'a Option<With>,
 	schemas: HashMap<Table, SchemaCache>,
 	idioms_indexes: HashMap<Table, HashMap<Idiom, LocalIndexRefs>>,
-	resolved_expressions: HashMap<ExpressionKey, ResolvedExpression>,
+	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
 	resolved_idioms: HashMap<Idiom, Node>,
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
@@ -289,7 +289,7 @@ impl<'a> TreeBuilder<'a> {
 				if let Some(re) = self.resolved_expressions.get(e).cloned() {
 					return Ok(re.into());
 				}
-				let exp = e.clone().into();
+				let exp = Arc::new(e.clone());
 				let left = Arc::new(stk.run(|stk| self.eval_value(stk, group, l)).await?);
 				let right = Arc::new(stk.run(|stk| self.eval_value(stk, group, r)).await?);
 				let mut io = None;
@@ -337,7 +337,7 @@ impl<'a> TreeBuilder<'a> {
 		o: &Operator,
 		id: &Idiom,
 		node: &Node,
-		exp: &ExpressionKey,
+		exp: &Arc<Expression>,
 		p: IdiomPosition,
 		local_irs: LocalIndexRefs,
 		remote_irs: Option<RemoteIndexRefs>,
@@ -367,7 +367,7 @@ impl<'a> TreeBuilder<'a> {
 		op: &Operator,
 		id: &Idiom,
 		n: &Node,
-		e: &ExpressionKey,
+		e: &Arc<Expression>,
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>, Error> {
 		for ir in irs {
@@ -414,7 +414,7 @@ impl<'a> TreeBuilder<'a> {
 
 	fn eval_indexed_knn(
 		&mut self,
-		exp: &ExpressionKey,
+		exp: &Arc<Expression>,
 		op: &Operator,
 		n: &Node,
 		id: &Idiom,
@@ -441,7 +441,7 @@ impl<'a> TreeBuilder<'a> {
 
 	fn eval_indexed_ann(
 		&mut self,
-		exp: &ExpressionKey,
+		exp: &Arc<Expression>,
 		op: &Operator,
 		nd: &Node,
 		id: &Idiom,
@@ -460,7 +460,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(None)
 	}
 
-	fn eval_knn(&mut self, id: &Idiom, val: &Node, exp: &ExpressionKey) -> Result<(), Error> {
+	fn eval_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expression>) -> Result<(), Error> {
 		if let Operator::Knn(k, d) = exp.operator() {
 			if let Node::Computed(v) = val {
 				let vec: Vec<Number> = v.as_ref().try_into()?;
@@ -516,7 +516,7 @@ pub(super) type IndexRef = u16;
 /// For each expression a possible index option
 #[derive(Default)]
 pub(super) struct IndexesMap {
-	pub(super) options: Vec<(ExpressionKey, IndexOption)>,
+	pub(super) options: Vec<(Arc<Expression>, IndexOption)>,
 	pub(super) definitions: Vec<DefineIndexStatement>,
 }
 
@@ -546,7 +546,7 @@ pub(super) enum Node {
 		io: Option<IndexOption>,
 		left: Arc<Node>,
 		right: Arc<Node>,
-		exp: ExpressionKey,
+		exp: Arc<Expression>,
 	},
 	IndexedField(Idiom, Vec<IndexRef>),
 	RecordField(Idiom, RecordOptions),
@@ -608,7 +608,7 @@ impl IdiomPosition {
 #[derive(Clone)]
 struct ResolvedExpression {
 	group: GroupRef,
-	exp: ExpressionKey,
+	exp: Arc<Expression>,
 	io: Option<IndexOption>,
 	left: Arc<Node>,
 	right: Arc<Node>,

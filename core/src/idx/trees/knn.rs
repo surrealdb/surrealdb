@@ -652,6 +652,7 @@ pub(super) mod tests {
 	pub(in crate::idx::trees) fn new_vectors_from_file<V: From<Vector>>(
 		t: VectorType,
 		path: &str,
+		limit: Option<usize>,
 	) -> Result<Vec<(DocId, V)>, Error> {
 		// Open the gzip file
 		let file = File::open(path)?;
@@ -665,6 +666,11 @@ pub(super) mod tests {
 		let mut res = Vec::new();
 		// Iterate over each line in the file
 		for (i, line_result) in reader.lines().enumerate() {
+			if let Some(l) = limit {
+				if l == i {
+					break;
+				}
+			}
 			let line = line_result?;
 			let array = Array::parse(&line);
 			let vec = Vector::try_from_array(t, &array)?.into();

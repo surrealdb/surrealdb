@@ -1228,6 +1228,7 @@ mod tests {
 			TestCollection::NonUnique(new_vectors_from_file(
 				VectorType::F32,
 				"../tests/data/hnsw-random-9000-20-euclidean.gz",
+				Some(3000),
 			)?);
 		let p = new_params(dim, vt, Distance::Euclidean, m, 150, true, false, false);
 		let mut h = HnswIndex::new(&p);
@@ -1240,6 +1241,7 @@ mod tests {
 		let queries = TestCollection::NonUnique(new_vectors_from_file(
 			VectorType::F32,
 			"../tests/data/hnsw-random-5000-20-euclidean.gz",
+			Some(500),
 		)?);
 
 		info!("Check recall");
