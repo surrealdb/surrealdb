@@ -70,8 +70,6 @@ const LQ_CHANNEL_SIZE: usize = 100;
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
-const EMPTY_DOC: Value = Value::None;
-
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 #[non_exhaustive]
@@ -1466,61 +1464,6 @@ impl Datastore {
 		}
 		// All ok
 		Ok(())
-	}
-}
-
-/// Construct a document from a Change Feed mutation
-/// This is required to perform document operations such as live query notifications
-pub(crate) fn construct_document(mutation: &TableMutation) -> Option<Document> {
-	match mutation {
-		TableMutation::Set(id, current_value) => {
-			let doc = Document::new_artificial(
-				None,
-				Some(id),
-				None,
-				Cow::Borrowed(current_value),
-				Cow::Owned(EMPTY_DOC),
-				Workable::Normal,
-			);
-			Some(doc)
-		}
-		TableMutation::Del(id) => {
-			let fake_previous_value_because_we_need_the_id_and_del_doesnt_store_value =
-				Value::Object(Object::from(map! {
-					"id" => Value::Thing(id.clone()),
-				}));
-			let doc = Document::new_artificial(
-				None,
-				Some(id),
-				None,
-				Cow::Owned(Value::None),
-				Cow::Owned(fake_previous_value_because_we_need_the_id_and_del_doesnt_store_value),
-				Workable::Normal,
-			);
-			Some(doc)
-		}
-		TableMutation::Def(_) => None,
-		TableMutation::SetWithDiff(id, current_value, _operations) => {
-			// We need a previous value otherwise the Value::compute function won't work correctly
-			// This is also how IDs are carried into notifications, not via doc.rid
-			let todo_original_after_reverse_applying_patches = Value::Object(Object::from(map! {
-				"id" => Value::Thing(id.clone()),
-				// This value is included so that we know for sure it is placeholder
-				"fake_value" => Value::Strand(
-					Strand::from( "placeholder until we can derive diffs from reversing patch operations" ))
-			}));
-			let doc = Document::new_artificial(
-				None,
-				Some(id),
-				None,
-				Cow::Borrowed(current_value),
-				Cow::Owned(todo_original_after_reverse_applying_patches),
-				Workable::Normal,
-			);
-			trace!("Constructed artificial document: {:?}, is_new={}", doc, doc.is_new());
-			// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
-			Some(doc)
-		}
 	}
 }
 

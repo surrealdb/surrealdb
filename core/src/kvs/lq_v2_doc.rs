@@ -1,6 +1,71 @@
-mod test_construct_document {
+use crate::cf::TableMutation;
+use crate::dbs::Workable;
+use crate::doc::Document;
+use crate::err::Error;
+use crate::sql::{Array, Object, Strand, Value};
+use std::borrow::Cow;
+
+const EMPTY_DOC: Value = Value::None;
+
+/// Construct a document from a Change Feed mutation
+/// This is required to perform document operations such as live query notifications
+pub(in crate::kvs) fn construct_document(
+	mutation: &TableMutation,
+) -> Result<Option<Document>, Error> {
+	match mutation {
+		TableMutation::Set(id, current_value) => {
+			let doc = Document::new_artificial(
+				None,
+				Some(id),
+				None,
+				Cow::Borrowed(current_value),
+				Cow::Owned(EMPTY_DOC),
+				Workable::Normal,
+			);
+			Ok(Some(doc))
+		}
+		TableMutation::Del(id) => {
+			let fake_previous_value_because_we_need_the_id_and_del_doesnt_store_value =
+				Value::Object(Object::from(map! {
+					"id" => Value::Thing(id.clone()),
+				}));
+			let doc = Document::new_artificial(
+				None,
+				Some(id),
+				None,
+				Cow::Owned(Value::None),
+				Cow::Owned(fake_previous_value_because_we_need_the_id_and_del_doesnt_store_value),
+				Workable::Normal,
+			);
+			Ok(Some(doc))
+		}
+		TableMutation::Def(_) => Ok(None),
+		TableMutation::SetWithDiff(id, current_value, operations) => {
+			// We need a previous value otherwise the Value::compute function won't work correctly
+			// This is also how IDs are carried into notifications, not via doc.rid
+			let mut copy = current_value.clone();
+			copy.patch(Value::Array(Array(
+				operations.iter().map(|op| Value::Object(Object::from(op.clone()))).collect(),
+			)))?;
+			let doc = Document::new_artificial(
+				None,
+				Some(id),
+				None,
+				Cow::Borrowed(current_value),
+				Cow::Owned(copy),
+				Workable::Normal,
+			);
+			trace!("Constructed artificial document: {:?}, is_new={}", doc, doc.is_new());
+			// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
+			Ok(Some(doc))
+		}
+	}
+}
+
+#[cfg(test)]
+mod test {
 	use crate::cf::TableMutation;
-	use crate::kvs::ds;
+	use crate::kvs::lq_v2_doc::construct_document;
 	use crate::sql::statements::DefineTableStatement;
 	use crate::sql::{Strand, Thing, Value};
 
@@ -9,7 +74,7 @@ mod test_construct_document {
 		let thing = Thing::from(("table", "id"));
 		let value = Value::Strand(Strand::from("value"));
 		let tb_mutation = TableMutation::Set(thing.clone(), value);
-		let doc = ds::construct_document(&tb_mutation);
+		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
 		assert!(doc.is_new());
 		assert!(doc.initial_doc().is_none());
@@ -20,13 +85,14 @@ mod test_construct_document {
 	fn test_construct_document_empty_value_is_valid() {
 		let thing = Thing::from(("table", "id"));
 		let value = Value::None;
-		// TODO: throw panic on Set validation somehow? That way we can check if records really are being set to Value::None
 		let tb_mutation = TableMutation::Set(thing.clone(), value);
-		let doc = ds::construct_document(&tb_mutation);
+		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
-		assert!(doc.is_new());
+		assert!(!doc.is_new());
+		// This is actually invalid data - we are going to treat it as delete though
+		assert!(doc.is_delete());
 		assert!(doc.initial_doc().is_none());
-		assert!(doc.current_doc().is_some());
+		assert!(doc.current_doc().is_none());
 	}
 
 	#[test]
@@ -35,22 +101,23 @@ mod test_construct_document {
 		let value = Value::Strand(Strand::from("value"));
 		let operations = vec![];
 		let tb_mutation = TableMutation::SetWithDiff(thing.clone(), value, operations);
-		let doc = ds::construct_document(&tb_mutation);
+		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
 		assert!(!doc.is_new());
-		assert!(doc.initial_doc().is_strand());
-		assert!(doc.current_doc().is_strand());
+		assert!(doc.initial_doc().is_strand(), "{:?}", doc.initial_doc());
+		assert!(doc.current_doc().is_strand(), "{:?}", doc.current_doc());
 	}
 
 	#[test]
 	fn test_construct_document_delete() {
 		let thing = Thing::from(("table", "id"));
 		let tb_mutation = TableMutation::Del(thing.clone());
-		let doc = ds::construct_document(&tb_mutation);
+		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
 		// The previous and current doc values are "None", so technically this is a new doc as per
 		// current == None
-		assert!(doc.is_new(), "{:?}", doc);
+		assert!(!doc.is_new(), "{:?}", doc);
+		assert!(doc.is_delete(), "{:?}", doc);
 		assert!(doc.current_doc().is_none());
 		assert!(doc.initial_doc().is_some());
 		match doc.initial_doc() {
@@ -65,12 +132,13 @@ mod test_construct_document {
 	#[test]
 	fn test_construct_document_none_for_schema() {
 		let tb_mutation = TableMutation::Def(DefineTableStatement::default());
-		let doc = ds::construct_document(&tb_mutation);
+		let doc = construct_document(&tb_mutation).unwrap();
 		assert!(doc.is_none());
 	}
 }
 
 #[cfg(feature = "kv-mem")]
+#[cfg(test)]
 mod test_check_lqs_and_send_notifications {
 	use crate::cf::TableMutation;
 	use crate::ctx::Context;
@@ -78,6 +146,7 @@ mod test_check_lqs_and_send_notifications {
 	use crate::dbs::{Action, Notification, Options, Session, Statement};
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
+	use crate::kvs::lq_v2_doc::construct_document;
 	use crate::kvs::{ds, Datastore, LockType, TransactionType};
 	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
@@ -154,7 +223,7 @@ mod test_check_lqs_and_send_notifications {
 		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
 		let value = Value::Strand(Strand::from("value"));
 		let tb_mutation = TableMutation::Set(record_id.clone(), value);
-		let doc = ds::construct_document(&tb_mutation).unwrap();
+		let doc = construct_document(&tb_mutation).unwrap().unwrap();
 
 		// AND:
 		// Perform "live query" on the constructed doc that we are checking
@@ -210,7 +279,7 @@ mod test_check_lqs_and_send_notifications {
 		let record_id = Thing::from((SETUP.tb.as_str(), "id"));
 		let value = Value::Strand(Strand::from("value"));
 		let tb_mutation = TableMutation::Set(record_id.clone(), value);
-		let doc = ds::construct_document(&tb_mutation).unwrap();
+		let doc = construct_document(&tb_mutation).unwrap().unwrap();
 
 		// AND:
 		// Perform "live query" on the constructed doc that we are checking
