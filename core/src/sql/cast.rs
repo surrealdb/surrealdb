@@ -3,7 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Idiom, Kind, Value};
-use async_recursion::async_recursion;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -33,17 +33,17 @@ impl Cast {
 }
 
 impl Cast {
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
+	/// Was marked recursively
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&'async_recursion CursorDoc<'_>>,
+		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
-		self.1.compute(ctx, opt, txn, doc).await?.convert_to(&self.0)
+		stk.run(|stk| self.1.compute(stk, ctx, opt, txn, doc)).await?.convert_to(&self.0)
 	}
 }
 

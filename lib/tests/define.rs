@@ -487,7 +487,7 @@ async fn define_statement_event_check_doc_always_populated() -> Result<(), Error
 			}
 	]"#,
 	);
-	assert_eq!(tmp, val);
+	assert_eq!(tmp, val, "{tmp} != {val}");
 	//
 	Ok(())
 }

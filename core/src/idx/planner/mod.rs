@@ -14,6 +14,7 @@ use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
 use crate::sql::{Cond, Table, Thing};
+use reblessive::tree::Stk;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -46,6 +47,7 @@ impl<'a> QueryPlanner<'a> {
 
 	pub(crate) async fn add_iterables(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		txn: &Transaction,
 		t: Table,
@@ -53,10 +55,11 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 		let mut is_knn = false;
-		match Tree::build(ctx, self.opt, txn, &t, self.cond, self.with).await? {
+		match Tree::build(stk, ctx, self.opt, txn, &t, self.cond, self.with).await? {
 			Some(tree) => {
 				is_knn = is_knn || !tree.knn_expressions.is_empty();
 				let mut exe = InnerQueryExecutor::new(
+					stk,
 					ctx,
 					self.opt,
 					txn,

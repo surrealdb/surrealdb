@@ -12,10 +12,12 @@ use crate::sql::array::Array;
 use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Part, Thing, Value};
+use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
 	pub async fn index(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -47,10 +49,10 @@ impl<'a> Document<'a> {
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Calculate old values
-			let o = build_opt_values(ctx, opt, txn, ix, &self.initial).await?;
+			let o = build_opt_values(stk, ctx, opt, txn, ix, &self.initial).await?;
 
 			// Calculate new values
-			let n = build_opt_values(ctx, opt, txn, ix, &self.current).await?;
+			let n = build_opt_values(stk, ctx, opt, txn, ix, &self.current).await?;
 
 			// Update the index entries
 			if targeted_force || o != n {
@@ -61,8 +63,8 @@ impl<'a> Document<'a> {
 				match &ix.index {
 					Index::Uniq => ic.index_unique(txn).await?,
 					Index::Idx => ic.index_non_unique(txn).await?,
-					Index::Search(p) => ic.index_full_text(ctx, txn, p).await?,
-					Index::MTree(p) => ic.index_mtree(ctx, txn, p).await?,
+					Index::Search(p) => ic.index_full_text(stk, ctx, txn, p).await?,
+					Index::MTree(p) => ic.index_mtree(stk, ctx, txn, p).await?,
 					Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 				};
 			}
@@ -77,6 +79,7 @@ impl<'a> Document<'a> {
 /// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
 /// It will return: ["Tobie", "piano"]
 async fn build_opt_values(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
 	txn: &Transaction,
@@ -88,7 +91,7 @@ async fn build_opt_values(
 	}
 	let mut o = Vec::with_capacity(ix.cols.len());
 	for i in ix.cols.iter() {
-		let v = i.compute(ctx, opt, txn, Some(doc)).await?;
+		let v = i.compute(stk, ctx, opt, txn, Some(doc)).await?;
 		o.push(v);
 	}
 	Ok(Some(o))
@@ -357,6 +360,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_full_text(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		txn: &Transaction,
 		p: &SearchParams,
@@ -375,7 +379,7 @@ impl<'a> IndexOperation<'a> {
 		.await?;
 
 		if let Some(n) = self.n.take() {
-			ft.index_document(ctx, self.opt, txn, self.rid, n).await?;
+			ft.index_document(stk, ctx, self.opt, txn, self.rid, n).await?;
 		} else {
 			ft.remove_document(txn, self.rid).await?;
 		}
@@ -384,6 +388,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		txn: &Transaction,
 		p: &MTreeParams,
@@ -395,11 +400,11 @@ impl<'a> IndexOperation<'a> {
 				.await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			mt.remove_document(&mut tx, self.rid, &o).await?;
+			mt.remove_document(stk, &mut tx, self.rid, &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			mt.index_document(&mut tx, self.rid, &n).await?;
+			mt.index_document(stk, &mut tx, self.rid, &n).await?;
 		}
 		mt.finish(&mut tx).await
 	}
