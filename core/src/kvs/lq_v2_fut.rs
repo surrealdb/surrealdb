@@ -5,9 +5,10 @@ use crate::err::Error;
 use crate::fflags::FFLAGS;
 use crate::kvs::lq_cf::LiveQueryTracker;
 use crate::kvs::lq_structs::{LqIndexKey, LqIndexValue, LqSelector};
+use crate::kvs::lq_v2_doc::construct_document;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::Read;
-use crate::kvs::{construct_document, Datastore, Transaction};
+use crate::kvs::{Datastore, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs::conv;
 use futures::lock::Mutex;
@@ -159,7 +160,7 @@ async fn process_change_set_for_notifications(
 				for (i, mutation) in table_mutations.1.iter().enumerate() {
 					#[cfg(debug_assertions)]
 					trace!("[{} @ {:?}] Processing table mutation: {:?}   Constructing document from mutation", i, change_vs, mutation);
-					if let Some(doc) = construct_document(mutation) {
+					if let Some(doc) = construct_document(mutation)? {
 						// We know we are only processing a single LQ at a time, so we can limit notifications to 1
 						let notification_capacity = 1;
 						// We track notifications as a separate channel in case we want to process
