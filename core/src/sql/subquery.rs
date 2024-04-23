@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
 	CreateStatement, DefineStatement, DeleteStatement, IfelseStatement, InsertStatement,
 	OutputStatement, RelateStatement, RemoveStatement, SelectStatement, UpdateStatement,
@@ -31,6 +32,7 @@ pub enum Subquery {
 	Insert(InsertStatement),
 	Define(DefineStatement),
 	Remove(RemoveStatement),
+	Rebuild(RebuildStatement),
 	// Add new variants here
 }
 
@@ -56,6 +58,7 @@ impl Subquery {
 			Self::Insert(v) => v.writeable(),
 			Self::Define(v) => v.writeable(),
 			Self::Remove(v) => v.writeable(),
+			Self::Rebuild(v) => v.writeable(),
 		}
 	}
 	/// Process this type returning a computed simple Value
@@ -78,6 +81,7 @@ impl Subquery {
 			Self::Ifelse(ref v) => v.compute(&ctx, opt, txn, doc).await,
 			Self::Output(ref v) => v.compute(&ctx, opt, txn, doc).await,
 			Self::Define(ref v) => v.compute(&ctx, opt, txn, doc).await,
+			Self::Rebuild(ref v) => v.compute(&ctx, opt, txn, doc).await,
 			Self::Remove(ref v) => v.compute(&ctx, opt, txn, doc).await,
 			Self::Select(ref v) => v.compute(&ctx, opt, txn, doc).await,
 			Self::Create(ref v) => v.compute(&ctx, opt, txn, doc).await,
@@ -102,6 +106,7 @@ impl Display for Subquery {
 			Self::Insert(v) => write!(f, "({v})"),
 			Self::Define(v) => write!(f, "({v})"),
 			Self::Remove(v) => write!(f, "({v})"),
+			Self::Rebuild(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}
