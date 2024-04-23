@@ -26,6 +26,7 @@ pub(crate) struct Document<'a> {
 }
 
 #[non_exhaustive]
+#[cfg_attr(debug_assertions, derive(Debug))]
 pub struct CursorDoc<'a> {
 	pub(crate) ir: Option<IteratorRef>,
 	pub(crate) rid: Option<&'a Thing>,
@@ -140,7 +141,6 @@ impl<'a> Document<'a> {
 	}
 
 	/// Check if document is being deleted
-	#[allow(dead_code)]
 	pub fn is_delete(&self) -> bool {
 		self.current.doc.is_none()
 	}

@@ -1,11 +1,12 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+
 use crate::cf::{TableMutation, TableMutations};
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::Idiom;
-use std::borrow::Cow;
-use std::collections::HashMap;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
 // The versionstamp key is the key that contains the current versionstamp and might be used by the
@@ -64,7 +65,7 @@ impl Writer {
 	}
 
 	#[allow(clippy::too_many_arguments)]
-	pub(crate) fn update(
+	pub(crate) fn record_cf_change(
 		&mut self,
 		ns: &str,
 		db: &str,
@@ -139,7 +140,7 @@ mod tests {
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::fflags::FFLAGS;
 	use crate::key::key_req::KeyRequirements;
-	use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
 	use crate::sql::statements::show::ShowSince;
@@ -148,7 +149,9 @@ mod tests {
 	};
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
+	use crate::sql::Datetime;
 	use crate::vs;
+	use crate::vs::{conv, Versionstamp};
 
 	const DONT_STORE_PREVIOUS: bool = false;
 
@@ -158,43 +161,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_changefeed_read_write() {
-		let ts = crate::sql::Datetime::default();
-		let dns = DefineNamespaceStatement {
-			name: crate::sql::Ident(NS.to_string()),
-			..Default::default()
-		};
-		let ddb = DefineDatabaseStatement {
-			name: crate::sql::Ident(DB.to_string()),
-			changefeed: Some(ChangeFeed {
-				expiry: Duration::from_secs(10),
-				store_original: false,
-			}),
-			..Default::default()
-		};
-		let dtb = DefineTableStatement {
-			name: TB.into(),
-			changefeed: Some(ChangeFeed {
-				expiry: Duration::from_secs(10),
-				store_original: false,
-			}),
-			..Default::default()
-		};
-
-		let ds = Datastore::new("memory").await.unwrap();
-
-		//
-		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp conversion
-		// work.
-		//
-
-		let mut tx0 = ds.transaction(Write, Optimistic).await.unwrap();
-		let ns_root = crate::key::root::ns::new(NS);
-		tx0.put(ns_root.key_category(), &ns_root, dns).await.unwrap();
-		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx0.put(db_root.key_category(), &db_root, ddb).await.unwrap();
-		let tb_root = crate::key::database::tb::new(NS, DB, TB);
-		tx0.put(tb_root.key_category(), &tb_root, dtb.clone()).await.unwrap();
-		tx0.commit().await.unwrap();
+		let ts = Datetime::default();
+		let ds = init().await;
 
 		// Let the db remember the timestamp for the current versionstamp
 		// so that we can replay change feeds from the timestamp later.
@@ -411,5 +379,114 @@ mod tests {
 			.unwrap();
 		tx7.commit().await.unwrap();
 		assert_eq!(r, want);
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn test_scan_picks_up_from_offset() {
+		// Given we have 2 entries in change feeds
+		let ds = init().await;
+		ds.tick_at(5).await.unwrap();
+		let _id1 = record_change_feed_entry(
+			ds.transaction(Write, Optimistic).await.unwrap(),
+			"First".to_string(),
+		)
+		.await;
+		ds.tick_at(10).await.unwrap();
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let vs1 = tx.get_versionstamp_from_timestamp(5, NS, DB, false).await.unwrap().unwrap();
+		let vs2 = tx.get_versionstamp_from_timestamp(10, NS, DB, false).await.unwrap().unwrap();
+		tx.cancel().await.unwrap();
+		let _id2 = record_change_feed_entry(
+			ds.transaction(Write, Optimistic).await.unwrap(),
+			"Second".to_string(),
+		)
+		.await;
+
+		// When we scan from the versionstamp between the changes
+		let r = change_feed(ds.transaction(Write, Optimistic).await.unwrap(), &vs2).await;
+
+		// Then there is only 1 change
+		assert_eq!(r.len(), 1);
+		assert!(r[0].0 >= vs2, "{:?}", r);
+
+		// And scanning with previous offset includes both values (without table definitions)
+		let r = change_feed(ds.transaction(Write, Optimistic).await.unwrap(), &vs1).await;
+		assert_eq!(r.len(), 2);
+	}
+
+	async fn change_feed(mut tx: Transaction, vs: &Versionstamp) -> Vec<ChangeSet> {
+		let r = crate::cf::read(
+			&mut tx,
+			NS,
+			DB,
+			Some(TB),
+			ShowSince::Versionstamp(conv::versionstamp_to_u64(vs)),
+			Some(10),
+		)
+		.await
+		.unwrap();
+		tx.cancel().await.unwrap();
+		r
+	}
+
+	async fn record_change_feed_entry(mut tx: Transaction, id: String) -> Thing {
+		let thing = Thing {
+			tb: TB.to_owned(),
+			id: Id::String(id),
+		};
+		let value_a: Value = "a".into();
+		let previous = Cow::from(Value::None);
+		tx.record_change(
+			NS,
+			DB,
+			TB,
+			&thing,
+			previous.clone(),
+			Cow::Borrowed(&value_a),
+			DONT_STORE_PREVIOUS,
+		);
+		tx.complete_changes(true).await.unwrap();
+		tx.commit().await.unwrap();
+		thing
+	}
+
+	async fn init() -> Datastore {
+		let dns = DefineNamespaceStatement {
+			name: crate::sql::Ident(NS.to_string()),
+			..Default::default()
+		};
+		let ddb = DefineDatabaseStatement {
+			name: crate::sql::Ident(DB.to_string()),
+			changefeed: Some(ChangeFeed {
+				expiry: Duration::from_secs(10),
+				store_original: false,
+			}),
+			..Default::default()
+		};
+		let dtb = DefineTableStatement {
+			name: TB.into(),
+			changefeed: Some(ChangeFeed {
+				expiry: Duration::from_secs(10),
+				store_original: false,
+			}),
+			..Default::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+
+		//
+		// Create the ns, db, and tb to let the GC and the timestamp-to-versionstamp conversion
+		// work.
+		//
+
+		let mut tx0 = ds.transaction(Write, Optimistic).await.unwrap();
+		let ns_root = crate::key::root::ns::new(NS);
+		tx0.put(ns_root.key_category(), &ns_root, dns).await.unwrap();
+		let db_root = crate::key::namespace::db::new(NS, DB);
+		tx0.put(db_root.key_category(), &db_root, ddb).await.unwrap();
+		let tb_root = crate::key::database::tb::new(NS, DB, TB);
+		tx0.put(tb_root.key_category(), &tb_root, dtb.clone()).await.unwrap();
+		tx0.commit().await.unwrap();
+		ds
 	}
 }
