@@ -26,17 +26,12 @@ impl Tokens {
 
 	pub(super) fn filter(self, f: &Filter) -> Result<Tokens, Error> {
 		let mut tks = Vec::new();
-		let mut res = vec![];
-		for t in self.t {
-			if t.is_empty() {
+		for tk in self.t {
+			if tk.is_empty() {
 				continue;
 			}
-			let c = t.get_str(&self.i)?;
-			let r = f.apply_filter(c);
-			res.push((t, r));
-		}
-		for (tk, fr) in res {
-			match fr {
+			let c = tk.get_str(&self.i)?;
+			match f.apply_filter(c) {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
 					Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
