@@ -55,12 +55,9 @@ impl From<SqlFilter> for Filter {
 }
 
 impl Filter {
-	pub(super) fn from(f: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
-		if let Some(f) = f {
-			let mut r = Vec::with_capacity(f.len());
-			for f in f {
-				r.push(f.into());
-			}
+	pub(super) fn from(fs: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+		if let Some(fs) = fs {
+			let r = fs.into_iter().map(|f| f.into()).collect();
 			Some(r)
 		} else {
 			None

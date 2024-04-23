@@ -171,7 +171,7 @@ impl Token {
 						"Unable to extract the token. The offset position ({s},{e}) is out of range ({l})."
 					)));
 				}
-				Ok(&i[(bytes.0 as usize)..(bytes.1 as usize)])
+				Ok(&i[s..e])
 			}
 			Token::String {
 				term,
