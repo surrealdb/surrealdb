@@ -26,7 +26,6 @@ impl<'a> Document<'a> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
 		// Process the desired output
-		trace!("Processing output {:?} stm: {:?}", stm.output(), stm);
 		let mut out = match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
@@ -53,24 +52,10 @@ impl<'a> Document<'a> {
 				}
 			},
 			None => match stm {
-				Statement::Live(s) => {
-					trace!("Live part of pluck, expr: {:?}", s.expr);
-					trace!(
-						"PLUCK ATTENTION\ninitial doc: {:?}\ncurrent doc: {:?}\n",
-						self.initial.doc,
-						self.current.doc
-					);
-					match s.expr.len() {
-						0 => {
-							trace!("Len was 0");
-							Ok(self.initial.doc.diff(&self.current.doc, Idiom::default()).into())
-						}
-						_ => {
-							trace!("expr compute");
-							s.expr.compute(stk, ctx, opt, txn, Some(&self.current), false).await
-						}
-					}
-				}
+				Statement::Live(s) => match s.expr.len() {
+					0 => Ok(self.initial.doc.diff(&self.current.doc, Idiom::default()).into()),
+					_ => s.expr.compute(stk, ctx, opt, txn, Some(&self.current), false).await,
+				},
 				Statement::Select(s) => {
 					s.expr.compute(stk, ctx, opt, txn, Some(&self.current), s.group.is_some()).await
 				}
