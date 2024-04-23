@@ -108,9 +108,7 @@ impl Socket {
 		match format {
 			Format::Json => Ok(Message::Text(serde_json::to_string(message)?)),
 			Format::Cbor => {
-				pub mod try_from_impls {
-					include!("../../src/rpc/format/cbor/convert.rs");
-				}
+				use surrealdb::rpc::format::cbor::Cbor;
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
 				// datetimes, and durations are stored properly.
@@ -119,7 +117,7 @@ impl Socket {
 				// Then we parse the JSON in to SurrealQL.
 				let surrealql = surrealdb::syn::value_legacy_strand(&json)?;
 				// Then we convert the SurrealQL in to CBOR.
-				let cbor = try_from_impls::Cbor::try_from(surrealql)?;
+				let cbor = Cbor::try_from(surrealql)?;
 				// Then serialize the CBOR as binary data.
 				let mut output = Vec::new();
 				ciborium::into_writer(&cbor.0, &mut output).unwrap();
@@ -127,9 +125,7 @@ impl Socket {
 				Ok(Message::Binary(output))
 			}
 			Format::Pack => {
-				pub mod try_from_impls {
-					include!("../../src/rpc/format/msgpack/convert.rs");
-				}
+				use surrealdb::rpc::format::msgpack::Pack;
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
 				// datetimes, and durations are stored properly.
@@ -138,7 +134,7 @@ impl Socket {
 				// Then we parse the JSON in to SurrealQL.
 				let surrealql = surrealdb::syn::value_legacy_strand(&json)?;
 				// Then we convert the SurrealQL in to MessagePack.
-				let pack = try_from_impls::Pack::try_from(surrealql)?;
+				let pack = Pack::try_from(surrealql)?;
 				// Then serialize the MessagePack as binary data.
 				let mut output = Vec::new();
 				rmpv::encode::write_value(&mut output, &pack.0).unwrap();
@@ -165,15 +161,13 @@ impl Socket {
 				debug!("Response {msg:?}");
 				match format {
 					Format::Cbor => {
-						pub mod try_from_impls {
-							include!("../../src/rpc/format/cbor/convert.rs");
-						}
+						use surrealdb::rpc::format::cbor::Cbor;
 						// For tests we need to convert the binary data to
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the CBOR data.
 						let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
-						let msg: Value = try_from_impls::Cbor(msg).try_into()?;
+						let msg: Value = Cbor(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.
@@ -181,15 +175,13 @@ impl Socket {
 						Ok(Some(msg))
 					}
 					Format::Pack => {
-						pub mod try_from_impls {
-							include!("../../src/rpc/format/msgpack/convert.rs");
-						}
+						use surrealdb::rpc::format::msgpack::Pack;
 						// For tests we need to convert the binary data to
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the MessagePack data.
 						let msg: rmpv::Value = rmpv::decode::read_value(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
-						let msg: Value = try_from_impls::Pack(msg).try_into()?;
+						let msg: Value = Pack(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.
@@ -429,6 +421,7 @@ impl Socket {
 			}
 		}
 	}
+
 	pub async fn send_message_run(
 		&mut self,
 		fn_name: &str,
@@ -437,6 +430,40 @@ impl Socket {
 	) -> Result<serde_json::Value> {
 		// Send message and receive response
 		let msg = self.send_request("run", json!([fn_name, version, args])).await?;
+		// Check response message structure
+		match msg.as_object() {
+			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {
+				Err(format!("unexpected error from query request: {:?}", obj.get("error")).into())
+			}
+			Some(obj) if obj.keys().all(|k| ["id", "result"].contains(&k.as_str())) => Ok(obj
+				.get("result")
+				.ok_or(TestError::AssertionError {
+					message: format!(
+						"expected a result from the received object, got this instead: {:?}",
+						obj
+					),
+				})?
+				.to_owned()),
+			_ => {
+				error!("{:?}", msg.as_object().unwrap().keys().collect::<Vec<_>>());
+				Err(format!("unexpected response: {:?}", msg).into())
+			}
+		}
+	}
+
+	pub async fn send_message_relate(
+		&mut self,
+		from: serde_json::Value,
+		kind: serde_json::Value,
+		with: serde_json::Value,
+		content: Option<serde_json::Value>,
+	) -> Result<serde_json::Value> {
+		// Send message and receive response
+		let msg = if let Some(content) = content {
+			self.send_request("relate", json!([from, kind, with, content])).await?
+		} else {
+			self.send_request("relate", json!([from, kind, with])).await?
+		};
 		// Check response message structure
 		match msg.as_object() {
 			Some(obj) if obj.keys().all(|k| ["id", "error"].contains(&k.as_str())) => {

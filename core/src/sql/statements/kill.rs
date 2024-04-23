@@ -1,6 +1,7 @@
 use std::fmt;
 
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -13,9 +14,9 @@ use crate::kvs::lq_structs::{KillEntry, TrackedResult};
 use crate::sql::Uuid;
 use crate::sql::Value;
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct KillStatement {
 	// Uuid of Live Query
@@ -27,6 +28,7 @@ impl KillStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -39,7 +41,7 @@ impl KillStatement {
 		// Resolve live query id
 		let live_query_id = match &self.id {
 			Value::Uuid(id) => *id,
-			Value::Param(param) => match param.compute(ctx, opt, txn, None).await? {
+			Value::Param(param) => match param.compute(stk, ctx, opt, txn, None).await? {
 				Value::Uuid(id) => id,
 				Value::Strand(id) => match uuid::Uuid::try_parse(&id) {
 					Ok(id) => Uuid(id),
@@ -153,7 +155,10 @@ mod test {
 		let ds = Datastore::new("memory").await.unwrap();
 		let tx =
 			ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap().enclose();
-		res.compute(&ctx, &opt, &tx, None).await.unwrap();
+
+		let mut stack = reblessive::tree::TreeStack::new();
+
+		stack.enter(|stk| res.compute(stk, &ctx, &opt, &tx, None)).finish().await.unwrap();
 
 		let mut tx = tx.lock().await;
 		tx.commit().await.unwrap();

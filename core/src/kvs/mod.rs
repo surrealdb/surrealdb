@@ -27,6 +27,9 @@ mod tx;
 
 pub(crate) mod lq_structs;
 
+mod lq_cf;
+mod lq_v2_doc;
+mod lq_v2_fut;
 #[cfg(test)]
 mod tests;
 

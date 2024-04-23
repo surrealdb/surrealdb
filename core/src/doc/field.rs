@@ -7,10 +7,12 @@ use crate::iam::Action;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 use crate::sql::Part;
+use reblessive::tree::Stk;
 
 impl<'a> Document<'a> {
 	pub async fn field(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -85,7 +87,7 @@ impl<'a> Document<'a> {
 						ctx.add_value("after", &val);
 						ctx.add_value("before", &old);
 						// Process the VALUE clause
-						val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
+						val = expr.compute(stk, &ctx, opt, txn, Some(&self.current)).await?;
 					}
 				}
 				// Check for a TYPE clause
@@ -116,7 +118,7 @@ impl<'a> Document<'a> {
 						ctx.add_value("after", &val);
 						ctx.add_value("before", &old);
 						// Process the VALUE clause
-						val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
+						val = expr.compute(stk, &ctx, opt, txn, Some(&self.current)).await?;
 					}
 				}
 				// Check for a TYPE clause
@@ -145,7 +147,7 @@ impl<'a> Document<'a> {
 					ctx.add_value("after", &val);
 					ctx.add_value("before", &old);
 					// Process the ASSERT clause
-					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+					if !expr.compute(stk, &ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
 							thing: rid.to_string(),
 							field: fd.name.clone(),
@@ -186,7 +188,11 @@ impl<'a> Document<'a> {
 							ctx.add_value("after", &val);
 							ctx.add_value("before", &old);
 							// Process the PERMISSION clause
-							if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+							if !e
+								.compute(stk, &ctx, opt, txn, Some(&self.current))
+								.await?
+								.is_truthy()
+							{
 								val = old
 							}
 						}
@@ -194,8 +200,8 @@ impl<'a> Document<'a> {
 				}
 				// Set the value of the field
 				match val {
-					Value::None => self.current.doc.to_mut().del(ctx, opt, txn, &k).await?,
-					_ => self.current.doc.to_mut().set(ctx, opt, txn, &k, val).await?,
+					Value::None => self.current.doc.to_mut().del(stk, ctx, opt, txn, &k).await?,
+					_ => self.current.doc.to_mut().set(stk, ctx, opt, txn, &k, val).await?,
 				};
 			}
 		}

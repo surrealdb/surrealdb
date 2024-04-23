@@ -943,6 +943,10 @@ pub enum Error {
 	/// An error related to live query occurred
 	#[error("Failed to process Live Query: {0}")]
 	LiveQueryError(LiveQueryCause),
+
+	/// The supplied type could not be serialiazed into `sql::Value`
+	#[error("Serialization error: {0}")]
+	Serialization(String),
 }
 
 impl From<Error> for String {

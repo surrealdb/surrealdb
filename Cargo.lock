@@ -598,12 +598,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atomic-waker"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
-
-[[package]]
 name = "autocfg"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -780,7 +774,7 @@ dependencies = [
  "http-body 0.4.6",
  "hyper 0.14.28",
  "pin-project-lite",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "rustls-pemfile",
  "tokio",
  "tokio-rustls",
@@ -1775,9 +1769,9 @@ dependencies = [
 
 [[package]]
 name = "echodb"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "312221c0bb46e82cd250c818404ef9dce769a4d5a62915c0249b577762eec34a"
+checksum = "1ac31e38aeac770dd01b9d6c9ab2a6d7f025815f71105911cf6de073a5db8ee1"
 dependencies = [
  "arc-swap",
  "imbl",
@@ -2746,7 +2740,7 @@ dependencies = [
  "futures-util",
  "http 0.2.12",
  "hyper 0.14.28",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "tokio",
  "tokio-rustls",
 ]
@@ -3115,7 +3109,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.4",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4535,14 +4529,9 @@ dependencies = [
 
 [[package]]
 name = "reblessive"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb88832db7cfbac349e0276a84d4fbbcdb9cfe8069affbc765d8fd012265ba45"
-dependencies = [
- "atomic-waker",
- "pin-project-lite",
- "pin-utils",
-]
+checksum = "ffb68fbdf0b0509dcff7c86244a6e2408968c6153c7e50c4eb14a7be598b83a7"
 
 [[package]]
 name = "redox_syscall"
@@ -4673,7 +4662,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "rustls-pemfile",
  "serde",
  "serde_json",
@@ -4702,9 +4691,9 @@ checksum = "4389f1d5789befaf6029ebd9f7dac4af7f7e3d61b69d4f30e2ac02b57e7712b0"
 
 [[package]]
 name = "revision"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87eb86913082f8976b06d07a59f17df9120e6f38b882cf3fc5a45b4499e224b6"
+checksum = "588784c1d9453cfd2ce1b7aff06c903513677cf0e63779a0a3085ee8a44f5b17"
 dependencies = [
  "bincode",
  "chrono",
@@ -4720,9 +4709,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf996fc5f61f1dbec35799b5c00c6dda12e8862e8cb782ed24e10d0292e60ed3"
+checksum = "854ff0b6794d4e0aab5e4486870941caefe9f258e63cad2f21b49a6302377c85"
 dependencies = [
  "darling",
  "proc-macro-error",
@@ -5128,9 +5117,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.10"
+version = "0.21.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d5a6813c0759e4609cd494e8e725babae6a2ca7b62a5536a13daaec6fcb7ba"
+checksum = "7fecbfb7b1444f477b345853b1fce097a2c6fb637b2bfb87e6bc5db0f043fae4"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -5140,9 +5129,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.22.3"
+version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99008d7ad0bbbea527ec27bddbc0e432c5b87d8175178cee68d2eec9c4a1813c"
+checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
 dependencies = [
  "log",
  "ring 0.17.8",
@@ -5863,12 +5852,13 @@ dependencies = [
  "pprof",
  "radix_trie",
  "rand 0.8.5",
+ "reblessive",
  "regex",
  "reqwest",
  "revision",
  "ring 0.17.8",
  "rust_decimal",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "semver",
  "serde",
  "serde_json",
@@ -5910,6 +5900,7 @@ dependencies = [
  "bytes",
  "cedar-policy",
  "chrono",
+ "ciborium",
  "criterion",
  "deunicode",
  "dmp",
@@ -5947,6 +5938,7 @@ dependencies = [
  "reqwest",
  "revision",
  "ring 0.17.8",
+ "rmpv",
  "roaring",
  "rocksdb",
  "rquickjs",
@@ -6426,7 +6418,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "tokio",
 ]
 
@@ -6450,7 +6442,7 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
@@ -6784,7 +6776,7 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.8.5",
- "rustls 0.21.10",
+ "rustls 0.21.11",
  "sha1",
  "thiserror",
  "url",
@@ -6913,7 +6905,7 @@ dependencies = [
  "base64 0.21.7",
  "log",
  "once_cell",
- "rustls 0.22.3",
+ "rustls 0.22.4",
  "rustls-pki-types",
  "rustls-webpki 0.102.2",
  "url",

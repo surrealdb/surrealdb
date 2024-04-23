@@ -45,8 +45,8 @@ use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::Strand;
 use crate::sql::Value;
+use crate::vs::Oracle;
 use crate::vs::Versionstamp;
-use crate::vs::{conv, Oracle};
 
 use super::kv::Add;
 use super::kv::Convert;
@@ -2721,7 +2721,7 @@ impl Transaction {
 		current: Cow<'_, Value>,
 		store_difference: bool,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), previous, current, store_difference)
+		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
@@ -2907,7 +2907,7 @@ impl Transaction {
 		trace!(
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",
 			ts,
-			conv::versionstamp_to_u64(&vs),
+			crate::vs::conv::versionstamp_to_u64(&vs),
 			ns,
 			db
 		);

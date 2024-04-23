@@ -1,5 +1,5 @@
 # Default owners for the repository
-* @tobiemh
+* @tobiemh @surrealdb/surrealdb
 
 # Configuration for CI
 /.github/ @surrealdb/ci
@@ -25,58 +25,13 @@ cackle.toml @surrealdb/security
 supply-chain/* @surrealdb/security
 deny.toml @surrealdb/security
 
-# General owners for the database
-/core/ @surrealdb/db
-/doc/ @surrealdb/db
-/lib/ @surrealdb/db
-/src/ @surrealdb/db
-/tests/ @surrealdb/db
-
 # Code for fuzzing configuration
 /lib/fuzz/ @surrealdb/security
 SECURITY.md @surrealdb/security
 
-# Code and tests for the Rust API
-/lib/CARGO.md @surrealdb/api
-/lib/README.md @surrealdb/api
-/lib/examples/ @surrealdb/api
-/lib/src/ @surrealdb/api
-/lib/src/tests/api/ @surrealdb/api
-/lib/src/tests/api.rs @surrealdb/api
-
 # Code and tests for indexing
 /core/src/idx/ @surrealdb/ix
-
-# Code and tests for changefeeds
-/core/src/cf/ @surrealdb/cf
-/core/src/idg/ @surrealdb/cf
-/core/src/vs/ @surrealdb/cf
 
 # Tests related to the storage
 /core/src/key/ @surrealdb/kv
 /core/src/kvs/ @surrealdb/kv
-
-# Code and tests for querying
-/core/src/sql/ @surrealdb/ql
-/core/src/syn/ @surrealdb/ql
-/core/src/fnc/ @surrealdb/ql
-
-# Code and tests for the server
-/src/* @surrealdb/net
-/src/cnf/ @surrealdb/net
-/src/err/ @surrealdb/net
-/src/net/ @surrealdb/net
-/src/rpc/ @surrealdb/net
-/src/telemetry/ @surrealdb/net
-/tests/common/ @surrealdb/net
-/tests/http_integration.rs @surrealdb/net
-/tests/ws_integration.rs @surrealdb/net
-
-# Code and tests for the command-line
-/src/cli/ @surrealdb/cli
-/src/dbs/ @surrealdb/cli
-/tests/common/ @surrealdb/cli
-/tests/cli_integration.rs @surrealdb/cli
-
-# Code and tests for authentication
-/core/src/iam/ @surrealdb/api @surrealdb/security

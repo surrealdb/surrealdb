@@ -1,16 +1,19 @@
 use ciborium::Value as Data;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
+use rust_decimal::Decimal;
 use std::iter::once;
 use std::ops::Deref;
-use surrealdb::sql::Datetime;
-use surrealdb::sql::Duration;
-use surrealdb::sql::Geometry;
-use surrealdb::sql::Id;
-use surrealdb::sql::Number;
-use surrealdb::sql::Thing;
-use surrealdb::sql::Uuid;
-use surrealdb::sql::Value;
+
+use crate::sql::Datetime;
+use crate::sql::Duration;
+use crate::sql::Geometry;
+use crate::sql::Id;
+use crate::sql::Number;
+use crate::sql::Thing;
+use crate::sql::Uuid;
+use crate::sql::Value;
+use std::str::FromStr;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
@@ -118,7 +121,7 @@ impl TryFrom<Cbor> for Value {
 					},
 					// A literal decimal
 					TAG_STRING_DECIMAL => match *v {
-						Data::Text(v) => match Number::try_from(v) {
+						Data::Text(v) => match Decimal::from_str(v.as_str()) {
 							Ok(v) => Ok(v.into()),
 							_ => Err("Expected a valid Decimal value"),
 						},
@@ -327,7 +330,6 @@ impl TryFrom<Value> for Cbor {
 				Number::Decimal(v) => {
 					Ok(Cbor(Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.to_string())))))
 				}
-				_ => unreachable!(),
 			},
 			Value::Strand(v) => Ok(Cbor(Data::Text(v.0))),
 			Value::Duration(v) => {
@@ -390,60 +392,73 @@ impl TryFrom<Value> for Cbor {
 						Id::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR")
 						}
-						_ => unreachable!(),
 					},
 				])),
 			))),
 			Value::Table(v) => Ok(Cbor(Data::Tag(TAG_TABLE, Box::new(Data::Text(v.0))))),
-			Value::Geometry(v) => Ok(Cbor(encode_geometry(v))),
+			Value::Geometry(v) => Ok(Cbor(encode_geometry(v)?)),
 			// We shouldn't reach here
 			_ => Err("Found unsupported SurrealQL value being encoded into a CBOR value"),
 		}
 	}
 }
 
-fn encode_geometry(v: Geometry) -> Data {
+fn encode_geometry(v: Geometry) -> Result<Data, &'static str> {
 	match v {
-		Geometry::Point(v) => Data::Tag(
+		Geometry::Point(v) => Ok(Data::Tag(
 			TAG_GEOMETRY_POINT,
 			Box::new(Data::Array(vec![
 				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.x().to_string()))),
 				Data::Tag(TAG_STRING_DECIMAL, Box::new(Data::Text(v.y().to_string()))),
 			])),
-		),
+		)),
 		Geometry::Line(v) => {
-			let data = v.points().map(|v| encode_geometry(v.into())).collect::<Vec<Data>>();
+			let data = v
+				.points()
+				.map(|v| encode_geometry(v.into()))
+				.collect::<Result<Vec<Data>, &'static str>>()?;
 
-			Data::Tag(TAG_GEOMETRY_LINE, Box::new(Data::Array(data)))
+			Ok(Data::Tag(TAG_GEOMETRY_LINE, Box::new(Data::Array(data))))
 		}
 		Geometry::Polygon(v) => {
 			let data = once(v.exterior())
 				.chain(v.interiors())
 				.map(|v| encode_geometry(v.clone().into()))
-				.collect::<Vec<Data>>();
+				.collect::<Result<Vec<Data>, &'static str>>()?;
 
-			Data::Tag(TAG_GEOMETRY_POLYGON, Box::new(Data::Array(data)))
+			Ok(Data::Tag(TAG_GEOMETRY_POLYGON, Box::new(Data::Array(data))))
 		}
 		Geometry::MultiPoint(v) => {
-			let data = v.iter().map(|v| encode_geometry((*v).into())).collect::<Vec<Data>>();
+			let data = v
+				.iter()
+				.map(|v| encode_geometry((*v).into()))
+				.collect::<Result<Vec<Data>, &'static str>>()?;
 
-			Data::Tag(TAG_GEOMETRY_MULTIPOINT, Box::new(Data::Array(data)))
+			Ok(Data::Tag(TAG_GEOMETRY_MULTIPOINT, Box::new(Data::Array(data))))
 		}
 		Geometry::MultiLine(v) => {
-			let data = v.iter().map(|v| encode_geometry(v.clone().into())).collect::<Vec<Data>>();
+			let data = v
+				.iter()
+				.map(|v| encode_geometry(v.clone().into()))
+				.collect::<Result<Vec<Data>, &'static str>>()?;
 
-			Data::Tag(TAG_GEOMETRY_MULTILINE, Box::new(Data::Array(data)))
+			Ok(Data::Tag(TAG_GEOMETRY_MULTILINE, Box::new(Data::Array(data))))
 		}
 		Geometry::MultiPolygon(v) => {
-			let data = v.iter().map(|v| encode_geometry(v.clone().into())).collect::<Vec<Data>>();
+			let data = v
+				.iter()
+				.map(|v| encode_geometry(v.clone().into()))
+				.collect::<Result<Vec<Data>, &'static str>>()?;
 
-			Data::Tag(TAG_GEOMETRY_MULTIPOLYGON, Box::new(Data::Array(data)))
+			Ok(Data::Tag(TAG_GEOMETRY_MULTIPOLYGON, Box::new(Data::Array(data))))
 		}
 		Geometry::Collection(v) => {
-			let data = v.iter().map(|v| encode_geometry(v.clone())).collect::<Vec<Data>>();
+			let data = v
+				.iter()
+				.map(|v| encode_geometry(v.clone()))
+				.collect::<Result<Vec<Data>, &'static str>>()?;
 
-			Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data)))
+			Ok(Data::Tag(TAG_GEOMETRY_COLLECTION, Box::new(Data::Array(data))))
 		}
-		_ => unreachable!(),
 	}
 }
