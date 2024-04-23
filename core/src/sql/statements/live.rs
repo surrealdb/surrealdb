@@ -28,18 +28,20 @@ pub struct LiveStatement {
 	// When a live query is marked for archiving, this will
 	// be set to the node ID that archived the query. This
 	// is an internal property, set by the database runtime.
-	// This is optional, and os only set when archived.
+	// This is optional, and is only set when archived.
+	//
+	// This is deprecated from 2.0
 	pub(crate) archived: Option<Uuid>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
-	// so we can chack it later when sending notifications.
+	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
 	#[revision(start = 2)]
 	pub(crate) session: Option<Value>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
-	// so we can chack it later when sending notifications.
+	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
 	pub(crate) auth: Option<Auth>,

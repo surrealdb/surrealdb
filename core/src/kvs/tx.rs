@@ -2725,7 +2725,7 @@ impl Transaction {
 		current: Cow<'_, Value>,
 		store_difference: bool,
 	) {
-		self.cf.update(ns, db, tb, id.clone(), previous, current, store_difference)
+		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)
 	}
 
 	// Records the table (re)definition in the changefeed if enabled.
