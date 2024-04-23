@@ -9,6 +9,7 @@ use futures::lock::Mutex;
 use uuid::Uuid;
 
 use sql::permission::Permissions;
+use sql::statements::DefineAccessStatement;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
@@ -1460,6 +1461,28 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve all namespace access method definitions.
+	pub async fn all_ns_accesses(
+		&mut self,
+		ns: &str,
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let key = crate::key::namespace::ac::prefix(ns);
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Nas(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::namespace::ac::prefix(ns);
+			let end = crate::key::namespace::ac::suffix(ns);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Nas(Arc::clone(&val)));
+			val
+		})
+	}
+
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		let key = crate::key::namespace::db::prefix(ns);
@@ -1521,6 +1544,29 @@ impl Transaction {
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Dts(Arc::clone(&val)));
+			val
+		})
+	}
+
+	/// Retrieve all database access method definitions.
+	pub async fn all_db_accesses(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		let key = crate::key::database::ac::prefix(ns, db);
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Das(v) = e {
+				v
+			} else {
+				unreachable!();
+			}
+		} else {
+			let beg = crate::key::database::ac::prefix(ns, db);
+			let end = crate::key::database::ac::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Das(Arc::clone(&val)));
 			val
 		})
 	}
@@ -1839,6 +1885,15 @@ impl Transaction {
 		Ok(val.into())
 	}
 
+	/// Retrieve a specific access method definition from ROOT.
+	pub async fn get_root_access(&mut self, ac: &str) -> Result<DefineAccessStatement, Error> {
+		let key = crate::key::root::ac::new(ac);
+		let val = self.get(key).await?.ok_or(Error::AccessRootNotFound {
+			value: ac.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::root::ns::new(ns);
@@ -1871,6 +1926,19 @@ impl Transaction {
 		let key = crate::key::namespace::tk::new(ns, nt);
 		let val = self.get(key).await?.ok_or(Error::NtNotFound {
 			value: nt.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific namespace access method definition.
+	pub async fn get_ns_access(
+		&mut self,
+		ns: &str,
+		ac: &str,
+	) -> Result<DefineAccessStatement, Error> {
+		let key = crate::key::namespace::ac::new(ns, ac);
+		let val = self.get(key).await?.ok_or(Error::AccessNsNotFound {
+			value: ac.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -1925,6 +1993,20 @@ impl Transaction {
 		let key = crate::key::database::tk::new(ns, db, dt);
 		let val = self.get(key).await?.ok_or(Error::DtNotFound {
 			value: dt.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific database access method definition.
+	pub async fn get_db_access(
+		&mut self,
+		ns: &str,
+		db: &str,
+		ac: &str,
+	) -> Result<DefineAccessStatement, Error> {
+		let key = crate::key::database::ac::new(ns, db, ac);
+		let val = self.get(key).await?.ok_or(Error::AccessDbNotFound {
+			value: ac.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -2526,6 +2608,20 @@ impl Transaction {
 			if !dts.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("-- TOKENS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for dt in dts.iter() {
+					chn.send(bytes!(format!("{dt};"))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output ACCESSES
+		{
+			let dts = self.all_db_accesses(ns, db).await?;
+			if !dts.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- ACCESSES")).await?;
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for dt in dts.iter() {

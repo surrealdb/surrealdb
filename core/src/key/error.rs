@@ -8,6 +8,8 @@ pub enum KeyCategory {
 	Unknown,
 	/// crate::key::root::all                /
 	Root,
+	/// crate::key::root::ac                 /!ac{ac}
+	Access,
 	/// crate::key::root::hb                 /!hb{ts}/{nd}
 	Heartbeat,
 	/// crate::key::root::nd                 /!nd{nd}
@@ -32,6 +34,8 @@ pub enum KeyCategory {
 	DatabaseIdentifier,
 	/// crate::key::namespace::lg            /*{ns}!lg{lg}
 	DatabaseLogAlias,
+	/// crate::key::namespace::ac            /*{ns}!ac{ac}
+	NamespaceAccess,
 	/// crate::key::namespace::tk            /*{ns}!tk{tk}
 	NamespaceToken,
 	/// crate::key::namespace::us            /*{ns}!us{us}
@@ -39,6 +43,8 @@ pub enum KeyCategory {
 	///
 	/// crate::key::database::all            /*{ns}*{db}
 	DatabaseRoot,
+	/// crate::key::database::ac             /*{ns}*{db}!ac{ac}
+	DatabaseAccess,
 	/// crate::key::database::az             /*{ns}*{db}!az{az}
 	DatabaseAnalyzer,
 	/// crate::key::database::fc             /*{ns}*{db}!fn{fc}
@@ -124,6 +130,7 @@ impl Display for KeyCategory {
 		let name = match self {
 			KeyCategory::Unknown => "Unknown",
 			KeyCategory::Root => "Root",
+			KeyCategory::Access => "Access",
 			KeyCategory::Heartbeat => "Heartbeat",
 			KeyCategory::Node => "Node",
 			KeyCategory::NamespaceIdentifier => "NamespaceIdentifier",
@@ -135,9 +142,11 @@ impl Display for KeyCategory {
 			KeyCategory::DatabaseAlias => "DatabaseAlias",
 			KeyCategory::DatabaseIdentifier => "DatabaseIdentifier",
 			KeyCategory::DatabaseLogAlias => "DatabaseLogAlias",
+			KeyCategory::NamespaceAccess => "NamespaceAccess",
 			KeyCategory::NamespaceToken => "NamespaceToken",
 			KeyCategory::NamespaceUser => "NamespaceUser",
 			KeyCategory::DatabaseRoot => "DatabaseRoot",
+			KeyCategory::DatabaseAccess => "DatabaseAccess",
 			KeyCategory::DatabaseAnalyzer => "DatabaseAnalyzer",
 			KeyCategory::DatabaseFunction => "DatabaseFunction",
 			KeyCategory::DatabaseLog => "DatabaseLog",

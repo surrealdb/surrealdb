@@ -24,7 +24,9 @@ macro_rules! keyword {
 }
 
 keyword! {
+	Access => "ACCESS",
 	After => "AFTER",
+	Algorithm => "ALGORITHM",
 	All => "ALL",
 	Analyze => "ANALYZE",
 	Analyzer => "ANALYZER",
@@ -90,6 +92,8 @@ keyword! {
 	Into => "INTO",
 	If => "IF",
 	Is => "IS",
+	Jwt => "JWT",
+	Jwks => "JWKS",
 	Key => "KEY",
 	Kill => "KILL",
 	Let => "LET",

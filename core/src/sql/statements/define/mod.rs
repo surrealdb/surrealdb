@@ -1,3 +1,4 @@
+mod access;
 mod analyzer;
 mod database;
 mod event;
@@ -12,6 +13,7 @@ mod table;
 mod token;
 mod user;
 
+pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
@@ -56,6 +58,7 @@ pub enum DefineStatement {
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
 	Model(DefineModelStatement),
+	Access(DefineAccessStatement),
 }
 
 impl DefineStatement {
@@ -86,6 +89,7 @@ impl DefineStatement {
 			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Model(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Access(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -106,6 +110,7 @@ impl Display for DefineStatement {
 			Self::Index(v) => Display::fmt(v, f),
 			Self::Analyzer(v) => Display::fmt(v, f),
 			Self::Model(v) => Display::fmt(v, f),
+			Self::Access(v) => Display::fmt(v, f),
 		}
 	}
 }

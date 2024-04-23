@@ -1,5 +1,6 @@
 use crate::idg::u32::U32;
 use crate::kvs::kv::Key;
+use crate::sql::statements::DefineAccessStatement;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
@@ -32,6 +33,7 @@ pub enum Entry {
 	Azs(Arc<[DefineAnalyzerStatement]>),
 	Dbs(Arc<[DefineDatabaseStatement]>),
 	Dts(Arc<[DefineTokenStatement]>),
+	Das(Arc<[DefineAccessStatement]>),
 	Dus(Arc<[DefineUserStatement]>),
 	Evs(Arc<[DefineEventStatement]>),
 	Fcs(Arc<[DefineFunctionStatement]>),
@@ -42,6 +44,7 @@ pub enum Entry {
 	Mls(Arc<[DefineModelStatement]>),
 	Nss(Arc<[DefineNamespaceStatement]>),
 	Nts(Arc<[DefineTokenStatement]>),
+	Nas(Arc<[DefineAccessStatement]>),
 	Nus(Arc<[DefineUserStatement]>),
 	Pas(Arc<[DefineParamStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),

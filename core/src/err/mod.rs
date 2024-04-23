@@ -940,6 +940,46 @@ pub enum Error {
 	/// The supplied type could not be serialiazed into `sql::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
+
+	/// The requested root access method already exists
+	#[error("The root access method '{value}' already exists")]
+	AccessRootAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace access method already exists
+	#[error("The namespace access method '{value}' already exists")]
+	AccessNsAlreadyExists {
+		value: String,
+	},
+
+	/// The requested database access method already exists
+	#[error("The database access method '{value}' already exists")]
+	AccessDbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested root access method does not exist
+	#[error("The root access method '{value}' does not exist")]
+	AccessRootNotFound {
+		value: String,
+	},
+
+	/// The requested namespace access method does not exist
+	#[error("The namespace access method '{value}' does not exist")]
+	AccessNsNotFound {
+		value: String,
+	},
+
+	/// The requested database access method does not exist
+	#[error("The database access method '{value}' does not exist")]
+	AccessDbNotFound {
+		value: String,
+	},
+
+	/// The access method cannot be defined on the requested level
+	#[error("The access method cannot be defined on the requested level")]
+	AccessLevelMismatch,
 }
 
 impl From<Error> for String {

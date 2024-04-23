@@ -51,10 +51,10 @@ pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 
 pub use self::define::{
-	DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-	DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement,
-	DefineParamStatement, DefineScopeStatement, DefineStatement, DefineTableStatement,
-	DefineTokenStatement, DefineUserStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineNamespaceStatement, DefineParamStatement, DefineScopeStatement, DefineStatement,
+	DefineTableStatement, DefineTokenStatement, DefineUserStatement,
 };
 
 pub use self::remove::{

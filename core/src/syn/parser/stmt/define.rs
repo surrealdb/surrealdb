@@ -2,17 +2,20 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
+		access_type,
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
-			DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-			DefineNamespaceStatement, DefineParamStatement, DefineScopeStatement, DefineStatement,
-			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
+			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement,
+			DefineScopeStatement, DefineStatement, DefineTableStatement, DefineTokenStatement,
+			DefineUserStatement,
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType, Values,
+		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
+		Values,
 	},
 	syn::{
 		parser::{
@@ -42,6 +45,7 @@ impl Parser<'_> {
 			}
 			t!("INDEX") => self.parse_define_index().map(DefineStatement::Index),
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
+			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			x => unexpected!(self, x, "a define statement keyword"),
 		}
 	}
@@ -201,6 +205,117 @@ impl Parser<'_> {
 					res.roles = vec![self.next_token_value()?];
 					while self.eat(t!(",")) {
 						res.roles.push(self.next_token_value()?);
+					}
+				}
+				_ => break,
+			}
+		}
+
+		Ok(res)
+	}
+
+	pub async fn parse_define_access(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAccessStatement> {
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		let name = self.next_token_value()?;
+		expected!(self, t!("ON"));
+		// TODO: Parse base should no longer take an argument.
+		let base = self.parse_base(false)?;
+
+		let mut res = DefineAccessStatement {
+			name,
+			base,
+			if_not_exists,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = Some(self.next_token_value()?);
+				}
+				t!("TYPE") => {
+					self.pop_peek();
+					match self.peek_kind() {
+						t!("JWT") => {
+							self.pop_peek();
+							loop {
+								match self.peek_kind() {
+									t!("ALGORITHM") => {
+										self.pop_peek();
+										match self.next().kind {
+											TokenKind::Algorithm(alg) => match self.next().kind {
+												t!("KEY") => {
+													let key = self.next_token_value::<Strand>()?.0;
+													res.kind = AccessType::Jwt(
+															access_type::JwtAccess{
+																verification: access_type::JwtAccessVerification::Key(
+																	access_type::JwtAccessVerificationKey{
+																		alg: alg,
+																		key: key,
+																	}
+																)
+															}
+														);
+												}
+												x => unexpected!(self, x, "a key"),
+											},
+											x => unexpected!(self, x, "a valid algorithm"),
+										}
+									}
+									t!("JWKS") => {
+										self.pop_peek();
+										let url = self.next_token_value::<Strand>()?.0;
+										res.kind = AccessType::Jwt(access_type::JwtAccess {
+											verification: access_type::JwtAccessVerification::Jwks(
+												access_type::JwtAccessVerificationJwks {
+													url,
+												},
+											),
+										});
+									}
+									x => unexpected!(self, x, "`ALGORITHM`, or `JWKS`"),
+								}
+							}
+						}
+						t!("RECORD") => {
+							self.pop_peek();
+							let mut ac = access_type::RecordAccess {
+								duration: None,
+								signup: None,
+								signin: None,
+							};
+							loop {
+								match self.peek_kind() {
+									t!("DURATION") => {
+										self.pop_peek();
+										ac.duration = Some(self.next_token_value()?);
+									}
+									t!("SIGNUP") => {
+										self.pop_peek();
+										ac.signup =
+											Some(stk.run(|stk| self.parse_value(stk)).await?);
+									}
+									t!("SIGNIN") => {
+										self.pop_peek();
+										ac.signin =
+											Some(stk.run(|stk| self.parse_value(stk)).await?);
+									}
+									_ => break,
+								}
+							}
+							res.kind = AccessType::Record(ac);
+						}
+						_ => break,
 					}
 				}
 				_ => break,
