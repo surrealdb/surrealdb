@@ -167,16 +167,16 @@ impl Filter {
 			return FilterResult::Ignore;
 		}
 		let max = (max as usize).min(l);
-		let mut ng = vec![];
-		let r = min..(max + 1);
-		for p in r {
-			let n = &c[0..p];
-			if c.eq(n) {
-				ng.push(Term::Unchanged);
-			} else {
-				ng.push(Term::NewTerm(n.iter().collect(), 0));
-			}
-		}
+		let ng = (min..=max)
+			.map(|p| {
+				let n = &c[0..p];
+				if c.eq(n) {
+					Term::Unchanged
+				} else {
+					Term::NewTerm(n.iter().collect(), 0)
+				}
+			})
+			.collect();
 		FilterResult::Terms(ng)
 	}
 }
