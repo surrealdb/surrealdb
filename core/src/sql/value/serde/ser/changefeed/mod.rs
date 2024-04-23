@@ -68,7 +68,7 @@ impl serde::ser::SerializeStruct for SerializeChangeFeed {
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(ChangeFeed {
 			expiry: self.expiry,
-			store_original: self.store_original,
+			store_diff: self.store_original,
 		})
 	}
 }
