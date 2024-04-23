@@ -1847,9 +1847,9 @@ mod tests {
 		collection: &TestCollection<SharedVector>,
 		cache_size: usize,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
-		let mut map = HashMap::with_capacity(collection.as_ref().len());
+		let mut map = HashMap::with_capacity(collection.to_vec_ref().len());
 		let mut c = 0;
-		for (doc_id, obj) in collection.as_ref() {
+		for (doc_id, obj) in collection.to_vec_ref() {
 			{
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
@@ -1875,10 +1875,10 @@ mod tests {
 		collection: &TestCollection<SharedVector>,
 		cache_size: usize,
 	) -> Result<HashMap<DocId, SharedVector>, Error> {
-		let mut map = HashMap::with_capacity(collection.as_ref().len());
+		let mut map = HashMap::with_capacity(collection.to_vec_ref().len());
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
-			for (doc_id, obj) in collection.as_ref() {
+			for (doc_id, obj) in collection.to_vec_ref() {
 				t.insert(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
@@ -1898,16 +1898,16 @@ mod tests {
 		collection: &TestCollection<SharedVector>,
 		cache_size: usize,
 	) -> Result<(), Error> {
-		for (doc_id, obj) in collection.as_ref() {
+		for (doc_id, obj) in collection.to_vec_ref() {
 			{
 				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
 					new_operation(&ds, t, TransactionType::Write, cache_size).await;
-				if collection.as_ref().len() <= 30 {
+				if collection.to_vec_ref().len() <= 30 {
 					assert!(
 						t.delete(stk, &mut tx, &mut &mut st, obj.clone(), *doc_id).await?,
 						"Delete failed - doc_id: {doc_id} - obj: {obj:?} - coll: {:?} ",
-						collection.as_ref()
+						collection.to_vec_ref()
 					);
 				} else {
 					assert!(
@@ -1943,8 +1943,8 @@ mod tests {
 		cache_size: usize,
 	) -> Result<(), Error> {
 		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
-		let max_knn = 20.max(collection.as_ref().len());
-		for (doc_id, obj) in collection.as_ref() {
+		let max_knn = 20.max(collection.to_vec_ref().len());
+		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let res = t.knn_search(&mut tx, &st, obj, knn).await?;
 				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
@@ -1958,7 +1958,7 @@ mod tests {
 						res.docs
 					);
 				}
-				let expected_len = collection.as_ref().len().min(knn);
+				let expected_len = collection.to_vec_ref().len().min(knn);
 				if expected_len != res.docs.len() {
 					#[cfg(debug_assertions)]
 					debug!("{:?}", res.visited_nodes);
@@ -1970,7 +1970,7 @@ mod tests {
 					"Wrong knn count - Expected: {} - Got: {} - Collection: {}",
 					expected_len,
 					res.docs.len(),
-					collection.as_ref().len(),
+					collection.to_vec_ref().len(),
 				)
 			}
 		}
@@ -2026,13 +2026,13 @@ mod tests {
 					"test_mtree_collection - Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
 					distance,
 					capacity,
-					collection.as_ref().len(),
+					collection.to_vec_ref().len(),
 					vector_type,
 				);
 				let ds = Datastore::new("memory").await?;
 				let mut t = MTree::new(MState::new(*capacity), distance.clone());
 
-				let map = if collection.as_ref().len() < 1000 {
+				let map = if collection.to_vec_ref().len() < 1000 {
 					insert_collection_one_by_one(stk, &ds, &mut t, &collection, cache_size).await?
 				} else {
 					insert_collection_batch(stk, &ds, &mut t, &collection, cache_size).await?

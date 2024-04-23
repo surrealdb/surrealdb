@@ -695,7 +695,6 @@ impl Parser<'_> {
 					let mut m0 = None;
 					let mut ml = None;
 					let mut ef_construction = 150;
-					let mut heuristic = false;
 					let mut extend_candidates = false;
 					let mut keep_pruned_connections = false;
 					loop {
@@ -724,10 +723,6 @@ impl Parser<'_> {
 								self.pop_peek();
 								ef_construction = self.next_token_value()?;
 							}
-							t!("HEURISTIC") => {
-								self.pop_peek();
-								heuristic = true;
-							}
 							t!("EXTEND_CANDIDATES") => {
 								self.pop_peek();
 								extend_candidates = true;
@@ -750,7 +745,6 @@ impl Parser<'_> {
 						m,
 						m0,
 						ef_construction,
-						heuristic,
 						extend_candidates,
 						keep_pruned_connections,
 						ml,

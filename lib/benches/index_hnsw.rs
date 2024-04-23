@@ -188,7 +188,6 @@ fn hnsw() -> HnswIndex {
 		m: M,
 		m0: M0,
 		ef_construction: EF_CONSTRUCTION,
-		heuristic: false,
 		extend_candidates: false,
 		keep_pruned_connections: false,
 		ml: (1.0 / (M as f64).ln()).into(),

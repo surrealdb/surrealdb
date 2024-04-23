@@ -83,7 +83,6 @@ keyword! {
 	Full => "FULL",
 	Function => "FUNCTION",
 	Group => "GROUP",
-	Heuristic => "HEURISTIC",
 	Highlights => "HIGHLIGHTS",
 	Hnsw => "HNSW",
 	Ignore => "IGNORE",

@@ -121,20 +121,6 @@ impl DoublePriorityQueue {
 		}
 		s
 	}
-
-	pub(super) fn to_set_limit(&self, mut limit: usize) -> HashSet<ElementId> {
-		let mut s = HashSet::with_capacity(self.1.min(limit));
-		for q in self.0.values() {
-			for v in q {
-				s.insert(*v);
-				limit -= 1;
-				if limit == 0 {
-					return s;
-				}
-			}
-		}
-		s
-	}
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -641,11 +627,15 @@ pub(super) mod tests {
 		NonUnique(Vec<(DocId, V)>),
 	}
 
-	impl<V: From<Vector>> AsRef<Vec<(DocId, V)>> for TestCollection<V> {
-		fn as_ref(&self) -> &Vec<(DocId, V)> {
+	impl<V: From<Vector>> TestCollection<V> {
+		pub(in crate::idx::trees) fn to_vec_ref(&self) -> &Vec<(DocId, V)> {
 			match self {
 				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
 			}
+		}
+
+		pub(in crate::idx::trees) fn len(&self) -> usize {
+			self.to_vec_ref().len()
 		}
 	}
 

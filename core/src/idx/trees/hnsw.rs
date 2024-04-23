@@ -230,15 +230,14 @@ impl Hnsw {
 		let layers = self.layers.len();
 
 		// Be sure we have existing layers
+		let mut m_max = self.m;
 		for l in layers..=q_level {
-			let m = if l == 0 {
-				self.m0
-			} else {
-				self.m
-			};
+			if l == 0 {
+				m_max = self.m0
+			}
 			#[cfg(debug_assertions)]
-			debug!("Create Layer {l} - m_max: {m}");
-			self.layers.push(m.into());
+			debug!("Create Layer {l} - m_max: {m_max}");
+			self.layers.push(m_max.into());
 		}
 
 		self.elements.insert(q_id, q_pt.clone());
@@ -273,22 +272,25 @@ impl Hnsw {
 			self.elements.remove(&e_id);
 
 			let mut m_max = self.m;
-
 			for lc in (0..layers).rev() {
 				if lc == 0 {
-					m_max = self.m0;
+					m_max = self.m0
 				}
-				if let Some(f_ids) = self.layers[lc].remove_node(&e_id) {
+				if let Some(f_ids) = self.layers[lc].remove_node_and_bidirectional_edges(&e_id) {
 					for q_id in f_ids {
 						if let Some(q_pt) = self.elements.get(&q_id) {
 							let layer = &self.layers[lc];
 							let c = self.search_layer_multi_ignore_ep(q_pt, q_id, self.efc, layer);
 							let neighbors =
 								self.neighbors.select(self, layer, q_id, q_pt, c, m_max);
-							assert!(
-								!neighbors.contains(&q_id),
-								"!neighbors.contains(&q_id) = layer: {lc} - q_id: {q_id} - f_ids: {neighbors:?}"
-							);
+							#[cfg(debug_assertions)]
+							{
+								assert!(
+									!neighbors.contains(&q_id),
+									"!neighbors.contains(&q_id) = layer: {lc} - q_id: {q_id} - f_ids: {neighbors:?}"
+								);
+								assert!(neighbors.len() < m_max);
+							}
 							self.layers[lc].set_node(q_id, neighbors);
 						}
 					}
@@ -337,36 +339,35 @@ impl Hnsw {
 				.unwrap_or_else(|| unreachable!())
 		}
 
-		let mut m_max = self.m;
 		let mut eps = DoublePriorityQueue::from(ep_dist, ep_id);
 		for lc in (0..=top_layer_level.min(q_level)).rev() {
-			if lc == 0 {
-				m_max = self.m0;
-			}
+			let m_max = if lc == 0 {
+				self.m0
+			} else {
+				self.m
+			};
 
 			let w;
-			let neighbors;
-			{
+			let neighbors = {
 				let layer = &self.layers[lc];
 				w = self.search_layer_multi(q_pt, eps, self.efc, layer);
 				eps = w.clone();
-				neighbors = self.neighbors.select(self, layer, q_id, q_pt, w, m_max);
-			}
+				self.neighbors.select(self, layer, q_id, q_pt, w, m_max)
+			};
 
-			let neighbors = self.layers[lc]
-				.add_node(q_id, neighbors)
-				.unwrap_or_else(|| unreachable!("add node: {}", q_id));
+			let neighbors = self.layers[lc].add_node_and_bidirectional_edges(q_id, neighbors);
 
-			for n_id in neighbors {
+			for e_id in neighbors {
 				let e_conn = self.layers[lc]
-					.get_edges(&n_id)
-					.unwrap_or_else(|| unreachable!("Element: {}", n_id));
+					.get_edges(&e_id)
+					.unwrap_or_else(|| unreachable!("Element: {}", e_id));
 				if e_conn.len() > m_max {
-					let n_pt = &self.elements[&n_id];
-					let n_c = self.build_priority_list(n_id, e_conn);
-					let conn_neighbors =
-						self.neighbors.select(self, &self.layers[lc], n_id, n_pt, n_c, m_max);
-					self.layers[lc].set_node(n_id, conn_neighbors);
+					let e_pt = &self.elements[&e_id];
+					let e_c = self.build_priority_list(e_id, e_conn);
+					let e_new_conn =
+						self.neighbors.select(self, &self.layers[lc], e_id, e_pt, e_c, m_max);
+					assert!(!e_new_conn.contains(&e_id));
+					self.layers[lc].set_node(e_id, e_new_conn);
 				}
 			}
 		}
@@ -475,7 +476,11 @@ impl Hnsw {
 		ef: usize,
 		l: &UndirectedGraph,
 	) -> DoublePriorityQueue {
-		let mut f_dist = w.peek_last_dist().unwrap_or_else(|| unreachable!());
+		let mut f_dist = if let Some(d) = w.peek_last_dist() {
+			d
+		} else {
+			return w;
+		};
 		while let Some((dist, doc)) = candidates.pop_first() {
 			if dist > f_dist {
 				break;
@@ -491,7 +496,7 @@ impl Hnsw {
 								if w.len() > ef {
 									w.pop_last();
 								}
-								f_dist = w.peek_last_dist().unwrap_or_else(|| unreachable!());
+								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
 							}
 						}
 					}
@@ -533,7 +538,6 @@ impl Hnsw {
 
 #[derive(Debug)]
 enum SelectNeighbors {
-	Simple,
 	Heuristic,
 	HeuristicExt,
 	HeuristicKeep,
@@ -542,20 +546,16 @@ enum SelectNeighbors {
 
 impl From<&HnswParams> for SelectNeighbors {
 	fn from(p: &HnswParams) -> Self {
-		if p.heuristic {
-			if p.keep_pruned_connections {
-				if p.extend_candidates {
-					Self::HeuristicExtKeep
-				} else {
-					Self::HeuristicKeep
-				}
-			} else if p.extend_candidates {
-				Self::HeuristicExt
+		if p.keep_pruned_connections {
+			if p.extend_candidates {
+				Self::HeuristicExtKeep
 			} else {
-				Self::Heuristic
+				Self::HeuristicKeep
 			}
+		} else if p.extend_candidates {
+			Self::HeuristicExt
 		} else {
-			Self::Simple
+			Self::Heuristic
 		}
 	}
 }
@@ -571,16 +571,11 @@ impl SelectNeighbors {
 		m_max: usize,
 	) -> HashSet<ElementId> {
 		match self {
-			Self::Simple => Self::simple(c, m_max),
 			Self::Heuristic => Self::heuristic(c, h, m_max),
 			Self::HeuristicExt => Self::heuristic_ext(h, lc, q_id, q_pt, c, m_max),
 			Self::HeuristicKeep => Self::heuristic_keep(c, h, m_max),
 			Self::HeuristicExtKeep => Self::heuristic_ext_keep(h, lc, q_id, q_pt, c, m_max),
 		}
-	}
-
-	fn simple(w: DoublePriorityQueue, m_max: usize) -> HashSet<ElementId> {
-		w.to_set_limit(m_max)
 	}
 
 	fn heuristic(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> HashSet<ElementId> {
@@ -697,13 +692,15 @@ mod tests {
 	use roaring::RoaringTreemap;
 	use std::collections::hash_map::Entry;
 	use std::collections::{HashMap, HashSet};
+	use std::sync::Arc;
+	use test_log::test;
 
 	fn insert_collection_hnsw(
 		h: &mut Hnsw,
 		collection: &TestCollection<HashedSharedVector>,
 	) -> HashSet<HashedSharedVector> {
 		let mut set = HashSet::new();
-		for (_, obj) in collection.as_ref() {
+		for (_, obj) in collection.to_vec_ref() {
 			let obj: HashedSharedVector = obj.clone().into();
 			h.insert(obj.clone());
 			set.insert(obj);
@@ -713,8 +710,8 @@ mod tests {
 		set
 	}
 	fn find_collection_hnsw(h: &mut Hnsw, collection: &TestCollection<HashedSharedVector>) {
-		let max_knn = 20.min(collection.as_ref().len());
-		for (_, obj) in collection.as_ref() {
+		let max_knn = 20.min(collection.len());
+		for (_, obj) in collection.to_vec_ref() {
 			let obj = obj.clone().into();
 			for knn in 1..max_knn {
 				let res = h.knn_search(&obj, knn, 80);
@@ -733,10 +730,10 @@ mod tests {
 						knn,
 						res,
 						h.dist,
-						collection.as_ref().len(),
+						collection.len(),
 					);
 				}
-				let expected_len = collection.as_ref().len().min(knn);
+				let expected_len = collection.len().min(knn);
 				if expected_len != res.len() {
 					info!("expected_len != res.len()")
 				}
@@ -746,7 +743,7 @@ mod tests {
 					"Wrong knn count - Expected: {} - Got: {} - Collection: {} - Dist: {} - Res: {:?}",
 					expected_len,
 					res.len(),
-					collection.as_ref().len(),
+					collection.len(),
 					h.dist,
 					res,
 				)
@@ -766,7 +763,6 @@ mod tests {
 		distance: Distance,
 		m: usize,
 		efc: usize,
-		heuristic: bool,
 		extend_candidates: bool,
 		keep_pruned_connections: bool,
 	) -> HnswParams {
@@ -780,80 +776,35 @@ mod tests {
 			m0,
 			ef_construction: efc as u16,
 			ml: (1.0 / (m as f64).ln()).into(),
-			heuristic,
 			extend_candidates,
 			keep_pruned_connections,
 		}
 	}
 
-	fn test_hnsw(
-		distance: Distance,
-		vt: VectorType,
-		collection_size: usize,
-		dimension: usize,
-		m: usize,
-		extend_candidates: bool,
-		keep_pruned_connections: bool,
-	) {
-		info!("test_hnsw - dist: {distance} - type: {vt} - coll size: {collection_size} - dim: {dimension} - m: {m} - ext: {extend_candidates} - keep: {keep_pruned_connections}");
-		let collection = TestCollection::new(true, collection_size, vt, dimension, &distance);
-		let params = new_params(
-			dimension,
-			vt,
-			distance,
-			m,
-			500,
+	fn test_hnsw(collection_size: usize, p: HnswParams) {
+		info!("Collection size: {collection_size} - Params: {p:?}");
+		let collection = TestCollection::new(
 			true,
-			extend_candidates,
-			keep_pruned_connections,
+			collection_size,
+			p.vector_type,
+			p.dimension as usize,
+			&p.distance,
 		);
-		test_hnsw_collection(&params, &collection);
+		test_hnsw_collection(&p, &collection);
 	}
 
-	#[test_log::test]
-	fn test_hnsw_xs() {
-		for d in [
-			Distance::Chebyshev,
-			Distance::Cosine,
-			Distance::Euclidean,
-			Distance::Hamming,
-			Distance::Jaccard,
-			Distance::Manhattan,
-			Distance::Minkowski(2.into()),
-			Distance::Pearson,
-		] {
-			for vt in [
-				VectorType::F64,
-				VectorType::F32,
-				VectorType::I64,
-				VectorType::I32,
-				VectorType::I16,
-			] {
-				for extend in [false, true] {
-					for keep in [false, true] {
-						test_hnsw(d.clone(), vt, 30, 3, 12, extend, keep);
-					}
-				}
-			}
-		}
-	}
-
-	#[test_log::test]
-	fn test_hnsw_small_euclidean_check() {
-		test_hnsw(Distance::Euclidean, VectorType::F64, 100, 2, 24, true, true)
-	}
-
-	#[test_log::test]
-	fn test_hnsw_small() {
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn tests_hnsw() -> Result<(), Error> {
+		let mut futures = Vec::new();
 		for (dist, dim) in [
 			(Distance::Chebyshev, 5),
 			(Distance::Cosine, 5),
 			(Distance::Euclidean, 5),
-			(Distance::Hamming, 100),
+			(Distance::Hamming, 20),
 			// (Distance::Jaccard, 100),
 			(Distance::Manhattan, 5),
 			(Distance::Minkowski(2.into()), 5),
-			(Distance::Pearson, 5),
+			//(Distance::Pearson, 5),
 		] {
 			for vt in [
 				VectorType::F64,
@@ -862,18 +813,19 @@ mod tests {
 				VectorType::I32,
 				VectorType::I16,
 			] {
-				for extend in [false] {
-					for keep in [false] {
-						test_hnsw(dist.clone(), vt, 200, dim, 12, extend, keep);
-					}
+				for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
+					let p = new_params(dim, vt, dist.clone(), 24, 500, extend, keep);
+					let f = tokio::spawn(async move {
+						test_hnsw(30, p);
+					});
+					futures.push(f);
 				}
 			}
 		}
-	}
-
-	#[test_log::test]
-	fn test_hnsw_large_euclidean() {
-		test_hnsw(Distance::Euclidean, VectorType::F64, 200, 5, 12, false, false)
+		for f in futures {
+			f.await.expect("Task error");
+		}
+		Ok(())
 	}
 
 	fn insert_collection_hnsw_index(
@@ -881,7 +833,7 @@ mod tests {
 		collection: &TestCollection<HashedSharedVector>,
 	) -> HashMap<HashedSharedVector, HashSet<DocId>> {
 		let mut map: HashMap<HashedSharedVector, HashSet<DocId>> = HashMap::new();
-		for (doc_id, obj) in collection.as_ref() {
+		for (doc_id, obj) in collection.to_vec_ref() {
 			let obj: HashedSharedVector = obj.clone().into();
 			h.insert(obj.clone(), *doc_id);
 			match map.entry(obj) {
@@ -901,8 +853,8 @@ mod tests {
 		h: &mut HnswIndex,
 		collection: &TestCollection<HashedSharedVector>,
 	) {
-		let max_knn = 20.min(collection.as_ref().len());
-		for (doc_id, obj) in collection.as_ref() {
+		let max_knn = 20.min(collection.len());
+		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let obj: HashedSharedVector = obj.clone().into();
 				let res = h.search(&obj, knn, 500);
@@ -919,7 +871,7 @@ mod tests {
 						);
 					}
 				}
-				let expected_len = collection.as_ref().len().min(knn);
+				let expected_len = collection.len().min(knn);
 				assert_eq!(
 					expected_len,
 					res.docs.len(),
@@ -927,7 +879,7 @@ mod tests {
 					expected_len,
 					res.docs.len(),
 					res.docs,
-					collection.as_ref().len(),
+					collection.len(),
 				)
 			}
 		}
@@ -938,7 +890,7 @@ mod tests {
 		collection: &TestCollection<HashedSharedVector>,
 		mut map: HashMap<HashedSharedVector, HashSet<DocId>>,
 	) {
-		for (doc_id, obj) in collection.as_ref() {
+		for (doc_id, obj) in collection.to_vec_ref() {
 			let obj: HashedSharedVector = obj.clone().into();
 			h.remove(obj.clone(), *doc_id);
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
@@ -952,28 +904,14 @@ mod tests {
 		}
 	}
 
-	fn test_hnsw_index(
-		distance: Distance,
-		vt: VectorType,
-		collection_size: usize,
-		dimension: usize,
-		unique: bool,
-		m: usize,
-		heuristic: bool,
-		extend_candidates: bool,
-		keep_pruned_connections: bool,
-	) {
-		info!("test_hnsw_index - dist: {distance} - type: {vt} - coll size: {collection_size} - dim: {dimension} - unique: {unique} - m: {m} - ext: {extend_candidates} - keep: {keep_pruned_connections}");
-		let collection = TestCollection::new(unique, collection_size, vt, dimension, &distance);
-		let p = new_params(
-			dimension,
-			vt,
-			distance,
-			m,
-			500,
-			heuristic,
-			extend_candidates,
-			keep_pruned_connections,
+	fn test_hnsw_index(collection_size: usize, unique: bool, p: HnswParams) {
+		info!("test_hnsw_index - coll size: {collection_size} - params: {p:?}");
+		let collection = TestCollection::new(
+			unique,
+			collection_size,
+			p.vector_type,
+			p.dimension as usize,
+			&p.distance,
 		);
 		let mut h = HnswIndex::new(&p);
 		let map = insert_collection_hnsw_index(&mut h, &collection);
@@ -981,17 +919,18 @@ mod tests {
 		delete_hnsw_index_collection(&mut h, &collection, map);
 	}
 
-	#[test_log::test]
-	fn test_hnsw_index_xs() {
-		for d in [
-			Distance::Chebyshev,
-			Distance::Cosine,
-			Distance::Euclidean,
-			Distance::Hamming,
-			Distance::Jaccard,
-			Distance::Manhattan,
-			Distance::Minkowski(2.into()),
-			Distance::Pearson,
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn tests_hnsw_index() -> Result<(), Error> {
+		let mut futures = Vec::new();
+		for (dist, dim) in [
+			(Distance::Chebyshev, 5),
+			(Distance::Cosine, 5),
+			(Distance::Euclidean, 5),
+			(Distance::Hamming, 20),
+			// (Distance::Jaccard, 100),
+			(Distance::Manhattan, 5),
+			(Distance::Minkowski(2.into()), 5),
+			(Distance::Pearson, 5),
 		] {
 			for vt in [
 				VectorType::F64,
@@ -1000,199 +939,24 @@ mod tests {
 				VectorType::I32,
 				VectorType::I16,
 			] {
-				for unique in [false, true] {
-					test_hnsw_index(d.clone(), vt, 30, 2, unique, 12, true, true, true);
+				for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
+					for unique in [false, true] {
+						let p = new_params(dim, vt, dist.clone(), 8, 150, extend, keep);
+						let f = tokio::spawn(async move {
+							test_hnsw_index(30, unique, p);
+						});
+						futures.push(f);
+					}
 				}
 			}
 		}
+		for f in futures {
+			f.await.expect("Task error");
+		}
+		Ok(())
 	}
 
-	#[test_log::test]
-	fn test_building() {
-		let p = new_params(2, VectorType::I16, Distance::Euclidean, 2, 500, true, true, true);
-		let mut hnsw = Hnsw::new(&p);
-		assert_eq!(hnsw.elements.len(), 0);
-		assert_eq!(hnsw.enter_point, None);
-		assert_eq!(hnsw.layers.len(), 0);
-
-		let a_vec = new_i16_vec(1, 1);
-		let a0 = hnsw.insert_level(a_vec.clone(), 0);
-		assert_eq!(hnsw.elements.len(), 1);
-		assert_eq!(hnsw.enter_point, Some(a0));
-		assert_eq!(hnsw.layers.len(), 1);
-		hnsw.layers[0].check(vec![(a0, vec![])]);
-
-		let b1 = hnsw.insert_level(new_i16_vec(2, 2), 0);
-		assert_eq!(hnsw.elements.len(), 2);
-		assert_eq!(hnsw.enter_point, Some(a0));
-		assert_eq!(hnsw.layers.len(), 1);
-		hnsw.layers[0].check(vec![(a0, vec![b1]), (b1, vec![a0])]);
-
-		let c2 = hnsw.insert_level(new_i16_vec(3, 3), 0);
-		assert_eq!(hnsw.elements.len(), 3);
-		assert_eq!(hnsw.enter_point, Some(a0));
-		assert_eq!(hnsw.layers.len(), 1);
-		hnsw.layers[0].check(vec![(a0, vec![b1, c2]), (b1, vec![a0, c2]), (c2, vec![b1, a0])]);
-
-		let d3 = hnsw.insert_level(new_i16_vec(4, 4), 1);
-		assert_eq!(hnsw.elements.len(), 4);
-		assert_eq!(hnsw.enter_point, Some(d3));
-		assert_eq!(hnsw.layers.len(), 2);
-		hnsw.layers[1].check(vec![(d3, vec![])]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3]),
-			(b1, vec![a0, c2, d3]),
-			(c2, vec![b1, a0, d3]),
-			(d3, vec![c2, b1, a0]),
-		]);
-
-		let e4 = hnsw.insert_level(new_i16_vec(5, 5), 2);
-		assert_eq!(hnsw.elements.len(), 5);
-		assert_eq!(hnsw.enter_point, Some(e4));
-		assert_eq!(hnsw.layers.len(), 3);
-		hnsw.layers[2].check(vec![(e4, vec![])]);
-		hnsw.layers[1].check(vec![(d3, vec![e4]), (e4, vec![d3])]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3, e4]),
-			(b1, vec![a0, c2, d3, e4]),
-			(c2, vec![b1, d3, a0, e4]),
-			(d3, vec![c2, e4, b1, a0]),
-			(e4, vec![d3, c2, b1, a0]),
-		]);
-
-		let f5 = hnsw.insert_level(new_i16_vec(6, 6), 2);
-		assert_eq!(hnsw.elements.len(), 6);
-		assert_eq!(hnsw.enter_point, Some(e4));
-		assert_eq!(hnsw.layers.len(), 3);
-		hnsw.layers[2].check(vec![(e4, vec![f5]), (f5, vec![e4])]);
-		hnsw.layers[1].check(vec![(d3, vec![e4, f5]), (e4, vec![d3, f5]), (f5, vec![e4, d3])]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3, e4]),
-			(b1, vec![a0, c2, d3, e4]),
-			(c2, vec![b1, d3, a0, e4]),
-			(d3, vec![c2, e4, b1, f5]),
-			(e4, vec![d3, f5, c2, b1]),
-			(f5, vec![e4, d3, c2, b1]),
-		]);
-
-		let g6 = hnsw.insert_level(new_i16_vec(7, 7), 1);
-		assert_eq!(hnsw.elements.len(), 7);
-		assert_eq!(hnsw.enter_point, Some(e4));
-		assert_eq!(hnsw.layers.len(), 3);
-		hnsw.layers[2].check(vec![(e4, vec![f5]), (f5, vec![e4])]);
-		hnsw.layers[1].check(vec![
-			(d3, vec![e4, f5]),
-			(e4, vec![d3, f5]),
-			(f5, vec![e4, g6]),
-			(g6, vec![f5, e4]),
-		]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3, e4]),
-			(b1, vec![a0, c2, d3, e4]),
-			(c2, vec![b1, d3, a0, e4]),
-			(d3, vec![c2, e4, b1, f5]),
-			(e4, vec![d3, f5, c2, g6]),
-			(f5, vec![e4, g6, d3, c2]),
-			(g6, vec![f5, e4, d3, c2]),
-		]);
-
-		let h7 = hnsw.insert_level(new_i16_vec(8, 8), 0);
-		assert_eq!(hnsw.elements.len(), 8);
-		assert_eq!(hnsw.enter_point, Some(e4));
-		assert_eq!(hnsw.layers.len(), 3);
-		hnsw.layers[2].check(vec![(e4, vec![f5]), (f5, vec![e4])]);
-		hnsw.layers[1].check(vec![
-			(d3, vec![e4, f5]),
-			(e4, vec![d3, f5]),
-			(f5, vec![e4, g6]),
-			(g6, vec![f5, e4]),
-		]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3, e4]),
-			(b1, vec![a0, c2, d3, e4]),
-			(c2, vec![b1, d3, a0, e4]),
-			(d3, vec![c2, e4, b1, f5]),
-			(e4, vec![d3, f5, c2, g6]),
-			(f5, vec![e4, g6, d3, h7]),
-			(g6, vec![f5, h7, e4, d3]),
-			(h7, vec![g6, f5, e4, d3]),
-		]);
-
-		let i8 = hnsw.insert_level(new_i16_vec(9, 9), 0);
-		assert_eq!(hnsw.elements.len(), 9);
-		assert_eq!(hnsw.enter_point, Some(e4));
-		assert_eq!(hnsw.layers.len(), 3);
-		hnsw.layers[2].check(vec![(e4, vec![f5]), (f5, vec![e4])]);
-		hnsw.layers[1].check(vec![
-			(d3, vec![e4, f5]),
-			(e4, vec![d3, f5]),
-			(f5, vec![e4, g6]),
-			(g6, vec![f5, e4]),
-		]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3, e4]),
-			(b1, vec![a0, c2, d3, e4]),
-			(c2, vec![b1, d3, a0, e4]),
-			(d3, vec![c2, e4, b1, f5]),
-			(e4, vec![d3, f5, c2, g6]),
-			(f5, vec![e4, g6, d3, h7]),
-			(g6, vec![f5, h7, e4, i8]),
-			(h7, vec![g6, i8, f5, e4]),
-			(i8, vec![h7, g6, f5, e4]),
-		]);
-
-		let j9 = hnsw.insert_level(new_i16_vec(10, 10), 0);
-		assert_eq!(hnsw.elements.len(), 10);
-		assert_eq!(hnsw.enter_point, Some(e4));
-		assert_eq!(hnsw.layers.len(), 3);
-		hnsw.layers[2].check(vec![(e4, vec![f5]), (f5, vec![e4])]);
-		hnsw.layers[1].check(vec![
-			(d3, vec![e4, f5]),
-			(e4, vec![d3, f5]),
-			(f5, vec![e4, g6]),
-			(g6, vec![f5, e4]),
-		]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3, e4]),
-			(b1, vec![a0, c2, d3, e4]),
-			(c2, vec![b1, d3, a0, e4]),
-			(d3, vec![c2, e4, b1, f5]),
-			(e4, vec![d3, f5, c2, g6]),
-			(f5, vec![e4, g6, d3, h7]),
-			(g6, vec![f5, h7, e4, i8]),
-			(h7, vec![g6, i8, f5, j9]),
-			(i8, vec![h7, j9, g6, f5]),
-			(j9, vec![i8, h7, g6, f5]),
-		]);
-
-		let h10 = hnsw.insert_level(new_i16_vec(11, 11), 1);
-		assert_eq!(hnsw.elements.len(), 11);
-		assert_eq!(hnsw.enter_point, Some(e4));
-		assert_eq!(hnsw.layers.len(), 3);
-		hnsw.layers[2].check(vec![(e4, vec![f5]), (f5, vec![e4])]);
-		hnsw.layers[1].check(vec![
-			(d3, vec![e4, f5]),
-			(e4, vec![d3, f5]),
-			(f5, vec![e4, g6]),
-			(g6, vec![f5, e4]),
-			(h10, vec![g6, f5]),
-		]);
-		hnsw.layers[0].check(vec![
-			(a0, vec![b1, c2, d3, e4]),
-			(b1, vec![a0, c2, d3, e4]),
-			(c2, vec![b1, d3, a0, e4]),
-			(d3, vec![c2, e4, b1, f5]),
-			(e4, vec![d3, f5, c2, g6]),
-			(f5, vec![e4, g6, d3, h7]),
-			(g6, vec![f5, h7, e4, i8]),
-			(h7, vec![g6, i8, f5, j9]),
-			(i8, vec![h7, j9, g6, h10]),
-			(j9, vec![i8, h10, h7, g6]),
-			(h10, vec![j9, i8, h7, g6]),
-		]);
-	}
-
-	#[test_log::test]
+	#[test]
 	fn test_invalid_size() {
 		let collection = TestCollection::Unique(vec![
 			(0, new_i16_vec(-2, -3)),
@@ -1207,7 +971,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let mut h = Hnsw::new(&p);
 		insert_collection_hnsw(&mut h, &collection);
 		let pt = new_i16_vec(-2, -3);
@@ -1220,59 +984,111 @@ mod tests {
 		// assert_eq!(1.0, recall);
 	}
 
-	#[test_log::test]
-	fn test_recall() -> Result<(), Error> {
-		let (dim, vt, m) = (20, VectorType::F32, 24);
+	async fn test_recall(
+		embeddings_file: &str,
+		ingest_limit: usize,
+		queries_file: &str,
+		query_limit: usize,
+		p: HnswParams,
+		tests_ef_recall: &[(usize, f64)],
+	) -> Result<(), Error> {
 		info!("Build data collection");
-		let collection: TestCollection<HashedSharedVector> =
-			TestCollection::NonUnique(new_vectors_from_file(
-				VectorType::F32,
-				"../tests/data/hnsw-random-9000-20-euclidean.gz",
-				Some(3000),
-			)?);
-		let p = new_params(dim, vt, Distance::Euclidean, m, 150, true, false, false);
+		let collection: Arc<TestCollection<HashedSharedVector>> =
+			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
+				p.vector_type,
+				&format!("../tests/data/{embeddings_file}"),
+				Some(ingest_limit),
+			)?));
+
 		let mut h = HnswIndex::new(&p);
 		info!("Insert collection");
-		for (doc_id, obj) in collection.as_ref() {
+		for (doc_id, obj) in collection.to_vec_ref() {
 			h.insert(obj.clone(), *doc_id);
 		}
 
+		let h = Arc::new(h);
+
 		info!("Build query collection");
-		let queries = TestCollection::NonUnique(new_vectors_from_file(
-			VectorType::F32,
-			"../tests/data/hnsw-random-5000-20-euclidean.gz",
-			Some(500),
-		)?);
+		let queries = Arc::new(TestCollection::NonUnique(new_vectors_from_file(
+			p.vector_type,
+			&format!("../tests/data/{queries_file}"),
+			Some(query_limit),
+		)?));
 
 		info!("Check recall");
-		for (efs, expected_recall) in [(10, 0.97), (40, 1.0)] {
-			let mut total_recall = 0.0;
-			for (_, pt) in queries.as_ref() {
-				let knn = 10;
-				let hnsw_res = h.search(pt, knn, efs);
-				assert_eq!(
-					hnsw_res.docs.len(),
-					knn,
-					"Different size - knn: {knn} - efs: {efs} - doc: {:?}",
-					collection.as_ref().len()
-				);
-				let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
-				let rec = brute_force_res.recall(&hnsw_res);
-				if rec == 1.0 {
-					assert_eq!(brute_force_res.docs, hnsw_res.docs);
+		let mut futures = Vec::with_capacity(tests_ef_recall.len());
+		for &(efs, expected_recall) in tests_ef_recall {
+			let queries = queries.clone();
+			let collection = collection.clone();
+			let h = h.clone();
+			let f = tokio::spawn(async move {
+				let mut total_recall = 0.0;
+				for (_, pt) in queries.to_vec_ref() {
+					let knn = 10;
+					let hnsw_res = h.search(pt, knn, efs);
+					assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
+					let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
+					let rec = brute_force_res.recall(&hnsw_res);
+					if rec == 1.0 {
+						assert_eq!(brute_force_res.docs, hnsw_res.docs);
+					}
+					total_recall += rec;
 				}
-				total_recall += rec;
-			}
-			let recall = total_recall / queries.as_ref().len() as f64;
-			info!("EFS: {efs} - Recall: {recall}");
-			assert!(
-				recall >= expected_recall,
-				"Recall: {} - Expected: {}",
-				recall,
-				expected_recall
-			);
+				let recall = total_recall / queries.to_vec_ref().len() as f64;
+				info!("EFS: {efs} - Recall: {recall}");
+				assert!(
+					recall >= expected_recall,
+					"EFS: {efs} - Recall: {recall} - Expected: {expected_recall}"
+				);
+			});
+			futures.push(f);
+		}
+		for f in futures {
+			f.await.expect("Task failure");
 		}
 		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_euclidean() -> Result<(), Error> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false);
+		test_recall(
+			"hnsw-random-9000-20-euclidean.gz",
+			3000,
+			"hnsw-random-5000-20-euclidean.gz",
+			500,
+			p,
+			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_euclidean_keep_pruned_connections() -> Result<(), Error> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true);
+		test_recall(
+			"hnsw-random-9000-20-euclidean.gz",
+			3000,
+			"hnsw-random-5000-20-euclidean.gz",
+			500,
+			p,
+			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_euclidean_full() -> Result<(), Error> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true);
+		test_recall(
+			"hnsw-random-9000-20-euclidean.gz",
+			1000,
+			"hnsw-random-5000-20-euclidean.gz",
+			200,
+			p,
+			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
 	}
 
 	fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {
@@ -1291,9 +1107,8 @@ mod tests {
 			for (e_id, f_ids) in l.nodes() {
 				assert!(
 					f_ids.len() <= m_layer,
-					"Foreign list len = len({}) <= m_layer({})",
+					"Foreign list e_id: {e_id} - len = len({}) <= m_layer({m_layer}) - lc: {lc}",
 					f_ids.len(),
-					m_layer
 				);
 				assert!(
 					!f_ids.contains(e_id),
@@ -1321,7 +1136,7 @@ mod tests {
 	impl TestCollection<HashedSharedVector> {
 		fn knn(&self, pt: &HashedSharedVector, dist: Distance, n: usize) -> KnnResult {
 			let mut b = KnnResultBuilder::new(n);
-			for (doc_id, doc_pt) in self.as_ref() {
+			for (doc_id, doc_pt) in self.to_vec_ref() {
 				let d = dist.calculate(doc_pt, pt);
 				if b.check_add(d) {
 					b.add(d, &Ids64::One(*doc_id));

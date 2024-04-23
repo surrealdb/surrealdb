@@ -37,56 +37,28 @@ impl UndirectedGraph {
 			false
 		}
 	}
-	pub(super) fn add_node(
+
+	pub(super) fn add_node_and_bidirectional_edges(
 		&mut self,
 		node: ElementId,
 		edges: HashSet<ElementId>,
-	) -> Option<Vec<ElementId>> {
-		let edges: Vec<ElementId> = if let HEntry::Vacant(e) = self.nodes.entry(node) {
-			e.insert(edges).iter().copied().collect()
-		} else {
-			return None;
-		};
-		// Bidirectional
+	) -> Vec<ElementId> {
+		let mut r = Vec::with_capacity(edges.len());
 		for &e in &edges {
 			self.nodes.entry(e).or_default().insert(node);
+			r.push(e);
 		}
-		Some(edges)
+		self.nodes.insert(node, edges);
+		r
+	}
+	pub(super) fn set_node(&mut self, node: ElementId, new_edges: HashSet<ElementId>) {
+		self.nodes.insert(node, new_edges);
 	}
 
-	pub(super) fn set_node(&mut self, node: ElementId, edges: HashSet<ElementId>) {
-		let (to_add, to_remove) = match self.nodes.entry(node) {
-			HEntry::Occupied(mut e) => {
-				let old_edges = e.get();
-				let mut to_remove = Vec::new();
-				for old_edge in old_edges {
-					if !edges.contains(old_edge) {
-						to_remove.push(*old_edge);
-					}
-				}
-				let mut to_add = Vec::new();
-				for new_edge in &edges {
-					if !old_edges.contains(new_edge) {
-						to_add.push(*new_edge);
-					}
-				}
-				e.insert(edges);
-				(to_add, to_remove)
-			}
-			HEntry::Vacant(e) => {
-				let to_add: Vec<ElementId> = e.insert(edges).iter().copied().collect();
-				(to_add, vec![])
-			}
-		};
-		for n in to_add {
-			self.nodes.entry(n).or_default().insert(node);
-		}
-		for n in to_remove {
-			self.nodes.entry(n).or_default().remove(&node);
-		}
-	}
-
-	pub(super) fn remove_node(&mut self, node: &ElementId) -> Option<HashSet<ElementId>> {
+	pub(super) fn remove_node_and_bidirectional_edges(
+		&mut self,
+		node: &ElementId,
+	) -> Option<HashSet<ElementId>> {
 		if let Some(edges) = self.nodes.remove(node) {
 			for edge in &edges {
 				if let Some(edges_to_node) = self.nodes.get_mut(edge) {
@@ -139,35 +111,20 @@ mod tests {
 		g.check(vec![(0, vec![])]);
 
 		// Adding a node with one edge
-		let res = g.add_node(1, HashSet::from([0]));
-		assert_eq!(res, Some(vec![0]));
-		g.check(vec![(0, vec![1]), (1, vec![0])]);
-
-		// Adding the same node
-		let res = g.add_node(1, HashSet::from([2]));
-		assert_eq!(res, None);
+		let res = g.add_node_and_bidirectional_edges(1, HashSet::from([0]));
+		assert_eq!(res, vec![0]);
 		g.check(vec![(0, vec![1]), (1, vec![0])]);
 
 		// Adding a node with two edges
-		let res = g.add_node(2, HashSet::from([0, 1]));
-		assert_eq!(
-			res.map(|mut v| {
-				v.sort();
-				v
-			}),
-			Some(vec![0, 1])
-		);
+		let mut res = g.add_node_and_bidirectional_edges(2, HashSet::from([0, 1]));
+		res.sort();
+		assert_eq!(res, vec![0, 1]);
 		g.check(vec![(0, vec![1, 2]), (1, vec![0, 2]), (2, vec![0, 1])]);
 
 		// Adding a node with two edges
-		let res = g.add_node(3, HashSet::from([1, 2]));
-		assert_eq!(
-			res.map(|mut v| {
-				v.sort();
-				v
-			}),
-			Some(vec![1, 2])
-		);
+		let mut res = g.add_node_and_bidirectional_edges(3, HashSet::from([1, 2]));
+		res.sort();
+		assert_eq!(res, vec![1, 2]);
 		g.check(vec![(0, vec![1, 2]), (1, vec![0, 2, 3]), (2, vec![0, 1, 3]), (3, vec![1, 2])]);
 
 		// Change the edges of a node
@@ -179,7 +136,7 @@ mod tests {
 		g.check(vec![(0, vec![1, 2, 3]), (1, vec![0, 2]), (2, vec![0, 1, 3]), (3, vec![0, 2])]);
 
 		// Remove a node
-		let res = g.remove_node(&2);
+		let res = g.remove_node_and_bidirectional_edges(&2);
 		assert_eq!(
 			res.map(|v| {
 				let mut v: Vec<ElementId> = v.into_iter().collect();
@@ -191,7 +148,7 @@ mod tests {
 		g.check(vec![(0, vec![1, 3]), (1, vec![0]), (3, vec![0])]);
 
 		// Remove again
-		let res = g.remove_node(&2);
+		let res = g.remove_node_and_bidirectional_edges(&2);
 		assert_eq!(res, None);
 
 		// Set a non existing node

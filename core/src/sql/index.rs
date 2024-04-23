@@ -113,7 +113,6 @@ pub struct HnswParams {
 	pub m: u16,
 	pub m0: u16,
 	pub ef_construction: u16,
-	pub heuristic: bool,
 	pub extend_candidates: bool,
 	pub keep_pruned_connections: bool,
 	pub ml: Number,
@@ -228,9 +227,6 @@ impl Display for Index {
 					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} ML {}",
 					p.dimension, p.distance, p.vector_type, p.ef_construction, p.m, p.m0, p.ml
 				)?;
-				if p.heuristic {
-					f.write_str(" HEURISTIC")?
-				}
 				if p.extend_candidates {
 					f.write_str(" EXTEND_CANDIDATES")?
 				}

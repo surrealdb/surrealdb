@@ -222,7 +222,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [8,9,10,11];
-		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 HEURISTIC;
+		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
 		LET $pt = [2,3,4,5];
 		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,100|> $pt;
 		SELECT id FROM pts WHERE point <|2,100|> $pt EXPLAIN;
