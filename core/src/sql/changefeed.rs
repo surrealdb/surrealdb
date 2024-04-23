@@ -1,7 +1,7 @@
 use crate::sql::duration::Duration;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Kind::Object;
-use crate::sql::Value;
+
+use crate::sql::{Object, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -42,10 +42,10 @@ impl InfoStructure for ChangeFeed {
 		} = self;
 		let mut acc = Object::default();
 
-		acc.insert("expiry", expiry.to_string().into());
+		acc.insert("expiry".to_string(), Duration(expiry).to_string().into());
 
-		acc.insert("store_original", store_original.into());
+		acc.insert("store_original".to_string(), store_original.into());
 
-		Value::Object(acc);
+		Value::Object(acc)
 	}
 }
