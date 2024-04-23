@@ -1,5 +1,6 @@
 use crate::sql::duration::Duration;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::Kind::Object;
 use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,16 @@ impl Default for ChangeFeed {
 }
 impl InfoStructure for ChangeFeed {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		let Self {
+			expiry,
+			store_original,
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("expiry", expiry.to_string().into());
+
+		acc.insert("store_original", store_original.into());
+
+		Value::Object(acc);
 	}
 }
