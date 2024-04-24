@@ -157,9 +157,9 @@ async fn process_change_set_for_notifications(
 					"There are {} table mutations being prepared for notifications",
 					table_mutations.1.len()
 				);
-				for (i, mutation) in table_mutations.1.iter().enumerate() {
+				for (_i, mutation) in table_mutations.1.iter().enumerate() {
 					#[cfg(debug_assertions)]
-					trace!("[{} @ {:?}] Processing table mutation: {:?}   Constructing document from mutation", i, change_vs, mutation);
+					trace!("[{} @ {:?}] Processing table mutation: {:?}   Constructing document from mutation", _i, change_vs, mutation);
 					if let Some(doc) = construct_document(mutation)? {
 						// We know we are only processing a single LQ at a time, so we can limit notifications to 1
 						let notification_capacity = 1;
