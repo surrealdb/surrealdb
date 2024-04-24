@@ -289,6 +289,10 @@ impl Hnsw {
 									!neighbors.contains(&q_id),
 									"!neighbors.contains(&q_id) = layer: {lc} - q_id: {q_id} - f_ids: {neighbors:?}"
 								);
+								assert!(
+									!neighbors.contains(&e_id),
+									"!neighbors.contains(&e_id) = layer: {lc} - e_id: {e_id} - f_ids: {neighbors:?}"
+								);
 								assert!(neighbors.len() < m_max);
 							}
 							self.layers[lc].set_node(q_id, neighbors);
@@ -979,9 +983,6 @@ mod tests {
 		let efs = 501;
 		let hnsw_res = h.knn_search(&pt, knn, efs);
 		assert_eq!(hnsw_res.len(), knn);
-		// let brute_force_res = collection.knn(&pt, Distance::Euclidean, knn);
-		// let recall = brute_force_res.recall(&hnsw_res);
-		// assert_eq!(1.0, recall);
 	}
 
 	async fn test_recall(
@@ -1092,8 +1093,6 @@ mod tests {
 	}
 
 	fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {
-		// let mut deleted_foreign_elements = 0;
-		// let mut foreign_elements = 0;
 		let mut layer_size = h.elements.len();
 		assert_eq!(layer_size, expected_count);
 		for (lc, l) in h.layers.iter().enumerate() {
@@ -1118,19 +1117,8 @@ mod tests {
 					h.elements.contains_key(e_id),
 					"h.elements.contains_key(e_id) - layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"
 				);
-
-				// for f_id in f_ids {
-				// 	if !h.elements.contains_key(f_id) {
-				// 		deleted_foreign_elements += 1;
-				// 	}
-				// }
-				// foreign_elements += f_ids.len();
 			}
 		}
-		// if deleted_foreign_elements > 0 && deleted_foreign_elements > 0 {
-		// 	let miss_rate = deleted_foreign_elements as f64 / foreign_elements as f64;
-		// 	assert!(miss_rate < 0.5, "Miss rate: {miss_rate}");
-		// }
 	}
 
 	impl TestCollection<HashedSharedVector> {
