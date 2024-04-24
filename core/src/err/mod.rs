@@ -980,6 +980,21 @@ pub enum Error {
 	/// The access method cannot be defined on the requested level
 	#[error("The access method cannot be defined on the requested level")]
 	AccessLevelMismatch,
+
+	#[error("The access method does not exist")]
+	AccessNotFound,
+
+	#[error("The record access signup query failed")]
+	AccessRecordSignupQueryFailed,
+
+	#[error("The record access signin query failed")]
+	AccessRecordSigninQueryFailed,
+
+	#[error("This record access method does not allow signup")]
+	AccessRecordNoSignup,
+
+	#[error("This record access method does not allow signin")]
+	AccessRecordNoSignin,
 }
 
 impl From<Error> for String {

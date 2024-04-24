@@ -25,6 +25,8 @@ pub struct Session {
 	pub db: Option<String>,
 	/// The currently selected authentication scope
 	pub sc: Option<String>,
+	/// The currently selected access method
+	pub ac: Option<String>,
 	/// The current scope authentication token
 	pub tk: Option<Value>,
 	/// The current scope authentication data
@@ -46,7 +48,7 @@ impl Session {
 		self
 	}
 
-	/// Set the selected database for the session
+	/// Set the selected scope for the session
 	pub fn with_sc(mut self, sc: &str) -> Session {
 		self.sc = Some(sc.to_owned());
 		self
@@ -90,6 +92,9 @@ impl Session {
 		// Add scope data
 		let val: Value = self.sc.to_owned().into();
 		ctx.add_value("scope", val);
+		// Add access method data
+		let val: Value = self.ac.to_owned().into();
+		ctx.add_value("access", val);
 		// Add token data
 		let val: Value = self.tk.to_owned().into();
 		ctx.add_value("token", val);
@@ -101,6 +106,7 @@ impl Session {
 			"ns".to_string() => self.ns.to_owned().into(),
 			"or".to_string() => self.or.to_owned().into(),
 			"sc".to_string() => self.sc.to_owned().into(),
+			"ac".to_string() => self.ac.to_owned().into(),
 			"sd".to_string() => self.sd.to_owned().into(),
 			"tk".to_string() => self.tk.to_owned().into(),
 			"exp".to_string() => self.exp.to_owned().into(),
@@ -131,23 +137,6 @@ impl Session {
 			_ => {}
 		}
 		sess
-	}
-
-	/// Create a scoped session for a given NS and DB
-	pub fn for_scope(ns: &str, db: &str, sc: &str, rid: Value) -> Session {
-		Session {
-			au: Arc::new(Auth::for_sc(rid.to_string(), ns, db, sc)),
-			rt: false,
-			ip: None,
-			or: None,
-			id: None,
-			ns: Some(ns.to_owned()),
-			db: Some(db.to_owned()),
-			sc: Some(sc.to_owned()),
-			tk: None,
-			sd: Some(rid),
-			exp: None,
-		}
 	}
 
 	/// Create a system session for the root level with Owner role

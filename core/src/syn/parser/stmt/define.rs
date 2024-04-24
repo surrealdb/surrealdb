@@ -233,6 +233,7 @@ impl Parser<'_> {
 		let mut res = DefineAccessStatement {
 			name,
 			base,
+			key: DefineAccessStatement::random_key(),
 			if_not_exists,
 			..Default::default()
 		};

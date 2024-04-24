@@ -54,6 +54,7 @@ pub fn could_be_reserved(s: &str) -> bool {
 /// A map for mapping keyword strings to a tokenkind,
 pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map! {
 	// Keywords
+	UniCase::ascii("ACCESS") => TokenKind::Keyword(Keyword::Access),
 	UniCase::ascii("AFTER") => TokenKind::Keyword(Keyword::After),
 	UniCase::ascii("ALL") => TokenKind::Keyword(Keyword::All),
 	UniCase::ascii("ANALYZE") => TokenKind::Keyword(Keyword::Analyze),

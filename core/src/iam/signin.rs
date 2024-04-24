@@ -8,6 +8,7 @@ use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::Object;
 use crate::sql::Value;
+use crate::sql::AccessType;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
@@ -21,20 +22,20 @@ pub async fn signin(
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
-	let sc = vars.get("SC").or_else(|| vars.get("sc"));
+	let ac = vars.get("AC").or_else(|| vars.get("ac"));
 
 	// Check if the parameters exist
-	match (ns, db, sc) {
-		// SCOPE signin
-		(Some(ns), Some(db), Some(sc)) => {
+	match (ns, db, ac) {
+		// DB signin with access method
+		(Some(ns), Some(db), Some(ac)) => {
 			// Process the provided values
 			let ns = ns.to_raw_string();
 			let db = db.to_raw_string();
-			let sc = sc.to_raw_string();
-			// Attempt to signin to specified scope
-			super::signin::sc(kvs, session, ns, db, sc, vars).await
+			let ac = ac.to_raw_string();
+			// Attempt to signin using specified access method
+			super::signin::db(kvs, session, ns, db, ac, vars).await
 		}
-		// DB signin
+		// DB signin with user credentials
 		(Some(ns), Some(db), None) => {
 			// Get the provided user and pass
 			let user = vars.get("user");
@@ -49,12 +50,12 @@ pub async fn signin(
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 					// Attempt to signin to database
-					super::signin::db(kvs, session, ns, db, user, pass).await
+					super::signin::db_user(kvs, session, ns, db, user, pass).await
 				}
 				_ => Err(Error::MissingUserOrPass),
 			}
 		}
-		// NS signin
+		// NS signin with user credentials
 		(Some(ns), None, None) => {
 			// Get the provided user and pass
 			let user = vars.get("user");
@@ -68,12 +69,12 @@ pub async fn signin(
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 					// Attempt to signin to namespace
-					super::signin::ns(kvs, session, ns, user, pass).await
+					super::signin::ns_user(kvs, session, ns, user, pass).await
 				}
 				_ => Err(Error::MissingUserOrPass),
 			}
 		}
-		// KV signin
+		// ROOT signin with user credentials
 		(None, None, None) => {
 			// Get the provided user and pass
 			let user = vars.get("user");
@@ -86,7 +87,7 @@ pub async fn signin(
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
 					// Attempt to signin to root
-					super::signin::root(kvs, session, user, pass).await
+					super::signin::root_user(kvs, session, user, pass).await
 				}
 				_ => Err(Error::MissingUserOrPass),
 			}
@@ -95,114 +96,125 @@ pub async fn signin(
 	}
 }
 
-pub async fn sc(
+pub async fn db(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
 	db: String,
-	sc: String,
+	ac: String,
 	vars: Object,
 ) -> Result<Option<String>, Error> {
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(Read, Optimistic).await?;
-	// Fetch the specified scope from storage
-	let scope = tx.get_sc(&ns, &db, &sc).await;
+	// Fetch the specified access method from storage
+	let access = tx.get_db_access(&ns, &db, &ac).await;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
-	// Check if the supplied Scope login exists
-	match scope {
-		Ok(sv) => {
-			match sv.signin {
-				// This scope allows signin
-				Some(val) => {
-					// Setup the query params
-					let vars = Some(vars.0);
-					// Setup the system session for finding the signin record
-					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-					sess.ip.clone_from(&session.ip);
-					sess.or.clone_from(&session.or);
-					// Compute the value with the params
-					match kvs.evaluate(val, &sess, vars).await {
-						// The signin value succeeded
-						Ok(val) => match val.record() {
-							// There is a record returned
-							Some(rid) => {
-								// Create the authentication key
-								let key = EncodingKey::from_secret(sv.code.as_ref());
-								// Create the authentication claim
-								let exp = Some(
-									match sv.session {
-										Some(v) => {
-											// The defined session duration must be valid
-											match Duration::from_std(v.0) {
-												// The resulting session expiration must be valid
-												Ok(d) => match Utc::now().checked_add_signed(d) {
-													Some(exp) => exp,
-													None => {
-														return Err(Error::InvalidSessionExpiration)
+	// Check the provided access method exists
+	match access {
+		Ok(av) => {
+			// Check the access method type
+			// All access method types are supported except for JWT
+			// The JWT access method is the one that is internal to SurrealDB
+			match av.kind {
+				AccessType::Record(at) => {
+					match at.signin {
+						// This record access allows signin
+						Some(val) => {
+							// Setup the query params
+							let vars = Some(vars.0);
+							// Setup the system session for finding the signin record
+							let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+							sess.ip.clone_from(&session.ip);
+							sess.or.clone_from(&session.or);
+							// Compute the value with the params
+							match kvs.evaluate(val, &sess, vars).await {
+								// The signin value succeeded
+								Ok(val) => match val.record() {
+									// There is a record returned
+									Some(rid) => {
+										// Create the authentication key
+										let key = EncodingKey::from_secret(av.key.as_ref());
+										// Create the authentication claim
+										let exp = Some(
+											match at.duration {
+												Some(v) => {
+													// The defined session duration must be valid
+													match Duration::from_std(v.0) {
+														// The resulting session expiration must be valid
+														Ok(d) => match Utc::now().checked_add_signed(d) {
+															Some(exp) => exp,
+															None => {
+																return Err(Error::InvalidSessionExpiration)
+															}
+														},
+														Err(_) => {
+															return Err(Error::InvalidSessionDuration)
+														}
 													}
-												},
-												Err(_) => {
-													return Err(Error::InvalidSessionDuration)
 												}
+												_ => Utc::now() + Duration::hours(1),
 											}
+											.timestamp(),
+										);
+										let val = Claims {
+											iss: Some(SERVER_NAME.to_owned()),
+											iat: Some(Utc::now().timestamp()),
+											nbf: Some(Utc::now().timestamp()),
+											exp,
+											jti: Some(Uuid::new_v4().to_string()),
+											ns: Some(ns.to_owned()),
+											db: Some(db.to_owned()),
+											ac: Some(ac.to_owned()),
+											id: Some(rid.to_raw()),
+											..Claims::default()
+										};
+										// Log the authenticated access method info
+										trace!("Signing in with access method `{}`", ac);
+										// Create the authentication token
+										let enc = encode(&HEADER, &val, &key);
+										// Set the authentication on the session
+										session.tk = Some(val.into());
+										session.ns = Some(ns.to_owned());
+										session.db = Some(db.to_owned());
+										session.ac = Some(ac.to_owned());
+										session.sd = Some(Value::from(rid.to_owned()));
+										session.exp = exp;
+										session.au = Arc::new(Auth::new(Actor::new(
+											rid.to_string(),
+											Default::default(),
+											Level::Database(ns, db),
+										)));
+										// Check the authentication token
+										match enc {
+											// The auth token was created successfully
+											Ok(tk) => Ok(Some(tk)),
+											_ => Err(Error::TokenMakingFailed),
 										}
-										_ => Utc::now() + Duration::hours(1),
 									}
-									.timestamp(),
-								);
-								let val = Claims {
-									iss: Some(SERVER_NAME.to_owned()),
-									iat: Some(Utc::now().timestamp()),
-									nbf: Some(Utc::now().timestamp()),
-									exp,
-									jti: Some(Uuid::new_v4().to_string()),
-									ns: Some(ns.to_owned()),
-									db: Some(db.to_owned()),
-									sc: Some(sc.to_owned()),
-									id: Some(rid.to_raw()),
-									..Claims::default()
-								};
-								// Log the authenticated scope info
-								trace!("Signing in to scope `{}`", sc);
-								// Create the authentication token
-								let enc = encode(&HEADER, &val, &key);
-								// Set the authentication on the session
-								session.tk = Some(val.into());
-								session.ns = Some(ns.to_owned());
-								session.db = Some(db.to_owned());
-								session.sc = Some(sc.to_owned());
-								session.sd = Some(Value::from(rid.to_owned()));
-								session.exp = exp;
-								session.au = Arc::new(Auth::new(Actor::new(
-									rid.to_string(),
-									Default::default(),
-									Level::Scope(ns, db, sc),
-								)));
-								// Check the authentication token
-								match enc {
-									// The auth token was created successfully
-									Ok(tk) => Ok(Some(tk)),
-									_ => Err(Error::TokenMakingFailed),
-								}
+									_ => Err(Error::NoRecordFound),
+								},
+								Err(e) => match e {
+									Error::Thrown(_) => Err(e),
+									e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+									_ => Err(Error::AccessRecordSigninQueryFailed),
+								},
 							}
-							_ => Err(Error::NoRecordFound),
-						},
-						Err(e) => match e {
-							Error::Thrown(_) => Err(e),
-							e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
-							_ => Err(Error::SigninQueryFailed),
-						},
+						}
+						_ => Err(Error::AccessRecordNoSignin),
 					}
-				}
-				_ => Err(Error::ScopeNoSignin),
+				},
+				AccessType::Jwt(_) => {
+					// TODO(PR): Define error for signin using JWT instead of authenticate.
+					Err(Error::AccessNotFound)
+				},
 			}
-		}
-		_ => Err(Error::NoScopeFound),
+		},
+		_ => Err(Error::AccessNotFound),
 	}
 }
 
-pub async fn db(
+pub async fn db_user(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
@@ -258,7 +270,7 @@ pub async fn db(
 	}
 }
 
-pub async fn ns(
+pub async fn ns_user(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
@@ -312,7 +324,7 @@ pub async fn ns(
 	}
 }
 
-pub async fn root(
+pub async fn root_user(
 	kvs: &Datastore,
 	session: &mut Session,
 	user: String,
@@ -370,14 +382,14 @@ mod tests {
 	use std::collections::HashMap;
 
 	#[tokio::test]
-	async fn test_signin_scope() {
+	async fn test_signin_database_record() {
 		// Test with correct credentials
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE SCOPE user SESSION 1h
+				DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -408,7 +420,7 @@ mod tests {
 			let mut vars: HashMap<&str, Value> = HashMap::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
-			let res = sc(
+			let res = db(
 				&ds,
 				&mut sess,
 				"test".to_string(),
@@ -422,10 +434,9 @@ mod tests {
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
 			assert_eq!(sess.au.id(), "user:test");
-			assert!(sess.au.is_scope());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
-			// Scope users should not have roles
+			// Record users should not have roles
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
@@ -436,7 +447,7 @@ mod tests {
 			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow scope duration"
+				"Session expiration is expected to follow access method duration"
 			);
 		}
 
@@ -446,7 +457,7 @@ mod tests {
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE SCOPE user SESSION 1h
+				DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -477,7 +488,7 @@ mod tests {
 			let mut vars: HashMap<&str, Value> = HashMap::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "incorrect".into());
-			let res = sc(
+			let res = db(
 				&ds,
 				&mut sess,
 				"test".to_string(),
@@ -492,7 +503,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_signin_db() {
+	async fn test_signin_db_user() {
 		//
 		// Test without roles defined
 		//
@@ -507,7 +518,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = db(
+			let res = db_user(
 				&ds,
 				&mut sess,
 				"test".to_string(),
@@ -546,7 +557,7 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let res = db(
+			let res = db_user(
 				&ds,
 				&mut sess,
 				"test".to_string(),
@@ -578,7 +589,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = db(
+			let res = db_user(
 				&ds,
 				&mut sess,
 				"test".to_string(),
@@ -593,7 +604,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_signin_ns() {
+	async fn test_signin_ns_user() {
 		//
 		// Test without roles defined
 		//
@@ -608,7 +619,7 @@ mod tests {
 				..Default::default()
 			};
 			let res =
-				ns(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
+				ns_user(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
 					.await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
@@ -638,7 +649,7 @@ mod tests {
 				..Default::default()
 			};
 			let res =
-				ns(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
+				ns_user(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
 					.await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
@@ -662,7 +673,7 @@ mod tests {
 				..Default::default()
 			};
 			let res =
-				ns(&ds, &mut sess, "test".to_string(), "user".to_string(), "invalid".to_string())
+				ns_user(&ds, &mut sess, "test".to_string(), "user".to_string(), "invalid".to_string())
 					.await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
@@ -670,7 +681,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_signin_root() {
+	async fn test_signin_root_user() {
 		//
 		// Test without roles defined
 		//
@@ -683,7 +694,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = root(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
+			let res = root_user(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			assert_eq!(sess.au.id(), "user");
@@ -708,7 +719,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = root(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
+			let res = root_user(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			assert_eq!(sess.au.id(), "user");
@@ -728,7 +739,7 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res = root(&ds, &mut sess, "user".to_string(), "invalid".to_string()).await;
+			let res = root_user(&ds, &mut sess, "user".to_string(), "invalid".to_string()).await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}

@@ -35,6 +35,13 @@ pub struct Claims {
 	#[serde(alias = "https://surrealdb.com/database")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub db: Option<String>,
+	#[serde(alias = "ac")]
+	#[serde(alias = "AC")]
+	#[serde(rename = "AC")]
+	#[serde(alias = "https://surrealdb.com/ac")]
+	#[serde(alias = "https://surrealdb.com/access")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub ac: Option<String>,
 	#[serde(alias = "sc")]
 	#[serde(alias = "SC")]
 	#[serde(rename = "SC")]

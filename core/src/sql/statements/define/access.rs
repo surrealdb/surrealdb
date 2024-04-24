@@ -7,6 +7,8 @@ use crate::sql::access_type::JwtAccessVerification;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{escape::quote_str, AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -19,9 +21,19 @@ pub struct DefineAccessStatement {
 	pub name: Ident,
 	pub base: Base,
 	pub kind: AccessType,
+	pub key: String,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
+}
+
+impl DefineAccessStatement {
+	/// Generate a random key to be used to sign session tokens
+	/// These key will be used to sign tokens issued with this access method
+	/// This value is used in every access method other than JWT
+	pub(crate) fn random_key() -> String {
+		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+	}
 }
 
 impl DefineAccessStatement {
