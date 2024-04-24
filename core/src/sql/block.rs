@@ -177,7 +177,7 @@ impl InfoStructure for Block {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -198,6 +198,7 @@ pub enum Entry {
 	Break(BreakStatement),
 	Continue(ContinueStatement),
 	Foreach(ForeachStatement),
+	#[revision(start = 2)]
 	Rebuild(RebuildStatement),
 }
 

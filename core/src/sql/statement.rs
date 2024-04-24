@@ -53,7 +53,7 @@ impl Display for Statements {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -85,6 +85,7 @@ pub enum Statement {
 	Update(UpdateStatement),
 	Throw(ThrowStatement),
 	Use(UseStatement),
+	#[revision(start = 2)]
 	Rebuild(RebuildStatement),
 }
 
