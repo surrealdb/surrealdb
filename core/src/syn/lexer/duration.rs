@@ -35,7 +35,7 @@ impl<'a> Lexer<'a> {
 			Err(e) => {
 				if self.flexible_ident {
 					self.reader.backup(backup);
-					self.lex_ident();
+					return self.lex_ident();
 				}
 				self.scratch.clear();
 				self.invalid_token(LexError::Duration(e))

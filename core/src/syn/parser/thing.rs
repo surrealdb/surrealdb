@@ -143,61 +143,65 @@ impl Parser<'_> {
 
 		expected!(self, t!(":"));
 
-		self.peek();
-		self.no_whitespace()?;
+		enter_flexible_ident!(this = self =>(self.flexible_record_id){
+			this.peek();
+			this.no_whitespace()?;
 
-		let beg = if self.peek_can_be_ident() {
-			self.peek();
-			self.no_whitespace()?;
+			let beg = if this.peek_can_be_ident() {
+				this.peek();
+				this.no_whitespace()?;
 
-			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+				let id = ctx.run(|ctx| this.parse_id(ctx)).await?;
 
-			self.peek();
-			self.no_whitespace()?;
+				this.peek();
+				this.no_whitespace()?;
 
-			if self.eat(t!(">")) {
-				Bound::Excluded(id)
+				if this.eat(t!(">")) {
+					Bound::Excluded(id)
+				} else {
+					Bound::Included(id)
+				}
 			} else {
-				Bound::Included(id)
-			}
-		} else {
-			Bound::Unbounded
-		};
+				Bound::Unbounded
+			};
 
-		self.peek();
-		self.no_whitespace()?;
+			this.peek();
+			this.no_whitespace()?;
 
-		expected!(self, t!(".."));
+			expected!(this, t!(".."));
 
-		self.peek();
-		self.no_whitespace()?;
+			this.peek();
+			this.no_whitespace()?;
 
-		let inclusive = self.eat(t!("="));
+			let inclusive = this.eat(t!("="));
 
-		self.peek();
-		self.no_whitespace()?;
+			this.peek();
+			this.no_whitespace()?;
 
-		let end = if self.peek_can_be_ident() {
-			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
-			if inclusive {
-				Bound::Included(id)
+			let end = if this.peek_can_be_ident() {
+				let id = ctx.run(|ctx| this.parse_id(ctx)).await?;
+				if inclusive {
+					Bound::Included(id)
+				} else {
+					Bound::Excluded(id)
+				}
 			} else {
-				Bound::Excluded(id)
-			}
-		} else {
-			Bound::Unbounded
-		};
+				Bound::Unbounded
+			};
 
-		Ok(Range {
-			tb,
-			beg,
-			end,
+			Ok(Range {
+				tb,
+				beg,
+				end,
+			})
 		})
 	}
 
 	pub async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
-		self.parse_thing_from_ident(ctx, ident).await
+		enter_flexible_ident!(this = self =>(self.flexible_record_id){
+			this.parse_thing_from_ident(ctx, ident).await
+		})
 	}
 
 	pub async fn parse_thing_from_ident(
@@ -207,10 +211,13 @@ impl Parser<'_> {
 	) -> ParseResult<Thing> {
 		expected!(self, t!(":"));
 
-		self.peek();
-		self.no_whitespace()?;
+		let id = enter_flexible_ident!(this = self =>(self.flexible_record_id){
+			this.peek();
+			this.no_whitespace()?;
 
-		let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+			ctx.run(|ctx| this.parse_id(ctx)).await
+		})?;
+
 		Ok(Thing {
 			tb: ident,
 			id,
@@ -517,9 +524,35 @@ mod tests {
 
 	#[test]
 	fn weird_things() {
+		use crate::sql;
+
 		fn assert_ident_parses_correctly(ident: &str) {
-			let r = thing(&format!("t:{ident}")).unwrap().id;
-			assert_eq!(r, Id::String(ident.to_string()))
+			let thing = format!("t:{}", ident);
+			let mut parser = Parser::new(thing.as_bytes());
+			parser.allow_fexible_record_id(true);
+			let mut stack = Stack::new();
+			let r = stack
+				.enter(|ctx| async move { parser.parse_thing(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident))
+				.id;
+			assert_eq!(r, Id::String(ident.to_string()),);
+
+			let mut parser = Parser::new(thing.as_bytes());
+			let r = stack
+				.enter(|ctx| async move { parser.parse_query(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident));
+
+			assert_eq!(
+				r,
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
+					sql::Thing {
+						tb: "t".to_string(),
+						id: Id::String(ident.to_string())
+					}
+				))]))
+			)
 		}
 
 		assert_ident_parses_correctly("123abc");
