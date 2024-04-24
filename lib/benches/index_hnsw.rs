@@ -1,22 +1,19 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use flate2::read::GzDecoder;
-use futures::executor::block_on;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
 use surrealdb::idx::trees::hnsw::HnswIndex;
 use surrealdb::sql::index::Distance;
-use surrealdb_core2::dbs::Session;
-use surrealdb_core2::err::Error;
-use surrealdb_core2::kvs::Datastore;
-use surrealdb_core2::sql::index::{HnswParams, VectorType};
-use surrealdb_core2::sql::{Array, Id, Thing, Value};
-use surrealdb_core2::syn::value;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::sql::index::{HnswParams, VectorType};
+use surrealdb_core::sql::{value, Array, Id, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
 use tracing::info;
 
-const EF_CONSTRUCTION: u16 = 500;
+const EF_CONSTRUCTION: u16 = 150;
 const EF_SEARCH: usize = 80;
 
 const NN: usize = 10;
@@ -26,7 +23,7 @@ const M0: u16 = 48;
 const DIMENSION: u16 = 20;
 
 fn bench_hnsw_no_db(c: &mut Criterion) {
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz").unwrap();
+	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz");
 	let samples: Vec<(Thing, Vec<Value>)> =
 		samples.into_iter().map(|(r, a)| (r, vec![Value::Array(a)])).collect();
 
@@ -35,15 +32,15 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 		let mut group = get_group(c, "hnsw_no_db", samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
 		group.bench_function(id, |b| {
-			b.to_async(Runtime::new().unwrap()).iter(|| insert_objects(&samples));
+			b.iter(|| insert_objects(&samples));
 		});
 		group.finish();
 	}
 
 	// Create an HNSW instance with data
-	let hnsw = block_on(insert_objects(&samples));
+	let hnsw = insert_objects(&samples);
 
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz").unwrap();
+	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz");
 	let samples: Vec<Array> = samples.into_iter().map(|(_, a)| a).collect();
 
 	// Knn lookup benchmark group
@@ -51,38 +48,38 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 		let mut group = get_group(c, "hnsw_no_db", samples.len(), 10);
 		let id = format!("lookup len: {}", samples.len());
 		group.bench_function(id, |b| {
-			b.to_async(Runtime::new().unwrap()).iter(|| knn_lookup_objects(&hnsw, &samples));
+			b.iter(|| knn_lookup_objects(&hnsw, &samples));
 		});
 		group.finish();
 	}
 }
 
 fn bench_hnsw_with_db(c: &mut Criterion) {
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz").unwrap();
+	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz");
 	let samples: Vec<String> =
 		samples.into_iter().map(|(r, a)| format!("CREATE {r} SET r={a} RETURN NONE;")).collect();
 
 	let session = &Session::owner().with_ns("ns").with_db("db");
 
 	// Indexing benchmark group
-	// {
-	// 	let mut group = get_group(c, "hnsw_with_db", samples.len(), 10);
-	// 	let id = format!("insert len: {}", samples.len());
-	//
-	// 	group.bench_function(id, |b| {
-	// 		b.to_async(Runtime::new().unwrap()).iter(|| insert_objects_db(session, true, &samples));
-	// 	});
-	// 	group.finish();
-	// }
+	{
+		let mut group = get_group(c, "hnsw_with_db", samples.len(), 10);
+		let id = format!("insert len: {}", samples.len());
+
+		group.bench_function(id, |b| {
+			b.to_async(Runtime::new().unwrap()).iter(|| insert_objects_db(session, true, &samples));
+		});
+		group.finish();
+	}
 
 	let b = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 	let ds = b.block_on(insert_objects_db(session, true, &samples));
 
 	// Knn lookup benchmark group
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz").unwrap();
+	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz");
 	let selects: Vec<String> = samples
 		.into_iter()
-		.map(|(_, a)| format!("SELECT id FROM e WHERE r <{NN},{EF_SEARCH}> {a};"))
+		.map(|(_, a)| format!("SELECT id FROM e WHERE r <|{NN},{EF_SEARCH}|> {a};"))
 		.collect();
 	{
 		let mut group = get_group(c, "hnsw_with_db", selects.len(), 10);
@@ -97,7 +94,7 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 
 fn bench_db_without_index(c: &mut Criterion) {
 	info!("Build data collection");
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz").unwrap();
+	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz");
 	let samples: Vec<String> =
 		samples.into_iter().map(|(r, a)| format!("CREATE {r} SET r={a} RETURN NONE;")).collect();
 
@@ -119,7 +116,7 @@ fn bench_db_without_index(c: &mut Criterion) {
 	let ds = b.block_on(insert_objects_db(session, false, &samples));
 
 	// Knn lookup benchmark group
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz").unwrap();
+	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz");
 	let selects: Vec<String> = samples
 		.into_iter()
 		.map(|(id, _)| format!("SELECT id FROM {id},{id},{id},{id},{id},{id},{id},{id},{id},{id};"))
@@ -148,9 +145,9 @@ fn get_group<'a>(
 	group
 }
 
-fn new_vectors_from_file(path: &str) -> Result<Vec<(Thing, Array)>, Error> {
+fn new_vectors_from_file(path: &str) -> Vec<(Thing, Array)> {
 	// Open the gzip file
-	let file = File::open(path)?;
+	let file = File::open(path).unwrap();
 
 	// Create a GzDecoder to read the file
 	let gz = GzDecoder::new(file);
@@ -161,7 +158,7 @@ fn new_vectors_from_file(path: &str) -> Result<Vec<(Thing, Array)>, Error> {
 	let mut res = Vec::new();
 	// Iterate over each line in the file
 	for (i, line_result) in reader.lines().enumerate() {
-		let line = line_result?;
+		let line = line_result.unwrap();
 		let value = value(&line).unwrap();
 		if let Value::Array(a) = value {
 			res.push((Thing::from(("e", Id::Number(i as i64))), a));
@@ -169,7 +166,7 @@ fn new_vectors_from_file(path: &str) -> Result<Vec<(Thing, Array)>, Error> {
 			panic!("Wrong value");
 		}
 	}
-	Ok(res)
+	res
 }
 async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 	let ds = Datastore::new("memory").await.unwrap();
@@ -181,23 +178,24 @@ async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 }
 
 fn hnsw() -> HnswIndex {
-	HnswIndex::new(&HnswParams {
-		dimension: DIMENSION,
-		distance: Distance::Euclidean,
-		vector_type: VectorType::F32,
-		m: M,
-		m0: M0,
-		ef_construction: EF_CONSTRUCTION,
-		extend_candidates: false,
-		keep_pruned_connections: false,
-		ml: (1.0 / (M as f64).ln()).into(),
-	})
+	let p = HnswParams::new(
+		DIMENSION,
+		Distance::Euclidean,
+		VectorType::F32,
+		M,
+		M0,
+		(1.0 / (M as f64).ln()).into(),
+		EF_CONSTRUCTION,
+		false,
+		false,
+	);
+	HnswIndex::new(&p)
 }
 
-async fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> HnswIndex {
+fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> HnswIndex {
 	let mut h = hnsw();
 	for (id, content) in samples {
-		h.index_document(&id, content).await.unwrap();
+		h.index_document(&id, content).unwrap();
 	}
 	h
 }
@@ -210,9 +208,9 @@ async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[Str
 	ds
 }
 
-async fn knn_lookup_objects(h: &HnswIndex, samples: &[Array]) {
+fn knn_lookup_objects(h: &HnswIndex, samples: &[Array]) {
 	for a in samples {
-		let r = h.knn_search(a, NN, EF_SEARCH).await.unwrap();
+		let r = h.knn_search(a, NN, EF_SEARCH).unwrap();
 		assert_eq!(r.len(), NN);
 	}
 }
@@ -229,6 +227,5 @@ async fn knn_lookup_objects_db(ds: &Datastore, session: &Session, selects: &[Str
 	}
 }
 
-// criterion_group!(benches, bench_hnsw_no_db, bench_hnsw_with_db, bench_db_without_index);
-criterion_group!(benches, bench_hnsw_with_db);
+criterion_group!(benches, bench_hnsw_no_db, bench_hnsw_with_db, bench_db_without_index);
 criterion_main!(benches);

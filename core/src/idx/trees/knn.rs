@@ -123,6 +123,8 @@ impl DoublePriorityQueue {
 	}
 }
 
+/// Treats f64 as a sortable data type.
+/// It provides an implementation so it can be used as a key in a BTreeMap or BTreeSet.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FloatKey(f64);
 
@@ -157,6 +159,11 @@ impl Ord for FloatKey {
 	}
 }
 
+/// Ids64 is a collection able to store u64 identifiers in an optimised way.
+/// The enumerations are optimised in a way that, depending on the number of identifiers,
+/// the most memory efficient variant is used.
+/// When identifiers are added or removed, the method returned the most appropriate
+/// variant (if required).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Ids64 {
 	Empty,

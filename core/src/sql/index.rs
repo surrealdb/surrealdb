@@ -118,6 +118,33 @@ pub struct HnswParams {
 	pub ml: Number,
 }
 
+impl HnswParams {
+	#[allow(clippy::too_many_arguments)]
+	pub fn new(
+		dimension: u16,
+		distance: Distance,
+		vector_type: VectorType,
+		m: u16,
+		m0: u16,
+		ml: Number,
+		ef_construction: u16,
+		extend_candidates: bool,
+		keep_pruned_connections: bool,
+	) -> HnswParams {
+		HnswParams {
+			dimension,
+			distance,
+			vector_type,
+			m,
+			m0,
+			ef_construction,
+			ml,
+			extend_candidates,
+			keep_pruned_connections,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

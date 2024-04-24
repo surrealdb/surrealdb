@@ -768,17 +768,17 @@ mod tests {
 	) -> HnswParams {
 		let m = m as u16;
 		let m0 = m * 2;
-		HnswParams {
-			dimension: dimension as u16,
+		HnswParams::new(
+			dimension as u16,
 			distance,
 			vector_type,
 			m,
 			m0,
-			ef_construction: efc as u16,
-			ml: (1.0 / (m as f64).ln()).into(),
+			(1.0 / (m as f64).ln()).into(),
+			efc as u16,
 			extend_candidates,
 			keep_pruned_connections,
-		}
+		)
 	}
 
 	fn test_hnsw(collection_size: usize, p: HnswParams) {
