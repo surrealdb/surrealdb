@@ -249,43 +249,41 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("JWT") => {
 							self.pop_peek();
-							loop {
-								match self.peek_kind() {
-									t!("ALGORITHM") => {
-										self.pop_peek();
-										match self.next().kind {
-											TokenKind::Algorithm(alg) => match self.next().kind {
-												t!("KEY") => {
-													let key = self.next_token_value::<Strand>()?.0;
-													res.kind = AccessType::Jwt(
-															access_type::JwtAccess{
-																verification: access_type::JwtAccessVerification::Key(
-																	access_type::JwtAccessVerificationKey{
-																		alg: alg,
-																		key: key,
-																	}
-																)
-															}
-														);
-												}
-												x => unexpected!(self, x, "a key"),
-											},
-											x => unexpected!(self, x, "a valid algorithm"),
-										}
+							match self.peek_kind() {
+								t!("ALGORITHM") => {
+									self.pop_peek();
+									match self.next().kind {
+										TokenKind::Algorithm(alg) => match self.next().kind {
+											t!("KEY") => {
+												let key = self.next_token_value::<Strand>()?.0;
+												res.kind = AccessType::Jwt(
+														access_type::JwtAccess{
+															verification: access_type::JwtAccessVerification::Key(
+																access_type::JwtAccessVerificationKey{
+																	alg: alg,
+																	key: key,
+																}
+															)
+														}
+													);
+											}
+											x => unexpected!(self, x, "a key"),
+										},
+										x => unexpected!(self, x, "a valid algorithm"),
 									}
-									t!("JWKS") => {
-										self.pop_peek();
-										let url = self.next_token_value::<Strand>()?.0;
-										res.kind = AccessType::Jwt(access_type::JwtAccess {
-											verification: access_type::JwtAccessVerification::Jwks(
-												access_type::JwtAccessVerificationJwks {
-													url,
-												},
-											),
-										});
-									}
-									x => unexpected!(self, x, "`ALGORITHM`, or `JWKS`"),
 								}
+								t!("URL") => {
+									self.pop_peek();
+									let url = self.next_token_value::<Strand>()?.0;
+									res.kind = AccessType::Jwt(access_type::JwtAccess {
+										verification: access_type::JwtAccessVerification::Jwks(
+											access_type::JwtAccessVerificationJwks {
+												url,
+											},
+										),
+									});
+								}
+								x => unexpected!(self, x, "`ALGORITHM`, or `URL`"),
 							}
 						}
 						t!("RECORD") => {

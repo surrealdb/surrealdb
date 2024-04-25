@@ -56,6 +56,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	// Keywords
 	UniCase::ascii("ACCESS") => TokenKind::Keyword(Keyword::Access),
 	UniCase::ascii("AFTER") => TokenKind::Keyword(Keyword::After),
+	UniCase::ascii("ALGORITHM") => TokenKind::Keyword(Keyword::Algorithm),
 	UniCase::ascii("ALL") => TokenKind::Keyword(Keyword::All),
 	UniCase::ascii("ANALYZE") => TokenKind::Keyword(Keyword::Analyze),
 	UniCase::ascii("ANALYZER") => TokenKind::Keyword(Keyword::Analyzer),
@@ -128,6 +129,8 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("INTO") => TokenKind::Keyword(Keyword::Into),
 	UniCase::ascii("IF") => TokenKind::Keyword(Keyword::If),
 	UniCase::ascii("IS") => TokenKind::Keyword(Keyword::Is),
+	UniCase::ascii("JWT") => TokenKind::Keyword(Keyword::Jwt),
+	UniCase::ascii("JWKS") => TokenKind::Keyword(Keyword::Jwks),
 	UniCase::ascii("KEY") => TokenKind::Keyword(Keyword::Key),
 	UniCase::ascii("KILL") => TokenKind::Keyword(Keyword::Kill),
 	UniCase::ascii("LET") => TokenKind::Keyword(Keyword::Let),
@@ -204,6 +207,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("UNSET") => TokenKind::Keyword(Keyword::Unset),
 	UniCase::ascii("UPDATE") => TokenKind::Keyword(Keyword::Update),
 	UniCase::ascii("UPPERCASE") => TokenKind::Keyword(Keyword::Uppercase),
+	UniCase::ascii("URL") => TokenKind::Keyword(Keyword::Url),
 	UniCase::ascii("USE") => TokenKind::Keyword(Keyword::Use),
 	UniCase::ascii("USER") => TokenKind::Keyword(Keyword::User),
 	UniCase::ascii("VALUE") => TokenKind::Keyword(Keyword::Value),
@@ -329,7 +333,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("RS256") => TokenKind::Algorithm(Algorithm::Rs256),
 	UniCase::ascii("RS384") => TokenKind::Algorithm(Algorithm::Rs384),
 	UniCase::ascii("RS512") => TokenKind::Algorithm(Algorithm::Rs512),
-	UniCase::ascii("JWKS") => jwks_token_kind(), // Necessary because `phf_map!` doesn't support `cfg` attributes
 
 	// Distance
 	UniCase::ascii("CHEBYSHEV") => TokenKind::Distance(DistanceKind::Chebyshev),
@@ -344,11 +347,3 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	// Change Feed keywords
 	UniCase::ascii("ORIGINAL") => TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original),
 };
-
-const fn jwks_token_kind() -> TokenKind {
-	#[cfg(feature = "jwks")]
-	let token = TokenKind::Algorithm(Algorithm::Jwks);
-	#[cfg(not(feature = "jwks"))]
-	let token = TokenKind::Identifier;
-	token
-}

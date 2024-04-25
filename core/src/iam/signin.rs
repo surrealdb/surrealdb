@@ -6,9 +6,9 @@ use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::sql::AccessType;
 use crate::sql::Object;
 use crate::sql::Value;
-use crate::sql::AccessType;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
@@ -116,6 +116,7 @@ pub async fn db(
 			// Check the access method type
 			// All access method types are supported except for JWT
 			// The JWT access method is the one that is internal to SurrealDB
+			// The equivalent of signing in with JWT is to authenticate it
 			match av.kind {
 				AccessType::Record(at) => {
 					match at.signin {
@@ -130,17 +131,19 @@ pub async fn db(
 							// Compute the value with the params
 							match kvs.evaluate(val, &sess, vars).await {
 								// The signin value succeeded
-								Ok(val) => match val.record() {
-									// There is a record returned
-									Some(rid) => {
-										// Create the authentication key
-										let key = EncodingKey::from_secret(av.key.as_ref());
-										// Create the authentication claim
-										let exp = Some(
-											match at.duration {
-												Some(v) => {
-													// The defined session duration must be valid
-													match Duration::from_std(v.0) {
+								Ok(val) => {
+									match val.record() {
+										// There is a record returned
+										Some(rid) => {
+											// Create the authentication key
+											let key = EncodingKey::from_secret(av.key.as_ref());
+											// Create the authentication claim
+											let exp =
+												Some(
+													match at.duration {
+														Some(v) => {
+															// The defined session duration must be valid
+															match Duration::from_std(v.0) {
 														// The resulting session expiration must be valid
 														Ok(d) => match Utc::now().checked_add_signed(d) {
 															Some(exp) => exp,
@@ -152,48 +155,49 @@ pub async fn db(
 															return Err(Error::InvalidSessionDuration)
 														}
 													}
-												}
-												_ => Utc::now() + Duration::hours(1),
+														}
+														_ => Utc::now() + Duration::hours(1),
+													}
+													.timestamp(),
+												);
+											let val = Claims {
+												iss: Some(SERVER_NAME.to_owned()),
+												iat: Some(Utc::now().timestamp()),
+												nbf: Some(Utc::now().timestamp()),
+												exp,
+												jti: Some(Uuid::new_v4().to_string()),
+												ns: Some(ns.to_owned()),
+												db: Some(db.to_owned()),
+												ac: Some(ac.to_owned()),
+												id: Some(rid.to_raw()),
+												..Claims::default()
+											};
+											// Log the authenticated access method info
+											trace!("Signing in with access method `{}`", ac);
+											// Create the authentication token
+											let enc = encode(&HEADER, &val, &key);
+											// Set the authentication on the session
+											session.tk = Some(val.into());
+											session.ns = Some(ns.to_owned());
+											session.db = Some(db.to_owned());
+											session.ac = Some(ac.to_owned());
+											session.sd = Some(Value::from(rid.to_owned()));
+											session.exp = exp;
+											session.au = Arc::new(Auth::new(Actor::new(
+												rid.to_string(),
+												Default::default(),
+												Level::Record(ns, db, rid.to_string()),
+											)));
+											// Check the authentication token
+											match enc {
+												// The auth token was created successfully
+												Ok(tk) => Ok(Some(tk)),
+												_ => Err(Error::TokenMakingFailed),
 											}
-											.timestamp(),
-										);
-										let val = Claims {
-											iss: Some(SERVER_NAME.to_owned()),
-											iat: Some(Utc::now().timestamp()),
-											nbf: Some(Utc::now().timestamp()),
-											exp,
-											jti: Some(Uuid::new_v4().to_string()),
-											ns: Some(ns.to_owned()),
-											db: Some(db.to_owned()),
-											ac: Some(ac.to_owned()),
-											id: Some(rid.to_raw()),
-											..Claims::default()
-										};
-										// Log the authenticated access method info
-										trace!("Signing in with access method `{}`", ac);
-										// Create the authentication token
-										let enc = encode(&HEADER, &val, &key);
-										// Set the authentication on the session
-										session.tk = Some(val.into());
-										session.ns = Some(ns.to_owned());
-										session.db = Some(db.to_owned());
-										session.ac = Some(ac.to_owned());
-										session.sd = Some(Value::from(rid.to_owned()));
-										session.exp = exp;
-										session.au = Arc::new(Auth::new(Actor::new(
-											rid.to_string(),
-											Default::default(),
-											Level::Database(ns, db),
-										)));
-										// Check the authentication token
-										match enc {
-											// The auth token was created successfully
-											Ok(tk) => Ok(Some(tk)),
-											_ => Err(Error::TokenMakingFailed),
 										}
+										_ => Err(Error::NoRecordFound),
 									}
-									_ => Err(Error::NoRecordFound),
-								},
+								}
 								Err(e) => match e {
 									Error::Thrown(_) => Err(e),
 									e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
@@ -203,13 +207,10 @@ pub async fn db(
 						}
 						_ => Err(Error::AccessRecordNoSignin),
 					}
-				},
-				AccessType::Jwt(_) => {
-					// TODO(PR): Define error for signin using JWT instead of authenticate.
-					Err(Error::AccessNotFound)
-				},
+				}
+				_ => Err(Error::AccessMethodMismatch),
 			}
-		},
+		}
 		_ => Err(Error::AccessNotFound),
 	}
 }
@@ -382,7 +383,7 @@ mod tests {
 	use std::collections::HashMap;
 
 	#[tokio::test]
-	async fn test_signin_database_record() {
+	async fn test_signin_record() {
 		// Test with correct credentials
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -434,8 +435,10 @@ mod tests {
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
 			assert_eq!(sess.au.id(), "user:test");
+			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
+			assert_eq!(sess.au.level().id(), Some("user:test"));
 			// Record users should not have roles
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
@@ -672,9 +675,14 @@ mod tests {
 			let mut sess = Session {
 				..Default::default()
 			};
-			let res =
-				ns_user(&ds, &mut sess, "test".to_string(), "user".to_string(), "invalid".to_string())
-					.await;
+			let res = ns_user(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"user".to_string(),
+				"invalid".to_string(),
+			)
+			.await;
 
 			assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
 		}

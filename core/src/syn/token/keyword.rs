@@ -165,6 +165,7 @@ keyword! {
 	Unset => "UNSET",
 	Update => "UPDATE",
 	Uppercase => "UPPERCASE",
+	Url => "URL",
 	Use => "USE",
 	User => "USER",
 	Value => "VALUE",

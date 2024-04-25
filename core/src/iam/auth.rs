@@ -49,9 +49,9 @@ impl Auth {
 		matches!(self.level(), Level::Database(_, _))
 	}
 
-	/// Check if the current level is Scope
-	pub fn is_scope(&self) -> bool {
-		matches!(self.level(), Level::Scope(_, _, _))
+	/// Check if the current level is Record
+	pub fn is_record(&self) -> bool {
+		matches!(self.level(), Level::Record(_, _, _))
 	}
 
 	/// System Auth helpers
@@ -70,8 +70,8 @@ impl Auth {
 		Self::new(Actor::new("system_auth".into(), vec![role], (ns, db).into()))
 	}
 
-	pub fn for_sc(rid: String, ns: &str, db: &str, sc: &str) -> Self {
-		Self::new(Actor::new(rid, vec![], (ns, db, sc).into()))
+	pub fn for_rid(role: Role, ns: &str, db: &str, rid: &str) -> Self {
+		Self::new(Actor::new(rid.to_string(), vec![role], (ns, db, rid).into()))
 	}
 
 	//

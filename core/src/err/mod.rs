@@ -981,6 +981,9 @@ pub enum Error {
 	#[error("The access method cannot be defined on the requested level")]
 	AccessLevelMismatch,
 
+	#[error("The access method cannot be used in the requested operation")]
+	AccessMethodMismatch,
+
 	#[error("The access method does not exist")]
 	AccessNotFound,
 

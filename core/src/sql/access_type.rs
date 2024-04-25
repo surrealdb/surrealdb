@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-use super::{Access, Object, Value};
+use super::{Object, Value};
 
 /// The type of access methods available
 #[revisioned(revision = 1)]
@@ -123,8 +123,4 @@ impl InfoStructure for AccessType {
 
 		Value::Object(acc)
 	}
-}
-
-fn get_accesses_from_kind(accesses: &[Access]) -> Vec<&str> {
-	accesses.iter().map(|t| t.0.as_str()).collect::<Vec<_>>()
 }
