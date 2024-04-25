@@ -42,6 +42,9 @@ async fn scan_node_lq() {
 
 #[test_log::test(tokio::test)]
 async fn live_params_are_evaluated() {
+	if !FFLAGS.change_feed_live_queries.enabled() {
+		return;
+	}
 	let node_id = Uuid::parse_str("9cb22db9-1851-4781-8847-d781a3f373ae").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let test = init(node_id, clock).await.unwrap();
@@ -50,7 +53,7 @@ async fn live_params_are_evaluated() {
 	let params = map! {
 		"expected_table".to_string() => Value::Table(sql::Table("test_table".to_string())),
 	};
-	test.db.execute("LIVE SELECT * FROM $expected_table", &sess, Some(params)).await.unwrap();
+	test.db.execute("DEFINE TABLE expected_table CHANGEFEED 10m INCLUDE ORIGINAL; LIVE SELECT * FROM $expected_table", &sess, Some(params)).await.unwrap();
 	let mut res = test.db.lq_cf_store.read().await.live_queries_for_selector(&LqSelector {
 		ns: "test_namespace".to_string(),
 		db: "test_database".to_string(),
