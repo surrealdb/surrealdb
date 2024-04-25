@@ -96,9 +96,7 @@ impl Writer {
 							)
 						}
 					}
-					false => {
-						TableMutation::Set(id, current.into_owned())
-					}
+					false => TableMutation::Set(id, current.into_owned()),
 				},
 			);
 		} else {
