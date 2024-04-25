@@ -28,7 +28,7 @@ impl<'js> FormDataValue<'js> {
 		filename: Opt<Coerced<String<'js>>>,
 		error: &'static str,
 	) -> Result<Self> {
-		if let Some(blob) = value.as_object().and_then(|value| Class::<Blob>::from_object(value)) {
+		if let Some(blob) = value.as_object().and_then(Class::<Blob>::from_object) {
 			let filename = filename.into_inner().map(|x| x.0);
 
 			Ok(FormDataValue::Blob {
