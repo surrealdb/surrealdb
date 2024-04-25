@@ -75,7 +75,6 @@ impl Writer {
 		current: Cow<'_, Value>,
 		store_difference: bool,
 	) {
-		warn!("Record cf called: {current:?}");
 		if current.is_some() {
 			self.buf.push(
 				ns.to_string(),
@@ -98,13 +97,11 @@ impl Writer {
 						}
 					}
 					false => {
-						warn!("Store difference is off");
 						TableMutation::Set(id, current.into_owned())
 					}
 				},
 			);
 		} else {
-			warn!("Record current was not some");
 			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
 		}
 	}
