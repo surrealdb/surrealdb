@@ -6038,8 +6038,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6521ab0048936eae53c772cd92feb49e6fe1e860d24df19cb017be59c1459c5d"
+source = "git+https://github.com/surrealdb/surrealkv.git?branch=fix/watermark-fetch#d04a37f692ef8f4a6c97e7b06efe19e4f4c998a6"
 dependencies = [
  "async-channel 2.2.0",
  "bytes",
