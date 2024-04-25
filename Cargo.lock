@@ -3109,7 +3109,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.4",
 ]
 
 [[package]]
@@ -6037,9 +6037,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80716f4dc05f98c00f5da30adcb5e86fe4f04b7ebaf21317f58b8c840f7f2c94"
+checksum = "3cea631ab9dde241b2fd2cbc2938c2a2ee0232034df132250ec47c200b9a1777"
 dependencies = [
  "async-channel 2.2.0",
  "bytes",
@@ -6963,9 +6963,9 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "vart"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d56828f4bc2743d165217540c06f4d24fffae77846b381fa7ec52ddd1cb5adc"
+checksum = "6c07dbb7140d0a8fa046a25eabaaad09f4082076ccb8f157d9fe2b13dc9ae570"
 dependencies = [
  "hashbrown 0.14.3",
 ]
