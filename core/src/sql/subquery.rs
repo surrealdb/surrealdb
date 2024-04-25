@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
 	CreateStatement, DefineStatement, DeleteStatement, IfelseStatement, InsertStatement,
 	OutputStatement, RelateStatement, RemoveStatement, SelectStatement, UpdateStatement,
@@ -15,7 +16,7 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -32,6 +33,8 @@ pub enum Subquery {
 	Insert(InsertStatement),
 	Define(DefineStatement),
 	Remove(RemoveStatement),
+	#[revision(start = 2)]
+	Rebuild(RebuildStatement),
 	// Add new variants here
 }
 
@@ -57,6 +60,7 @@ impl Subquery {
 			Self::Insert(v) => v.writeable(),
 			Self::Define(v) => v.writeable(),
 			Self::Remove(v) => v.writeable(),
+			Self::Rebuild(v) => v.writeable(),
 		}
 	}
 	/// Process this type returning a computed simple Value
@@ -80,6 +84,7 @@ impl Subquery {
 			Self::Ifelse(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
 			Self::Output(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
 			Self::Define(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Rebuild(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
 			Self::Remove(ref v) => v.compute(&ctx, opt, txn, doc).await,
 			Self::Select(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
 			Self::Create(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
@@ -104,6 +109,7 @@ impl Display for Subquery {
 			Self::Insert(v) => write!(f, "({v})"),
 			Self::Define(v) => write!(f, "({v})"),
 			Self::Remove(v) => write!(f, "({v})"),
+			Self::Rebuild(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}
