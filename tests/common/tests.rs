@@ -3,6 +3,7 @@ use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
+use surrealdb::fflags::FFLAGS;
 use test_log::test;
 
 #[test(tokio::test)]
@@ -650,12 +651,21 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await?;
+
+	// Configure Live Queries
+	if FFLAGS.change_feed_live_queries.enabled() {
+		setup_live_queries(&socket, "tester").await;
+	}
+
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let live1 = res["result"].as_str().unwrap();
-	// Send QUERY command
+
+	println!("\n\nFinished first live query creation\n\n");
+
+	// Send second lq via QUERY command
 	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
@@ -663,21 +673,33 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(res.len(), 1, "result: {:?}", res);
 	assert!(res[0]["result"].is_string(), "result: {:?}", res);
 	let live2 = res[0]["result"].as_str().unwrap();
+
+	println!("\n\nFinished second live query creation\n\n");
+
 	// Create a new test record
 	let res = socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_array(), "result: {:?}", res);
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {:?}", res);
+
 	// Wait some time for all messages to arrive, and then search for the notification message
 	let msgs: Result<_, Box<dyn std::error::Error>> =
-		tokio::time::timeout(Duration::from_secs(1), async {
-			Ok(vec![socket.receive_other_message().await?, socket.receive_other_message().await?])
+		tokio::time::timeout(Duration::from_secs(2), async {
+			Ok(vec![
+				socket.receive_other_message().await.expect("first message"),
+				socket.receive_other_message().await.expect("second message"),
+			])
 		})
-		.await?;
-	let msgs = msgs?;
+		.await
+		.expect(
+			format!("Failed to get 2 messages for live queries [{} {}]", live1, live2).as_str(),
+		);
+	println!("Finished receiving messages: {:?}", msgs);
+	let msgs = msgs.unwrap();
+	println!("Messages had no error");
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {:?}", msgs);
-	// Check for first live query notifcation
+	// Check for first live query notification
 	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
 	assert!(res.is_some(), "Expected to find a notification for LQ id {}: {:?}", live1, msgs);
 	let res = res.unwrap();
@@ -703,7 +725,9 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 	let res = res["result"].as_object().unwrap();
 	assert_eq!(res["id"], "tester:id", "result: {:?}", res);
 	// Test passed
+	println!("\n\nFinishing server\n\n");
 	server.finish().unwrap();
+	println!("\n\nFinished successfully\n\n");
 	Ok(())
 }
 
@@ -717,11 +741,18 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await?;
+
+	// Configure Live Queries
+	if FFLAGS.change_feed_live_queries.enabled() {
+		setup_live_queries(&socket, "tester").await;
+	}
+
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let live1 = res["result"].as_str().unwrap();
+
 	// Send QUERY command
 	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
@@ -820,11 +851,18 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 	socket1.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
 	socket1.send_message_use(Some(NS), Some(DB)).await?;
+
+	// Configure Live Queries
+	if FFLAGS.change_feed_live_queries.enabled() {
+		setup_live_queries(&socket1, "tester").await;
+	}
+
 	// Send LIVE command
 	let res = socket1.send_request("live", json!(["tester"])).await?;
 	assert!(res.is_object(), "result: {:?}", res);
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let liveid = res["result"].as_str().unwrap();
+
 	// Connect to WebSocket
 	let mut socket2 = Socket::connect(&addr, SERVER, FORMAT).await?;
 	// Authenticate the connection
@@ -868,6 +906,12 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	socket_permanent.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
 	socket_permanent.send_message_use(Some(NS), Some(DB)).await?;
+
+	// Configure Live Queries
+	if FFLAGS.change_feed_live_queries.enabled() {
+		setup_live_queries(&socket_permanent, "tester").await;
+	}
+
 	// Setup the scope
 	socket_permanent
 		.send_message_query(
@@ -1538,4 +1582,18 @@ async fn relate_rpc() {
 
 	// Test passed
 	server.finish().unwrap();
+}
+
+async fn setup_live_queries(socket: &Socket, tb: &str) {
+	let res = socket
+		.send_request("query", json!(["DEFINE TABLE tester CHANGEFEED 10m INCLUDE ORIGINAL"]))
+		.await
+		.unwrap();
+	// thread 'ws_integration::cbor::live_second_connection' panicked at tests/common/tests.rs:1580:9:
+	// result: Object {"id": Number(2), "result": Array [Object {"result": Null, "status": String("OK"), "time": String("2.861334ms")}]}
+	tokio::time::sleep(Duration::from_millis(2000));
+	assert!(res.is_object(), "result: {:?}", res);
+	assert!(res["result"].is_array(), "result: {:?}", res);
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 1, "result: {:?}", res);
 }

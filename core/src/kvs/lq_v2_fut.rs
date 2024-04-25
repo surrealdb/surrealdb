@@ -1,3 +1,4 @@
+//! Handles the main-loop of the live query notifications on top of change feeds
 use crate::cf;
 use crate::cf::{ChangeSet, TableMutation};
 use crate::dbs::{Options, Statement};
@@ -141,7 +142,7 @@ async fn process_change_set_for_notifications(
 	lq_pairs: &[(LqIndexKey, LqIndexValue)],
 ) -> Result<(), Error> {
 	#[cfg(debug_assertions)]
-	trace!("Moving to next change set, {:?}", change_set);
+	trace!("Moving to next change set, {:?} for {} lq_pairs", change_set, lq_pairs.len());
 	for (lq_key, lq_value) in lq_pairs.iter() {
 		#[cfg(debug_assertions)]
 		trace!("Processing live query for notification key={:?} and value={:?}", lq_key, lq_value);

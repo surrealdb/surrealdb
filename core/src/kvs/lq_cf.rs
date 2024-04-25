@@ -159,6 +159,16 @@ impl LiveQueryTracker {
 		&self,
 		selector: &LqSelector,
 	) -> Vec<(LqIndexKey, LqIndexValue)> {
+		#[cfg(debug_assertions)]
+		trace!(
+			"Finding live queries for selector {:?},\n{}",
+			selector,
+			self.local_live_queries
+				.iter()
+				.map(|(k, v)| format!("{:?} -> {:?}", k, v))
+				.collect::<Vec<String>>()
+				.join("\n\n")
+		);
 		Self::live_queries_for_selector_impl(&self.local_live_queries, selector)
 	}
 
