@@ -294,7 +294,7 @@ impl Parser<'_> {
 			TokenKind::Duration if self.flexible_record_id => {
 				self.lexer.duration = None;
 				let slice = self.lexer.reader.span(token.span);
-				if slice.into_iter().any(|x| *x > 0b0111_1111) {
+				if slice.iter().any(|x| *x > 0b0111_1111) {
 					unexpected!(self, token.kind, "a identifier");
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
