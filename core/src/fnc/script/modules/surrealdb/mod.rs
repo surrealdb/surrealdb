@@ -28,7 +28,7 @@ async fn value(ctx: Ctx<'_>, value: Coerced<String>) -> Result<SurValue> {
 }
 
 impl ModuleDef for Package {
-	fn declare(decls: &mut js::module::Declarations) -> js::Result<()> {
+	fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 		decls.declare("default")?;
 		decls.declare("functions")?;
 		decls.declare("version")?;
@@ -38,7 +38,7 @@ impl ModuleDef for Package {
 		Ok(())
 	}
 
-	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &mut js::module::Exports<'js>) -> js::Result<()> {
+	fn evaluate<'js>(ctx: &js::Ctx<'js>, exports: &js::module::Exports<'js>) -> js::Result<()> {
 		let default = js::Object::new(ctx.clone())?;
 		let package = pkg::<functions::Package>(ctx, "functions")?;
 		exports.export("functions", package.clone())?;
@@ -69,5 +69,7 @@ fn pkg<'js, D>(ctx: &Ctx<'js>, name: &str) -> Result<Value<'js>>
 where
 	D: ModuleDef,
 {
-	Module::evaluate_def::<D, _>(ctx.clone(), name)?.get::<_, js::Value>("default")
+	let (m, promise) = Module::evaluate_def::<D, _>(ctx.clone(), name)?;
+	promise.finish()?;
+	m.get::<_, js::Value>("default")
 }
