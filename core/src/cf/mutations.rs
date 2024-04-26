@@ -7,10 +7,16 @@ use crate::sql::value::Value;
 use crate::sql::Operation;
 use crate::vs::to_u128_be;
 use derive::Store;
+use once_cell::sync::Lazy;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
+use std::ops::DerefMut;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LockResult, Mutex};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 2)]
@@ -83,6 +89,30 @@ impl TableMutation {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
+				let val: u64 = {
+					// let mut ret = None;
+					// while ret.is_none() {
+					// 	match COUNTER.try_lock() {
+					// 		Ok(mut lock) => {
+					// 			let mut val = lock.deref_mut();
+					// 			*val = *val + 1u64;
+					// 			ret = Some(*val);
+					// 		}
+					// 		Err(_) => {
+					// 			std::thread::sleep(std::time::Duration::from_millis(1));
+					// 		}
+					// 	};
+					// }
+					// ret.unwrap()
+					COUNTER.fetch_add(1, Ordering::SeqCst)
+				};
+				info!(
+					"CFSet {} and {} for {}\n{}",
+					_thing,
+					v,
+					val,
+					std::backtrace::Backtrace::force_capture()
+				);
 				if FFLAGS.change_feed_live_queries.enabled() {
 					h.insert("create".to_string(), v);
 				} else {

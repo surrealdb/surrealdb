@@ -1080,7 +1080,8 @@ async fn changefeed() {
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	// Create and update users
+
+	// Create and update users - this all happens in a single changefeed entry
 	let sql = "
         CREATE user:amos SET name = 'Amos';
         CREATE user:jane SET name = 'Jane';
@@ -1109,6 +1110,8 @@ async fn changefeed() {
 	assert_eq!(users, expected);
 	let users: Vec<RecordBuf> = db.select(table).await.unwrap();
 	assert_eq!(users, expected);
+
+	// Fetch all changes
 	let sql = "
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
@@ -1140,7 +1143,8 @@ async fn changefeed() {
 		)
 		.unwrap()
 	);
-	// UPDATE user:amos
+
+	// Validate CREATE user:amos
 	let a = array.get(1).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
@@ -1148,11 +1152,29 @@ async fn changefeed() {
 	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
+
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			r#"[
+	// The first amos is created
+	if FFLAGS.change_feed_live_queries.enabled() {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				r#"[
+				 {
+					  create: {
+						  id: user:amos,
+						  name: 'Amos'
+					  }
+				 }
+			]"#
+			)
+			.unwrap()
+		);
+	} else {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				r#"[
 				 {
 					  update: {
 						  id: user:amos,
@@ -1160,10 +1182,12 @@ async fn changefeed() {
 					  }
 				 }
 			]"#
-		)
-		.unwrap()
-	);
-	// UPDATE user:jane
+			)
+			.unwrap()
+		);
+	}
+
+	// Validate CREATE user:jane
 	let a = array.get(2).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
@@ -1173,10 +1197,26 @@ async fn changefeed() {
 	};
 	assert!(versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		surrealdb::sql::value(
-			"[
+	if FFLAGS.change_feed_live_queries.enabled() {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				"[
+					{
+						 create: {
+							 id: user:jane,
+							 name: 'Jane'
+						 }
+					}
+				]"
+			)
+			.unwrap()
+		);
+	} else {
+		assert_eq!(
+			changes,
+			surrealdb::sql::value(
+				"[
 					{
 						 update: {
 							 id: user:jane,
@@ -1184,10 +1224,12 @@ async fn changefeed() {
 						 }
 					}
 				]"
-		)
-		.unwrap()
-	);
-	// UPDATE user:amos
+			)
+			.unwrap()
+		);
+	}
+
+	// Validate UPDATE user:amos
 	let a = array.get(3).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
