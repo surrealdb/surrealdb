@@ -3,6 +3,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Thro
 use futures::executor::block_on;
 use rand::prelude::ThreadRng;
 use rand::{thread_rng, Rng};
+use reblessive::TreeStack;
 use std::time::Duration;
 use surrealdb::idx::docids::DocId;
 use surrealdb::idx::trees::mtree::{MState, MTree};
@@ -128,11 +129,14 @@ async fn insert_objects(
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
 	let mut s = TreeStore::new(TreeNodeProvider::Debug, c.clone(), Write).await;
-	for i in 0..samples_size {
-		let object = random_object(&mut rng, vector_size).into();
-		// Insert the sample
-		t.insert(&mut tx, &mut s, object, i as DocId).await.unwrap();
-	}
+	let mut stack = TreeStack::new();
+	stack.enter(|stk| async {
+		for i in 0..samples_size {
+			let object = random_object(&mut rng, vector_size).into();
+			// Insert the sample
+			t.insert(stk, &mut tx, &mut s, object, i as DocId).await.unwrap();
+		}
+	});
 	s.finish(&mut tx).await.unwrap();
 	tx.commit().await.unwrap();
 }

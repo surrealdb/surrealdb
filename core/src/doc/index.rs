@@ -366,23 +366,17 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 
-		let mut ft = FtIndex::new(
-			ctx.get_index_stores(),
-			self.opt,
-			txn,
-			&p.az,
-			ikb,
-			p,
-			TransactionType::Write,
-		)
-		.await?;
+		let ixs = ctx.get_index_stores();
+
+		let mut ft =
+			FtIndex::new(ixs, self.opt, txn, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, ctx, self.opt, txn, self.rid, n).await?;
 		} else {
 			ft.remove_document(txn, self.rid).await?;
 		}
-		ft.finish(txn).await
+		ft.finish(&ixs, txn).await
 	}
 
 	async fn index_mtree(

@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::trees::store::cache::TreeCache;
-use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
+use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
@@ -12,7 +12,7 @@ where
 	N: TreeNode + Debug + Clone,
 {
 	np: TreeNodeProvider,
-	cache: TreeCache<N>,
+	cache: Arc<TreeCache<N>>,
 	nodes: HashMap<NodeId, StoredNode<N>>,
 	updated: HashSet<NodeId>,
 	removed: HashMap<NodeId, Key>,
@@ -24,7 +24,7 @@ impl<N> TreeWrite<N>
 where
 	N: TreeNode + Clone + Debug + Display,
 {
-	pub(super) fn new(keys: TreeNodeProvider, cache: TreeCache<N>) -> Self {
+	pub(super) fn new(keys: TreeNodeProvider, cache: Arc<TreeCache<N>>) -> Self {
 		Self {
 			np: keys,
 			cache,
@@ -34,6 +34,10 @@ where
 			#[cfg(debug_assertions)]
 			out: HashSet::new(),
 		}
+	}
+
+	pub(super) fn cache(&self) -> &TreeCache<N> {
+		&self.cache
 	}
 
 	pub(super) async fn get_node_mut(
@@ -101,8 +105,11 @@ where
 		Ok(())
 	}
 
-	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
-		let update = !self.updated.is_empty() || !self.removed.is_empty();
+	pub(super) async fn finish(
+		&mut self,
+		tx: &mut Transaction,
+		new_generation: StoreGeneration,
+	) -> Result<Option<TreeCache<N>>, Error> {
 		#[cfg(debug_assertions)]
 		{
 			debug!("finish");
@@ -111,11 +118,17 @@ where
 				return Err(Error::Unreachable("TreeTransactionWrite::finish(1)"));
 			}
 		}
+		if self.updated.is_empty() && self.removed.is_empty() {
+			return Ok(None);
+		}
+		let new_cache = self.cache.new_generation(new_generation);
 		for node_id in &self.updated {
-			if let Some(node) = self.nodes.remove(node_id) {
+			if let Some(mut node) = self.nodes.remove(node_id) {
 				#[cfg(debug_assertions)]
 				debug!("finish: tx.save {node_id}");
-				self.np.save(tx, node).await?;
+				node.n.prepare_save();
+				self.np.save(tx, &node).await?;
+				new_cache.set_node(node).await;
 			} else {
 				return Err(Error::Unreachable("TreeTransactionWrite::finish(2)"));
 			}
@@ -127,9 +140,10 @@ where
 				#[cfg(debug_assertions)]
 				debug!("finish: tx.del {node_id}");
 				tx.del(node_key).await?;
+				new_cache.remove_node(node_id).await;
 			}
 		}
-		Ok(update)
+		Ok(Some(new_cache))
 	}
 }
 
@@ -153,14 +167,14 @@ pub struct TreeRead<N>
 where
 	N: TreeNode + Debug + Clone,
 {
-	cache: TreeCache<N>,
+	cache: Arc<TreeCache<N>>,
 }
 
 impl<N> TreeRead<N>
 where
 	N: TreeNode + Debug + Clone,
 {
-	pub(super) fn new(cache: TreeCache<N>) -> Self {
+	pub(super) fn new(cache: Arc<TreeCache<N>>) -> Self {
 		Self {
 			cache,
 		}

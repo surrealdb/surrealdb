@@ -86,6 +86,7 @@ impl Postings {
 		if self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			self.store.completed(state.generation());
 		}
 		Ok(())
 	}

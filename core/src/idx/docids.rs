@@ -135,8 +135,13 @@ impl DocIds {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.store.finish(tx).await? {
+	pub(in crate::idx) async fn finish(
+		&mut self,
+		ixs: &IndexStores,
+		tx: &mut Transaction,
+	) -> Result<(), Error> {
+		let next_generation = self.btree.generation() + 1;
+		if let Some(new_cache) = self.store.finish(tx, next_generation).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {
 				btree,
@@ -144,6 +149,7 @@ impl DocIds {
 				next_doc_id: self.next_doc_id,
 			};
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			ixs.advance_cache_btree_trie(new_cache).await;
 		}
 		Ok(())
 	}

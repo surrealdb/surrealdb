@@ -122,12 +122,14 @@ impl Terms {
 	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
+			let new_gen = btree.generation();
 			let state = State {
 				btree,
 				available_ids: self.available_ids.take(),
 				next_term_id: self.next_term_id,
 			};
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			self.store.completed(new_gen);
 		}
 		Ok(())
 	}

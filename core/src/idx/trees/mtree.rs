@@ -181,11 +181,14 @@ impl MTreeIndex {
 	}
 
 	pub(crate) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		self.doc_ids.write().await.finish(tx).await?;
 		let mut mtree = self.mtree.write().await;
-		if self.store.finish(tx).await? {
-			mtree.state.generation += 1;
-			tx.set(self.state_key.clone(), mtree.state.try_to_val()?).await?;
+		let next_generation = mtree.state.generation += 1;
+		if let Some(new_cache) = self.doc_ids.write().await.finish(tx, next_generation).await? {
+			if self.store.finish(tx).await? {
+				mtree.state.generation += 1;
+				tx.set(self.state_key.clone(), mtree.state.try_to_val()?).await?;
+				self.store.completed(mtree.state.generation);
+			}
 		}
 		Ok(())
 	}
@@ -1548,7 +1551,7 @@ impl TreeNode for MTreeNode {
 		}
 	}
 
-	fn try_into_val(&mut self) -> Result<Val, Error> {
+	fn try_into_val(&self) -> Result<Val, Error> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 		match self {
 			MTreeNode::Leaf(objects) => {
@@ -1680,9 +1683,11 @@ mod tests {
 	) -> Result<(), Error> {
 		if st.finish(&mut tx).await? {
 			t.state.generation += 1;
+			st.completed(t.state.generation);
 		}
 		if commit {
-			tx.commit().await
+			tx.commit().await?;
+			Ok(())
 		} else {
 			tx.cancel().await
 		}

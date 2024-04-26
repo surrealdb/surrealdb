@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::trees::bkeys::BKeys;
-use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeStore};
+use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
@@ -36,7 +36,7 @@ pub struct BState {
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 	#[revision(start = 2)]
-	generation: u64,
+	generation: StoreGeneration,
 }
 
 impl VersionedSerdeState for BState {
@@ -158,6 +158,10 @@ impl<BK> TreeNode for BTreeNode<BK>
 where
 	BK: BKeys + Clone,
 {
+	fn prepare_save(&mut self) {
+		self.keys_mut().compile();
+	}
+
 	fn try_from_val(val: Val) -> Result<Self, Error> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(val);
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
@@ -172,8 +176,7 @@ where
 		}
 	}
 
-	fn try_into_val(&mut self) -> Result<Val, Error> {
-		self.keys_mut().compile();
+	fn try_into_val(&self) -> Result<Val, Error> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 		match self {
 			BTreeNode::Internal(keys, child) => {
@@ -280,6 +283,10 @@ where
 	pub(in crate::idx) fn inc_generation(&mut self) -> &BState {
 		self.state.generation += 1;
 		&self.state
+	}
+
+	pub(in crate::idx) fn generation(&self) -> StoreGeneration {
+		self.state.generation
 	}
 
 	pub async fn search(
@@ -1017,7 +1024,7 @@ mod tests {
 	#[test]
 	fn test_node_serde_internal() {
 		let mut node = BTreeNode::Internal(FstKeys::default(), vec![]);
-		node.keys_mut().compile();
+		node.prepare_save();
 		let val = node.try_into_val().unwrap();
 		let _: BTreeNode<FstKeys> = BTreeNode::try_from_val(val).unwrap();
 	}
@@ -1025,6 +1032,7 @@ mod tests {
 	#[test]
 	fn test_node_serde_leaf() {
 		let mut node = BTreeNode::Leaf(TrieKeys::default());
+		node.prepare_save();
 		let val = node.try_into_val().unwrap();
 		let _: BTreeNode<TrieKeys> = BTreeNode::try_from_val(val).unwrap();
 	}
@@ -1045,7 +1053,9 @@ mod tests {
 			t.insert(&mut tx, &mut st, key, payload).await.unwrap();
 		}
 		st.finish(&mut tx).await.unwrap();
+		t.inc_generation();
 		tx.commit().await.unwrap();
+		st.completed(t.state.generation);
 	}
 
 	async fn check_insertions<F, BK>(
@@ -1418,6 +1428,7 @@ mod tests {
 				t.insert(&mut tx, &mut st, key.into(), payload).await.unwrap();
 			}
 			st.finish(&mut tx).await.unwrap();
+			st.completed(t.state.generation);
 			tx.commit().await.unwrap();
 		}
 
@@ -1509,6 +1520,7 @@ mod tests {
 	{
 		if st.finish(&mut tx).await? {
 			t.state.generation += 1;
+			st.completed(t.state.generation);
 		}
 		gen += 1;
 		assert_eq!(t.state.generation, gen, "{}", info);
@@ -1833,6 +1845,8 @@ mod tests {
 				assert_eq!(keys, tree_keys);
 			}
 			st.finish(&mut tx).await?;
+			t.inc_generation();
+			st.completed(t.state.generation);
 			tx.commit().await?;
 		}
 		{
