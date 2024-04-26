@@ -55,12 +55,9 @@ impl From<SqlFilter> for Filter {
 }
 
 impl Filter {
-	pub(super) fn from(f: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
-		if let Some(f) = f {
-			let mut r = Vec::with_capacity(f.len());
-			for f in f {
-				r.push(f.into());
-			}
+	pub(super) fn from(fs: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+		if let Some(fs) = fs {
+			let r = fs.into_iter().map(|f| f.into()).collect();
 			Some(r)
 		} else {
 			None
@@ -167,16 +164,16 @@ impl Filter {
 			return FilterResult::Ignore;
 		}
 		let max = (max as usize).min(l);
-		let mut ng = vec![];
-		let r = min..(max + 1);
-		for p in r {
-			let n = &c[0..p];
-			if c.eq(n) {
-				ng.push(Term::Unchanged);
-			} else {
-				ng.push(Term::NewTerm(n.iter().collect(), 0));
-			}
-		}
+		let ng = (min..=max)
+			.map(|p| {
+				let n = &c[0..p];
+				if c.eq(n) {
+					Term::Unchanged
+				} else {
+					Term::NewTerm(n.iter().collect(), 0)
+				}
+			})
+			.collect();
 		FilterResult::Terms(ng)
 	}
 }
