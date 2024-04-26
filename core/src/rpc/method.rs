@@ -88,6 +88,36 @@ impl Method {
 	}
 }
 
+impl From<u8> for Method {
+	fn from(n: u8) -> Self {
+		match n {
+			1 => Self::Ping,
+			2 => Self::Info,
+			3 => Self::Use,
+			4 => Self::Signup,
+			5 => Self::Signin,
+			6 => Self::Invalidate,
+			7 => Self::Authenticate,
+			8 => Self::Kill,
+			9 => Self::Live,
+			10 => Self::Set,
+			11 => Self::Unset,
+			12 => Self::Select,
+			13 => Self::Insert,
+			14 => Self::Create,
+			15 => Self::Update,
+			16 => Self::Merge,
+			17 => Self::Patch,
+			18 => Self::Delete,
+			19 => Self::Version,
+			20 => Self::Query,
+			21 => Self::Relate,
+			22 => Self::Run,
+			_ => Self::Unknown,
+		}
+	}
+}
+
 impl Method {
 	pub fn is_valid(&self) -> bool {
 		!matches!(self, Self::Unknown)

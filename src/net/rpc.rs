@@ -23,7 +23,6 @@ use http_body::Body as HttpBody;
 use surrealdb::dbs::Session;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
-use surrealdb::rpc::method::Method;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
 
@@ -116,7 +115,7 @@ async fn post_handler(
 
 	match fmt.req_http(body) {
 		Ok(req) => {
-			let res = rpc_ctx.execute(Method::parse(req.method), req.params).await;
+			let res = rpc_ctx.execute(&req.method, req.params).await;
 			fmt.res_http(res.into_response(None)).map_err(Error::from)
 		}
 		Err(err) => Err(Error::from(err)),

@@ -35,7 +35,7 @@ pub trait RpcContext {
 		async { unreachable!() }
 	}
 
-	async fn execute(&mut self, method: Method, params: Array) -> Result<Data, RpcError> {
+	async fn execute(&mut self, method: &Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
 			Method::Info => self.info().await.map(Into::into).map_err(Into::into),
@@ -65,7 +65,7 @@ pub trait RpcContext {
 		}
 	}
 
-	async fn execute_immut(&self, method: Method, params: Array) -> Result<Data, RpcError> {
+	async fn execute_immut(&self, method: &Method, params: Array) -> Result<Data, RpcError> {
 		match method {
 			Method::Ping => Ok(Value::None.into()),
 			Method::Info => self.info().await.map(Into::into).map_err(Into::into),

@@ -297,15 +297,17 @@ impl Connection {
 			// Parse the RPC request structure
 			match fmt.req_ws(msg) {
 				Ok(req) => {
+					let method_str = req.method.to_str();
+
 					// Now that we know the method, we can update the span and create otel context
-					span.record("rpc.method", &req.method);
-					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
+					span.record("rpc.method", method_str);
+					span.record("otel.name", format!("surrealdb.rpc/{}", method_str));
 					span.record(
 						"rpc.request_id",
 						req.id.clone().map(Value::as_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
-						req_cx.with_method(&req.method).with_size(len),
+						req_cx.with_method(method_str).with_size(len),
 					));
 					// Process the message
 					let res =
@@ -333,11 +335,10 @@ impl Connection {
 
 	pub async fn process_message(
 		rpc: Arc<RwLock<Connection>>,
-		method: &str,
+		method: &Method,
 		params: Array,
 	) -> Result<Data, Failure> {
 		debug!("Process RPC request");
-		let method = Method::parse(method);
 		if !method.is_valid() {
 			return Err(Failure::METHOD_NOT_FOUND);
 		}

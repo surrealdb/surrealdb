@@ -747,6 +747,54 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn rpc_endpoint_with_method_as_string() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/rpc");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", Ulid::new().to_string().parse()?);
+		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		let res = client.post(url).json(&json!({"method": "ping"})).send().await?;
+		assert!(res.status().is_success());
+
+		let result = res.text().await?;
+		assert_eq!(result, "{\"result\":null}");
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn rpc_endpoint_with_method_as_number() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/rpc");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("NS", Ulid::new().to_string().parse()?);
+		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		let res = client.post(url).json(&json!({"method": 1})).send().await?;
+		assert!(res.status().is_success());
+
+		let result = res.text().await?;
+		assert_eq!(result, "{\"result\":null}");
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
 		let url = &format!("http://{addr}/signin");

@@ -1,9 +1,10 @@
 use crate::rpc::format::cbor::Cbor;
 use crate::rpc::format::msgpack::Pack;
 use crate::rpc::RpcError;
-use crate::sql::Part;
-use crate::sql::{Array, Value};
+use crate::sql::{Array, Number, Part, Value};
 use once_cell::sync::Lazy;
+
+use super::method::Method;
 
 pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 pub static METHOD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("method")]);
@@ -11,7 +12,7 @@ pub static PARAMS: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("params")]);
 
 pub struct Request {
 	pub id: Option<Value>,
-	pub method: String,
+	pub method: Method,
 	pub params: Array,
 }
 
@@ -44,7 +45,11 @@ impl TryFrom<Value> for Request {
 		};
 		// Fetch the 'method' argument
 		let method = match val.pick(&*METHOD) {
-			Value::Strand(v) => v.to_raw(),
+			Value::Strand(v) => Method::parse(v.to_raw()),
+			Value::Number(Number::Int(v)) => match u8::try_from(v) {
+				Ok(v) => Method::from(v),
+				_ => return Err(RpcError::InvalidRequest),
+			},
 			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'params' argument
