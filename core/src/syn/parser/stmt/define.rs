@@ -233,7 +233,6 @@ impl Parser<'_> {
 		let mut res = DefineAccessStatement {
 			name,
 			base,
-			key: DefineAccessStatement::random_key(),
 			if_not_exists,
 			..Default::default()
 		};
@@ -249,49 +248,12 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("JWT") => {
 							self.pop_peek();
-							match self.peek_kind() {
-								t!("ALGORITHM") => {
-									self.pop_peek();
-									match self.next().kind {
-										TokenKind::Algorithm(alg) => match self.next().kind {
-											t!("KEY") => {
-												let key = self.next_token_value::<Strand>()?.0;
-												res.kind = AccessType::Jwt(
-														access_type::JwtAccess{
-															verification: access_type::JwtAccessVerification::Key(
-																access_type::JwtAccessVerificationKey{
-																	alg: alg,
-																	key: key,
-																}
-															)
-														}
-													);
-											}
-											x => unexpected!(self, x, "a key"),
-										},
-										x => unexpected!(self, x, "a valid algorithm"),
-									}
-								}
-								t!("URL") => {
-									self.pop_peek();
-									let url = self.next_token_value::<Strand>()?.0;
-									res.kind = AccessType::Jwt(access_type::JwtAccess {
-										verification: access_type::JwtAccessVerification::Jwks(
-											access_type::JwtAccessVerificationJwks {
-												url,
-											},
-										),
-									});
-								}
-								x => unexpected!(self, x, "`ALGORITHM`, or `URL`"),
-							}
+							res.kind = AccessType::Jwt(self.parse_jwt()?);
 						}
 						t!("RECORD") => {
 							self.pop_peek();
 							let mut ac = access_type::RecordAccess {
-								duration: None,
-								signup: None,
-								signin: None,
+								..Default::default()
 							};
 							loop {
 								match self.peek_kind() {
@@ -312,6 +274,10 @@ impl Parser<'_> {
 									_ => break,
 								}
 							}
+							let _with_jwt = if self.eat(t!("WITH")) {
+								expected!(self, t!("JWT"));
+								ac.jwt = self.parse_jwt()?;
+							};
 							res.kind = AccessType::Record(ac);
 						}
 						_ => break,
@@ -936,5 +902,60 @@ impl Parser<'_> {
 			names.push(self.next_token_value()?);
 		}
 		Ok(Kind::Record(names))
+	}
+
+	pub fn parse_jwt(&mut self) -> ParseResult<access_type::JwtAccess> {
+		let mut res = access_type::JwtAccess {
+			..Default::default()
+		};
+
+		match self.peek_kind() {
+			t!("ALGORITHM") => {
+				self.pop_peek();
+				match self.next().kind {
+					TokenKind::Algorithm(alg) => match self.next().kind {
+						t!("KEY") => {
+							let key = self.next_token_value::<Strand>()?.0;
+							res.verify = access_type::JwtAccessVerify::Key(
+								access_type::JwtAccessVerifyKey {
+									alg,
+									key,
+								},
+							);
+							res.issue = None;
+						}
+						x => unexpected!(self, x, "a key"),
+					},
+					x => unexpected!(self, x, "a valid algorithm"),
+				}
+			}
+			t!("URL") => {
+				self.pop_peek();
+				let url = self.next_token_value::<Strand>()?.0;
+				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
+					url,
+				});
+				res.issue = None;
+			}
+			x => unexpected!(self, x, "`ALGORITHM`, or `URL`"),
+		}
+
+		let _with_issuer = if self.eat(t!("WITH")) {
+			expected!(self, t!("ISSUER"));
+			expected!(self, t!("KEY"));
+			let mut iss = access_type::JwtAccessIssue {
+				key: self.next_token_value::<Strand>()?.0,
+				..Default::default()
+			};
+			match self.peek_kind() {
+				t!("DURATION") => {
+					self.pop_peek();
+					iss.duration = Some(self.next_token_value()?);
+				}
+				x => unexpected!(self, x, "`DURATION`"),
+			}
+		};
+
+		Ok(res)
 	}
 }

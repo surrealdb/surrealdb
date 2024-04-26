@@ -92,6 +92,7 @@ keyword! {
 	Into => "INTO",
 	If => "IF",
 	Is => "IS",
+	Issuer => "ISSUER",
 	Jwt => "JWT",
 	Jwks => "JWKS",
 	Key => "KEY",

@@ -25,6 +25,28 @@ pub enum Algorithm {
 	Jwks, // Not an argorithm.
 }
 
+impl Into<jsonwebtoken::Algorithm> for Algorithm {
+	fn into(self) -> jsonwebtoken::Algorithm {
+		match self {
+			Algorithm::Hs256 => jsonwebtoken::Algorithm::HS256,
+			Algorithm::Hs384 => jsonwebtoken::Algorithm::HS384,
+			Algorithm::Hs512 => jsonwebtoken::Algorithm::HS512,
+			Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
+			Algorithm::Es256 => jsonwebtoken::Algorithm::ES256,
+			Algorithm::Es384 => jsonwebtoken::Algorithm::ES384,
+			Algorithm::Es512 => jsonwebtoken::Algorithm::ES384,
+			Algorithm::Ps256 => jsonwebtoken::Algorithm::PS256,
+			Algorithm::Ps384 => jsonwebtoken::Algorithm::PS384,
+			Algorithm::Ps512 => jsonwebtoken::Algorithm::PS512,
+			Algorithm::Rs256 => jsonwebtoken::Algorithm::RS256,
+			Algorithm::Rs384 => jsonwebtoken::Algorithm::RS384,
+			Algorithm::Rs512 => jsonwebtoken::Algorithm::RS512,
+			// TODO(PR): Remove this option.
+			Algorithm::Jwks => jsonwebtoken::Algorithm::HS512,
+		}
+	}
+}
+
 impl Default for Algorithm {
 	fn default() -> Self {
 		Self::Hs512

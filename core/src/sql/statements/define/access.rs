@@ -3,7 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::access_type::JwtAccessVerification;
+use crate::sql::access_type::{JwtAccess, JwtAccessVerify};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{escape::quote_str, AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
@@ -21,7 +21,6 @@ pub struct DefineAccessStatement {
 	pub name: Ident,
 	pub base: Base,
 	pub kind: AccessType,
-	pub key: String,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
@@ -29,8 +28,8 @@ pub struct DefineAccessStatement {
 
 impl DefineAccessStatement {
 	/// Generate a random key to be used to sign session tokens
-	/// These key will be used to sign tokens issued with this access method
-	/// This value is used in every access method other than JWT
+	/// This key will be used to sign tokens issued with this access method
+	/// This value is used by default in every access method other than JWT
 	pub(crate) fn random_key() -> String {
 		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
 	}
@@ -133,22 +132,14 @@ impl DefineAccessStatement {
 
 impl Display for DefineAccessStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TOKEN",)?;
+		write!(f, "DEFINE ACCESS",)?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
 		write!(f, " {} ON {}", self.name, self.base)?;
 		match &self.kind {
 			AccessType::Jwt(ac) => {
-				write!(f, " TYPE JWT")?;
-				match &ac.verification {
-					JwtAccessVerification::Key(ref v) => {
-						write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
-					}
-					JwtAccessVerification::Jwks(ref v) => {
-						write!(f, " JWKS {}", quote_str(&v.url),)?;
-					}
-				}
+				write!(f, " TYPE JWT {}", ac)?;
 			}
 			AccessType::Record(ac) => {
 				write!(f, " TYPE RECORD")?;
@@ -161,6 +152,7 @@ impl Display for DefineAccessStatement {
 				if let Some(ref v) = ac.signin {
 					write!(f, " SIGNIN {v}")?
 				}
+				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
 		if let Some(ref v) = self.comment {
@@ -170,6 +162,27 @@ impl Display for DefineAccessStatement {
 	}
 }
 
+impl Display for JwtAccess {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match &self.verify {
+			JwtAccessVerify::Key(ref v) => {
+				write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
+			}
+			JwtAccessVerify::Jwks(ref v) => {
+				write!(f, " JWKS {}", quote_str(&v.url),)?;
+			}
+		}
+		if let Some(iss) = &self.issue {
+			write!(f, " WITH ISSUER KEY {}", quote_str(&iss.key))?;
+			if let Some(ref v) = iss.duration {
+				write!(f, " DURATION {v}")?
+			}
+		}
+		Ok(())
+	}
+}
+
+// TODO(PR): Fix structured display.
 impl InfoStructure for DefineAccessStatement {
 	fn structure(self) -> Value {
 		let Self {

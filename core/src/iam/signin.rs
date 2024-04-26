@@ -10,7 +10,7 @@ use crate::sql::AccessType;
 use crate::sql::Object;
 use crate::sql::Value;
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -119,6 +119,11 @@ pub async fn db(
 			// The equivalent of signing in with JWT is to authenticate it
 			match av.kind {
 				AccessType::Record(at) => {
+					// Check if the record access method supports issuing tokens
+					let iss = match at.jwt.issue {
+						Some(iss) => iss,
+						_ => return Err(Error::AccessMethodMismatch),
+					};
 					match at.signin {
 						// This record access allows signin
 						Some(val) => {
@@ -136,7 +141,7 @@ pub async fn db(
 										// There is a record returned
 										Some(rid) => {
 											// Create the authentication key
-											let key = EncodingKey::from_secret(av.key.as_ref());
+											let key = EncodingKey::from_secret(iss.key.as_ref());
 											// Create the authentication claim
 											let exp =
 												Some(
@@ -175,7 +180,8 @@ pub async fn db(
 											// Log the authenticated access method info
 											trace!("Signing in with access method `{}`", ac);
 											// Create the authentication token
-											let enc = encode(&HEADER, &val, &key);
+											let enc =
+												encode(&Header::new(iss.alg.into()), &val, &key);
 											// Set the authentication on the session
 											session.tk = Some(val.into());
 											session.ns = Some(ns.to_owned());

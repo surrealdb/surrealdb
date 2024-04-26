@@ -1,4 +1,5 @@
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::statements::DefineAccessStatement;
 use crate::sql::{escape::quote_str, Algorithm, Duration};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -13,33 +14,100 @@ use super::{Object, Value};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AccessType {
-	Jwt(JwtAccess),
 	Record(RecordAccess),
+	Jwt(JwtAccess),
+}
+
+impl Default for AccessType {
+	fn default() -> Self {
+		// Access type defaults to the most specific
+		Self::Record(RecordAccess {
+			..Default::default()
+		})
+	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 pub struct JwtAccess {
-	pub verification: JwtAccessVerification,
+	// Verify is required
+	pub verify: JwtAccessVerify,
+	// Issue is optional
+	// It is possible to only verify externally issued tokens
+	pub issue: Option<JwtAccessIssue>,
+}
+
+impl Default for JwtAccess {
+	fn default() -> Self {
+		// Defaults to HS512 with a randomly generated key
+		let alg = Algorithm::Hs512;
+		let key = DefineAccessStatement::random_key();
+		// By default the access method can verify and issue tokens
+		Self {
+			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+				alg,
+				key: key.clone(),
+			}),
+			issue: Some(JwtAccessIssue {
+				alg,
+				key,
+				// Defaults to tokens lasting for one hour
+				duration: Some(Duration::from_hours(1)),
+			}),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-pub enum JwtAccessVerification {
-	Key(JwtAccessVerificationKey),
-	Jwks(JwtAccessVerificationJwks),
+pub struct JwtAccessIssue {
+	pub alg: Algorithm,
+	pub key: String,
+	pub duration: Option<Duration>,
+}
+
+impl Default for JwtAccessIssue {
+	fn default() -> Self {
+		Self {
+			// Defaults to HS512
+			alg: Algorithm::Hs512,
+			// Avoid defaulting to empty key
+			key: DefineAccessStatement::random_key(),
+			// Defaults to tokens lasting for one hour
+			duration: Some(Duration::from_hours(1)),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-pub struct JwtAccessVerificationKey {
+#[non_exhaustive]
+pub enum JwtAccessVerify {
+	Key(JwtAccessVerifyKey),
+	Jwks(JwtAccessVerifyJwks),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
 	pub key: String,
 }
 
+impl Default for JwtAccessVerifyKey {
+	fn default() -> Self {
+		Self {
+			// Defaults to HS512
+			alg: Algorithm::Hs512,
+			// Avoid defaulting to empty key
+			key: DefineAccessStatement::random_key(),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-pub struct JwtAccessVerificationJwks {
+pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
@@ -49,15 +117,20 @@ pub struct RecordAccess {
 	pub duration: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
+	pub jwt: JwtAccess,
 }
 
-impl Default for AccessType {
+impl Default for RecordAccess {
 	fn default() -> Self {
-		Self::Record(RecordAccess {
-			duration: None,
+		Self {
+			// Defaults to sessions lasting one hour
+			duration: Some(Duration::from_hours(1)),
 			signup: None,
 			signin: None,
-		})
+			jwt: JwtAccess {
+				..Default::default()
+			},
+		}
 	}
 }
 
@@ -66,11 +139,11 @@ impl Display for AccessType {
 		match self {
 			AccessType::Jwt(ac) => {
 				f.write_str(" JWT")?;
-				match &ac.verification {
-					JwtAccessVerification::Key(ref v) => {
+				match &ac.verify {
+					JwtAccessVerify::Key(ref v) => {
 						write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?
 					}
-					JwtAccessVerification::Jwks(ref v) => write!(f, " JWKS {}", quote_str(&v.url))?,
+					JwtAccessVerify::Jwks(ref v) => write!(f, " JWKS {}", quote_str(&v.url))?,
 				}
 			}
 			AccessType::Record(ac) => {
@@ -97,12 +170,12 @@ impl InfoStructure for AccessType {
 		match self {
 			AccessType::Jwt(ac) => {
 				acc.insert("kind".to_string(), "JWT".into());
-				match ac.verification {
-					JwtAccessVerification::Key(v) => {
+				match ac.verify {
+					JwtAccessVerify::Key(v) => {
 						acc.insert("alg".to_string(), v.alg.structure());
 						acc.insert("key".to_string(), v.key.into());
 					}
-					JwtAccessVerification::Jwks(v) => {
+					JwtAccessVerify::Jwks(v) => {
 						acc.insert("url".to_string(), v.url.into());
 					}
 				}

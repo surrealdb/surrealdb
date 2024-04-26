@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::iam::jwks;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::access_type::{AccessType, JwtAccessVerification};
+use crate::sql::access_type::{AccessType, JwtAccessVerify};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -210,14 +210,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match de.kind {
-				AccessType::Record(_) => {
-					// For record access, all tokens are signed using HS512
-					config(Algorithm::Hs512, de.key)
-				}
-				AccessType::Jwt(ac) => match ac.verification {
-					JwtAccessVerification::Key(key) => config(key.alg, key.key),
+				AccessType::Record(ac) => match ac.jwt.verify {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key),
 					#[cfg(feature = "jwks")]
-					JwtAccessVerification::Jwks(jwks) => {
+					JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
@@ -262,10 +258,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let de = tx.get_db_access(&ns, &db, &ac).await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match de.kind {
-				AccessType::Jwt(ac) => match ac.verification {
-					JwtAccessVerification::Key(key) => config(key.alg, key.key),
+				AccessType::Jwt(ac) => match ac.verify {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key),
 					#[cfg(feature = "jwks")]
-					JwtAccessVerification::Jwks(jwks) => {
+					JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
@@ -353,10 +349,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let de = tx.get_ns_access(&ns, &ac).await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match de.kind {
-				AccessType::Jwt(ac) => match ac.verification {
-					JwtAccessVerification::Key(key) => config(key.alg, key.key),
+				AccessType::Jwt(ac) => match ac.verify {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key),
 					#[cfg(feature = "jwks")]
-					JwtAccessVerification::Jwks(jwks) => {
+					JwtAccessVerify::Jwks(jwks) => {
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
@@ -920,7 +916,8 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE ACCESS token ON DB TYPE JWT ALGORITHM HS512 KEY '{secret}'").as_str(),
+			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}'")
+				.as_str(),
 			&sess,
 			None,
 		)
@@ -1021,17 +1018,25 @@ mod tests {
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-			tk: Some("token".to_string()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
-			sc: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			id: Some("user:test".to_string()),
 			..Claims::default()
 		};
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE ACCESS token ON DB TYPE JWT ALGORITHM HS512 KEY '{secret}';").as_str(),
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY '{secret}';
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
 			&sess,
 			None,
 		)
@@ -1055,8 +1060,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
@@ -1083,8 +1088,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
@@ -1111,12 +1116,12 @@ mod tests {
 		}
 
 		//
-		// Test with valid token invalid sc
+		// Test with valid token invalid access method
 		//
 		{
 			// Prepare the claims object
 			let mut claims = claims.clone();
-			claims.sc = Some("invalid".to_string());
+			claims.ac = Some("invalid".to_string());
 			// Create the token
 			let enc = encode(&HEADER, &claims, &key).unwrap();
 			// Signin with the token
@@ -1146,7 +1151,7 @@ mod tests {
 		// Test with generic user identifier
 		//
 		{
-			let resource_id = "user:`2k9qnabxuxh8k4d5gfto`".to_string();
+			let resource_id = "user:⟨2k9qnabxuxh8k4d5gfto⟩".to_string();
 			// Prepare the claims object
 			let mut claims = claims.clone();
 			claims.id = Some(resource_id.clone());
@@ -1159,8 +1164,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), resource_id);
 			assert!(sess.au.is_record());
 			let user_id = syn::thing(&resource_id).unwrap();
 			assert_eq!(sess.sd, Some(Value::from(user_id)));
@@ -1185,8 +1190,8 @@ mod tests {
 				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 				assert_eq!(sess.ns, Some("test".to_string()));
 				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.sc, Some("test".to_string()));
-				assert_eq!(sess.au.id(), "token");
+				assert_eq!(sess.ac, Some("token".to_string()));
+				assert_eq!(sess.au.id(), resource_id);
 				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
 				assert_eq!(sess.sd, Some(Value::from(user_id)));
@@ -1212,8 +1217,8 @@ mod tests {
 				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 				assert_eq!(sess.ns, Some("test".to_string()));
 				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.sc, Some("test".to_string()));
-				assert_eq!(sess.au.id(), "token");
+				assert_eq!(sess.ac, Some("token".to_string()));
+				assert_eq!(sess.au.id(), resource_id);
 				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
 				assert_eq!(sess.sd, Some(Value::from(user_id)));
@@ -1240,8 +1245,8 @@ mod tests {
 				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 				assert_eq!(sess.ns, Some("test".to_string()));
 				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.sc, Some("test".to_string()));
-				assert_eq!(sess.au.id(), "token");
+				assert_eq!(sess.ac, Some("token".to_string()));
+				assert_eq!(sess.au.id(), resource_id);
 				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
 				assert_eq!(sess.sd, Some(Value::from(user_id)));
@@ -1267,8 +1272,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), resource_id);
 			assert!(sess.au.is_record());
 			let user_id = syn::thing(&resource_id).unwrap();
 			assert_eq!(sess.sd, Some(Value::from(user_id)));
@@ -1276,7 +1281,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_token_scope_custom_claims() {
+	async fn test_token_db_record_custom_claims() {
 		use std::collections::HashMap;
 
 		let secret = "jwt_secret";
@@ -1285,7 +1290,15 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE TOKEN token ON SCOPE test TYPE HS512 VALUE '{secret}';").as_str(),
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY '{secret}';
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
 			&sess,
 			None,
 		)
@@ -1305,10 +1318,10 @@ mod tests {
 					"iat": {now},
 					"nbf": {now},
 					"exp": {later},
-					"tk": "token",
 					"ns": "test",
 					"db": "test",
-					"sc": "test",
+					"ac": "token",
+					"id": "user:test",
 
 					"string_claim": "test",
 					"bool_claim": true,
@@ -1341,8 +1354,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
@@ -1377,7 +1390,7 @@ mod tests {
 
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
-	async fn test_token_scope_jwks() {
+	async fn test_token_db_record_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
@@ -1438,8 +1451,15 @@ mod tests {
 
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE ACCESS token ON DATABASE TYPE JWT URL '{server_url}/{jwks_path}';")
-				.as_str(),
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT URL '{server_url}/{jwks_path}';
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
 			&sess,
 			None,
 		)
@@ -1460,10 +1480,10 @@ mod tests {
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-			tk: Some("token".to_string()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
-			sc: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			id: Some("user:test".to_string()),
 			..Claims::default()
 		};
 
@@ -1484,8 +1504,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
 			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
