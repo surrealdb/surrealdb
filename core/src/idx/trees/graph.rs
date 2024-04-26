@@ -21,14 +21,6 @@ impl UndirectedGraph {
 		self.nodes.get(node)
 	}
 
-	#[cfg(test)]
-	pub(super) fn add_edge(&mut self, node1: ElementId, node2: ElementId) {
-		if node1 != node2 {
-			self.nodes.entry(node1).or_default().insert(node2);
-			self.nodes.entry(node2).or_default().insert(node1);
-		}
-	}
-
 	pub(super) fn add_empty_node(&mut self, node: ElementId) -> bool {
 		if let HEntry::Vacant(e) = self.nodes.entry(node) {
 			e.insert(HashSet::with_capacity(self.m_max));
@@ -129,11 +121,7 @@ mod tests {
 
 		// Change the edges of a node
 		g.set_node(3, HashSet::from([0]));
-		g.check(vec![(0, vec![1, 2, 3]), (1, vec![0, 2]), (2, vec![0, 1]), (3, vec![0])]);
-
-		// Add an edge
-		g.add_edge(2, 3);
-		g.check(vec![(0, vec![1, 2, 3]), (1, vec![0, 2]), (2, vec![0, 1, 3]), (3, vec![0, 2])]);
+		g.check(vec![(0, vec![1, 2]), (1, vec![0, 2, 3]), (2, vec![0, 1, 3]), (3, vec![0])]);
 
 		// Remove a node
 		let res = g.remove_node_and_bidirectional_edges(&2);
@@ -145,7 +133,7 @@ mod tests {
 			}),
 			Some(vec![0, 1, 3])
 		);
-		g.check(vec![(0, vec![1, 3]), (1, vec![0]), (3, vec![0])]);
+		g.check(vec![(0, vec![1]), (1, vec![0, 3]), (3, vec![0])]);
 
 		// Remove again
 		let res = g.remove_node_and_bidirectional_edges(&2);
@@ -153,6 +141,6 @@ mod tests {
 
 		// Set a non existing node
 		g.set_node(2, HashSet::from([1]));
-		g.check(vec![(0, vec![1, 3]), (1, vec![0, 2]), (2, vec![1]), (3, vec![0])]);
+		g.check(vec![(0, vec![1]), (1, vec![0, 3]), (2, vec![1]), (3, vec![0])]);
 	}
 }
