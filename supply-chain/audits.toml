@@ -6,6 +6,12 @@ who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
 version = "0.9.0"
 
+[[audits.hashlink]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.9.0"
+notes = "Unsafe code from handling its internal linked list. It currently passes tests under miri and sanitizers."
+
 [[audits.quick_cache]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
