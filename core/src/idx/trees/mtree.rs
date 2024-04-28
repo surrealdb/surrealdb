@@ -27,6 +27,7 @@ use crate::sql::index::{Distance, MTreeParams, VectorType};
 use crate::sql::{Array, Object, Thing, Value};
 
 pub(crate) struct MTreeIndex {
+	ixs: IndexStores,
 	state_key: Key,
 	dim: usize,
 	vector_type: VectorType,
@@ -62,6 +63,7 @@ impl MTreeIndex {
 			.await;
 		let mtree = Arc::new(RwLock::new(MTree::new(state, p.distance.clone())));
 		Ok(Self {
+			ixs: ixs.clone(),
 			state_key,
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
@@ -181,14 +183,12 @@ impl MTreeIndex {
 	}
 
 	pub(crate) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+		self.doc_ids.write().await.finish(tx).await?;
 		let mut mtree = self.mtree.write().await;
-		let next_generation = mtree.state.generation += 1;
-		if let Some(new_cache) = self.doc_ids.write().await.finish(tx, next_generation).await? {
-			if self.store.finish(tx).await? {
-				mtree.state.generation += 1;
-				tx.set(self.state_key.clone(), mtree.state.try_to_val()?).await?;
-				self.store.completed(mtree.state.generation);
-			}
+		if let Some(new_cache) = self.store.finish(tx).await? {
+			mtree.state.generation += 1;
+			tx.set(self.state_key.clone(), mtree.state.try_to_val()?).await?;
+			self.ixs.advance_store_mtree(new_cache);
 		}
 		Ok(())
 	}
@@ -1676,14 +1676,16 @@ mod tests {
 	}
 
 	async fn finish_operation(
+		ds: &Datastore,
 		t: &mut MTree,
 		mut tx: Transaction,
 		mut st: TreeStore<MTreeNode>,
 		commit: bool,
 	) -> Result<(), Error> {
-		if st.finish(&mut tx).await? {
+		if let Some(new_cache) = st.finish(&mut tx).await? {
+			assert!(new_cache.len() > 0, "new_cache.len() = {}", new_cache.len());
 			t.state.generation += 1;
-			st.completed(t.state.generation);
+			ds.index_store().advance_store_mtree(new_cache);
 		}
 		if commit {
 			tx.commit().await?;
@@ -1739,7 +1741,7 @@ mod tests {
 				check_leaf_vec(m, &vec1, 0.0, &[1]);
 			})
 			.await;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		// Check KNN
 		{
@@ -1756,7 +1758,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec2.clone(), 2)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		// vec1 knn
 		{
@@ -1787,7 +1789,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec2.clone(), 3)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		// vec2 knn
 		{
@@ -1811,7 +1813,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec3.clone(), 3)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		// vec3 knn
 		{
@@ -1836,7 +1838,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec4.clone(), 4)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		// vec4 knn
 		{
@@ -1872,7 +1874,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec6.clone(), 6)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		// vec6 knn
 		{
@@ -1911,7 +1913,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec8.clone(), 8)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
@@ -1950,7 +1952,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec9.clone(), 9)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
@@ -1990,7 +1992,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
 			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec10.clone(), 10)).finish().await?;
-			finish_operation(&mut t, tx, st, true).await?;
+			finish_operation(&ds, &mut t, tx, st, true).await?;
 		}
 		{
 			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
@@ -2085,7 +2087,7 @@ mod tests {
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
 				t.insert(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
-				finish_operation(t, tx, st, true).await?;
+				finish_operation(ds, t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			c += 1;
@@ -2113,7 +2115,7 @@ mod tests {
 				t.insert(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
-			finish_operation(t, tx, st, true).await?;
+			finish_operation(ds, t, tx, st, true).await?;
 		}
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
@@ -2136,7 +2138,7 @@ mod tests {
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
 				let deleted = t.delete(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
-				finish_operation(t, tx, st, true).await?;
+				finish_operation(ds, t, tx, st, true).await?;
 				deleted
 			};
 			all_deleted = all_deleted && deleted;
@@ -2462,7 +2464,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_mtree_unique_normal_root_cache() -> Result<(), Error> {
+	async fn test_mtree_unique_normal_small_cache() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -2475,7 +2477,7 @@ mod tests {
 						false,
 						true,
 						false,
-						1,
+						10,
 					)
 					.await?;
 				}

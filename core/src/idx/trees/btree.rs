@@ -285,10 +285,6 @@ where
 		&self.state
 	}
 
-	pub(in crate::idx) fn generation(&self) -> StoreGeneration {
-		self.state.generation
-	}
-
 	pub async fn search(
 		&self,
 		tx: &mut Transaction,
@@ -1053,9 +1049,7 @@ mod tests {
 			t.insert(&mut tx, &mut st, key, payload).await.unwrap();
 		}
 		st.finish(&mut tx).await.unwrap();
-		t.inc_generation();
 		tx.commit().await.unwrap();
-		st.completed(t.state.generation);
 	}
 
 	async fn check_insertions<F, BK>(
@@ -1428,7 +1422,6 @@ mod tests {
 				t.insert(&mut tx, &mut st, key.into(), payload).await.unwrap();
 			}
 			st.finish(&mut tx).await.unwrap();
-			st.completed(t.state.generation);
 			tx.commit().await.unwrap();
 		}
 
@@ -1518,9 +1511,8 @@ mod tests {
 	where
 		BK: BKeys + Clone + Debug,
 	{
-		if st.finish(&mut tx).await? {
+		if st.finish(&mut tx).await?.is_some() {
 			t.state.generation += 1;
-			st.completed(t.state.generation);
 		}
 		gen += 1;
 		assert_eq!(t.state.generation, gen, "{}", info);
@@ -1845,8 +1837,6 @@ mod tests {
 				assert_eq!(keys, tree_keys);
 			}
 			st.finish(&mut tx).await?;
-			t.inc_generation();
-			st.completed(t.state.generation);
 			tx.commit().await?;
 		}
 		{

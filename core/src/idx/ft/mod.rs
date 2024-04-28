@@ -467,9 +467,9 @@ impl FtIndex {
 		})
 	}
 
-	pub(crate) async fn finish(&self, ixs: &IndexStores, tx: &Transaction) -> Result<(), Error> {
+	pub(crate) async fn finish(&self, tx: &Transaction) -> Result<(), Error> {
 		let mut run = tx.lock().await;
-		self.doc_ids.write().await.finish(ixs, &mut run).await?;
+		self.doc_ids.write().await.finish(&mut run).await?;
 		self.doc_lengths.write().await.finish(&mut run).await?;
 		self.postings.write().await.finish(&mut run).await?;
 		self.terms.write().await.finish(&mut run).await?;

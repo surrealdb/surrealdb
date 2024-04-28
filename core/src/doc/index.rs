@@ -365,9 +365,7 @@ impl<'a> IndexOperation<'a> {
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-
 		let ixs = ctx.get_index_stores();
-
 		let mut ft =
 			FtIndex::new(ixs, self.opt, txn, &p.az, ikb, p, TransactionType::Write).await?;
 
@@ -376,7 +374,7 @@ impl<'a> IndexOperation<'a> {
 		} else {
 			ft.remove_document(txn, self.rid).await?;
 		}
-		ft.finish(&ixs, txn).await
+		ft.finish(txn).await
 	}
 
 	async fn index_mtree(

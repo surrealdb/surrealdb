@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub type DocId = u64;
 
 pub(crate) struct DocIds {
+	ixs: IndexStores,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -43,6 +44,7 @@ impl DocIds {
 			)
 			.await;
 		Ok(Self {
+			ixs: ixs.clone(),
 			state_key,
 			index_key_base: ikb,
 			btree: BTree::new(state.btree),
@@ -135,13 +137,8 @@ impl DocIds {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(in crate::idx) async fn finish(
-		&mut self,
-		ixs: &IndexStores,
-		tx: &mut Transaction,
-	) -> Result<(), Error> {
-		let next_generation = self.btree.generation() + 1;
-		if let Some(new_cache) = self.store.finish(tx, next_generation).await? {
+	pub(in crate::idx) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
+		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {
 				btree,
@@ -149,7 +146,7 @@ impl DocIds {
 				next_doc_id: self.next_doc_id,
 			};
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
-			ixs.advance_cache_btree_trie(new_cache).await;
+			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())
 	}
