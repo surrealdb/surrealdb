@@ -177,6 +177,13 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.surrealkv]]
+version = "0.1.5"
+when = "2024-04-24"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.surrealml-core]]
 version = "0.1.2"
 when = "2024-04-02"
@@ -222,6 +229,13 @@ user-name = "Tobie Morgan Hitchcock"
 [[publisher.vart]]
 version = "0.2.0"
 when = "2024-04-04"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.vart]]
+version = "0.2.1"
+when = "2024-04-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
