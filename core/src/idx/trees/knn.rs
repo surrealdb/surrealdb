@@ -534,20 +534,6 @@ pub(super) mod tests {
 		}
 	}
 
-	pub(in crate::idx::trees) fn new_vec(
-		mut n: i64,
-		t: VectorType,
-		dim: usize,
-	) -> HashedSharedVector {
-		let mut vec = Vector::new(t, dim);
-		vec.add(&Number::Int(n));
-		for _ in 1..dim {
-			n += 1;
-			vec.add(&Number::Int(n));
-		}
-		vec.into()
-	}
-
 	pub(in crate::idx::trees) fn new_random_vec(
 		rng: &mut SmallRng,
 		t: VectorType,

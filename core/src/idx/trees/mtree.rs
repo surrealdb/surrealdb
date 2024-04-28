@@ -1441,10 +1441,8 @@ mod tests {
 	use test_log::test;
 
 	use crate::idx::docids::DocId;
-	use crate::idx::trees::knn::tests::{new_vec, TestCollection};
-	use crate::idx::trees::mtree::{
-		InternalMap, LeafMap, LeafNode, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
-	};
+	use crate::idx::trees::knn::tests::TestCollection;
+	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeStore};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::HashedSharedVector;
 	use crate::kvs::LockType::*;
@@ -1939,117 +1937,6 @@ mod tests {
 			})
 			.finish()
 			.await
-	}
-
-	fn check_leaf_vec(
-		m: &HashMap<HashedSharedVector, ObjectProperties>,
-		obj: &HashedSharedVector,
-		parent_dist: f64,
-		docs: &[DocId],
-	) {
-		let p = m.get(obj).unwrap();
-		assert_eq!(p.docs.len(), docs.len() as u64);
-		for doc in docs {
-			assert!(p.docs.contains(*doc));
-		}
-		assert_eq!(p.parent_dist, parent_dist);
-	}
-
-	fn check_routing_vec(
-		m: &InternalMap,
-		center: &HashedSharedVector,
-		parent_dist: f64,
-		node_id: NodeId,
-		radius: f64,
-	) {
-		let p = m.get(center).unwrap();
-		assert_eq!(parent_dist, p.parent_dist);
-		assert_eq!(node_id, p.node, "{:?}", m);
-		assert_eq!(radius, p.radius);
-	}
-
-	async fn check_node_read<F>(
-		tx: &mut Transaction,
-		st: &mut MTreeStore,
-		node_id: NodeId,
-		check_func: F,
-	) where
-		F: FnOnce(&MTreeNode),
-	{
-		let n = st.get_node(tx, node_id).await.unwrap();
-		check_func(&n.n);
-	}
-
-	async fn check_node_write<F>(
-		tx: &mut Transaction,
-		st: &mut MTreeStore,
-		node_id: NodeId,
-		check_func: F,
-	) where
-		F: FnOnce(&MTreeNode),
-	{
-		let n = st.get_node_mut(tx, node_id).await.unwrap();
-		check_func(&n.n);
-		st.set_node(n, false).await.unwrap();
-	}
-
-	async fn check_leaf_read<F>(
-		tx: &mut Transaction,
-		st: &mut MTreeStore,
-		node_id: NodeId,
-		check_func: F,
-	) where
-		F: FnOnce(&LeafNode),
-	{
-		check_node_read(tx, st, node_id, |n| {
-			if let MTreeNode::Leaf(m) = n {
-				check_func(m);
-			} else {
-				panic!("The node is not a leaf node: {node_id}")
-			}
-		})
-		.await
-	}
-
-	async fn check_leaf_write<F>(
-		tx: &mut Transaction,
-		st: &mut MTreeStore,
-		node_id: NodeId,
-		check_func: F,
-	) where
-		F: FnOnce(&LeafMap),
-	{
-		check_node_write(tx, st, node_id, |n| {
-			if let MTreeNode::Leaf(m) = n {
-				check_func(m);
-			} else {
-				panic!("The node is not a leaf node: {node_id}")
-			}
-		})
-		.await
-	}
-
-	async fn check_internal<F>(
-		tx: &mut Transaction,
-		st: &mut MTreeStore,
-		node_id: NodeId,
-		check_func: F,
-	) where
-		F: FnOnce(&InternalMap),
-	{
-		check_node_read(tx, st, node_id, |n| {
-			if let MTreeNode::Internal(m) = n {
-				check_func(m);
-			} else {
-				panic!("The node is not a routing node: {node_id}")
-			}
-		})
-		.await
-	}
-
-	fn check_knn(res: &VecDeque<(DocId, f64)>, expected: Vec<DocId>) {
-		let res: Vec<DocId> = res.into_iter().map(|(doc, _)| *doc).collect();
-		assert_eq!(res, expected);
 	}
 
 	#[derive(Default, Debug)]
