@@ -1,3 +1,4 @@
+use crate::syn::token::VectorTypeKind;
 use crate::{
 	sql::change_feed_include::ChangeFeedInclude,
 	sql::{language::Language, Algorithm},
@@ -341,6 +342,13 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MANHATTAN") => TokenKind::Distance(DistanceKind::Manhattan),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 	UniCase::ascii("PEARSON") => TokenKind::Distance(DistanceKind::Pearson),
+
+	// VectorTypes
+	UniCase::ascii("F64") => TokenKind::VectorType(VectorTypeKind::F64),
+	UniCase::ascii("F32") => TokenKind::VectorType(VectorTypeKind::F32),
+	UniCase::ascii("I64") => TokenKind::VectorType(VectorTypeKind::I64),
+	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
+	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 
 	// Change Feed keywords
 	UniCase::ascii("ORIGINAL") => TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original),

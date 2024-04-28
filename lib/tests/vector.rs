@@ -12,7 +12,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [8,9,10,11];
-		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4;
+		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4 TYPE F32;
 		LET $pt = [2,3,4,5];
 		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2|> $pt;
 		SELECT id FROM pts WHERE point <|2|> $pt EXPLAIN;
@@ -71,7 +71,7 @@ async fn delete_update_mtree_index() -> Result<(), Error> {
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [2,3,4,5];
-		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4;
+		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4 TYPE I32;
 		CREATE pts:4 SET point = [8,9,10,11];
 		DELETE pts:2;
 		UPDATE pts:3 SET point = [12,13,14,15];

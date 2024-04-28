@@ -365,9 +365,16 @@ impl<'a> IndexOperation<'a> {
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let ixs = ctx.get_index_stores();
-		let mut ft =
-			FtIndex::new(ixs, self.opt, txn, &p.az, ikb, p, TransactionType::Write).await?;
+		let mut ft = FtIndex::new(
+			ctx.get_index_stores(),
+			self.opt,
+			txn,
+			&p.az,
+			ikb,
+			p,
+			TransactionType::Write,
+		)
+		.await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, ctx, self.opt, txn, self.rid, n).await?;
