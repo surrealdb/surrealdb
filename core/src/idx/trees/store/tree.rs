@@ -109,7 +109,7 @@ where
 			return Ok(None);
 		}
 		// Create a new cache hydrated with non-updated and non-removed previous cache entries.
-		let new_cache = self.cache.next_generation(&self.updated, &self.removed);
+		let new_cache = self.cache.next_generation(&self.updated, &self.removed).await;
 
 		let updated = mem::take(&mut self.updated);
 		for node_id in updated {
@@ -117,7 +117,7 @@ where
 				node.n.prepare_save();
 				self.np.save(tx, &node).await?;
 				// Update the cache with updated entries.
-				new_cache.set_node(node);
+				new_cache.set_node(node).await;
 			} else {
 				return Err(Error::Unreachable("TreeTransactionWrite::finish(2)"));
 			}
@@ -125,7 +125,7 @@ where
 		let removed = mem::take(&mut self.removed);
 		for (node_id, node_key) in removed {
 			tx.del(node_key).await?;
-			new_cache.remove_node(&node_id);
+			new_cache.remove_node(&node_id).await;
 		}
 
 		Ok(Some(new_cache))

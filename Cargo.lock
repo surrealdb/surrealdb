@@ -2499,6 +2499,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashlink"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "692eaaf7f7607518dd3cef090f1474b61edc5301d8012f09579920df68b725ee"
+dependencies = [
+ "hashbrown 0.14.3",
+]
+
+[[package]]
 name = "headers"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5926,6 +5935,7 @@ dependencies = [
  "fuzzy-matcher",
  "geo 0.27.0",
  "geo-types",
+ "hashlink",
  "hex",
  "indxdb",
  "ipnet",

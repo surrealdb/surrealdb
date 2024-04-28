@@ -1,26 +1,24 @@
-use std::cmp::{Ordering, Reverse};
-use std::collections::btree_map::Entry;
-#[cfg(debug_assertions)]
-use std::collections::HashMap;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
-use std::fmt::{Debug, Display, Formatter};
-use std::io::Cursor;
-use std::sync::Arc;
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::collections::{BinaryHeap, HashSet, VecDeque};
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Cursor;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::trees::btree::BStatistics;
+use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{
 	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
-use crate::idx::trees::vector::{SharedVector, Vector};
+use crate::idx::trees::vector::{HashedSharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::{Distance, MTreeParams, VectorType};
@@ -77,7 +75,7 @@ impl MTreeIndex {
 		stk: &mut Stk,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let resolved = self.doc_ids.write().await.resolve_doc_id(tx, rid.into()).await?;
@@ -86,8 +84,10 @@ impl MTreeIndex {
 		let mut mtree = self.mtree.write().await;
 		for v in content {
 			// Extract the vector
-			let vector = self.extract_vector(v)?.into();
-			mtree.insert(stk, tx, &mut self.store, vector, doc_id).await?;
+			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
+			vector.check_dimension(self.dim)?;
+			// Insert the vector in the index
+			mtree.insert(stk, tx, &mut self.store, vector.into(), doc_id).await?;
 		}
 		Ok(())
 	}
@@ -95,63 +95,18 @@ impl MTreeIndex {
 	pub(crate) async fn knn_search(
 		&self,
 		tx: &mut Transaction,
-		a: Array,
+		a: &Array,
 		k: usize,
-	) -> Result<VecDeque<DocId>, Error> {
+	) -> Result<VecDeque<(DocId, f64)>, Error> {
 		// Extract the vector
-		let vector = self.check_vector_array(a)?;
-		// Lock the store
-		let res = self.mtree.read().await.knn_search(tx, &self.store, &vector, k).await?;
+		let vector = Vector::try_from_array(self.vector_type, a)?;
+		vector.check_dimension(self.dim)?;
+		let vector: HashedSharedVector = vector.into();
+		// Lock the index
+		let mtree = self.mtree.read().await;
+		// Do the search
+		let res = mtree.knn_search(tx, &self.store, &vector, k).await?;
 		Ok(res.docs)
-	}
-
-	fn check_vector_array(&self, a: Array) -> Result<SharedVector, Error> {
-		if a.0.len() != self.dim {
-			return Err(Error::InvalidVectorDimension {
-				current: a.0.len(),
-				expected: self.dim,
-			});
-		}
-		let mut vec = Vector::new(self.vector_type, a.len());
-		for v in a.0 {
-			if let Value::Number(n) = v {
-				vec.add(n);
-			} else {
-				return Err(Error::InvalidVectorType {
-					current: v.clone().to_string(),
-					expected: "Number",
-				});
-			}
-		}
-		Ok(vec.into())
-	}
-
-	fn extract_vector(&self, v: Value) -> Result<Vector, Error> {
-		let mut vec = Vector::new(self.vector_type, self.dim);
-		Self::check_vector_value(v, &mut vec)?;
-		if vec.len() != self.dim {
-			return Err(Error::InvalidVectorDimension {
-				current: vec.len(),
-				expected: self.dim,
-			});
-		}
-		Ok(vec)
-	}
-
-	fn check_vector_value(value: Value, vec: &mut Vector) -> Result<(), Error> {
-		match value {
-			Value::Array(a) => {
-				for v in a {
-					Self::check_vector_value(v, vec)?;
-				}
-				Ok(())
-			}
-			Value::Number(n) => {
-				vec.add(n);
-				Ok(())
-			}
-			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
-		}
 	}
 
 	pub(crate) async fn remove_document(
@@ -159,14 +114,17 @@ impl MTreeIndex {
 		stk: &mut Stk,
 		tx: &mut Transaction,
 		rid: &Thing,
-		content: Vec<Value>,
+		content: &Vec<Value>,
 	) -> Result<(), Error> {
 		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(tx, rid.into()).await? {
+			// Lock the index
 			let mut mtree = self.mtree.write().await;
 			for v in content {
 				// Extract the vector
-				let vector = self.extract_vector(v)?.into();
-				mtree.delete(stk, tx, &mut self.store, vector, doc_id).await?;
+				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
+				vector.check_dimension(self.dim)?;
+				// Remove the vector
+				mtree.delete(stk, tx, &mut self.store, vector.into(), doc_id).await?;
 			}
 		}
 		Ok(())
@@ -194,104 +152,6 @@ impl MTreeIndex {
 	}
 }
 
-struct KnnResultBuilder {
-	knn: u64,
-	docs: RoaringTreemap,
-	priority_list: BTreeMap<PriorityResult, RoaringTreemap>,
-}
-
-impl KnnResultBuilder {
-	fn new(knn: usize) -> Self {
-		Self {
-			knn: knn as u64,
-			docs: RoaringTreemap::default(),
-			priority_list: BTreeMap::default(),
-		}
-	}
-	fn check_add(&self, dist: f64) -> bool {
-		if self.docs.len() < self.knn {
-			true
-		} else if let Some(pr) = self.priority_list.keys().last() {
-			dist <= pr.0
-		} else {
-			true
-		}
-	}
-
-	fn add(&mut self, dist: f64, docs: &RoaringTreemap) {
-		let pr = PriorityResult(dist);
-		match self.priority_list.entry(pr) {
-			Entry::Vacant(e) => {
-				for doc in docs {
-					self.docs.insert(doc);
-				}
-				e.insert(docs.clone());
-			}
-			Entry::Occupied(mut e) => {
-				let d = e.get_mut();
-				for doc in docs {
-					d.insert(doc);
-					self.docs.insert(doc);
-				}
-			}
-		}
-
-		#[cfg(debug_assertions)]
-		debug!("KnnResult add - dist: {} - docs: {:?} - total: {}", dist, docs, self.docs.len());
-		debug!("{:?}", self.priority_list);
-
-		// Do possible eviction
-		let docs_len = self.docs.len();
-		if docs_len > self.knn {
-			if let Some((_, d)) = self.priority_list.last_key_value() {
-				if docs_len - d.len() >= self.knn {
-					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
-						self.docs -= evicted_docs;
-					}
-				}
-			}
-		}
-	}
-
-	fn build(self, #[cfg(debug_assertions)] visited_nodes: HashMap<NodeId, usize>) -> KnnResult {
-		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
-		#[cfg(debug_assertions)]
-		debug!("self.priority_list: {:?} - self.docs: {:?}", self.priority_list, self.docs);
-		let mut left = self.knn;
-		for (_, docs) in self.priority_list {
-			let dl = docs.len();
-			if dl > left {
-				for doc_id in docs.iter().take(left as usize) {
-					sorted_docs.push_back(doc_id);
-				}
-				break;
-			}
-			for doc_id in docs {
-				sorted_docs.push_back(doc_id);
-			}
-			left -= dl;
-			// We don't expect anymore result, we can leave
-			if left == 0 {
-				break;
-			}
-		}
-		debug!("sorted_docs: {:?}", sorted_docs);
-		KnnResult {
-			docs: sorted_docs,
-			#[cfg(debug_assertions)]
-			visited_nodes,
-		}
-	}
-}
-
-#[non_exhaustive]
-pub struct KnnResult {
-	docs: VecDeque<DocId>,
-	#[cfg(debug_assertions)]
-	#[allow(dead_code)]
-	visited_nodes: HashMap<NodeId, usize>,
-}
-
 // https://en.wikipedia.org/wiki/M-tree
 // https://arxiv.org/pdf/1004.4216.pdf
 #[non_exhaustive]
@@ -315,7 +175,7 @@ impl MTree {
 		&self,
 		tx: &mut Transaction,
 		store: &MTreeStore,
-		v: &SharedVector,
+		v: &HashedSharedVector,
 		k: usize,
 	) -> Result<KnnResult, Error> {
 		#[cfg(debug_assertions)]
@@ -323,16 +183,17 @@ impl MTree {
 		let mut queue = BinaryHeap::new();
 		let mut res = KnnResultBuilder::new(k);
 		if let Some(root_id) = self.state.root {
-			queue.push(Reverse(PriorityNode(0.0, root_id)));
+			queue.push(PriorityNode::new(0.0, root_id));
 		}
 		#[cfg(debug_assertions)]
 		let mut visited_nodes = HashMap::new();
-		while let Some(current) = queue.pop() {
-			let node = store.get_node(tx, current.0 .1).await?;
+		while let Some(e) = queue.pop() {
+			let id = e.id();
+			let node = store.get_node(tx, id).await?;
 			#[cfg(debug_assertions)]
 			{
-				debug!("Visit node id: {} - dist: {}", current.0 .1, current.0 .1);
-				if visited_nodes.insert(current.0 .1, node.n.len()).is_some() {
+				debug!("Visit node id: {}", id);
+				if visited_nodes.insert(id, node.n.len()).is_some() {
 					return Err(Error::Unreachable("MTree::knn_search"));
 				}
 			}
@@ -345,7 +206,7 @@ impl MTree {
 						if res.check_add(d) {
 							#[cfg(debug_assertions)]
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
-							res.add(d, &p.docs);
+							res.add(d, &Ids64::Bits(p.docs.clone()));
 						}
 					}
 				}
@@ -357,7 +218,7 @@ impl MTree {
 						let min_dist = (d - p.radius).max(0.0);
 						if res.check_add(min_dist) {
 							debug!("Queue add - dist: {} - node: {}", min_dist, p.node);
-							queue.push(Reverse(PriorityNode(min_dist, p.node)));
+							queue.push(PriorityNode::new(min_dist, p.node));
 						}
 					}
 				}
@@ -373,7 +234,7 @@ impl MTree {
 enum InsertionResult {
 	DocAdded,
 	CoveringRadius(f64),
-	PromotedEntries(SharedVector, RoutingProperties, SharedVector, RoutingProperties),
+	PromotedEntries(HashedSharedVector, RoutingProperties, HashedSharedVector, RoutingProperties),
 }
 
 enum DeletionResult {
@@ -396,7 +257,7 @@ impl MTree {
 		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		obj: SharedVector,
+		obj: HashedSharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
@@ -422,7 +283,7 @@ impl MTree {
 	async fn create_new_leaf_root(
 		&mut self,
 		store: &mut MTreeStore,
-		obj: SharedVector,
+		obj: HashedSharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
@@ -438,9 +299,9 @@ impl MTree {
 	async fn create_new_internal_root(
 		&mut self,
 		store: &mut MTreeStore,
-		o1: SharedVector,
+		o1: HashedSharedVector,
 		p1: RoutingProperties,
-		o2: SharedVector,
+		o2: HashedSharedVector,
 		p2: RoutingProperties,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
@@ -468,7 +329,7 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		object: &SharedVector,
+		object: &HashedSharedVector,
 		id: DocId,
 	) -> Result<bool, Error> {
 		let mut queue = BinaryHeap::new();
@@ -507,8 +368,8 @@ impl MTree {
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
-		parent_center: &Option<SharedVector>,
-		object: SharedVector,
+		parent_center: &Option<HashedSharedVector>,
+		object: HashedSharedVector,
 		doc: DocId,
 	) -> Result<InsertionResult, Error> {
 		#[cfg(debug_assertions)]
@@ -545,8 +406,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: InternalNode,
-		parent_center: &Option<SharedVector>,
-		object: SharedVector,
+		parent_center: &Option<HashedSharedVector>,
+		object: HashedSharedVector,
 		doc_id: DocId,
 	) -> Result<InsertionResult, Error> {
 		// Choose `best` subtree entry ObestSubstree from N;
@@ -572,7 +433,7 @@ impl MTree {
 				// Remove ObestSubtree from N;
 				node.remove(&best_entry_obj);
 				// if (N U P will fit into N)
-				let mut nup: BTreeSet<SharedVector> = BTreeSet::from_iter(node.keys().cloned());
+				let mut nup: HashSet<HashedSharedVector> = HashSet::from_iter(node.keys().cloned());
 				nup.insert(o1.clone());
 				nup.insert(o2.clone());
 				if nup.len() <= self.state.capacity as usize {
@@ -633,8 +494,8 @@ impl MTree {
 	fn find_closest(
 		&self,
 		node: &InternalNode,
-		object: &SharedVector,
-	) -> Result<(SharedVector, RoutingProperties), Error> {
+		object: &HashedSharedVector,
+	) -> Result<(HashedSharedVector, RoutingProperties), Error> {
 		let mut closest = None;
 		let mut dist = f64::MAX;
 		for (o, p) in node {
@@ -660,8 +521,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: LeafNode,
-		parent_center: &Option<SharedVector>,
-		object: SharedVector,
+		parent_center: &Option<HashedSharedVector>,
+		object: HashedSharedVector,
 		doc_id: DocId,
 	) -> Result<InsertionResult, Error> {
 		match node.entry(object) {
@@ -712,7 +573,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: N,
-	) -> Result<(SharedVector, RoutingProperties, SharedVector, RoutingProperties), Error>
+	) -> Result<(HashedSharedVector, RoutingProperties, HashedSharedVector, RoutingProperties), Error>
 	where
 		N: NodeVectors + Debug,
 	{
@@ -728,7 +589,7 @@ impl MTree {
 			d1.total_cmp(&d2)
 		});
 		let a1_size = a2.len() / 2;
-		let a1: Vec<SharedVector> = a2.drain(0..a1_size).collect();
+		let a1: Vec<HashedSharedVector> = a2.drain(0..a1_size).collect();
 
 		let (node1, r1, o1) = node.extract_node(&distances, p1, a1)?;
 		let (node2, r2, o2) = node.extract_node(&distances, p2, a2)?;
@@ -764,12 +625,12 @@ impl MTree {
 	// Compute the distance cache, and return the most distant objects
 	fn compute_distances_and_promoted_objects(
 		&self,
-		objects: &[SharedVector],
-	) -> Result<(DistanceCache, SharedVector, SharedVector), Error> {
+		objects: &[HashedSharedVector],
+	) -> Result<(DistanceCache, HashedSharedVector, HashedSharedVector), Error> {
 		let mut promo = None;
 		let mut max_dist = 0f64;
 		let n = objects.len();
-		let mut dist_cache = BTreeMap::new();
+		let mut dist_cache = HashMap::new();
 		for (i, o1) in objects.iter().enumerate() {
 			for o2 in objects.iter().take(n).skip(i + 1) {
 				let distance = self.calculate_distance(o1, o2)?;
@@ -815,7 +676,7 @@ impl MTree {
 	fn compute_leaf_max_distance(
 		&self,
 		node: &LeafNode,
-		parent: &Option<SharedVector>,
+		parent: &Option<HashedSharedVector>,
 	) -> Result<f64, Error> {
 		Ok(if let Some(p) = parent {
 			let mut max_dist = 0f64;
@@ -828,17 +689,15 @@ impl MTree {
 		})
 	}
 
-	fn calculate_distance(&self, v1: &SharedVector, v2: &SharedVector) -> Result<f64, Error> {
+	fn calculate_distance(
+		&self,
+		v1: &HashedSharedVector,
+		v2: &HashedSharedVector,
+	) -> Result<f64, Error> {
 		if v1.eq(v2) {
 			return Ok(0.0);
 		}
-		let dist = match &self.distance {
-			Distance::Euclidean => v1.euclidean_distance(v2)?,
-			Distance::Cosine => v1.cosine_distance(v2),
-			Distance::Manhattan => v1.manhattan_distance(v2)?,
-			Distance::Minkowski(order) => v1.minkowski_distance(v2, order)?,
-			_ => return Err(Error::UnsupportedDistance(self.distance.clone())),
-		};
+		let dist = self.distance.calculate(v1, v2);
 		if dist.is_finite() {
 			Ok(dist)
 		} else {
@@ -855,7 +714,7 @@ impl MTree {
 		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		object: SharedVector,
+		object: HashedSharedVector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
 		let mut deleted = false;
@@ -902,8 +761,8 @@ impl MTree {
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
-		parent_center: &Option<SharedVector>,
-		object: SharedVector,
+		parent_center: &Option<HashedSharedVector>,
+		object: HashedSharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -953,8 +812,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut n_node: InternalNode,
-		parent_center: &Option<SharedVector>,
-		od: SharedVector,
+		parent_center: &Option<HashedSharedVector>,
+		od: HashedSharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -1081,9 +940,9 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		parent_center: &Option<SharedVector>,
+		parent_center: &Option<HashedSharedVector>,
 		n_node: &mut InternalNode,
-		on_obj: SharedVector,
+		on_obj: HashedSharedVector,
 		p: MStoredNode,
 		p_updated: bool,
 	) -> Result<bool, Error> {
@@ -1136,9 +995,9 @@ impl MTree {
 		&mut self,
 		store: &mut MTreeStore,
 		n_node: &mut InternalNode,
-		on_obj: SharedVector,
+		on_obj: HashedSharedVector,
 		p: MStoredNode,
-		onn_obj: SharedVector,
+		onn_obj: HashedSharedVector,
 		mut onn_entry: RoutingProperties,
 		mut onn_child: MStoredNode,
 	) -> Result<(), Error> {
@@ -1200,10 +1059,10 @@ impl MTree {
 	async fn delete_underflown_redistribute(
 		&mut self,
 		store: &mut MTreeStore,
-		parent_center: &Option<SharedVector>,
+		parent_center: &Option<HashedSharedVector>,
 		n_node: &mut InternalNode,
-		on_obj: SharedVector,
-		onn_obj: SharedVector,
+		on_obj: HashedSharedVector,
+		onn_obj: HashedSharedVector,
 		mut p: MStoredNode,
 		onn_child: MStoredNode,
 	) -> Result<(), Error> {
@@ -1240,8 +1099,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut leaf_node: LeafNode,
-		parent_center: &Option<SharedVector>,
-		od: SharedVector,
+		parent_center: &Option<HashedSharedVector>,
+		od: HashedSharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -1287,78 +1146,14 @@ impl MTree {
 	}
 }
 
-struct DistanceCache(BTreeMap<(SharedVector, SharedVector), f64>);
-
-struct PriorityNode(f64, NodeId);
-
-impl PartialEq<Self> for PriorityNode {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0 && self.1 == other.1
-	}
-}
-
-impl Eq for PriorityNode {}
-
-impl PartialOrd<Self> for PriorityNode {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for PriorityNode {
-	fn cmp(&self, other: &Self) -> Ordering {
-		let cmp = cmp_f64(&self.0, &other.0);
-		if cmp != Ordering::Equal {
-			return cmp;
-		}
-		self.1.cmp(&other.1)
-	}
-}
-
-#[derive(Debug)]
-struct PriorityResult(f64);
-
-impl Eq for PriorityResult {}
-
-impl PartialEq<Self> for PriorityResult {
-	fn eq(&self, other: &Self) -> bool {
-		self.0 == other.0
-	}
-}
-
-impl PartialOrd<Self> for PriorityResult {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for PriorityResult {
-	fn cmp(&self, other: &Self) -> Ordering {
-		cmp_f64(&self.0, &other.0)
-	}
-}
-
-fn cmp_f64(f1: &f64, f2: &f64) -> Ordering {
-	if let Some(cmp) = f1.partial_cmp(f2) {
-		return cmp;
-	}
-	if f1.is_nan() {
-		if f2.is_nan() {
-			Ordering::Equal
-		} else {
-			Ordering::Less
-		}
-	} else {
-		Ordering::Greater
-	}
-}
+struct DistanceCache(HashMap<(HashedSharedVector, HashedSharedVector), f64>);
 
 pub(in crate::idx) type MTreeStore = TreeStore<MTreeNode>;
 type MStoredNode = StoredNode<MTreeNode>;
 
-type InternalMap = BTreeMap<SharedVector, RoutingProperties>;
+type InternalMap = HashMap<HashedSharedVector, RoutingProperties>;
 
-type LeafMap = BTreeMap<SharedVector, ObjectProperties>;
+type LeafMap = HashMap<HashedSharedVector, ObjectProperties>;
 
 #[derive(Debug, Clone)]
 /// A node in this tree structure holds entries.
@@ -1445,14 +1240,14 @@ trait NodeVectors: Sized {
 	#[allow(dead_code)]
 	fn len(&self) -> usize;
 
-	fn get_objects(&self) -> Vec<SharedVector>;
+	fn get_objects(&self) -> Vec<HashedSharedVector>;
 
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: SharedVector,
-		a: Vec<SharedVector>,
-	) -> Result<(Self, f64, SharedVector), Error>;
+		p: HashedSharedVector,
+		a: Vec<HashedSharedVector>,
+	) -> Result<(Self, f64, HashedSharedVector), Error>;
 
 	fn into_mtree_node(self) -> MTreeNode;
 }
@@ -1462,16 +1257,16 @@ impl NodeVectors for LeafNode {
 		self.len()
 	}
 
-	fn get_objects(&self) -> Vec<SharedVector> {
+	fn get_objects(&self) -> Vec<HashedSharedVector> {
 		self.keys().cloned().collect()
 	}
 
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: SharedVector,
-		a: Vec<SharedVector>,
-	) -> Result<(Self, f64, SharedVector), Error> {
+		p: HashedSharedVector,
+		a: Vec<HashedSharedVector>,
+	) -> Result<(Self, f64, HashedSharedVector), Error> {
 		let mut n = LeafNode::new();
 		let mut r = 0f64;
 		for o in a {
@@ -1497,16 +1292,16 @@ impl NodeVectors for InternalNode {
 		self.len()
 	}
 
-	fn get_objects(&self) -> Vec<SharedVector> {
+	fn get_objects(&self) -> Vec<HashedSharedVector> {
 		self.keys().cloned().collect()
 	}
 
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: SharedVector,
-		a: Vec<SharedVector>,
-	) -> Result<(Self, f64, SharedVector), Error> {
+		p: HashedSharedVector,
+		a: Vec<HashedSharedVector>,
+	) -> Result<(Self, f64, HashedSharedVector), Error> {
 		let mut n = InternalNode::new();
 		let mut max_r = 0f64;
 		for o in a {
@@ -1538,13 +1333,11 @@ impl TreeNode for MTreeNode {
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		match node_type {
 			1u8 => {
-				let objects: BTreeMap<SharedVector, ObjectProperties> =
-					bincode::deserialize_from(c)?;
+				let objects: LeafNode = bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Leaf(objects))
 			}
 			2u8 => {
-				let entries: BTreeMap<SharedVector, RoutingProperties> =
-					bincode::deserialize_from(c)?;
+				let entries: InternalNode = bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Internal(entries))
 			}
 			_ => Err(Error::CorruptedIndex("MTreeNode::try_from_val")),
@@ -1641,25 +1434,23 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
-	use rand::prelude::StdRng;
-	use rand::{Rng, SeedableRng};
 	use reblessive::tree::Stk;
-	use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+	use std::collections::{HashMap, HashSet, VecDeque};
 
 	use crate::err::Error;
 	use test_log::test;
 
 	use crate::idx::docids::DocId;
+	use crate::idx::trees::knn::tests::{new_vec, TestCollection};
 	use crate::idx::trees::mtree::{
-		InternalMap, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
+		InternalMap, LeafMap, LeafNode, MState, MTree, MTreeNode, MTreeStore, ObjectProperties,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
-	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::idx::trees::vector::HashedSharedVector;
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::Number;
 
 	async fn new_operation(
 		ds: &Datastore,
@@ -1683,7 +1474,7 @@ mod tests {
 		commit: bool,
 	) -> Result<(), Error> {
 		if let Some(new_cache) = st.finish(&mut tx).await? {
-			assert!(new_cache.len() > 0, "new_cache.len() = {}", new_cache.len());
+			assert!(new_cache.len().await > 0, "new_cache.len() = {}", new_cache.len().await);
 			t.state.generation += 1;
 			ds.index_store().advance_store_mtree(new_cache);
 		}
@@ -1695,394 +1486,16 @@ mod tests {
 		}
 	}
 
-	fn new_vec(mut n: i64, t: VectorType, dim: usize) -> SharedVector {
-		let mut vec = Vector::new(t, dim);
-		vec.add(Number::Int(n));
-		for _ in 1..dim {
-			n += 1;
-			vec.add(Number::Int(n));
-		}
-		vec.into()
-	}
-
-	fn new_random_vec(rng: &mut StdRng, t: VectorType, dim: usize) -> SharedVector {
-		let mut vec = Vector::new(t, dim);
-		for _ in 0..dim {
-			vec.add(Number::Float(rng.gen_range(-5.0..5.0)));
-		}
-		vec.into()
-	}
-
-	#[test(tokio::test)]
-	async fn test_mtree_insertions() -> Result<(), Error> {
-		const CACHE_SIZE: usize = 20;
-
-		let mut stack = reblessive::tree::TreeStack::new();
-
-		let mut t = MTree::new(MState::new(3), Distance::Euclidean);
-		let ds = Datastore::new("memory").await?;
-
-		let vec1 = new_vec(1, VectorType::F64, 1);
-		// First the index is empty
-		{
-			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec1, 10).await?;
-			check_knn(&res.docs, vec![]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 0);
-		}
-		// Insert single element
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec1.clone(), 1)).finish().await?;
-			assert_eq!(t.state.root, Some(0));
-			check_leaf_write(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 1);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-			})
-			.await;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		// Check KNN
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec1, 10).await?;
-			check_knn(&res.docs, vec![1]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 1);
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(1), Some(1), 1, 1);
-		}
-
-		// insert second element
-		let vec2 = new_vec(2, VectorType::F64, 1);
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec2.clone(), 2)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		// vec1 knn
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec1, 10).await?;
-			check_knn(&res.docs, vec![1, 2]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 1);
-			assert_eq!(t.state.root, Some(0));
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 0.0, &[2]);
-			})
-			.await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(2), Some(2), 2, 2);
-		}
-		// vec2 knn
-		{
-			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec2, 10).await?;
-			check_knn(&res.docs, vec![2, 1]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 1);
-		}
-
-		// insert new doc to existing vector
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec2.clone(), 3)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		// vec2 knn
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec2, 10).await?;
-			check_knn(&res.docs, vec![2, 3, 1]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 1);
-			assert_eq!(t.state.root, Some(0));
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 0.0, &[2, 3]);
-			})
-			.await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(2), Some(2), 2, 3);
-		}
-
-		// insert third vector
-		let vec3 = new_vec(3, VectorType::F64, 1);
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec3.clone(), 3)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		// vec3 knn
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec3, 10).await?;
-			check_knn(&res.docs, vec![3, 2, 3, 1]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 1);
-			assert_eq!(t.state.root, Some(0));
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 3);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 0.0, &[2, 3]);
-				check_leaf_vec(m, &vec3, 0.0, &[3]);
-			})
-			.await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(1, 1, Some(3), Some(3), 3, 4);
-		}
-
-		// Check split leaf node
-		let vec4 = new_vec(4, VectorType::F64, 1);
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec4.clone(), 4)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		// vec4 knn
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec4, 10).await?;
-			check_knn(&res.docs, vec![4, 3, 2, 3, 1]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 3);
-			assert_eq!(t.state.root, Some(2));
-			check_internal(&mut tx, &mut st, 2, |m| {
-				assert_eq!(m.len(), 2);
-				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
-				check_routing_vec(m, &vec4, 0.0, 1, 1.0);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 1, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec3, 1.0, &[3]);
-				check_leaf_vec(m, &vec4, 0.0, &[4]);
-			})
-			.await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(3, 2, Some(2), Some(2), 4, 5);
-		}
-
-		// Insert vec extending the radius of the last node, calling compute_leaf_radius
-		let vec6 = new_vec(6, VectorType::F64, 1);
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec6.clone(), 6)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		// vec6 knn
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec6, 10).await?;
-			check_knn(&res.docs, vec![6, 4, 3, 2, 3, 1]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 3);
-			assert_eq!(t.state.root, Some(2));
-			check_internal(&mut tx, &mut st, 2, |m| {
-				assert_eq!(m.len(), 2);
-				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
-				check_routing_vec(m, &vec4, 0.0, 1, 2.0);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 1, |m| {
-				assert_eq!(m.len(), 3);
-				check_leaf_vec(m, &vec3, 1.0, &[3]);
-				check_leaf_vec(m, &vec4, 0.0, &[4]);
-				check_leaf_vec(m, &vec6, 2.0, &[6]);
-			})
-			.await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(3, 2, Some(2), Some(3), 5, 6);
-		}
-
-		// Insert check split internal node
-
-		// Insert vec8
-		let vec8 = new_vec(8, VectorType::F64, 1);
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec8.clone(), 8)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(4, 2, Some(2), Some(2), 6, 7);
-			assert_eq!(t.state.root, Some(2));
-			// Check Root node (level 1)
-			check_internal(&mut tx, &mut st, 2, |m| {
-				assert_eq!(m.len(), 3);
-				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
-				check_routing_vec(m, &vec3, 0.0, 1, 1.0);
-				check_routing_vec(m, &vec8, 0.0, 3, 2.0);
-			})
-			.await;
-			// Check level 2
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 1, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec3, 0.0, &[3]);
-				check_leaf_vec(m, &vec4, 1.0, &[4]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 3, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec6, 2.0, &[6]);
-				check_leaf_vec(m, &vec8, 0.0, &[8]);
-			})
-			.await;
-		}
-
-		let vec9 = new_vec(9, VectorType::F64, 1);
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec9.clone(), 9)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(4, 2, Some(2), Some(3), 7, 8);
-			assert_eq!(t.state.root, Some(2));
-			// Check Root node (level 1)
-			check_internal(&mut tx, &mut st, 2, |m| {
-				assert_eq!(m.len(), 3);
-				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
-				check_routing_vec(m, &vec3, 0.0, 1, 1.0);
-				check_routing_vec(m, &vec8, 0.0, 3, 2.0);
-			})
-			.await;
-			// Check level 2
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 1, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec3, 0.0, &[3]);
-				check_leaf_vec(m, &vec4, 1.0, &[4]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 3, |m| {
-				assert_eq!(m.len(), 3);
-				check_leaf_vec(m, &vec6, 2.0, &[6]);
-				check_leaf_vec(m, &vec8, 0.0, &[8]);
-				check_leaf_vec(m, &vec9, 1.0, &[9]);
-			})
-			.await;
-		}
-
-		let vec10 = new_vec(10, VectorType::F64, 1);
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Write, CACHE_SIZE).await;
-			stack.enter(|stk| t.insert(stk, &mut tx, &mut st, vec10.clone(), 10)).finish().await?;
-			finish_operation(&ds, &mut t, tx, st, true).await?;
-		}
-		{
-			let (mut st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			check_tree_properties(&mut tx, &mut st, &t).await?.check(7, 3, Some(2), Some(2), 8, 9);
-			assert_eq!(t.state.root, Some(6));
-			// Check Root node (level 1)
-			check_internal(&mut tx, &mut st, 6, |m| {
-				assert_eq!(m.len(), 2);
-				check_routing_vec(m, &vec1, 0.0, 2, 3.0);
-				check_routing_vec(m, &vec10, 0.0, 5, 6.0);
-			})
-			.await;
-			// Check level 2
-			check_internal(&mut tx, &mut st, 2, |m| {
-				assert_eq!(m.len(), 2);
-				check_routing_vec(m, &vec1, 0.0, 0, 1.0);
-				check_routing_vec(m, &vec3, 2.0, 1, 1.0);
-			})
-			.await;
-			check_internal(&mut tx, &mut st, 5, |m| {
-				assert_eq!(m.len(), 2);
-				check_routing_vec(m, &vec6, 4.0, 3, 2.0);
-				check_routing_vec(m, &vec10, 0.0, 4, 1.0);
-			})
-			.await;
-			// Check level 3
-			check_leaf_read(&mut tx, &mut st, 0, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec1, 0.0, &[1]);
-				check_leaf_vec(m, &vec2, 1.0, &[2, 3]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 1, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec3, 0.0, &[3]);
-				check_leaf_vec(m, &vec4, 1.0, &[4]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 3, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec6, 0.0, &[6]);
-				check_leaf_vec(m, &vec8, 2.0, &[8]);
-			})
-			.await;
-			check_leaf_read(&mut tx, &mut st, 4, |m| {
-				assert_eq!(m.len(), 2);
-				check_leaf_vec(m, &vec9, 1.0, &[9]);
-				check_leaf_vec(m, &vec10, 0.0, &[10]);
-			})
-			.await;
-		}
-
-		// vec8 knn
-		{
-			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec8, 20).await?;
-			check_knn(&res.docs, vec![8, 9, 6, 10, 4, 3, 2, 3, 1]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 7);
-		}
-		// vec4 knn(2)
-		{
-			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec4, 2).await?;
-			check_knn(&res.docs, vec![4, 3]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 6);
-		}
-
-		// vec10 knn(2)
-		{
-			let (st, mut tx) = new_operation(&ds, &t, TransactionType::Read, CACHE_SIZE).await;
-			let res = t.knn_search(&mut tx, &st, &vec10, 2).await?;
-			check_knn(&res.docs, vec![10, 9]);
-			#[cfg(debug_assertions)]
-			assert_eq!(res.visited_nodes.len(), 5);
-		}
-		Ok(())
-	}
-
 	async fn insert_collection_one_by_one(
 		stk: &mut Stk,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<HashMap<DocId, SharedVector>, Error> {
-		let mut map = HashMap::with_capacity(collection.as_ref().len());
+	) -> Result<HashMap<DocId, HashedSharedVector>, Error> {
+		let mut map = HashMap::with_capacity(collection.len());
 		let mut c = 0;
-		for (doc_id, obj) in collection.as_ref() {
+		for (doc_id, obj) in collection.to_vec_ref() {
 			{
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
@@ -2107,11 +1520,11 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<HashMap<DocId, SharedVector>, Error> {
-		let mut map = HashMap::with_capacity(collection.as_ref().len());
+	) -> Result<HashMap<DocId, HashedSharedVector>, Error> {
+		let mut map = HashMap::with_capacity(collection.len());
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
-			for (doc_id, obj) in collection.as_ref() {
+			for (doc_id, obj) in collection.to_vec_ref() {
 				t.insert(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
@@ -2132,7 +1545,7 @@ mod tests {
 		cache_size: usize,
 	) -> Result<(), Error> {
 		let mut all_deleted = true;
-		for (doc_id, obj) in collection.as_ref() {
+		for (doc_id, obj) in collection.to_vec_ref() {
 			let deleted = {
 				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
@@ -2145,7 +1558,12 @@ mod tests {
 			if deleted {
 				let (st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
 				let res = t.knn_search(&mut tx, &st, obj, 1).await?;
-				assert!(!res.docs.contains(doc_id), "Found: {} {:?}", doc_id, obj);
+				assert!(
+					!res.docs.iter().any(|(id, _)| id == doc_id),
+					"Found: {} {:?}",
+					doc_id,
+					obj
+				);
 			} else {
 				// In v1.2.x deletion is experimental. Will be fixed in 1.3
 				warn!("Delete failed: {} {:?}", doc_id, obj);
@@ -2171,13 +1589,14 @@ mod tests {
 		cache_size: usize,
 	) -> Result<(), Error> {
 		let (mut st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
-		let max_knn = 20.max(collection.as_ref().len());
-		for (doc_id, obj) in collection.as_ref() {
+		let max_knn = 20.max(collection.len());
+		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let res = t.knn_search(&mut tx, &st, obj, knn).await?;
+				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 				if collection.is_unique() {
 					assert!(
-						res.docs.contains(doc_id),
+						docs.contains(doc_id),
 						"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
 						obj,
 						knn,
@@ -2185,8 +1604,9 @@ mod tests {
 						res.docs
 					);
 				}
-				let expected_len = collection.as_ref().len().min(knn);
+				let expected_len = collection.len().min(knn);
 				if expected_len != res.docs.len() {
+					#[cfg(debug_assertions)]
 					debug!("{:?}", res.visited_nodes);
 					check_tree_properties(&mut tx, &mut st, t).await?;
 				}
@@ -2196,7 +1616,7 @@ mod tests {
 					"Wrong knn count - Expected: {} - Got: {} - Collection: {}",
 					expected_len,
 					res.docs.len(),
-					collection.as_ref().len(),
+					collection.len(),
 				)
 			}
 		}
@@ -2206,7 +1626,7 @@ mod tests {
 	async fn check_full_knn(
 		ds: &Datastore,
 		t: &mut MTree,
-		map: &HashMap<DocId, SharedVector>,
+		map: &HashMap<DocId, HashedSharedVector>,
 		cache_size: usize,
 	) -> Result<(), Error> {
 		let (st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
@@ -2222,9 +1642,8 @@ mod tests {
 			);
 			// We check that the results are sorted by ascending distance
 			let mut dist = 0.0;
-			for doc in res.docs {
+			for (doc, d) in res.docs {
 				let o = map.get(&doc).unwrap();
-				let d = t.calculate_distance(obj, o)?;
 				debug!("doc: {doc} - d: {d} - {obj:?} - {o:?}");
 				assert!(d >= dist, "d: {d} - dist: {dist}");
 				dist = d;
@@ -2253,13 +1672,13 @@ mod tests {
 					"test_mtree_collection - Distance: {:?} - Capacity: {} - Collection: {} - Vector type: {}",
 					distance,
 					capacity,
-					collection.as_ref().len(),
+					collection.len(),
 					vector_type,
 				);
 				let ds = Datastore::new("memory").await?;
 				let mut t = MTree::new(MState::new(*capacity), distance.clone());
 
-				let map = if collection.as_ref().len() < 1000 {
+				let map = if collection.len() < 1000 {
 					insert_collection_one_by_one(stk, &ds, &mut t, &collection, cache_size).await?
 				} else {
 					insert_collection_batch(stk, &ds, &mut t, &collection, cache_size).await?
@@ -2276,53 +1695,6 @@ mod tests {
 			}
 		}
 		Ok(())
-	}
-
-	enum TestCollection {
-		Unique(Vec<(DocId, SharedVector)>),
-		NonUnique(Vec<(DocId, SharedVector)>),
-	}
-
-	impl AsRef<Vec<(DocId, SharedVector)>> for TestCollection {
-		fn as_ref(&self) -> &Vec<(DocId, SharedVector)> {
-			match self {
-				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
-			}
-		}
-	}
-
-	impl TestCollection {
-		fn new_unique(
-			collection_size: usize,
-			vector_type: VectorType,
-			dimension: usize,
-		) -> TestCollection {
-			let mut collection = vec![];
-			for doc_id in 0..collection_size as DocId {
-				collection.push((doc_id, new_vec((doc_id + 1) as i64, vector_type, dimension)));
-			}
-			TestCollection::Unique(collection)
-		}
-
-		fn new_random(
-			collection_size: usize,
-			vector_type: VectorType,
-			dimension: usize,
-		) -> TestCollection {
-			let mut rng = get_seed_rnd();
-			let mut collection = vec![];
-
-			// Prepare data set
-			for doc_id in 0..collection_size {
-				collection
-					.push((doc_id as DocId, new_random_vec(&mut rng, vector_type, dimension)));
-			}
-			TestCollection::NonUnique(collection)
-		}
-
-		fn is_unique(&self) -> bool {
-			matches!(self, TestCollection::Unique(_))
-		}
 	}
 
 	#[test(tokio::test)]
@@ -2343,7 +1715,7 @@ mod tests {
 							stk,
 							&[3, 40],
 							vt,
-							TestCollection::new_unique(i, vt, 2),
+							TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 							true,
 							true,
 							true,
@@ -2376,7 +1748,7 @@ mod tests {
 							stk,
 							&[3, 40],
 							vt,
-							TestCollection::new_unique(i, vt, 2),
+							TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
 							true,
 							true,
 							true,
@@ -2401,7 +1773,7 @@ mod tests {
 						stk,
 						&[10, 20],
 						vt,
-						TestCollection::new_unique(150, vt, 3),
+						TestCollection::new(true, 150, vt, 3, &Distance::Euclidean),
 						true,
 						true,
 						false,
@@ -2425,7 +1797,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new_unique(1000, vt, 10),
+						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -2449,7 +1821,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new_unique(1000, vt, 10),
+						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -2473,7 +1845,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new_unique(1000, vt, 10),
+						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -2506,7 +1878,7 @@ mod tests {
 							stk,
 							&[3, 40],
 							vt,
-							TestCollection::new_random(i, vt, 1),
+							TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
 							true,
 							true,
 							true,
@@ -2531,7 +1903,7 @@ mod tests {
 						stk,
 						&[10, 20],
 						vt,
-						TestCollection::new_random(150, vt, 3),
+						TestCollection::new(false, 150, vt, 3, &Distance::Euclidean),
 						true,
 						true,
 						false,
@@ -2555,7 +1927,7 @@ mod tests {
 						stk,
 						&[40],
 						vt,
-						TestCollection::new_random(1000, vt, 10),
+						TestCollection::new(false, 1000, vt, 10, &Distance::Euclidean),
 						false,
 						true,
 						false,
@@ -2570,8 +1942,8 @@ mod tests {
 	}
 
 	fn check_leaf_vec(
-		m: &BTreeMap<SharedVector, ObjectProperties>,
-		obj: &Vector,
+		m: &HashMap<HashedSharedVector, ObjectProperties>,
+		obj: &HashedSharedVector,
 		parent_dist: f64,
 		docs: &[DocId],
 	) {
@@ -2585,14 +1957,14 @@ mod tests {
 
 	fn check_routing_vec(
 		m: &InternalMap,
-		center: &Vector,
+		center: &HashedSharedVector,
 		parent_dist: f64,
 		node_id: NodeId,
 		radius: f64,
 	) {
 		let p = m.get(center).unwrap();
 		assert_eq!(parent_dist, p.parent_dist);
-		assert_eq!(node_id, p.node);
+		assert_eq!(node_id, p.node, "{:?}", m);
 		assert_eq!(radius, p.radius);
 	}
 
@@ -2627,7 +1999,7 @@ mod tests {
 		node_id: NodeId,
 		check_func: F,
 	) where
-		F: FnOnce(&BTreeMap<SharedVector, ObjectProperties>),
+		F: FnOnce(&LeafNode),
 	{
 		check_node_read(tx, st, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
@@ -2645,7 +2017,7 @@ mod tests {
 		node_id: NodeId,
 		check_func: F,
 	) where
-		F: FnOnce(&BTreeMap<SharedVector, ObjectProperties>),
+		F: FnOnce(&LeafMap),
 	{
 		check_node_write(tx, st, node_id, |n| {
 			if let MTreeNode::Leaf(m) = n {
@@ -2675,9 +2047,9 @@ mod tests {
 		.await
 	}
 
-	fn check_knn(res: &VecDeque<DocId>, expected: Vec<DocId>) {
-		let expected: VecDeque<DocId> = expected.into_iter().collect();
-		assert_eq!(res, &expected);
+	fn check_knn(res: &VecDeque<(DocId, f64)>, expected: Vec<DocId>) {
+		let res: Vec<DocId> = res.into_iter().map(|(doc, _)| *doc).collect();
+		assert_eq!(res, expected);
 	}
 
 	#[derive(Default, Debug)]
@@ -2726,11 +2098,11 @@ mod tests {
 		debug!("CheckTreeProperties");
 		let mut node_ids = HashSet::new();
 		let mut checks = CheckedProperties::default();
-		let mut nodes: VecDeque<(NodeId, f64, Option<SharedVector>, usize)> = VecDeque::new();
+		let mut nodes: VecDeque<(NodeId, f64, Option<HashedSharedVector>, usize)> = VecDeque::new();
 		if let Some(root_id) = t.state.root {
 			nodes.push_back((root_id, 0.0, None, 1));
 		}
-		let mut leaf_objects = BTreeSet::new();
+		let mut leaf_objects = HashSet::new();
 		while let Some((node_id, radius, center, depth)) = nodes.pop_front() {
 			assert!(node_ids.insert(node_id), "Node already exist: {}", node_id);
 			checks.node_count += 1;
@@ -2807,15 +2179,5 @@ mod tests {
 		} else {
 			*max = Some(val);
 		}
-	}
-
-	fn get_seed_rnd() -> StdRng {
-		let seed: u64 = std::env::var("TEST_SEED")
-			.unwrap_or_else(|_| rand::random::<u64>().to_string())
-			.parse()
-			.expect("Failed to parse seed");
-		debug!("Seed: {}", seed);
-		// Create a seeded RNG
-		StdRng::seed_from_u64(seed)
 	}
 }
