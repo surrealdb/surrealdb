@@ -149,6 +149,39 @@ macro_rules! enter_query_recursion {
 	}};
 }
 
+#[macro_export]
+macro_rules! enter_flexible_ident{
+	($name:ident = $this:expr => ($enabled:expr){ $($t:tt)* }) => {{
+		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>,bool);
+		impl Drop for Dropper<'_, '_> {
+			fn drop(&mut self) {
+				self.0.lexer.flexible_ident = self.1;
+			}
+		}
+		impl<'a> ::std::ops::Deref for Dropper<'_,'a>{
+			type Target = $crate::syn::parser::Parser<'a>;
+
+			fn deref(&self) -> &Self::Target{
+				self.0
+			}
+		}
+
+		impl<'a> ::std::ops::DerefMut for Dropper<'_,'a>{
+			fn deref_mut(&mut self) -> &mut Self::Target{
+				self.0
+			}
+		}
+
+		let enabled = $this.lexer.flexible_ident;
+		$this.lexer.flexible_ident = $enabled;
+        #[allow(unused_mut)]
+		let mut $name = Dropper($this,enabled);
+		{
+			$($t)*
+		}
+	}};
+}
+
 pub(super) use expected;
 pub(super) use unexpected;
 

@@ -254,6 +254,8 @@ pub enum NumberKind {
 	DecimalExponent,
 	// A number with a float postfix.
 	Float,
+	// A number with a float postfix that had a mantissa.
+	FloatMantissa,
 	// A number with a `.3` part.
 	Mantissa,
 	// A number with a `.3e10` part.
