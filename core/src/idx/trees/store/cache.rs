@@ -417,3 +417,67 @@ where
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use crate::idx::trees::store::cache::TreeLru;
+
+	#[test]
+	fn test_minimal_tree_lru() {
+		let mut lru = TreeLru::new(1);
+		assert_eq!(lru.len(), 0);
+		//
+		lru.insert(1, 'a');
+		assert_eq!(lru.len(), 1);
+		assert_eq!(lru.get(&1), Some('a'));
+		//
+		lru.insert(2, 'b');
+		assert_eq!(lru.len(), 1);
+		assert_eq!(lru.get(&1), None);
+		assert_eq!(lru.get(&2), Some('b'));
+		//
+		lru.insert(2, 'c');
+		assert_eq!(lru.len(), 1);
+		assert_eq!(lru.get(&2), Some('c'));
+		//
+		lru.remove(&1);
+		assert_eq!(lru.len(), 1);
+		assert_eq!(lru.get(&2), Some('c'));
+		//
+		lru.remove(&2);
+		assert_eq!(lru.len(), 0);
+		assert_eq!(lru.get(&1), None);
+		assert_eq!(lru.get(&2), None);
+	}
+
+	#[test]
+	fn test_tree_lru() {
+		let mut lru = TreeLru::new(4);
+		//
+		lru.insert(1, 'a');
+		lru.insert(2, 'b');
+		lru.insert(3, 'c');
+		lru.insert(4, 'd');
+		assert_eq!(lru.len(), 4);
+		assert_eq!(lru.get(&1), Some('a'));
+		assert_eq!(lru.get(&2), Some('b'));
+		assert_eq!(lru.get(&3), Some('c'));
+		assert_eq!(lru.get(&4), Some('d'));
+		//
+		lru.insert(5, 'e');
+		assert_eq!(lru.len(), 4);
+		assert_eq!(lru.get(&1), None);
+		assert_eq!(lru.get(&2), Some('b'));
+		assert_eq!(lru.get(&3), Some('c'));
+		assert_eq!(lru.get(&4), Some('d'));
+		assert_eq!(lru.get(&5), Some('e'));
+		//
+		let mut lru = lru.duplicate(|k| *k != 3);
+		assert_eq!(lru.len(), 3);
+		assert_eq!(lru.get(&1), None);
+		assert_eq!(lru.get(&2), Some('b'));
+		assert_eq!(lru.get(&3), None);
+		assert_eq!(lru.get(&4), Some('d'));
+		assert_eq!(lru.get(&5), Some('e'));
+	}
+}
