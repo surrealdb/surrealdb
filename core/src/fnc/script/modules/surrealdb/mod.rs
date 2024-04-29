@@ -3,6 +3,7 @@ use js::class::OwnedBorrow;
 use js::prelude::Coerced;
 use js::Exception;
 use js::{module::ModuleDef, Class, Ctx, Function, Module, Result, String as JsString, Value};
+use reblessive::tree::Stk;
 
 use self::query::{QueryContext, QUERY_DATA_PROP_NAME};
 
@@ -16,10 +17,13 @@ pub struct Package;
 async fn value(ctx: Ctx<'_>, value: Coerced<String>) -> Result<SurValue> {
 	let value = parse_value(&value.0).map_err(|e| Exception::throw_type(&ctx, &e.to_string()))?;
 	let this = ctx.globals().get::<_, OwnedBorrow<QueryContext>>(QUERY_DATA_PROP_NAME)?;
-	let value = value
-		.compute(this.context, this.opt, this.txn, this.doc)
-		.await
-		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let value = Stk::enter_run(|stk| async {
+		value
+			.compute(stk, this.context, this.opt, this.txn, this.doc)
+			.await
+			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
+	})
+	.await?;
 	Ok(value)
 }
 

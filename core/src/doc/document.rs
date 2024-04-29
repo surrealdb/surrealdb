@@ -26,6 +26,7 @@ pub(crate) struct Document<'a> {
 }
 
 #[non_exhaustive]
+#[cfg_attr(debug_assertions, derive(Debug))]
 pub struct CursorDoc<'a> {
 	pub(crate) ir: Option<IteratorRef>,
 	pub(crate) rid: Option<&'a Thing>,
@@ -118,6 +119,14 @@ impl<'a> Document<'a> {
 			initial: CursorDoc::new(ir, id, doc_id, initial),
 		}
 	}
+
+	pub(crate) fn current_doc(&self) -> &Value {
+		self.current.doc.as_ref()
+	}
+
+	pub(crate) fn initial_doc(&self) -> &Value {
+		self.initial.doc.as_ref()
+	}
 }
 
 impl<'a> Document<'a> {
@@ -125,10 +134,17 @@ impl<'a> Document<'a> {
 	pub fn changed(&self) -> bool {
 		self.initial.doc != self.current.doc
 	}
-	/// Check if document has changed
+
+	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
-		self.initial.doc.is_none()
+		self.initial.doc.is_none() && self.current.doc.is_some()
 	}
+
+	/// Check if document is being deleted
+	pub fn is_delete(&self) -> bool {
+		self.current.doc.is_none()
+	}
+
 	/// Get the table for this document
 	pub async fn tb(
 		&self,

@@ -14,6 +14,7 @@ pub mod kill;
 pub mod live;
 pub mod option;
 pub mod output;
+pub mod rebuild;
 pub mod relate;
 pub mod remove;
 pub mod select;
@@ -76,6 +77,7 @@ impl ser::Serializer for Serializer {
 			"Live" => Ok(Statement::Live(value.serialize(live::Serializer.wrap())?)),
 			"Option" => Ok(Statement::Option(value.serialize(option::Serializer.wrap())?)),
 			"Output" => Ok(Statement::Output(value.serialize(output::Serializer.wrap())?)),
+			"Rebuild" => Ok(Statement::Rebuild(value.serialize(rebuild::Serializer.wrap())?)),
 			"Relate" => Ok(Statement::Relate(value.serialize(relate::Serializer.wrap())?)),
 			"Remove" => Ok(Statement::Remove(value.serialize(remove::Serializer.wrap())?)),
 			"Select" => Ok(Statement::Select(value.serialize(select::Serializer.wrap())?)),
@@ -161,7 +163,7 @@ mod tests {
 
 	#[test]
 	fn info() {
-		let statement = Statement::Info(InfoStatement::Ns);
+		let statement = Statement::Info(InfoStatement::Ns(Default::default()));
 		let serialized = statement.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(statement, serialized);
 	}

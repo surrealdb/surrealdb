@@ -3,6 +3,7 @@ use std::sync::Arc;
 use channel::Receiver;
 use futures::lock::Mutex;
 use futures::StreamExt;
+use reblessive::TreeStack;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
 use tracing::instrument;
@@ -94,7 +95,7 @@ impl<'a> Executor<'a> {
 									let lqs: Vec<TrackedResult> =
 										txn.consume_pending_live_queries();
 									// Track the live queries in the data store
-									self.kvs.adapt_tracked_live_queries(&lqs).await?;
+									self.kvs.handle_postprocessing_of_statements(&lqs).await?;
 									Ok(())
 								}
 								Err(e) => Err(e),
@@ -213,6 +214,9 @@ impl<'a> Executor<'a> {
 		opt: Options,
 		qry: Query,
 	) -> Result<(Vec<Response>, Vec<TrackedResult>), Error> {
+		// The stack to run the executor in.
+		let mut stack = TreeStack::new();
+
 		// Create a notification channel
 		let (send, recv) = channel::unbounded();
 		// Set the notification channel
@@ -308,7 +312,12 @@ impl<'a> Executor<'a> {
 						// The transaction began successfully
 						false => {
 							// Check the statement
-							match stm.compute(&ctx, &opt, &self.txn(), None).await {
+							let txn = self.txn();
+							match stack
+								.enter(|stk| stm.compute(stk, &ctx, &opt, &txn, None))
+								.finish()
+								.await
+							{
 								Ok(val) => {
 									// Check if writeable
 									let writeable = stm.writeable();
@@ -375,9 +384,14 @@ impl<'a> Executor<'a> {
 										if let Err(err) = ctx.add_timeout(timeout) {
 											Err(err)
 										} else {
+											let txn = self.txn();
 											// Process the statement
-											let res =
-												stm.compute(&ctx, &opt, &self.txn(), None).await;
+											let res = stack
+												.enter(|stk| {
+													stm.compute(stk, &ctx, &opt, &txn, None)
+												})
+												.finish()
+												.await;
 											// Catch statement timeout
 											match ctx.is_timedout() {
 												true => Err(Error::QueryTimedout),
@@ -386,7 +400,13 @@ impl<'a> Executor<'a> {
 										}
 									}
 									// There is no timeout clause
-									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
+									None => {
+										let txn = self.txn();
+										stack
+											.enter(|stk| stm.compute(stk, &ctx, &opt, &txn, None))
+											.finish()
+											.await
+									}
 								};
 								// Catch global timeout
 								let res = match ctx.is_timedout() {

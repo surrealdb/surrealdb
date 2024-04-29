@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -26,9 +27,9 @@ use std::collections::HashMap;
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct Model {
 	pub name: String,
@@ -53,6 +54,7 @@ impl Model {
 	#[cfg(feature = "ml")]
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -93,7 +95,7 @@ impl Model {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(ctx, opt, txn, doc).await?.is_truthy() {
+					if !stk.run(|stk| e.compute(stk, ctx, opt, txn, doc)).await?.is_truthy() {
 						return Err(Error::FunctionPermissions {
 							name: self.name.to_owned(),
 						});
@@ -102,8 +104,13 @@ impl Model {
 			}
 		}
 		// Compute the function arguments
-		let mut args =
-			try_join_all(self.args.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+		let mut args = stk
+			.scope(|stk| {
+				try_join_all(
+					self.args.iter().map(|v| stk.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
+				)
+			})
+			.await?;
 		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(Error::InvalidArguments {
@@ -214,6 +221,7 @@ impl Model {
 	#[cfg(not(feature = "ml"))]
 	pub(crate) async fn compute(
 		&self,
+		_stk: &mut Stk,
 		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,

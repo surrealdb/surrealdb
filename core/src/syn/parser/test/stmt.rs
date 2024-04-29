@@ -151,7 +151,7 @@ fn parse_define_database() {
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(60) * 10,
-				store_original: true,
+				store_diff: true,
 			}),
 			if_not_exists: false,
 		}))
@@ -323,7 +323,7 @@ fn parse_define_table() {
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
-				store_original: true,
+				store_diff: true,
 			}),
 			comment: None,
 			if_not_exists: false,
@@ -647,28 +647,31 @@ fn parse_if_block() {
 #[test]
 fn parse_info() {
 	let res = test_parse!(parse_stmt, "INFO FOR ROOT").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Root));
+	assert_eq!(res, Statement::Info(InfoStatement::Root(false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR KV").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Root));
+	assert_eq!(res, Statement::Info(InfoStatement::Root(false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR NAMESPACE").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Ns));
+	assert_eq!(res, Statement::Info(InfoStatement::Ns(false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR NS").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Ns));
+	assert_eq!(res, Statement::Info(InfoStatement::Ns(false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR SCOPE scope").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()))));
+	assert_eq!(res, Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()), false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR TABLE table").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Tb(Ident("table".to_owned()))));
+	assert_eq!(res, Statement::Info(InfoStatement::Tb(Ident("table".to_owned()), false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR USER user").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::User(Ident("user".to_owned()), None)));
+	assert_eq!(res, Statement::Info(InfoStatement::User(Ident("user".to_owned()), None, false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR USER user ON namespace").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns))));
+	assert_eq!(
+		res,
+		Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns), false))
+	);
 }
 
 #[test]

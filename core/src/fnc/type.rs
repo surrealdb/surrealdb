@@ -9,6 +9,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::{Id, Range, Strand};
 use crate::syn;
+use reblessive::tree::Stk;
 
 pub fn bool((val,): (Value,)) -> Result<Value, Error> {
 	val.convert_to_bool().map(Value::from)
@@ -27,7 +28,8 @@ pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub async fn field(
-	(ctx, opt, txn, doc): (
+	(stk, ctx, opt, txn, doc): (
+		&mut Stk,
 		&Context<'_>,
 		Option<&Options>,
 		Option<&Transaction>,
@@ -41,7 +43,7 @@ pub async fn field(
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
 			match opt.projections {
-				true => Ok(idi.compute(ctx, opt, txn, doc).await?),
+				true => Ok(idi.compute(stk, ctx, opt, txn, doc).await?),
 				false => Ok(idi.into()),
 			}
 		}
@@ -50,7 +52,8 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(ctx, opt, txn, doc): (
+	(stk, ctx, opt, txn, doc): (
+		&mut Stk,
 		&Context<'_>,
 		Option<&Options>,
 		Option<&Transaction>,
@@ -66,7 +69,7 @@ pub async fn fields(
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
 				match opt.projections {
-					true => args.push(idi.compute(ctx, opt, txn, doc).await?),
+					true => args.push(idi.compute(stk, ctx, opt, txn, doc).await?),
 					false => args.push(idi.into()),
 				}
 			}

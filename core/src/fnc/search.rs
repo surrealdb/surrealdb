@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::{Thing, Value};
+use reblessive::tree::Stk;
 
 fn get_execution_context<'a>(
 	ctx: &'a Context<'_>,
@@ -26,13 +27,13 @@ fn get_execution_context<'a>(
 }
 
 pub async fn analyze(
-	(ctx, txn, opt): (&Context<'_>, Option<&Transaction>, Option<&Options>),
+	(stk, ctx, txn, opt): (&mut Stk, &Context<'_>, Option<&Transaction>, Option<&Options>),
 	(az, val): (Value, Value),
 ) -> Result<Value, Error> {
 	if let (Some(txn), Some(opt), Value::Strand(az), Value::Strand(val)) = (txn, opt, az, val) {
 		let az: Analyzer =
 			txn.lock().await.get_db_analyzer(opt.ns(), opt.db(), az.as_str()).await?.into();
-		az.analyze(ctx, opt, txn, val.0).await
+		az.analyze(stk, ctx, opt, txn, val.0).await
 	} else {
 		Ok(Value::None)
 	}

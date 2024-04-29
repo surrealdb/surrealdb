@@ -13,9 +13,9 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Number {
