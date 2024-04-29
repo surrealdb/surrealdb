@@ -89,23 +89,7 @@ impl TableMutation {
 		let mut h = BTreeMap::<String, Value>::new();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
-				let val: u64 = {
-					// let mut ret = None;
-					// while ret.is_none() {
-					// 	match COUNTER.try_lock() {
-					// 		Ok(mut lock) => {
-					// 			let mut val = lock.deref_mut();
-					// 			*val = *val + 1u64;
-					// 			ret = Some(*val);
-					// 		}
-					// 		Err(_) => {
-					// 			std::thread::sleep(std::time::Duration::from_millis(1));
-					// 		}
-					// 	};
-					// }
-					// ret.unwrap()
-					COUNTER.fetch_add(1, Ordering::SeqCst)
-				};
+				let val: u64 = COUNTER.fetch_add(1, Ordering::SeqCst);
 				info!(
 					"CFSet {} and {} for {}\n{}",
 					_thing,
