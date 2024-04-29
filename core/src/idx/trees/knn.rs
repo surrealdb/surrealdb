@@ -493,7 +493,7 @@ pub struct KnnResult {
 pub(super) mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{FloatKey, Ids64, KnnResultBuilder};
-	use crate::idx::trees::vector::{HashedSharedVector, Vector};
+	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::Number;
 	use rand::prelude::SmallRng;
@@ -518,12 +518,12 @@ pub(super) mod tests {
 
 	#[derive(Debug)]
 	pub(in crate::idx::trees) enum TestCollection {
-		Unique(Vec<(DocId, HashedSharedVector)>),
-		NonUnique(Vec<(DocId, HashedSharedVector)>),
+		Unique(Vec<(DocId, SharedVector)>),
+		NonUnique(Vec<(DocId, SharedVector)>),
 	}
 
 	impl TestCollection {
-		pub(in crate::idx::trees) fn to_vec_ref(&self) -> &Vec<(DocId, HashedSharedVector)> {
+		pub(in crate::idx::trees) fn to_vec_ref(&self) -> &Vec<(DocId, SharedVector)> {
 			match self {
 				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
 			}
@@ -539,7 +539,7 @@ pub(super) mod tests {
 		t: VectorType,
 		dim: usize,
 		gen: &RandomItemGenerator,
-	) -> HashedSharedVector {
+	) -> SharedVector {
 		let mut vec = Vector::new(t, dim);
 		for _ in 0..dim {
 			vec.add(&gen.generate(rng));
@@ -581,7 +581,7 @@ pub(super) mod tests {
 			}
 		}
 
-		fn add(&mut self, doc: DocId, pt: HashedSharedVector) {
+		fn add(&mut self, doc: DocId, pt: SharedVector) {
 			match self {
 				TestCollection::Unique(vec) => vec,
 				TestCollection::NonUnique(vec) => vec,

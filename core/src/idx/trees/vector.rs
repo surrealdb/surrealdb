@@ -31,8 +31,8 @@ pub enum Vector {
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
 /// As computing the hash for a large vector is costly, this structures also caches the hashcode to avoid recomputing it.
 #[derive(Debug, Clone)]
-pub struct HashedSharedVector(Arc<Vector>, u64);
-impl From<Vector> for HashedSharedVector {
+pub struct SharedVector(Arc<Vector>, u64);
+impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
 		let mut h = DefaultHasher::new();
 		v.hash(&mut h);
@@ -40,38 +40,38 @@ impl From<Vector> for HashedSharedVector {
 	}
 }
 
-impl Borrow<Vector> for &HashedSharedVector {
+impl Borrow<Vector> for &SharedVector {
 	fn borrow(&self) -> &Vector {
 		self.0.as_ref()
 	}
 }
 
-impl Hash for HashedSharedVector {
+impl Hash for SharedVector {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		state.write_u64(self.1);
 	}
 }
 
-impl PartialEq for HashedSharedVector {
+impl PartialEq for SharedVector {
 	fn eq(&self, other: &Self) -> bool {
 		self.1 == other.1 && self.0 == other.0
 	}
 }
-impl Eq for HashedSharedVector {}
+impl Eq for SharedVector {}
 
-impl PartialOrd for HashedSharedVector {
+impl PartialOrd for SharedVector {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Ord for HashedSharedVector {
+impl Ord for SharedVector {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.0.as_ref().cmp(other.0.as_ref())
 	}
 }
 
-impl Serialize for HashedSharedVector {
+impl Serialize for SharedVector {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
@@ -81,7 +81,7 @@ impl Serialize for HashedSharedVector {
 	}
 }
 
-impl<'de> Deserialize<'de> for HashedSharedVector {
+impl<'de> Deserialize<'de> for SharedVector {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: Deserializer<'de>,

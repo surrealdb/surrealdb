@@ -18,7 +18,7 @@ use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{
 	IndexStores, NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore,
 };
-use crate::idx::trees::vector::{HashedSharedVector, Vector};
+use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::{Distance, MTreeParams, VectorType};
@@ -101,7 +101,7 @@ impl MTreeIndex {
 		// Extract the vector
 		let vector = Vector::try_from_array(self.vector_type, a)?;
 		vector.check_dimension(self.dim)?;
-		let vector: HashedSharedVector = vector.into();
+		let vector: SharedVector = vector.into();
 		// Lock the index
 		let mtree = self.mtree.read().await;
 		// Do the search
@@ -175,7 +175,7 @@ impl MTree {
 		&self,
 		tx: &mut Transaction,
 		store: &MTreeStore,
-		v: &HashedSharedVector,
+		v: &SharedVector,
 		k: usize,
 	) -> Result<KnnResult, Error> {
 		#[cfg(debug_assertions)]
@@ -234,7 +234,7 @@ impl MTree {
 enum InsertionResult {
 	DocAdded,
 	CoveringRadius(f64),
-	PromotedEntries(HashedSharedVector, RoutingProperties, HashedSharedVector, RoutingProperties),
+	PromotedEntries(SharedVector, RoutingProperties, SharedVector, RoutingProperties),
 }
 
 enum DeletionResult {
@@ -257,7 +257,7 @@ impl MTree {
 		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		obj: HashedSharedVector,
+		obj: SharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
@@ -283,7 +283,7 @@ impl MTree {
 	async fn create_new_leaf_root(
 		&mut self,
 		store: &mut MTreeStore,
-		obj: HashedSharedVector,
+		obj: SharedVector,
 		id: DocId,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
@@ -299,9 +299,9 @@ impl MTree {
 	async fn create_new_internal_root(
 		&mut self,
 		store: &mut MTreeStore,
-		o1: HashedSharedVector,
+		o1: SharedVector,
 		p1: RoutingProperties,
-		o2: HashedSharedVector,
+		o2: SharedVector,
 		p2: RoutingProperties,
 	) -> Result<(), Error> {
 		let new_root_id = self.new_node_id();
@@ -329,7 +329,7 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		object: &HashedSharedVector,
+		object: &SharedVector,
 		id: DocId,
 	) -> Result<bool, Error> {
 		let mut queue = BinaryHeap::new();
@@ -368,8 +368,8 @@ impl MTree {
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
-		parent_center: &Option<HashedSharedVector>,
-		object: HashedSharedVector,
+		parent_center: &Option<SharedVector>,
+		object: SharedVector,
 		doc: DocId,
 	) -> Result<InsertionResult, Error> {
 		#[cfg(debug_assertions)]
@@ -406,8 +406,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: InternalNode,
-		parent_center: &Option<HashedSharedVector>,
-		object: HashedSharedVector,
+		parent_center: &Option<SharedVector>,
+		object: SharedVector,
 		doc_id: DocId,
 	) -> Result<InsertionResult, Error> {
 		// Choose `best` subtree entry ObestSubstree from N;
@@ -433,7 +433,7 @@ impl MTree {
 				// Remove ObestSubtree from N;
 				node.remove(&best_entry_obj);
 				// if (N U P will fit into N)
-				let mut nup: HashSet<HashedSharedVector> = HashSet::from_iter(node.keys().cloned());
+				let mut nup: HashSet<SharedVector> = HashSet::from_iter(node.keys().cloned());
 				nup.insert(o1.clone());
 				nup.insert(o2.clone());
 				if nup.len() <= self.state.capacity as usize {
@@ -494,8 +494,8 @@ impl MTree {
 	fn find_closest(
 		&self,
 		node: &InternalNode,
-		object: &HashedSharedVector,
-	) -> Result<(HashedSharedVector, RoutingProperties), Error> {
+		object: &SharedVector,
+	) -> Result<(SharedVector, RoutingProperties), Error> {
 		let mut closest = None;
 		let mut dist = f64::MAX;
 		for (o, p) in node {
@@ -521,8 +521,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: LeafNode,
-		parent_center: &Option<HashedSharedVector>,
-		object: HashedSharedVector,
+		parent_center: &Option<SharedVector>,
+		object: SharedVector,
 		doc_id: DocId,
 	) -> Result<InsertionResult, Error> {
 		match node.entry(object) {
@@ -573,7 +573,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: N,
-	) -> Result<(HashedSharedVector, RoutingProperties, HashedSharedVector, RoutingProperties), Error>
+	) -> Result<(SharedVector, RoutingProperties, SharedVector, RoutingProperties), Error>
 	where
 		N: NodeVectors + Debug,
 	{
@@ -589,7 +589,7 @@ impl MTree {
 			d1.total_cmp(&d2)
 		});
 		let a1_size = a2.len() / 2;
-		let a1: Vec<HashedSharedVector> = a2.drain(0..a1_size).collect();
+		let a1: Vec<SharedVector> = a2.drain(0..a1_size).collect();
 
 		let (node1, r1, o1) = node.extract_node(&distances, p1, a1)?;
 		let (node2, r2, o2) = node.extract_node(&distances, p2, a2)?;
@@ -625,8 +625,8 @@ impl MTree {
 	// Compute the distance cache, and return the most distant objects
 	fn compute_distances_and_promoted_objects(
 		&self,
-		objects: &[HashedSharedVector],
-	) -> Result<(DistanceCache, HashedSharedVector, HashedSharedVector), Error> {
+		objects: &[SharedVector],
+	) -> Result<(DistanceCache, SharedVector, SharedVector), Error> {
 		let mut promo = None;
 		let mut max_dist = 0f64;
 		let n = objects.len();
@@ -676,7 +676,7 @@ impl MTree {
 	fn compute_leaf_max_distance(
 		&self,
 		node: &LeafNode,
-		parent: &Option<HashedSharedVector>,
+		parent: &Option<SharedVector>,
 	) -> Result<f64, Error> {
 		Ok(if let Some(p) = parent {
 			let mut max_dist = 0f64;
@@ -689,11 +689,7 @@ impl MTree {
 		})
 	}
 
-	fn calculate_distance(
-		&self,
-		v1: &HashedSharedVector,
-		v2: &HashedSharedVector,
-	) -> Result<f64, Error> {
+	fn calculate_distance(&self, v1: &SharedVector, v2: &SharedVector) -> Result<f64, Error> {
 		if v1.eq(v2) {
 			return Ok(0.0);
 		}
@@ -714,7 +710,7 @@ impl MTree {
 		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		object: HashedSharedVector,
+		object: SharedVector,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
 		let mut deleted = false;
@@ -761,8 +757,8 @@ impl MTree {
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
-		parent_center: &Option<HashedSharedVector>,
-		object: HashedSharedVector,
+		parent_center: &Option<SharedVector>,
+		object: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -812,8 +808,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut n_node: InternalNode,
-		parent_center: &Option<HashedSharedVector>,
-		od: HashedSharedVector,
+		parent_center: &Option<SharedVector>,
+		od: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -940,9 +936,9 @@ impl MTree {
 		&mut self,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
-		parent_center: &Option<HashedSharedVector>,
+		parent_center: &Option<SharedVector>,
 		n_node: &mut InternalNode,
-		on_obj: HashedSharedVector,
+		on_obj: SharedVector,
 		p: MStoredNode,
 		p_updated: bool,
 	) -> Result<bool, Error> {
@@ -995,9 +991,9 @@ impl MTree {
 		&mut self,
 		store: &mut MTreeStore,
 		n_node: &mut InternalNode,
-		on_obj: HashedSharedVector,
+		on_obj: SharedVector,
 		p: MStoredNode,
-		onn_obj: HashedSharedVector,
+		onn_obj: SharedVector,
 		mut onn_entry: RoutingProperties,
 		mut onn_child: MStoredNode,
 	) -> Result<(), Error> {
@@ -1059,10 +1055,10 @@ impl MTree {
 	async fn delete_underflown_redistribute(
 		&mut self,
 		store: &mut MTreeStore,
-		parent_center: &Option<HashedSharedVector>,
+		parent_center: &Option<SharedVector>,
 		n_node: &mut InternalNode,
-		on_obj: HashedSharedVector,
-		onn_obj: HashedSharedVector,
+		on_obj: SharedVector,
+		onn_obj: SharedVector,
 		mut p: MStoredNode,
 		onn_child: MStoredNode,
 	) -> Result<(), Error> {
@@ -1099,8 +1095,8 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut leaf_node: LeafNode,
-		parent_center: &Option<HashedSharedVector>,
-		od: HashedSharedVector,
+		parent_center: &Option<SharedVector>,
+		od: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
 	) -> Result<DeletionResult, Error> {
@@ -1146,14 +1142,14 @@ impl MTree {
 	}
 }
 
-struct DistanceCache(HashMap<(HashedSharedVector, HashedSharedVector), f64>);
+struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
 
 pub(in crate::idx) type MTreeStore = TreeStore<MTreeNode>;
 type MStoredNode = StoredNode<MTreeNode>;
 
-type InternalMap = HashMap<HashedSharedVector, RoutingProperties>;
+type InternalMap = HashMap<SharedVector, RoutingProperties>;
 
-type LeafMap = HashMap<HashedSharedVector, ObjectProperties>;
+type LeafMap = HashMap<SharedVector, ObjectProperties>;
 
 #[derive(Debug, Clone)]
 /// A node in this tree structure holds entries.
@@ -1240,14 +1236,14 @@ trait NodeVectors: Sized {
 	#[allow(dead_code)]
 	fn len(&self) -> usize;
 
-	fn get_objects(&self) -> Vec<HashedSharedVector>;
+	fn get_objects(&self) -> Vec<SharedVector>;
 
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: HashedSharedVector,
-		a: Vec<HashedSharedVector>,
-	) -> Result<(Self, f64, HashedSharedVector), Error>;
+		p: SharedVector,
+		a: Vec<SharedVector>,
+	) -> Result<(Self, f64, SharedVector), Error>;
 
 	fn into_mtree_node(self) -> MTreeNode;
 }
@@ -1257,16 +1253,16 @@ impl NodeVectors for LeafNode {
 		self.len()
 	}
 
-	fn get_objects(&self) -> Vec<HashedSharedVector> {
+	fn get_objects(&self) -> Vec<SharedVector> {
 		self.keys().cloned().collect()
 	}
 
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: HashedSharedVector,
-		a: Vec<HashedSharedVector>,
-	) -> Result<(Self, f64, HashedSharedVector), Error> {
+		p: SharedVector,
+		a: Vec<SharedVector>,
+	) -> Result<(Self, f64, SharedVector), Error> {
 		let mut n = LeafNode::new();
 		let mut r = 0f64;
 		for o in a {
@@ -1292,16 +1288,16 @@ impl NodeVectors for InternalNode {
 		self.len()
 	}
 
-	fn get_objects(&self) -> Vec<HashedSharedVector> {
+	fn get_objects(&self) -> Vec<SharedVector> {
 		self.keys().cloned().collect()
 	}
 
 	fn extract_node(
 		&mut self,
 		distances: &DistanceCache,
-		p: HashedSharedVector,
-		a: Vec<HashedSharedVector>,
-	) -> Result<(Self, f64, HashedSharedVector), Error> {
+		p: SharedVector,
+		a: Vec<SharedVector>,
+	) -> Result<(Self, f64, SharedVector), Error> {
 		let mut n = InternalNode::new();
 		let mut max_r = 0f64;
 		for o in a {
@@ -1444,7 +1440,7 @@ mod tests {
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeStore};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
-	use crate::idx::trees::vector::HashedSharedVector;
+	use crate::idx::trees::vector::SharedVector;
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
@@ -1490,7 +1486,7 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<HashMap<DocId, HashedSharedVector>, Error> {
+	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.len());
 		let mut c = 0;
 		for (doc_id, obj) in collection.to_vec_ref() {
@@ -1518,7 +1514,7 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<HashMap<DocId, HashedSharedVector>, Error> {
+	) -> Result<HashMap<DocId, SharedVector>, Error> {
 		let mut map = HashMap::with_capacity(collection.len());
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
@@ -1624,7 +1620,7 @@ mod tests {
 	async fn check_full_knn(
 		ds: &Datastore,
 		t: &mut MTree,
-		map: &HashMap<DocId, HashedSharedVector>,
+		map: &HashMap<DocId, SharedVector>,
 		cache_size: usize,
 	) -> Result<(), Error> {
 		let (st, mut tx) = new_operation(ds, t, TransactionType::Read, cache_size).await;
@@ -1985,7 +1981,7 @@ mod tests {
 		debug!("CheckTreeProperties");
 		let mut node_ids = HashSet::new();
 		let mut checks = CheckedProperties::default();
-		let mut nodes: VecDeque<(NodeId, f64, Option<HashedSharedVector>, usize)> = VecDeque::new();
+		let mut nodes: VecDeque<(NodeId, f64, Option<SharedVector>, usize)> = VecDeque::new();
 		if let Some(root_id) = t.state.root {
 			nodes.push_back((root_id, 0.0, None, 1));
 		}
