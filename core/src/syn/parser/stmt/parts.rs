@@ -343,7 +343,7 @@ impl Parser<'_> {
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
 		let expiry = self.next_token_value::<Duration>()?.0;
-		let store_original = if self.eat(t!("INCLUDE")) {
+		let store_diff = if self.eat(t!("INCLUDE")) {
 			expected!(self, TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original));
 			true
 		} else {
@@ -352,7 +352,7 @@ impl Parser<'_> {
 
 		Ok(ChangeFeed {
 			expiry,
-			store_original,
+			store_diff,
 		})
 	}
 
