@@ -40,9 +40,6 @@ pub mod rpc;
 #[doc(hidden)]
 pub mod syn;
 
-use once_cell::sync::Lazy;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
 #[cfg(feature = "ml")]
 #[doc(hidden)]
 pub use surrealml as ml;
