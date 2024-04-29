@@ -4530,8 +4530,6 @@ dependencies = [
 [[package]]
 name = "reblessive"
 version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffb68fbdf0b0509dcff7c86244a6e2408968c6153c7e50c4eb14a7be598b83a7"
 
 [[package]]
 name = "redox_syscall"
