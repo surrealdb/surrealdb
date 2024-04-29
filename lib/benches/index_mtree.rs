@@ -126,18 +126,23 @@ async fn insert_objects(
 	let mut rng = thread_rng();
 	let mut t = mtree();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let ixs = ds.index_store();
-	let mut s = ixs.get_store_mtree(TreeNodeProvider::Debug, 0, Write, cache_size).await;
+	let mut s =
+		ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Write, cache_size).await;
+
 	let mut stack = TreeStack::new();
-	stack.enter(|stk| async {
-		for i in 0..samples_size {
-			let object = random_object(&mut rng, vector_size).into();
-			// Insert the sample
-			t.insert(stk, &mut tx, &mut s, object, i as DocId).await.unwrap();
-		}
-	});
+	stack
+		.enter(|stk| async {
+			for i in 0..samples_size {
+				let object = random_object(&mut rng, vector_size).into();
+				// Insert the sample
+				t.insert(stk, &mut tx, &mut s, object, i as DocId).await.unwrap();
+			}
+		})
+		.finish()
+		.await;
+
 	if let Some(new_cache) = s.finish(&mut tx).await.unwrap() {
-		ixs.advance_store_mtree(new_cache);
+		ds.index_store().advance_store_mtree(new_cache);
 	}
 	tx.commit().await.unwrap();
 }
@@ -152,8 +157,7 @@ async fn knn_lookup_objects(
 	let mut rng = thread_rng();
 	let t = mtree();
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let ixs = ds.index_store();
-	let s = ixs.get_store_mtree(TreeNodeProvider::Debug, 0, Read, cache_size).await;
+	let s = ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Read, cache_size).await;
 	for _ in 0..samples_size {
 		let object = random_object(&mut rng, vector_size).into();
 		// Insert the sample

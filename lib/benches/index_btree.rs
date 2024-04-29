@@ -19,7 +19,7 @@ fn bench_index_btree(c: &mut Criterion) {
 	let (samples_len, samples) = setup();
 
 	let mut group = c.benchmark_group("index_btree");
-	group.throughput(Throughput::Elements(1));
+	group.throughput(Throughput::Elements(samples_len as u64));
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(30));
 
