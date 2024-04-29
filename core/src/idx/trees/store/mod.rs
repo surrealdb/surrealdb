@@ -137,11 +137,12 @@ impl TreeNodeProvider {
 		}
 	}
 
-	async fn save<N>(&self, tx: &mut Transaction, node: &StoredNode<N>) -> Result<(), Error>
+	async fn save<N>(&self, tx: &mut Transaction, node: &mut StoredNode<N>) -> Result<(), Error>
 	where
 		N: TreeNode + Clone + Display,
 	{
 		let val = node.n.try_into_val()?;
+		node.size = val.len() as u32;
 		tx.set(node.key.clone(), val).await?;
 		Ok(())
 	}

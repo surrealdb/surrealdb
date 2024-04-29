@@ -115,7 +115,7 @@ where
 		for node_id in updated {
 			if let Some(mut node) = self.nodes.remove(&node_id) {
 				node.n.prepare_save();
-				self.np.save(tx, &node).await?;
+				self.np.save(tx, &mut node).await?;
 				// Update the cache with updated entries.
 				new_cache.set_node(node).await;
 			} else {
