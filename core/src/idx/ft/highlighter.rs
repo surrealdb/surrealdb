@@ -161,9 +161,7 @@ impl TryFrom<Offseter> for Value {
 		for (idx, offsets) in or.offsets {
 			let mut r = Vec::with_capacity(offsets.len());
 			for (s, e) in offsets {
-				let mut o = BTreeMap::default();
-				o.insert("s".to_string(), Value::from(s));
-				o.insert("e".to_string(), Value::from(e));
+				let o = BTreeMap::from([("s", Value::from(s)), ("e", Value::from(e))]);
 				r.push(Value::Object(Object::from(o)));
 			}
 			res.insert(idx.to_string(), Value::Array(Array::from(r)));

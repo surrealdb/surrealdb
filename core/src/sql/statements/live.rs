@@ -113,7 +113,6 @@ impl LiveStatement {
 						let mut stm = stm;
 						stm.what = Value::Table(tb.clone());
 
-						trace!("Inside live statement, table is {}", tb);
 						let ns = opt.ns().to_string();
 						let db = opt.db().to_string();
 						self.validate_change_feed_valid(&mut run, &ns, &db, &tb).await?;
@@ -126,7 +125,6 @@ impl LiveStatement {
 						}))?;
 					}
 					v => {
-						trace!("Inside live statement, value was not a table it was {}", v);
 						return Err(Error::LiveStatement {
 							value: v.to_string(),
 						});
