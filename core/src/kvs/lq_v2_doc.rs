@@ -15,6 +15,7 @@ pub(in crate::kvs) fn construct_document(
 ) -> Result<Option<Document>, Error> {
 	match mutation {
 		TableMutation::Set(id, current_value) => {
+			trace!("Reconstructing document from Set {} with current value {}", id, current_value);
 			let doc = Document::new_artificial(
 				None,
 				Some(id),
@@ -42,6 +43,7 @@ pub(in crate::kvs) fn construct_document(
 		}
 		TableMutation::Def(_) => Ok(None),
 		TableMutation::SetWithDiff(id, current_value, operations) => {
+			trace!("Reconstructing document from SetWithDiff {} with current value {} and operations {:?}", id, current_value, operations);
 			// We need a previous value otherwise the Value::compute function won't work correctly
 			// This is also how IDs are carried into notifications, not via doc.rid
 			let mut copy = current_value.clone();

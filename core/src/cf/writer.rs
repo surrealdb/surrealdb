@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
+use crate::fflags::FFLAGS;
 use crate::kvs::Key;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
@@ -75,6 +76,10 @@ impl Writer {
 		current: Cow<'_, Value>,
 		store_difference: bool,
 	) {
+		warn!(
+			"Recording difference for cf: id={}, previous={:?}, current={:?}, store_difference={}",
+			id, previous, current, store_difference
+		);
 		if current.is_some() {
 			self.buf.push(
 				ns.to_string(),
@@ -82,7 +87,7 @@ impl Writer {
 				tb.to_string(),
 				match store_difference {
 					true => {
-						if previous.is_none() {
+						if (!FFLAGS.change_feed_live_queries.enabled()) || previous.is_none() {
 							TableMutation::Set(id, current.into_owned())
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)

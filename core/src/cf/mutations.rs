@@ -105,17 +105,18 @@ impl TableMutation {
 				h
 			}
 			TableMutation::SetWithDiff(_thing, current, operations) => {
-				h.insert("current".to_string(), current);
-				h.insert(
-					"update".to_string(),
-					Value::Array(Array(
+				// derive the original
+				let mut original = current.clone();
+				original
+					.patch(Value::Array(Array(
 						operations
 							.clone()
 							.into_iter()
-							.map(|x| Value::Object(Object::from(x)))
+							.map(|op| Value::Object(Object::from(op)))
 							.collect(),
-					)),
-				);
+					)))
+					.unwrap();
+				h.insert("update".to_string(), current);
 				h
 			}
 			TableMutation::Del(t) => {

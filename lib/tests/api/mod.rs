@@ -1074,9 +1074,10 @@ async fn changefeed() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	// Enable change feeds
-	let sql = "
-	DEFINE TABLE user CHANGEFEED 1h;
-	";
+	let sql = match FFLAGS.change_feed_live_queries.enabled() {
+		true => "DEFINE TABLE user CHANGEFEED 1h INCLUDE ORIGINAL;",
+		false => "DEFINE TABLE user CHANGEFEED 1h;",
+	};
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
