@@ -1,4 +1,5 @@
 pub mod cache;
+mod lru;
 pub(crate) mod tree;
 
 use crate::dbs::Options;

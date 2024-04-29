@@ -1472,7 +1472,7 @@ mod tests {
 		commit: bool,
 	) -> Result<(), Error> {
 		if let Some(new_cache) = st.finish(&mut tx).await? {
-			assert!(new_cache.len().await > 0, "new_cache.len() = {}", new_cache.len().await);
+			assert!(new_cache.len() > 0, "new_cache.len() = {}", new_cache.len());
 			t.state.generation += 1;
 			ds.index_store().advance_store_mtree(new_cache);
 		}
@@ -1761,7 +1761,7 @@ mod tests {
 			.await
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_small() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
@@ -1785,7 +1785,7 @@ mod tests {
 			.await
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_normal() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
@@ -1809,7 +1809,7 @@ mod tests {
 			.await
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_normal_full_cache() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
@@ -1833,7 +1833,7 @@ mod tests {
 			.await
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_normal_small_cache() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
@@ -1891,7 +1891,7 @@ mod tests {
 			.await
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_random_small() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
@@ -1915,7 +1915,7 @@ mod tests {
 			.await
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_random_normal() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
