@@ -7,8 +7,7 @@ use reblessive::TreeStack;
 use std::time::Duration;
 use surrealdb::idx::docids::DocId;
 use surrealdb::idx::trees::mtree::{MState, MTree};
-use surrealdb::idx::trees::store::cache::TreeCache;
-use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
+use surrealdb::idx::trees::store::TreeNodeProvider;
 use surrealdb::idx::trees::vector::Vector;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
@@ -127,17 +126,24 @@ async fn insert_objects(
 	let mut rng = thread_rng();
 	let mut t = mtree();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
-	let mut s = TreeStore::new(TreeNodeProvider::Debug, c.clone(), Write).await;
+	let mut s =
+		ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Write, cache_size).await;
+
 	let mut stack = TreeStack::new();
-	stack.enter(|stk| async {
-		for i in 0..samples_size {
-			let object = random_object(&mut rng, vector_size).into();
-			// Insert the sample
-			t.insert(stk, &mut tx, &mut s, object, i as DocId).await.unwrap();
-		}
-	});
-	s.finish(&mut tx).await.unwrap();
+	stack
+		.enter(|stk| async {
+			for i in 0..samples_size {
+				let object = random_object(&mut rng, vector_size).into();
+				// Insert the sample
+				t.insert(stk, &mut tx, &mut s, object, i as DocId).await.unwrap();
+			}
+		})
+		.finish()
+		.await;
+
+	if let Some(new_cache) = s.finish(&mut tx).await.unwrap() {
+		ds.index_store().advance_store_mtree(new_cache);
+	}
 	tx.commit().await.unwrap();
 }
 
@@ -151,8 +157,7 @@ async fn knn_lookup_objects(
 	let mut rng = thread_rng();
 	let t = mtree();
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
-	let s = TreeStore::new(TreeNodeProvider::Debug, c, Read).await;
+	let s = ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Read, cache_size).await;
 	for _ in 0..samples_size {
 		let object = random_object(&mut rng, vector_size).into();
 		// Insert the sample

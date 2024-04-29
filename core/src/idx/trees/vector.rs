@@ -5,7 +5,7 @@ use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -29,18 +29,10 @@ pub enum Vector {
 /// So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
 /// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-pub(crate) type SharedVector = Arc<Vector>;
-
-impl Borrow<Vector> for &SharedVector {
-	fn borrow(&self) -> &Vector {
-		self.as_ref()
-	}
-}
-
-/// This structures caches the hashcode to avoid recomputing it.
+/// As computing the hash for a large vector is costly, this structures also caches the hashcode to avoid recomputing it.
 #[derive(Debug, Clone)]
-pub struct HashedSharedVector(Arc<Vector>, u64);
-impl From<Vector> for HashedSharedVector {
+pub struct SharedVector(Arc<Vector>, u64);
+impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
 		let mut h = DefaultHasher::new();
 		v.hash(&mut h);
@@ -48,24 +40,58 @@ impl From<Vector> for HashedSharedVector {
 	}
 }
 
-impl Borrow<Vector> for &HashedSharedVector {
+impl Borrow<Vector> for &SharedVector {
 	fn borrow(&self) -> &Vector {
 		self.0.as_ref()
 	}
 }
 
-impl Hash for HashedSharedVector {
+impl Hash for SharedVector {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		state.write_u64(self.1);
 	}
 }
 
-impl PartialEq for HashedSharedVector {
+impl PartialEq for SharedVector {
 	fn eq(&self, other: &Self) -> bool {
 		self.1 == other.1 && self.0 == other.0
 	}
 }
-impl Eq for HashedSharedVector {}
+impl Eq for SharedVector {}
+
+impl PartialOrd for SharedVector {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for SharedVector {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.0.as_ref().cmp(other.0.as_ref())
+	}
+}
+
+impl Serialize for SharedVector {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		// We only serialize the vector part, not the u64
+		self.0.serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for SharedVector {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		// We deserialize into a vector and construct the struct
+		// assuming some default or dummy value for the u64, e.g., 0
+		let v = Vector::deserialize(deserializer)?;
+		Ok(v.into())
+	}
+}
 
 impl Hash for Vector {
 	fn hash<H: Hasher>(&self, state: &mut H) {
@@ -255,12 +281,7 @@ impl Vector {
 		let norm_a = Self::normalize(a);
 		let norm_b = Self::normalize(b);
 		let mut s = Self::dot(&norm_a, &norm_b);
-		if s < -1.0 {
-			s = -1.0;
-		}
-		if s > 1.0 {
-			s = 1.0;
-		}
+		s = s.clamp(-1.0, 1.0);
 		1.0 - s
 	}
 

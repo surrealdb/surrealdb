@@ -600,7 +600,7 @@ pub(super) mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
-	use crate::idx::trees::vector::Vector;
+	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::{Array, Number};
 	use crate::syn::Parse;
@@ -629,13 +629,13 @@ pub(super) mod tests {
 	}
 
 	#[derive(Debug)]
-	pub(in crate::idx::trees) enum TestCollection<V: From<Vector>> {
-		Unique(Vec<(DocId, V)>),
-		NonUnique(Vec<(DocId, V)>),
+	pub(in crate::idx::trees) enum TestCollection {
+		Unique(Vec<(DocId, SharedVector)>),
+		NonUnique(Vec<(DocId, SharedVector)>),
 	}
 
-	impl<V: From<Vector>> TestCollection<V> {
-		pub(in crate::idx::trees) fn to_vec_ref(&self) -> &Vec<(DocId, V)> {
+	impl TestCollection {
+		pub(in crate::idx::trees) fn to_vec_ref(&self) -> &Vec<(DocId, SharedVector)> {
 			match self {
 				TestCollection::Unique(c) | TestCollection::NonUnique(c) => c,
 			}
@@ -676,22 +676,12 @@ pub(super) mod tests {
 		Ok(res)
 	}
 
-	pub(in crate::idx::trees) fn new_vec(mut n: i64, t: VectorType, dim: usize) -> Vector {
-		let mut vec = Vector::new(t, dim);
-		vec.add(&Number::Int(n));
-		for _ in 1..dim {
-			n += 1;
-			vec.add(&Number::Int(n));
-		}
-		vec
-	}
-
 	pub(in crate::idx::trees) fn new_random_vec(
 		rng: &mut SmallRng,
 		t: VectorType,
 		dim: usize,
 		gen: &RandomItemGenerator,
-	) -> Vector {
+	) -> SharedVector {
 		let mut vec = Vector::new(t, dim);
 		for _ in 0..dim {
 			vec.add(&gen.generate(rng));
@@ -700,7 +690,7 @@ pub(super) mod tests {
 			// Some similarities (cosine) is undefined for null vector.
 			new_random_vec(rng, t, dim, gen)
 		} else {
-			vec
+			vec.into()
 		}
 	}
 
@@ -716,7 +706,7 @@ pub(super) mod tests {
 		}
 	}
 
-	impl<V: From<Vector>> TestCollection<V> {
+	impl TestCollection {
 		pub(in crate::idx::trees) fn new(
 			unique: bool,
 			collection_size: usize,
@@ -733,7 +723,7 @@ pub(super) mod tests {
 			}
 		}
 
-		fn add(&mut self, doc: DocId, pt: V) {
+		fn add(&mut self, doc: DocId, pt: SharedVector) {
 			match self {
 				TestCollection::Unique(vec) => vec,
 				TestCollection::NonUnique(vec) => vec,
