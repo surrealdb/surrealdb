@@ -5852,7 +5852,7 @@ dependencies = [
  "criterion",
  "dmp",
  "env_logger 0.10.2",
- "flate2",
+t t "flate2",
  "flume",
  "futures",
  "futures-concurrency",
