@@ -654,7 +654,7 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Configure Live Queries
 	if FFLAGS.change_feed_live_queries.enabled() {
-		setup_live_queries(&socket, "tester").await;
+		setup_live_queries(&socket).await;
 	}
 
 	// Send LIVE command
@@ -734,7 +734,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Configure Live Queries
 	if FFLAGS.change_feed_live_queries.enabled() {
-		setup_live_queries(&socket, "tester").await;
+		setup_live_queries(&socket).await;
 	}
 
 	// Send LIVE command
@@ -844,7 +844,7 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Configure Live Queries
 	if FFLAGS.change_feed_live_queries.enabled() {
-		setup_live_queries(&socket1, "tester").await;
+		setup_live_queries(&socket1).await;
 	}
 
 	// Send LIVE command
@@ -899,7 +899,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Configure Live Queries
 	if FFLAGS.change_feed_live_queries.enabled() {
-		setup_live_queries(&socket_permanent, "tester").await;
+		setup_live_queries(&socket_permanent).await;
 	}
 
 	// Setup the scope
@@ -1574,7 +1574,7 @@ async fn relate_rpc() {
 	server.finish().unwrap();
 }
 
-async fn setup_live_queries(socket: &Socket, tb: &str) {
+async fn setup_live_queries(socket: &Socket) {
 	let res = socket
 		.send_request("query", json!(["DEFINE TABLE tester CHANGEFEED 10m INCLUDE ORIGINAL"]))
 		.await
