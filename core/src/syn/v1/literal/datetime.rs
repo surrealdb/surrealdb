@@ -8,12 +8,12 @@ use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
 use nom::{
 	branch::alt,
 	bytes::complete::tag,
-	character::complete::char,
+	character::complete::{char, digit1},
 	combinator::{cut, map},
 	error::ErrorKind,
 	error_position,
 	sequence::delimited,
-	Err,
+	AsBytes, Err,
 };
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
@@ -137,18 +137,23 @@ fn second(i: &str) -> IResult<&str, u32> {
 
 fn nanosecond(i: &str) -> IResult<&str, u32> {
 	let (i, _) = char('.')(i)?;
-	let (i, (v, l)) = take_u32_len(i)?;
-	let v = match l {
-		l if l <= 2 => v * 10000000,
-		l if l <= 3 => v * 1000000,
-		l if l <= 4 => v * 100000,
-		l if l <= 5 => v * 10000,
-		l if l <= 6 => v * 1000,
-		l if l <= 7 => v * 100,
-		l if l <= 8 => v * 10,
-		_ => v,
-	};
-	Ok((i, v))
+	let (i, digits) = digit1(i)?;
+
+	let mut ns = 0u32;
+	let mut carry = false;
+
+	for d in digits.as_bytes().iter().rev().copied() {
+		carry = (ns % 10) >= 5;
+		ns /= 10;
+		ns += (d - b'0') as u32 * 100_000_000;
+	}
+
+	// round up.
+	if carry {
+		ns += 1;
+	}
+
+	Ok((i, ns))
 }
 
 fn zone(i: &str) -> IResult<&str, FixedOffset> {
