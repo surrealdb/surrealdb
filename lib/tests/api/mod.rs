@@ -1074,13 +1074,15 @@ async fn changefeed() {
 	let (permit, db) = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	// Enable change feeds
-	let sql = "
-	DEFINE TABLE user CHANGEFEED 1h;
-	";
+	let sql = match FFLAGS.change_feed_live_queries.enabled() {
+		true => "DEFINE TABLE user CHANGEFEED 1h INCLUDE ORIGINAL;",
+		false => "DEFINE TABLE user CHANGEFEED 1h;",
+	};
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	// Create and update users
+
+	// Create and update users - this all happens in a single changefeed entry
 	let sql = "
         CREATE user:amos SET name = 'Amos';
         CREATE user:jane SET name = 'Jane';
@@ -1109,6 +1111,8 @@ async fn changefeed() {
 	assert_eq!(users, expected);
 	let users: Vec<RecordBuf> = db.select(table).await.unwrap();
 	assert_eq!(users, expected);
+
+	// Fetch all changes
 	let sql = "
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
@@ -1140,7 +1144,8 @@ async fn changefeed() {
 		)
 		.unwrap()
 	);
-	// UPDATE user:amos
+
+	// Validate CREATE user:amos
 	let a = array.get(1).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
@@ -1148,6 +1153,7 @@ async fn changefeed() {
 	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
+
 	let changes = a.get("changes").unwrap().to_owned();
 	match FFLAGS.change_feed_live_queries.enabled() {
 		true => {
@@ -1183,7 +1189,8 @@ async fn changefeed() {
 			);
 		}
 	}
-	// UPDATE user:jane
+
+	// Validate CREATE user:jane
 	let a = array.get(2).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
@@ -1227,7 +1234,8 @@ async fn changefeed() {
 			);
 		}
 	}
-	// UPDATE user:amos
+
+	// Validate UPDATE user:amos
 	let a = array.get(3).unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
@@ -1237,28 +1245,10 @@ async fn changefeed() {
 	};
 	assert!(versionstamp2 < versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
-	match FFLAGS.change_feed_live_queries.enabled() {
-		true => {
-			assert_eq!(
-				changes,
-				surrealdb::sql::value(
-					"[
-					{
-						create: {
-							id: user:amos,
-							name: 'AMOS'
-						}
-					}
-				]"
-				)
-				.unwrap()
-			);
-		}
-		false => {
-			assert_eq!(
-				changes,
-				surrealdb::sql::value(
-					"[
+	assert_eq!(
+		changes,
+		surrealdb::sql::value(
+			"[
 					{
 						update: {
 							id: user:amos,
@@ -1266,11 +1256,10 @@ async fn changefeed() {
 						}
 					}
 				]"
-				)
-				.unwrap()
-			);
-		}
-	};
+		)
+		.unwrap()
+	);
+
 	// UPDATE table
 	let a = array.get(4).unwrap();
 	let Value::Object(a) = a else {
