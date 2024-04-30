@@ -288,7 +288,12 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
+			match FFLAGS.change_feed_live_queries.enabled() {
+				true =>
+					r#"{\"changes\":[{\"update\":{\"id\":\"mytb:tobie\",\"note\":\"surreal\"}},{\"update\":{\"id\":\"mytb:tobie2\",\"note\":\"surreal\"}},{\"delete\":{\"id\":\"mytb:tobie\"}},{\"define_table\":{\"name\":\"mytb\"}}],\"versionstamp\":65536}"#,
+				false =>
+					r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#,
+			}
 		);
 	}
 }
