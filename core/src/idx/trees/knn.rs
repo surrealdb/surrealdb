@@ -166,6 +166,7 @@ impl Ord for FloatKey {
 /// variant (if required).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Ids64 {
+	#[allow(dead_code)] // Will be used with HNSW
 	Empty,
 	One(u64),
 	Vec2([u64; 2]),
@@ -397,6 +398,7 @@ impl Ids64 {
 		}
 	}
 
+	#[allow(dead_code)] // Will be used with HNSW
 	pub(super) fn remove(&mut self, d: DocId) -> Option<Self> {
 		match self {
 			Self::Empty => None,

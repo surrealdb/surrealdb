@@ -288,7 +288,7 @@ impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
 		let mut h = DefaultHasher::new();
 		v.hash(&mut h);
-		Self(Arc::new(v.into()), h.finish())
+		Self(Arc::new(v), h.finish())
 	}
 }
 
