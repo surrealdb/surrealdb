@@ -108,16 +108,25 @@ impl TableMutation {
 				h
 			}
 			TableMutation::Del(t) => {
-				h.insert("id".to_string(), Value::Thing(t));
+				h.insert(
+					"delete".to_string(),
+					Value::Object(Object::from(map! {
+						"id".to_string() => Value::Thing(t)
+					})),
+				);
 				h
 			}
 			TableMutation::Def(t) => {
 				h.insert("define_table".to_string(), Value::from(t));
 				h
 			}
-			TableMutation::DelWithOriginal(id, val) => {
-				h.insert("id".to_string(), Value::Thing(id));
-				h.insert("delete".to_string(), val);
+			TableMutation::DelWithOriginal(id, _val) => {
+				h.insert(
+					"delete".to_string(),
+					Value::Object(Object::from(map! {
+					"id".to_string() => Value::Thing(id),
+					})),
+				);
 				h
 			}
 		};
@@ -281,6 +290,13 @@ mod tests {
 						}],
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+					TableMutation::DelWithOriginal(
+						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						Value::Object(Object::from(map! {
+								"id" => Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+								"note" => Value::from("surreal"),
+						})),
+					),
 					TableMutation::Def(DefineTableStatement {
 						name: "mytb".into(),
 						..DefineTableStatement::default()
@@ -292,7 +308,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
+			r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
 		);
 	}
 }
