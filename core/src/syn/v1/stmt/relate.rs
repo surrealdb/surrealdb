@@ -8,7 +8,7 @@ use super::super::{
 	value::array,
 	IResult,
 };
-use crate::sql::{statements::RelateStatement, Value};
+use crate::sql::{statements::RelateStatement, Data, Value};
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
@@ -31,6 +31,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	let (i, content) = opt(preceded(shouldbespace, content))(i)?;
 	warn!("handled content");
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
+	let data = content.or(data);
 	warn!("handled data");
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	warn!("handled output");
@@ -106,11 +107,11 @@ fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 	Ok((i, (kind, from)))
 }
 
-fn content(i: &str) -> IResult<&str, Value> {
+fn content(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("CONTENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = cut(alt((into(value), into(param))))(i)?;
-	Ok((i, v))
+	let (i, v) = alt((into(array), into(param)))(i)?;
+	Ok((i, Data::ContentExpression(v)))
 }
 
 #[cfg(test)]
