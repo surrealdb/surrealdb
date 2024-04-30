@@ -158,14 +158,6 @@ fn nanosecond(i: &str) -> IResult<&str, (u32, bool)> {
 		ns += (d - b'0') as u32 * 100_000_000;
 	}
 
-	// round up.
-	if carry {
-		if ns < 999_999_999 {
-			ns += 1;
-			carry = false;
-		}
-	}
-
 	Ok((i, (ns, carry)))
 }
 
