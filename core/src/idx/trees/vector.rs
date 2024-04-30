@@ -7,11 +7,10 @@ use ndarray_linalg::Norm;
 use num_traits::Zero;
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::borrow::Borrow;
 use std::cmp::PartialEq;
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::{Add, Div, Sub};
+use std::ops::{Add, Deref, Div, Sub};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
@@ -292,9 +291,11 @@ impl From<Vector> for SharedVector {
 	}
 }
 
-impl Borrow<Vector> for &SharedVector {
-	fn borrow(&self) -> &Vector {
-		self.0.as_ref()
+impl Deref for SharedVector {
+	type Target = Vector;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 
@@ -486,21 +487,16 @@ impl Vector {
 }
 
 impl Distance {
-	pub(super) fn calculate<V>(&self, a: V, b: V) -> f64
-	where
-		V: Borrow<Vector>,
-	{
+	pub(super) fn calculate(&self, a: &Vector, b: &Vector) -> f64 {
 		match self {
-			Distance::Chebyshev => a.borrow().chebyshev_distance(b.borrow()),
-			Distance::Cosine => a.borrow().cosine_distance(b.borrow()),
-			Distance::Euclidean => a.borrow().euclidean_distance(b.borrow()),
-			Distance::Hamming => a.borrow().hamming_distance(b.borrow()),
-			Distance::Jaccard => a.borrow().jaccard_similarity(b.borrow()),
-			Distance::Manhattan => a.borrow().manhattan_distance(b.borrow()),
-			Distance::Minkowski(order) => {
-				a.borrow().minkowski_distance(b.borrow(), order.to_float())
-			}
-			Distance::Pearson => a.borrow().pearson_similarity(b.borrow()),
+			Distance::Chebyshev => a.chebyshev_distance(b),
+			Distance::Cosine => a.cosine_distance(b),
+			Distance::Euclidean => a.euclidean_distance(b),
+			Distance::Hamming => a.hamming_distance(b),
+			Distance::Jaccard => a.jaccard_similarity(b),
+			Distance::Manhattan => a.manhattan_distance(b),
+			Distance::Minkowski(order) => a.minkowski_distance(b, order.to_float()),
+			Distance::Pearson => a.pearson_similarity(b),
 		}
 	}
 }
