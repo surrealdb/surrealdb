@@ -1,5 +1,5 @@
 use crate::cf;
-use crate::cf::{ChangeSet, TableMutation};
+use crate::cf::ChangeSet;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::fflags::FFLAGS;

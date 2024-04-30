@@ -1,4 +1,3 @@
-use crate::fflags::FFLAGS;
 use crate::kvs::lq_structs::{LqIndexKey, LqIndexValue, LqSelector};
 use uuid::Uuid;
 
@@ -43,7 +42,7 @@ async fn scan_node_lq() {
 
 #[test_log::test(tokio::test)]
 async fn live_params_are_evaluated() {
-	if !FFLAGS.change_feed_live_queries.enabled() {
+	if !crate::fflags::FFLAGS.change_feed_live_queries.enabled() {
 		return;
 	}
 	let node_id = Uuid::parse_str("9cb22db9-1851-4781-8847-d781a3f373ae").unwrap();
