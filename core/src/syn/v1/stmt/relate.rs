@@ -19,27 +19,18 @@ use nom::{
 pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	use super::super::depth;
 	// Limit recursion depth.
-	trace!("Starting relate for query: {}", i);
 	let _diving = depth::dive(i)?;
 	let (i, _) = tag_no_case("RELATE")(i)?;
 	let (i, only) = opt(preceded(shouldbespace, tag_no_case("ONLY")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, path) = relate_oi(i)?;
-	warn!("outside relate_oi");
 	let (i, uniq) = opt(preceded(shouldbespace, tag_no_case("UNIQUE")))(i)?;
-	warn!("handled unique");
 	let (i, content) = opt(preceded(shouldbespace, content))(i)?;
-	warn!("handled content");
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
 	let data = content.or(data);
-	warn!("handled data");
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
-	warn!("handled output");
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
-	warn!("handled timeout");
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	warn!("handled parallel");
-	trace!("Finished relate for query: {}", i);
 	Ok((
 		i,
 		RelateStatement {
@@ -57,13 +48,11 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 }
 
 fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
-	warn!("Starting relate_oi for {}", i);
 	let (i, prefix) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, is_o) =
 		expected("`->` or `<-`", cut(alt((value(true, tag("->")), value(false, tag("<-"))))))(i)?;
 
-	warn!("Finished relate_oi: {}", i);
 	if is_o {
 		let (i, (kind, with)) = cut(relate_o)(i)?;
 		Ok((i, (kind, prefix, with)))
@@ -74,36 +63,22 @@ fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
 }
 
 fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
-	warn!("Starting relate_o for {}", i);
 	let (i, _) = mightbespace(i)?;
-	warn!("After space one");
 	let (i, kind) = alt((into(thing), into(table), into(param)))(i)?;
-	warn!("After kind");
 	let (i, _) = mightbespace(i)?;
-	warn!("After space two");
 	let (i, _) = tag("->")(i)?;
-	warn!("After arrow");
 	let (i, _) = mightbespace(i)?;
-	warn!("After space three");
-	let res: IResult<&str, Value> = alt((into(subquery), into(array), into(param), into(thing)))(i);
-	if let Err(e) = res {
-		warn!("Error in relate_o: {:?}", e);
-	}
-	warn!("After final");
 	let (i, with) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
-	warn!("Finished relate_o for {}", i);
 	Ok((i, (kind, with)))
 }
 
 fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
-	warn!("Starting relate_i for {}", i);
 	let (i, _) = mightbespace(i)?;
 	let (i, kind) = alt((into(thing), into(table)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("<-")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, from) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
-	warn!("Finished relate_i for {}", i);
 	Ok((i, (kind, from)))
 }
 

@@ -117,7 +117,7 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
 
-	// cmd.env_clear();
+	cmd.env_clear();
 	cmd.stdin(Stdio::piped());
 	cmd.stdout(stdout);
 	cmd.stderr(stderr);
