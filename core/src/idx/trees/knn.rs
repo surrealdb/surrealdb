@@ -612,7 +612,7 @@ pub(super) mod tests {
 	use std::cmp::Reverse;
 	#[cfg(debug_assertions)]
 	use std::collections::HashMap;
-	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
+	use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
 	use std::time::SystemTime;
@@ -682,10 +682,11 @@ pub(super) mod tests {
 		dim: usize,
 		gen: &RandomItemGenerator,
 	) -> SharedVector {
-		let mut vec = Vector::new(t, dim);
+		let mut vec: Vec<Number> = Vec::with_capacity(dim);
 		for _ in 0..dim {
-			vec.add(&gen.generate(rng));
+			vec.push(gen.generate(rng));
 		}
+		let vec = Vector::try_from_array(t, &Array::from(vec)).unwrap();
 		if vec.is_null() {
 			// Some similarities (cosine) is undefined for null vector.
 			new_random_vec(rng, t, dim, gen)
@@ -738,7 +739,7 @@ pub(super) mod tests {
 			gen: &RandomItemGenerator,
 			rng: &mut SmallRng,
 		) -> Self {
-			let mut vector_set = BTreeSet::new();
+			let mut vector_set = HashSet::new();
 			let mut attempts = collection_size * 2;
 			while vector_set.len() < collection_size {
 				vector_set.insert(new_random_vec(rng, vector_type, dimension, gen));

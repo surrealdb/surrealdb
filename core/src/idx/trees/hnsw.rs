@@ -693,6 +693,7 @@ mod tests {
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
+	use ndarray::Array1;
 	use roaring::RoaringTreemap;
 	use std::collections::hash_map::Entry;
 	use std::collections::{HashMap, HashSet};
@@ -1148,9 +1149,7 @@ mod tests {
 	}
 
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
-		let mut vec = Vector::new(VectorType::I16, 2);
-		vec.add(&x.into());
-		vec.add(&y.into());
+		let vec = Vector::I16(Array1::from_vec(vec![x as i16, y as i16]));
 		vec.into()
 	}
 
