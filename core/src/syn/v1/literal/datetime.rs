@@ -1,5 +1,5 @@
 use super::super::{
-	common::{take_digits, take_digits_range, take_u32_len},
+	common::{take_digits, take_digits_range},
 	error::expected,
 	IResult,
 };
@@ -13,7 +13,7 @@ use nom::{
 	error::ErrorKind,
 	error_position,
 	sequence::delimited,
-	AsBytes, Err,
+	Err,
 };
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
@@ -299,5 +299,19 @@ mod tests {
 		// Hey! There's not a 31st of November!
 		let sql = "2022-11-31T12:00:00.000Z";
 		datetime_raw(sql).unwrap_err();
+	}
+
+	#[test]
+	fn excessive_precision() {
+		let a = datetime_raw("2024-06-06T12:00:00.0000999999999Z").unwrap_err();
+		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000100Z");
+		let a = datetime_raw("2024-06-06T12:00:00.0000900000000Z").unwrap_err();
+		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000090Z");
+		let a = datetime_raw("2024-06-06T12:00:00.0000999995Z").unwrap_err();
+		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000100Z");
+		let a = datetime_raw("2024-06-06T12:00:00.00000000000000000000000009Z").unwrap_err();
+		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00Z");
+		let a = datetime_raw("2024-06-06T12:00:00.0000000009Z").unwrap_err();
+		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000000001Z");
 	}
 }
