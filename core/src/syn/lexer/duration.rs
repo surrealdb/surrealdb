@@ -25,12 +25,21 @@ impl<'a> Lexer<'a> {
 	///
 	/// Expect the lexer to have already eaten the digits starting the duration.
 	pub fn lex_duration(&mut self) -> Token {
+		let backup = self.reader.offset();
 		match self.lex_duration_err() {
 			Ok(x) => {
+				self.scratch.clear();
 				self.duration = Some(x);
 				self.finish_token(TokenKind::Duration)
 			}
-			Err(e) => self.invalid_token(LexError::Duration(e)),
+			Err(e) => {
+				if self.flexible_ident {
+					self.reader.backup(backup);
+					return self.lex_ident();
+				}
+				self.scratch.clear();
+				self.invalid_token(LexError::Duration(e))
+			}
 		}
 	}
 
@@ -63,7 +72,6 @@ impl<'a> Lexer<'a> {
 			current_value = current_value.checked_mul(10).ok_or(Error::Overflow)?;
 			current_value = current_value.checked_add((b - b'0') as u64).ok_or(Error::Overflow)?;
 		}
-		self.scratch.clear();
 
 		loop {
 			let Some(next) = self.reader.peek() else {
