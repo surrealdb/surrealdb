@@ -5920,7 +5920,6 @@ dependencies = [
  "md-5",
  "nanoid",
  "ndarray",
- "nom",
  "num_cpus",
  "object_store",
  "once_cell",

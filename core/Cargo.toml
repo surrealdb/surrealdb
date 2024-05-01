@@ -104,7 +104,6 @@ lexicmp = "0.1.0"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 ndarray = { version = "0.15.6", optional = true }
-nom = { version = "7.1.3", features = ["alloc"] }
 num_cpus = "1.16.0"
 object_store = { version = "0.8.0", optional = false }
 once_cell = "1.18.0"

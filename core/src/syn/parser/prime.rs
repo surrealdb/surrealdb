@@ -3,7 +3,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
-	enter_query_recursion,
+	enter_object_recursion, enter_query_recursion,
 	sql::{
 		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Part, Script, Strand, Subquery, Table,
 		Value,
@@ -303,19 +303,21 @@ impl Parser<'_> {
 	/// Expects the starting `[` to already be eaten and its span passed as an argument.
 	pub async fn parse_array(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Array> {
 		let mut values = Vec::new();
-		loop {
-			if self.eat(t!("]")) {
-				break;
-			}
+		enter_object_recursion!(this = self => {
+			loop {
+				if this.eat(t!("]")) {
+					break;
+				}
 
-			let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-			values.push(value);
+				let value = ctx.run(|ctx| this.parse_value_field(ctx)).await?;
+				values.push(value);
 
-			if !self.eat(t!(",")) {
-				self.expect_closing_delimiter(t!("]"), start)?;
-				break;
+				if !this.eat(t!(",")) {
+					this.expect_closing_delimiter(t!("]"), start)?;
+					break;
+				}
 			}
-		}
+		});
 
 		Ok(Array(values))
 	}
