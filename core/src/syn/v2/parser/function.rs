@@ -105,7 +105,11 @@ mod test {
 	use crate::rpc::Data::Query;
 	use crate::sql::statements::RelateStatement;
 	use crate::sql::{Param, Statement, Statements};
-	use crate::{sql::{Script, Value}, sql, syn::{self, Parse}};
+	use crate::{
+		sql,
+		sql::{Script, Value},
+		syn::{self, Parse},
+	};
 
 	use super::*;
 
@@ -315,10 +319,7 @@ mod test {
 			with: Value::Param(Param(Ident("$to".to_owned()))),
 			data: None,
 			..Default::default()
-		};
-		assert_eq!(
-			out,
-			sql::Query(Statements(vec![relate]))
-		)
+		});
+		assert_eq!(out, sql::Query(Statements(vec![relate])))
 	}
 }
