@@ -120,9 +120,9 @@ mod tests {
 			out,
 			RelateStatement {
 				only: false,
-				kind: Value::Param(Param(Ident("$koala".to_owned()))),
-				from: Value::Param(Param(Ident("$tobie".to_owned()))),
-				with: Value::Param(Param(Ident("$bla".to_owned()))),
+				kind: Value::Param(Param(Ident("koala".to_owned()))),
+				from: Value::Param(Param(Ident("tobie".to_owned()))),
+				with: Value::Param(Param(Ident("bla".to_owned()))),
 				uniq: false,
 				data: None,
 				output: None,
