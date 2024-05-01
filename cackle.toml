@@ -543,6 +543,9 @@ allow_apis = [
     "net",
 ]
 
+[pkg.nom]
+allow_unsafe = true
+
 [pkg.num-traits]
 allow_unsafe = true
 
