@@ -246,7 +246,7 @@ async fn live_select_record_ranges() {
 			Value::Thing(thing) => thing,
 			_ => panic!("Expected a thing"),
 		};
-		let _: Option<Value> = db.delete(thing).await.unwrap();
+		db.query("DELETE $item").bind(("item", thing.clone())).await.unwrap();
 
 		// Pull the notification
 		let notification: Notification<Value> =
@@ -269,7 +269,6 @@ async fn live_select_query() {
 	let (permit, db) = new_db().await;
 
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-
 	{
 		let table = format!("table_{}", Ulid::new());
 		if FFLAGS.change_feed_live_queries.enabled() {
