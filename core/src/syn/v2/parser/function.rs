@@ -314,9 +314,9 @@ mod test {
 		let sql = "RELATE $from->$kind->$to CONTENT $data";
 		let out = syn::parse(sql).unwrap();
 		let relate = Statement::Relate(RelateStatement {
-			from: Value::Param(Param(Ident("$from".to_owned()))),
-			kind: Value::Param(Param(Ident("$kind".to_owned()))),
-			with: Value::Param(Param(Ident("$to".to_owned()))),
+			from: Value::Param(Param(Ident("from".to_owned()))),
+			kind: Value::Param(Param(Ident("kind".to_owned()))),
+			with: Value::Param(Param(Ident("to".to_owned()))),
 			data: None,
 			..Default::default()
 		});
