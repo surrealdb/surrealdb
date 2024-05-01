@@ -84,6 +84,7 @@ fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 mod tests {
 
 	use super::*;
+	use crate::sql::*;
 
 	#[test]
 	fn relate_statement_in() {
