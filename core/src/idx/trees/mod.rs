@@ -1,5 +1,6 @@
 pub mod bkeys;
 pub mod btree;
+pub mod dynamicset;
 mod graph;
 pub mod hnsw;
 mod knn;

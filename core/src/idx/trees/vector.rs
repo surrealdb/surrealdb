@@ -4,6 +4,7 @@ use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_linalg::Norm;
+use ndarray_stats::DeviationExt;
 use num_traits::Zero;
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -36,12 +37,18 @@ impl Vector {
 			.fold(0.0_f64, f64::max)
 	}
 
-	pub(crate) fn chebyshev_distance(&self, other: &Self) -> f64 {
+	fn chebyshev_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::chebyshev(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::chebyshev(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::chebyshev(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::chebyshev(a, b),
+			(Self::F64(a), Self::F64(b)) => a.linf_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F32(a), Self::F32(b)) => {
+				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
+			}
+			(Self::I64(a), Self::I64(b)) => {
+				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
+			}
+			(Self::I32(a), Self::I32(b)) => {
+				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
+			}
 			(Self::I16(a), Self::I16(b)) => Self::chebyshev(a, b),
 			_ => f64::NAN,
 		}
@@ -86,16 +93,6 @@ impl Vector {
 	}
 
 	#[inline]
-	fn euclidean_f64(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
-		(a - b).norm_l2()
-	}
-
-	#[inline]
-	fn euclidean_f32(a: &Array1<f32>, b: &Array1<f32>) -> f64 {
-		(a - b).norm_l2() as f64
-	}
-
-	#[inline]
 	fn euclidean<T>(a: &Array1<T>, b: &Array1<T>) -> f64
 	where
 		T: ToFloat,
@@ -104,10 +101,10 @@ impl Vector {
 	}
 	fn euclidean_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::euclidean_f64(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::euclidean_f32(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::euclidean(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::euclidean(a, b),
+			(Self::F64(a), Self::F64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F32(a), Self::F32(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::I64(a), Self::I64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::I32(a), Self::I32(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
 			(Self::I16(a), Self::I16(b)) => Self::euclidean(a, b),
 			_ => f64::INFINITY,
 		}
@@ -127,7 +124,7 @@ impl Vector {
 		}) as f64
 	}
 
-	pub(crate) fn hamming_distance(&self, other: &Self) -> f64 {
+	fn hamming_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
 			(Self::F64(a), Self::F64(b)) => Self::hamming(a, b),
 			(Self::F32(a), Self::F32(b)) => Self::hamming(a, b),
@@ -180,7 +177,7 @@ impl Vector {
 		intersection_size / union.len() as f64
 	}
 
-	pub(crate) fn jaccard_similarity(&self, other: &Self) -> f64 {
+	pub(super) fn jaccard_similarity(&self, other: &Self) -> f64 {
 		match (self, other) {
 			(Self::F64(a), Self::F64(b)) => Self::jaccard_f64(a, b),
 			(Self::F32(a), Self::F32(b)) => Self::jaccard_f32(a, b),
@@ -199,12 +196,12 @@ impl Vector {
 		a.iter().zip(b.iter()).map(|(&a, &b)| (a - b).to_float().abs()).sum()
 	}
 
-	pub(crate) fn manhattan_distance(&self, other: &Self) -> f64 {
+	pub(super) fn manhattan_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::manhattan(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::manhattan(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::manhattan(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::manhattan(a, b),
+			(Self::F64(a), Self::F64(b)) => a.l1_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F32(a), Self::F32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
+			(Self::I64(a), Self::I64(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
+			(Self::I32(a), Self::I32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
 			(Self::I16(a), Self::I16(b)) => Self::manhattan(a, b),
 			_ => f64::NAN,
 		}
@@ -223,7 +220,7 @@ impl Vector {
 		dist.powf(1.0 / order)
 	}
 
-	pub(crate) fn minkowski_distance(&self, other: &Self, order: f64) -> f64 {
+	pub(super) fn minkowski_distance(&self, other: &Self, order: f64) -> f64 {
 		match (self, other) {
 			(Self::F64(a), Self::F64(b)) => Self::minkowski(a, b, order),
 			(Self::F32(a), Self::F32(b)) => Self::minkowski(a, b, order),

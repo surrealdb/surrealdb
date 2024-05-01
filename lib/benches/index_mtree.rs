@@ -110,7 +110,7 @@ fn random_object(rng: &mut ThreadRng, vector_size: usize) -> Vector {
 	for _ in 0..vector_size {
 		vec.push(rng.gen_range(-1.0..=1.0));
 	}
-	Vector::F32(vec)
+	Vector::F32(vec.into())
 }
 
 fn mtree() -> MTree {

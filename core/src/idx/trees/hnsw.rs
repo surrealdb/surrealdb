@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
+use crate::idx::trees::dynamicset::{DynamicSet, DynamicSetImpl};
 use crate::idx::trees::graph::UndirectedGraph;
 use crate::idx::trees::knn::{DoublePriorityQueue, Ids64, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
@@ -237,7 +238,7 @@ impl Hnsw {
 			}
 			#[cfg(debug_assertions)]
 			debug!("Create Layer {l} - m_max: {m_max}");
-			self.layers.push(m_max.into());
+			self.layers.push(UndirectedGraph::new(m_max));
 		}
 
 		self.elements.insert(q_id, q_pt.clone());
@@ -277,7 +278,7 @@ impl Hnsw {
 					m_max = self.m0
 				}
 				if let Some(f_ids) = self.layers[lc].remove_node_and_bidirectional_edges(&e_id) {
-					for q_id in f_ids {
+					for &q_id in f_ids.iter() {
 						if let Some(q_pt) = self.elements.get(&q_id) {
 							let layer = &self.layers[lc];
 							let c = self.search_layer_multi_ignore_ep(q_pt, q_id, self.efc, layer);
@@ -392,11 +393,11 @@ impl Hnsw {
 	fn build_priority_list(
 		&self,
 		e_id: ElementId,
-		neighbors: &HashSet<ElementId>,
+		neighbors: &DynamicSet<ElementId>,
 	) -> DoublePriorityQueue {
 		let e_pt = &self.elements[&e_id];
 		let mut w = DoublePriorityQueue::default();
-		for n_id in neighbors {
+		for n_id in neighbors.iter() {
 			if let Some(n_pt) = self.elements.get(n_id) {
 				let dist = self.dist.calculate(e_pt, n_pt);
 				w.push(dist, *n_id);
@@ -490,7 +491,7 @@ impl Hnsw {
 				break;
 			}
 			if let Some(neighbourhood) = l.get_edges(&doc) {
-				for &e_id in neighbourhood {
+				for &e_id in neighbourhood.iter() {
 					if visited.insert(e_id) {
 						if let Some(e_pt) = self.elements.get(&e_id) {
 							let e_dist = self.dist.calculate(e_pt, q);
@@ -573,7 +574,7 @@ impl SelectNeighbors {
 		q_pt: &SharedVector,
 		c: DoublePriorityQueue,
 		m_max: usize,
-	) -> HashSet<ElementId> {
+	) -> DynamicSet<ElementId> {
 		match self {
 			Self::Heuristic => Self::heuristic(c, h, m_max),
 			Self::HeuristicExt => Self::heuristic_ext(h, lc, q_id, q_pt, c, m_max),
@@ -582,11 +583,11 @@ impl SelectNeighbors {
 		}
 	}
 
-	fn heuristic(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> HashSet<ElementId> {
+	fn heuristic(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> DynamicSet<ElementId> {
 		if c.len() <= m_max {
-			return c.to_set();
+			return c.to_dynamic_set(m_max);
 		}
-		let mut r = HashSet::with_capacity(m_max);
+		let mut r = DynamicSet::with_capacity(m_max);
 		while let Some((e_dist, e_id)) = c.pop_first() {
 			if Self::is_closer(h, e_dist, e_id, &mut r) && r.len() == m_max {
 				break;
@@ -595,12 +596,12 @@ impl SelectNeighbors {
 		r
 	}
 
-	fn heuristic_keep(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> HashSet<ElementId> {
+	fn heuristic_keep(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> DynamicSet<ElementId> {
 		if c.len() <= m_max {
-			return c.to_set();
+			return c.to_dynamic_set(m_max);
 		}
 		let mut pruned = Vec::new();
-		let mut r = HashSet::with_capacity(m_max);
+		let mut r = DynamicSet::with_capacity(m_max);
 		while let Some((e_dist, e_id)) = c.pop_first() {
 			if Self::is_closer(h, e_dist, e_id, &mut r) {
 				if r.len() == m_max {
@@ -630,7 +631,7 @@ impl SelectNeighbors {
 		let mut ex = c.to_set();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for (_, e_id) in c.to_vec().into_iter() {
-			for &e_adj in lc.get_edges(&e_id).unwrap_or_else(|| unreachable!()) {
+			for &e_adj in lc.get_edges(&e_id).unwrap_or_else(|| unreachable!()).iter() {
 				if e_adj != q_id && ex.insert(e_adj) {
 					if let Some(d) = h.get_element_distance(q_pt, &e_adj) {
 						ext.push((d, e_adj));
@@ -650,7 +651,7 @@ impl SelectNeighbors {
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
 		m_max: usize,
-	) -> HashSet<ElementId> {
+	) -> DynamicSet<ElementId> {
 		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
 		Self::heuristic(c, h, m_max)
 	}
@@ -662,12 +663,12 @@ impl SelectNeighbors {
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
 		m_max: usize,
-	) -> HashSet<ElementId> {
+	) -> DynamicSet<ElementId> {
 		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
 		Self::heuristic_keep(c, h, m_max)
 	}
 
-	fn is_closer(h: &Hnsw, e_dist: f64, e_id: ElementId, r: &mut HashSet<ElementId>) -> bool {
+	fn is_closer(h: &Hnsw, e_dist: f64, e_id: ElementId, r: &mut DynamicSet<ElementId>) -> bool {
 		if let Some(current_vec) = h.get_element_vector(&e_id) {
 			for r_id in r.iter() {
 				if let Some(r_dist) = h.get_element_distance(&current_vec, r_id) {
@@ -688,6 +689,7 @@ impl SelectNeighbors {
 mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
+	use crate::idx::trees::dynamicset::DynamicSetImpl;
 	use crate::idx::trees::hnsw::{Hnsw, HnswIndex};
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
