@@ -109,6 +109,10 @@ impl LiveStatement {
 				let mut run = txn.lock().await;
 				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
 					Value::Table(tb) => {
+						// We modify the table as it can be a $PARAM and the compute evaluates that
+						let mut stm = stm;
+						stm.what = Value::Table(tb.clone());
+
 						let ns = opt.ns().to_string();
 						let db = opt.db().to_string();
 						self.validate_change_feed_valid(&mut run, &ns, &db, &tb).await?;
@@ -172,7 +176,7 @@ impl LiveStatement {
 			.changefeed
 			.ok_or(Error::LiveQueryError(LiveQueryCause::MissingChangeFeed))?;
 		// check the change feed includes the original - required for differentiating between CREATE and UPDATE
-		if !cf.store_original {
+		if !cf.store_diff {
 			return Err(Error::LiveQueryError(LiveQueryCause::ChangeFeedNoOriginal));
 		}
 		Ok(())

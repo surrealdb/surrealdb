@@ -79,6 +79,7 @@ pub struct Parser<'a> {
 	token_buffer: TokenBuffer<4>,
 	table_as_field: bool,
 	legacy_strands: bool,
+	flexible_record_id: bool,
 	object_recursion: usize,
 	query_recursion: usize,
 }
@@ -92,6 +93,7 @@ impl<'a> Parser<'a> {
 			token_buffer: TokenBuffer::new(),
 			table_as_field: false,
 			legacy_strands: false,
+			flexible_record_id: true,
 			object_recursion: 100,
 			query_recursion: 20,
 		}
@@ -117,6 +119,11 @@ impl<'a> Parser<'a> {
 		self.legacy_strands = value;
 	}
 
+	/// Set whether to allow record-id's which don't adheare to regular ident rules.
+	pub fn allow_fexible_record_id(&mut self, value: bool) {
+		self.flexible_record_id = value;
+	}
+
 	/// Reset the parser state. Doesnt change the position of the parser in buffer.
 	pub fn reset(&mut self) {
 		self.last_span = Span::empty();
@@ -132,6 +139,7 @@ impl<'a> Parser<'a> {
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
 			legacy_strands: self.legacy_strands,
+			flexible_record_id: self.flexible_record_id,
 			table_as_field: false,
 			object_recursion: self.object_recursion,
 			query_recursion: self.query_recursion,

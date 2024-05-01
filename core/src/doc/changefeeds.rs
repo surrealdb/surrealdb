@@ -38,7 +38,7 @@ impl<'a> Document<'a> {
 				id,
 				self.initial.doc.clone(),
 				self.current.doc.clone(),
-				cf.store_original,
+				cf.store_diff,
 			);
 		}
 		// Carry on
