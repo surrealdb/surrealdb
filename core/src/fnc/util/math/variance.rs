@@ -1,4 +1,5 @@
 use super::mean::Mean;
+use crate::fnc::util::math::ToFloat;
 use crate::sql::number::Number;
 
 pub trait Variance {
@@ -13,7 +14,12 @@ impl Variance for Vec<Number> {
 	}
 }
 
-pub(super) fn variance(v: &[Number], mean: f64, sample: bool) -> f64 {
+// This function is exposed to optimise the pearson distance calculation.
+// As the mean of the vector is already calculated, we pass it as a parameter rather than recalculating it.
+pub(super) fn variance<T>(v: &[T], mean: f64, sample: bool) -> f64
+where
+	T: ToFloat,
+{
 	match v.len() {
 		0 => f64::NAN,
 		1 => 0.0,

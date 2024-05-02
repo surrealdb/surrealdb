@@ -176,7 +176,7 @@ impl LiveStatement {
 			.changefeed
 			.ok_or(Error::LiveQueryError(LiveQueryCause::MissingChangeFeed))?;
 		// check the change feed includes the original - required for differentiating between CREATE and UPDATE
-		if !cf.store_original {
+		if !cf.store_diff {
 			return Err(Error::LiveQueryError(LiveQueryCause::ChangeFeedNoOriginal));
 		}
 		Ok(())

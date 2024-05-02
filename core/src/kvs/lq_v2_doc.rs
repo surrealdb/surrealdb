@@ -68,7 +68,7 @@ mod test {
 	use crate::cf::TableMutation;
 	use crate::kvs::lq_v2_doc::construct_document;
 	use crate::sql::statements::DefineTableStatement;
-	use crate::sql::{Strand, Thing, Value};
+	use crate::sql::{Idiom, Object, Operation, Strand, Thing, Value};
 
 	#[test]
 	fn test_construct_document_create() {
@@ -99,14 +99,35 @@ mod test {
 	#[test]
 	fn test_construct_document_update() {
 		let thing = Thing::from(("table", "id"));
-		let value = Value::Strand(Strand::from("value"));
-		let operations = vec![];
-		let tb_mutation = TableMutation::SetWithDiff(thing.clone(), value, operations);
+		let current_value = Value::Object(Object(map! {
+			"first_field".to_string() => Value::Strand(Strand::from("first_value")),
+			"second_field".to_string() => Value::Strand(Strand::from("second_value")),
+		}));
+		let operations = vec![
+			Operation::Remove {
+				path: Idiom::from("first_field"),
+			},
+			Operation::Replace {
+				path: Idiom::from("second_field"),
+				value: Value::Strand(Strand::from("original_value")),
+			},
+			Operation::Add {
+				path: Idiom::from("third_field"),
+				value: Value::Strand(Strand::from("third_value")),
+			},
+		];
+		let expected_original = Value::Object(Object(map! {
+			"second_field".to_string() => Value::Strand(Strand::from("original_value")),
+			"third_field".to_string() => Value::Strand(Strand::from("third_value")),
+		}));
+		let tb_mutation =
+			TableMutation::SetWithDiff(thing.clone(), current_value.clone(), operations);
 		let doc = construct_document(&tb_mutation).unwrap();
 		let doc = doc.unwrap();
 		assert!(!doc.is_new());
-		assert!(doc.initial_doc().is_strand(), "{:?}", doc.initial_doc());
-		assert!(doc.current_doc().is_strand(), "{:?}", doc.current_doc());
+		assert!(!doc.is_delete());
+		assert_eq!(doc.initial_doc(), &expected_original, "{:?}", doc.initial_doc());
+		assert_eq!(doc.current_doc(), &current_value, "{:?}", doc.current_doc());
 	}
 
 	#[test]

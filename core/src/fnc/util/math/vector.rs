@@ -4,12 +4,7 @@ use crate::fnc::util::math::mean::Mean;
 use crate::sql::Number;
 use std::collections::HashSet;
 
-pub trait Add {
-	/// Addition of two vectors
-	fn add(&self, other: &Self) -> Result<Vec<Number>, Error>;
-}
-
-fn check_same_dimension(fnc: &str, a: &[Number], b: &[Number]) -> Result<(), Error> {
+pub(crate) fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<(), Error> {
 	if a.len() != b.len() {
 		Err(Error::InvalidArguments {
 			name: String::from(fnc),
@@ -18,6 +13,11 @@ fn check_same_dimension(fnc: &str, a: &[Number], b: &[Number]) -> Result<(), Err
 	} else {
 		Ok(())
 	}
+}
+
+pub trait Add {
+	/// Addition of two vectors
+	fn add(&self, other: &Self) -> Result<Vec<Number>, Error>;
 }
 
 impl Add for Vec<Number> {
@@ -39,6 +39,18 @@ impl Angle for Vec<Number> {
 		let m = self.magnitude() * other.magnitude();
 		let d = vector_div(&dp, &m);
 		Ok(d.acos())
+	}
+}
+
+pub trait CosineDistance {
+	fn cosine_distance(&self, other: &Self) -> Result<Number, Error>;
+}
+
+impl CosineDistance for Vec<Number> {
+	fn cosine_distance(&self, other: &Self) -> Result<Number, Error> {
+		check_same_dimension("vector::distance::cosine", self, other)?;
+		let d = dot(self, other);
+		Ok(Number::from(1) - d / (self.magnitude() * other.magnitude()))
 	}
 }
 
@@ -81,7 +93,7 @@ pub trait HammingDistance {
 impl HammingDistance for Vec<Number> {
 	fn hamming_distance(&self, other: &Self) -> Result<Number, Error> {
 		check_same_dimension("vector::distance::hamming", self, other)?;
-		Ok(self.iter().zip(other.iter()).filter(|&(a, b)| a != b).count().into())
+		Ok(self.iter().zip(other.iter()).filter(|(a, b)| a != b).count().into())
 	}
 }
 
@@ -91,11 +103,9 @@ pub trait JaccardSimilarity {
 
 impl JaccardSimilarity for Vec<Number> {
 	fn jaccard_similarity(&self, other: &Self) -> Result<Number, Error> {
-		let set_a: HashSet<_> = HashSet::from_iter(self.iter());
-		let set_b: HashSet<_> = HashSet::from_iter(other.iter());
-		let intersection_size = set_a.intersection(&set_b).count() as f64;
-		let union_size = set_a.union(&set_b).count() as f64;
-		Ok((intersection_size / union_size).into())
+		let mut union: HashSet<&Number> = HashSet::from_iter(self.iter());
+		let intersection_size = other.iter().filter(|n| !union.insert(n)).count() as f64;
+		Ok((intersection_size / union.len() as f64).into())
 	}
 }
 
