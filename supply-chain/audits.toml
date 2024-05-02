@@ -1,6 +1,71 @@
 
 # cargo-vet audits file
 
+[[audits.approx]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.1 -> 0.4.0"
+
+[[audits.cauchy]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.4.0"
+
+[[audits.cblas-sys]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.1.4"
+
+[[audits.dirs]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "3.0.2"
+
+[[audits.dirs-sys]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.3.7"
+
+[[audits.katexit]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.1.4"
+
+[[audits.lapack-sys]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.14.0"
+
+[[audits.lax]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.16.0"
+
+[[audits.ndarray-linalg]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.16.0"
+
+[[audits.ndarray-stats]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.5.1"
+
+[[audits.noisy_float]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+
+[[audits.openblas-build]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.10.9"
+
+[[audits.openblas-src]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.10.9"
+
 [[audits.quick_cache]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
@@ -15,6 +80,16 @@ delta = "0.21.10 -> 0.21.11"
 who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.22.3 -> 0.22.4"
+
+[[audits.rustls-native-certs]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.7.0"
+
+[[audits.rustls-pemfile]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.4 -> 2.1.2"
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
@@ -33,6 +108,12 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-01-27"
 end = "2025-01-24"
+
+[[trusted.hashbrown]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2019-04-02"
+end = "2025-05-02"
 
 [[trusted.indxdb]]
 criteria = "safe-to-deploy"
