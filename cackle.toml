@@ -1334,3 +1334,6 @@ allow_unsafe = true
 
 [pkg.foreign-types]
 allow_unsafe = true
+
+[pkg.rustls-pki-types]
+allow_unsafe = true
