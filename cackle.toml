@@ -1312,6 +1312,9 @@ allow_proc_macro = true
 
 [pkg.openssl-macros]
 allow_proc_macro = true
+allow_apis = [
+    "fs",
+]
 
 [pkg.katexit]
 allow_proc_macro = true
