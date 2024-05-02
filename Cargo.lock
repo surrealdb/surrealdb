@@ -6137,6 +6137,7 @@ dependencies = [
  "num_cpus",
  "object_store",
  "once_cell",
+ "openblas-src",
  "pbkdf2",
  "pharos",
  "phf",
