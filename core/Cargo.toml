@@ -182,7 +182,7 @@ wasmtimer = { version = "0.2.0", default-features = false, features = [
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-ndarray-linalg = { version = "0.16.0", features = ["openblas"] }
+ndarray-linalg = { version = "0.16.0", features = ["openblas-static"] }
 tokio = { version = "1.34.0", default-features = false, features = [
     "macros",
     "io-util",
