@@ -1318,3 +1318,6 @@ allow_unsafe = true
 
 [pkg.approx]
 allow_unsafe = true
+
+[num-complex]
+allow_unsafe = true
