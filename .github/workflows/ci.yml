@@ -59,7 +59,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -125,11 +124,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Check fuzzers
         run: cargo build --manifest-path lib/fuzz/Cargo.toml
@@ -214,7 +208,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -251,7 +244,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -279,7 +271,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -307,7 +298,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -317,7 +307,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ "self-hosted", "arm64", "builder" ]
+    runs-on: ["self-hosted", "arm64", "builder"]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -335,9 +325,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
-          sudo apt-get install -y pkg-config libssl-dev
-          sudo apt-get install -y gcc gfortran 
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -377,7 +364,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -414,7 +400,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -451,7 +436,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -580,7 +564,6 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y libopenblas-dev
 
       - name: Install TiUP
         timeout-minutes: 10

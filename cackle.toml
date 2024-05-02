@@ -1309,31 +1309,3 @@ allow_apis = [
 
 [pkg.phf_macros]
 allow_proc_macro = true
-
-[pkg.openssl-macros]
-allow_proc_macro = true
-
-[pkg.openssl-sys]
-allow_unsafe = true
-build.allow_apis = [
-    "fs",
-    "process",
-]
-build.allow_build_instructions = [
-    "cargo:rustc-link-lib=*",
-    "cargo:conf=OPENSSL_NO_IDEA,OPENSSL_NO_SSL3_METHOD",
-    "cargo:version_number=*",
-    "cargo:include=/usr/include"
-]
-
-[pkg.katexit]
-allow_proc_macro = true
-
-[pkg.foreign-types-shared]
-allow_unsafe = true
-
-[pkg.foreign-types]
-allow_unsafe = true
-
-[pkg.rustls-pki-types]
-allow_unsafe = true

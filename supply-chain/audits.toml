@@ -6,41 +6,6 @@ who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.5.1 -> 0.4.0"
 
-[[audits.cauchy]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.4.0"
-
-[[audits.cblas-sys]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.1.4"
-
-[[audits.dirs]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "3.0.2"
-
-[[audits.dirs-sys]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.3.7"
-
-[[audits.katexit]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.1.4"
-
-[[audits.lapack-sys]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.14.0"
-
-[[audits.lax]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.16.0"
-
 [[audits.linfa-linalg]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
@@ -60,16 +25,6 @@ version = "0.5.1"
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
 version = "0.2.0"
-
-[[audits.openblas-build]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.10.9"
-
-[[audits.openblas-src]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.10.9"
 
 [[audits.quick_cache]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
