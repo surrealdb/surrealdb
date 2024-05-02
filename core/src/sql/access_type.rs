@@ -170,15 +170,7 @@ impl InfoStructure for AccessType {
 		match self {
 			AccessType::Jwt(ac) => {
 				acc.insert("kind".to_string(), "JWT".into());
-				match ac.verify {
-					JwtAccessVerify::Key(v) => {
-						acc.insert("alg".to_string(), v.alg.structure());
-						acc.insert("key".to_string(), v.key.into());
-					}
-					JwtAccessVerify::Jwks(v) => {
-						acc.insert("url".to_string(), v.url.into());
-					}
-				}
+				acc.insert("jwt".to_string(), ac.structure());
 			}
 			AccessType::Record(ac) => {
 				acc.insert("kind".to_string(), "RECORD".into());
@@ -191,9 +183,55 @@ impl InfoStructure for AccessType {
 				if let Some(duration) = ac.duration {
 					acc.insert("duration".to_string(), duration.into());
 				}
+				acc.insert("jwt".to_string(), ac.jwt.structure());
 			}
 		};
 
+		Value::Object(acc)
+	}
+}
+
+impl Display for JwtAccess {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match &self.verify {
+			JwtAccessVerify::Key(ref v) => {
+				write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
+			}
+			JwtAccessVerify::Jwks(ref v) => {
+				write!(f, " JWKS {}", quote_str(&v.url),)?;
+			}
+		}
+		if let Some(iss) = &self.issue {
+			write!(f, " WITH ISSUER KEY {}", quote_str(&iss.key))?;
+			if let Some(ref v) = iss.duration {
+				write!(f, " DURATION {v}")?
+			}
+		}
+		Ok(())
+	}
+}
+
+impl InfoStructure for JwtAccess {
+	fn structure(self) -> Value {
+		let mut acc = Object::default();
+		match self.verify {
+			JwtAccessVerify::Key(v) => {
+				acc.insert("alg".to_string(), v.alg.structure());
+				acc.insert("key".to_string(), v.key.into());
+			}
+			JwtAccessVerify::Jwks(v) => {
+				acc.insert("jwks".to_string(), v.url.into());
+			}
+		}
+		if let Some(v) = self.issue {
+			let mut iss = Object::default();
+			iss.insert("alg".to_string(), v.alg.structure());
+			iss.insert("key".to_string(), v.key.into());
+			if let Some(t) = v.duration {
+				iss.insert("duration".to_string(), t.into());
+			}
+			acc.insert("issuer".to_string(), iss.to_string().into());
+		}
 		Value::Object(acc)
 	}
 }

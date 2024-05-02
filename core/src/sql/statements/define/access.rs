@@ -3,9 +3,8 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::access_type::{JwtAccess, JwtAccessVerify};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{escape::quote_str, AccessType, Base, Ident, Object, Strand, Value};
+use crate::sql::{AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -162,27 +161,6 @@ impl Display for DefineAccessStatement {
 	}
 }
 
-impl Display for JwtAccess {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match &self.verify {
-			JwtAccessVerify::Key(ref v) => {
-				write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
-			}
-			JwtAccessVerify::Jwks(ref v) => {
-				write!(f, " JWKS {}", quote_str(&v.url),)?;
-			}
-		}
-		if let Some(iss) = &self.issue {
-			write!(f, " WITH ISSUER KEY {}", quote_str(&iss.key))?;
-			if let Some(ref v) = iss.duration {
-				write!(f, " DURATION {v}")?
-			}
-		}
-		Ok(())
-	}
-}
-
-// TODO(PR): Fix structured display.
 impl InfoStructure for DefineAccessStatement {
 	fn structure(self) -> Value {
 		let Self {
