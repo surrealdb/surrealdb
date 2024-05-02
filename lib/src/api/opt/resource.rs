@@ -216,7 +216,7 @@ impl<R> IntoResource<Vec<R>> for &str {
 	fn into_resource(self) -> Result<Resource> {
 		blacklist_colon(self)?;
 		let mut table = Table::default();
-		table.0 = self.to_owned();
+		self.clone_into(&mut table.0);
 		Ok(Resource::Table(table))
 	}
 }
