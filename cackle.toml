@@ -1314,6 +1314,7 @@ allow_proc_macro = true
 allow_proc_macro = true
 
 [pkg.openssl-sys]
+allow_unsafe = true
 build.allow_apis = [
     "fs",
     "process",
