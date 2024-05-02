@@ -1,10 +1,12 @@
-use flume::Sender;
-use futures::StreamExt;
+use flume::{Receiver, Sender, TryRecvError};
+use futures::{Stream, StreamExt};
 use futures_concurrency::stream::Merge;
 use reblessive::TreeStack;
+use std::pin::Pin;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -37,18 +39,65 @@ pub struct Tasks {
 impl Tasks {
 	#[cfg(not(target_arch = "wasm32"))]
 	pub async fn resolve(self) -> Result<(), RootError> {
+		println!("Resolve for nd");
 		self.nd.await.map_err(|e| {
+			println!("Node agent task failed: {}", e);
 			error!("Node agent task failed: {}", e);
 			let inner_err = crate::err::Error::NodeAgent("node task failed and has been logged");
 			RootError::Db(inner_err)
 		})?;
+		println!("Resolve for lq");
 		self.lq.await.map_err(|e| {
+			println!("Live query task failed: {}", e);
 			error!("Live query task failed: {}", e);
 			let inner_err =
 				crate::err::Error::NodeAgent("live query task failed and has been logged");
 			RootError::Db(inner_err)
 		})?;
+		println!("Finished resolve");
 		Ok(())
+	}
+}
+
+/// We create our own flume streams because the default flume streams conitnue to work even if the
+/// channel has been dropped - something we dont want
+struct FlumeStream<T> {
+	receiver: Receiver<T>,
+	is_dropped: Arc<Mutex<bool>>,
+}
+
+impl<T> FlumeStream<T> {
+	fn new(receiver: Receiver<T>, is_dropped: Arc<Mutex<bool>>) -> Self {
+		FlumeStream {
+			receiver,
+			is_dropped,
+		}
+	}
+}
+
+impl<T> Stream for FlumeStream<T> {
+	type Item = T;
+
+	fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		let mut is_dropped = self.is_dropped.lock().unwrap();
+		if *is_dropped {
+			// If the channel is dropped, return None
+			return Poll::Ready(None);
+		}
+
+		println!("Future polled");
+		match self.receiver.try_recv() {
+			Ok(item) => return Poll::Ready(Some(item)),
+			Err(TryRecvError::Empty) => {
+				// The channel is not yet closed and no items are available
+				return Poll::Pending;
+			}
+			Err(TryRecvError::Disconnected) => {
+				// The channel has been closed
+				*is_dropped = true;
+				return Poll::Ready(None);
+			}
+		}
 	}
 }
 
@@ -86,19 +135,23 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let (tx, rx) = flume::bounded(1);
 
 	let _fut = spawn_future(async move {
+		println!("Spawned future");
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("heartbeat task".to_string());
 		let ticker = interval_ticker(tick_interval).await;
 		let streams = (
 			ticker.map(|i| {
+				println!("Node agent tick: {:?}", i);
 				trace!("Node agent tick: {:?}", i);
 				Some(i)
 			}),
-			rx.into_stream().map(|_| None),
+			FlumeStream::new(rx, Arc::new(Mutex::new(false))).map(|_| None),
+			// rx.into_stream().map(|_| None),
 		);
 		let mut streams = streams.merge();
 
 		while let Some(Some(_)) = streams.next().await {
 			if let Err(e) = dbs.tick().await {
+				println!("Error running node agent tick: {}", e);
 				error!("Error running node agent tick: {}", e);
 				break;
 			}
@@ -116,6 +169,7 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 // Start live query on change feeds notification processing
 fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 	let tick_interval = opt.tick_interval;
+	println!("Creating live query future");
 
 	#[cfg(target_arch = "wasm32")]
 	let completed_status = Arc::new(AtomicBool::new(false));
@@ -126,6 +180,7 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 	let (tx, rx) = flume::bounded(1);
 
 	let _fut = spawn_future(async move {
+		println!("Spawned live query future");
 		let mut stack = TreeStack::new();
 
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("live query agent task".to_string());
@@ -133,15 +188,20 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 			// TODO verify test fails since return without completion
 			#[cfg(target_arch = "wasm32")]
 			completed_status.store(true, Ordering::Relaxed);
+			println!("Returning live query future");
 			return;
 		}
 		let ticker = interval_ticker(tick_interval).await;
 		let streams = (
 			ticker.map(|i| {
+				println!("Live query agent tick: {:?}", i);
 				trace!("Live query agent tick: {:?}", i);
 				Some(i)
 			}),
-			rx.into_stream().map(|_| None),
+			rx.into_stream().map(|_| {
+				println!("Live streamer tick");
+				None
+			}),
 		);
 		let mut streams = streams.merge();
 
@@ -150,6 +210,7 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 			if let Err(e) =
 				stack.enter(|stk| dbs.process_lq_notifications(stk, &opt)).finish().await
 			{
+				println!("Error running node agent tick: {}", e);
 				error!("Error running node agent tick: {}", e);
 				break;
 			}
@@ -192,6 +253,21 @@ mod test {
 		for chan in chans {
 			chan.send(()).unwrap();
 		}
+		val.resolve().await.unwrap();
+	}
+
+	#[test_log::test(tokio::test)]
+	pub async fn tasks_complete_channel_closed() {
+		println!("Started test");
+		let opt = EngineOptions::default();
+		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
+		println!("Starting tasks");
+		let val = {
+			let (val, _chans) = start_tasks(&opt, dbs.clone());
+			println!("Started tasks, dropping chans");
+			val
+		};
+		println!("Dropped chans");
 		val.resolve().await.unwrap();
 	}
 }
