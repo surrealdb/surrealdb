@@ -1312,3 +1312,6 @@ allow_proc_macro = true
 
 [pkg.rawpointer]
 allow_unsafe = true
+
+[pkg.matrixmultiply]
+allow_unsafe = true
