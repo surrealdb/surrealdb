@@ -1312,6 +1312,8 @@ allow_proc_macro = true
 
 [pkg.openssl-macros]
 allow_proc_macro = true
+
+[pkg.openssl-sys]
 allow_apis = [
     "fs",
 ]
