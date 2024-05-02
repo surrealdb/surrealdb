@@ -1309,3 +1309,6 @@ allow_apis = [
 
 [pkg.phf_macros]
 allow_proc_macro = true
+
+[pkg.rawpointer]
+allow_unsafe = true
