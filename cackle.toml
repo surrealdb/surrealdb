@@ -1321,3 +1321,6 @@ allow_unsafe = true
 
 [pkg.num-complex]
 allow_unsafe = true
+
+[pkg.ndarray]
+allow_unsafe = true
