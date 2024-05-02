@@ -1318,6 +1318,12 @@ build.allow_apis = [
     "fs",
     "process",
 ]
+build.allow_build_instructions = [
+    "cargo:rustc-link-lib=*",
+    "cargo:conf=OPENSSL_NO_IDEA,OPENSSL_NO_SSL3_METHOD",
+    "cargo:version_number=*",
+    "cargo:include=/usr/include"
+]
 
 [pkg.katexit]
 allow_proc_macro = true
