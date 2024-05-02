@@ -1309,3 +1309,9 @@ allow_apis = [
 
 [pkg.phf_macros]
 allow_proc_macro = true
+
+[pkg.openssl-macros]
+allow_proc_macro = true
+
+[pkg.katexit]
+allow_proc_macro = true
