@@ -326,7 +326,7 @@ jobs:
         run: |
           sudo apt-get -y update
           sudo apt-get install -y pkg-config libssl-dev
-          sudo apt-get install -y gcc gcc-multilib gfortran 
+          sudo apt-get install -y gcc gfortran 
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
