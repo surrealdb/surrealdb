@@ -41,6 +41,11 @@ who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
 version = "0.16.0"
 
+[[audits.linfa-linalg]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.1.0"
+
 [[audits.ndarray-linalg]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"

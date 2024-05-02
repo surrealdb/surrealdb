@@ -2,7 +2,10 @@ use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
+#[cfg(target_arch = "wasm32")]
+use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray_linalg::Norm;
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
