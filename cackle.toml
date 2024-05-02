@@ -1327,3 +1327,6 @@ build.allow_build_instructions = [
 
 [pkg.katexit]
 allow_proc_macro = true
+
+[pkg.foreign-types-shared]
+allow_unsafe = true
