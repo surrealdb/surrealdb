@@ -1315,3 +1315,6 @@ allow_unsafe = true
 
 [pkg.matrixmultiply]
 allow_unsafe = true
+
+[pkg.approx]
+allow_unsafe = true
