@@ -3,6 +3,7 @@ use reblessive::Stk;
 use crate::{
 	sql::{
 		access_type,
+		base::Base,
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
@@ -22,7 +23,7 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
-		token::{t, TokenKind},
+		token::{t, Keyword, TokenKind},
 	},
 };
 
@@ -33,8 +34,8 @@ impl Parser<'_> {
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
-			t!("TOKEN") => self.parse_define_token().map(DefineStatement::Token),
-			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Scope),
+			t!("TOKEN") => self.parse_define_token().map(DefineStatement::Access),
+			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Access),
 			t!("PARAM") => self.parse_define_param(ctx).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(ctx).await.map(DefineStatement::Table),
 			t!("EVENT") => {
@@ -290,7 +291,8 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_token(&mut self) -> ParseResult<DefineTokenStatement> {
+	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
+	pub fn parse_define_token(&mut self) -> ParseResult<DefineAccessStatement> {
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -302,40 +304,97 @@ impl Parser<'_> {
 		expected!(self, t!("ON"));
 		let base = self.parse_base(true)?;
 
-		let mut res = DefineTokenStatement {
+		let mut res = DefineAccessStatement {
 			name,
-			base,
 			if_not_exists,
 			..Default::default()
 		};
 
-		loop {
-			match self.peek_kind() {
-				t!("COMMENT") => {
-					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
-				}
-				t!("VALUE") => {
-					self.pop_peek();
-					res.code = self.next_token_value::<Strand>()?.0;
-				}
-				t!("TYPE") => {
-					self.pop_peek();
-					match self.next().kind {
-						TokenKind::Algorithm(x) => {
-							res.kind = x;
+		match base {
+			// DEFINE TOKEN ON SCOPE is now record access with JWT
+			Base::Sc(_) => {
+				res.base = Base::Db;
+				let mut ac = access_type::RecordAccess {
+					..Default::default()
+				};
+				loop {
+					match self.peek_kind() {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = Some(self.next_token_value()?);
 						}
-						x => unexpected!(self, x, "a token algorithm"),
+						// For backward compatibility, value is always expected after type
+						// This matches the display format of the legacy statement
+						t!("TYPE") => {
+							self.pop_peek();
+							match self.next().kind {
+								TokenKind::Algorithm(alg) => {
+									expected!(self, t!("VALUE"));
+									ac.jwt.verify = access_type::JwtAccessVerify::Key(access_type::JwtAccessVerifyKey{
+										alg,
+										key: self.next_token_value::<Strand>()?.0,
+									});
+								},
+								TokenKind::Keyword(Keyword::Jwks) => {
+									expected!(self, t!("VALUE"));
+									ac.jwt.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks{
+										url: self.next_token_value::<Strand>()?.0,
+									});
+								},
+								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
+							}
+
+						}
+						_ => break,
 					}
 				}
-				_ => break,
-			}
+				res.kind = AccessType::Record(ac);
+			},
+			// DEFINE TOKEN anywhere else is now JWT access
+			_ => {
+				let mut ac = access_type::JwtAccess {
+					..Default::default()
+				};
+				loop {
+					match self.peek_kind() {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = Some(self.next_token_value()?);
+						}
+						// For backward compatibility, value is always expected after type
+						// This matches the display format of the legacy statement
+						t!("TYPE") => {
+							self.pop_peek();
+							match self.next().kind {
+								TokenKind::Algorithm(alg) => {
+									expected!(self, t!("VALUE"));
+									ac.verify = access_type::JwtAccessVerify::Key(access_type::JwtAccessVerifyKey{
+										alg,
+										key: self.next_token_value::<Strand>()?.0,
+									});
+								},
+								TokenKind::Keyword(Keyword::Jwks) => {
+									expected!(self, t!("VALUE"));
+									ac.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks{
+										url: self.next_token_value::<Strand>()?.0,
+									});
+								},
+								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
+							}
+
+						}
+						_ => break,
+					}
+				}
+				res.kind = AccessType::Jwt(ac);
+			},
 		}
 
 		Ok(res)
 	}
 
-	pub async fn parse_define_scope(&mut self, stk: &mut Stk) -> ParseResult<DefineScopeStatement> {
+	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
+	pub async fn parse_define_scope(&mut self, stk: &mut Stk) -> ParseResult<DefineAccessStatement> {
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -344,10 +403,13 @@ impl Parser<'_> {
 			false
 		};
 		let name = self.next_token_value()?;
-		let mut res = DefineScopeStatement {
+		let mut res = DefineAccessStatement {
 			name,
-			code: DefineScopeStatement::random_code(),
+			base: Base::Db,
 			if_not_exists,
+			..Default::default()
+		};
+		let mut ac = access_type::RecordAccess {
 			..Default::default()
 		};
 
@@ -359,19 +421,21 @@ impl Parser<'_> {
 				}
 				t!("SESSION") => {
 					self.pop_peek();
-					res.session = Some(self.next_token_value()?);
+					ac.duration = Some(self.next_token_value()?);
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					res.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					res.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				_ => break,
 			}
 		}
+
+		res.kind = AccessType::Record(ac);
 
 		Ok(res)
 	}

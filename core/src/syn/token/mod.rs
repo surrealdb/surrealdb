@@ -355,7 +355,6 @@ impl TokenKind {
 			Algorithm::Rs256 => "RS256",
 			Algorithm::Rs384 => "RS384",
 			Algorithm::Rs512 => "RS512",
-			Algorithm::Jwks => "JWKS", // TODO(PR): Remove this.
 		}
 	}
 

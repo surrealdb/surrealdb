@@ -68,7 +68,6 @@ fn config(alg: Algorithm, key: String) -> Result<(DecodingKey, Validation), Erro
 			DecodingKey::from_rsa_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
-		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here
 	}
 }
 

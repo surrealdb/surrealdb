@@ -22,7 +22,6 @@ pub enum Algorithm {
 	Rs256,
 	Rs384,
 	Rs512,
-	Jwks, // Not an argorithm.
 }
 
 impl Into<jsonwebtoken::Algorithm> for Algorithm {
@@ -41,8 +40,6 @@ impl Into<jsonwebtoken::Algorithm> for Algorithm {
 			Algorithm::Rs256 => jsonwebtoken::Algorithm::RS256,
 			Algorithm::Rs384 => jsonwebtoken::Algorithm::RS384,
 			Algorithm::Rs512 => jsonwebtoken::Algorithm::RS512,
-			// TODO(PR): Remove this option.
-			Algorithm::Jwks => jsonwebtoken::Algorithm::HS512,
 		}
 	}
 }
@@ -69,7 +66,6 @@ impl fmt::Display for Algorithm {
 			Self::Rs256 => "RS256",
 			Self::Rs384 => "RS384",
 			Self::Rs512 => "RS512",
-			Self::Jwks => "JWKS", // Not an algorithm.
 		})
 	}
 }
