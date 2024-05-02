@@ -1314,8 +1314,9 @@ allow_proc_macro = true
 allow_proc_macro = true
 
 [pkg.openssl-sys]
-allow_apis = [
+build.allow_apis = [
     "fs",
+    "process",
 ]
 
 [pkg.katexit]
