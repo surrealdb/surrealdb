@@ -1,9 +1,9 @@
 use crate::{
 	sql::{
 		statements::{
-			remove::RemoveAnalyzerStatement, RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
-			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
+			remove::RemoveAnalyzerStatement, RemoveAccessStatement, RemoveDatabaseStatement,
+			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
 			RemoveUserStatement,
 		},
 		Param,

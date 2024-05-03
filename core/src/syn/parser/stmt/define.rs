@@ -9,9 +9,8 @@ use crate::{
 		statements::{
 			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement,
-			DefineStatement, DefineTableStatement,
-			DefineUserStatement,
+			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+			DefineTableStatement, DefineUserStatement,
 		},
 		table_type,
 		tokenizer::Tokenizer,
@@ -335,26 +334,29 @@ impl Parser<'_> {
 							match self.next().kind {
 								TokenKind::Algorithm(alg) => {
 									expected!(self, t!("VALUE"));
-									ac.jwt.verify = access_type::JwtAccessVerify::Key(access_type::JwtAccessVerifyKey{
-										alg,
-										key: self.next_token_value::<Strand>()?.0,
-									});
-								},
+									ac.jwt.verify = access_type::JwtAccessVerify::Key(
+										access_type::JwtAccessVerifyKey {
+											alg,
+											key: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
 								TokenKind::Keyword(Keyword::Jwks) => {
 									expected!(self, t!("VALUE"));
-									ac.jwt.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks{
-										url: self.next_token_value::<Strand>()?.0,
-									});
-								},
+									ac.jwt.verify = access_type::JwtAccessVerify::Jwks(
+										access_type::JwtAccessVerifyJwks {
+											url: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
 								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
 							}
-
 						}
 						_ => break,
 					}
 				}
 				res.kind = AccessType::Record(ac);
-			},
+			}
 			// DEFINE TOKEN anywhere else is now JWT access
 			_ => {
 				let mut ac = access_type::JwtAccess {
@@ -373,33 +375,39 @@ impl Parser<'_> {
 							match self.next().kind {
 								TokenKind::Algorithm(alg) => {
 									expected!(self, t!("VALUE"));
-									ac.verify = access_type::JwtAccessVerify::Key(access_type::JwtAccessVerifyKey{
-										alg,
-										key: self.next_token_value::<Strand>()?.0,
-									});
-								},
+									ac.verify = access_type::JwtAccessVerify::Key(
+										access_type::JwtAccessVerifyKey {
+											alg,
+											key: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
 								TokenKind::Keyword(Keyword::Jwks) => {
 									expected!(self, t!("VALUE"));
-									ac.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks{
-										url: self.next_token_value::<Strand>()?.0,
-									});
-								},
+									ac.verify = access_type::JwtAccessVerify::Jwks(
+										access_type::JwtAccessVerifyJwks {
+											url: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
 								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
 							}
-
 						}
 						_ => break,
 					}
 				}
 				res.kind = AccessType::Jwt(ac);
-			},
+			}
 		}
 
 		Ok(res)
 	}
 
 	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
-	pub async fn parse_define_scope(&mut self, stk: &mut Stk) -> ParseResult<DefineAccessStatement> {
+	pub async fn parse_define_scope(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAccessStatement> {
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));

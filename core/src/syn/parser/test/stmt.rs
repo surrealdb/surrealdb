@@ -1,6 +1,6 @@
 use crate::{
 	sql::{
-		access_type::{AccessType, RecordAccess, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey},
+		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
@@ -12,14 +12,13 @@ use crate::{
 			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
 			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DeleteStatement, ForeachStatement,
-			IfelseStatement, InfoStatement, InsertStatement, KillStatement, OptionStatement,
-			OutputStatement, RelateStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
-			RemoveAccessStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
-			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
-			RemoveStatement, RemoveTableStatement,
-			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UseStatement
+			DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+			InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
+			RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement,
+			RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+			RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
+			RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+			SelectStatement, SetStatement, ThrowStatement, UpdateStatement, UseStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -232,8 +231,8 @@ fn parse_define_access_jwt_key() {
 		Statement::Define(DefineStatement::Token(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
-			kind: AccessType::Jwt(JwtAccess{
-				verify: JwtAccessVerify::Key(JwtAccessVerifyKey{
+			kind: AccessType::Jwt(JwtAccess {
+				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 					alg: Algorithm::EdDSA,
 					key: "foo".to_string(),
 				}),
@@ -261,8 +260,8 @@ fn parse_define_access_jwt_jwks() {
 		Statement::Define(DefineStatement::Token(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
-			kind: AccessType::Jwt(JwtAccess{
-				verify: JwtAccessVerify::Key(JwtAccessVerifyJwks{
+			kind: AccessType::Jwt(JwtAccess {
+				verify: JwtAccessVerify::Key(JwtAccessVerifyJwks {
 					url: "http://example.com/.well-known/jwks.json".to_string(),
 				}),
 				issue: None,
@@ -299,18 +298,18 @@ fn parse_define_access_record() {
 			match ac.jwt.verify {
 				JwtAccessVerify::Key(key) => {
 					assert_eq!(key.alg, Algorithm::Hs512);
-				},
-				_ => panic!()
+				}
+				_ => panic!(),
 			}
 			match ac.jwt.issue {
 				Some(iss) => {
 					assert_eq!(iss.alg, Algorithm::Hs512);
 					assert_eq!(iss.duration, Some(Duration::from_secs(1)));
-				},
-				_ => panic!()
+				}
+				_ => panic!(),
 			}
-		},
-		_ => panic!()
+		}
+		_ => panic!(),
 	}
 }
 
@@ -325,12 +324,12 @@ fn parse_define_access_record_with_jwt() {
 		Statement::Define(DefineStatement::Token(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
-			kind: AccessType::Record(RecordAccess{
+			kind: AccessType::Record(RecordAccess {
 				duration: Some(Duration::from_hours(1)),
 				signup: None,
 				signin: None,
-				jwt: JwtAccess{
-					verify: JwtAccessVerify::Key(JwtAccessVerifyKey{
+				jwt: JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
 						key: "foo".to_string(),
 					}),

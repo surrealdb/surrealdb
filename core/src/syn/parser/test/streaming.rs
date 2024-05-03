@@ -1,6 +1,6 @@
 use crate::{
 	sql::{
-		access_type::{AccessType, RecordAccess, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey},
+		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
@@ -9,13 +9,13 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineAccessStatement, DeleteStatement, ForeachStatement,
-			IfelseStatement, InfoStatement, InsertStatement, KillStatement, OutputStatement,
-			RelateStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveStatement,
-			SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
+			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -194,12 +194,12 @@ fn statements() -> Vec<Statement> {
 		Statement::Define(DefineStatement::Token(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
-			kind: AccessType::Record(RecordAccess{
+			kind: AccessType::Record(RecordAccess {
 				duration: Some(Duration::from_hours(1)),
 				signup: None,
 				signin: None,
-				jwt: JwtAccess{
-					verify: JwtAccessVerify::Key(JwtAccessVerifyKey{
+				jwt: JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
 						key: "foo".to_string(),
 					}),
@@ -208,7 +208,7 @@ fn statements() -> Vec<Statement> {
 						key: "foo".to_string(),
 						duration: Some(Duration::from_hours(1)),
 					}),
-				}
+				},
 			}),
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,

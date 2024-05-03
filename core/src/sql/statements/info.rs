@@ -258,7 +258,10 @@ impl InfoStatement {
 				// Process the users
 				res.insert("users".to_owned(), process_arr(run.all_ns_users(opt.ns()).await?));
 				// Process the accesses
-				res.insert("accesses".to_owned(), process_arr(run.all_ns_accesses(opt.ns()).await?));
+				res.insert(
+					"accesses".to_owned(),
+					process_arr(run.all_ns_accesses(opt.ns()).await?),
+				);
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -295,7 +298,10 @@ impl InfoStatement {
 					process_arr(run.all_db_params(opt.ns(), opt.db()).await?),
 				);
 				// Process the accesses
-				res.insert("accesses".to_owned(), process_arr(run.all_db_accesses(opt.ns(), opt.db()).await?));
+				res.insert(
+					"accesses".to_owned(),
+					process_arr(run.all_db_accesses(opt.ns(), opt.db()).await?),
+				);
 				// Process the tables
 				res.insert("tables".to_owned(), process_arr(run.all_tb(opt.ns(), opt.db()).await?));
 				// Process the analyzers
