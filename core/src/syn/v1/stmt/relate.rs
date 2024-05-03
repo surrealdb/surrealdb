@@ -9,7 +9,7 @@ use super::super::{
 	value::{array, value as sql_value},
 	IResult,
 };
-use crate::sql::{statements::RelateStatement, Value};
+use crate::sql::{statements::RelateStatement, Data, Value};
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
@@ -82,7 +82,6 @@ fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 }
 
 fn inner_relate_kind(i: &str) -> IResult<&str, Value> {
-	dbg!(i);
 	alt((
 		into(thing),
 		into(table),
@@ -135,7 +134,7 @@ mod tests {
 				from: Value::Param(Param(Ident("tobie".to_owned()))),
 				with: Value::Param(Param(Ident("bla".to_owned()))),
 				uniq: false,
-				data: None,
+				data: Some(Data::ContentExpression(Value::Param(Param(Ident("bla".to_owned()))))),
 				output: None,
 				timeout: None,
 				parallel: false,
