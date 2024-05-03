@@ -81,7 +81,7 @@ fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 }
 
 fn inner_relate_kind(i: &str) -> IResult<&str, Value> {
-	alt((into(thing), into(table), into(param), into(delimited(tag('('), subquery, tag(')')))))(i)
+	alt((into(thing), into(table), into(param), into(delimited(tag("("), subquery, tag(")")))))(i)
 }
 
 #[cfg(test)]
