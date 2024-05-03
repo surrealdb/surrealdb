@@ -1325,5 +1325,8 @@ allow_unsafe = true
 [pkg.ndarray]
 allow_unsafe = true
 
+[pkg.ndarray-stats]
+allow_unsafe = true
+
 [pkg.noisy_float]
 allow_unsafe = true
