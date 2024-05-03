@@ -13,7 +13,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
 	combinator::{cut, into, opt, value},
-	sequence::preceded,
+	sequence::{delimited, preceded},
 };
 
 pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
@@ -62,7 +62,7 @@ fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
 
 fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table), into(param)))(i)?;
+	let (i, kind) = inner_relate_kind(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("->")(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -72,12 +72,16 @@ fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 
 fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table)))(i)?;
+	let (i, kind) = inner_relate_kind(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("<-")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, from) = alt((into(subquery), into(array), into(param), into(thing)))(i)?;
 	Ok((i, (kind, from)))
+}
+
+fn inner_relate_kind(i: &str) -> IResult<&str, Value> {
+	alt((into(thing), into(table), into(param), into(delimited(tag('('), subquery, tag(')')))))(i)
 }
 
 #[cfg(test)]
