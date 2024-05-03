@@ -233,7 +233,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.sd = Some(Value::from(id.to_owned()));
+			session.rd = Some(Value::from(id.to_owned()));
 			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
@@ -1044,7 +1044,7 @@ mod tests {
 
 		//
 		// Test without roles defined
-		// Roles should be ignored in scope authentication
+		// Roles should be ignored in record access
 		//
 		{
 			// Prepare the claims object
@@ -1072,7 +1072,7 @@ mod tests {
 
 		//
 		// Test with roles defined
-		// Roles should be ignored in scope authentication
+		// Roles should be ignored in record access
 		//
 		{
 			// Prepare the claims object
@@ -1167,7 +1167,7 @@ mod tests {
 			assert_eq!(sess.au.id(), resource_id);
 			assert!(sess.au.is_record());
 			let user_id = syn::thing(&resource_id).unwrap();
-			assert_eq!(sess.sd, Some(Value::from(user_id)));
+			assert_eq!(sess.rd, Some(Value::from(user_id)));
 		}
 
 		//
@@ -1193,7 +1193,7 @@ mod tests {
 				assert_eq!(sess.au.id(), resource_id);
 				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.sd, Some(Value::from(user_id)));
+				assert_eq!(sess.rd, Some(Value::from(user_id)));
 			}
 		}
 
@@ -1220,7 +1220,7 @@ mod tests {
 				assert_eq!(sess.au.id(), resource_id);
 				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.sd, Some(Value::from(user_id)));
+				assert_eq!(sess.rd, Some(Value::from(user_id)));
 			}
 		}
 
@@ -1248,7 +1248,7 @@ mod tests {
 				assert_eq!(sess.au.id(), resource_id);
 				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.sd, Some(Value::from(user_id)));
+				assert_eq!(sess.rd, Some(Value::from(user_id)));
 			}
 		}
 
@@ -1275,7 +1275,7 @@ mod tests {
 			assert_eq!(sess.au.id(), resource_id);
 			assert!(sess.au.is_record());
 			let user_id = syn::thing(&resource_id).unwrap();
-			assert_eq!(sess.sd, Some(Value::from(user_id)));
+			assert_eq!(sess.rd, Some(Value::from(user_id)));
 		}
 	}
 
@@ -1488,7 +1488,7 @@ mod tests {
 
 		//
 		// Test without roles defined
-		// Roles should be ignored in scope authentication
+		// Roles should be ignored in record access
 		//
 		{
 			// Prepare the claims object

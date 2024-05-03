@@ -1,5 +1,6 @@
 use crate::{
 	sql::{
+		access_type::{AccessType, RecordAccess, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
@@ -11,14 +12,14 @@ use crate::{
 			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
 			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineTokenStatement, DeleteStatement, ForeachStatement,
+			DefineTableStatement, DeleteStatement, ForeachStatement,
 			IfelseStatement, InfoStatement, InsertStatement, KillStatement, OptionStatement,
 			OutputStatement, RelateStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
-			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveAccessStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
 			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
-			RemoveScopeStatement, RemoveStatement, RemoveTableStatement, RemoveTokenStatement,
+			RemoveStatement, RemoveTableStatement,
 			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UseStatement,
+			UseStatement
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -220,43 +221,130 @@ fn parse_define_user() {
 }
 
 #[test]
-fn parse_define_token() {
+fn parse_define_access_jwt_key() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE TOKEN a ON SCOPE b TYPE EDDSA VALUE "foo" COMMENT "bar""#
+		r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
 	)
 	.unwrap();
 	assert_eq!(
 		res,
-		Statement::Define(DefineStatement::Token(DefineTokenStatement {
+		Statement::Define(DefineStatement::Token(DefineAccessStatement {
 			name: Ident("a".to_string()),
-			base: Base::Sc(Ident("b".to_string())),
-			kind: Algorithm::EdDSA,
-			code: "foo".to_string(),
+			base: Base::Db,
+			kind: AccessType::Jwt(JwtAccess{
+				verify: JwtAccessVerify::Key(JwtAccessVerifyKey{
+					alg: Algorithm::EdDSA,
+					key: "foo".to_string(),
+				}),
+				issue: Some(JwtAccessIssue {
+					alg: Algorithm::EdDSA,
+					key: "foo".to_string(),
+					duration: Some(Duration::from_hours(1)),
+				}),
+			}),
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
-		}))
+		})),
 	)
 }
 
 #[test]
-fn parse_define_scope() {
+fn parse_define_access_jwt_jwks() {
 	let res = test_parse!(
 		parse_stmt,
-		r#"DEFINE SCOPE a SESSION 1s SIGNUP true SIGNIN false COMMENT "bar""#
+		r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" COMMENT "bar""#
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Token(DefineAccessStatement {
+			name: Ident("a".to_string()),
+			base: Base::Db,
+			kind: AccessType::Jwt(JwtAccess{
+				verify: JwtAccessVerify::Key(JwtAccessVerifyJwks{
+					url: "http://example.com/.well-known/jwks.json".to_string(),
+				}),
+				issue: None,
+			}),
+			comment: Some(Strand("bar".to_string())),
+			if_not_exists: false,
+		})),
+	)
+}
+
+#[test]
+fn parse_define_access_record() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE ACCESS a TYPE RECORD DURATION 1s SIGNUP true SIGNIN false COMMENT "bar""#
 	)
 	.unwrap();
 
-	// manually compare since DefineScopeStatement creates a random code in its parser.
-	let Statement::Define(DefineStatement::Scope(stmt)) = res else {
+	// Manually compare since DefineAccessStatement for record access
+	// withou explicit JWT will create a random signing key during parsing.
+	let Statement::Define(DefineStatement::Access(stmt)) = res else {
 		panic!()
 	};
 
 	assert_eq!(stmt.name, Ident("a".to_string()));
+	assert_eq!(stmt.base, Base::Db);
 	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-	assert_eq!(stmt.session, Some(Duration(std::time::Duration::from_secs(1))));
-	assert_eq!(stmt.signup, Some(Value::Bool(true)));
-	assert_eq!(stmt.signin, Some(Value::Bool(false)));
+	assert_eq!(stmt.if_not_exists, false);
+	match stmt.kind {
+		AccessType::Record(ac) => {
+			assert_eq!(ac.duration, Some(Duration(std::time::Duration::from_secs(1))));
+			assert_eq!(ac.signup, Some(Value::Bool(true)));
+			assert_eq!(ac.signin, Some(Value::Bool(false)));
+			match ac.jwt.verify {
+				JwtAccessVerify::Key(key) => {
+					assert_eq!(key.alg, Algorithm::Hs512);
+				},
+				_ => panic!()
+			}
+			match ac.jwt.issue {
+				Some(iss) => {
+					assert_eq!(iss.alg, Algorithm::Hs512);
+					assert_eq!(iss.duration, Some(Duration::from_secs(1)));
+				},
+				_ => panic!()
+			}
+		},
+		_ => panic!()
+	}
+}
+
+fn parse_define_access_record_with_jwt() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Token(DefineAccessStatement {
+			name: Ident("a".to_string()),
+			base: Base::Db,
+			kind: AccessType::Record(RecordAccess{
+				duration: Some(Duration::from_hours(1)),
+				signup: None,
+				signin: None,
+				jwt: JwtAccess{
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey{
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+						duration: Some(Duration::from_hours(1)),
+					}),
+				}
+			}),
+			comment: Some(Strand("bar".to_string())),
+			if_not_exists: false,
+		})),
+	)
 }
 
 #[test]
@@ -657,9 +745,6 @@ fn parse_info() {
 
 	let res = test_parse!(parse_stmt, "INFO FOR NS").unwrap();
 	assert_eq!(res, Statement::Info(InfoStatement::Ns(false)));
-
-	let res = test_parse!(parse_stmt, "INFO FOR SCOPE scope").unwrap();
-	assert_eq!(res, Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()), false)));
 
 	let res = test_parse!(parse_stmt, "INFO FOR TABLE table").unwrap();
 	assert_eq!(res, Statement::Info(InfoStatement::Tb(Ident("table".to_owned()), false)));
@@ -1104,21 +1189,12 @@ fn parse_remove() {
 		}))
 	);
 
-	let res = test_parse!(parse_stmt, r#"REMOVE TOKEN foo ON SCOPE bar"#).unwrap();
+	let res = test_parse!(parse_stmt, r#"REMOVE ACCESS foo ON DATABASE"#).unwrap();
 	assert_eq!(
 		res,
-		Statement::Remove(RemoveStatement::Token(RemoveTokenStatement {
+		Statement::Remove(RemoveStatement::Access(RemoveAccessStatement {
 			name: Ident("foo".to_owned()),
-			base: Base::Sc(Ident("bar".to_owned())),
-			if_exists: false,
-		}))
-	);
-
-	let res = test_parse!(parse_stmt, r#"REMOVE SCOPE foo"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Remove(RemoveStatement::Scope(RemoveScopeStatement {
-			name: Ident("foo".to_owned()),
+			base: Base::Db,
 			if_exists: false,
 		}))
 	);

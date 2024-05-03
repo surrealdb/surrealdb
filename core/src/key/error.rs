@@ -36,8 +36,6 @@ pub enum KeyCategory {
 	DatabaseLogAlias,
 	/// crate::key::namespace::ac            /*{ns}!ac{ac}
 	NamespaceAccess,
-	/// crate::key::namespace::tk            /*{ns}!tk{tk}
-	NamespaceToken,
 	/// crate::key::namespace::us            /*{ns}!us{us}
 	NamespaceUser,
 	///
@@ -55,25 +53,16 @@ pub enum KeyCategory {
 	DatabaseModel,
 	/// crate::key::database::pa             /*{ns}*{db}!pa{pa}
 	DatabaseParameter,
-	/// crate::key::database::sc             /*{ns}*{db}!sc{sc}
-	DatabaseScope,
 	/// crate::key::database::tb             /*{ns}*{db}!tb{tb}
 	DatabaseTable,
 	/// crate::key::database::ti             /+{ns id}*{db id}!ti
 	DatabaseTableIdentifier,
-	/// crate::key::database::tk             /*{ns}*{db}!tk{tk}
-	DatabaseToken,
 	/// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 	DatabaseTimestamp,
 	/// crate::key::database::us             /*{ns}*{db}!us{us}
 	DatabaseUser,
 	/// crate::key::database::vs             /*{ns}*{db}!vs
 	DatabaseVersionstamp,
-	///
-	/// crate::key::scope::all               /*{ns}*{db}±{sc}
-	ScopeRoot,
-	/// crate::key::scope::tk                /*{ns}*{db}±{sc}!tk{tk}
-	ScopeToken,
 	///
 	/// crate::key::table::all               /*{ns}*{db}*{tb}
 	TableRoot,
@@ -143,7 +132,6 @@ impl Display for KeyCategory {
 			KeyCategory::DatabaseIdentifier => "DatabaseIdentifier",
 			KeyCategory::DatabaseLogAlias => "DatabaseLogAlias",
 			KeyCategory::NamespaceAccess => "NamespaceAccess",
-			KeyCategory::NamespaceToken => "NamespaceToken",
 			KeyCategory::NamespaceUser => "NamespaceUser",
 			KeyCategory::DatabaseRoot => "DatabaseRoot",
 			KeyCategory::DatabaseAccess => "DatabaseAccess",
@@ -152,15 +140,11 @@ impl Display for KeyCategory {
 			KeyCategory::DatabaseLog => "DatabaseLog",
 			KeyCategory::DatabaseModel => "DatabaseModel",
 			KeyCategory::DatabaseParameter => "DatabaseParameter",
-			KeyCategory::DatabaseScope => "DatabaseScope",
 			KeyCategory::DatabaseTable => "DatabaseTable",
 			KeyCategory::DatabaseTableIdentifier => "DatabaseTableIdentifier",
-			KeyCategory::DatabaseToken => "DatabaseToken",
 			KeyCategory::DatabaseTimestamp => "DatabaseTimestamp",
 			KeyCategory::DatabaseUser => "DatabaseUser",
 			KeyCategory::DatabaseVersionstamp => "DatabaseVersionstamp",
-			KeyCategory::ScopeRoot => "ScopeRoot",
-			KeyCategory::ScopeToken => "ScopeToken",
 			KeyCategory::TableRoot => "TableRoot",
 			KeyCategory::TableEvent => "TableEvent",
 			KeyCategory::TableField => "TableField",

@@ -1,3 +1,4 @@
+mod access;
 mod analyzer;
 mod database;
 mod event;
@@ -7,11 +8,10 @@ mod index;
 mod model;
 mod namespace;
 mod param;
-mod scope;
 mod table;
-mod token;
 mod user;
 
+pub use access::RemoveAccessStatement;
 pub use analyzer::RemoveAnalyzerStatement;
 pub use database::RemoveDatabaseStatement;
 pub use event::RemoveEventStatement;
@@ -21,9 +21,7 @@ pub use index::RemoveIndexStatement;
 pub use model::RemoveModelStatement;
 pub use namespace::RemoveNamespaceStatement;
 pub use param::RemoveParamStatement;
-pub use scope::RemoveScopeStatement;
 pub use table::RemoveTableStatement;
-pub use token::RemoveTokenStatement;
 pub use user::RemoveUserStatement;
 
 use crate::ctx::Context;
@@ -45,8 +43,7 @@ pub enum RemoveStatement {
 	Database(RemoveDatabaseStatement),
 	Function(RemoveFunctionStatement),
 	Analyzer(RemoveAnalyzerStatement),
-	Token(RemoveTokenStatement),
-	Scope(RemoveScopeStatement),
+	Access(RemoveAccessStatement),
 	Param(RemoveParamStatement),
 	Table(RemoveTableStatement),
 	Event(RemoveEventStatement),
@@ -73,8 +70,7 @@ impl RemoveStatement {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Database(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Function(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Token(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Scope(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Access(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Param(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Table(ref v) => v.compute(ctx, opt, txn).await,
 			Self::Event(ref v) => v.compute(ctx, opt, txn).await,
@@ -93,8 +89,7 @@ impl Display for RemoveStatement {
 			Self::Namespace(v) => Display::fmt(v, f),
 			Self::Database(v) => Display::fmt(v, f),
 			Self::Function(v) => Display::fmt(v, f),
-			Self::Token(v) => Display::fmt(v, f),
-			Self::Scope(v) => Display::fmt(v, f),
+			Self::Access(v) => Display::fmt(v, f),
 			Self::Param(v) => Display::fmt(v, f),
 			Self::Table(v) => Display::fmt(v, f),
 			Self::Event(v) => Display::fmt(v, f),

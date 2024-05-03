@@ -1,6 +1,6 @@
 use super::verify::{verify_creds_legacy, verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level};
-use crate::cnf::{INSECURE_FORWARD_SCOPE_ERRORS, SERVER_NAME};
+use crate::cnf::{INSECURE_FORWARD_RECORD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
@@ -187,7 +187,7 @@ pub async fn db(
 											session.ns = Some(ns.to_owned());
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
-											session.sd = Some(Value::from(rid.to_owned()));
+											session.rd = Some(Value::from(rid.to_owned()));
 											session.exp = exp;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),
@@ -206,7 +206,7 @@ pub async fn db(
 								}
 								Err(e) => match e {
 									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_SCOPE_ERRORS => Err(e),
+									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
 									_ => Err(Error::AccessRecordSigninQueryFailed),
 								},
 							}

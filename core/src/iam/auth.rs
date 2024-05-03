@@ -1,4 +1,4 @@
-use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
+use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -95,8 +95,8 @@ impl std::convert::From<(&DefineUserStatement, Level)> for Auth {
 	}
 }
 
-impl std::convert::From<(&DefineTokenStatement, Level)> for Auth {
-	fn from(val: (&DefineTokenStatement, Level)) -> Self {
+impl std::convert::From<(&DefineAccessStatement, Level)> for Auth {
+	fn from(val: (&DefineAccessStatement, Level)) -> Self {
 		Self::new((val.0, val.1).into())
 	}
 }

@@ -19,9 +19,7 @@ use sql::statements::DefineIndexStatement;
 use sql::statements::DefineModelStatement;
 use sql::statements::DefineNamespaceStatement;
 use sql::statements::DefineParamStatement;
-use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
-use sql::statements::DefineTokenStatement;
 use sql::statements::DefineUserStatement;
 use sql::statements::LiveStatement;
 
@@ -1442,25 +1440,6 @@ impl Transaction {
 		})
 	}
 
-	/// Retrieve all namespace token definitions for a specific namespace.
-	pub async fn all_ns_tokens(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
-		let key = crate::key::namespace::tk::prefix(ns);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Nts(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::namespace::tk::prefix(ns);
-			let end = crate::key::namespace::tk::suffix(ns);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Nts(Arc::clone(&val)));
-			val
-		})
-	}
-
 	/// Retrieve all namespace access method definitions.
 	pub async fn all_ns_accesses(
 		&mut self,
@@ -1521,29 +1500,6 @@ impl Transaction {
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Dus(Arc::clone(&val)));
-			val
-		})
-	}
-
-	/// Retrieve all database token definitions for a specific database.
-	pub async fn all_db_tokens(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineTokenStatement]>, Error> {
-		let key = crate::key::database::tk::prefix(ns, db);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Dts(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::database::tk::prefix(ns, db);
-			let end = crate::key::database::tk::suffix(ns, db);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Dts(Arc::clone(&val)));
 			val
 		})
 	}
@@ -1659,53 +1615,6 @@ impl Transaction {
 			let val = self.getr(beg..end, u32::MAX).await?;
 			let val = val.convert().into();
 			self.cache.set(key, Entry::Mls(Arc::clone(&val)));
-			val
-		})
-	}
-
-	/// Retrieve all scope definitions for a specific database.
-	pub async fn all_sc(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineScopeStatement]>, Error> {
-		let key = crate::key::database::sc::prefix(ns, db);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Scs(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::database::sc::prefix(ns, db);
-			let end = crate::key::database::sc::suffix(ns, db);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Scs(Arc::clone(&val)));
-			val
-		})
-	}
-
-	/// Retrieve all scope token definitions for a scope.
-	pub async fn all_sc_tokens(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-	) -> Result<Arc<[DefineTokenStatement]>, Error> {
-		let key = crate::key::scope::tk::prefix(ns, db, sc);
-		Ok(if let Some(e) = self.cache.get(&key) {
-			if let Entry::Sts(v) = e {
-				v
-			} else {
-				unreachable!();
-			}
-		} else {
-			let beg = crate::key::scope::tk::prefix(ns, db, sc);
-			let end = crate::key::scope::tk::suffix(ns, db, sc);
-			let val = self.getr(beg..end, u32::MAX).await?;
-			let val = val.convert().into();
-			self.cache.set(key, Entry::Sts(Arc::clone(&val)));
 			val
 		})
 	}
@@ -1917,19 +1826,6 @@ impl Transaction {
 		Ok(val.into())
 	}
 
-	/// Retrieve a specific namespace token definition.
-	pub async fn get_ns_token(
-		&mut self,
-		ns: &str,
-		nt: &str,
-	) -> Result<DefineTokenStatement, Error> {
-		let key = crate::key::namespace::tk::new(ns, nt);
-		let val = self.get(key).await?.ok_or(Error::NtNotFound {
-			value: nt.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
 	/// Retrieve a specific namespace access method definition.
 	pub async fn get_ns_access(
 		&mut self,
@@ -1979,20 +1875,6 @@ impl Transaction {
 		let key = crate::key::database::ml::new(ns, db, ml, vn);
 		let val = self.get(key).await?.ok_or(Error::MlNotFound {
 			value: format!("{ml}<{vn}>"),
-		})?;
-		Ok(val.into())
-	}
-
-	/// Retrieve a specific database token definition.
-	pub async fn get_db_token(
-		&mut self,
-		ns: &str,
-		db: &str,
-		dt: &str,
-	) -> Result<DefineTokenStatement, Error> {
-		let key = crate::key::database::tk::new(ns, db, dt);
-		let val = self.get(key).await?.ok_or(Error::DtNotFound {
-			value: dt.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -2049,35 +1931,6 @@ impl Transaction {
 		let key = crate::key::database::pa::new(ns, db, pa);
 		let val = self.get(key).await?.ok_or(Error::PaNotFound {
 			value: pa.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
-	/// Retrieve a specific scope definition.
-	pub async fn get_sc(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-	) -> Result<DefineScopeStatement, Error> {
-		let key = crate::key::database::sc::new(ns, db, sc);
-		let val = self.get(key).await?.ok_or(Error::ScNotFound {
-			value: sc.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
-	/// Retrieve a specific scope token definition.
-	pub async fn get_sc_token(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-		st: &str,
-	) -> Result<DefineTokenStatement, Error> {
-		let key = crate::key::scope::tk::new(ns, db, sc, st);
-		let val = self.get(key).await?.ok_or(Error::StNotFound {
-			value: st.to_owned(),
 		})?;
 		Ok(val.into())
 	}
@@ -2228,36 +2081,6 @@ impl Transaction {
 					Ok(val)
 				}
 				true => Err(Error::DbNotFound {
-					value,
-				}),
-			},
-			Err(e) => Err(e),
-			Ok(v) => Ok(v),
-		}
-	}
-
-	/// Add a scope with a default configuration, only if we are in dynamic mode.
-	pub async fn add_sc(
-		&mut self,
-		ns: &str,
-		db: &str,
-		sc: &str,
-		strict: bool,
-	) -> Result<DefineScopeStatement, Error> {
-		match self.get_sc(ns, db, sc).await {
-			Err(Error::ScNotFound {
-				value,
-			}) => match strict {
-				false => {
-					let key = crate::key::database::sc::new(ns, db, sc);
-					let val = DefineScopeStatement {
-						name: sc.to_owned().into(),
-						..Default::default()
-					};
-					self.put(key.key_category(), key, &val).await?;
-					Ok(val)
-				}
-				true => Err(Error::ScNotFound {
 					value,
 				}),
 			},
@@ -2602,20 +2425,6 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 			}
 		}
-		// Output TOKENS
-		{
-			let dts = self.all_db_tokens(ns, db).await?;
-			if !dts.is_empty() {
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- TOKENS")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				for dt in dts.iter() {
-					chn.send(bytes!(format!("{dt};"))).await?;
-				}
-				chn.send(bytes!("")).await?;
-			}
-		}
 		// Output ACCESSES
 		{
 			let dts = self.all_db_accesses(ns, db).await?;
@@ -2668,31 +2477,6 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 				for az in azs.iter() {
 					chn.send(bytes!(format!("{az};"))).await?;
-				}
-				chn.send(bytes!("")).await?;
-			}
-		}
-		// Output SCOPES
-		{
-			let scs = self.all_sc(ns, db).await?;
-			if !scs.is_empty() {
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- SCOPES")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				for sc in scs.iter() {
-					// Output SCOPE
-					chn.send(bytes!(format!("{sc};"))).await?;
-					// Output TOKENS
-					{
-						let sts = self.all_sc_tokens(ns, db, &sc.name).await?;
-						if !sts.is_empty() {
-							for st in sts.iter() {
-								chn.send(bytes!(format!("{st};"))).await?;
-							}
-							chn.send(bytes!("")).await?;
-						}
-					}
 				}
 				chn.send(bytes!("")).await?;
 			}

@@ -299,9 +299,9 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested namespace token does not exist
-	#[error("The namespace token '{value}' does not exist")]
-	NtNotFound {
+	/// The requested namespace access method does not exist
+	#[error("The namespace access method '{value}' does not exist")]
+	NaNotFound {
 		value: String,
 	},
 
@@ -317,9 +317,9 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested database token does not exist
-	#[error("The database token '{value}' does not exist")]
-	DtNotFound {
+	/// The requested database access method does not exist
+	#[error("The database access method '{value}' does not exist")]
+	DaNotFound {
 		value: String,
 	},
 
@@ -353,12 +353,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested scope does not exist
-	#[error("The scope '{value}' does not exist")]
-	ScNotFound {
-		value: String,
-	},
-
 	// The cluster node already exists
 	#[error("The node '{value}' already exists")]
 	ClAlreadyExists {
@@ -368,12 +362,6 @@ pub enum Error {
 	// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
-		value: String,
-	},
-
-	/// The requested scope token does not exist
-	#[error("The scope token '{value}' does not exist")]
-	StNotFound {
 		value: String,
 	},
 
@@ -764,15 +752,6 @@ pub enum Error {
 	#[error("The signin query failed")]
 	SigninQueryFailed,
 
-	#[error("This scope does not allow signup")]
-	ScopeNoSignup,
-
-	#[error("This scope does not allow signin")]
-	ScopeNoSignin,
-
-	#[error("The scope does not exist")]
-	NoScopeFound,
-
 	#[error("Username or Password was not provided")]
 	MissingUserOrPass,
 
@@ -864,12 +843,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested scope already exists
-	#[error("The scope '{value}' already exists")]
-	ScAlreadyExists {
-		value: String,
-	},
-
 	/// The requested table already exists
 	#[error("The table '{value}' already exists")]
 	TbAlreadyExists {
@@ -885,12 +858,6 @@ pub enum Error {
 	/// The requested database token already exists
 	#[error("The database token '{value}' already exists")]
 	DtAlreadyExists {
-		value: String,
-	},
-
-	/// The requested scope token already exists
-	#[error("The scope token '{value}' already exists")]
-	StAlreadyExists {
 		value: String,
 	},
 

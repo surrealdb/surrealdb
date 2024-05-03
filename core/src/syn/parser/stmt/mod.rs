@@ -429,10 +429,6 @@ impl Parser<'_> {
 			t!("ROOT") => InfoStatement::Root(false),
 			t!("NAMESPACE") => InfoStatement::Ns(false),
 			t!("DATABASE") => InfoStatement::Db(false),
-			t!("SCOPE") => {
-				let ident = self.next_token_value()?;
-				InfoStatement::Sc(ident, false)
-			}
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
 				InfoStatement::Tb(ident, false)

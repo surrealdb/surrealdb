@@ -10,7 +10,7 @@ use crate::{
 			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
 			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement,
-			DefineScopeStatement, DefineStatement, DefineTableStatement, DefineTokenStatement,
+			DefineStatement, DefineTableStatement,
 			DefineUserStatement,
 		},
 		table_type,
@@ -261,6 +261,11 @@ impl Parser<'_> {
 									t!("DURATION") => {
 										self.pop_peek();
 										ac.duration = Some(self.next_token_value()?);
+										// By default, token duration matches session duration
+										// The token duration can be modified in the WITH JWT clause
+										if let Some(ref mut iss) = ac.jwt.issue {
+											iss.duration = ac.duration;
+										}
 									}
 									t!("SIGNUP") => {
 										self.pop_peek();

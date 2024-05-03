@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
 use crate::iam::Role;
-use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
+use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 
 //
 // User
@@ -124,8 +124,8 @@ impl std::convert::From<(&DefineUserStatement, Level)> for Actor {
 	}
 }
 
-impl std::convert::From<(&DefineTokenStatement, Level)> for Actor {
-	fn from(val: (&DefineTokenStatement, Level)) -> Self {
+impl std::convert::From<(&DefineAccessStatement, Level)> for Actor {
+	fn from(val: (&DefineAccessStatement, Level)) -> Self {
 		Self::new(val.0.name.to_string(), Vec::default(), val.1)
 	}
 }

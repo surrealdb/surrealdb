@@ -6,7 +6,7 @@ use std::sync::Arc;
 pub fn clear(session: &mut Session) -> Result<(), Error> {
 	session.au = Arc::new(Auth::default());
 	session.tk = None;
-	session.sc = None;
-	session.sd = None;
+	session.ac = None;
+	session.rd = None;
 	Ok(())
 }

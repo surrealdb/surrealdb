@@ -8,7 +8,6 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
 use crate::sql::paths::META;
-use crate::sql::paths::SC;
 use crate::sql::paths::SD;
 use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
@@ -155,7 +154,6 @@ impl<'a> Document<'a> {
 			// of the user who created the LIVE query.
 			let mut lqctx = Context::background();
 			lqctx.add_value("auth", sess.pick(SD.as_ref()));
-			lqctx.add_value("scope", sess.pick(SC.as_ref()));
 			lqctx.add_value("token", sess.pick(TK.as_ref()));
 			lqctx.add_value("session", sess);
 			// We need to create a new options which we will
