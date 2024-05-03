@@ -3,7 +3,7 @@ use hashbrown::HashSet as HashBrownSet;
 use smallvec::{Array, SmallVec};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
-use surrealdb_core::idx::trees::dynamicset::{DynamicSet, DynamicSetImpl};
+use surrealdb_core::idx::trees::dynamicset::{ArraySet, DynamicSetImpl};
 
 fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
@@ -47,6 +47,22 @@ fn bench_vector(samples_vec: &Vec<Vec<u64>>) {
 	}
 }
 
+fn bench_array<const S: usize, F: Fn() -> ArraySet<u64, S>>(
+	new_array: F,
+	samples_vec: &Vec<Vec<u64>>,
+) {
+	for samples in samples_vec {
+		let mut v = new_array();
+		for &s in samples {
+			v.insert(s);
+		}
+		for s in samples {
+			assert!(v.contains(s));
+		}
+		assert_eq!(v.len(), samples.len());
+	}
+}
+
 fn bench_small_vec<A: Array<Item = u64>, F: Fn() -> SmallVec<A>>(
 	new_vec: F,
 	samples_vec: &Vec<Vec<u64>>,
@@ -58,19 +74,6 @@ fn bench_small_vec<A: Array<Item = u64>, F: Fn() -> SmallVec<A>>(
 			if !v.contains(&s) {
 				v.push(s);
 			}
-		}
-		for s in samples {
-			assert!(v.contains(s));
-		}
-		assert_eq!(v.len(), samples.len());
-	}
-}
-
-fn bench_dynamic_set(samples_vec: &Vec<Vec<u64>>) {
-	for samples in samples_vec {
-		let mut v = DynamicSet::with_capacity(samples.len());
-		for &s in samples {
-			v.insert(s);
 		}
 		for s in samples {
 			assert!(v.contains(s));
@@ -124,8 +127,8 @@ fn bench_hashset_vs_vector(c: &mut Criterion) {
 			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 4]>::new(), &samples));
 		});
 
-		group.bench_function("dynamic_set_4", |b| {
-			b.iter(|| bench_dynamic_set(&samples));
+		group.bench_function("array_4", |b| {
+			b.iter(|| bench_array(|| ArraySet::<u64, 4>::default(), &samples));
 		});
 	}
 
@@ -148,8 +151,8 @@ fn bench_hashset_vs_vector(c: &mut Criterion) {
 			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 8]>::new(), &samples));
 		});
 
-		group.bench_function("dynamic_set_8", |b| {
-			b.iter(|| bench_dynamic_set(&samples));
+		group.bench_function("array_8", |b| {
+			b.iter(|| bench_array(|| ArraySet::<u64, 8>::default(), &samples));
 		});
 	}
 
@@ -172,8 +175,8 @@ fn bench_hashset_vs_vector(c: &mut Criterion) {
 			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 16]>::new(), &samples));
 		});
 
-		group.bench_function("dynamic_set_16", |b| {
-			b.iter(|| bench_dynamic_set(&samples));
+		group.bench_function("array_16", |b| {
+			b.iter(|| bench_array(|| ArraySet::<u64, 16>::default(), &samples));
 		});
 	}
 
@@ -196,8 +199,56 @@ fn bench_hashset_vs_vector(c: &mut Criterion) {
 			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 24]>::new(), &samples));
 		});
 
-		group.bench_function("dynamic_set_24", |b| {
-			b.iter(|| bench_dynamic_set(&samples));
+		group.bench_function("array_24", |b| {
+			b.iter(|| bench_array(|| ArraySet::<u64, 24>::default(), &samples));
+		});
+	}
+
+	{
+		let samples = create_samples(28, ITERATIONS);
+
+		group.bench_function("hashset_28", |b| {
+			b.iter(|| bench_hashset(&samples));
+		});
+
+		group.bench_function("hashbrown_28", |b| {
+			b.iter(|| bench_hashbrown(&samples));
+		});
+
+		group.bench_function("vector_28", |b| {
+			b.iter(|| bench_vector(&samples));
+		});
+
+		group.bench_function("smallvec_28", |b| {
+			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 28]>::new(), &samples));
+		});
+
+		group.bench_function("array_28", |b| {
+			b.iter(|| bench_array(|| ArraySet::<u64, 28>::default(), &samples));
+		});
+	}
+
+	{
+		let samples = create_samples(32, ITERATIONS);
+
+		group.bench_function("hashset_32", |b| {
+			b.iter(|| bench_hashset(&samples));
+		});
+
+		group.bench_function("hashbrown_32", |b| {
+			b.iter(|| bench_hashbrown(&samples));
+		});
+
+		group.bench_function("vector_32", |b| {
+			b.iter(|| bench_vector(&samples));
+		});
+
+		group.bench_function("smallvec_32", |b| {
+			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 32]>::new(), &samples));
+		});
+
+		group.bench_function("array_32", |b| {
+			b.iter(|| bench_array(|| ArraySet::<u64, 32>::default(), &samples));
 		});
 	}
 
@@ -220,34 +271,8 @@ fn bench_hashset_vs_vector(c: &mut Criterion) {
 			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 36]>::new(), &samples));
 		});
 
-		group.bench_function("dynamic_set_36", |b| {
-			b.iter(|| bench_dynamic_set(&samples));
-		});
-	}
-
-	{
-		let samples = create_samples(48, ITERATIONS);
-
-		group.bench_function("hashset_48", |b| {
-			b.iter(|| bench_hashset(&samples));
-		});
-
-		group.bench_function("hashbrown_48", |b| {
-			b.iter(|| bench_hashbrown(&samples));
-		});
-
-		group.bench_function("vector_48", |b| {
-			b.iter(|| bench_vector(&samples));
-		});
-
-		group.bench_function("smallvec_48", |b| {
-			// There is no 48 implementation for Array/SmallVec,
-			// so we just up to the next implementation, which is 0x40 / 64.
-			b.iter(|| bench_small_vec(|| SmallVec::<[u64; 64]>::new(), &samples));
-		});
-
-		group.bench_function("dynamic_set_48", |b| {
-			b.iter(|| bench_dynamic_set(&samples));
+		group.bench_function("array_36", |b| {
+			b.iter(|| bench_array(|| ArraySet::<u64, 36>::default(), &samples));
 		});
 	}
 
