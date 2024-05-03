@@ -399,11 +399,11 @@ impl<'a> IndexOperation<'a> {
 				.await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			mt.remove_document(stk, &mut tx, self.rid, o).await?;
+			mt.remove_document(stk, &mut tx, self.rid, &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			mt.index_document(stk, &mut tx, self.rid, n).await?;
+			mt.index_document(stk, &mut tx, self.rid, &n).await?;
 		}
 		mt.finish(&mut tx).await
 	}

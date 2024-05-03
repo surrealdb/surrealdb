@@ -2,6 +2,8 @@
 
 use reblessive::Stk;
 
+use crate::sql::index::VectorType;
+use crate::syn::token::VectorTypeKind;
 use crate::{
 	sql::{
 		change_feed_include::ChangeFeedInclude, changefeed::ChangeFeed, index::Distance, Base,
@@ -407,6 +409,19 @@ impl Parser<'_> {
 		}
 
 		self.parse_distance().map(Some)
+	}
+
+	pub fn parse_vector_type(&mut self) -> ParseResult<VectorType> {
+		match self.next().kind {
+			TokenKind::VectorType(x) => Ok(match x {
+				VectorTypeKind::F64 => VectorType::F64,
+				VectorTypeKind::F32 => VectorType::F32,
+				VectorTypeKind::I64 => VectorType::I64,
+				VectorTypeKind::I32 => VectorType::I32,
+				VectorTypeKind::I16 => VectorType::I16,
+			}),
+			x => unexpected!(self, x, "a vector type"),
+		}
 	}
 
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {

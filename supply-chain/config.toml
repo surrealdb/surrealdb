@@ -244,10 +244,6 @@ version = "0.3.71"
 criteria = "safe-to-deploy"
 
 [[exemptions.base64]]
-version = "0.21.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.base64]]
 version = "0.22.0"
 criteria = "safe-to-deploy"
 
@@ -423,10 +419,6 @@ criteria = "safe-to-deploy"
 version = "0.18.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.core-foundation]]
-version = "0.9.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.cpp_demangle]]
 version = "0.4.3"
 criteria = "safe-to-deploy"
@@ -593,10 +585,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fail]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fastrand]]
-version = "2.0.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.figment]]
@@ -979,10 +967,6 @@ criteria = "safe-to-deploy"
 version = "0.4.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.log]]
-version = "0.4.21"
-criteria = "safe-to-deploy"
-
 [[exemptions.loom]]
 version = "0.5.6"
 criteria = "safe-to-deploy"
@@ -1039,10 +1023,6 @@ criteria = "safe-to-deploy"
 version = "0.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.miniz_oxide]]
-version = "0.7.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.mio]]
 version = "0.8.11"
 criteria = "safe-to-deploy"
@@ -1089,10 +1069,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.num-complex]]
 version = "0.4.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-conv]]
-version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-format]]
@@ -1233,10 +1209,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.pin-project-internal]]
 version = "1.1.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.pin-project-lite]]
-version = "0.2.14"
 criteria = "safe-to-deploy"
 
 [[exemptions.pkcs1]]
@@ -1623,10 +1595,6 @@ criteria = "safe-to-deploy"
 version = "2.10.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.semver]]
-version = "1.0.22"
-criteria = "safe-to-deploy"
-
 [[exemptions.send_wrapper]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
@@ -1843,18 +1811,6 @@ criteria = "safe-to-run"
 version = "0.2.15"
 criteria = "safe-to-run"
 
-[[exemptions.thiserror]]
-version = "1.0.58"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror-impl]]
-version = "1.0.58"
-criteria = "safe-to-deploy"
-
-[[exemptions.thread_local]]
-version = "1.1.8"
-criteria = "safe-to-deploy"
-
 [[exemptions.time]]
 version = "0.3.34"
 criteria = "safe-to-deploy"
@@ -2064,14 +2020,6 @@ version = "0.4.42"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-macro]]
-version = "0.2.92"
-criteria = "safe-to-deploy"
-
-[[exemptions.wasm-bindgen-macro-support]]
-version = "0.2.92"
-criteria = "safe-to-deploy"
-
-[[exemptions.wasm-bindgen-shared]]
 version = "0.2.92"
 criteria = "safe-to-deploy"
 

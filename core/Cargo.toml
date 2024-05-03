@@ -71,6 +71,7 @@ ciborium = "0.2.1"
 cedar-policy = "2.4.2"
 channel = { version = "1.9.0", package = "async-channel" }
 chrono = { version = "0.4.31", features = ["serde"] }
+dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }
 deunicode = "1.4.1"
 dmp = "0.2.0"
@@ -111,7 +112,7 @@ once_cell = "1.18.0"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
 phf = { version = "0.11.2", features = ["macros", "unicase"] }
 pin-project-lite = "0.2.13"
-quick_cache = "0.4.0"
+quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
 reblessive = { version = "0.3.5", features = ["tree"] }
