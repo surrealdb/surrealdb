@@ -1330,3 +1330,6 @@ allow_unsafe = true
 
 [pkg.noisy_float]
 allow_unsafe = true
+
+[pkg.linfa-linalg]
+allow_unsafe = true
