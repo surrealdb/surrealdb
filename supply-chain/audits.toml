@@ -1,31 +1,6 @@
 
 # cargo-vet audits file
 
-[[audits.approx]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-delta = "0.5.1 -> 0.4.0"
-
-[[audits.linfa-linalg]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.1.0"
-
-[[audits.ndarray-linalg]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.16.0"
-
-[[audits.ndarray-stats]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.5.1"
-
-[[audits.noisy_float]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.2.0"
-
 [[audits.quick_cache]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
@@ -40,16 +15,6 @@ delta = "0.21.10 -> 0.21.11"
 who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.22.3 -> 0.22.4"
-
-[[audits.rustls-native-certs]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-version = "0.7.0"
-
-[[audits.rustls-pemfile]]
-who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
-criteria = "safe-to-deploy"
-delta = "1.0.4 -> 2.1.2"
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"

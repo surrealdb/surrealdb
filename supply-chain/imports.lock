@@ -1576,6 +1576,26 @@ criteria = "safe-to-deploy"
 delta = "2.4.1 -> 2.5.0"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.zerocopy]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.7.32"
+notes = """
+This crate is `no_std` so doesn't use any side-effectful std functions. It
+contains quite a lot of `unsafe` code, however. I verified portions of this. It
+also has a large, thorough test suite. The project claims to run tests with
+Miri to have stronger soundness checks, and also claims to use formal
+verification tools to prove correctness.
+"""
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.zerocopy-derive]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.7.32"
+notes = "Clean, safe macros for zerocopy."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.zcash.audits.base64]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
