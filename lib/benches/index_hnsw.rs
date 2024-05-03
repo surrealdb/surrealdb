@@ -11,7 +11,6 @@ use surrealdb_core::kvs::Datastore;
 use surrealdb_core::sql::index::{HnswParams, VectorType};
 use surrealdb_core::sql::{value, Array, Id, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
-use tracing::info;
 
 const EF_CONSTRUCTION: u16 = 150;
 const EF_SEARCH: usize = 80;
@@ -22,14 +21,19 @@ const M0: u16 = 48;
 
 const DIMENSION: u16 = 20;
 
+const INGESTING_SOURCE: &str = "../tests/data/hnsw-random-9000-20-euclidean.gz";
+const QUERYING_SOURCE: &str = "../tests/data/hnsw-random-5000-20-euclidean.gz";
+
 fn bench_hnsw_no_db(c: &mut Criterion) {
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz");
+	const GROUP_NAME: &str = "hnsw_no_db";
+
+	let samples = new_vectors_from_file(INGESTING_SOURCE);
 	let samples: Vec<(Thing, Vec<Value>)> =
 		samples.into_iter().map(|(r, a)| (r, vec![Value::Array(a)])).collect();
 
 	// Indexing benchmark group
 	{
-		let mut group = get_group(c, "hnsw_no_db", samples.len(), 10);
+		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
 		group.bench_function(id, |b| {
 			b.iter(|| insert_objects(&samples));
@@ -40,12 +44,12 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 	// Create an HNSW instance with data
 	let hnsw = insert_objects(&samples);
 
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz");
+	let samples = new_vectors_from_file(QUERYING_SOURCE);
 	let samples: Vec<Array> = samples.into_iter().map(|(_, a)| a).collect();
 
 	// Knn lookup benchmark group
 	{
-		let mut group = get_group(c, "hnsw_no_db", samples.len(), 10);
+		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("lookup len: {}", samples.len());
 		group.bench_function(id, |b| {
 			b.iter(|| knn_lookup_objects(&hnsw, &samples));
@@ -55,7 +59,9 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 }
 
 fn bench_hnsw_with_db(c: &mut Criterion) {
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz");
+	const GROUP_NAME: &str = "hnsw_with_db";
+
+	let samples = new_vectors_from_file(INGESTING_SOURCE);
 	let samples: Vec<String> =
 		samples.into_iter().map(|(r, a)| format!("CREATE {r} SET r={a} RETURN NONE;")).collect();
 
@@ -63,7 +69,7 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 
 	// Indexing benchmark group
 	{
-		let mut group = get_group(c, "hnsw_with_db", samples.len(), 10);
+		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
 
 		group.bench_function(id, |b| {
@@ -76,13 +82,13 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 	let ds = b.block_on(insert_objects_db(session, true, &samples));
 
 	// Knn lookup benchmark group
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz");
+	let samples = new_vectors_from_file(QUERYING_SOURCE);
 	let selects: Vec<String> = samples
 		.into_iter()
 		.map(|(_, a)| format!("SELECT id FROM e WHERE r <|{NN},{EF_SEARCH}|> {a};"))
 		.collect();
 	{
-		let mut group = get_group(c, "hnsw_with_db", selects.len(), 10);
+		let mut group = get_group(c, GROUP_NAME, selects.len(), 10);
 		let id = format!("lookup len: {}", selects.len());
 		group.bench_function(id, |b| {
 			b.to_async(Runtime::new().unwrap())
@@ -93,8 +99,9 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 }
 
 fn bench_db_without_index(c: &mut Criterion) {
-	info!("Build data collection");
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-9000-20-euclidean.gz");
+	const GROUP_NAME: &str = "hnsw_without_index";
+
+	let samples = new_vectors_from_file(INGESTING_SOURCE);
 	let samples: Vec<String> =
 		samples.into_iter().map(|(r, a)| format!("CREATE {r} SET r={a} RETURN NONE;")).collect();
 
@@ -102,7 +109,7 @@ fn bench_db_without_index(c: &mut Criterion) {
 
 	// Ingesting benchmark group
 	{
-		let mut group = get_group(c, "hnsw_without_index", samples.len(), 10);
+		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("insert len: {}", samples.len());
 
 		group.bench_function(id, |b| {
@@ -116,13 +123,13 @@ fn bench_db_without_index(c: &mut Criterion) {
 	let ds = b.block_on(insert_objects_db(session, false, &samples));
 
 	// Knn lookup benchmark group
-	let samples = new_vectors_from_file("../tests/data/hnsw-random-5000-20-euclidean.gz");
+	let samples = new_vectors_from_file(QUERYING_SOURCE);
 	let selects: Vec<String> = samples
 		.into_iter()
 		.map(|(id, _)| format!("SELECT id FROM {id},{id},{id},{id},{id},{id},{id},{id},{id},{id};"))
 		.collect();
 	{
-		let mut group = get_group(c, "hnsw_without_index", selects.len(), 10);
+		let mut group = get_group(c, GROUP_NAME, selects.len(), 10);
 		let id = format!("lookup len: {}", selects.len());
 		group.bench_function(id, |b| {
 			b.to_async(Runtime::new().unwrap())

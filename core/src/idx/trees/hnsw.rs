@@ -428,12 +428,6 @@ impl Hnsw {
 		self.search_layer(q, candidates, visited, w, ef, l)
 	}
 
-	/// query element q
-	/// enter points ep
-	/// number of nearest to q
-	/// elements to return ef
-	/// layer number lc
-	/// Output: ef closest neighbors to q
 	fn search_layer_multi(
 		&self,
 		q: &SharedVector,
