@@ -1,11 +1,12 @@
 use super::super::{
 	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, expect_delimited, openparentheses},
 	error::expected,
 	literal::{param, table},
 	part::{data, output, timeout},
-	subquery::subquery,
+	subquery::{subquery, subquery_inner},
 	thing::thing,
-	value::array,
+	value::{array, value as sql_value},
 	IResult,
 };
 use crate::sql::{statements::RelateStatement, Value};
@@ -13,7 +14,7 @@ use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
 	combinator::{cut, into, opt, value},
-	sequence::{delimited, preceded},
+	sequence::preceded,
 };
 
 pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
@@ -81,7 +82,13 @@ fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 }
 
 fn inner_relate_kind(i: &str) -> IResult<&str, Value> {
-	alt((into(thing), into(table), into(param), into(delimited(tag("("), subquery, tag(")")))))(i)
+	dbg!(i);
+	alt((
+		into(thing),
+		into(table),
+		into(param),
+		expect_delimited(openparentheses, alt((into(subquery_inner), sql_value)), closeparentheses),
+	))(i)
 }
 
 #[cfg(test)]

@@ -50,7 +50,7 @@ fn eat_semicolon(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
-fn subquery_inner(i: &str) -> IResult<&str, Subquery> {
+pub fn subquery_inner(i: &str) -> IResult<&str, Subquery> {
 	alt((
 		map(output, Subquery::Output),
 		map(select, Subquery::Select),
