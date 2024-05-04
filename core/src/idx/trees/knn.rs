@@ -1,5 +1,5 @@
 use crate::idx::docids::DocId;
-use crate::idx::trees::dynamicset::{DynamicSet, DynamicSetImpl};
+use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
 use roaring::RoaringTreemap;
@@ -123,8 +123,8 @@ impl DoublePriorityQueue {
 		s
 	}
 
-	pub(super) fn to_dynamic_set(&self, capacity: usize) -> DynamicSet<ElementId> {
-		let mut s = DynamicSet::with_capacity(capacity);
+	pub(super) fn to_dynamic_set<S: DynamicSet<ElementId>>(&self, capacity: usize) -> S {
+		let mut s = S::with_capacity(capacity);
 		for q in self.0.values() {
 			for v in q {
 				s.insert(*v);

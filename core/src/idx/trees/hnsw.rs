@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
-use crate::idx::trees::dynamicset::{DynamicSet, DynamicSetImpl};
+use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
 use crate::idx::trees::graph::UndirectedGraph;
 use crate::idx::trees::knn::{DoublePriorityQueue, Ids64, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 pub struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
-	hnsw: Hnsw,
+	hnsw: HnswFlavor,
 	docs: HnswDocs,
 	vec_docs: HashMap<SharedVector, (Ids64, ElementId)>,
 }
@@ -27,7 +27,7 @@ impl HnswIndex {
 		Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: Hnsw::new(p),
+			hnsw: HnswFlavor::new(p),
 			docs: HnswDocs::default(),
 			vec_docs: HashMap::default(),
 		}
@@ -122,7 +122,7 @@ impl HnswIndex {
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
-				let v = &self.hnsw.elements[&e_id];
+				let v = &self.hnsw.element(&e_id);
 				if let Some((docs, _)) = self.vec_docs.get(v) {
 					builder.add(e_dist, docs);
 				}
@@ -188,13 +188,38 @@ impl HnswDocs {
 	}
 }
 
-struct Hnsw {
+enum HnswFlavor {
+	Array4(Hnsw<ArraySet<ElementId, 9>, ArraySet<ElementId, 5>>),
+	Array8(Hnsw<ArraySet<ElementId, 17>, ArraySet<ElementId, 9>>),
+	Array12(Hnsw<ArraySet<ElementId, 25>, ArraySet<ElementId, 13>>),
+	Array16(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 17>>),
+	Array20(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 21>>),
+	Array24(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 25>>),
+	Array28(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 29>>),
+	Hash(Hnsw<HashBrownSet<ElementId>, HashBrownSet<ElementId>>),
+}
+
+impl HnswFlavor {
+	fn new(p: &HnswParams) -> Self {
+		match p.m {
+			1..=4 => Self::Array4(Hnsw::new(p)),
+			_ => Self::Hash(Hnsw::new(p)),
+		}
+	}
+}
+
+struct Hnsw<L0, L>
+where
+	L0: DynamicSet<ElementId>,
+	L: DynamicSet<ElementId>,
+{
 	m: usize,
 	m0: usize,
 	efc: usize,
 	ml: f64,
 	dist: Distance,
-	layers: Vec<UndirectedGraph>,
+	layer0: UndirectedGraph<ElementId, L0>,
+	layers: Vec<UndirectedGraph<ElementId, L>>,
 	enter_point: Option<ElementId>,
 	elements: HashMap<ElementId, SharedVector>,
 	next_element_id: ElementId,
@@ -204,8 +229,13 @@ struct Hnsw {
 
 pub(super) type ElementId = u64;
 
-impl Hnsw {
+impl<L0, L> Hnsw<L0, L>
+where
+	L0: DynamicSet<ElementId>,
+	L: DynamicSet<ElementId>,
+{
 	fn new(p: &HnswParams) -> Self {
+		let m0 = p.m0 as usize;
 		Self {
 			m: p.m as usize,
 			m0: p.m0 as usize,
@@ -213,6 +243,7 @@ impl Hnsw {
 			ml: p.ml.to_float(),
 			dist: p.distance.clone(),
 			enter_point: None,
+			layer0: UndirectedGraph::new(m0),
 			layers: Vec::default(),
 			elements: HashMap::default(),
 			next_element_id: 0,
@@ -390,10 +421,10 @@ impl Hnsw {
 		}
 	}
 
-	fn build_priority_list(
+	fn build_priority_list<S: DynamicSet<ElementId>>(
 		&self,
 		e_id: ElementId,
-		neighbors: &DynamicSet<ElementId>,
+		neighbors: &S,
 	) -> DoublePriorityQueue {
 		let e_pt = &self.elements[&e_id];
 		let mut w = DoublePriorityQueue::default();
@@ -414,13 +445,13 @@ impl Hnsw {
 		self.elements.get(e_id).cloned()
 	}
 
-	fn search_layer_single(
+	fn search_layer_single<S: DynamicSet<ElementId>>(
 		&self,
 		q: &SharedVector,
 		ep_dist: f64,
 		ep_id: ElementId,
 		ef: usize,
-		l: &UndirectedGraph,
+		l: &UndirectedGraph<ElementId, S>,
 	) -> DoublePriorityQueue {
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
@@ -428,23 +459,23 @@ impl Hnsw {
 		self.search_layer(q, candidates, visited, w, ef, l)
 	}
 
-	fn search_layer_multi(
+	fn search_layer_multi<S: DynamicSet<ElementId>>(
 		&self,
 		q: &SharedVector,
 		candidates: DoublePriorityQueue,
 		ef: usize,
-		l: &UndirectedGraph,
+		l: &UndirectedGraph<ElementId, S>,
 	) -> DoublePriorityQueue {
 		let w = candidates.clone();
 		let visited = w.to_set();
 		self.search_layer(q, candidates, visited, w, ef, l)
 	}
 
-	fn search_layer_single_ignore_ep(
+	fn search_layer_single_ignore_ep<S: DynamicSet<ElementId>>(
 		&self,
 		q: &SharedVector,
 		ep_id: ElementId,
-		l: &UndirectedGraph,
+		l: &UndirectedGraph<ElementId, S>,
 	) -> Option<(f64, ElementId)> {
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
@@ -453,12 +484,12 @@ impl Hnsw {
 		q.peek_first()
 	}
 
-	fn search_layer_multi_ignore_ep(
+	fn search_layer_multi_ignore_ep<S: DynamicSet<ElementId>>(
 		&self,
 		q: &SharedVector,
 		ep_id: ElementId,
 		ef: usize,
-		l: &UndirectedGraph,
+		l: &UndirectedGraph<ElementId, S>,
 	) -> DoublePriorityQueue {
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
@@ -466,14 +497,14 @@ impl Hnsw {
 		self.search_layer(q, candidates, visited, w, ef, l)
 	}
 
-	fn search_layer(
+	fn search_layer<S: DynamicSet<ElementId>>(
 		&self,
 		q: &SharedVector,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
 		ef: usize,
-		l: &UndirectedGraph,
+		l: &UndirectedGraph<ElementId, S>,
 	) -> DoublePriorityQueue {
 		let mut f_dist = if let Some(d) = w.peek_last_dist() {
 			d
@@ -560,15 +591,20 @@ impl From<&HnswParams> for SelectNeighbors {
 }
 
 impl SelectNeighbors {
-	fn select(
+	fn select<L0, L, S>(
 		&self,
-		h: &Hnsw,
-		lc: &UndirectedGraph,
+		h: &Hnsw<L0, L>,
+		lc: &UndirectedGraph<ElementId, S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: DoublePriorityQueue,
 		m_max: usize,
-	) -> DynamicSet<ElementId> {
+	) -> S
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+		S: DynamicSet<ElementId>,
+	{
 		match self {
 			Self::Heuristic => Self::heuristic(c, h, m_max),
 			Self::HeuristicExt => Self::heuristic_ext(h, lc, q_id, q_pt, c, m_max),
@@ -577,11 +613,16 @@ impl SelectNeighbors {
 		}
 	}
 
-	fn heuristic(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> DynamicSet<ElementId> {
+	fn heuristic<L0, L, S>(mut c: DoublePriorityQueue, h: &Hnsw<L0, L>, m_max: usize) -> S
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+		S: DynamicSet<ElementId>,
+	{
 		if c.len() <= m_max {
 			return c.to_dynamic_set(m_max);
 		}
-		let mut r = DynamicSet::with_capacity(m_max);
+		let mut r = S::with_capacity(m_max);
 		while let Some((e_dist, e_id)) = c.pop_first() {
 			if Self::is_closer(h, e_dist, e_id, &mut r) && r.len() == m_max {
 				break;
@@ -590,7 +631,12 @@ impl SelectNeighbors {
 		r
 	}
 
-	fn heuristic_keep(mut c: DoublePriorityQueue, h: &Hnsw, m_max: usize) -> DynamicSet<ElementId> {
+	fn heuristic_keep<L0, L, S>(mut c: DoublePriorityQueue, h: &Hnsw<L0, L>, m_max: usize) -> S
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+		S: DynamicSet<ElementId>,
+	{
 		if c.len() <= m_max {
 			return c.to_dynamic_set(m_max);
 		}
@@ -614,14 +660,18 @@ impl SelectNeighbors {
 		r
 	}
 
-	fn extend(
-		h: &Hnsw,
-		lc: &UndirectedGraph,
+	fn extend<L0, L, S>(
+		h: &Hnsw<L0, L>,
+		lc: &UndirectedGraph<ElementId, S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		c: &mut DoublePriorityQueue,
 		m_max: usize,
-	) {
+	) where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+		S: DynamicSet<ElementId>,
+	{
 		let mut ex = c.to_set();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for (_, e_id) in c.to_vec().into_iter() {
@@ -638,31 +688,46 @@ impl SelectNeighbors {
 		}
 	}
 
-	fn heuristic_ext(
-		h: &Hnsw,
-		lc: &UndirectedGraph,
+	fn heuristic_ext<L0, L, S>(
+		h: &Hnsw<L0, L>,
+		lc: &UndirectedGraph<ElementId, S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
 		m_max: usize,
-	) -> DynamicSet<ElementId> {
+	) -> S
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+		S: DynamicSet<ElementId>,
+	{
 		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
 		Self::heuristic(c, h, m_max)
 	}
 
-	fn heuristic_ext_keep(
-		h: &Hnsw,
-		lc: &UndirectedGraph,
+	fn heuristic_ext_keep<L0, L, S>(
+		h: &Hnsw<L0, L>,
+		lc: &UndirectedGraph<ElementId, S>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		mut c: DoublePriorityQueue,
 		m_max: usize,
-	) -> DynamicSet<ElementId> {
+	) -> S
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+		S: DynamicSet<ElementId>,
+	{
 		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
 		Self::heuristic_keep(c, h, m_max)
 	}
 
-	fn is_closer(h: &Hnsw, e_dist: f64, e_id: ElementId, r: &mut DynamicSet<ElementId>) -> bool {
+	fn is_closer<L0, L, S>(h: &Hnsw<L0, L>, e_dist: f64, e_id: ElementId, r: &mut S) -> bool
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+		S: DynamicSet<ElementId>,
+	{
 		if let Some(current_vec) = h.get_element_vector(&e_id) {
 			for r_id in r.iter() {
 				if let Some(r_dist) = h.get_element_distance(&current_vec, r_id) {
@@ -683,8 +748,8 @@ impl SelectNeighbors {
 mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
-	use crate::idx::trees::dynamicset::DynamicSetImpl;
-	use crate::idx::trees::hnsw::{Hnsw, HnswIndex};
+	use crate::idx::trees::dynamicset::DynamicSet;
+	use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswIndex};
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -696,7 +761,14 @@ mod tests {
 	use std::sync::Arc;
 	use test_log::test;
 
-	fn insert_collection_hnsw(h: &mut Hnsw, collection: &TestCollection) -> HashSet<SharedVector> {
+	fn insert_collection_hnsw<L0, L>(
+		h: &mut Hnsw<L0, L>,
+		collection: &TestCollection,
+	) -> HashSet<SharedVector>
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+	{
 		let mut set = HashSet::new();
 		for (_, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone().into();
@@ -707,7 +779,11 @@ mod tests {
 		}
 		set
 	}
-	fn find_collection_hnsw(h: &mut Hnsw, collection: &TestCollection) {
+	fn find_collection_hnsw<L0, L>(h: &mut Hnsw<L0, L>, collection: &TestCollection)
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+	{
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
 			let obj = obj.clone().into();
@@ -1083,7 +1159,11 @@ mod tests {
 		.await
 	}
 
-	fn check_hnsw_properties(h: &Hnsw, expected_count: usize) {
+	fn check_hnsw_properties<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+	{
 		let mut layer_size = h.elements.len();
 		assert_eq!(layer_size, expected_count);
 		for (lc, l) in h.layers.iter().enumerate() {
@@ -1149,7 +1229,11 @@ mod tests {
 		vec.into()
 	}
 
-	impl Hnsw {
+	impl<L0, L> Hnsw<L0, L>
+	where
+		L0: DynamicSet<ElementId>,
+		L: DynamicSet<ElementId>,
+	{
 		fn debug_print_check(&self) {
 			debug!("EP: {:?}", self.enter_point);
 			for (i, l) in self.layers.iter().enumerate() {

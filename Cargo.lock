@@ -6019,7 +6019,6 @@ dependencies = [
  "serial_test",
  "sha1",
  "sha2",
- "smallvec",
  "snap",
  "speedb",
  "storekey",

@@ -139,7 +139,6 @@ serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 sha1 = "0.10.6"
 sha2 = "0.10.8"
-smallvec = "1.13.2"
 snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
