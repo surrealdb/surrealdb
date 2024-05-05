@@ -1,9 +1,9 @@
+use hashbrown::hash_map::Entry;
+use hashbrown::HashMap;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::collections::{BinaryHeap, HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;

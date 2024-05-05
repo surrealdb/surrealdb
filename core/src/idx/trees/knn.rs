@@ -2,12 +2,13 @@ use crate::idx::docids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
+#[cfg(debug_assertions)]
+use hashbrown::HashMap;
+use hashbrown::HashSet;
 use roaring::RoaringTreemap;
 use std::cmp::{Ordering, Reverse};
 use std::collections::btree_map::Entry;
-#[cfg(debug_assertions)]
-use std::collections::HashMap;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug, Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
 pub(super) struct PriorityNode(Reverse<FloatKey>, NodeId);
@@ -618,14 +619,15 @@ pub(super) mod tests {
 	use crate::sql::{Array, Number};
 	use crate::syn::Parse;
 	use flate2::read::GzDecoder;
+	#[cfg(debug_assertions)]
+	use hashbrown::HashMap;
+	use hashbrown::HashSet;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
 	use std::cmp::Reverse;
-	#[cfg(debug_assertions)]
-	use std::collections::HashMap;
-	use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
+	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
 	use std::time::SystemTime;

@@ -7,12 +7,13 @@ use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Key;
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::{Array, Thing, Value};
+use hashbrown::hash_map::Entry;
+use hashbrown::{HashMap, HashSet};
 use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use roaring::RoaringTreemap;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 
 pub struct HnswIndex {
 	dim: usize,
@@ -122,7 +123,7 @@ impl HnswIndex {
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
-				let v = &self.hnsw.element(&e_id);
+				let v = self.hnsw.element(&e_id);
 				if let Some((docs, _)) = self.vec_docs.get(v) {
 					builder.add(e_dist, docs);
 				}
@@ -204,6 +205,58 @@ impl HnswFlavor {
 		match p.m {
 			1..=4 => Self::Array4(Hnsw::new(p)),
 			_ => Self::Hash(Hnsw::new(p)),
+		}
+	}
+
+	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
+		match self {
+			HnswFlavor::Array4(h) => h.insert(q_pt),
+			HnswFlavor::Array8(h) => h.insert(q_pt),
+			HnswFlavor::Array12(h) => h.insert(q_pt),
+			HnswFlavor::Array16(h) => h.insert(q_pt),
+			HnswFlavor::Array20(h) => h.insert(q_pt),
+			HnswFlavor::Array24(h) => h.insert(q_pt),
+			HnswFlavor::Array28(h) => h.insert(q_pt),
+			HnswFlavor::Hash(h) => h.insert(q_pt),
+		}
+	}
+
+	fn remove(&mut self, e_id: ElementId) -> bool {
+		match self {
+			HnswFlavor::Array4(h) => h.remove(e_id),
+			HnswFlavor::Array8(h) => h.remove(e_id),
+			HnswFlavor::Array12(h) => h.remove(e_id),
+			HnswFlavor::Array16(h) => h.remove(e_id),
+			HnswFlavor::Array20(h) => h.remove(e_id),
+			HnswFlavor::Array24(h) => h.remove(e_id),
+			HnswFlavor::Array28(h) => h.remove(e_id),
+			HnswFlavor::Hash(h) => h.remove(e_id),
+		}
+	}
+
+	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
+		match self {
+			HnswFlavor::Array4(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Array8(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Array12(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Array16(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Array20(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Array24(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Array28(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Hash(h) => h.knn_search(q, k, efs),
+		}
+	}
+
+	fn element(&self, e_id: &ElementId) -> &SharedVector {
+		match self {
+			HnswFlavor::Array4(h) => h.element(e_id),
+			HnswFlavor::Array8(h) => h.element(e_id),
+			HnswFlavor::Array12(h) => h.element(e_id),
+			HnswFlavor::Array16(h) => h.element(e_id),
+			HnswFlavor::Array20(h) => h.element(e_id),
+			HnswFlavor::Array24(h) => h.element(e_id),
+			HnswFlavor::Array28(h) => h.element(e_id),
+			HnswFlavor::Hash(h) => h.element(e_id),
 		}
 	}
 }
@@ -564,6 +617,11 @@ where
 			vec![]
 		}
 	}
+
+	#[inline]
+	fn element(&self, e_id: &ElementId) -> &SharedVector {
+		&self.elements[e_id]
+	}
 }
 
 #[derive(Debug)]
@@ -641,7 +699,7 @@ impl SelectNeighbors {
 			return c.to_dynamic_set(m_max);
 		}
 		let mut pruned = Vec::new();
-		let mut r = DynamicSet::with_capacity(m_max);
+		let mut r = S::with_capacity(m_max);
 		while let Some((e_dist, e_id)) = c.pop_first() {
 			if Self::is_closer(h, e_dist, e_id, &mut r) {
 				if r.len() == m_max {
@@ -749,41 +807,31 @@ mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::dynamicset::DynamicSet;
-	use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswIndex};
+	use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswFlavor, HnswIndex};
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, HnswParams, VectorType};
+	use hashbrown::{hash_map::Entry, HashMap, HashSet};
 	use ndarray::Array1;
 	use roaring::RoaringTreemap;
-	use std::collections::hash_map::Entry;
-	use std::collections::{HashMap, HashSet};
 	use std::sync::Arc;
 	use test_log::test;
 
-	fn insert_collection_hnsw<L0, L>(
-		h: &mut Hnsw<L0, L>,
+	fn insert_collection_hnsw(
+		h: &mut HnswFlavor,
 		collection: &TestCollection,
-	) -> HashSet<SharedVector>
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-	{
+	) -> HashSet<SharedVector> {
 		let mut set = HashSet::new();
 		for (_, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone().into();
 			h.insert(obj.clone());
 			set.insert(obj);
-			check_hnsw_properties(h, set.len());
-			h.debug_print_check();
+			h.check_hnsw_properties(set.len());
 		}
 		set
 	}
-	fn find_collection_hnsw<L0, L>(h: &mut Hnsw<L0, L>, collection: &TestCollection)
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-	{
+	fn find_collection_hnsw(h: &HnswFlavor, collection: &TestCollection) {
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
 			let obj = obj.clone().into();
@@ -792,18 +840,17 @@ mod tests {
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
-						if h.elements[&e_id].eq(&obj) {
+						if h.element(e_id).eq(&obj) {
 							found = true;
 							break;
 						}
 					}
 					assert!(
 						found,
-						"Search: {:?} - Knn: {} - Vector not found - Got: {:?} - Dist: {} - Coll: {}",
+						"Search: {:?} - Knn: {} - Vector not found - Got: {:?} - Coll: {}",
 						obj,
 						knn,
 						res,
-						h.dist,
 						collection.len(),
 					);
 				}
@@ -814,11 +861,10 @@ mod tests {
 				assert_eq!(
 					expected_len,
 					res.len(),
-					"Wrong knn count - Expected: {} - Got: {} - Collection: {} - Dist: {} - Res: {:?}",
+					"Wrong knn count - Expected: {} - Got: {} - Collection: {} - - Res: {:?}",
 					expected_len,
 					res.len(),
 					collection.len(),
-					h.dist,
 					res,
 				)
 			}
@@ -826,9 +872,9 @@ mod tests {
 	}
 
 	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
-		let mut h = Hnsw::new(p);
+		let mut h = HnswFlavor::new(p);
 		insert_collection_hnsw(&mut h, collection);
-		find_collection_hnsw(&mut h, &collection);
+		find_collection_hnsw(&h, &collection);
 	}
 
 	fn new_params(
@@ -918,7 +964,7 @@ mod tests {
 					e.insert(HashSet::from([*doc_id]));
 				}
 			}
-			check_hnsw_properties(&h.hnsw, map.len());
+			h.hnsw.check_hnsw_properties(map.len());
 		}
 		map
 	}
@@ -971,7 +1017,7 @@ mod tests {
 					e.remove();
 				}
 			}
-			check_hnsw_properties(&h.hnsw, map.len());
+			h.hnsw.check_hnsw_properties(map.len());
 		}
 	}
 
@@ -1043,7 +1089,7 @@ mod tests {
 			(10, new_i16_vec(0, 3)),
 		]);
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
-		let mut h = Hnsw::new(&p);
+		let mut h = HnswFlavor::new(&p);
 		insert_collection_hnsw(&mut h, &collection);
 		let pt = new_i16_vec(-2, -3);
 		let knn = 10;
@@ -1159,7 +1205,22 @@ mod tests {
 		.await
 	}
 
-	fn check_hnsw_properties<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
+	impl HnswFlavor {
+		fn check_hnsw_properties(&self, expected_count: usize) {
+			match self {
+				HnswFlavor::Array4(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Array8(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Array12(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Array16(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Array20(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Array24(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Array28(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Hash(h) => check_hnsw_props(h, expected_count),
+			}
+		}
+	}
+
+	fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
 	where
 		L0: DynamicSet<ElementId>,
 		L: DynamicSet<ElementId>,
@@ -1190,6 +1251,7 @@ mod tests {
 				);
 			}
 		}
+		h.debug_print_check();
 	}
 
 	impl TestCollection {

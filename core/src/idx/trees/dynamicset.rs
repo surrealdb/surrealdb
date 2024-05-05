@@ -1,7 +1,8 @@
 use hashbrown::HashSet;
+use std::fmt::Debug;
 use std::hash::Hash;
 
-pub trait DynamicSet<T>
+pub trait DynamicSet<T>: Debug
 where
 	T: Eq + Hash + Clone + Default + 'static,
 {
@@ -19,7 +20,7 @@ pub struct HashBrownSet<T>(HashSet<T>);
 
 impl<T> DynamicSet<T> for HashBrownSet<T>
 where
-	T: Eq + Hash + Clone + Default + 'static,
+	T: Eq + Hash + Clone + Default + Debug + 'static,
 {
 	#[inline]
 	fn with_capacity(capacity: usize) -> Self {
@@ -68,7 +69,7 @@ where
 
 impl<T, const N: usize> DynamicSet<T> for ArraySet<T, N>
 where
-	T: Eq + Hash + Clone + Copy + Default + 'static,
+	T: Eq + Hash + Clone + Copy + Default + Debug + 'static,
 {
 	fn with_capacity(capacity: usize) -> Self {
 		assert_eq!(capacity, N);
