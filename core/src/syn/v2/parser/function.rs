@@ -317,7 +317,7 @@ mod test {
 			from: Value::Param(Param(Ident("from".to_owned()))),
 			kind: Value::Param(Param(Ident("kind".to_owned()))),
 			with: Value::Param(Param(Ident("to".to_owned()))),
-			data: Some(Data::ContentExpresion(Value::Param(Param(Ident("data".to_owned()))))),
+			data: Some(Data::ContentExpression(Value::Param(Param(Ident("data".to_owned()))))),
 			..Default::default()
 		});
 		assert_eq!(out, sql::Query(Statements(vec![relate])))

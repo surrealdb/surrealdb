@@ -9,7 +9,7 @@ use super::super::{
 	value::{array, value as sql_value},
 	IResult,
 };
-use crate::sql::{statements::RelateStatement, Data, Value};
+use crate::sql::{statements::RelateStatement, Value};
 use nom::{
 	branch::alt,
 	bytes::complete::{tag, tag_no_case},
@@ -130,7 +130,7 @@ mod tests {
 			out,
 			RelateStatement {
 				only: false,
-				kind: Value::Param(Param(Ident("koala".to_owned()))),
+				kind: Value::Table(Table("koala".to_owned())),
 				from: Value::Param(Param(Ident("tobie".to_owned()))),
 				with: Value::Param(Param(Ident("bla".to_owned()))),
 				uniq: false,
