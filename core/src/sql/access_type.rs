@@ -89,7 +89,7 @@ pub enum JwtAccessVerify {
 
 impl Default for JwtAccessVerify {
 	fn default() -> Self {
-		Self::Key(JwtAccessVerifyKey{
+		Self::Key(JwtAccessVerifyKey {
 			..Default::default()
 		})
 	}

@@ -81,14 +81,14 @@ impl ser::Serializer for SerializerRecord {
 
 #[derive(Default)]
 #[non_exhaustive]
-pub struct SerializeRecord{
+pub struct SerializeRecord {
 	pub duration: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
 }
 
-impl serde::ser::SerializeStruct for SerializeRecord{
+impl serde::ser::SerializeStruct for SerializeRecord {
 	type Ok = RecordAccess;
 	type Error = Error;
 
