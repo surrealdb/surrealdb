@@ -1,7 +1,7 @@
 use crate::err::Error;
-use crate::sql::statements::DefineTokenStatement;
+use crate::sql::access_type::AccessType;
+use crate::sql::statements::DefineAccessStatement;
 use crate::sql::value::serde::ser;
-use crate::sql::Algorithm;
 use crate::sql::Base;
 use crate::sql::Ident;
 use crate::sql::Strand;
@@ -14,18 +14,18 @@ use serde::ser::Serialize;
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
-	type Ok = DefineTokenStatement;
+	type Ok = DefineAccessStatement;
 	type Error = Error;
 
-	type SerializeSeq = Impossible<DefineTokenStatement, Error>;
-	type SerializeTuple = Impossible<DefineTokenStatement, Error>;
-	type SerializeTupleStruct = Impossible<DefineTokenStatement, Error>;
-	type SerializeTupleVariant = Impossible<DefineTokenStatement, Error>;
-	type SerializeMap = Impossible<DefineTokenStatement, Error>;
-	type SerializeStruct = SerializeDefineTokenStatement;
-	type SerializeStructVariant = Impossible<DefineTokenStatement, Error>;
+	type SerializeSeq = Impossible<DefineAccessStatement, Error>;
+	type SerializeTuple = Impossible<DefineAccessStatement, Error>;
+	type SerializeTupleStruct = Impossible<DefineAccessStatement, Error>;
+	type SerializeTupleVariant = Impossible<DefineAccessStatement, Error>;
+	type SerializeMap = Impossible<DefineAccessStatement, Error>;
+	type SerializeStruct = SerializeDefineAccessStatement;
+	type SerializeStructVariant = Impossible<DefineAccessStatement, Error>;
 
-	const EXPECTED: &'static str = "a struct `DefineTokenStatement`";
+	const EXPECTED: &'static str = "a struct `DefineAccessStatement`";
 
 	#[inline]
 	fn serialize_struct(
@@ -33,23 +33,22 @@ impl ser::Serializer for Serializer {
 		_name: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStruct, Error> {
-		Ok(SerializeDefineTokenStatement::default())
+		Ok(SerializeDefineAccessStatement::default())
 	}
 }
 
 #[derive(Default)]
 #[non_exhaustive]
-pub struct SerializeDefineTokenStatement {
+pub struct SerializeDefineAccessStatement {
 	name: Ident,
 	base: Base,
-	kind: Algorithm,
-	code: String,
+	kind: AccessType,
 	comment: Option<Strand>,
 	if_not_exists: bool,
 }
 
-impl serde::ser::SerializeStruct for SerializeDefineTokenStatement {
-	type Ok = DefineTokenStatement;
+impl serde::ser::SerializeStruct for SerializeDefineAccessStatement {
+	type Ok = DefineAccessStatement;
 	type Error = Error;
 
 	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Error>
@@ -64,10 +63,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTokenStatement {
 				self.base = value.serialize(ser::base::Serializer.wrap())?;
 			}
 			"kind" => {
-				self.kind = value.serialize(ser::algorithm::Serializer.wrap())?;
-			}
-			"code" => {
-				self.code = value.serialize(ser::string::Serializer.wrap())?;
+				self.kind = value.serialize(ser::access_type::Serializer.wrap())?;
 			}
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
@@ -77,7 +73,7 @@ impl serde::ser::SerializeStruct for SerializeDefineTokenStatement {
 			}
 			key => {
 				return Err(Error::custom(format!(
-					"unexpected field `DefineTokenStatement::{key}`"
+					"unexpected field `DefineAccessStatement::{key}`"
 				)));
 			}
 		}
@@ -85,11 +81,10 @@ impl serde::ser::SerializeStruct for SerializeDefineTokenStatement {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		Ok(DefineTokenStatement {
+		Ok(DefineAccessStatement {
 			name: self.name,
 			base: self.base,
 			kind: self.kind,
-			code: self.code,
 			comment: self.comment,
 			if_not_exists: self.if_not_exists,
 		})
@@ -102,8 +97,8 @@ mod tests {
 
 	#[test]
 	fn default() {
-		let stmt = DefineTokenStatement::default();
-		let value: DefineTokenStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		let stmt = DefineAccessStatement::default();
+		let value: DefineAccessStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 }

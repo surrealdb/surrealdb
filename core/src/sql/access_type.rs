@@ -87,6 +87,14 @@ pub enum JwtAccessVerify {
 	Jwks(JwtAccessVerifyJwks),
 }
 
+impl Default for JwtAccessVerify {
+	fn default() -> Self {
+		Self::Key(JwtAccessVerifyKey{
+			..Default::default()
+		})
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 pub struct JwtAccessVerifyKey {
