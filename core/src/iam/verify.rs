@@ -28,7 +28,7 @@ async fn config(
 		#[cfg(feature = "jwks")]
 		// The key identifier header must be present
 		if let Some(kid) = _token_header.kid {
-			jwks::config(_kvs, &kid, &de_code).await
+			jwks::config(_kvs, &kid, &de_code, _token_header.alg).await
 		} else {
 			Err(Error::MissingTokenHeader("kid".to_string()))
 		}

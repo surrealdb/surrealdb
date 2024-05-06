@@ -166,7 +166,7 @@ fn statements() -> Vec<Statement> {
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(60) * 10,
-				store_original: false,
+				store_diff: false,
 			}),
 			if_not_exists: false,
 		})),
@@ -244,7 +244,7 @@ fn statements() -> Vec<Statement> {
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
-				store_original: false,
+				store_diff: false,
 			}),
 			comment: None,
 			if_not_exists: false,
@@ -433,10 +433,10 @@ fn statements() -> Vec<Statement> {
 				vec![Part::Field(Ident("baq".to_owned()))],
 			)))])))),
 		}),
-		Statement::Info(InfoStatement::Root),
-		Statement::Info(InfoStatement::Ns),
-		Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()))),
-		Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns))),
+		Statement::Info(InfoStatement::Root(false)),
+		Statement::Info(InfoStatement::Ns(false)),
+		Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()), false)),
+		Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns), false)),
 		Statement::Select(SelectStatement {
 			expr: Fields(
 				vec![

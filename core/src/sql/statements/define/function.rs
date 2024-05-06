@@ -3,18 +3,19 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
 	fmt::{is_pretty, pretty_indent},
-	Base, Block, Ident, Kind, Permission, Strand, Value,
+	Base, Block, Ident, Kind, Object, Permission, Strand, Value,
 };
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct DefineFunctionStatement {
 	pub name: Ident,
@@ -91,5 +92,41 @@ impl fmt::Display for DefineFunctionStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineFunctionStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			args,
+			block,
+			comment,
+			permissions,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		acc.insert(
+			"args".to_string(),
+			Value::Array(
+				args.into_iter()
+					.map(|(n, k)| Value::Array(vec![n.structure(), k.structure()].into()))
+					.collect::<Vec<Value>>()
+					.into(),
+			),
+		);
+
+		acc.insert("block".to_string(), block.structure());
+
+		acc.insert("permissions".to_string(), permissions.structure());
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }

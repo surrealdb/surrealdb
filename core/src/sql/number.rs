@@ -1,5 +1,6 @@
 use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
+use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
 use revision::revisioned;
 use rust_decimal::prelude::*;
@@ -13,9 +14,9 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Number")]
-#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Number {
@@ -733,5 +734,11 @@ impl Sort for Vec<Number> {
 	fn sorted(&mut self) -> Sorted<&Vec<Number>> {
 		self.sort();
 		Sorted(self)
+	}
+}
+
+impl ToFloat for Number {
+	fn to_float(&self) -> f64 {
+		self.to_float()
 	}
 }

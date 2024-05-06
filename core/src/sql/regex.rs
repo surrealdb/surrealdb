@@ -1,6 +1,5 @@
 use once_cell::sync::Lazy;
-use quick_cache::sync::Cache;
-use quick_cache::GuardResult;
+use quick_cache::sync::{Cache, GuardResult};
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},
@@ -15,8 +14,8 @@ use std::{env, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 
-#[derive(Clone)]
 #[revisioned(revision = 1)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct Regex(pub regex::Regex);
 

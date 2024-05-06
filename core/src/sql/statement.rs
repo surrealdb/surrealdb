@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	statements::{
@@ -14,6 +15,7 @@ use crate::sql::{
 	value::Value,
 };
 use derive::Store;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,9 +24,9 @@ use std::{
 	time::Duration,
 };
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub struct Statements(pub Vec<Statement>);
 
@@ -52,9 +54,9 @@ impl Display for Statements {
 	}
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Statement {
 	Value(Value),
@@ -84,6 +86,8 @@ pub enum Statement {
 	Update(UpdateStatement),
 	Throw(ThrowStatement),
 	Use(UseStatement),
+	#[revision(start = 2)]
+	Rebuild(RebuildStatement),
 }
 
 impl Statement {
@@ -117,6 +121,7 @@ impl Statement {
 			Self::Live(_) => true,
 			Self::Output(v) => v.writeable(),
 			Self::Option(_) => false,
+			Self::Rebuild(_) => true,
 			Self::Relate(v) => v.writeable(),
 			Self::Remove(_) => true,
 			Self::Select(v) => v.writeable(),
@@ -132,6 +137,7 @@ impl Statement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -141,29 +147,30 @@ impl Statement {
 			Self::Analyze(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Break(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Continue(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Create(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Delete(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Define(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Foreach(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Ifelse(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Create(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Delete(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Define(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Foreach(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Ifelse(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Info(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Insert(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Kill(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Live(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Output(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Relate(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Insert(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Kill(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Live(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Output(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Relate(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Rebuild(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Remove(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Select(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Set(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Select(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Set(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Show(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Sleep(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Throw(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Update(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Throw(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Update(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Value(v) => {
 				// Ensure futures are processed
 				let opt = &opt.new_with_futures(true);
 				// Process the output value
-				v.compute(ctx, opt, txn, doc).await
+				v.compute(stk, ctx, opt, txn, doc).await
 			}
 			_ => unreachable!(),
 		}
@@ -191,6 +198,7 @@ impl Display for Statement {
 			Self::Live(v) => write!(Pretty::from(f), "{v}"),
 			Self::Option(v) => write!(Pretty::from(f), "{v}"),
 			Self::Output(v) => write!(Pretty::from(f), "{v}"),
+			Self::Rebuild(v) => write!(Pretty::from(f), "{v}"),
 			Self::Relate(v) => write!(Pretty::from(f), "{v}"),
 			Self::Remove(v) => write!(Pretty::from(f), "{v}"),
 			Self::Select(v) => write!(Pretty::from(f), "{v}"),

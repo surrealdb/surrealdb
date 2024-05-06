@@ -1,3 +1,4 @@
+use crate::syn::token::VectorTypeKind;
 use crate::{
 	sql::change_feed_include::ChangeFeedInclude,
 	sql::{language::Language, Algorithm},
@@ -23,6 +24,7 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("KILL"),
 	UniCase::ascii("LIVE"),
 	UniCase::ascii("OPTION"),
+	UniCase::ascii("REBUILD"),
 	UniCase::ascii("RETURN"),
 	UniCase::ascii("RELATE"),
 	UniCase::ascii("REMOVE"),
@@ -162,6 +164,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("READONLY") => TokenKind::Keyword(Keyword::Readonly),
 	UniCase::ascii("RELATE") => TokenKind::Keyword(Keyword::Relate),
 	UniCase::ascii("RELATION") => TokenKind::Keyword(Keyword::Relation),
+	UniCase::ascii("REBUILD") => TokenKind::Keyword(Keyword::Rebuild),
 	UniCase::ascii("REMOVE") => TokenKind::Keyword(Keyword::Remove),
 	UniCase::ascii("REPLACE") => TokenKind::Keyword(Keyword::Replace),
 	UniCase::ascii("RETURN") => TokenKind::Keyword(Keyword::Return),
@@ -185,6 +188,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("SNOWBALL") => TokenKind::Keyword(Keyword::Snowball),
 	UniCase::ascii("SPLIT") => TokenKind::Keyword(Keyword::Split),
 	UniCase::ascii("START") => TokenKind::Keyword(Keyword::Start),
+	UniCase::ascii("STRUCTURE") => TokenKind::Keyword(Keyword::Structure),
 	UniCase::ascii("TABLE") => TokenKind::Keyword(Keyword::Table),
 	UniCase::ascii("TB") => TokenKind::Keyword(Keyword::Table),
 	UniCase::ascii("TERMS_CACHE") => TokenKind::Keyword(Keyword::TermsCache),
@@ -338,6 +342,13 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MANHATTAN") => TokenKind::Distance(DistanceKind::Manhattan),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 	UniCase::ascii("PEARSON") => TokenKind::Distance(DistanceKind::Pearson),
+
+	// VectorTypes
+	UniCase::ascii("F64") => TokenKind::VectorType(VectorTypeKind::F64),
+	UniCase::ascii("F32") => TokenKind::VectorType(VectorTypeKind::F32),
+	UniCase::ascii("I64") => TokenKind::VectorType(VectorTypeKind::I64),
+	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
+	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 
 	// Change Feed keywords
 	UniCase::ascii("ORIGINAL") => TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original),

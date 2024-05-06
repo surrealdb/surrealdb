@@ -19,7 +19,7 @@ fn bench_index_btree(c: &mut Criterion) {
 	let (samples_len, samples) = setup();
 
 	let mut group = c.benchmark_group("index_btree");
-	group.throughput(Throughput::Elements(1));
+	group.throughput(Throughput::Elements(samples_len as u64));
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(30));
 
@@ -66,8 +66,9 @@ where
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut t = BTree::<BK>::new(BState::new(100));
-	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
-	let mut s = TreeStore::new(TreeNodeProvider::Debug, c, Write).await;
+	let np = TreeNodeProvider::Debug;
+	let c = TreeCache::new(0, np.get_key(0), np.clone(), cache_size);
+	let mut s = TreeStore::new(np, c.into(), Write).await;
 	for i in 0..samples_size {
 		let (key, payload) = sample_provider(i);
 		// Insert the sample

@@ -3,15 +3,16 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{escape::quote_str, Algorithm, Base, Ident, Strand, Value};
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{escape::quote_str, Algorithm, Base, Ident, Object, Strand, Value};
 use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct DefineTokenStatement {
 	pub name: Ident,
@@ -141,5 +142,33 @@ impl Display for DefineTokenStatement {
 			write!(f, " COMMENT {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl InfoStructure for DefineTokenStatement {
+	fn structure(self) -> Value {
+		let Self {
+			name,
+			base,
+			kind,
+			code,
+			comment,
+			..
+		} = self;
+		let mut acc = Object::default();
+
+		acc.insert("name".to_string(), name.structure());
+
+		acc.insert("base".to_string(), base.structure());
+
+		acc.insert("kind".to_string(), kind.structure());
+
+		acc.insert("code".to_string(), code.into());
+
+		if let Some(comment) = comment {
+			acc.insert("comment".to_string(), comment.into());
+		}
+
+		Value::Object(acc)
 	}
 }

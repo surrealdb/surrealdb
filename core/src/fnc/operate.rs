@@ -6,6 +6,7 @@ use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::TryRem;
 use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
 use crate::sql::{Expression, Thing};
+use reblessive::tree::Stk;
 
 pub fn neg(a: Value) -> Result<Value, Error> {
 	a.try_neg()
@@ -210,20 +211,29 @@ fn get_executor_option<'a>(
 	ExecutorOption::None
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn matches(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
+	opt: &Options,
 	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
+	l: Value,
+	r: Value,
 ) -> Result<Value, Error> {
-	match get_executor_option(ctx, doc, exp) {
-		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
-		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
-	}
+	let res = match get_executor_option(ctx, doc, exp) {
+		ExecutorOption::PreMatch => true,
+		ExecutorOption::None => false,
+		ExecutorOption::Execute(exe, thg) => {
+			exe.matches(stk, ctx, opt, txn, thg, exp, l, r).await?
+		}
+	};
+	Ok(res.into())
 }
 
 pub(crate) async fn knn(
+	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
 	txn: &Transaction,
@@ -233,7 +243,7 @@ pub(crate) async fn knn(
 	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.knn(ctx, opt, txn, thg, doc, exp).await,
+		ExecutorOption::Execute(exe, thg) => exe.knn(stk, ctx, opt, txn, thg, doc, exp).await,
 	}
 }
 

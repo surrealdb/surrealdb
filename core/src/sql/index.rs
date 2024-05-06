@@ -1,19 +1,20 @@
 use crate::err::Error;
 use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineSimilarity, EuclideanDistance, HammingDistance, JaccardSimilarity,
+	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
 	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
 };
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
-use crate::sql::Number;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Number, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Index {
 	/// (Basic) non unique
@@ -27,9 +28,9 @@ pub enum Index {
 	MTree(MTreeParams),
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct SearchParams {
 	pub az: Ident,
@@ -49,9 +50,9 @@ pub struct SearchParams {
 	pub terms_cache: u32,
 }
 
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 2)]
 #[non_exhaustive]
 pub struct MTreeParams {
 	pub dimension: u16,
@@ -85,9 +86,9 @@ impl MTreeParams {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Distance1 {
 	#[default]
@@ -98,9 +99,9 @@ pub enum Distance1 {
 	Minkowski(Number),
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum Distance {
 	Chebyshev,
@@ -117,7 +118,7 @@ pub enum Distance {
 impl Distance {
 	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
 		match self {
-			Self::Cosine => v1.cosine_similarity(v2),
+			Self::Cosine => v1.cosine_distance(v2),
 			Self::Chebyshev => v1.chebyshev_distance(v2),
 			Self::Euclidean => v1.euclidean_distance(v2),
 			Self::Hamming => v1.hamming_distance(v2),
@@ -144,9 +145,9 @@ impl Display for Distance {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[revisioned(revision = 1)]
 #[non_exhaustive]
 pub enum VectorType {
 	#[default]
@@ -202,5 +203,11 @@ impl Display for Index {
 				)
 			}
 		}
+	}
+}
+
+impl InfoStructure for Index {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }

@@ -626,7 +626,7 @@ jobs:
           sed -i "0,/surrealdb-core/s//surrealdb-core-${{ inputs.environment }}/" core/Cargo.toml
 
           # Patch lib dependency
-          sed -i "s#package = \"surrealdb-core\"#package = \"surrealdb-core-${{ inputs.environment }}\"#" lib/Cargo.toml
+          sed -i "s#path = \"\.\./core\", package = \"surrealdb-core\"#path = \"../core\", package = \"surrealdb-core-${{ inputs.environment }}\"#" lib/Cargo.toml
 
           # Patch the description
           sed -i "s#^description = \".*\"#description = \"A ${{ inputs.environment }} release of the surrealdb crate\"#" lib/Cargo.toml

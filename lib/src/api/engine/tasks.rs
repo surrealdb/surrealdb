@@ -1,6 +1,7 @@
 use flume::Sender;
 use futures::StreamExt;
 use futures_concurrency::stream::Merge;
+use reblessive::TreeStack;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -125,6 +126,8 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 	let (tx, rx) = flume::bounded(1);
 
 	let _fut = spawn_future(async move {
+		let mut stack = TreeStack::new();
+
 		let _lifecycle = crate::dbs::LoggingLifecycle::new("live query agent task".to_string());
 		if !FFLAGS.change_feed_live_queries.enabled() {
 			// TODO verify test fails since return without completion
@@ -144,7 +147,9 @@ fn live_query_change_feed(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTa
 
 		let opt = Options::default();
 		while let Some(Some(_)) = streams.next().await {
-			if let Err(e) = dbs.process_lq_notifications(&opt).await {
+			if let Err(e) =
+				stack.enter(|stk| dbs.process_lq_notifications(stk, &opt)).finish().await
+			{
 				error!("Error running node agent tick: {}", e);
 				break;
 			}

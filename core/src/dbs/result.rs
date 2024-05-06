@@ -14,6 +14,7 @@ use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement, Transaction};
 use crate::err::Error;
 use crate::sql::{Orders, Value};
+use reblessive::tree::Stk;
 
 pub(super) enum Results {
 	None,
@@ -63,6 +64,7 @@ impl Results {
 
 	pub(super) async fn push(
 		&mut self,
+		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -86,7 +88,7 @@ impl Results {
 				e.push(val)?;
 			}
 			Self::Groups(g) => {
-				g.push(ctx, opt, txn, stm, val).await?;
+				g.push(stk, ctx, opt, txn, stm, val).await?;
 			}
 		}
 		Ok(())
