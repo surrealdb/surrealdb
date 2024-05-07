@@ -208,9 +208,21 @@ enum HnswFlavor {
 impl HnswFlavor {
 	fn new(p: &HnswParams) -> Self {
 		match p.m {
-			1..=4 => Self::M1to4(Hnsw::new(p)),
-			5..=8 => Self::M5to8(Hnsw::new(p)),
-			9..=12 => Self::M9to12(Hnsw::new(p)),
+			1..=4 => match p.m0 {
+				1..=8 => Self::M1to4(Hnsw::new(p)),
+				9..=16 => Self::M5to8(Hnsw::new(p)),
+				17..=24 => Self::M9to12(Hnsw::new(p)),
+				_ => Self::Many(Hnsw::new(p)),
+			},
+			5..=8 => match p.m0 {
+				1..=16 => Self::M5to8(Hnsw::new(p)),
+				17..=24 => Self::M9to12(Hnsw::new(p)),
+				_ => Self::Many(Hnsw::new(p)),
+			},
+			9..=12 => match p.m0 {
+				17..=24 => Self::M9to12(Hnsw::new(p)),
+				_ => Self::Many(Hnsw::new(p)),
+			},
 			13..=16 => Self::M13to16(Hnsw::new(p)),
 			17..=20 => Self::M17to20(Hnsw::new(p)),
 			21..=24 => Self::M21to24(Hnsw::new(p)),
