@@ -127,6 +127,7 @@ keyword! {
 	PostingsOrder => "POSTINGS_ORDER",
 	Punct => "PUNCT",
 	Readonly => "READONLY",
+	Rebuild => "REBUILD",
 	Relate => "RELATE",
 	Relation => "RELATION",
 	Remove => "REMOVE",

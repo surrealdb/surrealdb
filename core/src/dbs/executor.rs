@@ -95,7 +95,7 @@ impl<'a> Executor<'a> {
 									let lqs: Vec<TrackedResult> =
 										txn.consume_pending_live_queries();
 									// Track the live queries in the data store
-									self.kvs.adapt_tracked_live_queries(&lqs).await?;
+									self.kvs.handle_postprocessing_of_statements(&lqs).await?;
 									Ok(())
 								}
 								Err(e) => Err(e),

@@ -23,7 +23,6 @@ mod env;
 mod err;
 mod mem;
 mod net;
-mod node;
 mod rpc;
 mod telemetry;
 

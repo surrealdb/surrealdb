@@ -155,7 +155,7 @@ fn parse_define_database() {
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(60) * 10,
-				store_original: true,
+				store_diff: true,
 			}),
 			if_not_exists: false,
 		}))
@@ -414,7 +414,7 @@ fn parse_define_table() {
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
-				store_original: true,
+				store_diff: true,
 			}),
 			comment: None,
 			if_not_exists: false,

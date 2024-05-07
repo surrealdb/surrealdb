@@ -1,6 +1,9 @@
 use crate::sql::part::Part;
 use once_cell::sync::Lazy;
 
+pub const OBJ_PATH_ACCESS: &str = "ac";
+pub const OBJ_PATH_AUTH: &str = "rd";
+
 pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 
 pub static IP: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("ip")]);
@@ -15,7 +18,7 @@ pub static RD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("rd")]);
 
 pub static OR: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("or")]);
 
-pub static TK: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("tk")]);
+pub static TK: Lazy<[Part; 1]> = Lazy::new(|| [Part::from(OBJ_PATH_TOKEN)]);
 
 pub static IN: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("in")]);
 
