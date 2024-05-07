@@ -384,13 +384,9 @@ where
 			if Some(e_id) == self.enter_point {
 				// Let's find a new enter point
 				new_enter_point = if layers == 0 {
-					self.layer0.search_layer_single_ignore_ep(&self.elements, &e_pt, e_id)
+					self.layer0.search_single_ignore_ep(&self.elements, &e_pt, e_id)
 				} else {
-					self.layers[layers - 1].search_layer_single_ignore_ep(
-						&self.elements,
-						&e_pt,
-						e_id,
-					)
+					self.layers[layers - 1].search_single_ignore_ep(&self.elements, &e_pt, e_id)
 				};
 			}
 
@@ -398,13 +394,13 @@ where
 
 			// Remove from the up layers
 			for layer in self.layers.iter_mut().rev() {
-				if layer.remove_from_layer(&self.elements, &self.heuristic, e_id, self.efc) {
+				if layer.remove(&self.elements, &self.heuristic, e_id, self.efc) {
 					removed = true;
 				}
 			}
 
 			// Remove from layer 0
-			if self.layer0.remove_from_layer(&self.elements, &self.heuristic, e_id, self.efc) {
+			if self.layer0.remove(&self.elements, &self.heuristic, e_id, self.efc) {
 				removed = true;
 			}
 
@@ -445,7 +441,7 @@ where
 		if q_level < top_up_layers {
 			for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
 				(ep_dist, ep_id) = layer
-					.search_layer_single(&self.elements, q_pt, ep_dist, ep_id, 1)
+					.search_single(&self.elements, q_pt, ep_dist, ep_id, 1)
 					.peek_first()
 					.unwrap_or_else(|| unreachable!())
 			}
@@ -456,18 +452,11 @@ where
 		let insert_to_up_layers = q_level.min(top_up_layers);
 		if insert_to_up_layers > 0 {
 			for layer in self.layers.iter_mut().take(insert_to_up_layers).rev() {
-				eps = layer.insert_element(
-					&self.elements,
-					&self.heuristic,
-					self.efc,
-					q_id,
-					q_pt,
-					eps,
-				);
+				eps = layer.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
 			}
 		}
 
-		self.layer0.insert_element(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
+		self.layer0.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
 
 		if top_up_layers < q_level {
 			for layer in self.layers[top_up_layers..q_level].iter_mut() {
@@ -490,12 +479,12 @@ where
 				self.elements.get_distance(q, &ep_id).unwrap_or_else(|| unreachable!());
 			for layer in self.layers.iter().rev() {
 				(ep_dist, ep_id) = layer
-					.search_layer_single(&self.elements, q, ep_dist, ep_id, 1)
+					.search_single(&self.elements, q, ep_dist, ep_id, 1)
 					.peek_first()
 					.unwrap_or_else(|| unreachable!());
 			}
 			{
-				let w = self.layer0.search_layer_single(&self.elements, q, ep_dist, ep_id, efs);
+				let w = self.layer0.search_single(&self.elements, q, ep_dist, ep_id, efs);
 				#[cfg(debug_assertions)]
 				if w.len() < expected_w_len {
 					debug!(

@@ -37,7 +37,7 @@ where
 	pub(super) fn add_empty_node(&mut self, node: ElementId) -> bool {
 		self.graph.add_empty_node(node)
 	}
-	pub(super) fn search_layer_single(
+	pub(super) fn search_single(
 		&self,
 		elements: &HnswElements,
 		q: &SharedVector,
@@ -48,10 +48,10 @@ where
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
-		self.search_layer(elements, q, candidates, visited, w, ef)
+		self.search(elements, q, candidates, visited, w, ef)
 	}
 
-	pub(super) fn search_layer_multi(
+	pub(super) fn search_multi(
 		&self,
 		elements: &HnswElements,
 		q: &SharedVector,
@@ -60,10 +60,10 @@ where
 	) -> DoublePriorityQueue {
 		let w = candidates.clone();
 		let visited = w.to_set();
-		self.search_layer(elements, q, candidates, visited, w, ef)
+		self.search(elements, q, candidates, visited, w, ef)
 	}
 
-	pub(super) fn search_layer_single_ignore_ep(
+	pub(super) fn search_single_ignore_ep(
 		&self,
 		elements: &HnswElements,
 		q: &SharedVector,
@@ -72,11 +72,11 @@ where
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = candidates.clone();
-		let q = self.search_layer(elements, q, candidates, visited, w, 1);
+		let q = self.search(elements, q, candidates, visited, w, 1);
 		q.peek_first()
 	}
 
-	pub(super) fn search_layer_multi_ignore_ep(
+	pub(super) fn search_multi_ignore_ep(
 		&self,
 		elements: &HnswElements,
 		q: &SharedVector,
@@ -86,10 +86,10 @@ where
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = DoublePriorityQueue::default();
-		self.search_layer(elements, q, candidates, visited, w, ef)
+		self.search(elements, q, candidates, visited, w, ef)
 	}
 
-	pub(super) fn search_layer(
+	pub(super) fn search(
 		&self,
 		elements: &HnswElements,
 		q: &SharedVector,
@@ -128,7 +128,7 @@ where
 		w
 	}
 
-	pub(super) fn insert_element(
+	pub(super) fn insert(
 		&mut self,
 		elements: &HnswElements,
 		heuristic: &Heuristic,
@@ -140,7 +140,7 @@ where
 		let w;
 		let mut neighbors = self.graph.new_edges();
 		{
-			w = self.search_layer_multi(elements, q_pt, eps, efc);
+			w = self.search_multi(elements, q_pt, eps, efc);
 			eps = w.clone();
 			heuristic.select(elements, self, q_id, q_pt, w, &mut neighbors);
 		};
@@ -182,7 +182,7 @@ where
 		w
 	}
 
-	pub(super) fn remove_from_layer(
+	pub(super) fn remove(
 		&mut self,
 		elements: &HnswElements,
 		heuristic: &Heuristic,
@@ -192,7 +192,7 @@ where
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(&e_id) {
 			for &q_id in f_ids.iter() {
 				if let Some(q_pt) = elements.get_vector(&q_id) {
-					let c = self.search_layer_multi_ignore_ep(elements, q_pt, q_id, efc);
+					let c = self.search_multi_ignore_ep(elements, q_pt, q_id, efc);
 					let mut neighbors = self.graph.new_edges();
 					heuristic.select(elements, self, q_id, q_pt, c, &mut neighbors);
 					#[cfg(debug_assertions)]

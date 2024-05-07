@@ -112,6 +112,7 @@ where
 		self.size
 	}
 
+	#[inline]
 	fn is_empty(&self) -> bool {
 		self.size == 0
 	}
