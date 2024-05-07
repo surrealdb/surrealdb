@@ -86,6 +86,9 @@ impl Session {
 
 	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
+		// Add access method data
+		let val: Value = self.ac.to_owned().into();
+		ctx.add_value("access", val);
 		// Add record access data
 		let val: Value = self.rd.to_owned().into();
 		ctx.add_value("auth", val);

@@ -21,7 +21,7 @@ pub static MAX_COMPUTATION_DEPTH: Lazy<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
 /// Specifies the names of parameters which can not be specified in a query.
-pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "token", "session"];
+pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
 /// The characters which are supported in server record IDs.
 pub const ID_CHARS: [char; 36] = [

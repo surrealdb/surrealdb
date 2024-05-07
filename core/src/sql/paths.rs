@@ -9,9 +9,9 @@ pub static NS: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("ns")]);
 
 pub static DB: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("db")]);
 
-pub static SC: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("sc")]);
+pub static AC: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("ac")]);
 
-pub static SD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("sd")]);
+pub static RD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("rd")]);
 
 pub static OR: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("or")]);
 
