@@ -1,6 +1,9 @@
 use crate::{
 	sql::{
-		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
+		access_type::{
+			AccessType, JwtAccess, JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks,
+			JwtAccessVerifyKey, RecordAccess,
+		},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
@@ -9,16 +12,17 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement,
-			InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
-			RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement,
-			RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-			RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
-			RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-			SelectStatement, SetStatement, ThrowStatement, UpdateStatement, UseStatement,
+			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
+			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+			OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement,
+			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
+			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
+			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			UseStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -228,7 +232,7 @@ fn parse_define_access_jwt_key() {
 	.unwrap();
 	assert_eq!(
 		res,
-		Statement::Define(DefineStatement::Token(DefineAccessStatement {
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
 			kind: AccessType::Jwt(JwtAccess {
@@ -257,7 +261,7 @@ fn parse_define_access_jwt_jwks() {
 	.unwrap();
 	assert_eq!(
 		res,
-		Statement::Define(DefineStatement::Token(DefineAccessStatement {
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
 			kind: AccessType::Jwt(JwtAccess {
@@ -321,7 +325,7 @@ fn parse_define_access_record_with_jwt() {
 	.unwrap();
 	assert_eq!(
 		res,
-		Statement::Define(DefineStatement::Token(DefineAccessStatement {
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
 			kind: AccessType::Record(RecordAccess {

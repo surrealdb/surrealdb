@@ -1,6 +1,9 @@
 use crate::{
 	sql::{
-		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
+		access_type::{
+			AccessType, JwtAccess, JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyJwks,
+			JwtAccessVerifyKey, RecordAccess,
+		},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
@@ -191,7 +194,7 @@ fn statements() -> Vec<Statement> {
 			permissions: Permission::Full,
 			if_not_exists: false,
 		})),
-		Statement::Define(DefineStatement::Token(DefineAccessStatement {
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
 			base: Base::Db,
 			kind: AccessType::Record(RecordAccess {
