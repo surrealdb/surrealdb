@@ -28,6 +28,7 @@ use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
 use reblessive::tree::Stk;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -106,28 +107,27 @@ impl InnerQueryExecutor {
 			if let Some(idx_def) = im.definitions.get(ix_ref as usize) {
 				match &idx_def.index {
 					Index::Search(p) => {
-						let mut ft_entry = None;
-						if let Some(ft) = ft_map.get(&ix_ref) {
-							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(stk, ctx, opt, txn, ft, io).await?;
+						let ft_entry = match ft_map.entry(ix_ref) {
+							Entry::Occupied(e) => {
+								FtEntry::new(stk, ctx, opt, txn, e.get(), io).await?
 							}
-						} else {
-							let ikb = IndexKeyBase::new(opt, idx_def);
-							let ft = FtIndex::new(
-								ctx.get_index_stores(),
-								opt,
-								txn,
-								p.az.as_str(),
-								ikb,
-								p,
-								TransactionType::Read,
-							)
-							.await?;
-							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(stk, ctx, opt, txn, &ft, io).await?;
+							Entry::Vacant(e) => {
+								let ikb = IndexKeyBase::new(opt, idx_def);
+								let ft = FtIndex::new(
+									ctx.get_index_stores(),
+									opt,
+									txn,
+									p.az.as_str(),
+									ikb,
+									p,
+									TransactionType::Read,
+								)
+								.await?;
+								let fte = FtEntry::new(stk, ctx, opt, txn, &ft, io).await?;
+								e.insert(ft);
+								fte
 							}
-							ft_map.insert(ix_ref, ft);
-						}
+						};
 						if let Some(e) = ft_entry {
 							if let Matches(_, Some(mr)) = e.0.index_option.op() {
 								if mr_entries.insert(*mr, e.clone()).is_some() {
@@ -142,35 +142,41 @@ impl InnerQueryExecutor {
 					Index::MTree(p) => {
 						if let IndexOperator::Knn(a, k) = io.op() {
 							let mut tx = txn.lock().await;
-							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
-								MtEntry::new(&mut tx, mt, a, *k).await?
-							} else {
-								let ikb = IndexKeyBase::new(opt, idx_def);
-								let mt = MTreeIndex::new(
-									ctx.get_index_stores(),
-									&mut tx,
-									ikb,
-									p,
-									TransactionType::Read,
-								)
-								.await?;
-								let entry = MtEntry::new(&mut tx, &mt, a, *k).await?;
-								mt_map.insert(ix_ref, mt);
-								entry
+							let entry = match mt_map.entry(ix_ref) {
+								Entry::Occupied(e) => MtEntry::new(&mut tx, e.get(), a, *k).await?,
+								Entry::Vacant(e) => {
+									let ikb = IndexKeyBase::new(opt, idx_def);
+									let mt = MTreeIndex::new(
+										ctx.get_index_stores(),
+										&mut tx,
+										ikb,
+										p,
+										TransactionType::Read,
+									)
+									.await?;
+									let entry = MtEntry::new(&mut tx, &mt, a, *k).await?;
+									e.insert(mt);
+									entry
+								}
 							};
 							mt_entries.insert(exp, entry);
 						}
 					}
 					Index::Hnsw(p) => {
 						if let IndexOperator::Ann(a, n, ef) = io.op() {
-							let entry = if let Some(hnsw) = hnsw_map.get(&ix_ref).cloned() {
-								HnswEntry::new(hnsw, a, *n, *ef).await?
-							} else {
-								let hnsw =
-									ctx.get_index_stores().get_index_hnsw(opt, idx_def, p).await;
-								let entry = HnswEntry::new(hnsw.clone(), a, *n, *ef).await?;
-								hnsw_map.insert(ix_ref, hnsw);
-								entry
+							let entry = match hnsw_map.entry(ix_ref) {
+								Entry::Occupied(e) => {
+									HnswEntry::new(e.get().clone(), a, *n, *ef).await?
+								}
+								Entry::Vacant(e) => {
+									let hnsw = ctx
+										.get_index_stores()
+										.get_index_hnsw(opt, idx_def, p)
+										.await;
+									let entry = HnswEntry::new(hnsw.clone(), a, *n, *ef).await?;
+									e.insert(hnsw);
+									entry
+								}
 							};
 							hnsw_entries.insert(exp, entry);
 						}
