@@ -130,7 +130,7 @@ mod tests {
 			out,
 			RelateStatement {
 				only: false,
-				kind: Value::Table(Table("liek".to_owned())),
+				kind: Value::Table(Table("like".to_owned())),
 				from: Value::Param(Param(Ident("tobie".to_owned()))),
 				with: Value::Param(Param(Ident("koala".to_owned()))),
 				uniq: false,

@@ -556,7 +556,7 @@ pub(crate) fn router(
 
 impl Response {
 	fn try_from(message: &Message, supports_revision: bool) -> Result<Option<Self>> {
-		match message {
+		match dbg!(message) {
 			Message::Text(text) => {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
