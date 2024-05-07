@@ -130,9 +130,9 @@ mod tests {
 			out,
 			RelateStatement {
 				only: false,
-				kind: Value::Table(Table("koala".to_owned())),
+				kind: Value::Table(Table("liek".to_owned())),
 				from: Value::Param(Param(Ident("tobie".to_owned()))),
-				with: Value::Param(Param(Ident("bla".to_owned()))),
+				with: Value::Param(Param(Ident("koala".to_owned()))),
 				uniq: false,
 				data: Some(Data::ContentExpression(Value::Param(Param(Ident("bla".to_owned()))))),
 				output: None,

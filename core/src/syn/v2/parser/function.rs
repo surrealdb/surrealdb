@@ -101,8 +101,6 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use crate::rpc::Data;
-	use crate::rpc::Data::Query;
 	use crate::sql::statements::RelateStatement;
 	use crate::sql::{Param, Statement, Statements};
 	use crate::{
