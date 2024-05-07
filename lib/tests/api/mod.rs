@@ -52,14 +52,14 @@ async fn invalidate() {
 }
 
 #[test_log::test(tokio::test)]
-async fn signup_scope() {
+async fn signup_record() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
-	let scope = Ulid::new().to_string();
+	let access = Ulid::new().to_string();
 	let sql = format!(
 		"
-        DEFINE SCOPE `{scope}` SESSION 1s
+        DEFINE ACCESS `{ac}` ON DB TYPE RECORD DURATION 1s
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     "
@@ -67,10 +67,10 @@ async fn signup_scope() {
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	db.signup(Scope {
+	db.signup(Record {
 		namespace: NS,
 		database: &database,
-		scope: &scope,
+		access: &access,
 		params: AuthParams {
 			email: "john.doe@example.com",
 			pass: "password123",
@@ -121,16 +121,16 @@ async fn signin_db() {
 }
 
 #[test_log::test(tokio::test)]
-async fn signin_scope() {
+async fn signin_record() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
-	let scope = Ulid::new().to_string();
-	let email = format!("{scope}@example.com");
+	let access = Ulid::new().to_string();
+	let email = format!("{access}@example.com");
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE SCOPE `{scope}` SESSION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     "
@@ -138,10 +138,10 @@ async fn signin_scope() {
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	db.signup(Scope {
+	db.signup(Record {
 		namespace: NS,
 		database: &database,
-		scope: &scope,
+		access: &access,
 		params: AuthParams {
 			pass,
 			email: &email,
@@ -149,10 +149,10 @@ async fn signin_scope() {
 	})
 	.await
 	.unwrap();
-	db.signin(Scope {
+	db.signin(Record {
 		namespace: NS,
 		database: &database,
-		scope: &scope,
+		access: &access,
 		params: AuthParams {
 			pass,
 			email: &email,
@@ -163,16 +163,16 @@ async fn signin_scope() {
 }
 
 #[test_log::test(tokio::test)]
-async fn scope_throws_error() {
+async fn record_access_throws_error() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
-	let scope = Ulid::new().to_string();
-	let email = format!("{scope}@example.com");
+	let access = Ulid::new().to_string();
+	let email = format!("{access}@example.com");
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE SCOPE `{scope}` SESSION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
         SIGNUP {{ THROW 'signup_thrown_error' }}
         SIGNIN {{ THROW 'signin_thrown_error' }}
     "
@@ -182,10 +182,10 @@ async fn scope_throws_error() {
 	response.check().unwrap();
 
 	match db
-		.signup(Scope {
+		.signup(Record {
 			namespace: NS,
 			database: &database,
-			scope: &scope,
+			access: &access,
 			params: AuthParams {
 				pass,
 				email: &email,
@@ -203,10 +203,10 @@ async fn scope_throws_error() {
 	};
 
 	match db
-		.signin(Scope {
+		.signin(Record {
 			namespace: NS,
 			database: &database,
-			scope: &scope,
+			access: &access,
 			params: AuthParams {
 				pass,
 				email: &email,
@@ -225,16 +225,16 @@ async fn scope_throws_error() {
 }
 
 #[test_log::test(tokio::test)]
-async fn scope_invalid_query() {
+async fn record_access_invalid_query() {
 	let (permit, db) = new_db().await;
 	let database = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&database).await.unwrap();
-	let scope = Ulid::new().to_string();
-	let email = format!("{scope}@example.com");
+	let access = Ulid::new().to_string();
+	let email = format!("{access}@example.com");
 	let pass = "password123";
 	let sql = format!(
 		"
-        DEFINE SCOPE `{scope}` SESSION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
         SIGNUP {{ SELECT * FROM ONLY [1, 2] }}
         SIGNIN {{ SELECT * FROM ONLY [1, 2] }}
     "
@@ -244,10 +244,10 @@ async fn scope_invalid_query() {
 	response.check().unwrap();
 
 	match db
-		.signup(Scope {
+		.signup(Access {
 			namespace: NS,
 			database: &database,
-			scope: &scope,
+			access: &access,
 			params: AuthParams {
 				pass,
 				email: &email,
@@ -267,10 +267,10 @@ async fn scope_invalid_query() {
 	};
 
 	match db
-		.signin(Scope {
+		.signin(Access {
 			namespace: NS,
 			database: &database,
-			scope: &scope,
+			access: &access,
 			params: AuthParams {
 				pass,
 				email: &email,

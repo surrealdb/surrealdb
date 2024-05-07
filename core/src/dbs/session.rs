@@ -23,8 +23,6 @@ pub struct Session {
 	pub ns: Option<String>,
 	/// The currently selected database
 	pub db: Option<String>,
-	/// The currently selected record
-	pub rid: Option<String>,
 	/// The current access method
 	pub ac: Option<String>,
 	/// The current authentication token
@@ -48,9 +46,9 @@ impl Session {
 		self
 	}
 
-	/// Set the selected record for the session
-	pub fn with_rid(mut self, rid: &str) -> Session {
-		self.rid = Some(rid.to_owned());
+	/// Set the selected access method for the session
+	pub fn with_ac(mut self, ac: &str) -> Session {
+		self.ac = Some(ac.to_owned());
 		self
 	}
 
@@ -105,7 +103,6 @@ impl Session {
 			"ns".to_string() => self.ns.to_owned().into(),
 			"or".to_string() => self.or.to_owned().into(),
 			"rd".to_string() => self.rd.to_owned().into(),
-			"rid".to_string() => self.rid.to_owned().into(),
 			"tk".to_string() => self.tk.to_owned().into(),
 		});
 		ctx.add_value("session", val);
@@ -134,6 +131,23 @@ impl Session {
 			_ => {}
 		}
 		sess
+	}
+
+	/// Create a record user session for a given NS and DB
+	pub fn for_record(ns: &str, db: &str, ac: &str, rid: Value) -> Session {
+		Session {
+			ac: Some(ac.to_owned()),
+			au: Arc::new(Auth::for_record(rid.to_string(), ns, db, ac)),
+			rt: false,
+			ip: None,
+			or: None,
+			id: None,
+			ns: Some(ns.to_owned()),
+			db: Some(db.to_owned()),
+			tk: None,
+			rd: Some(rid),
+			exp: None,
+		}
 	}
 
 	/// Create a system session for the root level with Owner role

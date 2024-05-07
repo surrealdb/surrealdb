@@ -5,6 +5,7 @@ use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
+use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::sql::Part;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
@@ -236,7 +237,7 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 		CREATE demo SET id = demo:one;
 		INSERT INTO demo (id) VALUES (demo:two);
 	";
-	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "test")).into());
+	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "test")).into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//

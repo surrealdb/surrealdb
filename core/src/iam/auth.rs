@@ -70,8 +70,8 @@ impl Auth {
 		Self::new(Actor::new("system_auth".into(), vec![role], (ns, db).into()))
 	}
 
-	pub fn for_rid(role: Role, ns: &str, db: &str, rid: &str) -> Self {
-		Self::new(Actor::new(rid.to_string(), vec![role], (ns, db, rid).into()))
+	pub fn for_record(rid: String, ns: &str, db: &str, ac: &str) -> Self {
+		Self::new(Actor::new(rid.to_string(), vec![], (ns, db, ac).into()))
 	}
 
 	//

@@ -243,7 +243,6 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			databases: { test: 'DEFINE DATABASE test' },
-			tokens: {},
 			users: {},
 		}",
 	);
@@ -252,12 +251,11 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",

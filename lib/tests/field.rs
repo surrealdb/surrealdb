@@ -842,7 +842,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 		RELATE business:one->contact:one->business:two;
 		RELATE business:two->contact:two->business:one;
 	";
-	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "one")).into());
+	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "one")).into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//

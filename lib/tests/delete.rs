@@ -456,7 +456,7 @@ async fn delete_with_permissions() -> Result<(), Error> {
 		DELETE friends_with:1 RETURN BEFORE;
 		DELETE friends_with:2 RETURN BEFORE;
 	";
-	let ses = Session::for_scope("test", "test", "test", Thing::from(("user", "john")).into());
+	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "john")).into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
