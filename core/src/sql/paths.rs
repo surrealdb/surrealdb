@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 
 pub const OBJ_PATH_ACCESS: &str = "ac";
 pub const OBJ_PATH_AUTH: &str = "rd";
+pub const OBJ_PATH_TOKEN: &str = "tk";
 
 pub static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 
@@ -12,9 +13,9 @@ pub static NS: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("ns")]);
 
 pub static DB: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("db")]);
 
-pub static AC: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("ac")]);
+pub static AC: Lazy<[Part; 1]> = Lazy::new(|| [Part::from(OBJ_PATH_ACCESS)]);
 
-pub static RD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("rd")]);
+pub static RD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from(OBJ_PATH_AUTH)]);
 
 pub static OR: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("or")]);
 
