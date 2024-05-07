@@ -1,14 +1,18 @@
+mod heuristic;
+mod layer;
+
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
-use crate::idx::trees::graph::UndirectedGraph;
+use crate::idx::trees::hnsw::heuristic::Heuristic;
+use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::knn::{DoublePriorityQueue, Ids64, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Key;
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::{Array, Thing, Value};
 use hashbrown::hash_map::Entry;
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashMap;
 use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -123,9 +127,10 @@ impl HnswIndex {
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
-				let v = self.hnsw.element(&e_id);
-				if let Some((docs, _)) = self.vec_docs.get(v) {
-					builder.add(e_dist, docs);
+				if let Some(v) = self.hnsw.get_vector(&e_id) {
+					if let Some((docs, _)) = self.vec_docs.get(v) {
+						builder.add(e_dist, docs);
+					}
 				}
 			}
 		}
@@ -190,74 +195,111 @@ impl HnswDocs {
 }
 
 enum HnswFlavor {
-	Array4(Hnsw<ArraySet<ElementId, 9>, ArraySet<ElementId, 5>>),
-	Array8(Hnsw<ArraySet<ElementId, 17>, ArraySet<ElementId, 9>>),
-	Array12(Hnsw<ArraySet<ElementId, 25>, ArraySet<ElementId, 13>>),
-	Array16(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 17>>),
-	Array20(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 21>>),
-	Array24(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 25>>),
-	Array28(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 29>>),
-	Hash(Hnsw<HashBrownSet<ElementId>, HashBrownSet<ElementId>>),
+	M1to4(Hnsw<ArraySet<ElementId, 9>, ArraySet<ElementId, 5>>),
+	M5to8(Hnsw<ArraySet<ElementId, 17>, ArraySet<ElementId, 9>>),
+	M9to12(Hnsw<ArraySet<ElementId, 25>, ArraySet<ElementId, 13>>),
+	M13to16(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 17>>),
+	M17to20(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 21>>),
+	M21to24(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 25>>),
+	M25to28(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 29>>),
+	Many(Hnsw<HashBrownSet<ElementId>, HashBrownSet<ElementId>>),
 }
 
 impl HnswFlavor {
 	fn new(p: &HnswParams) -> Self {
 		match p.m {
-			1..=4 => Self::Array4(Hnsw::new(p)),
-			_ => Self::Hash(Hnsw::new(p)),
+			1..=4 => Self::M1to4(Hnsw::new(p)),
+			5..=8 => Self::M5to8(Hnsw::new(p)),
+			9..=12 => Self::M9to12(Hnsw::new(p)),
+			13..=16 => Self::M13to16(Hnsw::new(p)),
+			17..=20 => Self::M17to20(Hnsw::new(p)),
+			21..=24 => Self::M21to24(Hnsw::new(p)),
+			25..=28 => Self::M25to28(Hnsw::new(p)),
+			_ => Self::Many(Hnsw::new(p)),
 		}
 	}
 
 	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
 		match self {
-			HnswFlavor::Array4(h) => h.insert(q_pt),
-			HnswFlavor::Array8(h) => h.insert(q_pt),
-			HnswFlavor::Array12(h) => h.insert(q_pt),
-			HnswFlavor::Array16(h) => h.insert(q_pt),
-			HnswFlavor::Array20(h) => h.insert(q_pt),
-			HnswFlavor::Array24(h) => h.insert(q_pt),
-			HnswFlavor::Array28(h) => h.insert(q_pt),
-			HnswFlavor::Hash(h) => h.insert(q_pt),
+			HnswFlavor::M1to4(h) => h.insert(q_pt),
+			HnswFlavor::M5to8(h) => h.insert(q_pt),
+			HnswFlavor::M9to12(h) => h.insert(q_pt),
+			HnswFlavor::M13to16(h) => h.insert(q_pt),
+			HnswFlavor::M17to20(h) => h.insert(q_pt),
+			HnswFlavor::M21to24(h) => h.insert(q_pt),
+			HnswFlavor::M25to28(h) => h.insert(q_pt),
+			HnswFlavor::Many(h) => h.insert(q_pt),
 		}
 	}
 
 	fn remove(&mut self, e_id: ElementId) -> bool {
 		match self {
-			HnswFlavor::Array4(h) => h.remove(e_id),
-			HnswFlavor::Array8(h) => h.remove(e_id),
-			HnswFlavor::Array12(h) => h.remove(e_id),
-			HnswFlavor::Array16(h) => h.remove(e_id),
-			HnswFlavor::Array20(h) => h.remove(e_id),
-			HnswFlavor::Array24(h) => h.remove(e_id),
-			HnswFlavor::Array28(h) => h.remove(e_id),
-			HnswFlavor::Hash(h) => h.remove(e_id),
+			HnswFlavor::M1to4(h) => h.remove(e_id),
+			HnswFlavor::M5to8(h) => h.remove(e_id),
+			HnswFlavor::M9to12(h) => h.remove(e_id),
+			HnswFlavor::M13to16(h) => h.remove(e_id),
+			HnswFlavor::M17to20(h) => h.remove(e_id),
+			HnswFlavor::M21to24(h) => h.remove(e_id),
+			HnswFlavor::M25to28(h) => h.remove(e_id),
+			HnswFlavor::Many(h) => h.remove(e_id),
 		}
 	}
 
 	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
 		match self {
-			HnswFlavor::Array4(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Array8(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Array12(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Array16(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Array20(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Array24(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Array28(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Hash(h) => h.knn_search(q, k, efs),
+			HnswFlavor::M1to4(h) => h.knn_search(q, k, efs),
+			HnswFlavor::M5to8(h) => h.knn_search(q, k, efs),
+			HnswFlavor::M9to12(h) => h.knn_search(q, k, efs),
+			HnswFlavor::M13to16(h) => h.knn_search(q, k, efs),
+			HnswFlavor::M17to20(h) => h.knn_search(q, k, efs),
+			HnswFlavor::M21to24(h) => h.knn_search(q, k, efs),
+			HnswFlavor::M25to28(h) => h.knn_search(q, k, efs),
+			HnswFlavor::Many(h) => h.knn_search(q, k, efs),
 		}
 	}
 
-	fn element(&self, e_id: &ElementId) -> &SharedVector {
+	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
 		match self {
-			HnswFlavor::Array4(h) => h.element(e_id),
-			HnswFlavor::Array8(h) => h.element(e_id),
-			HnswFlavor::Array12(h) => h.element(e_id),
-			HnswFlavor::Array16(h) => h.element(e_id),
-			HnswFlavor::Array20(h) => h.element(e_id),
-			HnswFlavor::Array24(h) => h.element(e_id),
-			HnswFlavor::Array28(h) => h.element(e_id),
-			HnswFlavor::Hash(h) => h.element(e_id),
+			HnswFlavor::M1to4(h) => h.elements.get_vector(e_id),
+			HnswFlavor::M5to8(h) => h.elements.get_vector(e_id),
+			HnswFlavor::M9to12(h) => h.elements.get_vector(e_id),
+			HnswFlavor::M13to16(h) => h.elements.get_vector(e_id),
+			HnswFlavor::M17to20(h) => h.elements.get_vector(e_id),
+			HnswFlavor::M21to24(h) => h.elements.get_vector(e_id),
+			HnswFlavor::M25to28(h) => h.elements.get_vector(e_id),
+			HnswFlavor::Many(h) => h.elements.get_vector(e_id),
 		}
+	}
+}
+
+struct HnswElements {
+	elements: HashMap<ElementId, SharedVector>,
+	next_element_id: ElementId,
+	dist: Distance,
+}
+
+impl HnswElements {
+	fn new(dist: Distance) -> Self {
+		Self {
+			elements: Default::default(),
+			next_element_id: 0,
+			dist,
+		}
+	}
+
+	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
+		self.elements.get(e_id)
+	}
+
+	fn distance(&self, a: &SharedVector, b: &SharedVector) -> f64 {
+		self.dist.calculate(a, b)
+	}
+	fn get_distance(&self, q: &SharedVector, e_id: &ElementId) -> Option<f64> {
+		self.elements.get(e_id).map(|e_pt| self.dist.calculate(e_pt, q))
+	}
+
+	fn remove(&mut self, e_id: &ElementId) {
+		self.elements.remove(e_id);
 	}
 }
 
@@ -267,17 +309,14 @@ where
 	L: DynamicSet<ElementId>,
 {
 	m: usize,
-	m0: usize,
 	efc: usize,
 	ml: f64,
-	dist: Distance,
-	layer0: UndirectedGraph<ElementId, L0>,
-	layers: Vec<UndirectedGraph<ElementId, L>>,
+	layer0: HnswLayer<L0>,
+	layers: Vec<HnswLayer<L>>,
 	enter_point: Option<ElementId>,
-	elements: HashMap<ElementId, SharedVector>,
-	next_element_id: ElementId,
+	elements: HnswElements,
 	rng: SmallRng,
-	neighbors: SelectNeighbors,
+	heuristic: Heuristic,
 }
 
 pub(super) type ElementId = u64;
@@ -291,17 +330,14 @@ where
 		let m0 = p.m0 as usize;
 		Self {
 			m: p.m as usize,
-			m0: p.m0 as usize,
 			efc: p.ef_construction as usize,
 			ml: p.ml.to_float(),
-			dist: p.distance.clone(),
 			enter_point: None,
-			layer0: UndirectedGraph::new(m0),
+			layer0: HnswLayer::new(m0),
 			layers: Vec::default(),
-			elements: HashMap::default(),
-			next_element_id: 0,
+			elements: HnswElements::new(p.distance.clone()),
 			rng: SmallRng::from_entropy(),
-			neighbors: p.into(),
+			heuristic: p.into(),
 		}
 	}
 
@@ -311,83 +347,69 @@ where
 	}
 
 	fn insert_level(&mut self, q_pt: SharedVector, q_level: usize) -> ElementId {
-		let q_id = self.next_element_id;
-		let layers = self.layers.len();
+		// Attribute an ID to the vector
+		let q_id = self.elements.next_element_id;
+		let top_up_layers = self.layers.len();
 
-		// Be sure we have existing layers
-		let mut m_max = self.m;
-		for l in layers..=q_level {
-			if l == 0 {
-				m_max = self.m0
-			}
-			#[cfg(debug_assertions)]
-			debug!("Create Layer {l} - m_max: {m_max}");
-			self.layers.push(UndirectedGraph::new(m_max));
+		// Be sure we have existing (up) layers if required
+		for _ in top_up_layers..q_level {
+			self.layers.push(HnswLayer::new(self.m));
 		}
 
-		self.elements.insert(q_id, q_pt.clone());
+		// Store the vector
+		self.elements.elements.insert(q_id, q_pt.clone());
 
 		if let Some(ep_id) = self.enter_point {
-			self.insert_element(q_id, &q_pt, q_level, ep_id, layers - 1);
+			// We already have an enter_point, let's insert the element in the layers
+			self.insert_element(q_id, &q_pt, q_level, ep_id, top_up_layers);
 		} else {
+			// Otherwise is the first element
 			self.insert_first_element(q_id, q_level);
 		}
 
-		self.next_element_id += 1;
+		self.elements.next_element_id += 1;
 		q_id
 	}
 
 	fn remove(&mut self, e_id: ElementId) -> bool {
-		#[cfg(debug_assertions)]
-		debug!("Remove {e_id}");
-
 		let mut removed = false;
 
-		let e_pt = self.elements.get(&e_id).cloned();
+		let e_pt = self.elements.get_vector(&e_id).cloned();
+		// Do we have the vector?
 		if let Some(e_pt) = e_pt {
 			let layers = self.layers.len();
 			let mut new_enter_point = None;
 
 			// Are we deleting the current enter point?
 			if Some(e_id) == self.enter_point {
-				let layer = &self.layers[layers - 1];
-				new_enter_point = self.search_layer_single_ignore_ep(&e_pt, e_id, layer);
+				// Let's find a new enter point
+				new_enter_point = if layers == 0 {
+					self.layer0.search_layer_single_ignore_ep(&self.elements, &e_pt, e_id)
+				} else {
+					self.layers[layers - 1].search_layer_single_ignore_ep(
+						&self.elements,
+						&e_pt,
+						e_id,
+					)
+				};
 			}
 
 			self.elements.remove(&e_id);
 
-			let mut m_max = self.m;
-			for lc in (0..layers).rev() {
-				if lc == 0 {
-					m_max = self.m0
-				}
-				if let Some(f_ids) = self.layers[lc].remove_node_and_bidirectional_edges(&e_id) {
-					for &q_id in f_ids.iter() {
-						if let Some(q_pt) = self.elements.get(&q_id) {
-							let layer = &self.layers[lc];
-							let c = self.search_layer_multi_ignore_ep(q_pt, q_id, self.efc, layer);
-							let neighbors =
-								self.neighbors.select(self, layer, q_id, q_pt, c, m_max);
-							#[cfg(debug_assertions)]
-							{
-								assert!(
-									!neighbors.contains(&q_id),
-									"!neighbors.contains(&q_id) = layer: {lc} - q_id: {q_id} - f_ids: {neighbors:?}"
-								);
-								assert!(
-									!neighbors.contains(&e_id),
-									"!neighbors.contains(&e_id) = layer: {lc} - e_id: {e_id} - f_ids: {neighbors:?}"
-								);
-								assert!(neighbors.len() < m_max);
-							}
-							self.layers[lc].set_node(q_id, neighbors);
-						}
-					}
+			// Remove from the up layers
+			for layer in self.layers.iter_mut().rev() {
+				if layer.remove_from_layer(&self.elements, &self.heuristic, e_id, self.efc) {
 					removed = true;
 				}
 			}
 
-			if removed && Some(e_id) == self.enter_point {
+			// Remove from layer 0
+			if self.layer0.remove_from_layer(&self.elements, &self.heuristic, e_id, self.efc) {
+				removed = true;
+			}
+
+			if removed && new_enter_point.is_some() {
+				// Update the enter point
 				self.enter_point = new_enter_point.map(|(_, e_id)| e_id);
 			}
 		}
@@ -400,14 +422,13 @@ where
 	}
 
 	fn insert_first_element(&mut self, id: ElementId, level: usize) {
-		#[cfg(debug_assertions)]
-		debug!("insert_first_element - id: {id} - level: {level}");
-		for lc in 0..=level {
-			self.layers[lc].add_empty_node(id);
+		if level > 0 {
+			for layer in self.layers.iter_mut().take(level) {
+				layer.add_empty_node(id);
+			}
 		}
+		self.layer0.add_empty_node(id);
 		self.enter_point = Some(id);
-		#[cfg(debug_assertions)]
-		debug!("E - EP: {id}");
 	}
 
 	fn insert_element(
@@ -416,194 +437,65 @@ where
 		q_pt: &SharedVector,
 		q_level: usize,
 		mut ep_id: ElementId,
-		top_layer_level: usize,
+		top_up_layers: usize,
 	) {
-		#[cfg(debug_assertions)]
-		debug!("insert_element q_pt: {q_pt:?} - q_id: {q_id} - level: {q_level} -  ep_id: {ep_id:?} - top-layer: {top_layer_level}");
-		let mut ep_dist = self.get_element_distance(q_pt, &ep_id).unwrap_or_else(|| unreachable!());
-		for lc in ((q_level + 1)..=top_layer_level).rev() {
-			(ep_dist, ep_id) = self
-				.search_layer_single(q_pt, ep_dist, ep_id, 1, &self.layers[lc])
-				.peek_first()
-				.unwrap_or_else(|| unreachable!())
+		let mut ep_dist =
+			self.elements.get_distance(q_pt, &ep_id).unwrap_or_else(|| unreachable!());
+
+		if q_level < top_up_layers {
+			for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
+				(ep_dist, ep_id) = layer
+					.search_layer_single(&self.elements, q_pt, ep_dist, ep_id, 1)
+					.peek_first()
+					.unwrap_or_else(|| unreachable!())
+			}
 		}
 
 		let mut eps = DoublePriorityQueue::from(ep_dist, ep_id);
-		for lc in (0..=top_layer_level.min(q_level)).rev() {
-			let m_max = if lc == 0 {
-				self.m0
-			} else {
-				self.m
-			};
 
-			let w;
-			let neighbors = {
-				let layer = &self.layers[lc];
-				w = self.search_layer_multi(q_pt, eps, self.efc, layer);
-				eps = w.clone();
-				self.neighbors.select(self, layer, q_id, q_pt, w, m_max)
-			};
+		let insert_to_up_layers = q_level.min(top_up_layers);
+		if insert_to_up_layers > 0 {
+			for layer in self.layers.iter_mut().take(insert_to_up_layers).rev() {
+				eps = layer.insert_element(
+					&self.elements,
+					&self.heuristic,
+					self.efc,
+					q_id,
+					q_pt,
+					eps,
+				);
+			}
+		}
 
-			let neighbors = self.layers[lc].add_node_and_bidirectional_edges(q_id, neighbors);
+		self.layer0.insert_element(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
 
-			for e_id in neighbors {
-				let e_conn = self.layers[lc]
-					.get_edges(&e_id)
-					.unwrap_or_else(|| unreachable!("Element: {}", e_id));
-				if e_conn.len() > m_max {
-					let e_pt = &self.elements[&e_id];
-					let e_c = self.build_priority_list(e_id, e_conn);
-					let e_new_conn =
-						self.neighbors.select(self, &self.layers[lc], e_id, e_pt, e_c, m_max);
-					assert!(!e_new_conn.contains(&e_id));
-					self.layers[lc].set_node(e_id, e_new_conn);
+		if top_up_layers < q_level {
+			for layer in self.layers[top_up_layers..q_level].iter_mut() {
+				if !layer.add_empty_node(q_id) {
+					unreachable!("Already there {}", q_id);
 				}
 			}
 		}
 
-		for lc in (top_layer_level + 1)..=q_level {
-			if !self.layers[lc].add_empty_node(q_id) {
-				unreachable!("Already there {}", q_id);
-			}
-		}
-
-		if q_level > top_layer_level {
+		if q_level > top_up_layers {
 			self.enter_point = Some(q_id);
-			#[cfg(debug_assertions)]
-			debug!("E - ep_id: {q_id}");
 		}
-	}
-
-	fn build_priority_list<S: DynamicSet<ElementId>>(
-		&self,
-		e_id: ElementId,
-		neighbors: &S,
-	) -> DoublePriorityQueue {
-		let e_pt = &self.elements[&e_id];
-		let mut w = DoublePriorityQueue::default();
-		for n_id in neighbors.iter() {
-			if let Some(n_pt) = self.elements.get(n_id) {
-				let dist = self.dist.calculate(e_pt, n_pt);
-				w.push(dist, *n_id);
-			}
-		}
-		w
-	}
-
-	fn get_element_distance(&self, q: &SharedVector, e_id: &ElementId) -> Option<f64> {
-		self.elements.get(e_id).map(|e_pt| self.dist.calculate(e_pt, q))
-	}
-
-	fn get_element_vector(&self, e_id: &ElementId) -> Option<SharedVector> {
-		self.elements.get(e_id).cloned()
-	}
-
-	fn search_layer_single<S: DynamicSet<ElementId>>(
-		&self,
-		q: &SharedVector,
-		ep_dist: f64,
-		ep_id: ElementId,
-		ef: usize,
-		l: &UndirectedGraph<ElementId, S>,
-	) -> DoublePriorityQueue {
-		let visited = HashSet::from([ep_id]);
-		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
-		let w = candidates.clone();
-		self.search_layer(q, candidates, visited, w, ef, l)
-	}
-
-	fn search_layer_multi<S: DynamicSet<ElementId>>(
-		&self,
-		q: &SharedVector,
-		candidates: DoublePriorityQueue,
-		ef: usize,
-		l: &UndirectedGraph<ElementId, S>,
-	) -> DoublePriorityQueue {
-		let w = candidates.clone();
-		let visited = w.to_set();
-		self.search_layer(q, candidates, visited, w, ef, l)
-	}
-
-	fn search_layer_single_ignore_ep<S: DynamicSet<ElementId>>(
-		&self,
-		q: &SharedVector,
-		ep_id: ElementId,
-		l: &UndirectedGraph<ElementId, S>,
-	) -> Option<(f64, ElementId)> {
-		let visited = HashSet::from([ep_id]);
-		let candidates = DoublePriorityQueue::from(0.0, ep_id);
-		let w = candidates.clone();
-		let q = self.search_layer(q, candidates, visited, w, 1, l);
-		q.peek_first()
-	}
-
-	fn search_layer_multi_ignore_ep<S: DynamicSet<ElementId>>(
-		&self,
-		q: &SharedVector,
-		ep_id: ElementId,
-		ef: usize,
-		l: &UndirectedGraph<ElementId, S>,
-	) -> DoublePriorityQueue {
-		let visited = HashSet::from([ep_id]);
-		let candidates = DoublePriorityQueue::from(0.0, ep_id);
-		let w = DoublePriorityQueue::default();
-		self.search_layer(q, candidates, visited, w, ef, l)
-	}
-
-	fn search_layer<S: DynamicSet<ElementId>>(
-		&self,
-		q: &SharedVector,
-		mut candidates: DoublePriorityQueue,
-		mut visited: HashSet<ElementId>,
-		mut w: DoublePriorityQueue,
-		ef: usize,
-		l: &UndirectedGraph<ElementId, S>,
-	) -> DoublePriorityQueue {
-		let mut f_dist = if let Some(d) = w.peek_last_dist() {
-			d
-		} else {
-			return w;
-		};
-		while let Some((dist, doc)) = candidates.pop_first() {
-			if dist > f_dist {
-				break;
-			}
-			if let Some(neighbourhood) = l.get_edges(&doc) {
-				for &e_id in neighbourhood.iter() {
-					if visited.insert(e_id) {
-						if let Some(e_pt) = self.elements.get(&e_id) {
-							let e_dist = self.dist.calculate(e_pt, q);
-							if e_dist < f_dist || w.len() < ef {
-								candidates.push(e_dist, e_id);
-								w.push(e_dist, e_id);
-								if w.len() > ef {
-									w.pop_last();
-								}
-								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
-							}
-						}
-					}
-				}
-			}
-		}
-		w
 	}
 
 	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
 		#[cfg(debug_assertions)]
-		let expected_w_len = self.elements.len().min(k);
+		let expected_w_len = self.elements.elements.len().min(k);
 		if let Some(mut ep_id) = self.enter_point {
 			let mut ep_dist =
-				self.get_element_distance(q, &ep_id).unwrap_or_else(|| unreachable!());
-			let l = self.layers.len();
-			for lc in (1..l).rev() {
-				(ep_dist, ep_id) = self
-					.search_layer_single(q, ep_dist, ep_id, 1, &self.layers[lc])
+				self.elements.get_distance(q, &ep_id).unwrap_or_else(|| unreachable!());
+			for layer in self.layers.iter().rev() {
+				(ep_dist, ep_id) = layer
+					.search_layer_single(&self.elements, q, ep_dist, ep_id, 1)
 					.peek_first()
 					.unwrap_or_else(|| unreachable!());
 			}
 			{
-				let w = self.search_layer_single(q, ep_dist, ep_id, efs, &self.layers[0]);
+				let w = self.layer0.search_layer_single(&self.elements, q, ep_dist, ep_id, efs);
 				#[cfg(debug_assertions)]
 				if w.len() < expected_w_len {
 					debug!(
@@ -615,189 +507,6 @@ where
 			}
 		} else {
 			vec![]
-		}
-	}
-
-	#[inline]
-	fn element(&self, e_id: &ElementId) -> &SharedVector {
-		&self.elements[e_id]
-	}
-}
-
-#[derive(Debug)]
-enum SelectNeighbors {
-	Heuristic,
-	HeuristicExt,
-	HeuristicKeep,
-	HeuristicExtKeep,
-}
-
-impl From<&HnswParams> for SelectNeighbors {
-	fn from(p: &HnswParams) -> Self {
-		if p.keep_pruned_connections {
-			if p.extend_candidates {
-				Self::HeuristicExtKeep
-			} else {
-				Self::HeuristicKeep
-			}
-		} else if p.extend_candidates {
-			Self::HeuristicExt
-		} else {
-			Self::Heuristic
-		}
-	}
-}
-
-impl SelectNeighbors {
-	fn select<L0, L, S>(
-		&self,
-		h: &Hnsw<L0, L>,
-		lc: &UndirectedGraph<ElementId, S>,
-		q_id: ElementId,
-		q_pt: &SharedVector,
-		c: DoublePriorityQueue,
-		m_max: usize,
-	) -> S
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-		S: DynamicSet<ElementId>,
-	{
-		match self {
-			Self::Heuristic => Self::heuristic(c, h, m_max),
-			Self::HeuristicExt => Self::heuristic_ext(h, lc, q_id, q_pt, c, m_max),
-			Self::HeuristicKeep => Self::heuristic_keep(c, h, m_max),
-			Self::HeuristicExtKeep => Self::heuristic_ext_keep(h, lc, q_id, q_pt, c, m_max),
-		}
-	}
-
-	fn heuristic<L0, L, S>(mut c: DoublePriorityQueue, h: &Hnsw<L0, L>, m_max: usize) -> S
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-		S: DynamicSet<ElementId>,
-	{
-		if c.len() <= m_max {
-			return c.to_dynamic_set(m_max);
-		}
-		let mut r = S::with_capacity(m_max);
-		while let Some((e_dist, e_id)) = c.pop_first() {
-			if Self::is_closer(h, e_dist, e_id, &mut r) && r.len() == m_max {
-				break;
-			}
-		}
-		r
-	}
-
-	fn heuristic_keep<L0, L, S>(mut c: DoublePriorityQueue, h: &Hnsw<L0, L>, m_max: usize) -> S
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-		S: DynamicSet<ElementId>,
-	{
-		if c.len() <= m_max {
-			return c.to_dynamic_set(m_max);
-		}
-		let mut pruned = Vec::new();
-		let mut r = S::with_capacity(m_max);
-		while let Some((e_dist, e_id)) = c.pop_first() {
-			if Self::is_closer(h, e_dist, e_id, &mut r) {
-				if r.len() == m_max {
-					break;
-				}
-			} else {
-				pruned.push(e_id);
-			}
-		}
-		let n = m_max - r.len();
-		if n > 0 {
-			for e_id in pruned.drain(0..n) {
-				r.insert(e_id);
-			}
-		}
-		r
-	}
-
-	fn extend<L0, L, S>(
-		h: &Hnsw<L0, L>,
-		lc: &UndirectedGraph<ElementId, S>,
-		q_id: ElementId,
-		q_pt: &SharedVector,
-		c: &mut DoublePriorityQueue,
-		m_max: usize,
-	) where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-		S: DynamicSet<ElementId>,
-	{
-		let mut ex = c.to_set();
-		let mut ext = Vec::with_capacity(m_max.min(c.len()));
-		for (_, e_id) in c.to_vec().into_iter() {
-			for &e_adj in lc.get_edges(&e_id).unwrap_or_else(|| unreachable!()).iter() {
-				if e_adj != q_id && ex.insert(e_adj) {
-					if let Some(d) = h.get_element_distance(q_pt, &e_adj) {
-						ext.push((d, e_adj));
-					}
-				}
-			}
-		}
-		for (e_dist, e_id) in ext {
-			c.push(e_dist, e_id);
-		}
-	}
-
-	fn heuristic_ext<L0, L, S>(
-		h: &Hnsw<L0, L>,
-		lc: &UndirectedGraph<ElementId, S>,
-		q_id: ElementId,
-		q_pt: &SharedVector,
-		mut c: DoublePriorityQueue,
-		m_max: usize,
-	) -> S
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-		S: DynamicSet<ElementId>,
-	{
-		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
-		Self::heuristic(c, h, m_max)
-	}
-
-	fn heuristic_ext_keep<L0, L, S>(
-		h: &Hnsw<L0, L>,
-		lc: &UndirectedGraph<ElementId, S>,
-		q_id: ElementId,
-		q_pt: &SharedVector,
-		mut c: DoublePriorityQueue,
-		m_max: usize,
-	) -> S
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-		S: DynamicSet<ElementId>,
-	{
-		Self::extend(h, lc, q_id, q_pt, &mut c, m_max);
-		Self::heuristic_keep(c, h, m_max)
-	}
-
-	fn is_closer<L0, L, S>(h: &Hnsw<L0, L>, e_dist: f64, e_id: ElementId, r: &mut S) -> bool
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-		S: DynamicSet<ElementId>,
-	{
-		if let Some(current_vec) = h.get_element_vector(&e_id) {
-			for r_id in r.iter() {
-				if let Some(r_dist) = h.get_element_distance(&current_vec, r_id) {
-					if e_dist > r_dist {
-						return false;
-					}
-				}
-			}
-			r.insert(e_id);
-			true
-		} else {
-			false
 		}
 	}
 }
@@ -840,9 +549,11 @@ mod tests {
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
-						if h.element(e_id).eq(&obj) {
-							found = true;
-							break;
+						if let Some(v) = h.get_vector(e_id) {
+							if obj.eq(v) {
+								found = true;
+								break;
+							}
 						}
 					}
 					assert!(
@@ -1074,7 +785,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_invalid_size() {
+	fn test_simple_hnsw() {
 		let collection = TestCollection::Unique(vec![
 			(0, new_i16_vec(-2, -3)),
 			(1, new_i16_vec(-2, 1)),
@@ -1094,8 +805,8 @@ mod tests {
 		let pt = new_i16_vec(-2, -3);
 		let knn = 10;
 		let efs = 501;
-		let hnsw_res = h.knn_search(&pt, knn, efs);
-		assert_eq!(hnsw_res.len(), knn);
+		let res = h.knn_search(&pt, knn, efs);
+		assert_eq!(res.len(), knn);
 	}
 
 	async fn test_recall(
@@ -1208,14 +919,14 @@ mod tests {
 	impl HnswFlavor {
 		fn check_hnsw_properties(&self, expected_count: usize) {
 			match self {
-				HnswFlavor::Array4(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Array8(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Array12(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Array16(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Array20(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Array24(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Array28(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Hash(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::M1to4(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::M5to8(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::M9to12(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::M13to16(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::M17to20(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::M21to24(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::M25to28(h) => check_hnsw_props(h, expected_count),
+				HnswFlavor::Many(h) => check_hnsw_props(h, expected_count),
 			}
 		}
 	}
@@ -1225,33 +936,10 @@ mod tests {
 		L0: DynamicSet<ElementId>,
 		L: DynamicSet<ElementId>,
 	{
-		let mut layer_size = h.elements.len();
-		assert_eq!(layer_size, expected_count);
-		for (lc, l) in h.layers.iter().enumerate() {
-			assert!(l.len() <= layer_size, "{} - {}", l.len(), layer_size);
-			layer_size = l.len();
-			let m_layer = if lc == 0 {
-				h.m0
-			} else {
-				h.m
-			};
-			for (e_id, f_ids) in l.nodes() {
-				assert!(
-					f_ids.len() <= m_layer,
-					"Foreign list e_id: {e_id} - len = len({}) <= m_layer({m_layer}) - lc: {lc}",
-					f_ids.len(),
-				);
-				assert!(
-					!f_ids.contains(e_id),
-					"!f_ids.contains(e_id) = layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"
-				);
-				assert!(
-					h.elements.contains_key(e_id),
-					"h.elements.contains_key(e_id) - layer: {lc} - el: {e_id} - f_ids: {f_ids:?}"
-				);
-			}
+		assert_eq!(h.elements.elements.len(), expected_count);
+		for layer in h.layers.iter() {
+			layer.check_props(&h.elements);
 		}
-		h.debug_print_check();
 	}
 
 	impl TestCollection {
@@ -1289,26 +977,5 @@ mod tests {
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
 		let vec = Vector::I16(Array1::from_vec(vec![x as i16, y as i16]));
 		vec.into()
-	}
-
-	impl<L0, L> Hnsw<L0, L>
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-	{
-		fn debug_print_check(&self) {
-			debug!("EP: {:?}", self.enter_point);
-			for (i, l) in self.layers.iter().enumerate() {
-				debug!("LAYER {i} - len: {}", l.len());
-				let m_max = if i == 0 {
-					self.m0
-				} else {
-					self.m
-				};
-				for f in l.nodes().values() {
-					assert!(f.len() <= m_max);
-				}
-			}
-		}
 	}
 }

@@ -124,14 +124,12 @@ impl DoublePriorityQueue {
 		s
 	}
 
-	pub(super) fn to_dynamic_set<S: DynamicSet<ElementId>>(&self, capacity: usize) -> S {
-		let mut s = S::with_capacity(capacity);
+	pub(super) fn to_dynamic_set<S: DynamicSet<ElementId>>(&self, set: &mut S) {
 		for q in self.0.values() {
 			for v in q {
-				s.insert(*v);
+				set.insert(*v);
 			}
 		}
-		s
 	}
 }
 

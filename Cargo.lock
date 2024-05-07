@@ -5925,7 +5925,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "smallvec",
  "surrealdb-core",
  "temp-dir",
  "test-log",

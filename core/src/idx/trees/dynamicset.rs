@@ -71,8 +71,9 @@ impl<T, const N: usize> DynamicSet<T> for ArraySet<T, N>
 where
 	T: Eq + Hash + Clone + Copy + Default + Debug + 'static,
 {
-	fn with_capacity(capacity: usize) -> Self {
-		assert_eq!(capacity, N);
+	fn with_capacity(_capacity: usize) -> Self {
+		#[cfg(debug_assertions)]
+		assert!(_capacity <= N);
 		Self {
 			array: [T::default(); N],
 			size: 0,
@@ -124,7 +125,7 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
-	use std::collections::HashSet;
+	use hashbrown::HashSet;
 
 	fn test_dynamic_set<S: DynamicSet<usize>>(capacity: usize) {
 		let mut dyn_set = S::with_capacity(capacity);

@@ -3,12 +3,13 @@ use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
 use std::hash::Hash;
 
+#[derive(Debug)]
 pub(super) struct UndirectedGraph<T, S>
 where
 	T: Eq + Hash + Clone + Copy + Default + 'static,
 	S: DynamicSet<T>,
 {
-	m_max: usize,
+	capacity: usize,
 	nodes: HashMap<T, S>,
 }
 
@@ -17,15 +18,16 @@ where
 	T: Eq + Hash + Clone + Copy + Default + 'static,
 	S: DynamicSet<T>,
 {
-	pub(super) fn new(m_max: usize) -> Self {
+	pub(super) fn new(capacity: usize) -> Self {
 		Self {
-			m_max,
+			capacity,
 			nodes: HashMap::new(),
 		}
 	}
 
+	#[inline]
 	pub(super) fn new_edges(&self) -> S {
-		S::with_capacity(self.m_max)
+		S::with_capacity(self.capacity)
 	}
 
 	#[inline]
@@ -35,7 +37,7 @@ where
 
 	pub(super) fn add_empty_node(&mut self, node: T) -> bool {
 		if let Entry::Vacant(e) = self.nodes.entry(node) {
-			e.insert(S::with_capacity(self.m_max));
+			e.insert(S::with_capacity(self.capacity));
 			true
 		} else {
 			false
@@ -45,7 +47,7 @@ where
 	pub(super) fn add_node_and_bidirectional_edges(&mut self, node: T, edges: S) -> Vec<T> {
 		let mut r = Vec::with_capacity(edges.len());
 		for &e in edges.iter() {
-			self.nodes.entry(e).or_insert_with(|| S::with_capacity(self.m_max)).insert(node);
+			self.nodes.entry(e).or_insert_with(|| S::with_capacity(self.capacity)).insert(node);
 			r.push(e);
 		}
 		self.nodes.insert(node, edges);
@@ -74,8 +76,7 @@ where
 mod tests {
 	use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
 	use crate::idx::trees::graph::UndirectedGraph;
-	use hashbrown::HashMap;
-	use std::collections::HashSet;
+	use hashbrown::{HashMap, HashSet};
 	use std::fmt::{Debug, Display};
 	use std::hash::Hash;
 
@@ -104,7 +105,7 @@ mod tests {
 	fn test_undirected_graph<S: DynamicSet<i32>>(m_max: usize) {
 		// Graph creation
 		let mut g = UndirectedGraph::<i32, S>::new(m_max);
-		assert_eq!(g.m_max, 10);
+		assert_eq!(g.capacity, 10);
 
 		// Adding an empty node
 		let res = g.add_empty_node(0);

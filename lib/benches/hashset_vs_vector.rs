@@ -1,6 +1,5 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
-use smallvec::SmallVec;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 use surrealdb_core::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
@@ -20,7 +19,7 @@ fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
 
 fn bench_hashbrown(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
-		let mut h = HashBrownSet::<u64>::witch_capacity(samples.len());
+		let mut h = HashBrownSet::<u64>::with_capacity(samples.len());
 		for &s in samples {
 			h.insert(s);
 		}
@@ -49,25 +48,9 @@ fn bench_vector(samples_vec: &Vec<Vec<u64>>) {
 
 fn bench_array<const N: usize>(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
-		let mut v = ArraySet::<u64, N>::witch_capacity(samples.len());
+		let mut v = ArraySet::<u64, N>::with_capacity(samples.len());
 		for &s in samples {
 			v.insert(s);
-		}
-		for s in samples {
-			assert!(v.contains(s));
-		}
-		assert_eq!(v.len(), samples.len());
-	}
-}
-
-fn bench_small_vec<const N: usize>(samples_vec: &Vec<Vec<u64>>) {
-	for samples in samples_vec {
-		let mut v = SmallVec::<[u64; N]>::new();
-		for &s in samples {
-			// Same behaviour than Hash
-			if !v.contains(&s) {
-				v.push(s);
-			}
 		}
 		for s in samples {
 			assert!(v.contains(s));
@@ -126,10 +109,6 @@ fn group_test<const N: usize>(group: &mut BenchmarkGroup<WallTime>, iterations: 
 
 	group.bench_function(format!("vector_{N}"), |b| {
 		b.iter(|| bench_vector(&samples));
-	});
-
-	group.bench_function(format!("smallvec_{N}"), |b| {
-		b.iter(|| bench_small_vec::<N>(&samples));
 	});
 
 	group.bench_function(format!("array_{N}"), |b| {

@@ -1,5 +1,5 @@
 use futures::future::join_all;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use tokio::sync::Mutex;

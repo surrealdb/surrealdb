@@ -4,10 +4,10 @@ use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, Tr
 use crate::idx::VersionedSerdeState;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
+#[cfg(debug_assertions)]
+use hashbrown::HashSet;
 use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
-#[cfg(debug_assertions)]
-use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
