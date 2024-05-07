@@ -29,6 +29,7 @@ impl Default for AccessType {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
@@ -60,6 +61,7 @@ impl Default for JwtAccess {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
 	pub key: String,
@@ -81,6 +83,7 @@ impl Default for JwtAccessIssue {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
@@ -97,6 +100,7 @@ impl Default for JwtAccessVerify {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
 	pub key: String,
@@ -115,12 +119,14 @@ impl Default for JwtAccessVerifyKey {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub duration: Option<Duration>,
 	pub signup: Option<Value>,
