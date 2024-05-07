@@ -279,10 +279,10 @@ impl Parser<'_> {
 									_ => break,
 								}
 							}
-							let _with_jwt = if self.eat(t!("WITH")) {
+							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
 								ac.jwt = self.parse_jwt()?;
-							};
+							}
 							res.kind = AccessType::Record(ac);
 						}
 						_ => break,
@@ -1017,7 +1017,7 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "`ALGORITHM`, or `URL`"),
 		}
 
-		let _with_issuer = if self.eat(t!("WITH")) {
+		if self.eat(t!("WITH")) {
 			expected!(self, t!("ISSUER"));
 			expected!(self, t!("KEY"));
 			let mut iss = access_type::JwtAccessIssue {
@@ -1031,7 +1031,7 @@ impl Parser<'_> {
 				}
 				x => unexpected!(self, x, "`DURATION`"),
 			}
-		};
+		}
 
 		Ok(res)
 	}

@@ -1167,7 +1167,7 @@ mod http_integration {
 				.basic_auth(USER, Some(PASS))
 				.body(
 					r#"
-					DEFINE ACCESS user TYPE RECORD DURATION 24h
+					DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
 						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 					;

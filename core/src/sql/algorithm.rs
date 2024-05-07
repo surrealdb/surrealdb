@@ -24,9 +24,9 @@ pub enum Algorithm {
 	Rs512,
 }
 
-impl Into<jsonwebtoken::Algorithm> for Algorithm {
-	fn into(self) -> jsonwebtoken::Algorithm {
-		match self {
+impl From<Algorithm> for jsonwebtoken::Algorithm {
+	fn from(val: alg) -> Self {
+		match val {
 			Algorithm::Hs256 => jsonwebtoken::Algorithm::HS256,
 			Algorithm::Hs384 => jsonwebtoken::Algorithm::HS384,
 			Algorithm::Hs512 => jsonwebtoken::Algorithm::HS512,
