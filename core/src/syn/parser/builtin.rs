@@ -326,6 +326,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::is::geometry") => PathKind::Function,
 		UniCase::ascii("type::is::int") => PathKind::Function,
 		UniCase::ascii("type::is::line") => PathKind::Function,
+		UniCase::ascii("type::is::nil") => PathKind::Function,
 		UniCase::ascii("type::is::null") => PathKind::Function,
 		UniCase::ascii("type::is::none") => PathKind::Function,
 		UniCase::ascii("type::is::multiline") => PathKind::Function,

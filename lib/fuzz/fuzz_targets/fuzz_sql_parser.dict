@@ -375,6 +375,7 @@
 "type::is::geometry("
 "type::is::int("
 "type::is::line("
+"type::is::nil("
 "type::is::none("
 "type::is::null("
 "type::is::multiline("

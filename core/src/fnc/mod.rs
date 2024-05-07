@@ -335,6 +335,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::is::geometry" => r#type::is::geometry,
 		"type::is::int" => r#type::is::int,
 		"type::is::line" => r#type::is::line,
+		"type::is::nil" => r#type::is::nil,
 		"type::is::none" => r#type::is::none,
 		"type::is::null" => r#type::is::null,
 		"type::is::multiline" => r#type::is::multiline,

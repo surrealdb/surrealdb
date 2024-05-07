@@ -271,6 +271,11 @@ pub mod is {
 		Ok(matches!(arg, Value::Geometry(Geometry::Line(_))).into())
 	}
 
+	pub fn nil((arg,): (Value,)) -> Result<Value, Error> {
+		let result = arg.is_none() || arg.is_null();
+		Ok(result.into())
+	}
+
 	pub fn none((arg,): (Value,)) -> Result<Value, Error> {
 		Ok(arg.is_none().into())
 	}

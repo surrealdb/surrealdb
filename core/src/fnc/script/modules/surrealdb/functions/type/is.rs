@@ -18,6 +18,7 @@ impl_module_def!(
 	"geometry" => run,
 	"int" => run,
 	"line" => run,
+	"nil" => run,
 	"none" => run,
 	"null" => run,
 	"multiline" => run,
