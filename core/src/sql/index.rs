@@ -110,39 +110,12 @@ pub struct HnswParams {
 	pub dimension: u16,
 	pub distance: Distance,
 	pub vector_type: VectorType,
-	pub m: u16,
-	pub m0: u16,
+	pub m: u8,
+	pub m0: u8,
 	pub ef_construction: u16,
 	pub extend_candidates: bool,
 	pub keep_pruned_connections: bool,
 	pub ml: Number,
-}
-
-impl HnswParams {
-	#[allow(clippy::too_many_arguments)]
-	pub fn new(
-		dimension: u16,
-		distance: Distance,
-		vector_type: VectorType,
-		m: u16,
-		m0: u16,
-		ml: Number,
-		ef_construction: u16,
-		extend_candidates: bool,
-		keep_pruned_connections: bool,
-	) -> HnswParams {
-		HnswParams {
-			dimension,
-			distance,
-			vector_type,
-			m,
-			m0,
-			ef_construction,
-			ml,
-			extend_candidates,
-			keep_pruned_connections,
-		}
-	}
 }
 
 #[revisioned(revision = 1)]

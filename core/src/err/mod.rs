@@ -251,10 +251,6 @@ pub enum Error {
 		expected: &'static str,
 	},
 
-	/// The index parameter is invalid
-	#[error("The index parameter {0} is invalid")]
-	InvalidIndexParameter(&'static str),
-
 	/// The size of the vector is incorrect
 	#[error("The value cannot be converted to a vector: {0}")]
 	InvalidVectorValue(String),
