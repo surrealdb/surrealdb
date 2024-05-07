@@ -25,7 +25,7 @@ pub enum Algorithm {
 }
 
 impl From<Algorithm> for jsonwebtoken::Algorithm {
-	fn from(val: alg) -> Self {
+	fn from(val: Algorithm) -> Self {
 		match val {
 			Algorithm::Hs256 => jsonwebtoken::Algorithm::HS256,
 			Algorithm::Hs384 => jsonwebtoken::Algorithm::HS384,
