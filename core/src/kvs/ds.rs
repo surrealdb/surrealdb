@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(any(
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
@@ -12,7 +11,6 @@ use std::env;
 use std::fmt;
 #[cfg(any(
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
@@ -114,7 +112,6 @@ pub struct Datastore {
 	jwks_cache: Arc<RwLock<JwksCache>>,
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -398,7 +395,6 @@ impl Datastore {
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -459,7 +455,6 @@ impl Datastore {
 
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -487,7 +482,6 @@ impl Datastore {
 
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -1473,7 +1467,6 @@ impl Datastore {
 			self.index_stores.clone(),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -1482,7 +1475,6 @@ impl Datastore {
 			self.is_memory(),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",

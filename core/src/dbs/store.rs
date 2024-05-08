@@ -51,7 +51,6 @@ impl From<Vec<Value>> for MemoryCollector {
 
 #[cfg(any(
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
