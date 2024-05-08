@@ -76,6 +76,7 @@ ciborium = "0.2.1"
 cedar-policy = "2.4.2"
 channel = { version = "1.9.0", package = "async-channel" }
 chrono = { version = "0.4.31", features = ["serde"] }
+dashmap = "5.5.3"
 derive = { version = "0.12.0", package = "surrealdb-derive" }
 deunicode = "1.4.1"
 dmp = "0.2.0"

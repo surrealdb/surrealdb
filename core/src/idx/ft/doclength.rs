@@ -9,6 +9,7 @@ use crate::kvs::{Key, Transaction, TransactionType};
 pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
+	ixs: IndexStores,
 	state_key: Key,
 	btree: BTree<TrieKeys>,
 	store: BTreeStore<TrieKeys>,
@@ -38,6 +39,7 @@ impl DocLengths {
 			)
 			.await;
 		Ok(Self {
+			ixs: ixs.clone(),
 			state_key,
 			btree: BTree::new(state),
 			store,
@@ -83,9 +85,10 @@ impl DocLengths {
 	}
 
 	pub(super) async fn finish(&mut self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.store.finish(tx).await? {
+		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), state.try_to_val()?).await?;
+			self.ixs.advance_cache_btree_trie(new_cache);
 		}
 		Ok(())
 	}

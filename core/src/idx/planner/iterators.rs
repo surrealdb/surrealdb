@@ -39,6 +39,7 @@ impl ThingIterator {
 			ThingIterator::UniqueUnion(i) => i.next_batch(tx, size).await,
 			ThingIterator::Matches(i) => i.next_batch(tx, size).await,
 			ThingIterator::Knn(i) => i.next_batch(tx, size).await,
+			ThingIterator::Things(i) => i.next_batch(size),
 		}
 	}
 }
@@ -488,16 +489,17 @@ impl ThingsIterator {
 			res,
 		}
 	}
-	fn next_batch<T: ThingCollector>(&mut self, limit: u32, collector: &mut T) -> usize {
+	fn next_batch(&mut self, limit: u32) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
+		let mut res = vec![];
 		let mut count = 0;
 		while limit > count {
 			if let Some(thg) = self.res.pop_front() {
-				collector.add(thg, None);
+				res.push((thg, None));
 				count += 1;
 			} else {
 				break;
 			}
 		}
-		count as usize
+		Ok(res)
 	}
 }

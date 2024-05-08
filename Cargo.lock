@@ -4467,18 +4467,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quick_cache"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "347e1a588d1de074eeb3c00eadff93db4db65aeb62aee852b1efd0949fe65b6c"
-dependencies = [
- "ahash 0.8.11",
- "equivalent",
- "hashbrown 0.14.5",
- "parking_lot",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6118,6 +6106,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "criterion",
+ "dashmap",
  "deunicode",
  "dmp",
  "echodb",

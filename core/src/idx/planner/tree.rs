@@ -266,7 +266,7 @@ impl<'a> TreeBuilder<'a> {
 						..
 					} => Self::eval_matches_operator(op, n),
 					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id.clone())?,
-					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id)?,
+					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id.clone())?,
 				};
 				if let Some(op) = op {
 					let io = IndexOption::new(*ir, id, op);
@@ -318,7 +318,7 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 		op: &Operator,
 		nd: &Node,
-		id: &Idiom,
+		id: Arc<Idiom>,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Ann(n, ef) = op {
 			if let Node::Computed(v) = nd {

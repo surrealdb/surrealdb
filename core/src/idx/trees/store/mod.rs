@@ -20,6 +20,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 pub type NodeId = u64;
+pub type StoreGeneration = u64;
 
 #[non_exhaustive]
 pub enum TreeStore<N>
@@ -36,10 +37,10 @@ impl<N> TreeStore<N>
 where
 	N: TreeNode + Debug + Display + Clone,
 {
-	pub async fn new(keys: TreeNodeProvider, cache: TreeCache<N>, tt: TransactionType) -> Self {
+	pub async fn new(np: TreeNodeProvider, cache: Arc<TreeCache<N>>, tt: TransactionType) -> Self {
 		match tt {
 			TransactionType::Read => Self::Read(TreeRead::new(cache)),
-			TransactionType::Write => Self::Write(TreeWrite::new(keys, cache)),
+			TransactionType::Write => Self::Write(TreeWrite::new(np, cache)),
 		}
 	}
 
@@ -49,7 +50,7 @@ where
 		node_id: NodeId,
 	) -> Result<StoredNode<N>, Error> {
 		match self {
-			TreeStore::Write(w) => w.get_node_mut(tx, node_id).await,
+			Self::Write(w) => w.get_node_mut(tx, node_id).await,
 			_ => Err(Error::Unreachable("TreeStore::get_node_mut")),
 		}
 	}
@@ -60,7 +61,7 @@ where
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
-			TreeStore::Read(r) => r.get_node(tx, node_id).await,
+			Self::Read(r) => r.get_node(tx, node_id).await,
 			_ => Err(Error::Unreachable("TreeStore::get_node")),
 		}
 	}
@@ -71,14 +72,14 @@ where
 		updated: bool,
 	) -> Result<(), Error> {
 		match self {
-			TreeStore::Write(w) => w.set_node(node, updated),
+			Self::Write(w) => w.set_node(node, updated),
 			_ => Err(Error::Unreachable("TreeStore::set_node")),
 		}
 	}
 
 	pub(in crate::idx) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>, Error> {
 		match self {
-			TreeStore::Write(w) => Ok(w.new_node(id, node)),
+			Self::Write(w) => Ok(w.new_node(id, node)),
 			_ => Err(Error::Unreachable("TreeStore::new_node")),
 		}
 	}
@@ -89,15 +90,15 @@ where
 		node_key: Key,
 	) -> Result<(), Error> {
 		match self {
-			TreeStore::Write(w) => w.remove_node(node_id, node_key),
+			Self::Write(w) => w.remove_node(node_id, node_key),
 			_ => Err(Error::Unreachable("TreeStore::remove_node")),
 		}
 	}
 
-	pub async fn finish(&mut self, tx: &mut Transaction) -> Result<bool, Error> {
+	pub async fn finish(&mut self, tx: &mut Transaction) -> Result<Option<TreeCache<N>>, Error> {
 		match self {
-			TreeStore::Write(w) => w.finish(tx).await,
-			_ => Ok(false),
+			Self::Write(w) => w.finish(tx).await,
+			_ => Ok(None),
 		}
 	}
 }
@@ -114,7 +115,7 @@ pub enum TreeNodeProvider {
 }
 
 impl TreeNodeProvider {
-	pub(in crate::idx) fn get_key(&self, node_id: NodeId) -> Key {
+	pub fn get_key(&self, node_id: NodeId) -> Key {
 		match self {
 			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
 			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
@@ -139,17 +140,19 @@ impl TreeNodeProvider {
 		}
 	}
 
-	async fn save<N>(&self, tx: &mut Transaction, mut node: StoredNode<N>) -> Result<(), Error>
+	async fn save<N>(&self, tx: &mut Transaction, node: &mut StoredNode<N>) -> Result<(), Error>
 	where
 		N: TreeNode + Clone + Display,
 	{
 		let val = node.n.try_into_val()?;
-		tx.set(node.key, val).await?;
+		node.size = val.len() as u32;
+		tx.set(node.key.clone(), val).await?;
 		Ok(())
 	}
 }
 
 #[non_exhaustive]
+#[derive(Debug)]
 pub struct StoredNode<N>
 where
 	N: Clone + Display,
@@ -184,10 +187,11 @@ where
 }
 
 pub trait TreeNode: Debug + Clone + Display {
+	fn prepare_save(&mut self) {}
 	fn try_from_val(val: Val) -> Result<Self, Error>
 	where
 		Self: Sized;
-	fn try_into_val(&mut self) -> Result<Val, Error>;
+	fn try_into_val(&self) -> Result<Val, Error>;
 }
 
 #[derive(Clone)]
@@ -212,10 +216,10 @@ impl Default for IndexStores {
 }
 
 impl IndexStores {
-	pub(in crate::idx) async fn get_store_btree_fst(
+	pub async fn get_store_btree_fst(
 		&self,
 		keys: TreeNodeProvider,
-		generation: u64,
+		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
 	) -> BTreeStore<FstKeys> {
@@ -223,10 +227,14 @@ impl IndexStores {
 		TreeStore::new(keys, cache, tt).await
 	}
 
-	pub(in crate::idx) async fn get_store_btree_trie(
+	pub fn advance_store_btree_fst(&self, new_cache: TreeCache<BTreeNode<FstKeys>>) {
+		self.0.btree_fst_caches.new_cache(new_cache);
+	}
+
+	pub async fn get_store_btree_trie(
 		&self,
 		keys: TreeNodeProvider,
-		generation: u64,
+		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
 	) -> BTreeStore<TrieKeys> {
@@ -234,10 +242,14 @@ impl IndexStores {
 		TreeStore::new(keys, cache, tt).await
 	}
 
-	pub(in crate::idx) async fn get_store_mtree(
+	pub fn advance_cache_btree_trie(&self, new_cache: TreeCache<BTreeNode<TrieKeys>>) {
+		self.0.btree_trie_caches.new_cache(new_cache);
+	}
+
+	pub async fn get_store_mtree(
 		&self,
 		keys: TreeNodeProvider,
-		generation: u64,
+		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
 	) -> MTreeStore {
@@ -300,10 +312,10 @@ impl IndexStores {
 		let ikb = IndexKeyBase::new(opt, ix);
 		match ix.index {
 			Index::Search(_) => {
-				self.remove_search_cache(ikb).await;
+				self.remove_search_caches(ikb);
 			}
 			Index::MTree(_) => {
-				self.remove_mtree_cache(ikb).await;
+				self.remove_mtree_caches(ikb);
 			}
 			Index::Hnsw(_) => {
 				self.remove_hnsw_index(ikb).await;
@@ -313,16 +325,16 @@ impl IndexStores {
 		Ok(())
 	}
 
-	async fn remove_search_cache(&self, ikb: IndexKeyBase) {
-		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::DocIds(ikb.clone())).await;
-		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::DocLengths(ikb.clone())).await;
-		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::Postings(ikb.clone())).await;
-		self.0.btree_fst_caches.remove_cache(&TreeNodeProvider::Terms(ikb)).await;
+	fn remove_search_caches(&self, ikb: IndexKeyBase) {
+		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::DocIds(ikb.clone()));
+		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::DocLengths(ikb.clone()));
+		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::Postings(ikb.clone()));
+		self.0.btree_fst_caches.remove_caches(&TreeNodeProvider::Terms(ikb));
 	}
 
-	async fn remove_mtree_cache(&self, ikb: IndexKeyBase) {
-		self.0.btree_trie_caches.remove_cache(&TreeNodeProvider::DocIds(ikb.clone())).await;
-		self.0.mtree_caches.remove_cache(&TreeNodeProvider::Vector(ikb.clone())).await;
+	fn remove_mtree_caches(&self, ikb: IndexKeyBase) {
+		self.0.btree_trie_caches.remove_caches(&TreeNodeProvider::DocIds(ikb.clone()));
+		self.0.mtree_caches.remove_caches(&TreeNodeProvider::Vector(ikb.clone()));
 	}
 
 	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) {

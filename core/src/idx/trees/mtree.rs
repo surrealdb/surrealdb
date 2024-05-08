@@ -1,6 +1,6 @@
+use async_recursion::async_recursion;
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -72,7 +72,6 @@ impl MTreeIndex {
 	}
 	pub(crate) async fn index_document(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		rid: &Thing,
 		content: &Vec<Value>,
@@ -87,7 +86,7 @@ impl MTreeIndex {
 			let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 			vector.check_dimension(self.dim)?;
 			// Insert the vector in the index
-			mtree.insert(stk, tx, &mut self.store, vector.into(), doc_id).await?;
+			mtree.insert(tx, &mut self.store, vector.into(), doc_id).await?;
 		}
 		Ok(())
 	}
@@ -111,7 +110,6 @@ impl MTreeIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		rid: &Thing,
 		content: &Vec<Value>,
@@ -124,7 +122,7 @@ impl MTreeIndex {
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
 				// Remove the vector
-				mtree.delete(stk, tx, &mut self.store, vector.into(), doc_id).await?;
+				mtree.delete(tx, &mut self.store, vector.into(), doc_id).await?;
 			}
 		}
 		Ok(())
@@ -254,7 +252,6 @@ impl MTree {
 
 	pub async fn insert(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		obj: SharedVector,
@@ -270,7 +267,7 @@ impl MTree {
 			let node = store.get_node_mut(tx, root_id).await?;
 			// Otherwise, we insert the object with possibly mutating the tree
 			if let InsertionResult::PromotedEntries(o1, p1, o2, p2) =
-				self.insert_at_node(stk, tx, store, node, &None, obj, id).await?
+				self.insert_at_node(tx, store, node, &None, obj, id).await?
 			{
 				self.create_new_internal_root(store, o1, p1, o2, p2).await?;
 			}
@@ -360,11 +357,10 @@ impl MTree {
 		Ok(false)
 	}
 
-	/// Was marked recursive
-	#[allow(clippy::too_many_arguments)]
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(? Send))]
 	async fn insert_at_node(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
@@ -382,7 +378,6 @@ impl MTree {
 			// Else
 			MTreeNode::Internal(n) => {
 				self.insert_node_internal(
-					stk,
 					tx,
 					store,
 					node.id,
@@ -400,7 +395,6 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn insert_node_internal(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node_id: NodeId,
@@ -415,14 +409,7 @@ impl MTree {
 		let best_node = store.get_node_mut(tx, best_entry.node).await?;
 		// Insert(Oi, child(ObestSubstree), ObestSubtree);
 		let best_entry_obj_op = Some(best_entry_obj.clone());
-		let this = &mut *self;
-		match stk
-			.run(|stk| async {
-				this.insert_at_node(stk, tx, store, best_node, &best_entry_obj_op, object, doc_id)
-					.await
-			})
-			.await?
-		{
+		match self.insert_at_node(tx, store, best_node, &best_entry_obj_op, object, doc_id).await? {
 			// If (entry returned)
 			InsertionResult::PromotedEntries(o1, mut p1, o2, mut p2) => {
 				#[cfg(debug_assertions)]
@@ -707,7 +694,6 @@ impl MTree {
 
 	async fn delete(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		object: SharedVector,
@@ -717,7 +703,7 @@ impl MTree {
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
 			if let DeletionResult::Underflown(sn, n_updated) = self
-				.delete_at_node(stk, tx, store, root_node, &None, object, doc_id, &mut deleted)
+				.delete_at_node(tx, store, root_node, &None, object, doc_id, &mut deleted)
 				.await?
 			{
 				match &sn.n {
@@ -749,11 +735,11 @@ impl MTree {
 		Ok(deleted)
 	}
 
-	/// Was marked recursive
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(? Send))]
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_at_node(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node: MStoredNode,
@@ -783,7 +769,6 @@ impl MTree {
 			// Else
 			MTreeNode::Internal(n) => {
 				self.delete_node_internal(
-					stk,
 					tx,
 					store,
 					node.id,
@@ -802,7 +787,6 @@ impl MTree {
 	#[allow(clippy::too_many_arguments)]
 	async fn delete_node_internal(
 		&mut self,
-		stk: &mut Stk,
 		tx: &mut Transaction,
 		store: &mut MTreeStore,
 		node_id: NodeId,
@@ -837,19 +821,8 @@ impl MTree {
 			#[cfg(debug_assertions)]
 			let d_id = on_node.id;
 			let on_obj_op = Some(on_obj.clone());
-			match stk
-				.run(|stk| {
-					self.delete_at_node(
-						stk,
-						tx,
-						store,
-						on_node,
-						&on_obj_op,
-						od.clone(),
-						id,
-						deleted,
-					)
-				})
+			match self
+				.delete_at_node(tx, store, on_node, &on_obj_op, od.clone(), id, deleted)
 				.await?
 			{
 				DeletionResult::NotFound => {
@@ -1431,7 +1404,6 @@ impl VersionedSerdeState for MState {}
 #[cfg(test)]
 mod tests {
 	use hashbrown::{HashMap, HashSet};
-	use reblessive::tree::Stk;
 	use std::collections::VecDeque;
 
 	use crate::err::Error;
@@ -1482,7 +1454,6 @@ mod tests {
 	}
 
 	async fn insert_collection_one_by_one(
-		stk: &mut Stk,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
@@ -1494,7 +1465,7 @@ mod tests {
 			{
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
-				t.insert(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
+				t.insert(&mut tx, &mut st, obj.clone(), *doc_id).await?;
 				finish_operation(ds, t, tx, st, true).await?;
 				map.insert(*doc_id, obj.clone());
 			}
@@ -1510,7 +1481,6 @@ mod tests {
 	}
 
 	async fn insert_collection_batch(
-		stk: &mut Stk,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
@@ -1520,7 +1490,7 @@ mod tests {
 		{
 			let (mut st, mut tx) = new_operation(ds, t, TransactionType::Write, cache_size).await;
 			for (doc_id, obj) in collection.to_vec_ref() {
-				t.insert(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
+				t.insert(&mut tx, &mut st, obj.clone(), *doc_id).await?;
 				map.insert(*doc_id, obj.clone());
 			}
 			finish_operation(ds, t, tx, st, true).await?;
@@ -1533,7 +1503,6 @@ mod tests {
 	}
 
 	async fn delete_collection(
-		stk: &mut Stk,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
@@ -1545,7 +1514,7 @@ mod tests {
 				debug!("### Remove {} {:?}", doc_id, obj);
 				let (mut st, mut tx) =
 					new_operation(ds, t, TransactionType::Write, cache_size).await;
-				let deleted = t.delete(stk, &mut tx, &mut st, obj.clone(), *doc_id).await?;
+				let deleted = t.delete(&mut tx, &mut st, obj.clone(), *doc_id).await?;
 				finish_operation(ds, t, tx, st, true).await?;
 				deleted
 			};
@@ -1648,7 +1617,6 @@ mod tests {
 	}
 
 	async fn test_mtree_collection(
-		stk: &mut Stk,
 		capacities: &[u16],
 		vector_type: VectorType,
 		collection: TestCollection,
@@ -1674,9 +1642,9 @@ mod tests {
 				let mut t = MTree::new(MState::new(*capacity), distance.clone());
 
 				let map = if collection.len() < 1000 {
-					insert_collection_one_by_one(stk, &ds, &mut t, &collection, cache_size).await?
+					insert_collection_one_by_one(&ds, &mut t, &collection, cache_size).await?
 				} else {
-					insert_collection_batch(stk, &ds, &mut t, &collection, cache_size).await?
+					insert_collection_batch(&ds, &mut t, &collection, cache_size).await?
 				};
 				if check_find {
 					find_collection(&ds, &mut t, &collection, cache_size).await?;
@@ -1685,7 +1653,7 @@ mod tests {
 					check_full_knn(&ds, &mut t, &map, cache_size).await?;
 				}
 				if check_delete {
-					delete_collection(stk, &ds, &mut t, &collection, cache_size).await?;
+					delete_collection(&ds, &mut t, &collection, cache_size).await?;
 				}
 			}
 		}
@@ -1695,245 +1663,170 @@ mod tests {
 	#[test(tokio::test)]
 	#[ignore]
 	async fn test_mtree_unique_xs() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [
-					VectorType::F64,
-					VectorType::F32,
-					VectorType::I64,
-					VectorType::I32,
-					VectorType::I16,
-				] {
-					for i in 0..30 {
-						test_mtree_collection(
-							stk,
-							&[3, 40],
-							vt,
-							TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
-							true,
-							true,
-							true,
-							100,
-						)
-						.await?;
-					}
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			for i in 0..30 {
+				test_mtree_collection(
+					&[3, 40],
+					vt,
+					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
+					true,
+					true,
+					true,
+					100,
+				)
+				.await?;
+			}
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test)]
 	#[ignore]
 	async fn test_mtree_unique_xs_full_cache() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [
-					VectorType::F64,
-					VectorType::F32,
-					VectorType::I64,
-					VectorType::I32,
-					VectorType::I16,
-				] {
-					for i in 0..30 {
-						test_mtree_collection(
-							stk,
-							&[3, 40],
-							vt,
-							TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
-							true,
-							true,
-							true,
-							0,
-						)
-						.await?;
-					}
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			for i in 0..30 {
+				test_mtree_collection(
+					&[3, 40],
+					vt,
+					TestCollection::new(true, i, vt, 2, &Distance::Euclidean),
+					true,
+					true,
+					true,
+					0,
+				)
+				.await?;
+			}
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_small() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [VectorType::F64, VectorType::I64] {
-					test_mtree_collection(
-						stk,
-						&[10, 20],
-						vt,
-						TestCollection::new(true, 150, vt, 3, &Distance::Euclidean),
-						true,
-						true,
-						false,
-						0,
-					)
-					.await?;
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in [VectorType::F64, VectorType::I64] {
+			test_mtree_collection(
+				&[10, 20],
+				vt,
+				TestCollection::new(true, 150, vt, 3, &Distance::Euclidean),
+				true,
+				true,
+				false,
+				0,
+			)
+			.await?;
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_normal() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [VectorType::F32, VectorType::I32] {
-					test_mtree_collection(
-						stk,
-						&[40],
-						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
-						false,
-						true,
-						false,
-						100,
-					)
-					.await?;
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in [VectorType::F32, VectorType::I32] {
+			test_mtree_collection(
+				&[40],
+				vt,
+				TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+				false,
+				true,
+				false,
+				100,
+			)
+			.await?;
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_normal_full_cache() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [VectorType::F32, VectorType::I32] {
-					test_mtree_collection(
-						stk,
-						&[40],
-						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
-						false,
-						true,
-						false,
-						0,
-					)
-					.await?;
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in [VectorType::F32, VectorType::I32] {
+			test_mtree_collection(
+				&[40],
+				vt,
+				TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+				false,
+				true,
+				false,
+				0,
+			)
+			.await?;
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_unique_normal_small_cache() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [VectorType::F32, VectorType::I32] {
-					test_mtree_collection(
-						stk,
-						&[40],
-						vt,
-						TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
-						false,
-						true,
-						false,
-						10,
-					)
-					.await?;
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in [VectorType::F32, VectorType::I32] {
+			test_mtree_collection(
+				&[40],
+				vt,
+				TestCollection::new(true, 1000, vt, 10, &Distance::Euclidean),
+				false,
+				true,
+				false,
+				10,
+			)
+			.await?;
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test)]
 	#[ignore]
 	async fn test_mtree_random_xs() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [
-					VectorType::F64,
-					VectorType::F32,
-					VectorType::I64,
-					VectorType::I32,
-					VectorType::I16,
-				] {
-					for i in 0..30 {
-						// 10, 40
-						test_mtree_collection(
-							stk,
-							&[3, 40],
-							vt,
-							TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
-							true,
-							true,
-							true,
-							0,
-						)
-						.await?;
-					}
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+		{
+			for i in 0..30 {
+				// 10, 40
+				test_mtree_collection(
+					&[3, 40],
+					vt,
+					TestCollection::new(false, i, vt, 1, &Distance::Euclidean),
+					true,
+					true,
+					true,
+					0,
+				)
+				.await?;
+			}
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_random_small() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [VectorType::F64, VectorType::I64] {
-					test_mtree_collection(
-						stk,
-						&[10, 20],
-						vt,
-						TestCollection::new(false, 150, vt, 3, &Distance::Euclidean),
-						true,
-						true,
-						false,
-						0,
-					)
-					.await?;
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in [VectorType::F64, VectorType::I64] {
+			test_mtree_collection(
+				&[10, 20],
+				vt,
+				TestCollection::new(false, 150, vt, 3, &Distance::Euclidean),
+				true,
+				true,
+				false,
+				0,
+			)
+			.await?;
+		}
+		Ok(())
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_mtree_random_normal() -> Result<(), Error> {
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
-				for vt in [VectorType::F32, VectorType::I32] {
-					test_mtree_collection(
-						stk,
-						&[40],
-						vt,
-						TestCollection::new(false, 1000, vt, 10, &Distance::Euclidean),
-						false,
-						true,
-						false,
-						0,
-					)
-					.await?;
-				}
-				Ok(())
-			})
-			.finish()
-			.await
+		for vt in [VectorType::F32, VectorType::I32] {
+			test_mtree_collection(
+				&[40],
+				vt,
+				TestCollection::new(false, 1000, vt, 10, &Distance::Euclidean),
+				false,
+				true,
+				false,
+				0,
+			)
+			.await?;
+		}
+		Ok(())
 	}
 
 	#[derive(Default, Debug)]
