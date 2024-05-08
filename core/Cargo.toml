@@ -89,7 +89,7 @@ geo-types = { version = "0.7.12", features = ["arbitrary"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "0.5.1", package = "rquickjs", features = [
+js = { version = "0.6.2", package = "rquickjs", features = [
     "array-buffer",
     "bindgen",
     "classes",
@@ -115,7 +115,7 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
-reblessive = { version = "0.3.3", features = ["tree"] }
+reblessive = { version = "0.3.5", features = ["tree"] }
 regex = "1.10.2"
 regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.11.22", default-features = false, features = [
