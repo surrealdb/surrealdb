@@ -67,7 +67,7 @@ async fn signup_record() {
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	db.signup(RecordAccess{
+	db.signup(RecordAccess {
 		namespace: NS,
 		database: &database,
 		access: &access,
@@ -138,7 +138,7 @@ async fn signin_record() {
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	db.signup(RecordAccess{
+	db.signup(RecordAccess {
 		namespace: NS,
 		database: &database,
 		access: &access,
@@ -149,7 +149,7 @@ async fn signin_record() {
 	})
 	.await
 	.unwrap();
-	db.signin(RecordAccess{
+	db.signin(RecordAccess {
 		namespace: NS,
 		database: &database,
 		access: &access,
@@ -182,7 +182,7 @@ async fn record_access_throws_error() {
 	response.check().unwrap();
 
 	match db
-		.signup(RecordAccess{
+		.signup(RecordAccess {
 			namespace: NS,
 			database: &database,
 			access: &access,
@@ -203,7 +203,7 @@ async fn record_access_throws_error() {
 	};
 
 	match db
-		.signin(RecordAccess{
+		.signin(RecordAccess {
 			namespace: NS,
 			database: &database,
 			access: &access,
@@ -257,7 +257,10 @@ async fn record_access_invalid_query() {
 	{
 		Err(Error::Db(surrealdb::err::Error::AccessRecordSignupQueryFailed)) => (),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
-			assert_eq!(e, "There was a problem with the database: The record access signup query failed")
+			assert_eq!(
+				e,
+				"There was a problem with the database: The record access signup query failed"
+			)
 		}
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
@@ -280,7 +283,10 @@ async fn record_access_invalid_query() {
 	{
 		Err(Error::Db(surrealdb::err::Error::AccessRecordSigninQueryFailed)) => (),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
-			assert_eq!(e, "There was a problem with the database: The record access signin query failed")
+			assert_eq!(
+				e,
+				"There was a problem with the database: The record access signin query failed"
+			)
 		}
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
