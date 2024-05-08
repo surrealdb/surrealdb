@@ -143,7 +143,8 @@ snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
 surrealkv = { version = "0.1.5", optional = true }
-surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
+# surrealml = { version = "0.1.1", optional = true, package = "surrealml-core" }
+surrealml = { version = "0.1.1", optional = true, git = "https://github.com/surrealdb/surrealml.git", branch = "newort" }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }
