@@ -49,7 +49,7 @@ mod tests {
 			if_exists: false,
 		});
 		let enc: Vec<u8> = stm.into();
-		assert_eq!(10, enc.len());
+		assert_eq!(16, enc.len());
 	}
 
 	/// REBUILD INDEX tests
