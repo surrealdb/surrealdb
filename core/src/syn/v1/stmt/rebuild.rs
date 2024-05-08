@@ -45,6 +45,7 @@ mod tests {
 	fn check_rebuild_serialize() {
 		let stm = RebuildStatement::Index(RebuildIndexStatement {
 			name: Ident::from("test"),
+			what: Ident::from("test"),
 			if_exists: false,
 		});
 		let enc: Vec<u8> = stm.into();
@@ -56,7 +57,7 @@ mod tests {
 	#[test]
 	fn rebuild_index() {
 		let sql = "REBUILD INDEX test ON test";
-		let res = remove(sql);
+		let res = rebuild(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REBUILD INDEX test ON test", format!("{}", out))
 	}
@@ -64,7 +65,7 @@ mod tests {
 	#[test]
 	fn rebuild_index_if_exists() {
 		let sql = "REBUILD INDEX IF EXISTS test ON test";
-		let res = remove(sql);
+		let res = rebuild(sql);
 		let out = res.unwrap().1;
 		assert_eq!("REBUILD INDEX IF EXISTS test ON test", format!("{}", out))
 	}
