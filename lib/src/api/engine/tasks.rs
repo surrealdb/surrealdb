@@ -98,6 +98,7 @@ fn init(opt: &EngineOptions, dbs: Arc<Datastore>) -> (FutureTask, Sender<()>) {
 		let mut streams = streams.merge();
 
 		while let Some(Some(_)) = streams.next().await {
+			trace!("There was a tick for the cf task stream");
 			if let Err(e) = dbs.tick().await {
 				error!("Error running node agent tick: {}", e);
 				break;

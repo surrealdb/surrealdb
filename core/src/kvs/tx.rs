@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use channel::{Receiver, Sender};
 use futures::lock::Mutex;
+use rand::Rng;
 use uuid::Uuid;
 
 use sql::permission::Permissions;
@@ -838,6 +839,15 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!("Scan paged {} - {}", sprint_key(&page.range.start), sprint_key(&page.range.end));
+
+		if rand::thread_rng().gen_ratio(20, 100) {
+			println!(
+				"Scan paged {} - {}, backtrace: {}",
+				sprint_key(&page.range.start),
+				sprint_key(&page.range.end),
+				std::backtrace::Backtrace::force_capture()
+			);
+		}
 		let range = page.range.clone();
 		let res = match self {
 			#[cfg(feature = "kv-mem")]

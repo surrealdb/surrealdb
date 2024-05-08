@@ -33,10 +33,14 @@ members = [
 
 [profile.release]
 lto = true
-strip = true
+strip = false
+debug = true
 opt-level = 3
 panic = 'abort'
 codegen-units = 1
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-elf-gcc"
 
 [profile.bench]
 strip = false
