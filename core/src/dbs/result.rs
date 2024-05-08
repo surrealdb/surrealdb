@@ -3,7 +3,6 @@ use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 #[cfg(any(
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
@@ -20,7 +19,6 @@ pub(super) enum Results {
 	Memory(MemoryCollector),
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -35,7 +33,6 @@ impl Results {
 		&mut self,
 		#[cfg(any(
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
@@ -49,7 +46,6 @@ impl Results {
 		}
 		#[cfg(any(
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
@@ -76,7 +72,6 @@ impl Results {
 			}
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -97,7 +92,6 @@ impl Results {
 			Self::Memory(m) => m.sort(orders),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -114,7 +108,6 @@ impl Results {
 			Self::Memory(m) => m.start_limit(start, limit),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -131,7 +124,6 @@ impl Results {
 			Self::Memory(s) => s.len(),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -147,7 +139,6 @@ impl Results {
 			Self::Memory(m) => m.take_vec(),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -166,7 +157,6 @@ impl Results {
 			}
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",

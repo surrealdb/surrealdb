@@ -299,7 +299,6 @@ impl Iterator {
 		self.results = self.results.prepare(
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
