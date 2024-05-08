@@ -59,7 +59,7 @@ async fn signup_record() {
 	let access = Ulid::new().to_string();
 	let sql = format!(
 		"
-        DEFINE ACCESS `{ac}` ON DB TYPE RECORD DURATION 1s
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD DURATION 1s
         SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
         SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
     "
@@ -67,7 +67,7 @@ async fn signup_record() {
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	db.signup(Record {
+	db.signup(RecordAccess{
 		namespace: NS,
 		database: &database,
 		access: &access,
@@ -138,7 +138,7 @@ async fn signin_record() {
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
-	db.signup(Record {
+	db.signup(RecordAccess{
 		namespace: NS,
 		database: &database,
 		access: &access,
@@ -149,7 +149,7 @@ async fn signin_record() {
 	})
 	.await
 	.unwrap();
-	db.signin(Record {
+	db.signin(RecordAccess{
 		namespace: NS,
 		database: &database,
 		access: &access,
@@ -182,7 +182,7 @@ async fn record_access_throws_error() {
 	response.check().unwrap();
 
 	match db
-		.signup(Record {
+		.signup(RecordAccess{
 			namespace: NS,
 			database: &database,
 			access: &access,
@@ -203,7 +203,7 @@ async fn record_access_throws_error() {
 	};
 
 	match db
-		.signin(Record {
+		.signin(RecordAccess{
 			namespace: NS,
 			database: &database,
 			access: &access,
@@ -244,7 +244,7 @@ async fn record_access_invalid_query() {
 	response.check().unwrap();
 
 	match db
-		.signup(Access {
+		.signup(RecordAccess {
 			namespace: NS,
 			database: &database,
 			access: &access,
@@ -255,9 +255,9 @@ async fn record_access_invalid_query() {
 		})
 		.await
 	{
-		Err(Error::Db(surrealdb::err::Error::SignupQueryFailed)) => (),
+		Err(Error::Db(surrealdb::err::Error::AccessRecordSignupQueryFailed)) => (),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
-			assert_eq!(e, "There was a problem with the database: The signup query failed")
+			assert_eq!(e, "There was a problem with the database: The record access signup query failed")
 		}
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
@@ -267,7 +267,7 @@ async fn record_access_invalid_query() {
 	};
 
 	match db
-		.signin(Access {
+		.signin(RecordAccess {
 			namespace: NS,
 			database: &database,
 			access: &access,
@@ -278,9 +278,9 @@ async fn record_access_invalid_query() {
 		})
 		.await
 	{
-		Err(Error::Db(surrealdb::err::Error::SigninQueryFailed)) => (),
+		Err(Error::Db(surrealdb::err::Error::AccessRecordSigninQueryFailed)) => (),
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
-			assert_eq!(e, "There was a problem with the database: The signin query failed")
+			assert_eq!(e, "There was a problem with the database: The record access signin query failed")
 		}
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
