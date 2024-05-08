@@ -1,11 +1,12 @@
 use super::super::{
 	comment::{mightbespace, shouldbespace},
+	common::{closeparentheses, expect_delimited, openparentheses},
 	error::expected,
 	literal::{param, table},
 	part::{data, output, timeout},
-	subquery::subquery,
+	subquery::{subquery, subquery_inner},
 	thing::thing,
-	value::array,
+	value::{array, value as sql_value},
 	IResult,
 };
 use crate::sql::{statements::RelateStatement, Value};
@@ -62,7 +63,7 @@ fn relate_oi(i: &str) -> IResult<&str, (Value, Value, Value)> {
 
 fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table)))(i)?;
+	let (i, kind) = inner_relate_kind(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("->")(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -72,7 +73,7 @@ fn relate_o(i: &str) -> IResult<&str, (Value, Value)> {
 
 fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = alt((into(thing), into(table)))(i)?;
+	let (i, kind) = inner_relate_kind(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("<-")(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -80,10 +81,20 @@ fn relate_i(i: &str) -> IResult<&str, (Value, Value)> {
 	Ok((i, (kind, from)))
 }
 
+fn inner_relate_kind(i: &str) -> IResult<&str, Value> {
+	alt((
+		into(thing),
+		into(table),
+		into(param),
+		expect_delimited(openparentheses, alt((into(subquery_inner), sql_value)), closeparentheses),
+	))(i)
+}
+
 #[cfg(test)]
 mod tests {
 
 	use super::*;
+	use crate::sql::*;
 
 	#[test]
 	fn relate_statement_in() {
@@ -107,5 +118,27 @@ mod tests {
 		let res = relate(sql);
 		let out = res.unwrap().1;
 		assert_eq!("RELATE $tobie -> like -> $koala", format!("{}", out))
+	}
+
+	#[test]
+	fn relate_statement_content() {
+		let sql = "RELATE $tobie->like->$koala CONTENT $bla";
+		let res = relate(sql);
+		let out = res.unwrap().1;
+		assert_eq!("RELATE $tobie -> like -> $koala CONTENT $bla", format!("{}", out));
+		assert_eq!(
+			out,
+			RelateStatement {
+				only: false,
+				kind: Value::Table(Table("like".to_owned())),
+				from: Value::Param(Param(Ident("tobie".to_owned()))),
+				with: Value::Param(Param(Ident("koala".to_owned()))),
+				uniq: false,
+				data: Some(Data::ContentExpression(Value::Param(Param(Ident("bla".to_owned()))))),
+				output: None,
+				timeout: None,
+				parallel: false,
+			}
+		)
 	}
 }
