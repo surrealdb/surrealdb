@@ -1,7 +1,9 @@
 use crate::idx::trees::dynamicset::DynamicSet;
 use hashbrown::hash_map::Entry;
-use hashbrown::{HashMap, HashSet};
-use std::fmt::{Debug, Display};
+use hashbrown::HashMap;
+#[cfg(test)]
+use hashbrown::HashSet;
+use std::fmt::Debug;
 use std::hash::Hash;
 
 #[derive(Debug)]
@@ -76,7 +78,7 @@ where
 #[cfg(test)]
 impl<T, S> UndirectedGraph<T, S>
 where
-	T: Eq + Hash + Clone + Copy + Default + 'static + Display + Debug + Send + Sync,
+	T: Eq + Hash + Clone + Copy + Default + 'static + Debug + Send + Sync,
 	S: DynamicSet<T>,
 {
 	pub(in crate::idx::trees) fn len(&self) -> usize {
@@ -91,7 +93,7 @@ where
 			let edges: HashSet<T> = e.into_iter().collect();
 			let n_edges: Option<HashSet<T>> =
 				self.get_edges(&n).map(|e| e.iter().cloned().collect());
-			assert_eq!(n_edges, Some(edges), "{n}");
+			assert_eq!(n_edges, Some(edges), "{n:?}");
 		}
 	}
 }
