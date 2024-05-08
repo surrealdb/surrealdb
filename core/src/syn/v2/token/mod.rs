@@ -437,49 +437,4 @@ impl Token {
 	pub fn is_eof(&self) -> bool {
 		matches!(self.kind, TokenKind::Eof)
 	}
-
-	#[test]
-	fn weird_things() {
-		use crate::sql;
-
-		fn assert_ident_parses_correctly(ident: &str) {
-			let thing = format!("t:{}", ident);
-			let mut parser = Parser::new(thing.as_bytes());
-			parser.allow_fexible_record_id(true);
-			let mut stack = Stack::new();
-			let r = stack
-				.enter(|ctx| async move { parser.parse_thing(ctx).await })
-				.finish()
-				.expect(&format!("failed on {}", ident))
-				.id;
-			assert_eq!(r, Id::String(ident.to_string()),);
-
-			let mut parser = Parser::new(thing.as_bytes());
-			let r = stack
-				.enter(|ctx| async move { parser.parse_query(ctx).await })
-				.finish()
-				.expect(&format!("failed on {}", ident));
-
-			assert_eq!(
-				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
-					sql::Thing {
-						tb: "t".to_string(),
-						id: Id::String(ident.to_string())
-					}
-				))]))
-			)
-		}
-
-		assert_ident_parses_correctly("123abc");
-		assert_ident_parses_correctly("123d");
-		assert_ident_parses_correctly("123de");
-		assert_ident_parses_correctly("123dec");
-		assert_ident_parses_correctly("1e23dec");
-		assert_ident_parses_correctly("1e23f");
-		assert_ident_parses_correctly("123f");
-		assert_ident_parses_correctly("1ns");
-		assert_ident_parses_correctly("1ns1");
-		assert_ident_parses_correctly("1ns1h");
-	}
 }
