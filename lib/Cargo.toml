@@ -115,6 +115,8 @@ reblessive = { version = "0.3.5", features = ["tree"] }
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
+flate2 = "1.0.28"
+hashbrown = "0.14.5"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 rand = "0.8.5"
 radix_trie = "0.2.1"
@@ -184,9 +186,17 @@ name = "index_mtree"
 harness = false
 
 [[bench]]
+name = "index_hnsw"
+harness = false
+
+[[bench]]
 name = "move_vs_clone"
 harness = false
 
 [[bench]]
 name = "sdb"
+harness = false
+
+[[bench]]
+name = "hashset_vs_vector"
 harness = false

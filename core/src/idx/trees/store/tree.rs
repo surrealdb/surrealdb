@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
 use crate::kvs::{Key, Transaction};
-use std::collections::{HashMap, HashSet};
+use hashbrown::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;

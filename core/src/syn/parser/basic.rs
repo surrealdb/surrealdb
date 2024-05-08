@@ -353,6 +353,7 @@ impl Parser<'_> {
 				| TokenKind::Language(_)
 				| TokenKind::Algorithm(_)
 				| TokenKind::Distance(_)
+				| TokenKind::VectorType(_)
 				| TokenKind::Identifier
 		)
 	}
