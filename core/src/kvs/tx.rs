@@ -2927,12 +2927,16 @@ impl Transaction {
 				db,
 				sprint_key(k)
 			);
-			let k = crate::key::database::ts::Ts::decode(k)?;
-			let latest_ts = k.ts;
+			let latest_key = crate::key::database::ts::Ts::decode(k)?;
+			let latest_ts = latest_key.ts;
 			if latest_ts >= ts {
 				return Err(Error::Internal(
 					"ts is less than or equal to the latest ts".to_string(),
 				));
+			}
+			// now delete all expired keys
+			for (k, _) in ts_pairs {
+				self.del(k).await?;
 			}
 		}
 		self.set(ts_key, vs).await?;
