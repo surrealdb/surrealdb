@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
 	BreakStatement, ContinueStatement, CreateStatement, DefineStatement, DeleteStatement,
 	ForeachStatement, IfelseStatement, InsertStatement, OutputStatement, RelateStatement,
@@ -99,6 +100,9 @@ impl Block {
 				Entry::Define(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
+				Entry::Rebuild(v) => {
+					v.compute(&ctx, opt, txn, doc).await?;
+				}
 				Entry::Remove(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
@@ -173,7 +177,7 @@ impl InfoStructure for Block {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -194,6 +198,8 @@ pub enum Entry {
 	Break(BreakStatement),
 	Continue(ContinueStatement),
 	Foreach(ForeachStatement),
+	#[revision(start = 2)]
+	Rebuild(RebuildStatement),
 }
 
 impl PartialOrd for Entry {
@@ -218,6 +224,7 @@ impl Entry {
 			Self::Insert(v) => v.writeable(),
 			Self::Output(v) => v.writeable(),
 			Self::Define(v) => v.writeable(),
+			Self::Rebuild(v) => v.writeable(),
 			Self::Remove(v) => v.writeable(),
 			Self::Throw(v) => v.writeable(),
 			Self::Break(v) => v.writeable(),
@@ -241,6 +248,7 @@ impl Display for Entry {
 			Self::Insert(v) => write!(f, "{v}"),
 			Self::Output(v) => write!(f, "{v}"),
 			Self::Define(v) => write!(f, "{v}"),
+			Self::Rebuild(v) => write!(f, "{v}"),
 			Self::Remove(v) => write!(f, "{v}"),
 			Self::Throw(v) => write!(f, "{v}"),
 			Self::Break(v) => write!(f, "{v}"),

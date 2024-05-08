@@ -85,7 +85,8 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => {
+			| t!("REMOVE")
+			| t!("REBUILD") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))
 			}
 			t!("fn") => self.parse_custom_function(ctx).await.map(|x| Value::Function(Box::new(x))),
@@ -244,7 +245,8 @@ impl Parser<'_> {
 			| t!("DELETE")
 			| t!("RELATE")
 			| t!("DEFINE")
-			| t!("REMOVE") => {
+			| t!("REMOVE")
+			| t!("REBUILD") => {
 				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))?
 			}
 			t!("fn") => {
@@ -410,6 +412,11 @@ impl Parser<'_> {
 				let stmt = self.parse_remove_stmt()?;
 				Subquery::Remove(stmt)
 			}
+			t!("REBUILD") => {
+				self.pop_peek();
+				let stmt = self.parse_rebuild_stmt()?;
+				Subquery::Rebuild(stmt)
+			}
 			t!("+") | t!("-") => {
 				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
 				if let TokenKind::Number(kind) = self.peek_token_at(1).kind {
@@ -555,6 +562,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				let stmt = self.parse_remove_stmt()?;
 				Subquery::Remove(stmt)
+			}
+			t!("REBUILD") => {
+				self.pop_peek();
+				let stmt = self.parse_rebuild_stmt()?;
+				Subquery::Rebuild(stmt)
 			}
 			_ => {
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;

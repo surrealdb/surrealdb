@@ -2,6 +2,7 @@ use reblessive::Stk;
 
 use crate::enter_query_recursion;
 use crate::sql::block::Entry;
+use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
@@ -83,12 +84,12 @@ impl Parser<'_> {
 				| t!("FOR") | t!("IF")
 				| t!("INFO") | t!("INSERT")
 				| t!("KILL") | t!("LIVE")
-				| t!("OPTION") | t!("RETURN")
-				| t!("RELATE") | t!("REMOVE")
-				| t!("SELECT") | t!("LET")
-				| t!("SHOW") | t!("SLEEP")
-				| t!("THROW") | t!("UPDATE")
-				| t!("USE")
+				| t!("OPTION") | t!("REBUILD")
+				| t!("RETURN") | t!("RELATE")
+				| t!("REMOVE") | t!("SELECT")
+				| t!("LET") | t!("SHOW")
+				| t!("SLEEP") | t!("THROW")
+				| t!("UPDATE") | t!("USE")
 		)
 	}
 
@@ -164,6 +165,10 @@ impl Parser<'_> {
 			t!("OPTION") => {
 				self.pop_peek();
 				self.parse_option_stmt().map(Statement::Option)
+			}
+			t!("REBUILD") => {
+				self.pop_peek();
+				self.parse_rebuild_stmt().map(Statement::Rebuild)
 			}
 			t!("RETURN") => {
 				self.pop_peek();
@@ -253,6 +258,10 @@ impl Parser<'_> {
 			t!("INSERT") => {
 				self.pop_peek();
 				self.parse_insert_stmt(ctx).await.map(Entry::Insert)
+			}
+			t!("REBUILD") => {
+				self.pop_peek();
+				self.parse_rebuild_stmt().map(Entry::Rebuild)
 			}
 			t!("RETURN") => {
 				self.pop_peek();
@@ -515,6 +524,31 @@ impl Parser<'_> {
 			name,
 			what,
 		})
+	}
+
+	pub fn parse_rebuild_stmt(&mut self) -> ParseResult<RebuildStatement> {
+		let res = match self.next().kind {
+			t!("INDEX") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let name = self.next_token_value()?;
+				expected!(self, t!("ON"));
+				self.eat(t!("TABLE"));
+				let what = self.next_token_value()?;
+
+				RebuildStatement::Index(RebuildIndexStatement {
+					what,
+					name,
+					if_exists,
+				})
+			}
+			x => unexpected!(self, x, "a rebuild statement keyword"),
+		};
+		Ok(res)
 	}
 
 	/// Parsers a RETURN statement.
