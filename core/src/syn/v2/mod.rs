@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::{
 	err::Error,
 	sql::{Datetime, Duration, Idiom, Query, Range, Subquery, Thing, Value},
