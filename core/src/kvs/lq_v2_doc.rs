@@ -178,7 +178,7 @@ mod test_check_lqs_and_send_notifications {
 	use crate::iam::{Auth, Role};
 	use crate::kvs::lq_v2_doc::construct_document;
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::paths::{OBJ_PATH_ACCESS, OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
+	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
 

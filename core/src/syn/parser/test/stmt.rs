@@ -265,7 +265,7 @@ fn parse_define_access_jwt_jwks() {
 			name: Ident("a".to_string()),
 			base: Base::Db,
 			kind: AccessType::Jwt(JwtAccess {
-				verify: JwtAccessVerify::Key(JwtAccessVerifyJwks {
+				verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
 					url: "http://example.com/.well-known/jwks.json".to_string(),
 				}),
 				issue: None,
