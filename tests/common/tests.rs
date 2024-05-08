@@ -1303,7 +1303,7 @@ async fn session_reauthentication() {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user DURATION 1h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
@@ -1391,7 +1391,7 @@ async fn session_reauthentication_expired() {
 	socket
 		.send_message_query(
 			r#"
-			DEFINE ACCESS user DURATION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,

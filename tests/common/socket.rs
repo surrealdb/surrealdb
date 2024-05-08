@@ -41,7 +41,7 @@ struct SigninParams<'a> {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	db: Option<&'a str>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	sc: Option<&'a str>,
+	ac: Option<&'a str>,
 }
 
 enum SocketMsg {
@@ -385,7 +385,7 @@ impl Socket {
 		pass: &str,
 		ns: Option<&str>,
 		db: Option<&str>,
-		sc: Option<&str>,
+		ac: Option<&str>,
 	) -> Result<String> {
 		// Send message and receive response
 		let msg = self
@@ -396,7 +396,7 @@ impl Socket {
 					pass,
 					ns,
 					db,
-					sc
+					ac
 				}]),
 			)
 			.await?;
