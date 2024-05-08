@@ -15,23 +15,22 @@ pub enum Error {
 }
 
 impl Lexer<'_> {
+	pub fn finish_number_token(&mut self, kind: NumberKind) -> Token {
+		let mut str = mem::take(&mut self.scratch);
+		str.retain(|x| x != '_');
+		self.string = Some(str);
+		self.finish_token(TokenKind::Number(kind))
+	}
 	/// Lex only an integer.
 	/// Use when a number can be followed immediatly by a `.` like in a model version.
 	pub fn lex_only_integer(&mut self) -> Token {
-		match self.lex_only_integer_err() {
-			Ok(x) => x,
-			Err(e) => self.invalid_token(LexError::Number(e)),
-		}
-	}
-
-	fn lex_only_integer_err(&mut self) -> Result<Token, Error> {
 		let Some(next) = self.reader.peek() else {
-			return Ok(self.eof_token());
+			return self.eof_token();
 		};
 
 		// not a number, return a different token kind, for error reporting.
 		if !next.is_ascii_digit() {
-			return Ok(self.next_token());
+			return self.next_token();
 		}
 
 		self.scratch.push(next as char);
@@ -39,9 +38,7 @@ impl Lexer<'_> {
 
 		// eat all the ascii digits
 		while let Some(x) = self.reader.peek() {
-			if x == b'_' {
-				self.reader.next();
-			} else if !x.is_ascii_digit() {
+			if !x.is_ascii_digit() && x != b'_' {
 				break;
 			} else {
 				self.scratch.push(x as char);
@@ -53,33 +50,25 @@ impl Lexer<'_> {
 		match self.reader.peek() {
 			Some(b'd' | b'f') => {
 				// not an integer but parse anyway for error reporting.
-				return self.lex_suffix(false, true);
+				return self.lex_suffix(false, false);
 			}
-			Some(x) if x.is_ascii_alphabetic() => return Err(self.invalid_suffix()),
+			Some(x) if x.is_ascii_alphabetic() => return self.invalid_suffix_token(),
 			_ => {}
 		}
 
-		self.string = Some(mem::take(&mut self.scratch));
-		Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)))
+		self.finish_number_token(NumberKind::Integer)
 	}
 
-	pub fn lex_number(&mut self, start: u8) -> Token {
-		match self.lex_number_err(start) {
-			Ok(x) => x,
-			Err(e) => self.invalid_token(LexError::Number(e)),
-		}
-	}
 	/// Lex a number.
 	///
 	/// Expects the digit which started the number as the start argument.
-	pub fn lex_number_err(&mut self, start: u8) -> Result<Token, Error> {
+	pub fn lex_number(&mut self, start: u8) -> Token {
 		debug_assert!(start.is_ascii_digit());
 		debug_assert_eq!(self.scratch, "");
 		self.scratch.push(start as char);
 		loop {
 			let Some(x) = self.reader.peek() else {
-				self.string = Some(mem::take(&mut self.scratch));
-				return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
+				return self.finish_number_token(NumberKind::Integer);
 			};
 			match x {
 				b'0'..=b'9' => {
@@ -87,10 +76,10 @@ impl Lexer<'_> {
 					self.reader.next();
 					self.scratch.push(x as char);
 				}
-				b'e' | b'E' => {
+				x @ (b'e' | b'E') => {
 					// scientific notation
 					self.reader.next();
-					self.scratch.push('e');
+					self.scratch.push(x as char);
 					return self.lex_exponent(false);
 				}
 				b'.' => {
@@ -104,33 +93,33 @@ impl Lexer<'_> {
 					} else {
 						// indexing a number
 						self.reader.backup(backup);
-						self.string = Some(mem::take(&mut self.scratch));
-						return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
+						return self.finish_number_token(NumberKind::Integer);
 					}
 				}
-				b'f' | b'd' => return self.lex_suffix(false, true),
+				b'f' | b'd' => return self.lex_suffix(false, false),
 				// Oxc2 is the start byte of 'µ'
 				0xc2 | b'n' | b'u' | b'm' | b'h' | b'w' | b'y' | b's' => {
 					// duration suffix, switch to lexing duration.
-					return Ok(self.lex_duration());
+					return self.lex_duration();
 				}
 				b'_' => {
 					self.reader.next();
 				}
 				b'a'..=b'z' | b'A'..=b'Z' => {
-					return Err(self.invalid_suffix());
-					// invalid token, unexpected identifier character immediatly after number.
-					// Eat all remaining identifier like characters.
+					if self.flexible_ident {
+						return self.lex_ident();
+					} else {
+						return self.invalid_suffix_token();
+					}
 				}
 				_ => {
-					self.string = Some(mem::take(&mut self.scratch));
-					return Ok(self.finish_token(TokenKind::Number(NumberKind::Integer)));
+					return self.finish_number_token(NumberKind::Integer);
 				}
 			}
 		}
 	}
 
-	fn invalid_suffix(&mut self) -> Error {
+	fn invalid_suffix_token(&mut self) -> Token {
 		// eat the whole suffix.
 		while let Some(x) = self.reader.peek() {
 			if !x.is_ascii_alphanumeric() {
@@ -139,20 +128,29 @@ impl Lexer<'_> {
 			self.reader.next();
 		}
 		self.scratch.clear();
-		Error::InvalidSuffix
+		self.invalid_token(LexError::Number(Error::InvalidSuffix))
 	}
 
 	/// Lex a number suffix, either 'f' or 'dec'.
-	fn lex_suffix(&mut self, had_exponent: bool, can_be_duration: bool) -> Result<Token, Error> {
+	fn lex_suffix(&mut self, had_mantissa: bool, had_exponent: bool) -> Token {
 		match self.reader.peek() {
 			Some(b'f') => {
 				// float suffix
 				self.reader.next();
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-					Err(self.invalid_suffix())
+					if self.flexible_ident && !had_mantissa {
+						self.scratch.push('f');
+						self.lex_ident()
+					} else {
+						self.invalid_suffix_token()
+					}
 				} else {
-					self.string = Some(mem::take(&mut self.scratch));
-					Ok(self.finish_token(TokenKind::Number(NumberKind::Float)))
+					let kind = if had_mantissa {
+						NumberKind::FloatMantissa
+					} else {
+						NumberKind::Float
+					};
+					self.finish_number_token(kind)
 				}
 			}
 			Some(b'd') => {
@@ -160,44 +158,53 @@ impl Lexer<'_> {
 				self.reader.next();
 				let checkpoint = self.reader.offset();
 				if !self.eat(b'e') {
-					if can_be_duration {
+					if !had_mantissa && !had_exponent {
 						self.reader.backup(checkpoint - 1);
-						return Ok(self.lex_duration());
+						return self.lex_duration();
+					} else if !had_mantissa && self.flexible_ident {
+						self.scratch.push('d');
+						return self.lex_ident();
 					} else {
-						return Err(self.invalid_suffix());
+						return self.invalid_suffix_token();
 					}
 				}
 
 				if !self.eat(b'c') {
-					return Err(self.invalid_suffix());
+					if self.flexible_ident {
+						self.scratch.push('d');
+						self.scratch.push('e');
+						return self.lex_ident();
+					} else {
+						return self.invalid_suffix_token();
+					}
 				}
 
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-					Err(self.invalid_suffix())
+					self.invalid_suffix_token()
 				} else {
-					self.string = Some(mem::take(&mut self.scratch));
-					if had_exponent {
-						Ok(self.finish_token(TokenKind::Number(NumberKind::DecimalExponent)))
+					let kind = if had_exponent {
+						NumberKind::DecimalExponent
 					} else {
-						Ok(self.finish_token(TokenKind::Number(NumberKind::Decimal)))
-					}
+						NumberKind::Decimal
+					};
+					self.finish_number_token(kind)
 				}
 			}
+			// Caller should ensure this is unreachable
 			_ => unreachable!(),
 		}
 	}
 
 	/// Lexes the mantissa of a number, i.e. `.8` in `1.8`
-	pub fn lex_mantissa(&mut self) -> Result<Token, Error> {
+	pub fn lex_mantissa(&mut self) -> Token {
 		loop {
 			// lex_number already checks if there exists a digit after the dot.
 			// So this will never fail the first iteration of the loop.
 			let Some(x) = self.reader.peek() else {
-				self.string = Some(mem::take(&mut self.scratch));
-				return Ok(self.finish_token(TokenKind::Number(NumberKind::Mantissa)));
+				return self.finish_number_token(NumberKind::Mantissa);
 			};
 			match x {
-				b'0'..=b'9' => {
+				b'0'..=b'9' | b'_' => {
 					// next digit.
 					self.reader.next();
 					self.scratch.push(x as char);
@@ -208,25 +215,21 @@ impl Lexer<'_> {
 					self.scratch.push('e');
 					return self.lex_exponent(true);
 				}
-				b'_' => {
-					self.reader.next();
-				}
-				b'f' | b'd' => return self.lex_suffix(false, false),
+				b'f' | b'd' => return self.lex_suffix(true, false),
 				b'a'..=b'z' | b'A'..=b'Z' => {
 					// invalid token, random identifier characters immediately after number.
 					self.scratch.clear();
-					return Err(Error::InvalidSuffix);
+					return self.invalid_suffix_token();
 				}
 				_ => {
-					self.string = Some(mem::take(&mut self.scratch));
-					return Ok(self.finish_token(TokenKind::Number(NumberKind::Mantissa)));
+					return self.finish_number_token(NumberKind::Mantissa);
 				}
 			}
 		}
 	}
 
 	/// Lexes the exponent of a number, i.e. `e10` in `1.1e10`;
-	fn lex_exponent(&mut self, had_mantissa: bool) -> Result<Token, Error> {
+	fn lex_exponent(&mut self, had_mantissa: bool) -> Token {
 		loop {
 			match self.reader.peek() {
 				Some(x @ b'-' | x @ b'+') => {
@@ -238,32 +241,76 @@ impl Lexer<'_> {
 					break;
 				}
 				_ => {
+					if self.flexible_ident && !had_mantissa {
+						return self.lex_ident();
+					}
 					// random other character, expected atleast one digit.
-					return Err(Error::DigitExpectedExponent);
+					return self.invalid_token(LexError::Number(Error::DigitExpectedExponent));
 				}
 			}
 		}
 		self.reader.next();
 		loop {
 			match self.reader.peek() {
-				Some(x @ b'0'..=b'9') => {
+				Some(x @ (b'0'..=b'9' | b'_')) => {
 					self.reader.next();
 					self.scratch.push(x as char);
 				}
-				Some(b'_') => {
-					self.reader.next();
-				}
-				Some(b'f' | b'd') => return self.lex_suffix(true, false),
+				Some(b'f' | b'd') => return self.lex_suffix(had_mantissa, true),
 				_ => {
 					let kind = if had_mantissa {
 						NumberKind::MantissaExponent
 					} else {
 						NumberKind::Exponent
 					};
-					self.string = Some(mem::take(&mut self.scratch));
-					return Ok(self.finish_token(TokenKind::Number(kind)));
+					return self.finish_number_token(kind);
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn weird_things() {
+		use crate::sql;
+
+		fn assert_ident_parses_correctly(ident: &str) {
+			let thing = format!("t:{}", ident);
+			let mut parser = Parser::new(thing.as_bytes());
+			parser.allow_fexible_record_id(true);
+			let mut stack = Stack::new();
+			let r = stack
+				.enter(|ctx| async move { parser.parse_thing(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident))
+				.id;
+			assert_eq!(r, Id::String(ident.to_string()),);
+
+			let mut parser = Parser::new(thing.as_bytes());
+			let r = stack
+				.enter(|ctx| async move { parser.parse_query(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident));
+
+			assert_eq!(
+				r,
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
+					sql::Thing {
+						tb: "t".to_string(),
+						id: Id::String(ident.to_string())
+					}
+				))]))
+			)
+		}
+
+		assert_ident_parses_correctly("123abc");
+		assert_ident_parses_correctly("123d");
+		assert_ident_parses_correctly("123de");
+		assert_ident_parses_correctly("123dec");
+		assert_ident_parses_correctly("1e23dec");
+		assert_ident_parses_correctly("1e23f");
+		assert_ident_parses_correctly("123f");
+		assert_ident_parses_correctly("1ns");
+		assert_ident_parses_correctly("1ns1");
+		assert_ident_parses_correctly("1ns1h");
 	}
 }

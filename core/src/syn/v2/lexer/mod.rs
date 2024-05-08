@@ -84,6 +84,10 @@ pub struct Lexer<'a> {
 	/// like for example strings with escape characters.
 	scratch: String,
 
+	/// Allow the next parsed idents to be flexible, i.e. support idents which don't start with a
+	/// number.
+	pub flexible_ident: bool,
+
 	// below are a collection of storage for values produced by tokens.
 	// For performance reasons we wan't to keep the tokens as small as possible.
 	// As only some tokens have an additional value associated with them we don't store that value
@@ -117,6 +121,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			whitespace_span: None,
 			scratch: String::new(),
+			flexible_ident: false,
 			string: None,
 			datetime: None,
 			duration: None,
@@ -132,6 +137,7 @@ impl<'a> Lexer<'a> {
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
+		self.flexible_ident = false;
 		self.whitespace_span = None;
 		self.string = None;
 		self.datetime = None;
@@ -155,6 +161,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			whitespace_span: None,
 			scratch: self.scratch,
+			flexible_ident: false,
 			string: self.string,
 			datetime: self.datetime,
 			duration: self.duration,
@@ -415,5 +422,50 @@ impl Iterator for Lexer<'_> {
 			return None;
 		}
 		Some(token)
+	}
+
+	#[test]
+	fn weird_things() {
+		use crate::sql;
+
+		fn assert_ident_parses_correctly(ident: &str) {
+			let thing = format!("t:{}", ident);
+			let mut parser = Parser::new(thing.as_bytes());
+			parser.allow_fexible_record_id(true);
+			let mut stack = Stack::new();
+			let r = stack
+				.enter(|ctx| async move { parser.parse_thing(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident))
+				.id;
+			assert_eq!(r, Id::String(ident.to_string()),);
+
+			let mut parser = Parser::new(thing.as_bytes());
+			let r = stack
+				.enter(|ctx| async move { parser.parse_query(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident));
+
+			assert_eq!(
+				r,
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
+					sql::Thing {
+						tb: "t".to_string(),
+						id: Id::String(ident.to_string())
+					}
+				))]))
+			)
+		}
+
+		assert_ident_parses_correctly("123abc");
+		assert_ident_parses_correctly("123d");
+		assert_ident_parses_correctly("123de");
+		assert_ident_parses_correctly("123dec");
+		assert_ident_parses_correctly("1e23dec");
+		assert_ident_parses_correctly("1e23f");
+		assert_ident_parses_correctly("123f");
+		assert_ident_parses_correctly("1ns");
+		assert_ident_parses_correctly("1ns1");
+		assert_ident_parses_correctly("1ns1h");
 	}
 }

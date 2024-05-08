@@ -25,12 +25,21 @@ impl<'a> Lexer<'a> {
 	///
 	/// Expect the lexer to have already eaten the digits starting the duration.
 	pub fn lex_duration(&mut self) -> Token {
+		let backup = self.reader.offset();
 		match self.lex_duration_err() {
 			Ok(x) => {
+				self.scratch.clear();
 				self.duration = Some(x);
 				self.finish_token(TokenKind::Duration)
 			}
-			Err(e) => self.invalid_token(LexError::Duration(e)),
+			Err(e) => {
+				if self.flexible_ident {
+					self.reader.backup(backup);
+					return self.lex_ident();
+				}
+				self.scratch.clear();
+				self.invalid_token(LexError::Duration(e))
+			}
 		}
 	}
 
@@ -63,7 +72,6 @@ impl<'a> Lexer<'a> {
 			current_value = current_value.checked_mul(10).ok_or(Error::Overflow)?;
 			current_value = current_value.checked_add((b - b'0') as u64).ok_or(Error::Overflow)?;
 		}
-		self.scratch.clear();
 
 		loop {
 			let Some(next) = self.reader.peek() else {
@@ -167,5 +175,50 @@ impl<'a> Lexer<'a> {
 					current_value.checked_add((b - b'0') as u64).ok_or(Error::Overflow)?;
 			}
 		}
+	}
+
+	#[test]
+	fn weird_things() {
+		use crate::sql;
+
+		fn assert_ident_parses_correctly(ident: &str) {
+			let thing = format!("t:{}", ident);
+			let mut parser = Parser::new(thing.as_bytes());
+			parser.allow_fexible_record_id(true);
+			let mut stack = Stack::new();
+			let r = stack
+				.enter(|ctx| async move { parser.parse_thing(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident))
+				.id;
+			assert_eq!(r, Id::String(ident.to_string()),);
+
+			let mut parser = Parser::new(thing.as_bytes());
+			let r = stack
+				.enter(|ctx| async move { parser.parse_query(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident));
+
+			assert_eq!(
+				r,
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
+					sql::Thing {
+						tb: "t".to_string(),
+						id: Id::String(ident.to_string())
+					}
+				))]))
+			)
+		}
+
+		assert_ident_parses_correctly("123abc");
+		assert_ident_parses_correctly("123d");
+		assert_ident_parses_correctly("123de");
+		assert_ident_parses_correctly("123dec");
+		assert_ident_parses_correctly("1e23dec");
+		assert_ident_parses_correctly("1e23f");
+		assert_ident_parses_correctly("123f");
+		assert_ident_parses_correctly("1ns");
+		assert_ident_parses_correctly("1ns1");
+		assert_ident_parses_correctly("1ns1h");
 	}
 }
