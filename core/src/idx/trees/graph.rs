@@ -1,7 +1,7 @@
 use crate::idx::trees::dynamicset::DynamicSet;
 use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
-use std::fmt::Debug;
+use hashbrown::{HashMap, HashSet};
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
 #[derive(Debug)]
