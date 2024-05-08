@@ -309,16 +309,16 @@ mod tests {
 	#[test]
 	fn excessive_precision() {
 		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000999999999Z").unwrap();
-		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000100Z");
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000100Z");
 		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000900000000Z").unwrap();
-		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000090Z");
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000090Z");
 		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000999995Z").unwrap();
-		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000100Z");
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000100Z");
 		let (_, a) = datetime_raw("2024-06-06T12:00:00.00000000000000000000000009Z").unwrap();
-		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00Z");
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00Z");
 		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000000009Z").unwrap();
-		assert_eq!(a.to_string().as_str(), "2024-06-06T12:00:00.000000001Z");
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000000001Z");
 		let (_, a) = datetime_raw("2024-12-31T23:59:59.9999999999Z").unwrap();
-		assert_eq!(a.to_string().as_str(), "2025-01-01T00:00:00Z");
+		assert_eq!(a.to_raw().as_str(), "2025-01-01T00:00:00Z");
 	}
 }
