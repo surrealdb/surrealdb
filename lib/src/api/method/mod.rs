@@ -425,7 +425,7 @@ where
 	///
 	/// // Define the user record access
 	/// let sql = r#"
-	///     DEFINE ACCESS user_access ON DATABASE TYPE JWT DURATION 24h
+	///     DEFINE ACCESS user_access ON DATABASE TYPE RECORD DURATION 24h
 	///     SIGNUP ( CREATE user SET email = $email, password = crypto::argon2::generate($password) )
 	///     SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password) )
 	/// "#;
