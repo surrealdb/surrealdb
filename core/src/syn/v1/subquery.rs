@@ -3,7 +3,9 @@ use super::{
 	common::{closeparentheses, expect_delimited, openparentheses},
 	ending,
 	error::ExplainResultExt,
-	stmt::{create, define, delete, ifelse, insert, output, relate, remove, select, update},
+	stmt::{
+		create, define, delete, ifelse, insert, output, rebuild, relate, remove, select, update,
+	},
 	value::value,
 	IResult,
 };
@@ -60,6 +62,7 @@ pub fn subquery_inner(i: &str) -> IResult<&str, Subquery> {
 		map(relate, Subquery::Relate),
 		map(insert, Subquery::Insert),
 		map(define, Subquery::Define),
+		map(rebuild, Subquery::Rebuild),
 		map(remove, Subquery::Remove),
 	))(i)
 	.explain("This statement is not allowed in a subquery", disallowed_subquery_statements)
@@ -123,6 +126,15 @@ mod tests {
 			"(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))",
 			format!("{}", out)
 		)
+	}
+
+	#[test]
+	fn subquery_rebuild_statement() {
+		let sql = "(REBUILD INDEX foo_event ON foo)";
+		let res = subquery(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(REBUILD INDEX foo_event ON foo)", format!("{}", out))
 	}
 
 	#[test]

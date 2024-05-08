@@ -66,6 +66,7 @@ impl ForeachStatement {
 							Entry::Relate(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Insert(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Define(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Rebuild(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Remove(v) => v.compute(&ctx, opt, txn, doc).await,
 							Entry::Output(v) => {
 								return v.compute(&ctx, opt, txn, doc).await;
