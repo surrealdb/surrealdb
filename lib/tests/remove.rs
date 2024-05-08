@@ -125,7 +125,7 @@ async fn remove_statement_index() -> Result<(), Error> {
 	}
 
 	// Every index store cache has been removed
-	assert!(dbs.index_store().is_empty());
+	assert!(dbs.index_store().is_empty().await);
 	Ok(())
 }
 
