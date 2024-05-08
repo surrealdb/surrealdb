@@ -1,5 +1,5 @@
 use super::super::{
-	common::{take_digits, take_digits_range, take_u32_len},
+	common::{take_digits, take_digits_range},
 	error::expected,
 	IResult,
 };
@@ -8,13 +8,14 @@ use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
 use nom::{
 	branch::alt,
 	bytes::complete::tag,
-	character::complete::char,
+	character::complete::{char, digit1},
 	combinator::{cut, map},
 	error::ErrorKind,
 	error_position,
 	sequence::delimited,
 	Err,
 };
+use std::time::Duration;
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 	expected("a datetime", alt((datetime_single, datetime_double)))(i)
@@ -48,7 +49,7 @@ fn date(i: &str) -> IResult<&str, Datetime> {
 	let (i, mon) = month(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, day) = day(i)?;
-	convert(i, (year, mon, day), (0, 0, 0, 0), Utc.fix())
+	convert(i, (year, mon, day), (0, 0, 0, 0), Utc.fix(), false)
 }
 
 fn time(i: &str) -> IResult<&str, Datetime> {
@@ -64,7 +65,7 @@ fn time(i: &str) -> IResult<&str, Datetime> {
 	let (i, _) = char(':')(i)?;
 	let (i, sec) = second(i)?;
 	let (i, zone) = zone(i)?;
-	convert(i, (year, mon, day), (hour, min, sec, 0), zone)
+	convert(i, (year, mon, day), (hour, min, sec, 0), zone, false)
 }
 
 fn nano(i: &str) -> IResult<&str, Datetime> {
@@ -79,9 +80,9 @@ fn nano(i: &str) -> IResult<&str, Datetime> {
 	let (i, min) = minute(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, sec) = second(i)?;
-	let (i, nano) = nanosecond(i)?;
+	let (i, (nano, carry)) = nanosecond(i)?;
 	let (i, zone) = zone(i)?;
-	convert(i, (year, mon, day), (hour, min, sec, nano), zone)
+	convert(i, (year, mon, day), (hour, min, sec, nano), zone, carry)
 }
 
 fn convert(
@@ -89,6 +90,7 @@ fn convert(
 	(year, mon, day): (i32, u32, u32),
 	(hour, min, sec, nano): (u32, u32, u32, u32),
 	zone: FixedOffset,
+	carry: bool,
 ) -> IResult<&str, Datetime> {
 	// Attempt to create date
 	let d = NaiveDate::from_ymd_opt(year, mon, day)
@@ -96,8 +98,16 @@ fn convert(
 	// Attempt to create time
 	let t = NaiveTime::from_hms_nano_opt(hour, min, sec, nano)
 		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?;
+
 	//
 	let v = NaiveDateTime::new(d, t);
+
+	let v = if carry {
+		v + Duration::from_nanos(1)
+	} else {
+		v
+	};
+
 	// Attempt to create time
 	let d = zone
 		.from_local_datetime(&v)
@@ -135,20 +145,20 @@ fn second(i: &str) -> IResult<&str, u32> {
 	take_digits_range(i, 2, 0..=60)
 }
 
-fn nanosecond(i: &str) -> IResult<&str, u32> {
+fn nanosecond(i: &str) -> IResult<&str, (u32, bool)> {
 	let (i, _) = char('.')(i)?;
-	let (i, (v, l)) = take_u32_len(i)?;
-	let v = match l {
-		l if l <= 2 => v * 10000000,
-		l if l <= 3 => v * 1000000,
-		l if l <= 4 => v * 100000,
-		l if l <= 5 => v * 10000,
-		l if l <= 6 => v * 1000,
-		l if l <= 7 => v * 100,
-		l if l <= 8 => v * 10,
-		_ => v,
-	};
-	Ok((i, v))
+	let (i, digits) = digit1(i)?;
+
+	let mut ns = 0u32;
+	let mut carry = false;
+
+	for d in digits.as_bytes().iter().rev().copied() {
+		carry = (ns % 10) >= 5;
+		ns /= 10;
+		ns += (d - b'0') as u32 * 100_000_000;
+	}
+
+	Ok((i, (ns, carry)))
 }
 
 fn zone(i: &str) -> IResult<&str, FixedOffset> {
@@ -294,5 +304,21 @@ mod tests {
 		// Hey! There's not a 31st of November!
 		let sql = "2022-11-31T12:00:00.000Z";
 		datetime_raw(sql).unwrap_err();
+	}
+
+	#[test]
+	fn excessive_precision() {
+		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000999999999Z").unwrap();
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000100Z");
+		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000900000000Z").unwrap();
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000090Z");
+		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000999995Z").unwrap();
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000100Z");
+		let (_, a) = datetime_raw("2024-06-06T12:00:00.00000000000000000000000009Z").unwrap();
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00Z");
+		let (_, a) = datetime_raw("2024-06-06T12:00:00.0000000009Z").unwrap();
+		assert_eq!(a.to_raw().as_str(), "2024-06-06T12:00:00.000000001Z");
+		let (_, a) = datetime_raw("2024-12-31T23:59:59.9999999999Z").unwrap();
+		assert_eq!(a.to_raw().as_str(), "2025-01-01T00:00:00Z");
 	}
 }

@@ -14,7 +14,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 #[cfg(any(
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
@@ -24,7 +23,6 @@ use std::env;
 use std::fmt::{self, Debug};
 #[cfg(any(
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",
@@ -74,7 +72,6 @@ pub struct Context<'a> {
 	capabilities: Arc<Capabilities>,
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -84,7 +81,6 @@ pub struct Context<'a> {
 	is_memory: bool,
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -118,7 +114,6 @@ impl<'a> Context<'a> {
 		index_stores: IndexStores,
 		#[cfg(any(
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
@@ -127,7 +122,6 @@ impl<'a> Context<'a> {
 		is_memory: bool,
 		#[cfg(any(
 			feature = "kv-surrealkv",
-			feature = "kv-file",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-tikv",
@@ -148,7 +142,6 @@ impl<'a> Context<'a> {
 			index_stores,
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -157,7 +150,6 @@ impl<'a> Context<'a> {
 			is_memory,
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -185,7 +177,6 @@ impl<'a> Context<'a> {
 			index_stores: IndexStores::default(),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -194,7 +185,6 @@ impl<'a> Context<'a> {
 			is_memory: false,
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -219,7 +209,6 @@ impl<'a> Context<'a> {
 			index_stores: parent.index_stores.clone(),
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -228,7 +217,6 @@ impl<'a> Context<'a> {
 			is_memory: parent.is_memory,
 			#[cfg(any(
 				feature = "kv-surrealkv",
-				feature = "kv-file",
 				feature = "kv-rocksdb",
 				feature = "kv-fdb",
 				feature = "kv-tikv",
@@ -352,7 +340,6 @@ impl<'a> Context<'a> {
 
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",
@@ -365,7 +352,6 @@ impl<'a> Context<'a> {
 
 	#[cfg(any(
 		feature = "kv-surrealkv",
-		feature = "kv-file",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-tikv",

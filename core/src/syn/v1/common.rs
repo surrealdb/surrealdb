@@ -105,10 +105,6 @@ pub fn take_u64(i: &str) -> IResult<&str, u64> {
 	map_res(take_while(is_digit), |s: &str| s.parse::<u64>())(i)
 }
 
-pub fn take_u32_len(i: &str) -> IResult<&str, (u32, usize)> {
-	map_res(take_while(is_digit), |s: &str| s.parse::<u32>().map(|x| (x, s.len())))(i)
-}
-
 pub fn take_digits(i: &str, n: usize) -> IResult<&str, u32> {
 	map_res(take_while_m_n(n, n, is_digit), |s: &str| s.parse::<u32>())(i)
 }
