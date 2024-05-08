@@ -21,6 +21,7 @@ pub(crate) enum ThingIterator {
 	UniqueUnion(UniqueUnionThingIterator),
 	Matches(MatchesThingIterator),
 	Knn(DocIdsIterator),
+	Things(ThingsIterator),
 }
 
 impl ThingIterator {
@@ -474,5 +475,29 @@ impl DocIdsIterator {
 			}
 		}
 		Ok(res)
+	}
+}
+
+pub(crate) struct ThingsIterator {
+	res: VecDeque<Thing>,
+}
+
+impl ThingsIterator {
+	pub(super) fn new(res: VecDeque<Thing>) -> Self {
+		Self {
+			res,
+		}
+	}
+	fn next_batch<T: ThingCollector>(&mut self, limit: u32, collector: &mut T) -> usize {
+		let mut count = 0;
+		while limit > count {
+			if let Some(thg) = self.res.pop_front() {
+				collector.add(thg, None);
+				count += 1;
+			} else {
+				break;
+			}
+		}
+		count as usize
 	}
 }

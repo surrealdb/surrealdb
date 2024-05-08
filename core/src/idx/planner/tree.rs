@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::KnnExpressions;
+use crate::idx::planner::executor::{AnnExpressions, KnnExpressions};
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
@@ -58,6 +58,7 @@ struct TreeBuilder<'a> {
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 	knn_expressions: KnnExpressions,
+	ann_expressions: AnnExpressions,
 	group_sequence: GroupRef,
 }
 
@@ -86,6 +87,7 @@ impl<'a> TreeBuilder<'a> {
 			index_map: Default::default(),
 			with_indexes,
 			knn_expressions: Default::default(),
+			ann_expressions: Default::default(),
 			group_sequence: 0,
 		}
 	}
@@ -264,6 +266,7 @@ impl<'a> TreeBuilder<'a> {
 						..
 					} => Self::eval_matches_operator(op, n),
 					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id.clone())?,
+					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id)?,
 				};
 				if let Some(op) = op {
 					let io = IndexOption::new(*ir, id, op);
@@ -304,6 +307,27 @@ impl<'a> TreeBuilder<'a> {
 						}
 						_ => {}
 					}
+				}
+			}
+		}
+		Ok(None)
+	}
+
+	fn eval_indexed_ann(
+		&mut self,
+		exp: &Arc<Expression>,
+		op: &Operator,
+		nd: &Node,
+		id: &Idiom,
+	) -> Result<Option<IndexOperator>, Error> {
+		if let Operator::Ann(n, ef) = op {
+			if let Node::Computed(v) = nd {
+				let vec: Vec<Number> = v.as_ref().try_into()?;
+				let n = *n as usize;
+				let ef = *ef as usize;
+				self.ann_expressions.insert(exp.clone(), (n, id.clone(), Arc::new(vec), ef));
+				if let Value::Array(a) = v.as_ref() {
+					return Ok(Some(IndexOperator::Ann(a.clone(), n, ef)));
 				}
 			}
 		}
@@ -372,7 +396,7 @@ pub(super) struct IndexesMap {
 
 pub(super) type GroupRef = u16;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum Node {
 	Expression {
 		group: GroupRef,

@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::sql::index::HnswParams;
 use crate::{
 	sql::{
 		filter::Filter,
@@ -674,6 +675,71 @@ impl Parser<'_> {
 						mtree_cache,
 						vector_type: VectorType::F64,
 					})
+				}
+				t!("HNSW") => {
+					self.pop_peek();
+					expected!(self, t!("DIMENSION"));
+					let dimension = self.next_token_value()?;
+					let mut distance = Distance::Euclidean;
+					let mut vector_type = VectorType::F64;
+					let mut m = None;
+					let mut m0 = None;
+					let mut ml = None;
+					let mut ef_construction = 150;
+					let mut extend_candidates = false;
+					let mut keep_pruned_connections = false;
+					loop {
+						match self.peek_kind() {
+							t!("DISTANCE") => {
+								self.pop_peek();
+								distance = self.parse_distance()?;
+							}
+							t!("TYPE") => {
+								self.pop_peek();
+								vector_type = self.parse_vector_type()?;
+							}
+							t!("M") => {
+								self.pop_peek();
+								m = Some(self.next_token_value()?);
+							}
+							t!("M0") => {
+								self.pop_peek();
+								m0 = Some(self.next_token_value()?);
+							}
+							t!("ML") => {
+								self.pop_peek();
+								ml = Some(self.next_token_value()?);
+							}
+							t!("EFC") => {
+								self.pop_peek();
+								ef_construction = self.next_token_value()?;
+							}
+							t!("EXTEND_CANDIDATES") => {
+								self.pop_peek();
+								extend_candidates = true;
+							}
+							t!("KEEP_PRUNED_CONNECTIONS") => {
+								self.pop_peek();
+								keep_pruned_connections = true;
+							}
+							_ => break,
+						}
+					}
+
+					let m = m.unwrap_or(12);
+					let m0 = m0.unwrap_or(m * 2);
+					let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
+					res.index = Index::Hnsw(HnswParams::new(
+						dimension,
+						distance,
+						vector_type,
+						m,
+						m0,
+						ml,
+						ef_construction,
+						extend_candidates,
+						keep_pruned_connections,
+					));
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

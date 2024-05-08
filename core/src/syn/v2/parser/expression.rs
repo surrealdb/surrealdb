@@ -10,6 +10,7 @@ use crate::syn::v2::{
 	token::{t, NumberKind, TokenKind},
 };
 use std::cmp::Ordering;
+use crate::syn::v2::token::Token;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -194,6 +195,36 @@ impl Parser<'_> {
 			})))
 		}
 	}
+	pub fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
+		let amount = self.next_token_value()?;
+		let op = if self.eat(t!(",")) {
+			let token = self.next();
+			match &token.kind {
+				TokenKind::Distance(k) => {
+					let d = self.convert_distance(k).map(Some)?;
+					Operator::Knn(amount, d)
+				},
+				TokenKind::Number(NumberKind::Integer) => {
+					let ef = self.token_value(token)?;
+					Operator::Ann(amount, ef)
+				}
+				_ => {
+					return Err(ParseError::new(
+						ParseErrorKind::UnexpectedExplain {
+							found: token.kind,
+							expected: "a distance or an integer",
+							explain: "The NN operator accepts either a distance for brute force operation, or an EF value for approximate operations",
+						},
+						token.span,
+					))
+				}
+			}
+		} else {
+			Operator::Knn(amount, None)
+		};
+		self.expect_closing_delimiter(t!("|>"), token.span)?;
+		Ok(op)
+	}
 
 	async fn parse_infix_op(
 		&mut self,
@@ -260,12 +291,7 @@ impl Parser<'_> {
 				Operator::NotInside
 			}
 			t!("IN") => Operator::Inside,
-			t!("<|") => {
-				let amount = self.next_token_value()?;
-				let dist = self.eat(t!(",")).then(|| self.parse_distance()).transpose()?;
-				self.expect_closing_delimiter(t!("|>"), token.span)?;
-				Operator::Knn(amount, dist)
-			}
+			t!("<|") => self.parse_knn(token)?,
 
 			// should be unreachable as we previously check if the token was a prefix op.
 			x => unreachable!("found non-operator token {x:?}"),

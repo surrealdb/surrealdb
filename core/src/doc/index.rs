@@ -9,7 +9,7 @@ use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::TransactionType;
 use crate::sql::array::Array;
-use crate::sql::index::{Index, MTreeParams, SearchParams};
+use crate::sql::index::{HnswParams, Index, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Part, Thing, Value};
 
@@ -63,6 +63,7 @@ impl<'a> Document<'a> {
 					Index::Idx => ic.index_non_unique(txn).await?,
 					Index::Search(p) => ic.index_full_text(ctx, txn, p).await?,
 					Index::MTree(p) => ic.index_mtree(ctx, txn, p).await?,
+					Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 				};
 			}
 		}
@@ -401,5 +402,19 @@ impl<'a> IndexOperation<'a> {
 			mt.index_document(&mut tx, self.rid, n).await?;
 		}
 		mt.finish(&mut tx).await
+	}
+
+	async fn index_hnsw(&mut self, ctx: &Context<'_>, p: &HnswParams) -> Result<(), Error> {
+		let hnsw = ctx.get_index_stores().get_index_hnsw(self.opt, self.ix, p).await;
+		let mut hnsw = hnsw.write().await;
+		// Delete the old index data
+		if let Some(o) = self.o.take() {
+			hnsw.remove_document(self.rid, &o)?;
+		}
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			hnsw.index_document(self.rid, &n)?;
+		}
+		Ok(())
 	}
 }

@@ -18,12 +18,14 @@ use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IndexRef, IndexesMap};
 use crate::idx::planner::{IterationStage, KnnSet};
 use crate::idx::trees::mtree::MTreeIndex;
+use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -31,6 +33,7 @@ use tokio::sync::RwLock;
 pub(super) type KnnEntry = (KnnPriorityList, Arc<Idiom>, Arc<Vec<Number>>, Distance);
 pub(super) type KnnExpressions =
 	HashMap<Arc<Expression>, (u32, Arc<Idiom>, Arc<Vec<Number>>, Distance)>;
+pub(super) type AnnExpressions = HashMap<Arc<Expression>, (usize, Idiom, Arc<Vec<Number>>, usize)>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -43,6 +46,7 @@ pub(super) struct InnerQueryExecutor {
 	it_entries: Vec<IteratorEntry>,
 	index_definitions: Vec<DefineIndexStatement>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
+	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
 	knn_entries: HashMap<Arc<Expression>, KnnEntry>,
 }
 
@@ -88,6 +92,8 @@ impl InnerQueryExecutor {
 		let mut ft_map = HashMap::default();
 		let mut mt_map: HashMap<IndexRef, MTreeIndex> = HashMap::default();
 		let mut mt_entries = HashMap::default();
+		let mut hnsw_map: HashMap<IndexRef, SharedHnswIndex> = HashMap::default();
+		let mut hnsw_entries = HashMap::default();
 		let mut knn_entries = HashMap::with_capacity(knns.len());
 
 		// Create all the instances of FtIndex
@@ -97,28 +103,27 @@ impl InnerQueryExecutor {
 			if let Some(idx_def) = im.definitions.get(ix_ref as usize) {
 				match &idx_def.index {
 					Index::Search(p) => {
-						let mut ft_entry = None;
-						if let Some(ft) = ft_map.get(&ix_ref) {
-							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(ctx, opt, txn, ft, io).await?;
+						let ft_entry = match ft_map.entry(ix_ref) {
+							Entry::Occupied(e) => {
+								FtEntry::new(ctx, opt, txn, e.get(), io).await?
 							}
-						} else {
-							let ikb = IndexKeyBase::new(opt, idx_def);
-							let ft = FtIndex::new(
-								ctx.get_index_stores(),
-								opt,
-								txn,
-								p.az.as_str(),
-								ikb,
-								p,
-								TransactionType::Read,
-							)
-							.await?;
-							if ft_entry.is_none() {
-								ft_entry = FtEntry::new(ctx, opt, txn, &ft, io).await?;
+							Entry::Vacant(e) => {
+								let ikb = IndexKeyBase::new(opt, idx_def);
+								let ft = FtIndex::new(
+									ctx.get_index_stores(),
+									opt,
+									txn,
+									p.az.as_str(),
+									ikb,
+									p,
+									TransactionType::Read,
+								)
+								.await?;
+								let fte = FtEntry::new(ctx, opt, txn, &ft, io).await?;
+								e.insert(ft);
+								fte
 							}
-							ft_map.insert(ix_ref, ft);
-						}
+						};
 						if let Some(e) = ft_entry {
 							if let Matches(_, Some(mr)) = e.0.index_option.op() {
 								if mr_entries.insert(*mr, e.clone()).is_some() {
@@ -133,23 +138,43 @@ impl InnerQueryExecutor {
 					Index::MTree(p) => {
 						if let IndexOperator::Knn(a, k) = io.op() {
 							let mut tx = txn.lock().await;
-							let entry = if let Some(mt) = mt_map.get(&ix_ref) {
-								MtEntry::new(&mut tx, mt, a.clone(), *k).await?
-							} else {
-								let ikb = IndexKeyBase::new(opt, idx_def);
-								let mt = MTreeIndex::new(
-									ctx.get_index_stores(),
-									&mut tx,
-									ikb,
-									p,
-									TransactionType::Read,
-								)
-								.await?;
-								let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
-								mt_map.insert(ix_ref, mt);
-								entry
+							let entry = match mt_map.entry(ix_ref) {
+								Entry::Occupied(e) => MtEntry::new(&mut tx, e.get(), a.clone(), *k).await?,
+								Entry::Vacant(e) => {
+									let ikb = IndexKeyBase::new(opt, idx_def);
+									let mt = MTreeIndex::new(
+										ctx.get_index_stores(),
+										&mut tx,
+										ikb,
+										p,
+										TransactionType::Read,
+									)
+									.await?;
+									let entry = MtEntry::new(&mut tx, &mt, a.clone(), *k).await?;
+									e.insert(mt);
+									entry
+								}
 							};
 							mt_entries.insert(exp, entry);
+						}
+					}
+					Index::Hnsw(p) => {
+						if let IndexOperator::Ann(a, n, ef) = io.op() {
+							let entry = match hnsw_map.entry(ix_ref) {
+								Entry::Occupied(e) => {
+									HnswEntry::new(e.get().clone(), a, *n, *ef).await?
+								}
+								Entry::Vacant(e) => {
+									let hnsw = ctx
+										.get_index_stores()
+										.get_index_hnsw(opt, idx_def, p)
+										.await;
+									let entry = HnswEntry::new(hnsw.clone(), a, *n, *ef).await?;
+									e.insert(hnsw);
+									entry
+								}
+							};
+							hnsw_entries.insert(exp, entry);
 						}
 					}
 					_ => {}
@@ -169,6 +194,7 @@ impl InnerQueryExecutor {
 			it_entries: Vec::new(),
 			index_definitions: im.definitions,
 			mt_entries,
+			hnsw_entries,
 			knn_entries,
 		})
 	}
@@ -290,6 +316,7 @@ impl QueryExecutor {
 					..
 				} => self.new_search_index_iterator(it_ref, io.clone()).await,
 				Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(it_ref)),
+				Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(it_ref)),
 			}
 		} else {
 			Ok(None)
@@ -361,7 +388,7 @@ impl QueryExecutor {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
 			if let Matches(_, _) = io.op() {
 				if let Some(fti) = self.0.ft_map.get(&io.ix_ref()) {
-					if let Some(fte) = self.0.exp_entries.get(exp.as_ref()) {
+					if let Some(fte) = self.0.exp_entries.get(exp) {
 						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
 						return Ok(Some(ThingIterator::Matches(it)));
 					}
@@ -379,6 +406,35 @@ impl QueryExecutor {
 			}
 		}
 		None
+	}
+
+	fn new_hnsw_index_ann_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
+			if let Some(he) = self.0.hnsw_entries.get(exp) {
+				let it = ThingsIterator::new(he.res.iter().map(|(thg, _)| thg.clone()).collect());
+				return Some(ThingIterator::Things(it));
+			}
+		}
+		None
+	}
+
+	async fn build_iterators(
+		&self,
+		opt: &Options,
+		it_ref: IteratorRef,
+		ios: &[IndexOption],
+	) -> Result<VecDeque<ThingIterator>, Error> {
+		let mut iterators = VecDeque::with_capacity(ios.len());
+		for io in ios {
+			if let Some(it) = Box::pin(self.new_single_iterator(opt, it_ref, io)).await? {
+				iterators.push_back(it);
+			}
+		}
+		Ok(iterators)
+	}
+
+	fn get_index_def(&self, ir: IndexRef) -> Option<&DefineIndexStatement> {
+		self.0.index_definitions.get(ir as usize)
 	}
 
 	pub(crate) async fn matches(
@@ -562,6 +618,20 @@ impl MtEntry {
 		Ok(Self {
 			res,
 			doc_ids: mt.doc_ids(),
+		})
+	}
+}
+
+#[derive(Clone)]
+pub(super) struct HnswEntry {
+	res: VecDeque<(Thing, f64)>,
+}
+
+impl HnswEntry {
+	async fn new(h: SharedHnswIndex, a: &Array, n: usize, ef: usize) -> Result<Self, Error> {
+		let res = h.read().await.knn_search(a, n, ef)?;
+		Ok(Self {
+			res,
 		})
 	}
 }

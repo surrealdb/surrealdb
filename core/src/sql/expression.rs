@@ -186,7 +186,9 @@ impl Expression {
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
 			Operator::Matches(_) => fnc::operate::matches(ctx, txn, doc, self).await,
-			Operator::Knn(_, _) => fnc::operate::knn(ctx, opt, txn, doc, self).await,
+			Operator::Knn(_, _) | Operator::Ann(_, _) => {
+				fnc::operate::knn(ctx, opt, txn, doc, self).await
+			}
 			_ => unreachable!(),
 		}
 	}
