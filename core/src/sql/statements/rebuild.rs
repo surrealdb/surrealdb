@@ -9,7 +9,6 @@ use crate::sql::statements::RemoveIndexStatement;
 use crate::sql::value::Value;
 use crate::sql::Base;
 use derive::Store;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -31,14 +30,13 @@ impl RebuildStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
-			Self::Index(s) => s.compute(stk, ctx, opt, txn, doc).await,
+			Self::Index(s) => s.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -65,7 +63,6 @@ impl RebuildIndexStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
@@ -91,7 +88,7 @@ impl RebuildIndexStatement {
 			remove.compute(ctx, opt, txn).await?;
 
 			// Rebuild the index
-			ix.compute(stk, ctx, opt, txn, doc).await?;
+			ix.compute(ctx, opt, txn, doc).await?;
 
 			// Return the result object
 			Ok(Value::None)

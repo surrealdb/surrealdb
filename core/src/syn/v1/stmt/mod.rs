@@ -23,6 +23,7 @@ mod kill;
 mod live;
 mod option;
 mod output;
+mod rebuild;
 mod relate;
 mod remove;
 mod select;
@@ -50,6 +51,7 @@ pub use live::live;
 pub use option::option;
 pub use output::output;
 pub use r#use::r#use;
+pub use rebuild::rebuild;
 pub use relate::relate;
 pub use remove::remove;
 pub use select::select;
@@ -89,6 +91,7 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 				map(live, Statement::Live),
 				map(option, Statement::Option),
 				map(output, Statement::Output),
+				map(rebuild, Statement::Rebuild),
 				map(relate, Statement::Relate),
 				map(remove, Statement::Remove),
 				map(select, Statement::Select),

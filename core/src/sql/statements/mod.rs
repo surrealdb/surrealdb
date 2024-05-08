@@ -58,6 +58,8 @@ pub use self::define::{
 	DefineTokenStatement, DefineUserStatement,
 };
 
+pub use self::rebuild::{RebuildIndexStatement, RebuildStatement};
+
 pub use self::remove::{
 	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
 	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,

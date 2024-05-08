@@ -2,8 +2,8 @@ use super::{
 	comment::mightbespace,
 	common::{closebraces, colons, expect_delimited, openbraces},
 	stmt::{
-		create, define, delete, foreach, ifelse, insert, output, r#break, r#continue, relate,
-		remove, select, set, throw, update,
+		create, define, delete, foreach, ifelse, insert, output, r#break, r#continue, rebuild,
+		relate, remove, select, set, throw, update,
 	},
 	value::value,
 	IResult,
@@ -42,6 +42,7 @@ pub fn entry(i: &str) -> IResult<&str, Entry> {
 			map(delete, Entry::Delete),
 			map(insert, Entry::Insert),
 			map(define, Entry::Define),
+			map(rebuild, Entry::Rebuild),
 			map(remove, Entry::Remove),
 			map(throw, Entry::Throw),
 			map(r#break, Entry::Break),

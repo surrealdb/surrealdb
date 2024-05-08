@@ -101,7 +101,7 @@ impl Block {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
 				Entry::Rebuild(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt, txn, doc).await?;
 				}
 				Entry::Remove(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
