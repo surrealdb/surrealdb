@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Function, Ident, Model},
+	sql::{Data, Function, Ident, Model},
 	syn::v2::{
 		parser::mac::{expected, unexpected},
 		token::{t, NumberKind, TokenKind},
@@ -101,7 +101,10 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
+	use crate::sql::statements::RelateStatement;
+	use crate::sql::{Param, Statement, Statements};
 	use crate::{
+		sql,
 		sql::{Script, Value},
 		syn::{self, Parse},
 	};
@@ -302,5 +305,19 @@ mod test {
 		let out = Value::parse(&sql);
 		assert_eq!(sql, format!("{}", out));
 		assert_eq!(out, Value::from(Function::Script(Script::from(body), Vec::new())));
+	}
+
+	#[test]
+	fn a_parameterised_relate() {
+		let sql = "RELATE $from->$kind->$to CONTENT $data";
+		let out = syn::parse(sql).unwrap();
+		let relate = Statement::Relate(RelateStatement {
+			from: Value::Param(Param(Ident("from".to_owned()))),
+			kind: Value::Param(Param(Ident("kind".to_owned()))),
+			with: Value::Param(Param(Ident("to".to_owned()))),
+			data: Some(Data::ContentExpression(Value::Param(Param(Ident("data".to_owned()))))),
+			..Default::default()
+		});
+		assert_eq!(out, sql::Query(Statements(vec![relate])))
 	}
 }
