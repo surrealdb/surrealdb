@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::sql::index::HnswParams;
 use crate::{
 	sql::{
 		filter::Filter,
@@ -738,17 +739,17 @@ impl Parser<'_> {
 					let m = m.unwrap_or(12);
 					let m0 = m0.unwrap_or(m * 2);
 					let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
-					res.index = Index::Hnsw(crate::sql::index::HnswParams {
+					res.index = Index::Hnsw(HnswParams::new(
 						dimension,
 						distance,
 						vector_type,
 						m,
 						m0,
+						ml,
 						ef_construction,
 						extend_candidates,
 						keep_pruned_connections,
-						ml,
-					})
+					));
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

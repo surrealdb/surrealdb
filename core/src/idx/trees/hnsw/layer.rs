@@ -218,38 +218,29 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-	use crate::idx::trees::dynamicset::DynamicSet;
-	use crate::idx::trees::hnsw::layer::HnswLayer;
-	use crate::idx::trees::hnsw::{ElementId, HnswElements};
-
-	impl<S> HnswLayer<S>
-	where
-		S: DynamicSet<ElementId>,
-	{
-		pub(in crate::idx::trees::hnsw) fn check_props(&self, elements: &HnswElements) {
+impl<S> HnswLayer<S>
+where
+	S: DynamicSet<ElementId>,
+{
+	pub(in crate::idx::trees::hnsw) fn check_props(&self, elements: &HnswElements) {
+		assert!(
+			self.graph.len() <= elements.elements.len(),
+			"{} - {}",
+			self.graph.len(),
+			elements.elements.len()
+		);
+		for (e_id, f_ids) in self.graph.nodes() {
 			assert!(
-				self.graph.len() <= elements.elements.len(),
-				"{} - {}",
-				self.graph.len(),
-				elements.elements.len()
+				f_ids.len() <= self.m_max,
+				"Foreign list e_id: {e_id} - len = len({}) <= m_layer({})",
+				self.m_max,
+				f_ids.len(),
 			);
-			for (e_id, f_ids) in self.graph.nodes() {
-				assert!(
-					f_ids.len() <= self.m_max,
-					"Foreign list e_id: {e_id} - len = len({}) <= m_layer({})",
-					self.m_max,
-					f_ids.len(),
-				);
-				assert!(
-					!f_ids.contains(e_id),
-					"!f_ids.contains(e_id) - el: {e_id} - f_ids: {f_ids:?}"
-				);
-				assert!(
-					elements.elements.contains_key(e_id),
-					"h.elements.contains_key(e_id) - el: {e_id} - f_ids: {f_ids:?}"
-				);
-			}
+			assert!(!f_ids.contains(e_id), "!f_ids.contains(e_id) - el: {e_id} - f_ids: {f_ids:?}");
+			assert!(
+				elements.elements.contains_key(e_id),
+				"h.elements.contains_key(e_id) - el: {e_id} - f_ids: {f_ids:?}"
+			);
 		}
 	}
 }

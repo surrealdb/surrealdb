@@ -2,9 +2,9 @@ use hashbrown::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-pub trait DynamicSet<T>: Debug
+pub trait DynamicSet<T>: Debug + Send + Sync
 where
-	T: Eq + Hash + Clone + Default + 'static,
+	T: Eq + Hash + Clone + Default + 'static + Send + Sync,
 {
 	fn with_capacity(capacity: usize) -> Self;
 	fn insert(&mut self, v: T) -> bool;
@@ -20,7 +20,7 @@ pub struct HashBrownSet<T>(HashSet<T>);
 
 impl<T> DynamicSet<T> for HashBrownSet<T>
 where
-	T: Eq + Hash + Clone + Default + Debug + 'static,
+	T: Eq + Hash + Clone + Default + Debug + 'static + Send + Sync,
 {
 	#[inline]
 	fn with_capacity(capacity: usize) -> Self {
@@ -61,7 +61,7 @@ where
 #[derive(Debug)]
 pub struct ArraySet<T, const N: usize>
 where
-	T: Eq + Hash + Clone + Default + 'static,
+	T: Eq + Hash + Clone + Default + 'static + Send + Sync,
 {
 	array: [T; N],
 	size: usize,
@@ -69,7 +69,7 @@ where
 
 impl<T, const N: usize> DynamicSet<T> for ArraySet<T, N>
 where
-	T: Eq + Hash + Clone + Copy + Default + Debug + 'static,
+	T: Eq + Hash + Clone + Copy + Default + Debug + 'static + Send + Sync,
 {
 	fn with_capacity(_capacity: usize) -> Self {
 		#[cfg(debug_assertions)]

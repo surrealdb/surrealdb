@@ -1,12 +1,13 @@
 use crate::idx::trees::dynamicset::DynamicSet;
 use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
+use std::fmt::Debug;
 use std::hash::Hash;
 
 #[derive(Debug)]
 pub(super) struct UndirectedGraph<T, S>
 where
-	T: Eq + Hash + Clone + Copy + Default + 'static,
+	T: Eq + Hash + Clone + Copy + Default + 'static + Send + Sync,
 	S: DynamicSet<T>,
 {
 	capacity: usize,
@@ -15,7 +16,7 @@ where
 
 impl<T, S> UndirectedGraph<T, S>
 where
-	T: Eq + Hash + Clone + Copy + Default + 'static,
+	T: Eq + Hash + Clone + Copy + Default + 'static + Send + Sync,
 	S: DynamicSet<T>,
 {
 	pub(super) fn new(capacity: usize) -> Self {
@@ -73,34 +74,32 @@ where
 }
 
 #[cfg(test)]
+impl<T, S> UndirectedGraph<T, S>
+where
+	T: Eq + Hash + Clone + Copy + Default + 'static + Display + Debug + Send + Sync,
+	S: DynamicSet<T>,
+{
+	pub(in crate::idx::trees) fn len(&self) -> usize {
+		self.nodes.len()
+	}
+
+	pub(in crate::idx::trees) fn nodes(&self) -> &HashMap<T, S> {
+		&self.nodes
+	}
+	pub(in crate::idx::trees) fn check(&self, g: Vec<(T, Vec<T>)>) {
+		for (n, e) in g {
+			let edges: HashSet<T> = e.into_iter().collect();
+			let n_edges: Option<HashSet<T>> =
+				self.get_edges(&n).map(|e| e.iter().cloned().collect());
+			assert_eq!(n_edges, Some(edges), "{n}");
+		}
+	}
+}
+
+#[cfg(test)]
 mod tests {
 	use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
 	use crate::idx::trees::graph::UndirectedGraph;
-	use hashbrown::{HashMap, HashSet};
-	use std::fmt::{Debug, Display};
-	use std::hash::Hash;
-
-	impl<T, S> UndirectedGraph<T, S>
-	where
-		T: Eq + Hash + Clone + Copy + Default + 'static + Display + Debug,
-		S: DynamicSet<T>,
-	{
-		pub(in crate::idx::trees) fn len(&self) -> usize {
-			self.nodes.len()
-		}
-
-		pub(in crate::idx::trees) fn nodes(&self) -> &HashMap<T, S> {
-			&self.nodes
-		}
-		pub(in crate::idx::trees) fn check(&self, g: Vec<(T, Vec<T>)>) {
-			for (n, e) in g {
-				let edges: HashSet<T> = e.into_iter().collect();
-				let n_edges: Option<HashSet<T>> =
-					self.get_edges(&n).map(|e| e.iter().cloned().collect());
-				assert_eq!(n_edges, Some(edges), "{n}");
-			}
-		}
-	}
 
 	fn test_undirected_graph<S: DynamicSet<i32>>(m_max: usize) {
 		// Graph creation

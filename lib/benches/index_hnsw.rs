@@ -16,8 +16,8 @@ const EF_CONSTRUCTION: u16 = 150;
 const EF_SEARCH: usize = 80;
 
 const NN: usize = 10;
-const M: u16 = 24;
-const M0: u16 = 48;
+const M: u8 = 24;
+const M0: u8 = 48;
 
 const DIMENSION: u16 = 20;
 

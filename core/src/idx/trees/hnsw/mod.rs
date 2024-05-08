@@ -22,19 +22,47 @@ use std::collections::VecDeque;
 pub struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
-	hnsw: HnswFlavor,
+	hnsw: Box<dyn HnswMethods>,
 	docs: HnswDocs,
 	vec_docs: HashMap<SharedVector, (Ids64, ElementId)>,
 }
+
+type ASet<const N: usize> = ArraySet<ElementId, N>;
+type HSet = HashBrownSet<ElementId>;
 
 impl HnswIndex {
 	pub fn new(p: &HnswParams) -> Self {
 		Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(p),
+			hnsw: Self::new_hnsw(p),
 			docs: HnswDocs::default(),
 			vec_docs: HashMap::default(),
+		}
+	}
+
+	fn new_hnsw(p: &HnswParams) -> Box<dyn HnswMethods> {
+		match p.m {
+			1..=4 => match p.m0 {
+				1..=8 => Box::new(Hnsw::<ASet<9>, ASet<5>>::new(p)),
+				9..=16 => Box::new(Hnsw::<ASet<17>, ASet<5>>::new(p)),
+				17..=24 => Box::new(Hnsw::<ASet<25>, ASet<5>>::new(p)),
+				_ => Box::new(Hnsw::<HSet, ASet<5>>::new(p)),
+			},
+			5..=8 => match p.m0 {
+				1..=16 => Box::new(Hnsw::<ASet<17>, ASet<9>>::new(p)),
+				17..=24 => Box::new(Hnsw::<ASet<25>, ASet<9>>::new(p)),
+				_ => Box::new(Hnsw::<HSet, ASet<9>>::new(p)),
+			},
+			9..=12 => match p.m0 {
+				17..=24 => Box::new(Hnsw::<ASet<25>, ASet<13>>::new(p)),
+				_ => Box::new(Hnsw::<HSet, ASet<13>>::new(p)),
+			},
+			13..=16 => Box::new(Hnsw::<HSet, ASet<17>>::new(p)),
+			17..=20 => Box::new(Hnsw::<HSet, ASet<21>>::new(p)),
+			21..=24 => Box::new(Hnsw::<HSet, ASet<25>>::new(p)),
+			25..=28 => Box::new(Hnsw::<HSet, ASet<29>>::new(p)),
+			_ => Box::new(Hnsw::<HSet, HSet>::new(p)),
 		}
 	}
 
@@ -194,93 +222,24 @@ impl HnswDocs {
 	}
 }
 
-enum HnswFlavor {
-	M1to4(Hnsw<ArraySet<ElementId, 9>, ArraySet<ElementId, 5>>),
-	M5to8(Hnsw<ArraySet<ElementId, 17>, ArraySet<ElementId, 9>>),
-	M9to12(Hnsw<ArraySet<ElementId, 25>, ArraySet<ElementId, 13>>),
-	M13to16(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 17>>),
-	M17to20(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 21>>),
-	M21to24(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 25>>),
-	M25to28(Hnsw<HashBrownSet<ElementId>, ArraySet<ElementId, 29>>),
-	Many(Hnsw<HashBrownSet<ElementId>, HashBrownSet<ElementId>>),
+trait HnswMethods: Send + Sync {
+	fn insert(&mut self, q_pt: SharedVector) -> ElementId;
+	fn remove(&mut self, e_id: ElementId) -> bool;
+	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)>;
+	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector>;
+	#[cfg(test)]
+	fn check_hnsw_properties(&self, expected_count: usize);
 }
 
-impl HnswFlavor {
-	fn new(p: &HnswParams) -> Self {
-		match p.m {
-			1..=4 => match p.m0 {
-				1..=8 => Self::M1to4(Hnsw::new(p)),
-				9..=16 => Self::M5to8(Hnsw::new(p)),
-				17..=24 => Self::M9to12(Hnsw::new(p)),
-				_ => Self::Many(Hnsw::new(p)),
-			},
-			5..=8 => match p.m0 {
-				1..=16 => Self::M5to8(Hnsw::new(p)),
-				17..=24 => Self::M9to12(Hnsw::new(p)),
-				_ => Self::Many(Hnsw::new(p)),
-			},
-			9..=12 => match p.m0 {
-				17..=24 => Self::M9to12(Hnsw::new(p)),
-				_ => Self::Many(Hnsw::new(p)),
-			},
-			13..=16 => Self::M13to16(Hnsw::new(p)),
-			17..=20 => Self::M17to20(Hnsw::new(p)),
-			21..=24 => Self::M21to24(Hnsw::new(p)),
-			25..=28 => Self::M25to28(Hnsw::new(p)),
-			_ => Self::Many(Hnsw::new(p)),
-		}
-	}
-
-	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
-		match self {
-			HnswFlavor::M1to4(h) => h.insert(q_pt),
-			HnswFlavor::M5to8(h) => h.insert(q_pt),
-			HnswFlavor::M9to12(h) => h.insert(q_pt),
-			HnswFlavor::M13to16(h) => h.insert(q_pt),
-			HnswFlavor::M17to20(h) => h.insert(q_pt),
-			HnswFlavor::M21to24(h) => h.insert(q_pt),
-			HnswFlavor::M25to28(h) => h.insert(q_pt),
-			HnswFlavor::Many(h) => h.insert(q_pt),
-		}
-	}
-
-	fn remove(&mut self, e_id: ElementId) -> bool {
-		match self {
-			HnswFlavor::M1to4(h) => h.remove(e_id),
-			HnswFlavor::M5to8(h) => h.remove(e_id),
-			HnswFlavor::M9to12(h) => h.remove(e_id),
-			HnswFlavor::M13to16(h) => h.remove(e_id),
-			HnswFlavor::M17to20(h) => h.remove(e_id),
-			HnswFlavor::M21to24(h) => h.remove(e_id),
-			HnswFlavor::M25to28(h) => h.remove(e_id),
-			HnswFlavor::Many(h) => h.remove(e_id),
-		}
-	}
-
-	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
-		match self {
-			HnswFlavor::M1to4(h) => h.knn_search(q, k, efs),
-			HnswFlavor::M5to8(h) => h.knn_search(q, k, efs),
-			HnswFlavor::M9to12(h) => h.knn_search(q, k, efs),
-			HnswFlavor::M13to16(h) => h.knn_search(q, k, efs),
-			HnswFlavor::M17to20(h) => h.knn_search(q, k, efs),
-			HnswFlavor::M21to24(h) => h.knn_search(q, k, efs),
-			HnswFlavor::M25to28(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Many(h) => h.knn_search(q, k, efs),
-		}
-	}
-
-	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
-		match self {
-			HnswFlavor::M1to4(h) => h.elements.get_vector(e_id),
-			HnswFlavor::M5to8(h) => h.elements.get_vector(e_id),
-			HnswFlavor::M9to12(h) => h.elements.get_vector(e_id),
-			HnswFlavor::M13to16(h) => h.elements.get_vector(e_id),
-			HnswFlavor::M17to20(h) => h.elements.get_vector(e_id),
-			HnswFlavor::M21to24(h) => h.elements.get_vector(e_id),
-			HnswFlavor::M25to28(h) => h.elements.get_vector(e_id),
-			HnswFlavor::Many(h) => h.elements.get_vector(e_id),
-		}
+#[cfg(test)]
+fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
+where
+	L0: DynamicSet<ElementId>,
+	L: DynamicSet<ElementId>,
+{
+	assert_eq!(h.elements.elements.len(), expected_count);
+	for layer in h.layers.iter() {
+		layer.check_props(&h.elements);
 	}
 }
 
@@ -353,11 +312,6 @@ where
 		}
 	}
 
-	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
-		let q_level = self.get_random_level();
-		self.insert_level(q_pt, q_level)
-	}
-
 	fn insert_level(&mut self, q_pt: SharedVector, q_level: usize) -> ElementId {
 		// Attribute an ID to the vector
 		let q_id = self.elements.next_element_id;
@@ -381,47 +335,6 @@ where
 
 		self.elements.next_element_id += 1;
 		q_id
-	}
-
-	fn remove(&mut self, e_id: ElementId) -> bool {
-		let mut removed = false;
-
-		let e_pt = self.elements.get_vector(&e_id).cloned();
-		// Do we have the vector?
-		if let Some(e_pt) = e_pt {
-			let layers = self.layers.len();
-			let mut new_enter_point = None;
-
-			// Are we deleting the current enter point?
-			if Some(e_id) == self.enter_point {
-				// Let's find a new enter point
-				new_enter_point = if layers == 0 {
-					self.layer0.search_single_ignore_ep(&self.elements, &e_pt, e_id)
-				} else {
-					self.layers[layers - 1].search_single_ignore_ep(&self.elements, &e_pt, e_id)
-				};
-			}
-
-			self.elements.remove(&e_id);
-
-			// Remove from the up layers
-			for layer in self.layers.iter_mut().rev() {
-				if layer.remove(&self.elements, &self.heuristic, e_id, self.efc) {
-					removed = true;
-				}
-			}
-
-			// Remove from layer 0
-			if self.layer0.remove(&self.elements, &self.heuristic, e_id, self.efc) {
-				removed = true;
-			}
-
-			if removed && new_enter_point.is_some() {
-				// Update the enter point
-				self.enter_point = new_enter_point.map(|(_, e_id)| e_id);
-			}
-		}
-		removed
 	}
 
 	fn get_random_level(&mut self) -> usize {
@@ -482,6 +395,58 @@ where
 			self.enter_point = Some(q_id);
 		}
 	}
+}
+
+impl<L0, L> HnswMethods for Hnsw<L0, L>
+where
+	L0: DynamicSet<ElementId>,
+	L: DynamicSet<ElementId>,
+{
+	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
+		let q_level = self.get_random_level();
+		self.insert_level(q_pt, q_level)
+	}
+
+	fn remove(&mut self, e_id: ElementId) -> bool {
+		let mut removed = false;
+
+		let e_pt = self.elements.get_vector(&e_id).cloned();
+		// Do we have the vector?
+		if let Some(e_pt) = e_pt {
+			let layers = self.layers.len();
+			let mut new_enter_point = None;
+
+			// Are we deleting the current enter point?
+			if Some(e_id) == self.enter_point {
+				// Let's find a new enter point
+				new_enter_point = if layers == 0 {
+					self.layer0.search_single_ignore_ep(&self.elements, &e_pt, e_id)
+				} else {
+					self.layers[layers - 1].search_single_ignore_ep(&self.elements, &e_pt, e_id)
+				};
+			}
+
+			self.elements.remove(&e_id);
+
+			// Remove from the up layers
+			for layer in self.layers.iter_mut().rev() {
+				if layer.remove(&self.elements, &self.heuristic, e_id, self.efc) {
+					removed = true;
+				}
+			}
+
+			// Remove from layer 0
+			if self.layer0.remove(&self.elements, &self.heuristic, e_id, self.efc) {
+				removed = true;
+			}
+
+			if removed && new_enter_point.is_some() {
+				// Update the enter point
+				self.enter_point = new_enter_point.map(|(_, e_id)| e_id);
+			}
+		}
+		removed
+	}
 
 	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
 		#[cfg(debug_assertions)]
@@ -510,14 +475,21 @@ where
 			vec![]
 		}
 	}
+
+	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
+		self.elements.get_vector(e_id)
+	}
+	#[cfg(test)]
+	fn check_hnsw_properties(&self, expected_count: usize) {
+		check_hnsw_props(self, expected_count);
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
-	use crate::idx::trees::dynamicset::DynamicSet;
-	use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswFlavor, HnswIndex};
+	use crate::idx::trees::hnsw::{HnswIndex, HnswMethods};
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -529,7 +501,7 @@ mod tests {
 	use test_log::test;
 
 	fn insert_collection_hnsw(
-		h: &mut HnswFlavor,
+		h: &mut Box<dyn HnswMethods>,
 		collection: &TestCollection,
 	) -> HashSet<SharedVector> {
 		let mut set = HashSet::new();
@@ -541,7 +513,7 @@ mod tests {
 		}
 		set
 	}
-	fn find_collection_hnsw(h: &HnswFlavor, collection: &TestCollection) {
+	fn find_collection_hnsw(h: &Box<dyn HnswMethods>, collection: &TestCollection) {
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
 			let obj = obj.clone().into();
@@ -584,7 +556,7 @@ mod tests {
 	}
 
 	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
-		let mut h = HnswFlavor::new(p);
+		let mut h = HnswIndex::new_hnsw(p);
 		insert_collection_hnsw(&mut h, collection);
 		find_collection_hnsw(&h, &collection);
 	}
@@ -600,17 +572,17 @@ mod tests {
 	) -> HnswParams {
 		let m = m as u8;
 		let m0 = m * 2;
-		HnswParams {
-			dimension: dimension as u16,
+		HnswParams::new(
+			dimension as u16,
 			distance,
 			vector_type,
 			m,
 			m0,
-			ml: (1.0 / (m as f64).ln()).into(),
-			ef_construction: efc as u16,
+			(1.0 / (m as f64).ln()).into(),
+			efc as u16,
 			extend_candidates,
 			keep_pruned_connections,
-		}
+		)
 	}
 
 	fn test_hnsw(collection_size: usize, p: HnswParams) {
@@ -801,7 +773,7 @@ mod tests {
 			(10, new_i16_vec(0, 3)),
 		]);
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
-		let mut h = HnswFlavor::new(&p);
+		let mut h = HnswIndex::new_hnsw(&p);
 		insert_collection_hnsw(&mut h, &collection);
 		let pt = new_i16_vec(-2, -3);
 		let knn = 10;
@@ -915,32 +887,6 @@ mod tests {
 			&[(10, 0.98), (40, 1.0)],
 		)
 		.await
-	}
-
-	impl HnswFlavor {
-		fn check_hnsw_properties(&self, expected_count: usize) {
-			match self {
-				HnswFlavor::M1to4(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::M5to8(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::M9to12(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::M13to16(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::M17to20(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::M21to24(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::M25to28(h) => check_hnsw_props(h, expected_count),
-				HnswFlavor::Many(h) => check_hnsw_props(h, expected_count),
-			}
-		}
-	}
-
-	fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
-	where
-		L0: DynamicSet<ElementId>,
-		L: DynamicSet<ElementId>,
-	{
-		assert_eq!(h.elements.elements.len(), expected_count);
-		for layer in h.layers.iter() {
-			layer.check_props(&h.elements);
-		}
 	}
 
 	impl TestCollection {
