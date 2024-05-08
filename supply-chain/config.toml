@@ -1368,7 +1368,7 @@ version = "0.11.3"
 criteria = "safe-to-run"
 
 [[exemptions.reblessive]]
-version = "0.3.3"
+version = "0.3.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
@@ -1484,19 +1484,19 @@ version = "0.21.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
-version = "0.5.1"
+version = "0.6.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-core]]
-version = "0.5.1"
+version = "0.6.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-macro]]
-version = "0.5.1"
+version = "0.6.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-sys]]
-version = "0.5.1"
+version = "0.6.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rsa]]
