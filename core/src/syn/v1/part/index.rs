@@ -145,7 +145,7 @@ fn search(i: &str) -> IResult<&str, Index> {
 	cut(|i| {
 		let mut p = SearchParams {
 			az: Ident::from("like"),
-			sc: Scoring::bm25(),
+			sc: Default::default(),
 			hl: false,
 			doc_ids_order: 100,
 			doc_lengths_order: 100,

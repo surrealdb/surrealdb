@@ -556,75 +556,87 @@ impl Parser<'_> {
 				}
 				t!("SEARCH") => {
 					self.pop_peek();
-					let analyzer =
-						self.eat(t!("ANALYZER")).then(|| self.next_token_value()).transpose()?;
-					let scoring = match self.next().kind {
-						t!("VS") => Scoring::Vs,
-						t!("BM25") => {
-							if self.eat(t!("(")) {
-								let open = self.last_span();
-								let k1 = self.next_token_value()?;
-								expected!(self, t!(","));
-								let b = self.next_token_value()?;
-								self.expect_closing_delimiter(t!(")"), open)?;
-								Scoring::Bm {
-									k1,
-									b,
-								}
-							} else {
-								Scoring::bm25()
+					let mut analyzer: Option<Ident> = None;
+					let mut scoring = None;
+					let mut doc_ids_order = 100;
+					let mut doc_lengths_order = 100;
+					let mut postings_order = 100;
+					let mut terms_order = 100;
+					let mut doc_ids_cache = 100;
+					let mut doc_lengths_cache = 100;
+					let mut postings_cache = 100;
+					let mut terms_cache = 100;
+					let mut hl = false;
+
+					loop {
+						match self.peek_kind() {
+							t!("ANALYZER") => {
+								self.pop_peek();
+								analyzer = Some(self.next_token_value()).transpose()?;
 							}
+							t!("VS") => {
+								self.pop_peek();
+								scoring = Some(Scoring::Vs);
+							}
+							t!("BM25") => {
+								self.pop_peek();
+								if self.eat(t!("(")) {
+									let open = self.last_span();
+									let k1 = self.next_token_value()?;
+									expected!(self, t!(","));
+									let b = self.next_token_value()?;
+									self.expect_closing_delimiter(t!(")"), open)?;
+									scoring = Some(Scoring::Bm {
+										k1,
+										b,
+									})
+								} else {
+									scoring = Some(Default::default());
+								};
+							}
+							t!("DOC_IDS_ORDER") => {
+								self.pop_peek();
+								doc_ids_order = self.next_token_value()?;
+							}
+							t!("DOC_LENGTHS_ORDER") => {
+								self.pop_peek();
+								doc_lengths_order = self.next_token_value()?;
+							}
+							t!("POSTINGS_ORDER") => {
+								self.pop_peek();
+								postings_order = self.next_token_value()?;
+							}
+							t!("TERMS_ORDER") => {
+								self.pop_peek();
+								terms_order = self.next_token_value()?;
+							}
+							t!("DOC_IDS_CACHE") => {
+								self.pop_peek();
+								doc_ids_cache = self.next_token_value()?;
+							}
+							t!("DOC_LENGTHS_CACHE") => {
+								self.pop_peek();
+								doc_lengths_cache = self.next_token_value()?;
+							}
+							t!("POSTINGS_CACHE") => {
+								self.pop_peek();
+								postings_cache = self.next_token_value()?;
+							}
+							t!("TERMS_CACHE") => {
+								self.pop_peek();
+								terms_cache = self.next_token_value()?;
+							}
+							t!("HIGHLIGHTS") => {
+								self.pop_peek();
+								hl = true;
+							}
+							_ => break,
 						}
-						x => unexpected!(self, x, "`VS` or `BM25`"),
-					};
-
-					// TODO: Propose change in how order syntax works.
-					let doc_ids_order = self
-						.eat(t!("DOC_IDS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let doc_lengths_order = self
-						.eat(t!("DOC_LENGTHS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let postings_order = self
-						.eat(t!("POSTINGS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let terms_order = self
-						.eat(t!("TERMS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let doc_ids_cache = self
-						.eat(t!("DOC_IDS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let doc_lengths_cache = self
-						.eat(t!("DOC_LENGTHS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let postings_cache = self
-						.eat(t!("POSTINGS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let terms_cache = self
-						.eat(t!("TERMS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let hl = self.eat(t!("HIGHLIGHTS"));
+					}
 
 					res.index = Index::Search(crate::sql::index::SearchParams {
 						az: analyzer.unwrap_or_else(|| Ident::from("like")),
-						sc: scoring,
+						sc: scoring.unwrap_or_else(|| Default::default()),
 						hl,
 						doc_ids_order,
 						doc_lengths_order,

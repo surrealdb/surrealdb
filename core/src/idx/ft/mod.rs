@@ -500,7 +500,6 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
-	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
 	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
@@ -569,7 +568,7 @@ mod tests {
 				doc_lengths_order: order,
 				postings_order: order,
 				terms_order: order,
-				sc: Scoring::bm25(),
+				sc: Default::default(),
 				hl,
 				doc_ids_cache: 100,
 				doc_lengths_cache: 100,
