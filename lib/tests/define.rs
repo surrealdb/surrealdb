@@ -2524,7 +2524,7 @@ async fn redefining_existing_access_with_if_not_exists_should_error() -> Result<
 	assert_eq!(tmp, Value::None);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::ScAlreadyExists { .. }),);
+	assert!(matches!(tmp, Error::AccessDbAlreadyExists { .. }),);
 	//
 	Ok(())
 }
