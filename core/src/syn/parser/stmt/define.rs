@@ -1041,6 +1041,7 @@ impl Parser<'_> {
 				}
 				x => unexpected!(self, x, "`DURATION`"),
 			}
+			res.issue = Some(iss);
 		}
 
 		Ok(res)
