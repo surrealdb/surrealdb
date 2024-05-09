@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::iam::{Auth, Level, Role};
+use surrealdb::iam::Role;
 use surrealdb::sql::Part;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
