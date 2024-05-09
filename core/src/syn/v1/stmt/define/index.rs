@@ -258,7 +258,7 @@ mod tests {
 	#[test]
 	fn check_create_hnsw_index() {
 		let sql =
-			"INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 EXTEND_CANDIDATES EFC 500 KEEP_PRUNED_CONNECTIONS DIST MANHATTAN TYPE F32 M 16 M0 24";
+			"INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 EXTEND_CANDIDATES EFC 500 KEEP_PRUNED_CONNECTIONS DIST MANHATTAN TYPE F32 M 16 M0 24 LM 0.5";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -272,7 +272,7 @@ mod tests {
 					vector_type: VectorType::F32,
 					m: 16,
 					m0: 24,
-					ml: Number::Float(0.36067376022224085),
+					ml: Number::Float(0.5),
 					ef_construction: 500,
 					extend_candidates: true,
 					keep_pruned_connections: true
@@ -283,7 +283,7 @@ mod tests {
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 DIST MANHATTAN TYPE F32 EFC 500 M 16 M0 24 ML 0.36067376022224085f EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 DIST MANHATTAN TYPE F32 EFC 500 M 16 M0 24 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"
 		);
 	}
 

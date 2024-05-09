@@ -328,7 +328,7 @@ fn hnsw_m0(i: &str) -> IResult<&str, HnswOption> {
 
 fn hnsw_ml(i: &str) -> IResult<&str, HnswOption> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ML")(i)?;
+	let (i, _) = tag_no_case("LM")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = number(i)?;
 	Ok((i, HnswOption::Ml(v)))

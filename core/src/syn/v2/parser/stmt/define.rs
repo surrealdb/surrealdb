@@ -728,7 +728,7 @@ impl Parser<'_> {
 								self.pop_peek();
 								m0 = Some(self.next_token_value()?);
 							}
-							t!("ML") => {
+							t!("LM") => {
 								self.pop_peek();
 								ml = Some(self.next_token_value()?);
 							}

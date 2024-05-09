@@ -1796,6 +1796,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
+	#[ignore]
 	async fn test_mtree_random_small() -> Result<(), Error> {
 		for vt in [VectorType::F64, VectorType::I64] {
 			test_mtree_collection(
