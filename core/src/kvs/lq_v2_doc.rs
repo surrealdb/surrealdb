@@ -189,7 +189,6 @@ mod test_check_lqs_and_send_notifications {
 		ns: String,
 		db: String,
 		tb: String,
-		rid: Value,
 	}
 
 	async fn setup_test_suite_init() -> TestSuite {
@@ -222,7 +221,6 @@ mod test_check_lqs_and_send_notifications {
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),
-			rid: Value::Thing(Thing::from(("user", "test"))),
 		}
 	}
 
