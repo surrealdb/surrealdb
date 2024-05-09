@@ -76,7 +76,7 @@ where
 			}
 			// Build the query and execute it
 			let mut query = sql::Query::default();
-			query.0 .0 = statements.clone();
+			query.0 .0.clone_from(&statements);
 			let param = Param::query(query, self.bindings?);
 			let mut conn = Client::new(Method::Query);
 			let mut response = conn.execute_query(router, param).await?;
