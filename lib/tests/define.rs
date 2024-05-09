@@ -1711,7 +1711,7 @@ async fn permissions_checks_define_access_ns() {
 async fn permissions_checks_define_access_db() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE ACCESS access ON DB TYPE JWT ON DB ALGORITHM HS512 KEY 'secret'"),
+		("test", "DEFINE ACCESS access ON DB TYPE JWT ALGORITHM HS512 KEY 'secret'"),
 		("check", "INFO FOR DB"),
 	]);
 
@@ -1879,13 +1879,13 @@ async fn permissions_checks_define_user_db() {
 async fn permissions_checks_define_access_record() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h;"),
+		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY 'secret';"),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY '.*' WITH ISSUER KEY '.*' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
