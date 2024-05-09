@@ -426,7 +426,7 @@ async fn should_error_when_remove_and_access_does_not_exist() -> Result<(), Erro
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::ScNotFound { .. }),);
+	assert!(matches!(tmp, Error::AccessNotFound { .. }),);
 
 	Ok(())
 }
