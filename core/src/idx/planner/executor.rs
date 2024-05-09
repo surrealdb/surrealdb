@@ -418,7 +418,7 @@ impl QueryExecutor {
 			}
 		}
 		None
-	}async
+	}
 
 	pub(crate) async fn matches(
 		&self,

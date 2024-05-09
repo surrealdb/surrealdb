@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineSimilarity, EuclideanDistance, HammingDistance, JaccardSimilarity,
+	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
 	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
 };
 use crate::sql::ident::Ident;
@@ -164,7 +164,7 @@ pub enum Distance {
 impl Distance {
 	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
 		match self {
-			Self::Cosine => v1.cosine_similarity(v2),
+			Self::Cosine => v1.cosine_distance(v2),
 			Self::Chebyshev => v1.chebyshev_distance(v2),
 			Self::Euclidean => v1.euclidean_distance(v2),
 			Self::Hamming => v1.hamming_distance(v2),

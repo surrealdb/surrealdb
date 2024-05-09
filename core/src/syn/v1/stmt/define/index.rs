@@ -111,11 +111,13 @@ fn index_comment(i: &str) -> IResult<&str, DefineIndexOption> {
 mod tests {
 
 	use super::*;
-	use crate::sql::index::{Distance, Distance1, MTreeParams, SearchParams, VectorType};
-	use crate::sql::Ident;
-	use crate::sql::Idiom;
+	use crate::sql::index::{
+		Distance, Distance1, HnswParams, MTreeParams, SearchParams, VectorType,
+	};
 	use crate::sql::Part;
 	use crate::sql::Scoring;
+	use crate::sql::{Ident, Index};
+	use crate::sql::{Idiom, Number};
 
 	#[test]
 	fn check_create_non_unique_index() {
@@ -250,6 +252,38 @@ mod tests {
 		assert_eq!(
 			idx.to_string(),
 			"DEFINE INDEX my_index ON my_table FIELDS my_col MTREE DIMENSION 4 DIST EUCLIDEAN TYPE F64 CAPACITY 40 DOC_IDS_ORDER 100 DOC_IDS_CACHE 100 MTREE_CACHE 100"
+		);
+	}
+
+	#[test]
+	fn check_create_hnsw_index() {
+		let sql =
+			"INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 EXTEND_CANDIDATES EFC 500 KEEP_PRUNED_CONNECTIONS DIST MANHATTAN TYPE F32 M 16 M0 24";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Hnsw(HnswParams {
+					dimension: 4,
+					distance: Distance::Manhattan,
+					vector_type: VectorType::F32,
+					m: 16,
+					m0: 24,
+					ml: Number::Float(0.36067376022224085),
+					ef_construction: 500,
+					extend_candidates: true,
+					keep_pruned_connections: true
+				}),
+				comment: None,
+				if_not_exists: false,
+			}
+		);
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col HNSW DIMENSION 4 DIST MANHATTAN TYPE F32 EFC 500 M 16 M0 24 ML 0.36067376022224085f EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"
 		);
 	}
 
