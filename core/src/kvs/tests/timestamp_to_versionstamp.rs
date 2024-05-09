@@ -1,3 +1,5 @@
+use crate::key;
+
 // Timestamp to versionstamp tests
 // This translation mechanism is currently used by the garbage collector to determine which change feed entries to delete.
 //
