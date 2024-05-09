@@ -4,12 +4,12 @@ use flate2::read::GzDecoder;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
+use surrealdb::dbs::Session;
 use surrealdb::idx::trees::hnsw::HnswIndex;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::index::Distance;
-use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::sql::index::{HnswParams, VectorType};
-use surrealdb_core::sql::{value, Array, Id, Thing, Value};
+use surrealdb::sql::index::{HnswParams, VectorType};
+use surrealdb::sql::{value, Array, Id, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
 
 const EF_CONSTRUCTION: u16 = 150;
