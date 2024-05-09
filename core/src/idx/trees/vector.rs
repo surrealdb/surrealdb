@@ -2,20 +2,22 @@ use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
+use ahash::AHasher;
 use hashbrown::HashSet;
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
+use revision::revisioned;
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::PartialEq;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::ops::{Add, Deref, Div, Sub};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Vector {
 	F64(Array1<f64>),
@@ -23,6 +25,41 @@ pub enum Vector {
 	I64(Array1<i64>),
 	I32(Array1<i32>),
 	I16(Array1<i16>),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
+#[non_exhaustive]
+enum SerializedVector {
+	F64(Vec<f64>),
+	F32(Vec<f32>),
+	I64(Vec<i64>),
+	I32(Vec<i32>),
+	I16(Vec<i16>),
+}
+
+impl From<&Vector> for SerializedVector {
+	fn from(value: &Vector) -> Self {
+		match value {
+			Vector::F64(v) => Self::F64(v.to_vec()),
+			Vector::F32(v) => Self::F32(v.to_vec()),
+			Vector::I64(v) => Self::I64(v.to_vec()),
+			Vector::I32(v) => Self::I32(v.to_vec()),
+			Vector::I16(v) => Self::I16(v.to_vec()),
+		}
+	}
+}
+
+impl From<SerializedVector> for Vector {
+	fn from(value: SerializedVector) -> Self {
+		match value {
+			SerializedVector::F64(v) => Self::F64(Array1::from_vec(v)),
+			SerializedVector::F32(v) => Self::F32(Array1::from_vec(v)),
+			SerializedVector::I64(v) => Self::I64(Array1::from_vec(v)),
+			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v)),
+			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v)),
+		}
+	}
 }
 
 impl Vector {
@@ -282,7 +319,7 @@ impl Vector {
 pub struct SharedVector(Arc<Vector>, u64);
 impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
-		let mut h = DefaultHasher::new();
+		let mut h = AHasher::default();
 		v.hash(&mut h);
 		Self(Arc::new(v), h.finish())
 	}
@@ -315,7 +352,8 @@ impl Serialize for SharedVector {
 		S: Serializer,
 	{
 		// We only serialize the vector part, not the u64
-		self.0.serialize(serializer)
+		let ser: SerializedVector = self.0.as_ref().into();
+		ser.serialize(serializer)
 	}
 }
 
@@ -325,8 +363,7 @@ impl<'de> Deserialize<'de> for SharedVector {
 		D: Deserializer<'de>,
 	{
 		// We deserialize into a vector and construct the struct
-		// assuming some default or dummy value for the u64, e.g., 0
-		let v = Vector::deserialize(deserializer)?;
+		let v: Vector = SerializedVector::deserialize(deserializer)?.into();
 		Ok(v.into())
 	}
 }

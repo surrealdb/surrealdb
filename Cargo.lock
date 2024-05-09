@@ -3466,7 +3466,6 @@ dependencies = [
  "num-integer",
  "num-traits",
  "rawpointer",
- "serde",
 ]
 
 [[package]]
@@ -5941,6 +5940,7 @@ name = "surrealdb-core"
 version = "2.0.0-1.5.0"
 dependencies = [
  "addr",
+ "ahash 0.8.11",
  "any_ascii",
  "arbitrary",
  "argon2",
