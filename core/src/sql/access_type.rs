@@ -209,10 +209,10 @@ impl Display for JwtAccess {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.verify {
 			JwtAccessVerify::Key(ref v) => {
-				write!(f, " ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
+				write!(f, "ALGORITHM {} KEY {}", v.alg, quote_str(&v.key))?;
 			}
 			JwtAccessVerify::Jwks(ref v) => {
-				write!(f, " JWKS {}", quote_str(&v.url),)?;
+				write!(f, "JWKS {}", quote_str(&v.url),)?;
 			}
 		}
 		if let Some(iss) = &self.issue {
