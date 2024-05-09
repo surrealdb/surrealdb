@@ -1974,6 +1974,7 @@ impl Transaction {
 	) -> Result<LiveStatement, Error> {
 		let key = crate::key::table::lq::new(ns, db, tb, *lv);
 		let key_enc = crate::key::table::lq::Lq::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting lv ({:?}) {}", lv, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
 			value: lv.to_string(),
@@ -1991,6 +1992,7 @@ impl Transaction {
 	) -> Result<DefineEventStatement, Error> {
 		let key = crate::key::table::ev::new(ns, db, tb, ev);
 		let key_enc = crate::key::table::ev::Ev::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting ev ({:?}) {}", ev, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::EvNotFound {
 			value: ev.to_string(),
@@ -2008,6 +2010,7 @@ impl Transaction {
 	) -> Result<DefineFieldStatement, Error> {
 		let key = crate::key::table::fd::new(ns, db, tb, fd);
 		let key_enc = crate::key::table::fd::Fd::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting fd ({:?}) {}", fd, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::FdNotFound {
 			value: fd.to_string(),
@@ -2025,6 +2028,7 @@ impl Transaction {
 	) -> Result<DefineIndexStatement, Error> {
 		let key = crate::key::table::ix::new(ns, db, tb, ix);
 		let key_enc = crate::key::table::ix::Ix::encode(&key)?;
+		#[cfg(debug_assertions)]
 		trace!("Getting ix ({:?}) {}", ix, sprint_key(&key_enc));
 		let val = self.get(key_enc).await?.ok_or(Error::IxNotFound {
 			value: ix.to_string(),
@@ -2800,6 +2804,7 @@ impl Transaction {
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, u32::MAX).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((k, _)) = latest_ts_pair {
+			#[cfg(debug_assertions)]
 			trace!(
 				"There already was a greater committed timestamp {} in ns: {}, db: {} found: {}",
 				ts,

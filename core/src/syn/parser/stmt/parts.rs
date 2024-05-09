@@ -2,13 +2,11 @@
 
 use reblessive::Stk;
 
-use crate::sql::index::VectorType;
-use crate::syn::token::VectorTypeKind;
 use crate::{
 	sql::{
-		change_feed_include::ChangeFeedInclude, changefeed::ChangeFeed, index::Distance, Base,
-		Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Tables, Timeout, Value, View,
+		change_feed_include::ChangeFeedInclude, changefeed::ChangeFeed, index::Distance,
+		index::VectorType, Base, Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups,
+		Ident, Idiom, Output, Permission, Permissions, Tables, Timeout, Value, View,
 	},
 	syn::{
 		parser::{
@@ -16,7 +14,7 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, DistanceKind, Span, TokenKind},
+		token::{t, DistanceKind, Span, TokenKind, VectorTypeKind},
 	},
 };
 
@@ -384,32 +382,29 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
-		let dist = match self.next().kind {
-			TokenKind::Distance(x) => match x {
-				DistanceKind::Chebyshev => Distance::Chebyshev,
-				DistanceKind::Cosine => Distance::Cosine,
-				DistanceKind::Euclidean => Distance::Euclidean,
-				DistanceKind::Manhattan => Distance::Manhattan,
-				DistanceKind::Hamming => Distance::Hamming,
-				DistanceKind::Jaccard => Distance::Jaccard,
-				DistanceKind::Minkowski => {
-					let distance = self.next_token_value()?;
-					Distance::Minkowski(distance)
-				}
-				DistanceKind::Pearson => Distance::Pearson,
-			},
-			x => unexpected!(self, x, "a distance measure"),
+	pub fn convert_distance(&mut self, k: &DistanceKind) -> ParseResult<Distance> {
+		let dist = match k {
+			DistanceKind::Chebyshev => Distance::Chebyshev,
+			DistanceKind::Cosine => Distance::Cosine,
+			DistanceKind::Euclidean => Distance::Euclidean,
+			DistanceKind::Manhattan => Distance::Manhattan,
+			DistanceKind::Hamming => Distance::Hamming,
+			DistanceKind::Jaccard => Distance::Jaccard,
+
+			DistanceKind::Minkowski => {
+				let distance = self.next_token_value()?;
+				Distance::Minkowski(distance)
+			}
+			DistanceKind::Pearson => Distance::Pearson,
 		};
 		Ok(dist)
 	}
 
-	pub fn try_parse_distance(&mut self) -> ParseResult<Option<Distance>> {
-		if !self.eat(t!("DISTANCE")) {
-			return Ok(None);
+	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
+		match self.next().kind {
+			TokenKind::Distance(k) => self.convert_distance(&k),
+			x => unexpected!(self, x, "a distance measure"),
 		}
-
-		self.parse_distance().map(Some)
 	}
 
 	pub fn parse_vector_type(&mut self) -> ParseResult<VectorType> {

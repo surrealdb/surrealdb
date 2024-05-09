@@ -1,10 +1,10 @@
+use hashbrown::hash_map::Entry;
+use hashbrown::{HashMap, HashSet};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::collections::{BinaryHeap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -1430,8 +1430,9 @@ impl VersionedSerdeState for MState {}
 
 #[cfg(test)]
 mod tests {
+	use hashbrown::{HashMap, HashSet};
 	use reblessive::tree::Stk;
-	use std::collections::{HashMap, HashSet, VecDeque};
+	use std::collections::VecDeque;
 
 	use crate::err::Error;
 	use test_log::test;
