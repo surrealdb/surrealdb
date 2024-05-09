@@ -59,8 +59,8 @@ struct TreeBuilder<'a> {
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 	knn_expressions: KnnExpressions,
-    ann_expressions: AnnExpressions,
-    idioms_record_options: HashMap<Idiom, RecordOptions>,
+	ann_expressions: AnnExpressions,
+	idioms_record_options: HashMap<Idiom, RecordOptions>,
 	group_sequence: GroupRef,
 }
 
@@ -98,8 +98,8 @@ impl<'a> TreeBuilder<'a> {
 			index_map: Default::default(),
 			with_indexes,
 			knn_expressions: Default::default(),
-            ann_expressions: Default::default(),
-            idioms_record_options: Default::default(),
+			ann_expressions: Default::default(),
+			idioms_record_options: Default::default(),
 			group_sequence: 0,
 		}
 	}
@@ -364,7 +364,7 @@ impl<'a> TreeBuilder<'a> {
 						..
 					} => Self::eval_matches_operator(op, n),
 					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id)?,
-					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id.clone())?,
+					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id)?,
 				};
 				if let Some(op) = op {
 					let io = IndexOption::new(*ir, id.clone(), p, op);
@@ -429,7 +429,7 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 		op: &Operator,
 		nd: &Node,
-		id: Arc<Idiom>,
+		id: &Idiom,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Ann(n, ef) = op {
 			if let Node::Computed(v) = nd {

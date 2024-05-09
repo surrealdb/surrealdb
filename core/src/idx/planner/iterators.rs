@@ -45,6 +45,7 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(tx, size, collector).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
+			Self::Things(i) => Ok(i.next_batch(size, collector)),
 		}
 	}
 }
@@ -699,17 +700,16 @@ impl ThingsIterator {
 			res,
 		}
 	}
-	fn next_batch(&mut self, limit: u32) -> Result<Vec<(Thing, Option<DocId>)>, Error> {
-		let mut res = vec![];
+	fn next_batch<T: ThingCollector>(&mut self, limit: u32, collector: &mut T) -> usize {
 		let mut count = 0;
 		while limit > count {
 			if let Some(thg) = self.res.pop_front() {
-				res.push((thg, None));
+				collector.add(thg, None);
 				count += 1;
 			} else {
 				break;
 			}
 		}
-		Ok(res)
+		count as usize
 	}
 }

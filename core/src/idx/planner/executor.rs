@@ -10,8 +10,9 @@ use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
 	DocIdsIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, MatchesThingIterator, ThingIterator, ThingsIterator, UniqueEqualThingIterator,
-	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
+	IndexUnionThingIterator, MatchesThingIterator, ThingIterator, ThingsIterator,
+	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
+	UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -33,8 +34,7 @@ use tokio::sync::RwLock;
 
 pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Idiom, Arc<Vec<Number>>, Distance)>;
-pub(super) type AnnExpressions =
-	HashMap<Arc<Expression>, (usize, Arc<Idiom>, Arc<Vec<Number>>, usize)>;
+pub(super) type AnnExpressions = HashMap<Arc<Expression>, (usize, Idiom, Arc<Vec<Number>>, usize)>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -430,15 +430,15 @@ impl QueryExecutor {
 		None
 	}
 
-    fn new_hnsw_index_ann_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
-        if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
-            if let Some(he) = self.0.hnsw_entries.get(exp) {
-                let it = ThingsIterator::new(he.res.iter().map(|(thg, _)| thg.clone()).collect());
-                return Some(ThingIterator::Things(it));
-            }
-        }
-        None
-    }
+	fn new_hnsw_index_ann_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
+			if let Some(he) = self.0.hnsw_entries.get(exp) {
+				let it = ThingsIterator::new(he.res.iter().map(|(thg, _)| thg.clone()).collect());
+				return Some(ThingIterator::Things(it));
+			}
+		}
+		None
+	}
 
 	async fn build_iterators(
 		&self,
