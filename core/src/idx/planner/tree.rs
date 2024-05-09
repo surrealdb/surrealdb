@@ -1,12 +1,13 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::KnnExpressions;
+use crate::idx::planner::executor::{AnnExpressions, KnnExpressions};
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
+use crate::kvs;
 use crate::sql::index::{Distance, Index};
-use crate::sql::statements::DefineIndexStatement;
+use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
-	Array, Cond, Expression, Idiom, Number, Operator, Part, Subquery, Table, Value, With,
+	Array, Cond, Expression, Idiom, Kind, Number, Operator, Part, Subquery, Table, Value, With,
 };
 use async_recursion::async_recursion;
 use std::collections::HashMap;
@@ -51,15 +52,26 @@ struct TreeBuilder<'a> {
 	txn: &'a Transaction,
 	table: &'a Table,
 	with: &'a Option<With>,
-	indexes: Option<Arc<[DefineIndexStatement]>>,
+	schemas: HashMap<Table, SchemaCache>,
+	idioms_indexes: HashMap<Table, HashMap<Idiom, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
-	resolved_idioms: HashMap<Arc<Idiom>, Arc<Idiom>>,
-	idioms_indexes: HashMap<Arc<Idiom>, Option<Arc<Vec<IndexRef>>>>,
+	resolved_idioms: HashMap<Idiom, Node>,
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 	knn_expressions: KnnExpressions,
+	ann_expressions: AnnExpressions,
+	idioms_record_options: HashMap<Idiom, RecordOptions>,
 	group_sequence: GroupRef,
 }
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub(super) struct RecordOptions {
+	locals: LocalIndexRefs,
+	remotes: RemoteIndexRefs,
+}
+
+pub(super) type LocalIndexRefs = Vec<IndexRef>;
+pub(super) type RemoteIndexRefs = Arc<Vec<(Idiom, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
 	fn new(
@@ -79,28 +91,29 @@ impl<'a> TreeBuilder<'a> {
 			txn,
 			table,
 			with,
-			indexes: None,
+			schemas: Default::default(),
+			idioms_indexes: Default::default(),
 			resolved_expressions: Default::default(),
 			resolved_idioms: Default::default(),
-			idioms_indexes: Default::default(),
 			index_map: Default::default(),
 			with_indexes,
 			knn_expressions: Default::default(),
+			ann_expressions: Default::default(),
+			idioms_record_options: Default::default(),
 			group_sequence: 0,
 		}
 	}
 
-	async fn lazy_cache_indexes(&mut self) -> Result<(), Error> {
-		if self.indexes.is_none() {
-			let indexes = self
-				.txn
-				.clone()
-				.lock()
-				.await
-				.all_tb_indexes(self.opt.ns(), self.opt.db(), &self.table.0)
-				.await?;
-			self.indexes = Some(indexes);
+	async fn lazy_load_schema_resolver(
+		&mut self,
+		tx: &mut kvs::Transaction,
+		table: &Table,
+	) -> Result<(), Error> {
+		if self.schemas.contains_key(table) {
+			return Ok(());
 		}
+		let l = SchemaCache::new(self.opt, table, tx).await?;
+		self.schemas.insert(table.clone(), l);
 		Ok(())
 	}
 
@@ -139,11 +152,8 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_idiom(&mut self, group: GroupRef, i: &Idiom) -> Result<Node, Error> {
 		// Check if the idiom has already been resolved
-		if let Some(i) = self.resolved_idioms.get(i) {
-			if let Some(Some(irs)) = self.idioms_indexes.get(i).cloned() {
-				return Ok(Node::IndexedField(i.clone(), irs));
-			}
-			return Ok(Node::NonIndexedField(i.clone()));
+		if let Some(node) = self.resolved_idioms.get(i).cloned() {
+			return Ok(node);
 		};
 
 		// Compute the idiom value if it is a param
@@ -154,42 +164,100 @@ impl<'a> TreeBuilder<'a> {
 			}
 		}
 
-		self.lazy_cache_indexes().await?;
+		let n = self.resolve_idiom(i).await?;
+		self.resolved_idioms.insert(i.clone(), n.clone());
 
-		let i = Arc::new(i.clone());
-
-		self.resolved_idioms.insert(i.clone(), i.clone());
-
-		// Try to detect if it matches an index
-		if let Some(irs) = self.resolve_indexes(&i) {
-			return Ok(Node::IndexedField(i.clone(), irs));
-		}
-
-		Ok(Node::NonIndexedField(i))
+		Ok(n)
 	}
 
-	fn resolve_indexes(&mut self, i: &Arc<Idiom>) -> Option<Arc<Vec<IndexRef>>> {
-		let mut res = None;
-		if let Some(indexes) = &self.indexes {
-			let mut irs = Vec::new();
-			for ix in indexes.as_ref() {
-				if ix.cols.len() == 1 && ix.cols[0].eq(i) {
-					let ixr = self.index_map.definitions.len() as IndexRef;
-					if let Some(With::Index(ixs)) = self.with {
-						if ixs.contains(&ix.name.0) {
-							self.with_indexes.push(ixr);
-						}
-					}
-					self.index_map.definitions.push(ix.clone());
-					irs.push(ixr);
-				}
-			}
+	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
+		let mut tx = self.txn.lock().await;
+		self.lazy_load_schema_resolver(&mut tx, self.table).await?;
+
+		// Try to detect if it matches an index
+		if let Some(schema) = self.schemas.get(self.table).cloned() {
+			let irs = self.resolve_indexes(self.table, i, &schema);
 			if !irs.is_empty() {
-				res = Some(Arc::new(irs));
+				return Ok(Node::IndexedField(i.clone(), irs));
+			}
+			// Try to detect an indexed record field
+			if let Some(ro) = self.resolve_record_field(&mut tx, schema.fields.as_ref(), i).await? {
+				return Ok(Node::RecordField(i.clone(), ro));
 			}
 		}
-		self.idioms_indexes.insert(i.clone(), res.clone());
-		res
+		Ok(Node::NonIndexedField(i.clone()))
+	}
+
+	fn resolve_indexes(&mut self, t: &Table, i: &Idiom, schema: &SchemaCache) -> Vec<IndexRef> {
+		if let Some(m) = self.idioms_indexes.get(t) {
+			if let Some(irs) = m.get(i).cloned() {
+				return irs;
+			}
+		}
+		let mut irs = Vec::new();
+		for ix in schema.indexes.iter() {
+			if ix.cols.len() == 1 && ix.cols[0].eq(i) {
+				let ixr = self.index_map.definitions.len() as IndexRef;
+				if let Some(With::Index(ixs)) = self.with {
+					if ixs.contains(&ix.name.0) {
+						self.with_indexes.push(ixr);
+					}
+				}
+				self.index_map.definitions.push(ix.clone());
+				irs.push(ixr);
+			}
+		}
+		if let Some(e) = self.idioms_indexes.get_mut(t) {
+			e.insert(i.clone(), irs.clone());
+		} else {
+			self.idioms_indexes.insert(t.clone(), HashMap::from([(i.clone(), irs.clone())]));
+		}
+		irs
+	}
+
+	async fn resolve_record_field(
+		&mut self,
+		tx: &mut kvs::Transaction,
+		fields: &[DefineFieldStatement],
+		idiom: &Idiom,
+	) -> Result<Option<RecordOptions>, Error> {
+		for field in fields.iter() {
+			if let Some(Kind::Record(tables)) = &field.kind {
+				if idiom.starts_with(&field.name.0) {
+					let (local_field, remote_field) = idiom.0.split_at(field.name.0.len());
+					if remote_field.is_empty() {
+						return Ok(None);
+					}
+					let local_field = Idiom::from(local_field);
+					self.lazy_load_schema_resolver(tx, self.table).await?;
+					let locals;
+					if let Some(shema) = self.schemas.get(self.table).cloned() {
+						locals = self.resolve_indexes(self.table, &local_field, &shema);
+					} else {
+						return Ok(None);
+					}
+
+					let remote_field = Idiom::from(remote_field);
+					let mut remotes = vec![];
+					for table in tables {
+						self.lazy_load_schema_resolver(tx, table).await?;
+						if let Some(shema) = self.schemas.get(table).cloned() {
+							let remote_irs = self.resolve_indexes(table, &remote_field, &shema);
+							remotes.push((remote_field.clone(), remote_irs));
+						} else {
+							return Ok(None);
+						}
+					}
+					let ro = RecordOptions {
+						locals,
+						remotes: Arc::new(remotes),
+					};
+					self.idioms_record_options.insert(idiom.clone(), ro.clone());
+					return Ok(Some(ro));
+				}
+			}
+		}
+		Ok(None)
 	}
 
 	async fn eval_expression(&mut self, group: GroupRef, e: &Expression) -> Result<Node, Error> {
@@ -210,23 +278,25 @@ impl<'a> TreeBuilder<'a> {
 				let left = Arc::new(self.eval_value(group, l).await?);
 				let right = Arc::new(self.eval_value(group, r).await?);
 				let mut io = None;
-				if let Some((id, irs)) = left.is_indexed_field() {
-					io = self.lookup_index_option(
-						irs.as_slice(),
+				if let Some((id, local_irs, remote_irs)) = left.is_indexed_field() {
+					io = self.lookup_index_options(
 						o,
 						id,
 						&right,
 						&exp,
 						IdiomPosition::Left,
+						local_irs,
+						remote_irs,
 					)?;
-				} else if let Some((id, irs)) = right.is_indexed_field() {
-					io = self.lookup_index_option(
-						irs.as_slice(),
+				} else if let Some((id, local_irs, remote_irs)) = right.is_indexed_field() {
+					io = self.lookup_index_options(
 						o,
 						id,
 						&left,
 						&exp,
 						IdiomPosition::Right,
+						local_irs,
+						remote_irs,
 					)?;
 				} else if let Some(id) = left.is_non_indexed_field() {
 					self.eval_knn(id, &right, &exp)?;
@@ -236,7 +306,7 @@ impl<'a> TreeBuilder<'a> {
 				let re = ResolvedExpression {
 					group,
 					exp: exp.clone(),
-					io: io.clone(),
+					io,
 					left: left.clone(),
 					right: right.clone(),
 				};
@@ -246,11 +316,41 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
+	fn lookup_index_options(
+		&mut self,
+		o: &Operator,
+		id: &Idiom,
+		node: &Node,
+		exp: &Arc<Expression>,
+		p: IdiomPosition,
+		local_irs: LocalIndexRefs,
+		remote_irs: Option<RemoteIndexRefs>,
+	) -> Result<Option<IndexOption>, Error> {
+		if let Some(remote_irs) = remote_irs {
+			let mut remote_ios = Vec::with_capacity(remote_irs.len());
+			for (id, irs) in remote_irs.iter() {
+				if let Some(io) = self.lookup_index_option(irs.as_slice(), o, id, node, exp, p)? {
+					remote_ios.push(io);
+				} else {
+					return Ok(None);
+				}
+			}
+			if let Some(ir) = self.lookup_join_index_ref(local_irs.as_slice()) {
+				let io = IndexOption::new(ir, id.clone(), p, IndexOperator::Join(remote_ios));
+				return Ok(Some(io));
+			}
+			return Ok(None);
+		}
+		let io = self.lookup_index_option(local_irs.as_slice(), o, id, node, exp, p)?;
+		Ok(io)
+	}
+
 	fn lookup_index_option(
 		&mut self,
 		irs: &[IndexRef],
 		op: &Operator,
-		id: Arc<Idiom>,
+		id: &Idiom,
 		n: &Node,
 		e: &Arc<Expression>,
 		p: IdiomPosition,
@@ -263,10 +363,11 @@ impl<'a> TreeBuilder<'a> {
 					Index::Search {
 						..
 					} => Self::eval_matches_operator(op, n),
-					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id.clone())?,
+					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id)?,
+					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id)?,
 				};
 				if let Some(op) = op {
-					let io = IndexOption::new(*ir, id, op);
+					let io = IndexOption::new(*ir, id.clone(), p, op);
 					self.index_map.options.push((e.clone(), io.clone()));
 					return Ok(Some(io));
 				}
@@ -274,6 +375,19 @@ impl<'a> TreeBuilder<'a> {
 		}
 		Ok(None)
 	}
+
+	fn lookup_join_index_ref(&self, irs: &[IndexRef]) -> Option<IndexRef> {
+		for ir in irs {
+			if let Some(ix) = self.index_map.definitions.get(*ir as usize) {
+				match &ix.index {
+					Index::Idx | Index::Uniq => return Some(*ir),
+					_ => {}
+				};
+			}
+		}
+		None
+	}
+
 	fn eval_matches_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			if let Operator::Matches(mr) = op {
@@ -288,14 +402,14 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 		op: &Operator,
 		n: &Node,
-		id: Arc<Idiom>,
+		id: &Idiom,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Knn(k, d) = op {
 			if let Node::Computed(v) = n {
 				let vec: Vec<Number> = v.as_ref().try_into()?;
 				self.knn_expressions.insert(
 					exp.clone(),
-					(*k, id, Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
+					(*k, id.clone(), Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
 				);
 				if let Value::Array(a) = v.as_ref() {
 					match d {
@@ -310,13 +424,34 @@ impl<'a> TreeBuilder<'a> {
 		Ok(None)
 	}
 
-	fn eval_knn(&mut self, id: Arc<Idiom>, val: &Node, exp: &Arc<Expression>) -> Result<(), Error> {
+	fn eval_indexed_ann(
+		&mut self,
+		exp: &Arc<Expression>,
+		op: &Operator,
+		nd: &Node,
+		id: &Idiom,
+	) -> Result<Option<IndexOperator>, Error> {
+		if let Operator::Ann(n, ef) = op {
+			if let Node::Computed(v) = nd {
+				let vec: Vec<Number> = v.as_ref().try_into()?;
+				let n = *n as usize;
+				let ef = *ef as usize;
+				self.ann_expressions.insert(exp.clone(), (n, id.clone(), Arc::new(vec), ef));
+				if let Value::Array(a) = v.as_ref() {
+					return Ok(Some(IndexOperator::Ann(a.clone(), n, ef)));
+				}
+			}
+		}
+		Ok(None)
+	}
+
+	fn eval_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expression>) -> Result<(), Error> {
 		if let Operator::Knn(k, d) = exp.operator() {
 			if let Node::Computed(v) = val {
 				let vec: Vec<Number> = v.as_ref().try_into()?;
 				self.knn_expressions.insert(
 					exp.clone(),
-					(*k, id, Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
+					(*k, id.clone(), Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
 				);
 			}
 		}
@@ -370,9 +505,26 @@ pub(super) struct IndexesMap {
 	pub(super) definitions: Vec<DefineIndexStatement>,
 }
 
+#[derive(Clone)]
+struct SchemaCache {
+	indexes: Arc<[DefineIndexStatement]>,
+	fields: Arc<[DefineFieldStatement]>,
+}
+
+impl SchemaCache {
+	async fn new(opt: &Options, table: &Table, tx: &mut kvs::Transaction) -> Result<Self, Error> {
+		let indexes = tx.all_tb_indexes(opt.ns(), opt.db(), table).await?;
+		let fields = tx.all_tb_fields(opt.ns(), opt.db(), table).await?;
+		Ok(Self {
+			indexes,
+			fields,
+		})
+	}
+}
+
 pub(super) type GroupRef = u16;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum Node {
 	Expression {
 		group: GroupRef,
@@ -381,8 +533,9 @@ pub(super) enum Node {
 		right: Arc<Node>,
 		exp: Arc<Expression>,
 	},
-	IndexedField(Arc<Idiom>, Arc<Vec<IndexRef>>),
-	NonIndexedField(Arc<Idiom>),
+	IndexedField(Idiom, Vec<IndexRef>),
+	RecordField(Idiom, RecordOptions),
+	NonIndexedField(Idiom),
 	Computed(Arc<Value>),
 	Unsupported(String),
 }
@@ -396,28 +549,31 @@ impl Node {
 		}
 	}
 
-	pub(super) fn is_indexed_field(&self) -> Option<(Arc<Idiom>, Arc<Vec<IndexRef>>)> {
-		if let Node::IndexedField(id, irs) = self {
-			Some((id.clone(), irs.clone()))
-		} else {
-			None
+	pub(super) fn is_indexed_field(
+		&self,
+	) -> Option<(&Idiom, LocalIndexRefs, Option<RemoteIndexRefs>)> {
+		match self {
+			Node::IndexedField(id, irs) => Some((id, irs.clone(), None)),
+			Node::RecordField(id, ro) => Some((id, ro.locals.clone(), Some(ro.remotes.clone()))),
+			_ => None,
 		}
 	}
 
-	pub(super) fn is_non_indexed_field(&self) -> Option<Arc<Idiom>> {
+	pub(super) fn is_non_indexed_field(&self) -> Option<&Idiom> {
 		if let Node::NonIndexedField(id) = self {
-			Some(id.clone())
+			Some(id)
 		} else {
 			None
 		}
 	}
 }
 
-#[derive(Clone, Copy)]
-enum IdiomPosition {
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(super) enum IdiomPosition {
 	Left,
 	Right,
 }
+
 impl IdiomPosition {
 	// Reverses the operator for non-commutative operators
 	fn transform(&self, op: &Operator) -> Operator {

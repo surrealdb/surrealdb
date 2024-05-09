@@ -11,14 +11,14 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
-use crate::idx::ft::analyzer::Analyzer;
+use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
-use crate::idx::ft::terms::{TermId, Terms};
+use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
@@ -39,7 +39,7 @@ use tokio::sync::RwLock;
 pub(crate) type MatchRef = u8;
 
 pub(crate) struct FtIndex {
-	analyzer: Analyzer,
+	analyzer: Arc<Analyzer>,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	state: State,
@@ -164,7 +164,7 @@ impl FtIndex {
 			index_key_base,
 			bm25,
 			highlighting: p.hl,
-			analyzer: az.into(),
+			analyzer: Arc::new(az.into()),
 			doc_ids,
 			doc_lengths,
 			postings,
@@ -176,6 +176,14 @@ impl FtIndex {
 
 	pub(super) fn doc_ids(&self) -> Arc<RwLock<DocIds>> {
 		self.doc_ids.clone()
+	}
+
+	pub(super) fn terms(&self) -> Arc<RwLock<Terms>> {
+		self.terms.clone()
+	}
+
+	pub(super) fn analyzer(&self) -> Arc<Analyzer> {
+		self.analyzer.clone()
 	}
 
 	pub(crate) async fn remove_document(
@@ -326,22 +334,22 @@ impl FtIndex {
 		Ok(())
 	}
 
-	pub(super) async fn extract_terms(
+	pub(super) async fn extract_querying_terms(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		query_string: String,
-	) -> Result<Vec<Option<(TermId, u32)>>, Error> {
+	) -> Result<(TermsList, TermsSet), Error> {
 		let t = self.terms.read().await;
-		let terms = self.analyzer.extract_terms(ctx, opt, txn, &t, query_string).await?;
-		Ok(terms)
+		let res = self.analyzer.extract_querying_terms(ctx, opt, txn, &t, query_string).await?;
+		Ok(res)
 	}
 
 	pub(super) async fn get_terms_docs(
 		&self,
 		tx: &mut kvs::Transaction,
-		terms: &Vec<Option<(TermId, u32)>>,
+		terms: &TermsList,
 	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>, Error> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
 		for opt_term in terms {
@@ -402,7 +410,7 @@ impl FtIndex {
 		&self,
 		tx: &mut kvs::Transaction,
 		thg: &Thing,
-		terms: &[Option<(TermId, u32)>],
+		terms: &[Option<(TermId, TermLen)>],
 		prefix: Value,
 		suffix: Value,
 		partial: bool,
@@ -500,7 +508,6 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
-	use crate::sql::scoring::Scoring;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
 	use crate::sql::{Array, Statement, Thing, Value};
 	use crate::syn;
@@ -538,9 +545,10 @@ mod tests {
 		fti: &FtIndex,
 		qs: &str,
 	) -> (Option<HitsIterator>, BM25Scorer) {
-		let t = fti.extract_terms(ctx, opt, txn, qs.to_string()).await.unwrap();
+		let (term_list, _) =
+			fti.extract_querying_terms(ctx, opt, txn, qs.to_string()).await.unwrap();
 		let mut tx = txn.lock().await;
-		let td = Arc::new(fti.get_terms_docs(&mut tx, &t).await.unwrap());
+		let td = Arc::new(fti.get_terms_docs(&mut tx, &term_list).await.unwrap());
 		drop(tx);
 		let scr = fti.new_scorer(td.clone()).unwrap().unwrap();
 		let hits = fti.new_hits_iterator(td).unwrap();
@@ -569,7 +577,7 @@ mod tests {
 				doc_lengths_order: order,
 				postings_order: order,
 				terms_order: order,
-				sc: Scoring::bm25(),
+				sc: Default::default(),
 				hl,
 				doc_ids_cache: 100,
 				doc_lengths_cache: 100,

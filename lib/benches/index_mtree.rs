@@ -6,8 +6,7 @@ use rand::{thread_rng, Rng};
 use std::time::Duration;
 use surrealdb::idx::docids::DocId;
 use surrealdb::idx::trees::mtree::{MState, MTree};
-use surrealdb::idx::trees::store::cache::TreeCache;
-use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
+use surrealdb::idx::trees::store::TreeNodeProvider;
 use surrealdb::idx::trees::vector::Vector;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
@@ -110,7 +109,7 @@ fn random_object(rng: &mut ThreadRng, vector_size: usize) -> Vector {
 	for _ in 0..vector_size {
 		vec.push(rng.gen_range(-1.0..=1.0));
 	}
-	Vector::F32(vec)
+	Vector::F32(vec.into())
 }
 
 fn mtree() -> MTree {
@@ -126,8 +125,8 @@ async fn insert_objects(
 	let mut rng = thread_rng();
 	let mut t = mtree();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
-	let mut s = TreeStore::new(TreeNodeProvider::Debug, c.clone(), Write).await;
+	let mut s =
+		ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Write, cache_size).await;
 	for i in 0..samples_size {
 		let object = random_object(&mut rng, vector_size).into();
 		// Insert the sample
@@ -147,8 +146,7 @@ async fn knn_lookup_objects(
 	let mut rng = thread_rng();
 	let t = mtree();
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let c = TreeCache::new(0, TreeNodeProvider::Debug, cache_size);
-	let s = TreeStore::new(TreeNodeProvider::Debug, c, Read).await;
+	let s = ds.index_store().get_store_mtree(TreeNodeProvider::Debug, 0, Read, cache_size).await;
 	for _ in 0..samples_size {
 		let object = random_object(&mut rng, vector_size).into();
 		// Insert the sample

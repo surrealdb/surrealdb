@@ -11,7 +11,6 @@ pub(super) enum FilteringStage {
 	Indexing,
 	Querying,
 }
-
 pub(super) enum Filter {
 	Stemmer(Stemmer),
 	Ascii,
