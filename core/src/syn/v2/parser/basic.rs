@@ -21,7 +21,8 @@ impl TokenValue for Ident {
 			TokenKind::Keyword(_)
 			| TokenKind::Language(_)
 			| TokenKind::Algorithm(_)
-			| TokenKind::Distance(_) => {
+			| TokenKind::Distance(_)
+			| TokenKind::VectorType(_) => {
 				let str = parser.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8
 				let str = std::str::from_utf8(str).unwrap().to_owned();

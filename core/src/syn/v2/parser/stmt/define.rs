@@ -640,31 +640,41 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
-					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
-					let capacity = self
-						.eat(t!("CAPACITY"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(40);
-
-					let doc_ids_order = self
-						.eat(t!("DOC_IDS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let doc_ids_cache = self
-						.eat(t!("DOC_IDS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let mtree_cache = self
-						.eat(t!("MTREE_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
+					let mut distance = Distance::Euclidean;
+					let mut vector_type = VectorType::F64;
+					let mut capacity = 40;
+					let mut doc_ids_cache = 100;
+					let mut doc_ids_order = 100;
+					let mut mtree_cache = 100;
+					loop {
+						match self.peek_kind() {
+							t!("DISTANCE") => {
+								self.pop_peek();
+								distance = self.parse_distance()?
+							}
+							t!("TYPE") => {
+								self.pop_peek();
+								vector_type = self.parse_vector_type()?
+							}
+							t!("CAPACITY") => {
+								self.pop_peek();
+								capacity = self.next_token_value()?
+							}
+							t!("DOC_IDS_CACHE") => {
+								self.pop_peek();
+								doc_ids_cache = self.next_token_value()?
+							}
+							t!("DOC_IDS_ORDER") => {
+								self.pop_peek();
+								doc_ids_order = self.next_token_value()?
+							}
+							t!("MTREE_CACHE") => {
+								self.pop_peek();
+								mtree_cache = self.next_token_value()?
+							}
+							_ => break,
+						}
+					}
 					res.index = Index::MTree(crate::sql::index::MTreeParams {
 						dimension,
 						_distance: Default::default(),
@@ -673,7 +683,7 @@ impl Parser<'_> {
 						doc_ids_order,
 						doc_ids_cache,
 						mtree_cache,
-						vector_type: VectorType::F64,
+						vector_type,
 					})
 				}
 				t!("HNSW") => {
