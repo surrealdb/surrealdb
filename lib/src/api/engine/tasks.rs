@@ -244,6 +244,7 @@ mod test {
 	use crate::kvs::Datastore;
 	use crate::options::EngineOptions;
 	use std::sync::Arc;
+	use std::time::Duration;
 
 	#[test_log::test(tokio::test)]
 	pub async fn tasks_complete() {
@@ -268,6 +269,11 @@ mod test {
 			val
 		};
 		println!("Dropped chans");
-		val.resolve().await.unwrap();
+		tokio::time::timeout(Duration::from_secs(10), val.resolve())
+			.await
+			.map_err(|e| format!("Timed out after {e}"))
+			.unwrap()
+			.map_err(|e| format!("Resolution failed: {e}"))
+			.unwrap();
 	}
 }
