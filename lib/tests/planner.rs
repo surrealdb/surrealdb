@@ -2438,11 +2438,11 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
-		DEFINE INDEX testIdx ON TABLE test COLUMNS col;
-		CREATE test:1 set col = true;
-		CREATE test:2 set col = false;
-		SELECT * FROM test WHERE col == true;
-		SELECT * FROM test WHERE col == true EXPLAIN;
+		DEFINE INDEX idx ON TABLE t COLUMNS c;
+		CREATE t:1 set c = true;
+		CREATE t:2 set c = false;
+		SELECT * FROM t WHERE c == true;
+		SELECT * FROM t WHERE c == true EXPLAIN;
 	";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
@@ -2453,15 +2453,35 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 	let val = Value::parse(
 		r#"[
 			{
-				col: true,
-				id: test:1
+				c: true,
+				id: t:1
 			}
 		]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(r#"[]"#);
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'idx',
+							operator: '==',
+							value: true
+						},
+						table: 't'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	Ok(())
