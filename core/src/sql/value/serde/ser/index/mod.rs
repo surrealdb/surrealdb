@@ -1,3 +1,4 @@
+mod hnswparams;
 mod mtreeparams;
 mod searchparams;
 
@@ -52,6 +53,7 @@ impl ser::Serializer for Serializer {
 		match variant {
 			"Search" => Ok(Index::Search(value.serialize(searchparams::Serializer.wrap())?)),
 			"MTree" => Ok(Index::MTree(value.serialize(mtreeparams::Serializer.wrap())?)),
+			"Hnsw" => Ok(Index::Hnsw(value.serialize(hnswparams::Serializer.wrap())?)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
@@ -62,7 +64,7 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::index::SearchParams;
+	use crate::sql::index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType};
 	use crate::sql::value::serde::ser::Serializer;
 	use crate::sql::Scoring;
 
@@ -97,6 +99,39 @@ mod tests {
 			doc_lengths_cache: 6,
 			postings_cache: 7,
 			terms_cache: 8,
+		});
+		let serialized = idx.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(idx, serialized);
+	}
+
+	#[test]
+	fn mtree() {
+		let idx = Index::MTree(MTreeParams {
+			dimension: 1,
+			_distance: Default::default(),
+			distance: Distance::Manhattan,
+			vector_type: VectorType::I16,
+			capacity: 2,
+			doc_ids_order: 3,
+			doc_ids_cache: 4,
+			mtree_cache: 5,
+		});
+		let serialized = idx.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(idx, serialized);
+	}
+
+	#[test]
+	fn hnsw() {
+		let idx = Index::Hnsw(HnswParams {
+			dimension: 1,
+			distance: Distance::Manhattan,
+			vector_type: VectorType::I16,
+			m: 2,
+			m0: 3,
+			ef_construction: 4,
+			extend_candidates: true,
+			keep_pruned_connections: true,
+			ml: 5.into(),
 		});
 		let serialized = idx.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(idx, serialized);

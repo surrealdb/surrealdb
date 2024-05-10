@@ -103,7 +103,7 @@ mod database_upgrade {
 		upgrade_test_1_1("v1.1.1").await;
 	}
 
-	async fn upgrade_test_1_2(version: &str) {
+	async fn upgrade_test_1_2_to_1_4(version: &str) {
 		// Start the docker instance
 		let (path, mut docker, client) = start_docker(version).await;
 
@@ -136,14 +136,49 @@ mod database_upgrade {
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_1_2_0() {
-		upgrade_test_1_2("v1.2.0").await;
+		upgrade_test_1_2_to_1_4("v1.2.0").await;
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[cfg(feature = "storage-rocksdb")]
 	#[serial]
 	async fn upgrade_test_1_2_1() {
-		upgrade_test_1_2("v1.2.1").await;
+		upgrade_test_1_2_to_1_4("v1.2.1").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_2_2() {
+		upgrade_test_1_2_to_1_4("v1.2.2").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_3_0() {
+		upgrade_test_1_2_to_1_4("v1.3.0").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_3_1() {
+		upgrade_test_1_2_to_1_4("v1.3.1").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_4_0() {
+		upgrade_test_1_2_to_1_4("v1.4.0").await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[cfg(feature = "storage-rocksdb")]
+	#[serial]
+	async fn upgrade_test_1_4_2() {
+		upgrade_test_1_2_to_1_4("v1.4.2").await;
 	}
 
 	// *******
@@ -178,11 +213,11 @@ mod database_upgrade {
 		 Expected::Two("{\"dist\": 2.0, \"id\": \"pts:1\"}", "{ \"dist\": 4.0, \"id\": \"pts:2\"}"))];
 
 	const CHECK_MTREE_DB: [Check; 1] = [
-		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2> [2,3,4,5]",
+		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2|> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
 	const CHECK_KNN_BRUTEFORCE: [Check; 1] = [
-		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <2,EUCLIDEAN> [2,3,4,5]",
+		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> [2,3,4,5]",
 		 Expected::Two("{\"dist\": 2.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 1}}}", "{ \"dist\": 4.0, \"id\": {\"tb\": \"pts\", \"id\": {\"Number\": 2}}}"))];
 
 	type Check = (&'static str, Expected);

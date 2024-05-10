@@ -212,15 +212,19 @@ fn get_executor_option<'a>(
 
 pub(crate) async fn matches(
 	ctx: &Context<'_>,
+	opt: &Options,
 	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
+	l: Value,
+	r: Value,
 ) -> Result<Value, Error> {
-	match get_executor_option(ctx, doc, exp) {
-		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
-		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.matches(txn, thg, exp).await,
-	}
+	let res = match get_executor_option(ctx, doc, exp) {
+		ExecutorOption::PreMatch => true,
+		ExecutorOption::None => false,
+		ExecutorOption::Execute(exe, thg) => exe.matches(ctx, opt, txn, thg, exp, l, r).await?,
+	};
+	Ok(res.into())
 }
 
 pub(crate) async fn knn(

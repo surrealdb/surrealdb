@@ -15,6 +15,7 @@ pub(crate) mod kill;
 pub(crate) mod live;
 pub(crate) mod option;
 pub(crate) mod output;
+pub(crate) mod rebuild;
 pub(crate) mod relate;
 pub(crate) mod remove;
 pub(crate) mod select;
@@ -56,6 +57,8 @@ pub use self::define::{
 	DefineParamStatement, DefineScopeStatement, DefineStatement, DefineTableStatement,
 	DefineTokenStatement, DefineUserStatement,
 };
+
+pub use self::rebuild::{RebuildIndexStatement, RebuildStatement};
 
 pub use self::remove::{
 	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,

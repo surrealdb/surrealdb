@@ -1313,3 +1313,30 @@ allow_proc_macro = true
 allow_apis = [
     "fs",
 ]
+
+[pkg.phf_macros]
+allow_proc_macro = true
+
+[pkg.rawpointer]
+allow_unsafe = true
+
+[pkg.matrixmultiply]
+allow_unsafe = true
+
+[pkg.approx]
+allow_unsafe = true
+
+[pkg.num-complex]
+allow_unsafe = true
+
+[pkg.ndarray]
+allow_unsafe = true
+
+[pkg.ndarray-stats]
+allow_unsafe = true
+
+[pkg.noisy_float]
+allow_unsafe = true
+
+[pkg.linfa-linalg]
+allow_unsafe = true

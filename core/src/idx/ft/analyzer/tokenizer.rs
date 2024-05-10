@@ -5,7 +5,7 @@ use crate::idx::ft::offsets::{Offset, Position};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Value;
 
-pub(super) struct Tokens {
+pub(in crate::idx) struct Tokens {
 	/// The input string
 	i: String,
 	/// The final list of tokens

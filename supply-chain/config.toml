@@ -136,6 +136,10 @@ version = "1.0.81"
 criteria = "safe-to-deploy"
 
 [[exemptions.approx]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.approx]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
@@ -903,10 +907,6 @@ criteria = "safe-to-deploy"
 version = "0.3.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.hashbrown]]
-version = "0.14.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.headers]]
 version = "0.3.9"
 criteria = "safe-to-deploy"
@@ -1083,10 +1083,6 @@ criteria = "safe-to-deploy"
 version = "0.7.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.libloading]]
-version = "0.8.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.libm]]
 version = "0.2.8"
 criteria = "safe-to-deploy"
@@ -1117,6 +1113,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.libz-sys]]
 version = "1.1.16"
+criteria = "safe-to-deploy"
+
+[[exemptions.linfa-linalg]]
+version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.linux-raw-sys]]
@@ -1231,6 +1231,10 @@ criteria = "safe-to-deploy"
 version = "0.15.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.ndarray-stats]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.new_debug_unreachable]]
 version = "1.0.6"
 criteria = "safe-to-deploy"
@@ -1245,6 +1249,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.nix]]
 version = "0.27.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.noisy_float]]
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint-dig]]
@@ -2558,14 +2566,6 @@ criteria = "safe-to-deploy"
 [[exemptions.yasna]]
 version = "0.5.2"
 criteria = "safe-to-run"
-
-[[exemptions.zerocopy]]
-version = "0.7.32"
-criteria = "safe-to-deploy"
-
-[[exemptions.zerocopy-derive]]
-version = "0.7.32"
-criteria = "safe-to-deploy"
 
 [[exemptions.zeroize]]
 version = "1.7.0"

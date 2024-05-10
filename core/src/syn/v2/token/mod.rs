@@ -223,6 +223,28 @@ impl DistanceKind {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 #[non_exhaustive]
+pub enum VectorTypeKind {
+	F64,
+	F32,
+	I64,
+	I32,
+	I16,
+}
+
+impl VectorTypeKind {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::F64 => "F64",
+			Self::F32 => "F32",
+			Self::I64 => "I64",
+			Self::I32 => "I32",
+			Self::I16 => "I16",
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[non_exhaustive]
 pub enum NumberKind {
 	// A plain integer number.
 	Integer,
@@ -252,6 +274,7 @@ pub enum TokenKind {
 	ChangeFeedInclude(ChangeFeedInclude),
 	Language(Language),
 	Distance(DistanceKind),
+	VectorType(VectorTypeKind),
 	Operator(Operator),
 	OpenDelim(Delim),
 	CloseDelim(Delim),
@@ -368,6 +391,7 @@ impl TokenKind {
 			TokenKind::Algorithm(x) => Self::algorithm_as_str(x),
 			TokenKind::Language(x) => x.as_str(),
 			TokenKind::Distance(x) => x.as_str(),
+			TokenKind::VectorType(x) => x.as_str(),
 			TokenKind::OpenDelim(Delim::Paren) => "(",
 			TokenKind::OpenDelim(Delim::Brace) => "{",
 			TokenKind::OpenDelim(Delim::Bracket) => "[",

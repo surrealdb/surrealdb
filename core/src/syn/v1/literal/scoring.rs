@@ -32,7 +32,7 @@ pub fn scoring(i: &str) -> IResult<&str, Scoring> {
 				closeparentheses,
 			)(i)
 		},
-		value(Scoring::bm25(), tag_no_case("BM25")),
+		value(Default::default(), tag_no_case("BM25")),
 	))(i)
 }
 
