@@ -1675,7 +1675,7 @@ async fn permissions_checks_define_access_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY 'secret'\" }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret' DURATION 1h\" }, databases: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"]
     ];
 
@@ -1717,7 +1717,7 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret'\" } analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret' DURATION 1h\" } analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
@@ -1879,7 +1879,7 @@ async fn permissions_checks_define_user_db() {
 async fn permissions_checks_define_access_record() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY 'secret';"),
+		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY 'secret'"),
 		("check", "INFO FOR DB"),
 	]);
 
@@ -1892,12 +1892,12 @@ async fn permissions_checks_define_access_record() {
 	let test_cases = [
 		// Root level
 		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
 		((().into(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
 		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
 		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
 		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
 		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
 		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
@@ -1905,7 +1905,7 @@ async fn permissions_checks_define_access_record() {
 		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
 		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
 		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
 		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
 		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
 		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
