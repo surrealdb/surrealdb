@@ -175,6 +175,7 @@ pub(super) struct IndexOption {
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(super) enum IndexOperator {
 	Equality(Value),
+	Exactness(Value),
 	Union(Array),
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Value),
@@ -230,6 +231,10 @@ impl IndexOption {
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
+				e.insert("value", Self::reduce_array(v));
+			}
+			IndexOperator::Exactness(v) => {
+				e.insert("operator", Value::from(Operator::Exact.to_string()));
 				e.insert("value", Self::reduce_array(v));
 			}
 			IndexOperator::Union(a) => {
