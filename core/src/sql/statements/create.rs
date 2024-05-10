@@ -14,12 +14,18 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct CreateStatement {
+	// A keyword modifier indicating if we are expecting a single result or several
 	#[revision(start = 2)]
 	pub only: bool,
+	// Where we are creating (i.e. table, or record ID)
 	pub what: Values,
+	// The data associated with the record being created
 	pub data: Option<Data>,
+	//  What the result of the statement should resemble (i.e. Diff or no result etc).
 	pub output: Option<Output>,
+	// The timeout for the statement
 	pub timeout: Option<Timeout>,
+	// If the statement should be run in parallel
 	pub parallel: bool,
 }
 

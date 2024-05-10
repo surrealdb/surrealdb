@@ -1,5 +1,6 @@
 use crate::fnc::util::math::mean::Mean;
 use crate::fnc::util::math::variance::variance;
+use crate::fnc::util::math::ToFloat;
 use crate::sql::number::Number;
 
 pub trait Deviation {
@@ -13,6 +14,11 @@ impl Deviation for Vec<Number> {
 	}
 }
 
-pub(super) fn deviation(v: &[Number], mean: f64, sample: bool) -> f64 {
+// This function is exposed to optimise the pearson distance calculation.
+// As the mean of the vector is already calculated, we pass it as a parameter rather than recalculating it.
+pub(crate) fn deviation<T>(v: &[T], mean: f64, sample: bool) -> f64
+where
+	T: ToFloat,
+{
 	variance(v, mean, sample).sqrt()
 }

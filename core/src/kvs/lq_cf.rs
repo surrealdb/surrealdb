@@ -5,7 +5,6 @@ use crate::kvs::lq_structs::{KillEntry, LqEntry, LqIndexKey, LqIndexValue, LqSel
 use crate::vs::{conv, Versionstamp};
 
 /// We often want to increment by 1, but the 2 least significant bytes are unused
-#[allow(dead_code)]
 const ONE_SHIFTED: u128 = 1 << 16;
 
 /// The datastore needs to track live queries that it owns as an engine. The db API and drivers
@@ -14,7 +13,6 @@ const ONE_SHIFTED: u128 = 1 << 16;
 /// This struct tracks live queries against change feeds so that the correct watermarks are used
 /// across differently versioned live queries. It provides convenience, correctness and separation
 /// of concerns.
-#[allow(dead_code)]
 pub(crate) struct LiveQueryTracker {
 	// Map of Live Query identifier (ns+db+tb) for change feed tracking
 	// the mapping is to a list of affected live queries
@@ -27,7 +25,6 @@ pub(crate) struct LiveQueryTracker {
 }
 
 impl LiveQueryTracker {
-	#[allow(dead_code)]
 	pub(crate) const fn new() -> Self {
 		Self {
 			local_live_queries: BTreeMap::new(),
@@ -36,13 +33,11 @@ impl LiveQueryTracker {
 	}
 
 	/// Add another Live Query to track, given the Versionstamp to stream from
-	#[allow(dead_code)]
 	pub(crate) fn register_live_query(
 		&mut self,
 		lq_index_key: &LqEntry,
 		live_query_vs: Versionstamp,
 	) -> Result<(), &'static str> {
-		#[cfg(debug_assertions)]
 		// See if we are already tracking the query
 		let k = lq_index_key.as_key();
 		if self.local_live_queries.contains_key(&k) {
@@ -71,7 +66,6 @@ impl LiveQueryTracker {
 		Ok(())
 	}
 
-	#[allow(dead_code)]
 	pub(crate) fn unregister_live_query(&mut self, kill_entry: &KillEntry) {
 		// Because the information available from a kill statement is limited, we need to find a relevant kill query
 		let found: Option<(LqIndexKey, LqIndexValue)> = self
@@ -105,7 +99,6 @@ impl LiveQueryTracker {
 	}
 
 	/// This will update the watermark of all live queries, regardless of their individual state
-	#[allow(dead_code)]
 	pub(crate) fn update_watermark_live_query(
 		&mut self,
 		live_query: &LqIndexKey,
@@ -141,7 +134,6 @@ impl LiveQueryTracker {
 		Ok(())
 	}
 
-	#[allow(dead_code)]
 	pub(crate) fn get_watermarks(&self) -> &BTreeMap<LqSelector, Versionstamp> {
 		&self.cf_watermarks
 	}
@@ -151,7 +143,6 @@ impl LiveQueryTracker {
 	/// to iterate over it normally
 	/// This will break if values are added or removed, so keep the write lock while iterating
 	/// This can be improved by having droppable trackers/iterators returned
-	#[allow(dead_code)]
 	pub(crate) fn get_watermark_by_enum_index(
 		&self,
 		index: usize,
@@ -159,13 +150,11 @@ impl LiveQueryTracker {
 		self.cf_watermarks.iter().nth(index)
 	}
 
-	#[allow(dead_code)]
 	pub(crate) fn is_empty(&self) -> bool {
 		self.local_live_queries.is_empty()
 	}
 
 	/// Find the necessary Live Query information for a given selector
-	#[allow(dead_code)]
 	pub(crate) fn live_queries_for_selector(
 		&self,
 		selector: &LqSelector,
@@ -303,21 +292,18 @@ mod test {
 		tracker.register_live_query(&lq1, DEFAULT_WATERMARK).unwrap();
 
 		// Check watermark is "default"
-		let selector = {
-			let wms = tracker.get_watermarks();
-			assert_eq!(wms.len(), 1);
-			let (selector, watermark) = wms.iter().next().unwrap();
-			assert_eq!(
-				selector,
-				&LqSelector {
-					ns: NS.to_string(),
-					db: DB.to_string(),
-					tb: TB.to_string(),
-				}
-			);
-			assert_eq!(watermark, &DEFAULT_WATERMARK);
-			selector.clone()
-		};
+		let wms = tracker.get_watermarks();
+		assert_eq!(wms.len(), 1);
+		let (selector, watermark) = wms.iter().next().unwrap();
+		assert_eq!(
+			selector,
+			&LqSelector {
+				ns: NS.to_string(),
+				db: DB.to_string(),
+				tb: TB.to_string(),
+			}
+		);
+		assert_eq!(watermark, &DEFAULT_WATERMARK);
 
 		// Progress the watermark
 		let progressed_watermark = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];

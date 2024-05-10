@@ -343,7 +343,7 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 		}
 
 		let headers = if let Some(hdrs) = object.get::<_, Option<Object>>("headers")? {
-			if let Some(cls) = Class::<Headers>::from_object(hdrs.clone()) {
+			if let Some(cls) = Class::<Headers>::from_object(&hdrs) {
 				cls
 			} else {
 				Class::instance(ctx.clone(), Headers::new_inner(ctx, hdrs.into_value())?)?
@@ -418,7 +418,7 @@ impl<'js> Request<'js> {
 				url,
 				init,
 			})
-		} else if let Some(request) = input.into_object().and_then(Class::<Self>::from_object) {
+		} else if let Some(request) = input.as_object().and_then(Class::<Self>::from_object) {
 			// existing request object, just return it
 			request.try_borrow()?.clone_js(ctx.clone())
 		} else {
@@ -551,7 +551,7 @@ mod test {
 	#[tokio::test]
 	async fn basic_request_use() {
 		create_test_context!(ctx => {
-			ctx.eval::<Promise<()>,_>(r#"
+			ctx.eval::<Promise,_>(r#"
 				(async () => {
 					assert.mustThrow(() => {
 						new Request("invalid url")
@@ -621,7 +621,7 @@ mod test {
 					assert.seq(await req_2.text(),"some text");
 
 				})()
-			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
+			"#).catch(&ctx).unwrap().into_future::<()>().await.catch(&ctx).unwrap();
 		})
 		.await;
 	}

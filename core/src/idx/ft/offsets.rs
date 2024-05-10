@@ -85,11 +85,12 @@ impl TryFrom<OffsetRecords> for Val {
 	type Error = Error;
 
 	fn try_from(offsets: OffsetRecords) -> Result<Self, Self::Error> {
+		let n_offsets = offsets.0.len();
 		// We build a unique vector with every values (start and offset).
-		let mut decompressed = Vec::new();
+		let mut decompressed = Vec::with_capacity(1 + 4 * n_offsets);
 		// The first push the size of the index,
 		// so we can rebuild the OffsetsRecord on deserialization.
-		decompressed.push(offsets.0.len() as u32);
+		decompressed.push(n_offsets as u32);
 		// We want the value to be more or less sorted so the RLE compression
 		// will be more effective
 		// Indexes are likely to be very small
@@ -114,25 +115,26 @@ impl TryFrom<Val> for OffsetRecords {
 			return Ok(Self(vec![]));
 		}
 		let decompressed: Vec<u32> = bincode::deserialize(&val)?;
-		let mut iter = decompressed.iter();
-		let n_offsets = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(1)"))?;
+		let n_offsets = *decompressed
+			.first()
+			.ok_or(Error::CorruptedIndex("OffsetRecords::try_from(1)"))? as usize;
 		// <= v1.4 the Offset contains only two field: start and end.
 		// We check the number of integers. If there is only 3 per offset this is the old format.
-		let without_gen_start = n_offsets * 3 + 1 == (decompressed.len() as u32);
-		let mut indexes = Vec::with_capacity(n_offsets as usize);
+		let without_gen_start = n_offsets * 3 + 1 == decompressed.len();
+
+		let mut indexes = decompressed.into_iter().skip(1);
+		let mut tail = indexes.clone().skip(n_offsets);
+		let mut res = Vec::with_capacity(n_offsets);
 		for _ in 0..n_offsets {
-			let index = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(2)"))?;
-			indexes.push(index);
-		}
-		let mut res = Vec::with_capacity(n_offsets as usize);
-		for index in indexes {
-			let start = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(3)"))?;
+			let index =
+				indexes.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(2)"))?;
+			let start = tail.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(3)"))?;
 			let gen_start = if without_gen_start {
 				start
 			} else {
-				*iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(4)"))?
+				tail.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(4)"))?
 			};
-			let end = *iter.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(5)"))?;
+			let end = tail.next().ok_or(Error::CorruptedIndex("OffsetRecords::try_from(5)"))?;
 			res.push(Offset::new(index, start, gen_start, end));
 		}
 		Ok(OffsetRecords(res))

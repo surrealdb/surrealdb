@@ -1,3 +1,5 @@
+use crate::fflags::FFLAGS;
+use crate::kvs::lq_structs::{LqIndexKey, LqIndexValue, LqSelector};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -37,4 +39,46 @@ async fn scan_node_lq() {
 	}
 
 	tx.commit().await.unwrap();
+}
+
+#[test_log::test(tokio::test)]
+async fn live_params_are_evaluated() {
+	if !FFLAGS.change_feed_live_queries.enabled() {
+		return;
+	}
+	let node_id = Uuid::parse_str("9cb22db9-1851-4781-8847-d781a3f373ae").unwrap();
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+	let test = init(node_id, clock).await.unwrap();
+
+	let sess = Session::owner().with_ns("test_namespace").with_db("test_database");
+	let params = map! {
+		"expected_table".to_string() => Value::Table(sql::Table("test_table".to_string())),
+	};
+	test.db.execute("DEFINE TABLE expected_table CHANGEFEED 10m INCLUDE ORIGINAL; LIVE SELECT * FROM $expected_table", &sess, Some(params)).await.unwrap();
+	let mut res = test.db.lq_cf_store.read().await.live_queries_for_selector(&LqSelector {
+		ns: "test_namespace".to_string(),
+		db: "test_database".to_string(),
+		tb: "test_table".to_string(),
+	});
+	assert_eq!(res.len(), 1);
+	// We remove the unknown value
+	res[0].0.lq = Default::default();
+	assert_eq!(
+		res,
+		vec![(
+			LqIndexKey {
+				selector: LqSelector {
+					ns: "test_namespace".to_string(),
+					db: "test_database".to_string(),
+					tb: "test_table".to_string(),
+				},
+				lq: Default::default(),
+			},
+			LqIndexValue {
+				stm: Default::default(),
+				vs: [0; 10],
+				ts: Default::default(),
+			}
+		)]
+	)
 }

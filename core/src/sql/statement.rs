@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::{
 	fmt::{Fmt, Pretty},
 	statements::{
@@ -53,7 +54,7 @@ impl Display for Statements {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -85,6 +86,8 @@ pub enum Statement {
 	Update(UpdateStatement),
 	Throw(ThrowStatement),
 	Use(UseStatement),
+	#[revision(start = 2)]
+	Rebuild(RebuildStatement),
 }
 
 impl Statement {
@@ -118,6 +121,7 @@ impl Statement {
 			Self::Live(_) => true,
 			Self::Output(v) => v.writeable(),
 			Self::Option(_) => false,
+			Self::Rebuild(_) => true,
 			Self::Relate(v) => v.writeable(),
 			Self::Remove(_) => true,
 			Self::Select(v) => v.writeable(),
@@ -154,6 +158,7 @@ impl Statement {
 			Self::Live(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Output(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Relate(v) => v.compute(stk, ctx, opt, txn, doc).await,
+			Self::Rebuild(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Remove(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(v) => v.compute(stk, ctx, opt, txn, doc).await,
 			Self::Set(v) => v.compute(stk, ctx, opt, txn, doc).await,
@@ -193,6 +198,7 @@ impl Display for Statement {
 			Self::Live(v) => write!(Pretty::from(f), "{v}"),
 			Self::Option(v) => write!(Pretty::from(f), "{v}"),
 			Self::Output(v) => write!(Pretty::from(f), "{v}"),
+			Self::Rebuild(v) => write!(Pretty::from(f), "{v}"),
 			Self::Relate(v) => write!(Pretty::from(f), "{v}"),
 			Self::Remove(v) => write!(Pretty::from(f), "{v}"),
 			Self::Select(v) => write!(Pretty::from(f), "{v}"),

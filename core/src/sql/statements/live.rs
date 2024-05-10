@@ -28,18 +28,20 @@ pub struct LiveStatement {
 	// When a live query is marked for archiving, this will
 	// be set to the node ID that archived the query. This
 	// is an internal property, set by the database runtime.
-	// This is optional, and os only set when archived.
+	// This is optional, and is only set when archived.
+	//
+	// This is deprecated from 2.0
 	pub(crate) archived: Option<Uuid>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
-	// so we can chack it later when sending notifications.
+	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
 	#[revision(start = 2)]
 	pub(crate) session: Option<Value>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
-	// so we can chack it later when sending notifications.
+	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
 	pub(crate) auth: Option<Auth>,
@@ -107,6 +109,10 @@ impl LiveStatement {
 				let mut run = txn.lock().await;
 				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
 					Value::Table(tb) => {
+						// We modify the table as it can be a $PARAM and the compute evaluates that
+						let mut stm = stm;
+						stm.what = Value::Table(tb.clone());
+
 						let ns = opt.ns().to_string();
 						let db = opt.db().to_string();
 						self.validate_change_feed_valid(&mut run, &ns, &db, &tb).await?;
@@ -170,7 +176,7 @@ impl LiveStatement {
 			.changefeed
 			.ok_or(Error::LiveQueryError(LiveQueryCause::MissingChangeFeed))?;
 		// check the change feed includes the original - required for differentiating between CREATE and UPDATE
-		if !cf.store_original {
+		if !cf.store_diff {
 			return Err(Error::LiveQueryError(LiveQueryCause::ChangeFeedNoOriginal));
 		}
 		Ok(())

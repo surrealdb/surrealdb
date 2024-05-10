@@ -1,6 +1,6 @@
 mod helpers;
 mod parse;
-use crate::helpers::new_ds;
+use crate::helpers::{new_ds, skip_ok};
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -12,7 +12,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [8,9,10,11];
-		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4;
+		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4 TYPE F32;
 		LET $pt = [2,3,4,5];
 		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2|> $pt;
 		SELECT id FROM pts WHERE point <|2|> $pt EXPLAIN;
@@ -71,7 +71,7 @@ async fn delete_update_mtree_index() -> Result<(), Error> {
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [2,3,4,5];
-		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4;
+		DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4 TYPE I32;
 		CREATE pts:4 SET point = [8,9,10,11];
 		DELETE pts:2;
 		UPDATE pts:3 SET point = [12,13,14,15];
@@ -155,42 +155,23 @@ async fn index_embedding() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_brut_force_knn() -> Result<(), Error> {
+async fn select_where_brute_force_knn() -> Result<(), Error> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
 		CREATE pts:3 SET point = [8,9,10,11];
 		LET $pt = [2,3,4,5];
+		SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;
 		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
 		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt PARALLEL;
-		SELECT id FROM pts WHERE point <|2|> $pt EXPLAIN;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	for _ in 0..4 {
-		let _ = res.remove(0).result?;
-	}
-
-	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
-		let val = Value::parse(
-			"[
-			{
-				id: pts:1,
-				dist: 2f
-			},
-			{
-				id: pts:2,
-				dist: 4f
-			}
-		]",
-		);
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-
+	skip_ok(res, 4)?;
+	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
@@ -212,6 +193,82 @@ async fn select_where_brut_force_knn() -> Result<(), Error> {
 					},
 					operation: 'Collector'
 				},
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	for i in 0..2 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
+			{
+				id: pts:1,
+				dist: 2f
+			},
+			{
+				id: pts:2,
+				dist: 4f
+			}
+		]",
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+	}
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_hnsw_knn() -> Result<(), Error> {
+	let sql = r"
+		CREATE pts:1 SET point = [1,2,3,4];
+		CREATE pts:2 SET point = [4,5,6,7];
+		CREATE pts:3 SET point = [8,9,10,11];
+		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
+		LET $pt = [2,3,4,5];
+		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,100|> $pt;
+		SELECT id FROM pts WHERE point <|2,100|> $pt EXPLAIN;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	for _ in 0..5 {
+		let _ = res.remove(0).result?;
+	}
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: pts:1,
+				dist: 2f
+			},
+			{
+				id: pts:2,
+				dist: 4f
+			}
+		]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+					{
+						detail: {
+							plan: {
+								index: 'hnsw_pts',
+								operator: '<2,100>',
+								value: [2,3,4,5]
+							},
+							table: 'pts',
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
 			]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));

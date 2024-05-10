@@ -21,7 +21,8 @@ impl TokenValue for Ident {
 			TokenKind::Keyword(_)
 			| TokenKind::Language(_)
 			| TokenKind::Algorithm(_)
-			| TokenKind::Distance(_) => {
+			| TokenKind::Distance(_)
+			| TokenKind::VectorType(_) => {
 				let str = parser.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8
 				let str = std::str::from_utf8(str).unwrap().to_owned();
@@ -127,6 +128,7 @@ impl TokenValue for f32 {
 			TokenKind::Number(
 				NumberKind::Integer
 				| NumberKind::Float
+				| NumberKind::FloatMantissa
 				| NumberKind::Mantissa
 				| NumberKind::MantissaExponent,
 			) => {
@@ -152,6 +154,7 @@ impl TokenValue for f64 {
 			TokenKind::Number(
 				NumberKind::Integer
 				| NumberKind::Float
+				| NumberKind::FloatMantissa
 				| NumberKind::Mantissa
 				| NumberKind::MantissaExponent,
 			) => {
@@ -203,7 +206,10 @@ impl TokenValue for Number {
 				Ok(Number::Float(x))
 			}
 			TokenKind::Number(
-				NumberKind::Mantissa | NumberKind::MantissaExponent | NumberKind::Float,
+				NumberKind::Mantissa
+				| NumberKind::MantissaExponent
+				| NumberKind::Float
+				| NumberKind::FloatMantissa,
 			) => {
 				let source = parser.lexer.string.take().unwrap();
 				// As far as I can tell this will never fail for valid integers.
@@ -347,6 +353,7 @@ impl Parser<'_> {
 				| TokenKind::Language(_)
 				| TokenKind::Algorithm(_)
 				| TokenKind::Distance(_)
+				| TokenKind::VectorType(_)
 				| TokenKind::Identifier
 		)
 	}

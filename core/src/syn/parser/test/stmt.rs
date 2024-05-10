@@ -3,7 +3,7 @@ use crate::{
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
-		index::{Distance, MTreeParams, SearchParams, VectorType},
+		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		statements::{
 			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
@@ -151,7 +151,7 @@ fn parse_define_database() {
 			comment: Some(Strand("test".to_string())),
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(60) * 10,
-				store_original: true,
+				store_diff: true,
 			}),
 			if_not_exists: false,
 		}))
@@ -323,7 +323,7 @@ fn parse_define_table() {
 			},
 			changefeed: Some(ChangeFeed {
 				expiry: std::time::Duration::from_secs(1),
-				store_original: true,
+				store_diff: true,
 			}),
 			comment: None,
 			if_not_exists: false,
@@ -452,7 +452,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9"#).unwrap();
+		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 TYPE I16 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9"#).unwrap();
 
 	assert_eq!(
 		res,
@@ -468,7 +468,32 @@ fn parse_define_index() {
 				doc_ids_order: 7,
 				doc_ids_cache: 8,
 				mtree_cache: 9,
-				vector_type: VectorType::F64,
+				vector_type: VectorType::I16,
+			}),
+			comment: None,
+			if_not_exists: false,
+		}))
+	);
+
+	let res =
+		test_parse!(parse_stmt, r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"#).unwrap();
+
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Index(DefineIndexStatement {
+			name: Ident("index".to_owned()),
+			what: Ident("table".to_owned()),
+			cols: Idioms(vec![Idiom(vec![Part::Field(Ident("a".to_owned()))]),]),
+			index: Index::Hnsw(HnswParams {
+				dimension: 128,
+				distance: Distance::Manhattan,
+				vector_type: VectorType::F32,
+				m: 6,
+				m0: 12,
+				ef_construction: 250,
+				extend_candidates: true,
+				keep_pruned_connections: true,
+				ml: 0.5.into(),
 			}),
 			comment: None,
 			if_not_exists: false,

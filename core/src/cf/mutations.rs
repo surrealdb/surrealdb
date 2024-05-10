@@ -23,8 +23,8 @@ pub enum TableMutation {
 	Del(Thing),
 	Def(DefineTableStatement),
 	#[revision(start = 2)]
-	/// Includes the ID, current value (after change), changes that were applied to achieve this
-	/// value, and if this is a new record (i.e. create = true vs update = false)
+	/// Includes the ID, current value (after change), changes that can be applied to get the original
+	/// value
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
 	/// Means that we have already applied the add "/note" operation to achieve the recorded result
 	SetWithDiff(Thing, Value, Vec<Operation>),

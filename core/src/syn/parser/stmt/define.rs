@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::sql::index::HnswParams;
 use crate::{
 	sql::{
 		filter::Filter,
@@ -555,75 +556,87 @@ impl Parser<'_> {
 				}
 				t!("SEARCH") => {
 					self.pop_peek();
-					let analyzer =
-						self.eat(t!("ANALYZER")).then(|| self.next_token_value()).transpose()?;
-					let scoring = match self.next().kind {
-						t!("VS") => Scoring::Vs,
-						t!("BM25") => {
-							if self.eat(t!("(")) {
-								let open = self.last_span();
-								let k1 = self.next_token_value()?;
-								expected!(self, t!(","));
-								let b = self.next_token_value()?;
-								self.expect_closing_delimiter(t!(")"), open)?;
-								Scoring::Bm {
-									k1,
-									b,
-								}
-							} else {
-								Scoring::bm25()
+					let mut analyzer: Option<Ident> = None;
+					let mut scoring = None;
+					let mut doc_ids_order = 100;
+					let mut doc_lengths_order = 100;
+					let mut postings_order = 100;
+					let mut terms_order = 100;
+					let mut doc_ids_cache = 100;
+					let mut doc_lengths_cache = 100;
+					let mut postings_cache = 100;
+					let mut terms_cache = 100;
+					let mut hl = false;
+
+					loop {
+						match self.peek_kind() {
+							t!("ANALYZER") => {
+								self.pop_peek();
+								analyzer = Some(self.next_token_value()).transpose()?;
 							}
+							t!("VS") => {
+								self.pop_peek();
+								scoring = Some(Scoring::Vs);
+							}
+							t!("BM25") => {
+								self.pop_peek();
+								if self.eat(t!("(")) {
+									let open = self.last_span();
+									let k1 = self.next_token_value()?;
+									expected!(self, t!(","));
+									let b = self.next_token_value()?;
+									self.expect_closing_delimiter(t!(")"), open)?;
+									scoring = Some(Scoring::Bm {
+										k1,
+										b,
+									})
+								} else {
+									scoring = Some(Default::default());
+								};
+							}
+							t!("DOC_IDS_ORDER") => {
+								self.pop_peek();
+								doc_ids_order = self.next_token_value()?;
+							}
+							t!("DOC_LENGTHS_ORDER") => {
+								self.pop_peek();
+								doc_lengths_order = self.next_token_value()?;
+							}
+							t!("POSTINGS_ORDER") => {
+								self.pop_peek();
+								postings_order = self.next_token_value()?;
+							}
+							t!("TERMS_ORDER") => {
+								self.pop_peek();
+								terms_order = self.next_token_value()?;
+							}
+							t!("DOC_IDS_CACHE") => {
+								self.pop_peek();
+								doc_ids_cache = self.next_token_value()?;
+							}
+							t!("DOC_LENGTHS_CACHE") => {
+								self.pop_peek();
+								doc_lengths_cache = self.next_token_value()?;
+							}
+							t!("POSTINGS_CACHE") => {
+								self.pop_peek();
+								postings_cache = self.next_token_value()?;
+							}
+							t!("TERMS_CACHE") => {
+								self.pop_peek();
+								terms_cache = self.next_token_value()?;
+							}
+							t!("HIGHLIGHTS") => {
+								self.pop_peek();
+								hl = true;
+							}
+							_ => break,
 						}
-						x => unexpected!(self, x, "`VS` or `BM25`"),
-					};
-
-					// TODO: Propose change in how order syntax works.
-					let doc_ids_order = self
-						.eat(t!("DOC_IDS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let doc_lengths_order = self
-						.eat(t!("DOC_LENGTHS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let postings_order = self
-						.eat(t!("POSTINGS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let terms_order = self
-						.eat(t!("TERMS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let doc_ids_cache = self
-						.eat(t!("DOC_IDS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let doc_lengths_cache = self
-						.eat(t!("DOC_LENGTHS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let postings_cache = self
-						.eat(t!("POSTINGS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-					let terms_cache = self
-						.eat(t!("TERMS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let hl = self.eat(t!("HIGHLIGHTS"));
+					}
 
 					res.index = Index::Search(crate::sql::index::SearchParams {
 						az: analyzer.unwrap_or_else(|| Ident::from("like")),
-						sc: scoring,
+						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 						doc_ids_order,
 						doc_lengths_order,
@@ -639,31 +652,41 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
-					let distance = self.try_parse_distance()?.unwrap_or(Distance::Euclidean);
-					let capacity = self
-						.eat(t!("CAPACITY"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(40);
-
-					let doc_ids_order = self
-						.eat(t!("DOC_IDS_ORDER"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let doc_ids_cache = self
-						.eat(t!("DOC_IDS_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
-					let mtree_cache = self
-						.eat(t!("MTREE_CACHE"))
-						.then(|| self.next_token_value())
-						.transpose()?
-						.unwrap_or(100);
-
+					let mut distance = Distance::Euclidean;
+					let mut vector_type = VectorType::F64;
+					let mut capacity = 40;
+					let mut doc_ids_cache = 100;
+					let mut doc_ids_order = 100;
+					let mut mtree_cache = 100;
+					loop {
+						match self.peek_kind() {
+							t!("DISTANCE") => {
+								self.pop_peek();
+								distance = self.parse_distance()?
+							}
+							t!("TYPE") => {
+								self.pop_peek();
+								vector_type = self.parse_vector_type()?
+							}
+							t!("CAPACITY") => {
+								self.pop_peek();
+								capacity = self.next_token_value()?
+							}
+							t!("DOC_IDS_CACHE") => {
+								self.pop_peek();
+								doc_ids_cache = self.next_token_value()?
+							}
+							t!("DOC_IDS_ORDER") => {
+								self.pop_peek();
+								doc_ids_order = self.next_token_value()?
+							}
+							t!("MTREE_CACHE") => {
+								self.pop_peek();
+								mtree_cache = self.next_token_value()?
+							}
+							_ => break,
+						}
+					}
 					res.index = Index::MTree(crate::sql::index::MTreeParams {
 						dimension,
 						_distance: Default::default(),
@@ -672,8 +695,76 @@ impl Parser<'_> {
 						doc_ids_order,
 						doc_ids_cache,
 						mtree_cache,
-						vector_type: VectorType::F64,
+						vector_type,
 					})
+				}
+				t!("HNSW") => {
+					self.pop_peek();
+					expected!(self, t!("DIMENSION"));
+					let dimension = self.next_token_value()?;
+					let mut distance = Distance::Euclidean;
+					let mut vector_type = VectorType::F64;
+					let mut m = None;
+					let mut m0 = None;
+					let mut ml = None;
+					let mut ef_construction = 150;
+					let mut extend_candidates = false;
+					let mut keep_pruned_connections = false;
+					loop {
+						match self.peek_kind() {
+							t!("DISTANCE") => {
+								self.pop_peek();
+								distance = self.parse_distance()?;
+							}
+							t!("TYPE") => {
+								self.pop_peek();
+								vector_type = self.parse_vector_type()?;
+							}
+							t!("LM") => {
+								self.pop_peek();
+								ml = Some(self.next_token_value()?);
+							}
+							t!("M0") => {
+								self.pop_peek();
+								m0 = Some(self.next_token_value()?);
+							}
+							t!("M") => {
+								self.pop_peek();
+								m = Some(self.next_token_value()?);
+							}
+							t!("EFC") => {
+								self.pop_peek();
+								ef_construction = self.next_token_value()?;
+							}
+							t!("EXTEND_CANDIDATES") => {
+								self.pop_peek();
+								extend_candidates = true;
+							}
+							t!("KEEP_PRUNED_CONNECTIONS") => {
+								self.pop_peek();
+								keep_pruned_connections = true;
+							}
+							t => {
+								println!("TOKEN: {t:?}");
+								break;
+							}
+						}
+					}
+
+					let m = m.unwrap_or(12);
+					let m0 = m0.unwrap_or(m * 2);
+					let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
+					res.index = Index::Hnsw(HnswParams::new(
+						dimension,
+						distance,
+						vector_type,
+						m,
+						m0,
+						ml,
+						ef_construction,
+						extend_candidates,
+						keep_pruned_connections,
+					));
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

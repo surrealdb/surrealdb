@@ -402,7 +402,7 @@ async fn receive_all_pending_notifications<
 	S: Stream<Item = Result<Notification<I>, Error>> + Unpin,
 	I,
 >(
-	mut stream: Arc<RwLock<S>>,
+	stream: Arc<RwLock<S>>,
 	timeout: Duration,
 ) -> Vec<Notification<I>> {
 	let (send, mut recv) = channel::<Notification<I>>(MAX_NOTIFICATIONS);

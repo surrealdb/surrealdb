@@ -13,12 +13,12 @@ use std::time;
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
 	#[revision(start = 2)]
-	pub store_original: bool,
+	pub store_diff: bool,
 }
 impl Display for ChangeFeed {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
-		if self.store_original {
+		if self.store_diff {
 			write!(f, " INCLUDE ORIGINAL")?;
 		};
 		Ok(())
@@ -29,7 +29,7 @@ impl Default for ChangeFeed {
 	fn default() -> Self {
 		Self {
 			expiry: time::Duration::from_secs(0),
-			store_original: false,
+			store_diff: false,
 		}
 	}
 }
