@@ -141,7 +141,7 @@ impl Model {
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
+					compute_unit.buffered_compute_v2(&mut args).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
@@ -169,7 +169,7 @@ impl Model {
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+					compute_unit.raw_compute_v2(tensor, None).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})
@@ -201,7 +201,7 @@ impl Model {
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
-					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+					compute_unit.raw_compute_v2(tensor, None).map_err(|err: SurrealError| {
 						Error::ModelComputation(err.message.to_string())
 					})
 				})

@@ -252,7 +252,7 @@ mod ml_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn buffered_compute() -> Result<(), Box<dyn std::error::Error>> {
+	async fn buffered_compute_v2() -> Result<(), Box<dyn std::error::Error>> {
 		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 
