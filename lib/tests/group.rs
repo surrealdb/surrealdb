@@ -415,10 +415,10 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 								'math::mean'
 							],
 							one: [
-								'math::sun'
+								'math::sum'
 							],
 							two: [
-								'math::sun'
+								'math::sum'
 							]
 						},
 						type: 'Group'
@@ -567,10 +567,10 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 								'first'
 							],
 							one: [
-								'math::sun'
+								'math::sum'
 							],
 							two: [
-								'math::sun'
+								'math::sum'
 							]
 						},
 						type: 'Group'
