@@ -2438,22 +2438,26 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
-		DEFINE INDEX idx ON TABLE t COLUMNS c;
-		CREATE t:1 set c = true;
-		CREATE t:2 set c = false;
-		SELECT * FROM t WHERE c == true;
-		SELECT * FROM t WHERE c == true EXPLAIN;
+		DEFINE INDEX idx ON TABLE t COLUMNS b;
+		DEFINE INDEX uniq ON TABLE t COLUMNS i;
+		CREATE t:1 set b = true, i = 1;
+		CREATE t:2 set b = false, i = 2;
+		SELECT * FROM t WHERE b == true;
+		SELECT * FROM t WHERE b == true EXPLAIN;
+		SELECT * FROM t WHERE i == 2;
+		SELECT * FROM t WHERE i == 2 EXPLAIN;
 	";
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
-	assert_eq!(res.len(), 5);
-	skip_ok(&mut res, 3)?;
+	assert_eq!(res.len(), 8);
+	skip_ok(&mut res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
 			{
-				c: true,
+				b: true,
+				i: 1,
 				id: t:1
 			}
 		]"#,
@@ -2469,6 +2473,43 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 							index: 'idx',
 							operator: '==',
 							value: true
+						},
+						table: 't'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+			{
+				b: false,
+				i: 2,
+				id: t:2
+			}
+		]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'uniq',
+							operator: '==',
+							value: 2
 						},
 						table: 't'
 					},

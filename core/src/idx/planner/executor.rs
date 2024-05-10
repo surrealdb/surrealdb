@@ -332,9 +332,15 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(value) => Some(ThingIterator::IndexEqual(
-				IndexEqualThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
-			)),
+			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
+				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+					opt.ns(),
+					opt.db(),
+					&ix.what,
+					&ix.name,
+					value,
+				)))
+			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
 				IndexUnionThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
 			)),
