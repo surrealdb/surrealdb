@@ -1,6 +1,7 @@
 use crate::cnf::{INSECURE_FORWARD_RECORD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
 use crate::iam::Auth;
 use crate::iam::{Actor, Level};
@@ -9,7 +10,7 @@ use crate::sql::AccessType;
 use crate::sql::Object;
 use crate::sql::Value;
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{encode, Header};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -80,35 +81,14 @@ pub async fn db(
 										// There is a record returned
 										Some(rid) => {
 											// Create the authentication key
-											let key = EncodingKey::from_secret(iss.key.as_ref());
+											let key = config(iss.alg, iss.key)?;
 											// Create the authentication claim
-											let exp =
-												Some(
-													match at.duration {
-														Some(v) => {
-															// The defined session duration must be valid
-															match Duration::from_std(v.0) {
-														// The resulting session expiration must be valid
-														Ok(d) => match Utc::now().checked_add_signed(d) {
-															Some(exp) => exp,
-															None => {
-																return Err(Error::InvalidSessionExpiration)
-															}
-														},
-														Err(_) => {
-															return Err(Error::InvalidSessionDuration)
-														}
-													}
-														}
-														_ => Utc::now() + Duration::hours(1),
-													}
-													.timestamp(),
-												);
 											let val = Claims {
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
-												exp,
+												// Token expiration is derived from issuer duration
+												exp: expiration(iss.duration)?,
 												jti: Some(Uuid::new_v4().to_string()),
 												ns: Some(ns.to_owned()),
 												db: Some(db.to_owned()),
@@ -127,7 +107,8 @@ pub async fn db(
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
 											session.rd = Some(Value::from(rid.to_owned()));
-											session.exp = exp;
+											// Session expiration is derived from record access duration
+											session.exp = expiration(at.duration)?;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),
 												Default::default(),
@@ -275,6 +256,160 @@ mod tests {
 			.await;
 
 			assert!(res.is_err(), "Unexpected successful signup: {:?}", res);
+		}
+	}
+
+	#[tokio::test]
+	async fn test_record_signup_with_jwt_issuer() {
+		use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+		// Test with valid parameters
+		{
+			let public_key = r#"-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu1SU1LfVLPHCozMxH2Mo
+4lgOEePzNm0tRgeLezV6ffAt0gunVTLw7onLRnrq0/IzW7yWR7QkrmBL7jTKEn5u
++qKhbwKfBstIs+bMY2Zkp18gnTxKLxoS2tFczGkPLPgizskuemMghRniWaoLcyeh
+kd3qqGElvW/VDL5AaWTg0nLVkjRo9z+40RQzuVaE8AkAFmxZzow3x+VJYKdjykkJ
+0iT9wCS0DRTXu269V264Vf/3jvredZiKRkgwlL9xNAwxXFg0x/XFw005UWVRIkdg
+cKWTjpBP2dPwVZ4WWC+9aGVd+Gyn1o0CLelf4rEjGoXbAAEgAqeGUxrcIlbjXfbc
+mwIDAQAB
+-----END PUBLIC KEY-----"#;
+			let private_key = r#"-----BEGIN PRIVATE KEY-----
+MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC7VJTUt9Us8cKj
+MzEfYyjiWA4R4/M2bS1GB4t7NXp98C3SC6dVMvDuictGeurT8jNbvJZHtCSuYEvu
+NMoSfm76oqFvAp8Gy0iz5sxjZmSnXyCdPEovGhLa0VzMaQ8s+CLOyS56YyCFGeJZ
+qgtzJ6GR3eqoYSW9b9UMvkBpZODSctWSNGj3P7jRFDO5VoTwCQAWbFnOjDfH5Ulg
+p2PKSQnSJP3AJLQNFNe7br1XbrhV//eO+t51mIpGSDCUv3E0DDFcWDTH9cXDTTlR
+ZVEiR2BwpZOOkE/Z0/BVnhZYL71oZV34bKfWjQIt6V/isSMahdsAASACp4ZTGtwi
+VuNd9tybAgMBAAECggEBAKTmjaS6tkK8BlPXClTQ2vpz/N6uxDeS35mXpqasqskV
+laAidgg/sWqpjXDbXr93otIMLlWsM+X0CqMDgSXKejLS2jx4GDjI1ZTXg++0AMJ8
+sJ74pWzVDOfmCEQ/7wXs3+cbnXhKriO8Z036q92Qc1+N87SI38nkGa0ABH9CN83H
+mQqt4fB7UdHzuIRe/me2PGhIq5ZBzj6h3BpoPGzEP+x3l9YmK8t/1cN0pqI+dQwY
+dgfGjackLu/2qH80MCF7IyQaseZUOJyKrCLtSD/Iixv/hzDEUPfOCjFDgTpzf3cw
+ta8+oE4wHCo1iI1/4TlPkwmXx4qSXtmw4aQPz7IDQvECgYEA8KNThCO2gsC2I9PQ
+DM/8Cw0O983WCDY+oi+7JPiNAJwv5DYBqEZB1QYdj06YD16XlC/HAZMsMku1na2T
+N0driwenQQWzoev3g2S7gRDoS/FCJSI3jJ+kjgtaA7Qmzlgk1TxODN+G1H91HW7t
+0l7VnL27IWyYo2qRRK3jzxqUiPUCgYEAx0oQs2reBQGMVZnApD1jeq7n4MvNLcPv
+t8b/eU9iUv6Y4Mj0Suo/AU8lYZXm8ubbqAlwz2VSVunD2tOplHyMUrtCtObAfVDU
+AhCndKaA9gApgfb3xw1IKbuQ1u4IF1FJl3VtumfQn//LiH1B3rXhcdyo3/vIttEk
+48RakUKClU8CgYEAzV7W3COOlDDcQd935DdtKBFRAPRPAlspQUnzMi5eSHMD/ISL
+DY5IiQHbIH83D4bvXq0X7qQoSBSNP7Dvv3HYuqMhf0DaegrlBuJllFVVq9qPVRnK
+xt1Il2HgxOBvbhOT+9in1BzA+YJ99UzC85O0Qz06A+CmtHEy4aZ2kj5hHjECgYEA
+mNS4+A8Fkss8Js1RieK2LniBxMgmYml3pfVLKGnzmng7H2+cwPLhPIzIuwytXywh
+2bzbsYEfYx3EoEVgMEpPhoarQnYPukrJO4gwE2o5Te6T5mJSZGlQJQj9q4ZB2Dfz
+et6INsK0oG8XVGXSpQvQh3RUYekCZQkBBFcpqWpbIEsCgYAnM3DQf3FJoSnXaMhr
+VBIovic5l0xFkEHskAjFTevO86Fsz1C2aSeRKSqGFoOQ0tmJzBEs1R6KqnHInicD
+TQrKhArgLXX4v3CddjfTRJkFWDbE/CkvKZNOrcf1nhaGCPspRJj2KUkj1Fhl9Cnc
+dn/RsYEONbwQSjIfMPkvxF+8HQ==
+-----END PRIVATE KEY-----"#;
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				&format!(
+					r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					DURATION 1h
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					SIGNUP (
+						CREATE user CONTENT {{
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}}
+					)
+				    WITH JWT ALGORITHM RS256 KEY '{public_key}'
+				        WITH ISSUER KEY '{private_key}' DURATION 15m
+				;
+
+				CREATE user:test CONTENT {{
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}}
+				"#
+				),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars: HashMap<&str, Value> = HashMap::new();
+			vars.insert("user", "user".into());
+			vars.insert("pass", "pass".into());
+			let res = db(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars.into(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signup: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert!(sess.au.id().starts_with("user:"));
+			assert!(sess.au.is_record());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			// Record users should not have roles.
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			// Session expiration should always be set for tokens issued by SurrealDB
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_sess_exp =
+				(Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_sess_exp =
+				(Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_sess_exp && exp < max_sess_exp,
+				"Session expiration is expected to follow access method duration"
+			);
+
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Check that token can be verified with the defined algorithm
+				let val = Validation::new(Algorithm::RS256);
+				// Check that token can be verified with the defined public key
+				let token_data = decode::<Claims>(
+					&tk,
+					&DecodingKey::from_rsa_pem(public_key.as_ref()).unwrap(),
+					&val,
+				)
+				.unwrap();
+				// Check that token has been issued with the defined algorithm
+				assert_eq!(token_data.header.alg, Algorithm::RS256);
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::minutes(15) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow issuer duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, Some("test".to_string()));
+				assert!(token_data.claims.id.unwrap().starts_with("user:"));
+				assert_eq!(token_data.claims.ac, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
 		}
 	}
 }

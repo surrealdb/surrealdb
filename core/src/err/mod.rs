@@ -888,14 +888,6 @@ pub enum Error {
 	#[error("The session has expired")]
 	ExpiredSession,
 
-	/// The session has an invalid duration
-	#[error("The session has an invalid duration")]
-	InvalidSessionDuration,
-
-	/// The session has an invalid expiration
-	#[error("The session has an invalid expiration")]
-	InvalidSessionExpiration,
-
 	/// A node task has failed
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
@@ -953,6 +945,12 @@ pub enum Error {
 
 	#[error("The access method does not exist")]
 	AccessNotFound,
+
+	#[error("This access method has an invalid duration")]
+	AccessInvalidDuration,
+
+	#[error("This access method results in an invalid expiration")]
+	AccessInvalidExpiration,
 
 	#[error("The record access signup query failed")]
 	AccessRecordSignupQueryFailed,
