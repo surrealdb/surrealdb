@@ -1059,6 +1059,8 @@ impl Parser<'_> {
 
 	pub fn parse_jwt(&mut self, ac: Option<AccessType>) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
+			// By default a explicitly defined JWT is only used to verify.
+			issue: None,
 			..Default::default()
 		};
 
@@ -1067,7 +1069,7 @@ impl Parser<'_> {
 		};
 
 		// If an access method was passed, inherit any relevant defaults.
-		// This will become a match statemenet whenever more access methods are available.
+		// This will become a match statement whenever more access methods are available.
 		if let Some(AccessType::Record(ac)) = ac {
 			// By default, token duration is inherited from session duration in record access.
 			iss.duration = ac.duration;
@@ -1083,15 +1085,16 @@ impl Parser<'_> {
 							res.verify = access_type::JwtAccessVerify::Key(
 								access_type::JwtAccessVerifyKey {
 									alg,
-									key: key.clone(),
+									key: key.to_owned(),
 								},
 							);
 
-							iss.alg = alg;
-							// If the algorithm is symmetric, the issuer uses the same key.
-							// For asymmetric algorithms, the key needs to be specified.
+							// If the algorithm is symmetric, the issuer is the same as the verifier.
+							// For asymmetric algorithms, the key needs to be explicitly defined.
 							if alg.is_symmetric() {
+								iss.alg = alg;
 								iss.key = key;
+								res.issue = Some(iss.clone());
 							}
 						}
 						x => unexpected!(self, x, "a key"),
@@ -1105,27 +1108,29 @@ impl Parser<'_> {
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
-				res.issue = None;
 			}
 			x => unexpected!(self, x, "`ALGORITHM`, or `URL`"),
 		}
 
 		if self.eat(t!("WITH")) {
 			expected!(self, t!("ISSUER"));
-			expected!(self, t!("KEY"));
-			// Since a key is specified, overwrite the default.
-			// This can be used when tokens are verified somewhere else.
-			iss.key = self.next_token_value::<Strand>()?.0;
-			match self.peek_kind() {
-				t!("DURATION") => {
-					self.pop_peek();
-					iss.duration = Some(self.next_token_value()?);
+			loop {
+				match self.peek_kind() {
+					t!("KEY") => {
+						self.pop_peek();
+						// Since a key is specified, overwrite any default assumption.
+						// This can be used when issued tokens are only verified externally.
+						iss.key = self.next_token_value::<Strand>()?.0;
+					},
+					t!("DURATION") => {
+						self.pop_peek();
+						iss.duration = Some(self.next_token_value()?);
+					}
+					_ => break,
 				}
-				x => unexpected!(self, x, "`DURATION`"),
 			}
+			res.issue = Some(iss);
 		}
-
-		res.issue = Some(iss);
 
 		Ok(res)
 	}

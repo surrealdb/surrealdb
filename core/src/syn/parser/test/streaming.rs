@@ -50,7 +50,7 @@ static SOURCE: &str = r#"
 	DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
 		RETURN a
 	} COMMENT 'test' PERMISSIONS FULL;
-	DEFINE ACCESS a ON DATABASE a TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar";
+	DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar";
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
@@ -206,11 +206,7 @@ fn statements() -> Vec<Statement> {
 						alg: Algorithm::EdDSA,
 						key: "foo".to_string(),
 					}),
-					issue: Some(JwtAccessIssue {
-						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
-						duration: Some(Duration::from_hours(1)),
-					}),
+					issue: None,
 				},
 			}),
 			comment: Some(Strand("bar".to_string())),

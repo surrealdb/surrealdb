@@ -240,11 +240,7 @@ fn parse_define_access_jwt_key() {
 					alg: Algorithm::EdDSA,
 					key: "foo".to_string(),
 				}),
-				issue: Some(JwtAccessIssue {
-					alg: Algorithm::EdDSA,
-					key: "foo".to_string(),
-					duration: Some(Duration::from_hours(1)),
-				}),
+				issue: None,
 			}),
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
@@ -278,42 +274,190 @@ fn parse_define_access_jwt_jwks() {
 
 #[test]
 fn parse_define_access_record() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE ACCESS a TYPE RECORD DURATION 1s SIGNUP true SIGNIN false COMMENT "bar""#
-	)
-	.unwrap();
+	// With comment. Nothing is explicitly defined.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD COMMENT "bar""#
+		)
+		.unwrap();
 
-	// Manually compare since DefineAccessStatement for record access
-	// withou explicit JWT will create a random signing key during parsing.
-	let Statement::Define(DefineStatement::Access(stmt)) = res else {
-		panic!()
-	};
+		// Manually compare since DefineAccessStatement for record access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
 
-	assert_eq!(stmt.name, Ident("a".to_string()));
-	assert_eq!(stmt.base, Base::Db);
-	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
-	assert_eq!(stmt.if_not_exists, false);
-	match stmt.kind {
-		AccessType::Record(ac) => {
-			assert_eq!(ac.duration, Some(Duration(std::time::Duration::from_secs(1))));
-			assert_eq!(ac.signup, Some(Value::Bool(true)));
-			assert_eq!(ac.signin, Some(Value::Bool(false)));
-			match ac.jwt.verify {
-				JwtAccessVerify::Key(key) => {
-					assert_eq!(key.alg, Algorithm::Hs512);
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
+		assert_eq!(stmt.if_not_exists, false);
+		match stmt.kind {
+			AccessType::Record(ac) => {
+				// A session duration of one hour is set by default.
+				assert_eq!(ac.duration, Some(Duration::from_hours(1)));
+				assert_eq!(ac.signup, None);
+				assert_eq!(ac.signin, None);
+				match ac.jwt.verify {
+					JwtAccessVerify::Key(key) => {
+						assert_eq!(key.alg, Algorithm::Hs512);
+					}
+					_ => panic!(),
 				}
-				_ => panic!(),
-			}
-			match ac.jwt.issue {
-				Some(iss) => {
-					assert_eq!(iss.alg, Algorithm::Hs512);
-					assert_eq!(iss.duration, Some(Duration::from_secs(1)));
+				match ac.jwt.issue {
+					Some(iss) => {
+						assert_eq!(iss.alg, Algorithm::Hs512);
+						// A token duration of one hour is set by default.
+						assert_eq!(iss.duration, Some(Duration::from_hours(1)));
+					}
+					_ => panic!(),
 				}
-				_ => panic!(),
 			}
+			_ => panic!(),
 		}
-		_ => panic!(),
+	}
+	// Duration and signing queries are explicitly defined.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s SIGNUP true SIGNIN false"#
+		)
+		.unwrap();
+
+		// Manually compare since DefineAccessStatement for record access
+		// without explicit JWT will create a random signing key during parsing.
+		let Statement::Define(DefineStatement::Access(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("a".to_string()));
+		assert_eq!(stmt.base, Base::Db);
+		assert_eq!(stmt.comment, None);
+		assert_eq!(stmt.if_not_exists, false);
+		match stmt.kind {
+			AccessType::Record(ac) => {
+				assert_eq!(ac.duration, Some(Duration(std::time::Duration::from_secs(10))));
+				assert_eq!(ac.signup, Some(Value::Bool(true)));
+				assert_eq!(ac.signin, Some(Value::Bool(false)));
+				match ac.jwt.verify {
+					JwtAccessVerify::Key(key) => {
+						assert_eq!(key.alg, Algorithm::Hs512);
+					}
+					_ => panic!(),
+				}
+				match ac.jwt.issue {
+					Some(iss) => {
+						assert_eq!(iss.alg, Algorithm::Hs512);
+						// Token duration matches session duration by default.
+						assert_eq!(iss.duration, Some(Duration::from_secs(10)));
+					}
+					_ => panic!(),
+				}
+			}
+			_ => panic!(),
+		}
+	}
+	// Verification with JWT is explicitly defined only with symmetric key.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM HS512 KEY "foo""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Record(RecordAccess {
+					duration: Some(Duration::from_secs(10)),
+					signup: None,
+					signin: None,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs512,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs512,
+							// Issuer key matches verification key by default in symmetric algorithms.
+							key: "foo".to_string(),
+							// Token duration matches session duration by default.
+							duration: Some(Duration::from_secs(10)),
+						}),
+					}
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		);
+	}
+	// Verification and issuing with JWT are explicitly defined with two different keys.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM HS512 KEY "foo" WITH ISSUER KEY "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Record(RecordAccess {
+					duration: Some(Duration::from_secs(10)),
+					signup: None,
+					signin: None,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs512,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs512,
+							key: "bar".to_string(),
+							// Token duration matches session duration by default.
+							duration: Some(Duration::from_secs(10)),
+						}),
+					}
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		);
+	}
+	// Verification and issuing with JWT are explicitly defined with two different keys. Token duration is explicitly defined.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM HS512 KEY 'foo' WITH ISSUER KEY 'bar' DURATION 1m"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Record(RecordAccess {
+					duration: Some(Duration::from_secs(10)),
+					signup: None,
+					signin: None,
+					jwt: JwtAccess {
+						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+							alg: Algorithm::Hs512,
+							key: "foo".to_string(),
+						}),
+						issue: Some(JwtAccessIssue {
+							alg: Algorithm::Hs512,
+							key: "bar".to_string(),
+							duration: Some(Duration::from_mins(1)),
+						}),
+					}
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		);
 	}
 }
 
@@ -337,11 +481,7 @@ fn parse_define_access_record_with_jwt() {
 						alg: Algorithm::EdDSA,
 						key: "foo".to_string(),
 					}),
-					issue: Some(JwtAccessIssue {
-						alg: Algorithm::EdDSA,
-						key: "foo".to_string(),
-						duration: Some(Duration::from_hours(1)),
-					}),
+					issue: None,
 				}
 			}),
 			comment: Some(Strand("bar".to_string())),

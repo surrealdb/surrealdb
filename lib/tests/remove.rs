@@ -418,7 +418,7 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<(), Error> {
 #[tokio::test]
 async fn should_error_when_remove_and_access_does_not_exist() -> Result<(), Error> {
 	let sql = "
-		REMOVE ACCESS foo;
+		REMOVE ACCESS foo ON DB;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -434,7 +434,7 @@ async fn should_error_when_remove_and_access_does_not_exist() -> Result<(), Erro
 #[tokio::test]
 async fn should_not_error_when_remove_access_if_exists() -> Result<(), Error> {
 	let sql = "
-		REMOVE ACCESS IF EXISTS foo;
+		REMOVE ACCESS IF EXISTS foo ON DB;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -662,7 +662,7 @@ async fn permissions_checks_remove_ns_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-        vec!["{ accesses: { \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY 'secret'\" }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: { \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret' DURATION 1h\" }, databases: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -704,7 +704,7 @@ async fn permissions_checks_remove_db_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret'\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -829,8 +829,8 @@ async fn permissions_checks_remove_db_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
     ];
 
 	let test_cases = [
