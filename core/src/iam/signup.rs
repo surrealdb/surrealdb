@@ -146,6 +146,7 @@ mod tests {
 	use super::*;
 	use crate::iam::Role;
 	use std::collections::HashMap;
+	use chrono::Duration;
 
 	#[tokio::test]
 	async fn test_record_signup() {
