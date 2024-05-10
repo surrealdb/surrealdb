@@ -2431,3 +2431,48 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_compound_index() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = r#"
+		DEFINE INDEX compound_idx ON student FIELDS subject,grade;
+		CREATE student:1 SET name = "Tobie", subject = "English", grade = "A";
+		CREATE student:2 SET name = "Muthu", subject = "Maths", grade = "B";
+		SELECT name FROM student WHERE subject = "English" AND grade = "A";
+		SELECT name FROM student WHERE subject = "English" AND grade = "A" EXPLAIN;"#;
+	//
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+	skip_ok(&mut res, 3)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ name: 'Tobie' }]");
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		r#"[
+				{
+					detail: {
+						plan: {
+							index: 'compound_idx',
+							operator: '=',
+							value: ["English", "A"]
+						},
+						table: 'student'
+					},
+					operation: 'Iterate Index'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]"#,
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
