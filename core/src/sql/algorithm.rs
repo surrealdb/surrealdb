@@ -24,6 +24,27 @@ pub enum Algorithm {
 	Rs512,
 }
 
+impl Algorithm {
+	// Does the algorithm us the same key for signing and verification?
+	pub(crate) fn is_symmetric(self) -> bool {
+		match self {
+			Algorithm::Hs256 => true,
+			Algorithm::Hs384 => true,
+			Algorithm::Hs512 => true,
+			Algorithm::EdDSA => false,
+			Algorithm::Es256 => false,
+			Algorithm::Es384 => false,
+			Algorithm::Es512 => false,
+			Algorithm::Ps256 => false,
+			Algorithm::Ps384 => false,
+			Algorithm::Ps512 => false,
+			Algorithm::Rs256 => false,
+			Algorithm::Rs384 => false,
+			Algorithm::Rs512 => false,
+		}
+	}
+}
+
 impl From<Algorithm> for jsonwebtoken::Algorithm {
 	fn from(val: Algorithm) -> Self {
 		match val {

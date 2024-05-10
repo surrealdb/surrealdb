@@ -249,7 +249,7 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("JWT") => {
 							self.pop_peek();
-							res.kind = AccessType::Jwt(self.parse_jwt()?);
+							res.kind = AccessType::Jwt(self.parse_jwt(None)?);
 						}
 						t!("RECORD") => {
 							self.pop_peek();
@@ -282,7 +282,7 @@ impl Parser<'_> {
 							}
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
-								ac.jwt = self.parse_jwt()?;
+								ac.jwt = self.parse_jwt(Some(AccessType::Record(ac.clone())))?;
 							}
 							res.kind = AccessType::Record(ac);
 						}
@@ -1057,10 +1057,25 @@ impl Parser<'_> {
 		Ok(Kind::Record(names))
 	}
 
-	pub fn parse_jwt(&mut self) -> ParseResult<access_type::JwtAccess> {
+	pub fn parse_jwt(&mut self, ac: Option<AccessType>) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			..Default::default()
 		};
+
+		let mut iss = access_type::JwtAccessIssue {
+			..Default::default()
+		};
+
+		// If an access method was passed, inherit its defaults.
+		if let Some(ac) = ac {
+			match ac {
+				AccessType::Record(ac) => {
+					// By default, token duration is inherited from session duration.
+					iss.duration = ac.duration;
+				}
+				_ => {}
+			}
+		}
 
 		match self.peek_kind() {
 			t!("ALGORITHM") => {
@@ -1072,10 +1087,16 @@ impl Parser<'_> {
 							res.verify = access_type::JwtAccessVerify::Key(
 								access_type::JwtAccessVerifyKey {
 									alg,
-									key,
+									key: key.clone(),
 								},
 							);
-							res.issue = None;
+
+							iss.alg = alg;
+							// If the algorithm is symmetric, the issuer uses the same key.
+							// For asymmetric algorithms, the key needs to be specified.
+							if alg.is_symmetric() {
+								iss.key = key;
+							}
 						}
 						x => unexpected!(self, x, "a key"),
 					},
@@ -1096,10 +1117,9 @@ impl Parser<'_> {
 		if self.eat(t!("WITH")) {
 			expected!(self, t!("ISSUER"));
 			expected!(self, t!("KEY"));
-			let mut iss = access_type::JwtAccessIssue {
-				key: self.next_token_value::<Strand>()?.0,
-				..Default::default()
-			};
+			// Since a key is specified, overwrite the default.
+			// This can be used when tokens are verified somewhere else.
+			iss.key = self.next_token_value::<Strand>()?.0;
 			match self.peek_kind() {
 				t!("DURATION") => {
 					self.pop_peek();
