@@ -15,7 +15,9 @@ async fn define_foreign_table() -> Result<(), Error> {
 				count(),
 				age,
 				math::sum(age) AS total,
-				math::mean(score) AS average
+				math::mean(score) AS average,
+				math::max(score) AS max,
+				math::min(score) AS min
 			FROM person
 			GROUP BY age
 		;
@@ -43,7 +45,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 		"{
 			events: {},
 			fields: {},
-			tables: { person_by_age: 'DEFINE TABLE person_by_age TYPE ANY SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average FROM person GROUP BY age PERMISSIONS NONE' },
+			tables: { person_by_age: 'DEFINE TABLE person_by_age TYPE ANY SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average, math::max(score) AS max, math::min(score) AS min FROM person GROUP BY age PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
 		}",
@@ -62,6 +64,8 @@ async fn define_foreign_table() -> Result<(), Error> {
 				average: 70,
 				count: 1,
 				id: person_by_age:[39],
+				max: 70,
+				min: 70,
 				total: 39
 			}
 		]",
@@ -80,6 +84,8 @@ async fn define_foreign_table() -> Result<(), Error> {
 				average: 75,
 				count: 2,
 				id: person_by_age:[39],
+				max: 80,
+				min: 70,
 				total: 78
 			}
 		]",
@@ -98,6 +104,8 @@ async fn define_foreign_table() -> Result<(), Error> {
 				average: 80,
 				count: 2,
 				id: person_by_age:[39],
+				max: 90,
+				min: 70,
 				total: 78
 			}
 		]",

@@ -104,19 +104,19 @@ pub fn any_like(a: &Value, b: &Value) -> Result<Value, Error> {
 }
 
 pub fn less_than(a: &Value, b: &Value) -> Result<Value, Error> {
-	Ok(a.lt(b).into())
+	Ok((a.is_none_or_null() || b.is_none_or_null() || a.lt(b)).into())
 }
 
 pub fn less_than_or_equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	Ok(a.le(b).into())
+	Ok((a.is_none_or_null() || b.is_none_or_null() || a.le(b)).into())
 }
 
 pub fn more_than(a: &Value, b: &Value) -> Result<Value, Error> {
-	Ok(a.gt(b).into())
+	Ok((a.is_none_or_null() || b.is_none_or_null() || a.gt(b)).into())
 }
 
 pub fn more_than_or_equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	Ok(a.ge(b).into())
+	Ok((a.is_none_or_null() || b.is_none_or_null() || a.ge(b)).into())
 }
 
 pub fn contain(a: &Value, b: &Value) -> Result<Value, Error> {
