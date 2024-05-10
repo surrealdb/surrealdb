@@ -145,8 +145,8 @@ pub async fn db(
 mod tests {
 	use super::*;
 	use crate::iam::Role;
-	use std::collections::HashMap;
 	use chrono::Duration;
+	use std::collections::HashMap;
 
 	#[tokio::test]
 	async fn test_record_signup() {
