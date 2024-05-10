@@ -276,11 +276,8 @@ fn parse_define_access_jwt_jwks() {
 fn parse_define_access_record() {
 	// With comment. Nothing is explicitly defined.
 	{
-		let res = test_parse!(
-			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD COMMENT "bar""#
-		)
-		.unwrap();
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON DB TYPE RECORD COMMENT "bar""#).unwrap();
 
 		// Manually compare since DefineAccessStatement for record access
 		// without explicit JWT will create a random signing key during parsing.

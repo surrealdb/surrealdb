@@ -1121,7 +1121,7 @@ impl Parser<'_> {
 						// Since a key is specified, overwrite any default assumption.
 						// This can be used when issued tokens are only verified externally.
 						iss.key = self.next_token_value::<Strand>()?.0;
-					},
+					}
 					t!("DURATION") => {
 						self.pop_peek();
 						iss.duration = Some(self.next_token_value()?);
