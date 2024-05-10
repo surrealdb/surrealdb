@@ -380,7 +380,7 @@ impl Aggregator {
 			collections.push("math::min".into());
 		}
 		if self.math_sum.is_some() {
-			collections.push("math::sun".into());
+			collections.push("math::sum".into());
 		}
 		if self.time_max.is_some() {
 			collections.push("time::max".into());
