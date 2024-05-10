@@ -59,6 +59,7 @@ targets = []
 
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
+ahash = "0.8.11"
 arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 argon2 = "0.5.2"
 ascii = { version = "0.3.2", package = "any_ascii" }
@@ -106,7 +107,7 @@ lexicmp = "0.1.0"
 linfa-linalg = "=0.1.0"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
-ndarray = { version = "=0.15.6", features = ["serde"] }
+ndarray = { version = "=0.15.6" }
 ndarray-stats = "=0.5.1"
 num-traits = "0.2.18"
 nom = { version = "7.1.3", features = ["alloc"] }
