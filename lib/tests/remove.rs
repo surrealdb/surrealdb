@@ -426,7 +426,7 @@ async fn should_error_when_remove_and_access_does_not_exist() -> Result<(), Erro
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::AccessNotFound { .. }),);
+	assert!(matches!(tmp, Error::DaNotFound { .. }),);
 
 	Ok(())
 }
@@ -662,7 +662,7 @@ async fn permissions_checks_remove_ns_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-        vec!["{ accesses: { \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret' DURATION 1h\" }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret' DURATION 1h\" }, databases: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
