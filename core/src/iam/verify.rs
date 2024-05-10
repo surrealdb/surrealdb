@@ -420,7 +420,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			Ok(())
 		}
 		// Check if this is root authentication with user credentials
-		// TODO(PR): Support root authentication with access method
 		Claims {
 			id: Some(id),
 			..

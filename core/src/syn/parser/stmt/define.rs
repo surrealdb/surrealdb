@@ -1112,7 +1112,6 @@ impl Parser<'_> {
 
 		if self.eat(t!("WITH")) {
 			expected!(self, t!("ISSUER"));
-			// TODO(PR): Allow for different order.
 			expected!(self, t!("KEY"));
 			// Since a key is specified, overwrite the default.
 			// This can be used when tokens are verified somewhere else.
