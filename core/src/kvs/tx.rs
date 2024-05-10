@@ -1794,15 +1794,6 @@ impl Transaction {
 		Ok(val.into())
 	}
 
-	/// Retrieve a specific access method definition from ROOT.
-	pub async fn get_root_access(&mut self, ac: &str) -> Result<DefineAccessStatement, Error> {
-		let key = crate::key::root::ac::new(ac);
-		let val = self.get(key).await?.ok_or(Error::AccessRootNotFound {
-			value: ac.to_owned(),
-		})?;
-		Ok(val.into())
-	}
-
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::root::ns::new(ns);
@@ -1833,7 +1824,7 @@ impl Transaction {
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
 		let key = crate::key::namespace::ac::new(ns, ac);
-		let val = self.get(key).await?.ok_or(Error::AccessNsNotFound {
+		let val = self.get(key).await?.ok_or(Error::NaNotFound {
 			value: ac.to_owned(),
 		})?;
 		Ok(val.into())
@@ -1887,7 +1878,7 @@ impl Transaction {
 		ac: &str,
 	) -> Result<DefineAccessStatement, Error> {
 		let key = crate::key::database::ac::new(ns, db, ac);
-		let val = self.get(key).await?.ok_or(Error::AccessDbNotFound {
+		let val = self.get(key).await?.ok_or(Error::DaNotFound {
 			value: ac.to_owned(),
 		})?;
 		Ok(val.into())

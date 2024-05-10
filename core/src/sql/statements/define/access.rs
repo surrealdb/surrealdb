@@ -46,30 +46,6 @@ impl DefineAccessStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 
 		match &self.base {
-			Base::Root => {
-				// Claim transaction
-				let mut run = txn.lock().await;
-				// Clear the cache
-				run.clear_cache();
-				// Check if access method already exists
-				if self.if_not_exists && run.get_root_access(&self.name).await.is_ok() {
-					return Err(Error::AccessNsAlreadyExists {
-						value: self.name.to_string(),
-					});
-				}
-				// Process the statement
-				let key = crate::key::root::ac::new(&self.name);
-				run.set(
-					key,
-					DefineAccessStatement {
-						if_not_exists: false,
-						..self.clone()
-					},
-				)
-				.await?;
-				// Ok all good
-				Ok(Value::None)
-			}
 			Base::Ns => {
 				// Claim transaction
 				let mut run = txn.lock().await;
