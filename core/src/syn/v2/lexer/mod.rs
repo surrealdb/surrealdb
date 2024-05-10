@@ -84,6 +84,10 @@ pub struct Lexer<'a> {
 	/// like for example strings with escape characters.
 	scratch: String,
 
+	/// Allow the next parsed idents to be flexible, i.e. support idents which don't start with a
+	/// number.
+	pub flexible_ident: bool,
+
 	// below are a collection of storage for values produced by tokens.
 	// For performance reasons we wan't to keep the tokens as small as possible.
 	// As only some tokens have an additional value associated with them we don't store that value
@@ -117,6 +121,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			whitespace_span: None,
 			scratch: String::new(),
+			flexible_ident: false,
 			string: None,
 			datetime: None,
 			duration: None,
@@ -132,6 +137,7 @@ impl<'a> Lexer<'a> {
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
+		self.flexible_ident = false;
 		self.whitespace_span = None;
 		self.string = None;
 		self.datetime = None;
@@ -155,6 +161,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			whitespace_span: None,
 			scratch: self.scratch,
+			flexible_ident: false,
 			string: self.string,
 			datetime: self.datetime,
 			duration: self.duration,
