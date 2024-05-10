@@ -1066,15 +1066,11 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		// If an access method was passed, inherit its defaults.
-		if let Some(ac) = ac {
-			match ac {
-				AccessType::Record(ac) => {
-					// By default, token duration is inherited from session duration.
-					iss.duration = ac.duration;
-				}
-				_ => {}
-			}
+		// If an access method was passed, inherit any relevant defaults.
+		// This will become a match statemenet whenever more access methods are available.
+		if let Some(AccessType::Record(ac)) = ac {
+			// By default, token duration is inherited from session duration in record access.
+			iss.duration = ac.duration;
 		}
 
 		match self.peek_kind() {
@@ -1116,6 +1112,7 @@ impl Parser<'_> {
 
 		if self.eat(t!("WITH")) {
 			expected!(self, t!("ISSUER"));
+			// TODO(PR): Allow for different order.
 			expected!(self, t!("KEY"));
 			// Since a key is specified, overwrite the default.
 			// This can be used when tokens are verified somewhere else.
@@ -1127,8 +1124,9 @@ impl Parser<'_> {
 				}
 				x => unexpected!(self, x, "`DURATION`"),
 			}
-			res.issue = Some(iss);
 		}
+
+		res.issue = Some(iss);
 
 		Ok(res)
 	}

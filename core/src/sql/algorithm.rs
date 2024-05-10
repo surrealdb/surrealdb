@@ -31,16 +31,7 @@ impl Algorithm {
 			Algorithm::Hs256 => true,
 			Algorithm::Hs384 => true,
 			Algorithm::Hs512 => true,
-			Algorithm::EdDSA => false,
-			Algorithm::Es256 => false,
-			Algorithm::Es384 => false,
-			Algorithm::Es512 => false,
-			Algorithm::Ps256 => false,
-			Algorithm::Ps384 => false,
-			Algorithm::Ps512 => false,
-			Algorithm::Rs256 => false,
-			Algorithm::Rs384 => false,
-			Algorithm::Rs512 => false,
+			_ => false,
 		}
 	}
 }
