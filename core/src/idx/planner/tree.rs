@@ -477,6 +477,7 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
 				(Operator::Equal, v, _) => Some(IndexOperator::Equality(v.clone())),
+				(Operator::Exact, v, _) => Some(IndexOperator::Exactness(v.clone())),
 				(Operator::Contain, v, IdiomPosition::Left) => {
 					Some(IndexOperator::Equality(v.clone()))
 				}
