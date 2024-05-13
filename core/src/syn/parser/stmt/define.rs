@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::sql::access_type::{JwtAccessVerify, JwtAccessVerifyKey};
+use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::{
 	sql::{
@@ -1113,7 +1113,7 @@ impl Parser<'_> {
 							if alg.is_symmetric() {
 								iss.key = key;
 								// Since all the issuer data is known, it can already be assigned.
-								// The clone allows updating the original with any explicit issuer data.
+								// Cloning allows updating the original with any explicit issuer data.
 								res.issue = Some(iss.clone());
 							}
 						}
@@ -1136,17 +1136,33 @@ impl Parser<'_> {
 			expected!(self, t!("ISSUER"));
 			loop {
 				match self.peek_kind() {
+					t!("ALGORITHM") => {
+						self.pop_peek();
+						match self.next().kind {
+							TokenKind::Algorithm(alg) => {
+								// If an algorithm is already defined, a different value is not expected.
+								if let JwtAccessVerify::Key(ref ver) = res.verify {
+									if alg != ver.alg {
+										unexpected!(
+											self,
+											t!("ALGORITHM"),
+											"a compatible algorithm or no algorithm"
+										);
+									}
+								}
+								iss.alg = alg;
+							}
+							x => unexpected!(self, x, "a valid algorithm"),
+						}
+					}
 					t!("KEY") => {
 						self.pop_peek();
 						let key = self.next_token_value::<Strand>()?.0;
-						// If the algorithm is symmetric and the key was already defined, a different key is not expected.
-						match res.verify {
-							JwtAccessVerify::Key(ref ver) => {
-								if ver.alg.is_symmetric() && key != ver.key {
-									unexpected!(self, t!("KEY"), "a symmetric key");
-								}
+						// If the algorithm is symmetric and a key is already defined, a different key is not expected.
+						if let JwtAccessVerify::Key(ref ver) = res.verify {
+							if ver.alg.is_symmetric() && key != ver.key {
+								unexpected!(self, t!("KEY"), "a symmetric key or no key");
 							}
-							_ => {}
 						}
 						iss.key = key;
 					}
