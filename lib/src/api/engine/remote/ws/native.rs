@@ -634,23 +634,40 @@ mod tests {
 		let ref_payload;
 		let ref_compressed;
 		//
-		const BINCODE: &str = "Bincode Vec<i32>";
-		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<i32>";
+		const BINCODE_REF: &str = "Bincode Vec<i32>";
+		const COMPRESSED_BINCODE_REF: &str = "Compressed Bincode Vec<i32>";
 		{
 			// Bincode Vec<i32>
 			let (duration, payload) = timed(&|| bincode::serialize(&vector).unwrap());
 			ref_payload = payload.len() as f32;
-			results.push((payload.len(), BINCODE, duration, 1.0));
+			results.push((payload.len(), BINCODE_REF, duration, 1.0));
 
 			// Compressed bincode
 			let (compression_duration, payload) = timed(&|| compress(&payload));
 			let duration = duration + compression_duration;
 			ref_compressed = payload.len() as f32;
-			results.push((payload.len(), COMPRESSED_BINCODE, duration, 1.0));
+			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
 		}
 		// Build the Value
 		let vector = Value::Array(Array::from(vector));
 		//
+		const BINCODE: &str = "Bincode Vec<Value>";
+		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
+		{
+			// Bincode Vec<i32>
+			let (duration, payload) = timed(&|| bincode::serialize(&vector).unwrap());
+			results.push((payload.len(), BINCODE, duration, payload.len() as f32 / ref_payload));
+
+			// Compressed bincode
+			let (compression_duration, payload) = timed(&|| compress(&payload));
+			let duration = duration + compression_duration;
+			results.push((
+				payload.len(),
+				COMPRESSED_BINCODE,
+				duration,
+				payload.len() as f32 / ref_compressed,
+			));
+		}
 		const UNVERSIONED: &str = "Unversioned Vec<Value>";
 		const COMPRESSED_UNVERSIONED: &str = "Compressed Unversioned Vec<Value>";
 		{
@@ -724,14 +741,16 @@ mod tests {
 		assert_eq!(
 			results,
 			vec![
-				BINCODE,
-				COMPRESSED_BINCODE,
+				BINCODE_REF,
+				COMPRESSED_BINCODE_REF,
 				COMPRESSED_CBOR,
 				COMPRESSED_UNVERSIONED,
 				CBOR,
 				COMPRESSED_VERSIONED,
+				COMPRESSED_BINCODE,
 				UNVERSIONED,
-				VERSIONED
+				VERSIONED,
+				BINCODE
 			]
 		)
 	}
