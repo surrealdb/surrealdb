@@ -1096,8 +1096,6 @@ impl Parser<'_> {
 		if let Some(AccessType::Record(ac)) = ac {
 			// By default, token duration is inherited from session duration in record access.
 			iss.duration = ac.duration;
-			// Cloning allows updating the original with any explicit issuer data.
-			res.issue = Some(iss.clone());
 		}
 
 		match self.peek_kind() {
