@@ -595,10 +595,11 @@ pub struct Socket(Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, M
 #[cfg(test)]
 mod tests {
 	use super::serialize;
-	use flate2::write::ZlibEncoder;
+	use flate2::write::GzEncoder;
 	use flate2::Compression;
 	use std::io::Write;
 	use std::time::SystemTime;
+	use surrealdb_core::rpc::format::cbor::Cbor;
 	use surrealdb_core::sql::{Array, Value};
 
 	#[test_log::test]
@@ -610,7 +611,7 @@ mod tests {
 		};
 
 		let compress = |v: &Vec<u8>| {
-			let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+			let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
 			encoder.write_all(&v).unwrap();
 			encoder.finish().unwrap()
 		};
@@ -626,7 +627,7 @@ mod tests {
 		let ref_payload = payload.len() as f32;
 		info!("Bincode Vec<i32> - Size: {} - Duration: {duration:?} - Factor: 1.0", payload.len(),);
 
-		// Compress bincode
+		// Compressed bincode
 		let (compression_duration, payload) = timed(&|| compress(&payload));
 		let duration = duration + compression_duration;
 		let ref_compressed = payload.len() as f32;
@@ -638,7 +639,7 @@ mod tests {
 		// Surreal Vector
 		let vector = Value::Array(Array::from(vector));
 
-		// Unversioned payload
+		// Unversioned
 		let (duration, payload) = timed(&|| serialize(&vector, false).unwrap());
 		info!(
 			"Unversioned Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
@@ -646,7 +647,7 @@ mod tests {
 			payload.len() as f32 / ref_payload
 		);
 
-		// Compressed Versioned payload
+		// Compressed Versioned
 		let (compression_duration, payload) = timed(&|| compress(&payload));
 		let duration = duration + compression_duration;
 		info!(
@@ -655,7 +656,7 @@ mod tests {
 			payload.len() as f32 / ref_compressed
 		);
 
-		// Versioned payload
+		// Versioned
 		let (duration, payload) = timed(&|| serialize(&vector, true).unwrap());
 		info!(
 			"Versioned Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
@@ -663,11 +664,33 @@ mod tests {
 			payload.len() as f32 / ref_payload
 		);
 
-		// Compressed Versioned payload
+		// Compressed Versioned
 		let (compression_duration, payload) = timed(&|| compress(&payload));
 		let duration = duration + compression_duration;
 		info!(
 			"Compressed Versioned vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			payload.len(),
+			payload.len() as f32 / ref_compressed
+		);
+
+		// CBor
+		let (duration, payload) = timed(&|| {
+			let cbor: Cbor = vector.clone().try_into().unwrap();
+			let mut res = Vec::new();
+			ciborium::into_writer(&cbor.0, &mut res).unwrap();
+			res
+		});
+		info!(
+			"CBor Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			payload.len(),
+			payload.len() as f32 / ref_payload
+		);
+
+		// Compressed Cbor
+		let (compression_duration, payload) = timed(&|| compress(&payload));
+		let duration = duration + compression_duration;
+		info!(
+			"Compressed CBor vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
 			payload.len(),
 			payload.len() as f32 / ref_compressed
 		);
