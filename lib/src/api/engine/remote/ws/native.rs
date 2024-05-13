@@ -591,3 +591,182 @@ impl Response {
 }
 
 pub struct Socket(Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>);
+
+#[cfg(test)]
+mod tests {
+	use super::serialize;
+	use bincode::Options;
+	use flate2::write::GzEncoder;
+	use flate2::Compression;
+	use rand::{thread_rng, Rng};
+	use std::io::Write;
+	use std::time::SystemTime;
+	use surrealdb_core::rpc::format::cbor::Cbor;
+	use surrealdb_core::sql::{Array, Value};
+
+	#[test_log::test]
+	fn large_vector_serialisation_bench() {
+		//
+		let timed = |func: &dyn Fn() -> Vec<u8>| {
+			let start = SystemTime::now();
+			let r = func();
+			(start.elapsed().unwrap(), r)
+		};
+		//
+		let compress = |v: &Vec<u8>| {
+			let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+			encoder.write_all(&v).unwrap();
+			encoder.finish().unwrap()
+		};
+		// Generate a random vector
+		let vector_size = if cfg!(debug_assertions) {
+			200_000 // Debug is slow
+		} else {
+			2_000_000 // Release is fast
+		};
+		let mut vector: Vec<i32> = Vec::new();
+		let mut rng = thread_rng();
+		for _ in 0..vector_size {
+			vector.push(rng.gen());
+		}
+		//	Store the results
+		let mut results = vec![];
+		// Calculate the reference
+		let ref_payload;
+		let ref_compressed;
+		//
+		const BINCODE_REF: &str = "Bincode Vec<i32>";
+		const COMPRESSED_BINCODE_REF: &str = "Compressed Bincode Vec<i32>";
+		{
+			// Bincode Vec<i32>
+			let (duration, payload) = timed(&|| {
+				let mut payload = Vec::new();
+				bincode::options()
+					.with_fixint_encoding()
+					.serialize_into(&mut payload, &vector)
+					.unwrap();
+				payload
+			});
+			ref_payload = payload.len() as f32;
+			results.push((payload.len(), BINCODE_REF, duration, 1.0));
+
+			// Compressed bincode
+			let (compression_duration, payload) = timed(&|| compress(&payload));
+			let duration = duration + compression_duration;
+			ref_compressed = payload.len() as f32;
+			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
+		}
+		// Build the Value
+		let vector = Value::Array(Array::from(vector));
+		//
+		const BINCODE: &str = "Bincode Vec<Value>";
+		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
+		{
+			// Bincode Vec<i32>
+			let (duration, payload) = timed(&|| {
+				let mut payload = Vec::new();
+				bincode::options()
+					.with_varint_encoding()
+					.serialize_into(&mut payload, &vector)
+					.unwrap();
+				payload
+			});
+			results.push((payload.len(), BINCODE, duration, payload.len() as f32 / ref_payload));
+
+			// Compressed bincode
+			let (compression_duration, payload) = timed(&|| compress(&payload));
+			let duration = duration + compression_duration;
+			results.push((
+				payload.len(),
+				COMPRESSED_BINCODE,
+				duration,
+				payload.len() as f32 / ref_compressed,
+			));
+		}
+		const UNVERSIONED: &str = "Unversioned Vec<Value>";
+		const COMPRESSED_UNVERSIONED: &str = "Compressed Unversioned Vec<Value>";
+		{
+			// Unversioned
+			let (duration, payload) = timed(&|| serialize(&vector, false).unwrap());
+			results.push((
+				payload.len(),
+				UNVERSIONED,
+				duration,
+				payload.len() as f32 / ref_payload,
+			));
+
+			// Compressed Versioned
+			let (compression_duration, payload) = timed(&|| compress(&payload));
+			let duration = duration + compression_duration;
+			results.push((
+				payload.len(),
+				COMPRESSED_UNVERSIONED,
+				duration,
+				payload.len() as f32 / ref_compressed,
+			));
+		}
+		//
+		const VERSIONED: &str = "Versioned Vec<Value>";
+		const COMPRESSED_VERSIONED: &str = "Compressed Versioned Vec<Value>";
+		{
+			// Versioned
+			let (duration, payload) = timed(&|| serialize(&vector, true).unwrap());
+			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
+
+			// Compressed Versioned
+			let (compression_duration, payload) = timed(&|| compress(&payload));
+			let duration = duration + compression_duration;
+			results.push((
+				payload.len(),
+				COMPRESSED_VERSIONED,
+				duration,
+				payload.len() as f32 / ref_compressed,
+			));
+		}
+		//
+		const CBOR: &str = "CBor Vec<Value>";
+		const COMPRESSED_CBOR: &str = "Compressed CBor Vec<Value>";
+		{
+			// CBor
+			let (duration, payload) = timed(&|| {
+				let cbor: Cbor = vector.clone().try_into().unwrap();
+				let mut res = Vec::new();
+				ciborium::into_writer(&cbor.0, &mut res).unwrap();
+				res
+			});
+			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));
+
+			// Compressed Cbor
+			let (compression_duration, payload) = timed(&|| compress(&payload));
+			let duration = duration + compression_duration;
+			results.push((
+				payload.len(),
+				COMPRESSED_CBOR,
+				duration,
+				payload.len() as f32 / ref_compressed,
+			));
+		}
+		// Sort the results by ascending size
+		results.sort_by(|(a, _, _, _), (b, _, _, _)| a.cmp(b));
+		for (size, name, duration, factor) in &results {
+			info!("{name} - Size: {size} - Duration: {duration:?} - Factor: {factor}");
+		}
+		// Check the expected sorted results
+		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
+		assert_eq!(
+			results,
+			vec![
+				BINCODE_REF,
+				COMPRESSED_BINCODE_REF,
+				COMPRESSED_CBOR,
+				COMPRESSED_BINCODE,
+				COMPRESSED_UNVERSIONED,
+				CBOR,
+				COMPRESSED_VERSIONED,
+				BINCODE,
+				UNVERSIONED,
+				VERSIONED,
+			]
+		)
+	}
+}
