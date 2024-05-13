@@ -597,6 +597,7 @@ mod tests {
 	use super::serialize;
 	use flate2::write::GzEncoder;
 	use flate2::Compression;
+	use rand::{thread_rng, Rng};
 	use std::io::Write;
 	use std::time::SystemTime;
 	use surrealdb_core::rpc::format::cbor::Cbor;
@@ -616,10 +617,16 @@ mod tests {
 			encoder.finish().unwrap()
 		};
 
-		// Native vector
-		let mut vector = Vec::new();
-		for i in 0..1_900_000 {
-			vector.push(i);
+		// Generate a random vector
+		let vector_size = if cfg!(debug_assertions) {
+			2_000_000 // Debug is slow
+		} else {
+			2_000_000 // Release is fast
+		};
+		let mut vector: Vec<i32> = Vec::new();
+		let mut rng = thread_rng();
+		for _ in 0..vector_size {
+			vector.push(rng.gen());
 		}
 
 		// Bincode Vec<i32>
@@ -668,7 +675,7 @@ mod tests {
 		let (compression_duration, payload) = timed(&|| compress(&payload));
 		let duration = duration + compression_duration;
 		info!(
-			"Compressed Versioned vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			"Compressed Versioned Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
 			payload.len(),
 			payload.len() as f32 / ref_compressed
 		);
@@ -690,7 +697,7 @@ mod tests {
 		let (compression_duration, payload) = timed(&|| compress(&payload));
 		let duration = duration + compression_duration;
 		info!(
-			"Compressed CBor vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			"Compressed CBor Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
 			payload.len(),
 			payload.len() as f32 / ref_compressed
 		);
