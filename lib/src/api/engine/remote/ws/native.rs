@@ -595,6 +595,7 @@ pub struct Socket(Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, M
 #[cfg(test)]
 mod tests {
 	use super::serialize;
+	use bincode::Options;
 	use flate2::write::GzEncoder;
 	use flate2::Compression;
 	use rand::{thread_rng, Rng};
@@ -638,7 +639,14 @@ mod tests {
 		const COMPRESSED_BINCODE_REF: &str = "Compressed Bincode Vec<i32>";
 		{
 			// Bincode Vec<i32>
-			let (duration, payload) = timed(&|| bincode::serialize(&vector).unwrap());
+			let (duration, payload) = timed(&|| {
+				let mut payload = Vec::new();
+				bincode::options()
+					.with_fixint_encoding()
+					.serialize_into(&mut payload, &vector)
+					.unwrap();
+				payload
+			});
 			ref_payload = payload.len() as f32;
 			results.push((payload.len(), BINCODE_REF, duration, 1.0));
 
@@ -655,7 +663,14 @@ mod tests {
 		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
 		{
 			// Bincode Vec<i32>
-			let (duration, payload) = timed(&|| bincode::serialize(&vector).unwrap());
+			let (duration, payload) = timed(&|| {
+				let mut payload = Vec::new();
+				bincode::options()
+					.with_varint_encoding()
+					.serialize_into(&mut payload, &vector)
+					.unwrap();
+				payload
+			});
 			results.push((payload.len(), BINCODE, duration, payload.len() as f32 / ref_payload));
 
 			// Compressed bincode
@@ -744,13 +759,13 @@ mod tests {
 				BINCODE_REF,
 				COMPRESSED_BINCODE_REF,
 				COMPRESSED_CBOR,
+				COMPRESSED_BINCODE,
 				COMPRESSED_UNVERSIONED,
 				CBOR,
 				COMPRESSED_VERSIONED,
-				COMPRESSED_BINCODE,
+				BINCODE,
 				UNVERSIONED,
 				VERSIONED,
-				BINCODE
 			]
 		)
 	}
