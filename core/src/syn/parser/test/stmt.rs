@@ -225,27 +225,180 @@ fn parse_define_user() {
 
 #[test]
 fn parse_define_access_jwt_key() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
-	)
-	.unwrap();
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Access(DefineAccessStatement {
-			name: Ident("a".to_string()),
-			base: Base::Db,
-			kind: AccessType::Jwt(JwtAccess {
-				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-					alg: Algorithm::EdDSA,
-					key: "foo".to_string(),
+	// With comment. Asymmetric verify only.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
 				}),
-				issue: None,
-			}),
-			comment: Some(Strand("bar".to_string())),
-			if_not_exists: false,
-		})),
-	)
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Asymmetric verify and issue.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" WITH ISSUER KEY "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::EdDSA,
+						key: "bar".to_string(),
+						// Default duration.
+						duration: Some(Duration::from_hours(1)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Symmetric verify and implicit issue.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::Hs256,
+						key: "foo".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Hs256,
+						key: "foo".to_string(),
+						// Default duration.
+						duration: Some(Duration::from_hours(1)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Symmetric verify and explicit issue.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER DURATION 10s"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::Hs256,
+						key: "foo".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Hs256,
+						key: "foo".to_string(),
+						duration: Some(Duration::from_secs(10)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Symmetric verify and explicit issue matching data.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS256 KEY "foo" DURATION 10s"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::Hs256,
+						key: "foo".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Hs256,
+						key: "foo".to_string(),
+						duration: Some(Duration::from_secs(10)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Symmetric verify and explicit issue non-matching data.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 KEY "bar" DURATION 10s"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of non-matching verifier and issuer: {:?}",
+			res
+		);
+	}
+	// Symmetric verify and explicit issue non-matching key.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER KEY "bar" DURATION 10s"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of non-matching verifier and issuer: {:?}",
+			res
+		);
+	}
+	// Symmetric verify and explicit issue non-matching algorithm.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 DURATION 10s"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of non-matching verifier and issuer: {:?}",
+			res
+		);
+	}
 }
 
 #[test]
