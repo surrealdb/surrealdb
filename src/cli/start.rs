@@ -174,7 +174,7 @@ pub async fn init(
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 		engine: None,
-	});
+	})?;
 	// This is the cancellation token propagated down to
 	// all the async functions that needs to be stopped gracefully.
 	let ct = CancellationToken::new();
