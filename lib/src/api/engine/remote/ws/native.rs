@@ -591,3 +591,85 @@ impl Response {
 }
 
 pub struct Socket(Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>);
+
+#[cfg(test)]
+mod tests {
+	use super::serialize;
+	use flate2::write::ZlibEncoder;
+	use flate2::Compression;
+	use std::io::Write;
+	use std::time::SystemTime;
+	use surrealdb_core::sql::{Array, Value};
+
+	#[test_log::test]
+	fn large_vector_serialisation_bench() {
+		let timed = |func: &dyn Fn() -> Vec<u8>| {
+			let start = SystemTime::now();
+			let r = func();
+			(start.elapsed().unwrap(), r)
+		};
+
+		let compress = |v: &Vec<u8>| {
+			let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+			encoder.write_all(&v).unwrap();
+			encoder.finish().unwrap()
+		};
+
+		// Native vector
+		let mut vector = Vec::new();
+		for i in 0..1_900_000 {
+			vector.push(i);
+		}
+
+		// Bincode Vec<i32>
+		let (duration, payload) = timed(&|| bincode::serialize(&vector).unwrap());
+		let ref_payload = payload.len() as f32;
+		info!("Bincode Vec<i32> - Size: {} - Duration: {duration:?} - Factor: 1.0", payload.len(),);
+
+		// Compress bincode
+		let (compression_duration, payload) = timed(&|| compress(&payload));
+		let duration = duration + compression_duration;
+		let ref_compressed = payload.len() as f32;
+		info!(
+			"Compressed Bincode Vec<i32> - Size {} - Duration: {duration:?} - Factor: 1.0",
+			payload.len()
+		);
+
+		// Surreal Vector
+		let vector = Value::Array(Array::from(vector));
+
+		// Unversioned payload
+		let (duration, payload) = timed(&|| serialize(&vector, false).unwrap());
+		info!(
+			"Unversioned Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			payload.len(),
+			payload.len() as f32 / ref_payload
+		);
+
+		// Compressed Versioned payload
+		let (compression_duration, payload) = timed(&|| compress(&payload));
+		let duration = duration + compression_duration;
+		info!(
+			"Compressed Unversioned Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			payload.len(),
+			payload.len() as f32 / ref_compressed
+		);
+
+		// Versioned payload
+		let (duration, payload) = timed(&|| serialize(&vector, true).unwrap());
+		info!(
+			"Versioned Vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			payload.len(),
+			payload.len() as f32 / ref_payload
+		);
+
+		// Compressed Versioned payload
+		let (compression_duration, payload) = timed(&|| compress(&payload));
+		let duration = duration + compression_duration;
+		info!(
+			"Compressed Versioned vec<Value> - Size: {} - Duration: {duration:?} - Factor: {}",
+			payload.len(),
+			payload.len() as f32 / ref_compressed
+		);
+	}
+}
