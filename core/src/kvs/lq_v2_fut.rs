@@ -1,5 +1,5 @@
 use crate::cf;
-use crate::cf::{ChangeSet, TableMutation};
+use crate::cf::ChangeSet;
 use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::fflags::FFLAGS;
@@ -167,13 +167,6 @@ async fn process_change_set_for_notifications(
 						// for the current state we only forward
 						let (local_notification_channel_sender, local_notification_channel_recv) =
 							channel::bounded(notification_capacity);
-						if doc.initial_doc().is_none()
-							&& doc.current_doc().is_none()
-							&& !matches!(mutation, TableMutation::Del(_))
-						{
-							// If we have a None to None mutation, and it isn't delete, then it indicates a bad document
-							panic!("Doc was wrong and the mutation was {:?}", mutation);
-						}
 						doc.check_lqs_and_send_notifications(
 							stk,
 							opt,

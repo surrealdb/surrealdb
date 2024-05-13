@@ -204,9 +204,11 @@ async fn live_select_record_ranges() {
 
 		// Delete the record
 		let _: Option<RecordId> = db.delete(&notification.data.id).await.unwrap();
+
 		// Pull the notification
 		let notification: Notification<RecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 	}
@@ -226,7 +228,11 @@ async fn live_select_record_ranges() {
 			db.select(Resource::from(&table)).range("jane".."john").live().await.unwrap();
 
 		// Create a record
-		db.create(Resource::from((table, "job"))).await.unwrap();
+		let created_value = match db.create(Resource::from((table, "job"))).await.unwrap() {
+			Value::Object(created_value) => created_value,
+			_ => panic!("Expected an object"),
+		};
+
 		// Pull the notification
 		let notification: Notification<Value> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
@@ -234,6 +240,25 @@ async fn live_select_record_ranges() {
 		assert!(notification.data.is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
+
+		// Delete the record
+		let thing = match created_value.0.get("id").unwrap() {
+			Value::Thing(thing) => thing,
+			_ => panic!("Expected a thing"),
+		};
+		db.query("DELETE $item").bind(("item", thing.clone())).await.unwrap();
+
+		// Pull the notification
+		let notification: Notification<Value> =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap();
+
+		// It should be deleted
+		assert_eq!(notification.action, Action::Delete);
+		let notification = match notification.data {
+			Value::Object(notification) => notification,
+			_ => panic!("Expected an object"),
+		};
+		assert_eq!(notification.0, created_value.0);
 	}
 
 	drop(permit);
@@ -244,7 +269,6 @@ async fn live_select_query() {
 	let (permit, db) = new_db().await;
 
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-
 	{
 		let table = format!("table_{}", Ulid::new());
 		if FFLAGS.change_feed_live_queries.enabled() {
