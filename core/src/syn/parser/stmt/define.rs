@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::sql::access_type::{JwtAccessVerify, JwtAccessVerifyKey};
 use crate::sql::index::HnswParams;
 use crate::{
 	sql::{
@@ -1074,7 +1075,7 @@ impl Parser<'_> {
 
 	pub fn parse_jwt(&mut self, ac: Option<AccessType>) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
-			// By default a explicitly defined JWT is only used to verify.
+			// By default, a JWT access method is only used to verify.
 			issue: None,
 			..Default::default()
 		};
@@ -1104,11 +1105,15 @@ impl Parser<'_> {
 								},
 							);
 
-							// If the algorithm is symmetric, the issuer is the same as the verifier.
+							// Currently, issuer and verifier must use the same algorithm.
+							iss.alg = alg;
+
+							// If the algorithm is symmetric, the issuer and verifier keys are the same.
 							// For asymmetric algorithms, the key needs to be explicitly defined.
 							if alg.is_symmetric() {
-								iss.alg = alg;
 								iss.key = key;
+								// Since all the issuer data is known, it can already be assigned.
+								// The clone allows updating the original with any explicit issuer data.
 								res.issue = Some(iss.clone());
 							}
 						}
@@ -1133,9 +1138,17 @@ impl Parser<'_> {
 				match self.peek_kind() {
 					t!("KEY") => {
 						self.pop_peek();
-						// Since a key is specified, overwrite any default assumption.
-						// This can be used when issued tokens are only verified externally.
-						iss.key = self.next_token_value::<Strand>()?.0;
+						let key = self.next_token_value::<Strand>()?.0;
+						// If the algorithm is symmetric and the key was already defined, a different key is not expected.
+						match res.verify {
+							JwtAccessVerify::Key(ref ver) => {
+								if ver.alg.is_symmetric() && key != ver.key {
+									unexpected!(self, t!("KEY"), "a symmetric key");
+								}
+							}
+							_ => {}
+						}
+						iss.key = key;
 					}
 					t!("DURATION") => {
 						self.pop_peek();
