@@ -225,8 +225,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("session::ip") => PathKind::Function,
 		UniCase::ascii("session::ns") => PathKind::Function,
 		UniCase::ascii("session::origin") => PathKind::Function,
-		UniCase::ascii("session::sc") => PathKind::Function,
-		UniCase::ascii("session::sd") => PathKind::Function,
+		UniCase::ascii("session::ac") => PathKind::Function,
+		UniCase::ascii("session::rd") => PathKind::Function,
 		UniCase::ascii("session::token") => PathKind::Function,
 		//
 		UniCase::ascii("string::concat") => PathKind::Function,

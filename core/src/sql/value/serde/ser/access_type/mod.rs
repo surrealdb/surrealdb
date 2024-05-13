@@ -175,7 +175,7 @@ impl serde::ser::SerializeStruct for SerializeJwt {
 				self.verify = value.serialize(SerializerJwtVerify.wrap())?;
 			}
 			"issue" => {
-				self.issue = Some(value.serialize(SerializerJwtIssue.wrap())?);
+				self.issue = value.serialize(SerializerJwtIssueOpt.wrap())?;
 			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `JwtAccess::{key}`")));
@@ -358,6 +358,37 @@ impl serde::ser::SerializeStruct for SerializeJwtVerifyJwks {
 }
 
 // Serialize JWT Access Issue
+
+pub struct SerializerJwtIssueOpt;
+
+impl ser::Serializer for SerializerJwtIssueOpt {
+	type Ok = Option<JwtAccessIssue>;
+	type Error = Error;
+
+	type SerializeSeq = Impossible<Option<JwtAccessIssue>, Error>;
+	type SerializeTuple = Impossible<Option<JwtAccessIssue>, Error>;
+	type SerializeTupleStruct = Impossible<Option<JwtAccessIssue>, Error>;
+	type SerializeTupleVariant = Impossible<Option<JwtAccessIssue>, Error>;
+	type SerializeMap = Impossible<Option<JwtAccessIssue>, Error>;
+	type SerializeStruct = Impossible<Option<JwtAccessIssue>, Error>;
+	type SerializeStructVariant = Impossible<Option<JwtAccessIssue>, Error>;
+
+	const EXPECTED: &'static str = "an `Option<JwtAccessIssue>`";
+
+	#[inline]
+	fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+		Ok(None)
+	}
+
+	#[inline]
+	fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		Ok(Some(value.serialize(SerializerJwtIssue.wrap())?))
+	}
+}
+
 pub struct SerializerJwtIssue;
 
 impl ser::Serializer for SerializerJwtIssue {

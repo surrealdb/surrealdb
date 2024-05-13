@@ -116,6 +116,9 @@ impl serde::ser::SerializeTupleVariant for SerializeInfoStatement {
 			(_, 0) => {
 				self.tuple.0 = Some(Ident(value.serialize(ser::string::Serializer.wrap())?));
 			}
+			(Tb, 1) => {
+				self.tuple.2 = value.serialize(ser::primitive::bool::Serializer.wrap())?;
+			}
 			(User, 1) => {
 				self.tuple.1 = value.serialize(ser::base::opt::Serializer.wrap())?;
 			}

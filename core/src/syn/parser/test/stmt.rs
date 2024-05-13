@@ -358,7 +358,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM HS512 KEY "foo""#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM HS384 KEY "foo""#
 		)
 		.unwrap();
 		assert_eq!(
@@ -372,11 +372,11 @@ fn parse_define_access_record() {
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-							alg: Algorithm::Hs512,
+							alg: Algorithm::Hs384,
 							key: "foo".to_string(),
 						}),
 						issue: Some(JwtAccessIssue {
-							alg: Algorithm::Hs512,
+							alg: Algorithm::Hs384,
 							// Issuer key matches verification key by default in symmetric algorithms.
 							key: "foo".to_string(),
 							// Token duration matches session duration by default.
@@ -393,7 +393,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM HS512 KEY "foo" WITH ISSUER KEY "bar""#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar""#
 		)
 		.unwrap();
 		assert_eq!(
@@ -407,11 +407,11 @@ fn parse_define_access_record() {
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-							alg: Algorithm::Hs512,
+							alg: Algorithm::Ps512,
 							key: "foo".to_string(),
 						}),
 						issue: Some(JwtAccessIssue {
-							alg: Algorithm::Hs512,
+							alg: Algorithm::Ps512,
 							key: "bar".to_string(),
 							// Token duration matches session duration by default.
 							duration: Some(Duration::from_secs(10)),
@@ -427,7 +427,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM HS512 KEY 'foo' WITH ISSUER KEY 'bar' DURATION 1m"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION 10s WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION 1m"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -441,11 +441,11 @@ fn parse_define_access_record() {
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-							alg: Algorithm::Hs512,
+							alg: Algorithm::Rs256,
 							key: "foo".to_string(),
 						}),
 						issue: Some(JwtAccessIssue {
-							alg: Algorithm::Hs512,
+							alg: Algorithm::Rs256,
 							key: "bar".to_string(),
 							duration: Some(Duration::from_mins(1)),
 						}),
