@@ -146,12 +146,14 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node, Error> {
-		if n == Node::Computable {
-			let v = v.compute(stk, self.ctx, self.opt, self.txn, None).await?;
-			Ok(Node::Computed(Arc::new(v)))
+		Ok(if n == Node::Computable {
+			match v.compute(stk, self.ctx, self.opt, self.txn, None).await {
+				Ok(v) => Node::Computed(Arc::new(v)),
+				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
+			}
 		} else {
-			Ok(n)
-		}
+			n
+		})
 	}
 
 	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node, Error> {
