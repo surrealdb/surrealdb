@@ -312,6 +312,7 @@ impl Parser<'_> {
 
 		let mut res = DefineAccessStatement {
 			name,
+			base: base.clone(),
 			if_not_exists,
 			..Default::default()
 		};
@@ -323,6 +324,7 @@ impl Parser<'_> {
 				let mut ac = access_type::RecordAccess {
 					..Default::default()
 				};
+				ac.jwt.issue = None;
 				loop {
 					match self.peek_kind() {
 						t!("COMMENT") => {
@@ -362,6 +364,7 @@ impl Parser<'_> {
 			// DEFINE TOKEN anywhere else is now JWT access
 			_ => {
 				let mut ac = access_type::JwtAccess {
+					issue: None,
 					..Default::default()
 				};
 				loop {
@@ -437,6 +440,10 @@ impl Parser<'_> {
 				t!("SESSION") => {
 					self.pop_peek();
 					ac.duration = Some(self.next_token_value()?);
+					// By default, token duration matches session duration.
+					if let Some(ref mut iss) = ac.jwt.issue {
+						iss.duration = ac.duration;
+					}
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
@@ -1089,6 +1096,8 @@ impl Parser<'_> {
 		if let Some(AccessType::Record(ac)) = ac {
 			// By default, token duration is inherited from session duration in record access.
 			iss.duration = ac.duration;
+			// Cloning allows updating the original with any explicit issuer data.
+			res.issue = Some(iss.clone());
 		}
 
 		match self.peek_kind() {

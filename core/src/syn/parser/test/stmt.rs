@@ -223,6 +223,174 @@ fn parse_define_user() {
 	assert_eq!(stmt.comment, Some(Strand("*******".to_string())))
 }
 
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+#[test]
+fn parse_define_token() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE TOKEN a ON DATABASE TYPE EDDSA VALUE "foo" COMMENT "bar""#
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
+			name: Ident("a".to_string()),
+			base: Base::Db,
+			kind: AccessType::Jwt(JwtAccess {
+				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+					alg: Algorithm::EdDSA,
+					key: "foo".to_string(),
+				}),
+				issue: None,
+			}),
+			comment: Some(Strand("bar".to_string())),
+			if_not_exists: false,
+		})),
+	)
+}
+
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+#[test]
+fn parse_define_token_on_scope() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE TOKEN a ON SCOPE b TYPE EDDSA VALUE "foo" COMMENT "bar""#
+	)
+	.unwrap();
+
+	// Manually compare since DefineAccessStatement for record access
+	// without explicit JWT will create a random signing key during parsing.
+	let Statement::Define(DefineStatement::Access(stmt)) = res else {
+		panic!()
+	};
+
+	assert_eq!(stmt.name, Ident("a".to_string()));
+	assert_eq!(stmt.base, Base::Db); // Scope base is ignored.
+	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
+	assert_eq!(stmt.if_not_exists, false);
+	match stmt.kind {
+		AccessType::Record(ac) => {
+			// A session duration of one hour is set by default.
+			assert_eq!(ac.duration, Some(Duration::from_hours(1)));
+			assert_eq!(ac.signup, None);
+			assert_eq!(ac.signin, None);
+			match ac.jwt.verify {
+				JwtAccessVerify::Key(key) => {
+					assert_eq!(key.alg, Algorithm::EdDSA);
+				}
+				_ => panic!(),
+			}
+			assert_eq!(ac.jwt.issue, None);
+		}
+		_ => panic!(),
+	}
+}
+
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+#[test]
+fn parse_define_token_jwks() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE TOKEN a ON DATABASE TYPE JWKS VALUE "http://example.com/.well-known/jwks.json" COMMENT "bar""#
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
+			name: Ident("a".to_string()),
+			base: Base::Db,
+			kind: AccessType::Jwt(JwtAccess {
+				verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+					url: "http://example.com/.well-known/jwks.json".to_string(),
+				}),
+				issue: None,
+			}),
+			comment: Some(Strand("bar".to_string())),
+			if_not_exists: false,
+		})),
+	)
+}
+
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+#[test]
+fn parse_define_token_jwks_on_scope() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE TOKEN a ON SCOPE b TYPE JWKS VALUE "http://example.com/.well-known/jwks.json" COMMENT "bar""#
+	)
+	.unwrap();
+
+	// Manually compare since DefineAccessStatement for record access
+	// without explicit JWT will create a random signing key during parsing.
+	let Statement::Define(DefineStatement::Access(stmt)) = res else {
+		panic!()
+	};
+
+	assert_eq!(stmt.name, Ident("a".to_string()));
+	assert_eq!(stmt.base, Base::Db); // Scope base is ignored.
+	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
+	assert_eq!(stmt.if_not_exists, false);
+	match stmt.kind {
+		AccessType::Record(ac) => {
+			// A session duration of one hour is set by default.
+			assert_eq!(ac.duration, Some(Duration::from_hours(1)));
+			assert_eq!(ac.signup, None);
+			assert_eq!(ac.signin, None);
+			match ac.jwt.verify {
+				JwtAccessVerify::Jwks(jwks) => {
+					assert_eq!(jwks.url, "http://example.com/.well-known/jwks.json");
+				}
+				_ => panic!(),
+			}
+			assert_eq!(ac.jwt.issue, None);
+		}
+		_ => panic!(),
+	}
+}
+
+// TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+#[test]
+fn parse_define_scope() {
+	let res = test_parse!(
+		parse_stmt,
+		r#"DEFINE SCOPE a SESSION 1s SIGNUP true SIGNIN false COMMENT "bar""#
+	)
+	.unwrap();
+
+	// Manually compare since DefineAccessStatement for record access
+	// without explicit JWT will create a random signing key during parsing.
+	let Statement::Define(DefineStatement::Access(stmt)) = res else {
+		panic!()
+	};
+
+	assert_eq!(stmt.name, Ident("a".to_string()));
+	assert_eq!(stmt.base, Base::Db);
+	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
+	assert_eq!(stmt.if_not_exists, false);
+	match stmt.kind {
+		AccessType::Record(ac) => {
+			assert_eq!(ac.duration, Some(Duration(std::time::Duration::from_secs(1))));
+			assert_eq!(ac.signup, Some(Value::Bool(true)));
+			assert_eq!(ac.signin, Some(Value::Bool(false)));
+			match ac.jwt.verify {
+				JwtAccessVerify::Key(key) => {
+					assert_eq!(key.alg, Algorithm::Hs512);
+				}
+				_ => panic!(),
+			}
+			match ac.jwt.issue {
+				Some(iss) => {
+					assert_eq!(iss.alg, Algorithm::Hs512);
+					// Token duration matches session duration by default.
+					assert_eq!(iss.duration, Some(Duration::from_secs(1)));
+				}
+				_ => panic!(),
+			}
+		}
+		_ => panic!(),
+	}
+}
+
 #[test]
 fn parse_define_access_jwt_key() {
 	// With comment. Asymmetric verify only.
@@ -403,26 +571,139 @@ fn parse_define_access_jwt_key() {
 
 #[test]
 fn parse_define_access_jwt_jwks() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" COMMENT "bar""#
-	)
-	.unwrap();
-	assert_eq!(
-		res,
-		Statement::Define(DefineStatement::Access(DefineAccessStatement {
-			name: Ident("a".to_string()),
-			base: Base::Db,
-			kind: AccessType::Jwt(JwtAccess {
-				verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-					url: "http://example.com/.well-known/jwks.json".to_string(),
+	// With comment. Verify only.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" COMMENT "bar""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+						url: "http://example.com/.well-known/jwks.json".to_string(),
+					}),
+					issue: None,
 				}),
-				issue: None,
-			}),
-			comment: Some(Strand("bar".to_string())),
-			if_not_exists: false,
-		})),
-	)
+				comment: Some(Strand("bar".to_string())),
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Verify and symmetric issuer.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+						url: "http://example.com/.well-known/jwks.json".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Hs384,
+						key: "foo".to_string(),
+						// Default duration.
+						duration: Some(Duration::from_hours(1)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Verify and symmetric issuer with custom duration.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo" DURATION 10s"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+						url: "http://example.com/.well-known/jwks.json".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Hs384,
+						key: "foo".to_string(),
+						duration: Some(Duration::from_secs(10)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Verify and asymmetric issuer.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo""#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+						url: "http://example.com/.well-known/jwks.json".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Ps256,
+						key: "foo".to_string(),
+						// Default duration.
+						duration: Some(Duration::from_hours(1)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
+	// Verify and asymmetric issuer with custom duration.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo" DURATION 10s"#
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Statement::Define(DefineStatement::Access(DefineAccessStatement {
+				name: Ident("a".to_string()),
+				base: Base::Db,
+				kind: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+						url: "http://example.com/.well-known/jwks.json".to_string(),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::Ps256,
+						key: "foo".to_string(),
+						duration: Some(Duration::from_secs(10)),
+					}),
+				}),
+				comment: None,
+				if_not_exists: false,
+			})),
+		)
+	}
 }
 
 #[test]
