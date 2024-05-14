@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.5.0-beta.1"
+version = "1.5.0"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -92,7 +92,7 @@ semver = "1.0.20"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 serde_pack = { version = "1.1.2", package = "rmp-serde" }
-surrealdb = { version = "=1.5.0-beta.1", path = "lib", features = [
+surrealdb = { version = "1", path = "lib", features = [
 	"protocol-http",
 	"protocol-ws",
 	"rustls",
