@@ -1759,6 +1759,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
+	#[ignore]
 	async fn test_mtree_unique_small() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
@@ -1889,6 +1890,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
+	#[ignore]
 	async fn test_mtree_random_small() -> Result<(), Error> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack

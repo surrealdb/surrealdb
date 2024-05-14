@@ -19,7 +19,7 @@ impl Default for EngineOptions {
 		Self {
 			new_live_queries_per_transaction: 100,
 			live_query_catchup_size: 1000,
-			tick_interval: Duration::from_secs(1),
+			tick_interval: Duration::from_secs(10),
 		}
 	}
 }

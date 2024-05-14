@@ -251,7 +251,7 @@ impl Display for Index {
 			Self::Hnsw(p) => {
 				write!(
 					f,
-					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} ML {}",
+					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} LM {}",
 					p.dimension, p.distance, p.vector_type, p.ef_construction, p.m, p.m0, p.ml
 				)?;
 				if p.extend_candidates {
