@@ -46,13 +46,11 @@
 <p align="center">
 	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?label=docker&style=flat-square"></a>
     &nbsp;
-    <a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/d/surrealdb
-	?color=dca282&label=rust&style=flat-square"></a>
+    <a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/d/surrealdb?color=dca282&label=rust&style=flat-square"></a>
 	&nbsp;
     <a href="https://www.npmjs.com/package/surrealdb.js"><img src="https://img.shields.io/npm/dt/surrealdb.js?color=f7df1e&label=javascript&style=flat-square"></a>
     &nbsp;
-	<a href="https://pypi.org/project/surrealdb/"><img src="https://img.shields.io/pepy/dt/surrealdb
-	?color=426c99&label=python&style=flat-square"></a>
+	<a href="https://pypi.org/project/surrealdb/"><img src="https://img.shields.io/pepy/dt/surrealdb?color=426c99&label=python&style=flat-square"></a>
 	&nbsp;
 	<a href="https://www.nuget.org/packages/SurrealDb.Net"><img src="https://img.shields.io/nuget/dt/surrealdb.net?color=4c2dcc&label=.NET&style=flat-square"></a>
 	&nbsp;
