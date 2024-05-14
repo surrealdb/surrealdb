@@ -32,13 +32,13 @@ pub async fn signup(
 			let ac = ac.to_raw_string();
 			// Attempt to signup using specified access method
 			// Currently, signup is only supported at the database level
-			super::signup::db(kvs, session, ns, db, ac, vars).await
+			super::signup::db_access(kvs, session, ns, db, ac, vars).await
 		}
 		_ => Err(Error::InvalidSignup),
 	}
 }
 
-pub async fn db(
+pub async fn db_access(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,

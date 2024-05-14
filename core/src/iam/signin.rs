@@ -34,7 +34,7 @@ pub async fn signin(
 			let db = db.to_raw_string();
 			let ac = ac.to_raw_string();
 			// Attempt to signin using specified access method
-			super::signin::db(kvs, session, ns, db, ac, vars).await
+			super::signin::db_access(kvs, session, ns, db, ac, vars).await
 		}
 		// DB signin with user credentials
 		(Some(ns), Some(db), None) => {
@@ -97,7 +97,7 @@ pub async fn signin(
 	}
 }
 
-pub async fn db(
+pub async fn db_access(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
