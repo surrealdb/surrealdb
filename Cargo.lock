@@ -5887,6 +5887,7 @@ dependencies = [
  "async-channel 1.9.0",
  "bincode",
  "chrono",
+ "ciborium",
  "criterion",
  "dmp",
  "env_logger 0.10.2",
