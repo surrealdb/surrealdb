@@ -408,7 +408,7 @@ mod tests {
 			let mut vars: HashMap<&str, Value> = HashMap::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
-			let res = db(
+			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
@@ -478,7 +478,7 @@ mod tests {
 			let mut vars: HashMap<&str, Value> = HashMap::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "incorrect".into());
-			let res = db(
+			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
@@ -575,7 +575,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let mut vars: HashMap<&str, Value> = HashMap::new();
 			vars.insert("user", "user".into());
 			vars.insert("pass", "pass".into());
-			let res = db(
+			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
