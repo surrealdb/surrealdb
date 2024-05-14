@@ -44,7 +44,7 @@
 </p>
 
 <p align="center">
-	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?label=docker&style=flat-square"></a>
+	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?label=docker%20pulls&style=flat-square"></a>
     &nbsp;
     <a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/d/surrealdb?color=dca282&label=rust&style=flat-square"></a>
 	&nbsp;
@@ -56,7 +56,7 @@
 	&nbsp;
 	<a href="https://packagist.org/packages/surrealdb/surrealdb.php"><img src="https://img.shields.io/packagist/dt/surrealdb/surrealdb.php?color=4d588b&label=php&style=flat-square"></a>
     &nbsp;
-	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/github/downloads/surrealdb/surrealdb/total?color=8259dd&label=github&style=flat-square"></a>
+	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/github/downloads/surrealdb/surrealdb/total?color=8259dd&label=github%20downloads&style=flat-square"></a>
 </p>
 
 <p align="center">
