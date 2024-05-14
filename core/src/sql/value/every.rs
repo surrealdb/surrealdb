@@ -52,8 +52,10 @@ impl Value {
 					false => vec![prev],
 				}
 			}
-			// Process everything else
-			_ => vec![prev],
+			// Process every other path
+			_ if prev.len() > 0 => vec![prev],
+			// Nothing to do
+			_ => vec![],
 		}
 	}
 }
@@ -63,6 +65,13 @@ mod tests {
 
 	use super::*;
 	use crate::syn::Parse;
+
+	#[test]
+	fn every_empty() {
+		let val = Value::parse("{}");
+		let res: Vec<Idiom> = vec![];
+		assert_eq!(res, val.every(None, false, false));
+	}
 
 	#[test]
 	fn every_with_empty_objects_arrays() {
