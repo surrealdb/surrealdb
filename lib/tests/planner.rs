@@ -1922,7 +1922,7 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 	//
 	let sql = "
 		DEFINE FIELD name ON TABLE t TYPE string;
-		DEFINE FIELD t ON TABLE i TYPE record(t);
+		DEFINE FIELD t ON TABLE i TYPE record<t>;
 		CREATE t:1 SET name = 'h';
 		CREATE t:2 SET name = 'h';
 		CREATE i:A SET t = t:1;
@@ -1981,7 +1981,7 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
 		DEFINE INDEX t_name_idx ON TABLE t COLUMNS name;
 		DEFINE FIELD name ON TABLE t TYPE string;
-		DEFINE FIELD t ON TABLE i TYPE record(t);
+		DEFINE FIELD t ON TABLE i TYPE record<t>;
 		CREATE t:1 SET name = 'h';
 		CREATE t:2 SET name = 'h';
 		CREATE i:A SET t = t:1;
@@ -2046,7 +2046,7 @@ async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
 		DEFINE INDEX i_t_unique_id ON TABLE i COLUMNS t UNIQUE;
 		DEFINE INDEX t_name_idx ON TABLE t COLUMNS name;
 		DEFINE FIELD name ON TABLE t TYPE string;
-		DEFINE FIELD t ON TABLE i TYPE record(t);
+		DEFINE FIELD t ON TABLE i TYPE record<t>;
 		CREATE t:1 SET name = 'h';
 		CREATE t:2 SET name = 'h';
 		CREATE i:A SET t = t:1;
@@ -2110,7 +2110,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<(), Error> {
 		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
 		DEFINE INDEX t_name_unique_idx ON TABLE t COLUMNS name UNIQUE;
 		DEFINE FIELD name ON TABLE t TYPE string;
-		DEFINE FIELD t ON TABLE i TYPE record(t);
+		DEFINE FIELD t ON TABLE i TYPE record<t>;
 		CREATE t:1 SET name = 'a';
 		CREATE t:2 SET name = 'b';
 		CREATE i:A SET t = t:1;
@@ -2179,7 +2179,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
 		DEFINE INDEX i_t_id ON TABLE i COLUMNS t;
 		DEFINE FIELD name ON TABLE t TYPE string;
-		DEFINE FIELD t ON TABLE i TYPE record(t);
+		DEFINE FIELD t ON TABLE i TYPE record<t>;
 		CREATE t:1 SET name = 'Hello World';
 		CREATE i:A SET t = t:1;
 		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
@@ -2236,7 +2236,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 		DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
 		DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name SEARCH ANALYZER name BM25 HIGHLIGHTS;
 		DEFINE FIELD name ON TABLE t TYPE string;
-		DEFINE FIELD t ON TABLE i TYPE record(t);
+		DEFINE FIELD t ON TABLE i TYPE record<t>;
 		CREATE t:1 SET name = 'Hello World';
 		CREATE i:A SET t = t:1;
 		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
