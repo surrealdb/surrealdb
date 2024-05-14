@@ -2527,3 +2527,76 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_with_non_boolean_expression() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	//
+	let sql = "
+		DEFINE INDEX idx ON t FIELDS v;
+		CREATE t:1 set v = 1;
+		CREATE t:2 set v = 2;
+		LET $p1 = 1;
+		LET $p3 = 3;
+ 		SELECT * FROM t WHERE v > math::max([0, 1]);
+		SELECT * FROM t WHERE v > math::max([0, 1]) EXPLAIN;
+		SELECT * FROM t WHERE v > 3 - math::max([0, 2]);
+		SELECT * FROM t WHERE v > 3 - math::max([0, 2]) EXPLAIN;
+		SELECT * FROM t WHERE v > 3 - math::max([0, 1]) - 1;
+		SELECT * FROM t WHERE v > 3 - math::max([0, 1]) - 1 EXPLAIN;
+		SELECT * FROM t WHERE v > 3 - ( math::max([0, 1]) + 1 );
+		SELECT * FROM t WHERE v > 3 - ( math::max([0, 1]) + 1 ) EXPLAIN;
+		SELECT * FROM t WHERE v > $p3 - ( math::max([0, $p1]) + $p1 );
+		SELECT * FROM t WHERE v > $p3 - ( math::max([0, $p1]) + $p1 ) EXPLAIN;
+	";
+	let mut res = dbs.execute(&sql, &ses, None).await?;
+	//
+	assert_eq!(res.len(), 15);
+	skip_ok(&mut res, 5)?;
+	//
+	for i in 0..5 {
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+				{
+					id: t:2,
+					v: 2
+				}
+			]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			r#"[
+					{
+						detail: {
+							plan: {
+								from: {
+									inclusive: false,
+									value: 1
+								},
+								index: 'idx',
+								to: {
+									inclusive: false,
+									value: NONE
+								}
+							},
+							table: 't'
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
+		);
+		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+	}
+	//
+	Ok(())
+}

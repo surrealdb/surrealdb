@@ -136,15 +136,24 @@ impl<'a> TreeBuilder<'a> {
 			| Value::Uuid(_)
 			| Value::Constant(_)
 			| Value::Geometry(_)
-			| Value::Datetime(_) => Ok(Node::Computed(Arc::new(v.to_owned()))),
+			| Value::Datetime(_)
+			| Value::Param(_)
+			| Value::Function(_) => Ok(Node::Computable),
 			Value::Array(a) => self.eval_array(stk, a).await,
 			Value::Subquery(s) => self.eval_subquery(stk, s).await,
-			Value::Param(p) => {
-				let v = stk.run(|stk| p.compute(stk, self.ctx, self.opt, self.txn, None)).await?;
-				stk.run(|stk| self.eval_value(stk, group, &v)).await
-			}
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
+	}
+
+	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node, Error> {
+		Ok(if n == Node::Computable {
+			match v.compute(stk, self.ctx, self.opt, self.txn, None).await {
+				Ok(v) => Node::Computed(Arc::new(v)),
+				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
+			}
+		} else {
+			n
+		})
 	}
 
 	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node, Error> {
@@ -289,9 +298,15 @@ impl<'a> TreeBuilder<'a> {
 				if let Some(re) = self.resolved_expressions.get(e).cloned() {
 					return Ok(re.into());
 				}
+				let left = stk.run(|stk| self.eval_value(stk, group, l)).await?;
+				let right = stk.run(|stk| self.eval_value(stk, group, r)).await?;
+				// If both values are computable, then we can delegate the computation to the parent
+				if left == Node::Computable && right == Node::Computable {
+					return Ok(Node::Computable);
+				}
 				let exp = Arc::new(e.clone());
-				let left = Arc::new(stk.run(|stk| self.eval_value(stk, group, l)).await?);
-				let right = Arc::new(stk.run(|stk| self.eval_value(stk, group, r)).await?);
+				let left = Arc::new(self.compute(stk, l, left).await?);
+				let right = Arc::new(self.compute(stk, r, right).await?);
 				let mut io = None;
 				if let Some((id, local_irs, remote_irs)) = left.is_indexed_field() {
 					io = self.lookup_index_options(
@@ -552,6 +567,7 @@ pub(super) enum Node {
 	IndexedField(Idiom, Vec<IndexRef>),
 	RecordField(Idiom, RecordOptions),
 	NonIndexedField(Idiom),
+	Computable,
 	Computed(Arc<Value>),
 	Unsupported(String),
 }
