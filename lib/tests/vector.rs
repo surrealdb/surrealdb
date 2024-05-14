@@ -274,3 +274,69 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_mtree_knn_with_limit() -> Result<(), Error> {
+	let sql = r"
+		DEFINE INDEX mt_pt1 ON pts FIELDS point MTREE DIMENSION 1;
+		INSERT INTO pts [
+			{ id: pts:1, point: [ 1f ], flag: true },
+			{ id: pts:2, point: [ 2f ], flag: false },
+			{ id: pts:3, point: [ 3f ], flag: true },
+			{ id: pts:4, point: [ 4f ], flag: false },
+			{ id: pts:5, point: [ 5f ], flag: true },
+			{ id: pts:6, point: [ 6f ], flag: false },
+			{ id: pts:7, point: [ 7f ], flag: true }
+		];
+		LET $pt = [4.5f];
+		SELECT id, flag, vector::similarity::cosine(point, $pt) AS similarity FROM pts
+			WHERE flag = true && point <||> $pt
+			ORDER BY similarity DESC
+			LIMIT 2;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	skip_ok(&mut res, 2)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					id: pts_true:5,
+					similarity: 1
+				},
+				{
+					id: pts_true:3,
+					similarity: 1
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+					{
+						detail: {
+							plan: {
+								index: 'mt_pt1',
+								operator: '<||>',
+								value: [4.5f]
+							},
+							table: 'pts',
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	Ok(())
+}
