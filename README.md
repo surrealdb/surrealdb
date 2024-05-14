@@ -30,7 +30,7 @@
 <br>
 
 <p align="center">
-    <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=%23ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
+    <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
     &nbsp;
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/built_with-Rust-dca282.svg?style=flat-square"></a>
     &nbsp;
@@ -44,6 +44,24 @@
 </p>
 
 <p align="center">
+	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?label=docker&style=flat-square"></a>
+    &nbsp;
+    <a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/d/surrealdb
+	?color=dca282&label=rust&style=flat-square"></a>
+	&nbsp;
+    <a href="https://www.npmjs.com/package/surrealdb.js"><img src="https://img.shields.io/npm/dt/surrealdb.js?color=f7df1e&label=javascript&style=flat-square"></a>
+    &nbsp;
+	<a href="https://pypi.org/project/surrealdb/"><img src="https://img.shields.io/pepy/dt/surrealdb
+	?color=426c99&label=python&style=flat-square"></a>
+	&nbsp;
+	<a href="https://www.nuget.org/packages/SurrealDb.Net"><img src="https://img.shields.io/nuget/dt/surrealdb.net?color=4c2dcc&label=.NET&style=flat-square"></a>
+	&nbsp;
+	<a href="https://packagist.org/packages/surrealdb/surrealdb.php"><img src="https://img.shields.io/packagist/dt/surrealdb/surrealdb.php?color=4d588b&label=php&style=flat-square"></a>
+    &nbsp;
+	<a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/github/downloads/surrealdb/surrealdb/total?color=8259dd&label=github&style=flat-square"></a>
+</p>
+
+<p align="center">
 	<a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
 	&nbsp;
     <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/twitter-follow_us-1d9bf0.svg?style=flat-square"></a>
@@ -51,6 +69,8 @@
     <a href="https://dev.to/surrealdb"><img src="https://img.shields.io/badge/dev-join_us-86f7b7.svg?style=flat-square"></a>
     &nbsp;
     <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square"></a>
+	&nbsp;
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img src="https://img.shields.io/badge/youtube-subscribe-fc1c1c.svg?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -95,14 +115,14 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 
 - [Features](#features)
 - [Documentation](#documentation)
+- [Getting started](#getting-started)
+	- [Server side code](#server-side-code)
+	- [Client side apps](#client-side-apps)
 - [Installation](#installation)
 	- [Install on macOS](#install-on-macos)
 	- [Install on Linux](#install-on-linux)
 	- [Install on Windows](#install-on-windows)
 	- [Run using Docker](#run-using-docker)
-- [Getting started](#getting-started)
-	- [Server side code](#server-side-code)
-	- [Client side apps](#client-side-apps)
 - [Quick look](#quick-look)
 - [Why SurrealDB](#why-surrealdb)
 	- [Database, API, and permissions](#database-api-and-permissions)
@@ -137,6 +157,44 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 <h2><img height="20" src="./img/documentation.svg">&nbsp;&nbsp;Documentation</h2>
 
 For guidance on installation, development, deployment, and administration, see our [documentation](https://surrealdb.com/docs).
+
+<h2><img height="20" src="./img/gettingstarted.svg">&nbsp;&nbsp;Getting started</h2>
+
+Getting started with SurrealDB is as easy as starting up the SurrealDB database server, choosing your platform, and integrating its SDK into your code. You can easily get started with your platform of choice by reading one of our tutorials.
+
+##### Server side code
+
+<p>
+    <a href="https://surrealdb.com/docs/integration/sdks/rust"><img width=60 title="Rust" src="https://raw.githubusercontent.com/surrealdb/icons/main/rust.svg" /></a>
+    &nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="JavaScript" src="https://raw.githubusercontent.com/surrealdb/icons/main/javascript.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="WebAssembly" src="https://raw.githubusercontent.com/surrealdb/icons/main/webassembly.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Node.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/nodejs.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Deno" src="https://raw.githubusercontent.com/surrealdb/icons/main/deno.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/golang"><img width=60 title="Golang" src="https://raw.githubusercontent.com/surrealdb/icons/main/golang.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/dotnet"><img width=60 title=".NET" src="https://raw.githubusercontent.com/surrealdb/icons/main/dotnet.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/php"><img width=60 title="PHP" src="https://raw.githubusercontent.com/surrealdb/icons/main/php.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/java"><img width=60 title="Java" src="https://raw.githubusercontent.com/surrealdb/icons/main/java.svg" /></a>
+</p>
+
+##### Client side apps
+
+<p>
+	<a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="JavaScript" src="https://raw.githubusercontent.com/surrealdb/icons/main/javascript.svg" /></a>
+    &nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="WebAssembly" src="https://raw.githubusercontent.com/surrealdb/icons/main/webassembly.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/react"><img width=60 title="React" src="https://raw.githubusercontent.com/surrealdb/icons/main/reactjs.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/ember"><img width=60 title="Ember.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/emberjs.svg" /></a>
+</p>
 
 <h2><img height="20" src="./img/installation.svg">&nbsp;&nbsp;Installation</h2>
 
@@ -193,34 +251,6 @@ For just getting started with a development server running in memory, you can pa
 ```bash
 docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log trace --user root --pass root memory
 ``` 
-
-<h2><img height="20" src="./img/gettingstarted.svg">&nbsp;&nbsp;Getting started</h2>
-
-Getting started with SurrealDB is as easy as starting up the SurrealDB database server, choosing your platform, and integrating its SDK into your code. You can easily get started with your platform of choice by reading one of our tutorials.
-
-##### Server side code
-
-- [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/sdks/javascript)
-- [x] [Getting started with Node.js](https://surrealdb.com/docs/integration/sdks/nodejs)
-- [x] [Getting started with Golang](https://surrealdb.com/docs/integration/sdks/golang)
-- [x] [Getting started with Rust](https://surrealdb.com/docs/integration/sdks/rust)
-- [x] [Getting started with Deno](https://surrealdb.com/docs/integration/sdks/deno)
-- [x] [Getting started with Python](https://surrealdb.com/docs/integration/sdks/python)
-- [x] [Getting started with Java](https://surrealdb.com/docs/integration/sdks/java)
-- [ ] Getting started with C (coming soon)
-- [ ] Getting started with Ruby (coming soon)
-- [ ] Getting started with PHP (coming soon)
-- [ ] Getting started with Swift (coming soon)
-- [ ] Getting started with R (coming soon)
-
-##### Client side apps
-
-- [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/sdks/javascript)
-- [ ] Getting started with Ember.js (coming soon)
-- [ ] Getting started with React.js (coming soon)
-- [ ] Getting started with Angular.js (coming soon)
-- [ ] Getting started with Vue.js (coming soon)
-- [ ] Getting started with Svelte (coming soon)
 
 <h2><img height="20" src="./img/features.svg">&nbsp;&nbsp;Quick look</h2>
 
@@ -279,7 +309,6 @@ RELATE $from->like->$devs UNIQUE
 	SET time.connected = time::now()
 ;
 ```
-
 
 Query data flexibly with advanced expressions and graph queries.
 
@@ -358,65 +387,70 @@ DEFINE TABLE post SCHEMALESS
 
 <h2><img height="20" src="./img/features.svg">&nbsp;&nbsp;Why SurrealDB?</h2>
 
+<p>
+	<img width="49%" src="./img/illustrations/database-api-security.jpg" />
+	<img width="49%" src="./img/illustrations/multimodel-database.jpg" />
+</p>
+
 #### Database, API, and permissions
 
 SurrealDB combines the database layer, the querying layer, and the API and authentication layer into one platform. Advanced table-based and row-based customisable access permissions allow for granular data access patterns for different types of users. There's no need for custom backend code and security rules with complicated database development.
-
-![Database, API, and permissions](/img/illustrations/database-api-security.jpg)
 
 #### Tables, documents, and graph
 
 As a multi-model database, SurrealDB enables developers to use multiple techniques to store and model data, without having to choose a method in advance. With the use of tables, SurrealDB has similarities with relational databases, but with the added functionality and flexibility of advanced nested fields and arrays. Inter-document record links allow for simple to understand and highly-performant related queries without the use of JOINs, eliminating the N+1 query problem.
 
-![Tables, documents, and graph](/img/illustrations/multimodel-database.jpg)
+<p>
+	<img width="49%" src="./img/illustrations/graph-database.jpg" />
+	<img width="49%" src="./img/illustrations/schema-direct-to-client.jpg" />
+</p>
 
 #### Advanced inter-document relations and analysis. No JOINs. No pain.
 
 With full graph database functionality SurrealDB enables more advanced querying and analysis. Records (or vertices) can be connected to one another with edges, each with its own record properties and metadata. Simple extensions to traditional SQL queries allow for multi-table, multi-depth document retrieval, efficiently in the database, without the use of complicated JOINs and without bringing the data down to the client.
 
-![Advanced inter-document relations](/img/illustrations/graph-database.jpg)
-
 #### Simple schema definition for frontend and backend development
 
 With SurrealDB, specify your database and API schema in one place, and define column rules and constraints just once. Once a schema is defined, database access is automatically granted to the relevant users. No more custom API code, and no more GraphQL integration. Simple, flexible, and ready for production in minutes not months.
 
-![Simple schema definition](/img/illustrations/schema-direct-to-client.jpg)
+<p>
+	<img width="49%" src="./img/illustrations/browser-sync.jpg" />
+	<img width="49%" src="./img/illustrations/multiple-integrations.jpg" />
+</p>
 
 #### Connect and query directly from web-browsers and client devices
 
 Connect directly to SurrealDB from any end-user client device. Run SurrealQL queries directly within web-browsers, ensuring that users can only view or modify the data that they are allowed to access. Highly-performant WebSocket connections allow for efficient bi-directional queries, responses and notifications.
 
-![Connect directly from web-browsers](/img/illustrations/browser-sync.jpg)
-
 #### Query the database with the tools you want
 
 Your data, your choice. SurrealDB is designed to be flexible to use, with support for SurrealQL, GraphQL (coming soon), CRUD support over REST, and JSON-RPC querying and modification over WebSockets. With direct-to-client connection with in-built permissions, SurrealDB speeds up the development process, and fits in seamlessly into any tech stack.
 
-![Multiple different query methods](/img/illustrations/multiple-integrations.jpg)
+<p>
+	<img width="49%" src="./img/illustrations/realtime-live-queries.jpg" />
+	<img width="49%" src="./img/illustrations/scale-up.jpg" />
+</p>
 
 #### Realtime live queries and data changes direct to application
 
 SurrealDB keeps every client device in-sync with data modifications pushed in realtime to the clients, applications, end-user devices, and server-side libraries. Live SQL queries allow for advanced filtering of the changes to which a client subscribes, and efficient data formats, including DIFFing and PATCHing enable highly-performant web-based data syncing.
 
-![Realtime live queries and data changes](/img/illustrations/realtime-live-queries.jpg)
-
 #### Scale effortlessly to hundreds of nodes for high-availability and scalability
 
 SurrealDB can be run as a single in-memory node, or as part of a distributed cluster - offering highly-available and highly-scalable system characteristics. Designed from the ground up to run in a distributed environment, SurrealDB makes use of special techniques when handling multi-table transactions, and document record IDs - with no use of table or row locks.
 
-![Scale effortlessly for high-availability](/img/illustrations/scale-up.jpg)
+<p>
+	<img width="49%" src="./img/illustrations/database-plugins.jpg" />
+	<img width="49%" src="./img/illustrations/cloud-or-embedded.jpg" />
+</p>
 
 #### Extend your database with JavaScript functions
 
 Embedded JavaScript functions allow for advanced, custom functionality, with computation logic being moved to the data layer. This improves upon the traditional approach of moving data to the client devices before applying any computation logic, ensuring that only the necessary data is transferred remotely. These advanced JavaScript functions, with support for the ES2020 standard, allow any developer to analyse the data in ever more simple-yet-advanced ways.
 
-![Extend your database with JavaScript](/img/illustrations/database-plugins.jpg)
-
 #### Designed to be embedded or to run distributed in the cloud
 
 Built entirely in Rust as a single library, SurrealDB is designed to be used as both an embedded database library with advanced querying functionality, and as a database server which can operate in a distributed cluster. With low memory usage and cpu requirements, the system requirements have been specifically thought through for running in all types of environment.
-
-![Designed to be embedded or in the cloud](/img/illustrations/cloud-or-embedded.jpg)
 
 <h2><img height="20" src="./img/community.svg">&nbsp;&nbsp;Community</h2>
 
