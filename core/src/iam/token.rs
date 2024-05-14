@@ -95,8 +95,8 @@ impl From<Claims> for Value {
 			out.insert("DB".to_string(), db.into());
 		}
 		// Add AC field if set
-		if let Some(sc) = v.ac {
-			out.insert("AC".to_string(), sc.into());
+		if let Some(ac) = v.ac {
+			out.insert("AC".to_string(), ac.into());
 		}
 		// Add ID field if set
 		if let Some(id) = v.id {
