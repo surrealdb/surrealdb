@@ -53,7 +53,7 @@ impl Value {
 				}
 			}
 			// Process every other path
-			_ if prev.len() > 0 => vec![prev],
+			_ if !prev.is_empty() => vec![prev],
 			// Nothing to do
 			_ => vec![],
 		}
