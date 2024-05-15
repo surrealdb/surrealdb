@@ -127,6 +127,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::push" => array::push,
 		"array::remove" => array::remove,
 		"array::reverse" => array::reverse,
+		"array::shuffle" => array::shuffle,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,
 		"array::transpose" => array::transpose,
