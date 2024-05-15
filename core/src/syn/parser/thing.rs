@@ -565,5 +565,6 @@ mod tests {
 		assert_ident_parses_correctly("1ns");
 		assert_ident_parses_correctly("1ns1");
 		assert_ident_parses_correctly("1ns1h");
+		assert_ident_parses_correctly("000e8bla");
 	}
 }
