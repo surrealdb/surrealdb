@@ -23,10 +23,6 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		// Check import
-		if opt.import {
-			return Ok(());
-		}
 		// Was this force targeted at a specific index?
 		let targeted_force = matches!(opt.force, Force::Index(_));
 		// Collect indexes or skip
