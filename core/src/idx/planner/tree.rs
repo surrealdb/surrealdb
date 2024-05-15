@@ -1,10 +1,10 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::{AnnExpressions, KnnExpressions};
+use crate::idx::planner::executor::{KnnExpression, KnnExpressions};
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::kvs;
-use crate::sql::index::{Distance, Index};
+use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::sql::{
 	Array, Cond, Expression, Idiom, Kind, Number, Operator, Part, Subquery, Table, Value, With,
@@ -60,7 +60,6 @@ struct TreeBuilder<'a> {
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
 	knn_expressions: KnnExpressions,
-	ann_expressions: AnnExpressions,
 	idioms_record_options: HashMap<Idiom, RecordOptions>,
 	group_sequence: GroupRef,
 }
@@ -99,7 +98,6 @@ impl<'a> TreeBuilder<'a> {
 			index_map: Default::default(),
 			with_indexes,
 			knn_expressions: Default::default(),
-			ann_expressions: Default::default(),
 			idioms_record_options: Default::default(),
 			group_sequence: 0,
 		}
@@ -329,9 +327,9 @@ impl<'a> TreeBuilder<'a> {
 						remote_irs,
 					)?;
 				} else if let Some(id) = left.is_non_indexed_field() {
-					self.eval_knn(id, &right, &exp)?;
+					self.eval_bruteforce_knn(id, &right, &exp)?;
 				} else if let Some(id) = right.is_non_indexed_field() {
-					self.eval_knn(id, &left, &exp)?;
+					self.eval_bruteforce_knn(id, &left, &exp)?;
 				}
 				let re = ResolvedExpression {
 					group,
@@ -393,8 +391,8 @@ impl<'a> TreeBuilder<'a> {
 					Index::Search {
 						..
 					} => Self::eval_matches_operator(op, n),
-					Index::MTree(_) => self.eval_indexed_knn(e, op, n, id)?,
-					Index::Hnsw(_) => self.eval_indexed_ann(e, op, n, id)?,
+					Index::MTree(_) => self.eval_mtree_knn(e, op, n, id)?,
+					Index::Hnsw(_) => self.eval_hnsw_knn(op, n)?,
 				};
 				if let Some(op) = op {
 					let io = IndexOption::new(*ir, id.clone(), p, op);
@@ -427,62 +425,50 @@ impl<'a> TreeBuilder<'a> {
 		None
 	}
 
-	fn eval_indexed_knn(
+	fn eval_mtree_knn(
 		&mut self,
 		exp: &Arc<Expression>,
 		op: &Operator,
 		n: &Node,
 		id: &Idiom,
 	) -> Result<Option<IndexOperator>, Error> {
-		if let Operator::Knn(k, d) = op {
+		if let Operator::Knn(k, None, None) = op {
 			if let Node::Computed(v) = n {
-				let vec: Vec<Number> = v.as_ref().try_into()?;
-				self.knn_expressions.insert(
-					exp.clone(),
-					(*k, id.clone(), Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
-				);
-				if let Value::Array(a) = v.as_ref() {
-					match d {
-						None | Some(Distance::Euclidean) | Some(Distance::Manhattan) => {
-							return Ok(Some(IndexOperator::Knn(a.clone(), *k)))
-						}
-						_ => {}
-					}
-				}
+				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
+				self.knn_expressions
+					.insert(exp.clone(), KnnExpression::new(*k, id.clone(), vec.clone(), None));
+				return Ok(Some(IndexOperator::Knn(vec, *k)));
 			}
 		}
 		Ok(None)
 	}
 
-	fn eval_indexed_ann(
+	fn eval_hnsw_knn(&mut self, op: &Operator, n: &Node) -> Result<Option<IndexOperator>, Error> {
+		if let Operator::Knn(Some(n1), None, n2) = op {
+			if let Node::Computed(v) = n {
+				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
+				let (k, ef) = if let Some(n2) = n2 {
+					(Some(*n1), *n2)
+				} else {
+					(None, *n1)
+				};
+				return Ok(Some(IndexOperator::Ann(vec, k, ef)));
+			}
+		}
+		Ok(None)
+	}
+
+	fn eval_bruteforce_knn(
 		&mut self,
-		exp: &Arc<Expression>,
-		op: &Operator,
-		nd: &Node,
 		id: &Idiom,
-	) -> Result<Option<IndexOperator>, Error> {
-		if let Operator::Ann(n, ef) = op {
-			if let Node::Computed(v) = nd {
-				let vec: Vec<Number> = v.as_ref().try_into()?;
-				let n = *n as usize;
-				let ef = *ef as usize;
-				self.ann_expressions.insert(exp.clone(), (n, id.clone(), Arc::new(vec), ef));
-				if let Value::Array(a) = v.as_ref() {
-					return Ok(Some(IndexOperator::Ann(a.clone(), n, ef)));
-				}
-			}
-		}
-		Ok(None)
-	}
-
-	fn eval_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expression>) -> Result<(), Error> {
-		if let Operator::Knn(k, d) = exp.operator() {
+		val: &Node,
+		exp: &Arc<Expression>,
+	) -> Result<(), Error> {
+		if let Operator::Knn(Some(k), d, _) = exp.operator() {
 			if let Node::Computed(v) = val {
-				let vec: Vec<Number> = v.as_ref().try_into()?;
-				self.knn_expressions.insert(
-					exp.clone(),
-					(*k, id.clone(), Arc::new(vec), d.clone().unwrap_or(Distance::Euclidean)),
-				);
+				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
+				self.knn_expressions
+					.insert(exp.clone(), KnnExpression::new(Some(*k), id.clone(), vec, d.clone()));
 			}
 		}
 		Ok(())

@@ -389,7 +389,6 @@ impl Parser<'_> {
 			DistanceKind::Manhattan => Distance::Manhattan,
 			DistanceKind::Hamming => Distance::Hamming,
 			DistanceKind::Jaccard => Distance::Jaccard,
-
 			DistanceKind::Minkowski => {
 				let distance = self.next_token_value()?;
 				Distance::Minkowski(distance)

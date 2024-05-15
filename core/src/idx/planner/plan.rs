@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{GroupRef, IdiomPosition, IndexRef, Node};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
-use crate::sql::{Array, Expression, Idiom, Object};
+use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -180,8 +180,8 @@ pub(super) enum IndexOperator {
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
-	Knn(Array, u32),
-	Ann(Array, usize, usize),
+	Knn(Arc<Vec<Number>>, Option<u32>),
+	Ann(Arc<Vec<Number>>, Option<u32>, u32),
 }
 
 impl IndexOption {
@@ -259,12 +259,16 @@ impl IndexOption {
 				e.insert("value", v.to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
-				e.insert("operator", Value::from(format!("<{}>", k)));
-				e.insert("value", Value::Array(a.clone()));
+				let op = Value::from(Operator::Knn(*k, None, None).to_string());
+				let val = Value::Array(Array::from(a.as_ref().clone()));
+				e.insert("operator", op);
+				e.insert("value", val);
 			}
-			IndexOperator::Ann(a, n, ef) => {
-				e.insert("operator", Value::from(format!("<{},{}>", n, ef)));
-				e.insert("value", Value::Array(a.clone()));
+			IndexOperator::Ann(a, k, ef) => {
+				let op = Value::from(Operator::Knn(*k, None, Some(*ef)).to_string());
+				let val = Value::Array(Array::from(a.as_ref().clone()));
+				e.insert("operator", op);
+				e.insert("value", val);
 			}
 		};
 		Value::from(e)

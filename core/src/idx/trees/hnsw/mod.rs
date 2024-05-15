@@ -10,7 +10,7 @@ use crate::idx::trees::knn::{DoublePriorityQueue, Ids64, KnnResult, KnnResultBui
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Key;
 use crate::sql::index::{Distance, HnswParams, VectorType};
-use crate::sql::{Array, Thing, Value};
+use crate::sql::{Number, Thing, Value};
 use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
 use radix_trie::Trie;
@@ -130,12 +130,12 @@ impl HnswIndex {
 
 	pub fn knn_search(
 		&self,
-		a: &Array,
+		o: &Vec<Number>,
 		n: usize,
 		ef: usize,
 	) -> Result<VecDeque<(Thing, f64)>, Error> {
 		// Extract the vector
-		let vector = Vector::try_from_array(self.vector_type, a)?;
+		let vector = Vector::try_from_vector(self.vector_type, o)?;
 		vector.check_dimension(self.dim)?;
 		// Do the search
 		let res = self.search(&vector.into(), n, ef);

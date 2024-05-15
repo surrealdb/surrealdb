@@ -4,7 +4,9 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
+use crate::sql::Thing;
 use reblessive::tree::Stk;
 
 pub mod args;
@@ -425,6 +427,8 @@ pub async fn asynchronous(
 		//
 		"type::field" => r#type::field((stk,ctx, opt, txn, doc)).await,
 		"type::fields" => r#type::fields((stk,ctx, opt, txn, doc)).await,
+		//
+		"vector::distance::knn" => vector::distance::knn((ctx, txn, doc)).await,
 	)
 }
 
@@ -507,4 +511,23 @@ mod tests {
 			panic!("ensure functions can be parsed in lib/src/sql/function.rs and are exported to JS in lib/src/fnc/script/modules/surrealdb");
 		}
 	}
+}
+
+fn get_execution_context<'a>(
+	ctx: &'a Context<'_>,
+	txn: Option<&'a Transaction>,
+	doc: Option<&'a CursorDoc<'_>>,
+) -> Option<(&'a Transaction, &'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
+	if let Some(txn) = txn {
+		if let Some(doc) = doc {
+			if let Some(thg) = doc.rid {
+				if let Some(pla) = ctx.get_query_planner() {
+					if let Some(exe) = pla.get_query_executor(&thg.tb) {
+						return Some((txn, exe, doc, thg));
+					}
+				}
+			}
+		}
+	}
+	None
 }

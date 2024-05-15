@@ -22,7 +22,7 @@ use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedSerdeState};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::{Distance, MTreeParams, VectorType};
-use crate::sql::{Array, Object, Thing, Value};
+use crate::sql::{Number, Object, Thing, Value};
 
 pub(crate) struct MTreeIndex {
 	ixs: IndexStores,
@@ -95,11 +95,11 @@ impl MTreeIndex {
 	pub(crate) async fn knn_search(
 		&self,
 		tx: &mut Transaction,
-		a: &Array,
+		v: &Vec<Number>,
 		k: usize,
 	) -> Result<VecDeque<(DocId, f64)>, Error> {
 		// Extract the vector
-		let vector = Vector::try_from_array(self.vector_type, a)?;
+		let vector = Vector::try_from_vector(self.vector_type, v)?;
 		vector.check_dimension(self.dim)?;
 		let vector: SharedVector = vector.into();
 		// Lock the index

@@ -2,29 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
-use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::{Thing, Value};
+use crate::sql::Value;
 use reblessive::tree::Stk;
-
-fn get_execution_context<'a>(
-	ctx: &'a Context<'_>,
-	txn: Option<&'a Transaction>,
-	doc: Option<&'a CursorDoc<'_>>,
-) -> Option<(&'a Transaction, &'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
-	if let Some(txn) = txn {
-		if let Some(doc) = doc {
-			if let Some(thg) = doc.rid {
-				if let Some(pla) = ctx.get_query_planner() {
-					if let Some(exe) = pla.get_query_executor(&thg.tb) {
-						return Some((txn, exe, doc, thg));
-					}
-				}
-			}
-		}
-	}
-	None
-}
 
 pub async fn analyze(
 	(stk, ctx, txn, opt): (&mut Stk, &Context<'_>, Option<&Transaction>, Option<&Options>),

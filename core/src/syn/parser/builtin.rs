@@ -352,6 +352,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("vector::distance::chebyshev") => PathKind::Function,
 		UniCase::ascii("vector::distance::euclidean") => PathKind::Function,
 		UniCase::ascii("vector::distance::hamming") => PathKind::Function,
+		UniCase::ascii("vector::distance::knn") => PathKind::Function,
 		UniCase::ascii("vector::distance::mahalanobis") => PathKind::Function,
 		UniCase::ascii("vector::distance::manhattan") => PathKind::Function,
 		UniCase::ascii("vector::distance::minkowski") => PathKind::Function,

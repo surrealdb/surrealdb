@@ -46,7 +46,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 						detail: {
 							plan: {
 								index: 'mt_pts',
-								operator: '<2>',
+								operator: '<|2|>',
 								value: [2,3,4,5]
 							},
 							table: 'pts',
@@ -256,7 +256,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 						detail: {
 							plan: {
 								index: 'hnsw_pts',
-								operator: '<2,100>',
+								operator: '<|2,100|>',
 								value: [2,3,4,5]
 							},
 							table: 'pts',
@@ -289,9 +289,9 @@ async fn select_mtree_knn_with_limit() -> Result<(), Error> {
 			{ id: pts:7, point: [ 7f ], flag: true }
 		];
 		LET $pt = [4.5f];
-		SELECT id, flag, vector::similarity::cosine(point, $pt) AS similarity FROM pts
+		SELECT id, flag, vector::distance::knn() AS distance FROM pts
 			WHERE flag = true && point <||> $pt
-			ORDER BY similarity DESC
+			ORDER BY vector::distance::knn() DESC
 			LIMIT 2;
 	";
 	let dbs = new_ds().await?;
@@ -306,11 +306,11 @@ async fn select_mtree_knn_with_limit() -> Result<(), Error> {
 		"[
 				{
 					id: pts_true:5,
-					similarity: 1
+					distance: 1
 				},
 				{
 					id: pts_true:3,
-					similarity: 1
+					distance: 1
 				}
 			]",
 	);

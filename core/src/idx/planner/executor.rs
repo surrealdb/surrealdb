@@ -26,16 +26,39 @@ use crate::kvs;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Idiom, Number, Object, Table, Thing, Value};
+use crate::sql::{Expression, Idiom, Number, Object, Table, Thing, Value};
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
-pub(super) type KnnExpressions = HashMap<Arc<Expression>, (u32, Idiom, Arc<Vec<Number>>, Distance)>;
-pub(super) type AnnExpressions = HashMap<Arc<Expression>, (usize, Idiom, Arc<Vec<Number>>, usize)>;
+pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Option<Distance>);
+
+pub(super) struct KnnExpression {
+	k: Option<u32>,
+	id: Idiom,
+	obj: Arc<Vec<Number>>,
+	d: Option<Distance>,
+}
+
+impl KnnExpression {
+	pub(super) fn new(
+		k: Option<u32>,
+		id: Idiom,
+		obj: Arc<Vec<Number>>,
+		d: Option<Distance>,
+	) -> Self {
+		Self {
+			k,
+			id,
+			obj,
+			d,
+		}
+	}
+}
+
+pub(super) type KnnExpressions = HashMap<Arc<Expression>, KnnExpression>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -140,7 +163,7 @@ impl InnerQueryExecutor {
 						}
 					}
 					Index::MTree(p) => {
-						if let IndexOperator::Knn(a, k) = io.op() {
+						if let IndexOperator::Knn(a, Some(k)) = io.op() {
 							let mut tx = txn.lock().await;
 							let entry = match mt_map.entry(ix_ref) {
 								Entry::Occupied(e) => MtEntry::new(&mut tx, e.get(), a, *k).await?,
@@ -163,7 +186,7 @@ impl InnerQueryExecutor {
 						}
 					}
 					Index::Hnsw(p) => {
-						if let IndexOperator::Ann(a, n, ef) = io.op() {
+						if let IndexOperator::Ann(a, Some(n), ef) = io.op() {
 							let entry = match hnsw_map.entry(ix_ref) {
 								Entry::Occupied(e) => {
 									HnswEntry::new(e.get().clone(), a, *n, *ef).await?
@@ -186,8 +209,10 @@ impl InnerQueryExecutor {
 			}
 		}
 
-		for (exp, (knn, id, obj, dist)) in knns {
-			knn_entries.insert(exp, (KnnPriorityList::new(knn as usize), id, obj, dist));
+		for (exp, knn) in knns {
+			if let Some(k) = knn.k {
+				knn_entries.insert(exp, (KnnPriorityList::new(k as usize), knn.id, knn.obj, knn.d));
+			}
 		}
 
 		Ok(Self {
@@ -234,7 +259,7 @@ impl QueryExecutor {
 			}
 			Ok(Value::Bool(false))
 		} else {
-			if let Some((p, id, val, dist)) = self.0.knn_entries.get(exp) {
+			if let Some((p, id, val, Some(dist))) = self.0.knn_entries.get(exp) {
 				let v: Vec<Number> = id.compute(stk, ctx, opt, txn, doc).await?.try_into()?;
 				let dist = dist.compute(&v, val.as_ref())?;
 				p.add(dist, thg).await;
@@ -694,10 +719,10 @@ impl MtEntry {
 	async fn new(
 		tx: &mut kvs::Transaction,
 		mt: &MTreeIndex,
-		a: &Array,
+		o: &Vec<Number>,
 		k: u32,
 	) -> Result<Self, Error> {
-		let res = mt.knn_search(tx, a, k as usize).await?;
+		let res = mt.knn_search(tx, o, k as usize).await?;
 		Ok(Self {
 			res,
 			doc_ids: mt.doc_ids(),
@@ -711,8 +736,8 @@ pub(super) struct HnswEntry {
 }
 
 impl HnswEntry {
-	async fn new(h: SharedHnswIndex, a: &Array, n: usize, ef: usize) -> Result<Self, Error> {
-		let res = h.read().await.knn_search(a, n, ef)?;
+	async fn new(h: SharedHnswIndex, v: &Vec<Number>, n: u32, ef: u32) -> Result<Self, Error> {
+		let res = h.read().await.knn_search(v, n as usize, ef as usize)?;
 		Ok(Self {
 			res,
 		})

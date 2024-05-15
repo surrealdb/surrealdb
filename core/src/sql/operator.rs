@@ -1,12 +1,12 @@
 use crate::idx::ft::MatchRef;
 use crate::sql::index::Distance;
-use revision::revisioned;
+use revision::{revisioned, Error};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 
 /// Binary operators.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -60,9 +60,12 @@ pub enum Operator {
 	Outside,
 	Intersects,
 	//
-	Knn(u32, Option<Distance>), // <|{k}[,{dist}]|>
-	#[revision(start = 2)]
-	Ann(u32, u32), // <|{k},{ef}|>
+	#[revision(start = 2, end = 3, convert_fn = "upgrade_knn_old")]
+	Knn_old(u32, Option<Distance>), // <|{k}[,{dist}]|>
+	#[revision(start = 2, end = 3, convert_fn = "upgrade_ann_old")]
+	Ann_old(u32, u32), // <|{k},{ef}|>
+	#[revision(start = 3)]
+	Knn(Option<u32>, Option<Distance>, Option<u32>),
 	//
 	Rem, // %
 }
@@ -88,6 +91,16 @@ impl Operator {
 			Self::Rem => 10,
 			_ => 5,
 		}
+	}
+	fn upgrade_knn_old(
+		_revision: u16,
+		(k, dist): (u32, Option<Distance>),
+	) -> Result<Operator, Error> {
+		Ok(Self::Knn(Some(k), dist, None))
+	}
+
+	fn upgrade_ann_old(_revision: u16, (k, ef): (u32, u32)) -> Result<Operator, Error> {
+		Ok(Self::Knn(Some(k), None, Some(ef)))
 	}
 }
 
@@ -141,15 +154,29 @@ impl fmt::Display for Operator {
 					f.write_str("@@")
 				}
 			}
-			Self::Knn(k, dist) => {
-				if let Some(d) = dist {
-					write!(f, "<|{k},{d}|>")
-				} else {
-					write!(f, "<|{k}|>")
+			Self::Knn(k, dist, ef) => {
+				let mut comma = false;
+				f.write_str("<|")?;
+				if let Some(k) = k {
+					write!(f, "{k}")?;
+					comma = true;
 				}
-			}
-			Self::Ann(k, ef) => {
-				write!(f, "<{k},{ef}>")
+				if let Some(dist) = dist {
+					if comma {
+						write!(f, ",{dist}")?;
+					} else {
+						write!(f, "{dist}")?;
+						comma = true;
+					}
+				}
+				if let Some(ef) = ef {
+					if comma {
+						write!(f, ",{ef}")?;
+					} else {
+						write!(f, "{ef}")?;
+					}
+				}
+				f.write_str("|>")
 			}
 		}
 	}

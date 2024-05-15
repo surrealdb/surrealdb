@@ -195,18 +195,30 @@ impl Parser<'_> {
 			})))
 		}
 	}
+
+	// <||> = MTREE + LIMIT
+	// <|{k}|> = MTREE
+	// <|{ef}|> = HNSW + LIMIT
+	// <|{k, ef}|> = HNSW
+	// <|{k},{dist}> = BRUTEFORCE
 	pub fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
-		let amount = self.next_token_value()?;
+		if self.eat(t!("|>")) {
+			// <||>
+			return Ok(Operator::Knn(None, None, None));
+		}
+		let n: u32 = self.next_token_value()?;
 		let op = if self.eat(t!(",")) {
 			let token = self.next();
 			match &token.kind {
 				TokenKind::Distance(k) => {
-					let d = self.convert_distance(k).map(Some)?;
-					Operator::Knn(amount, d)
+					let d = self.convert_distance(k)?;
+					// <|{k},{dist}>
+					Operator::Knn(Some(n), Some(d), None)
 				},
 				TokenKind::Number(NumberKind::Integer) => {
 					let ef = self.token_value(token)?;
-					Operator::Ann(amount, ef)
+					// <|{k, ef}|>
+					Operator::Knn(Some(n),None,  Some(ef))
 				}
 				_ => {
 					return Err(ParseError::new(
@@ -220,7 +232,8 @@ impl Parser<'_> {
 				}
 			}
 		} else {
-			Operator::Knn(amount, None)
+			// <|{k}|> or <|{ef}|>
+			Operator::Knn(Some(n), None, None)
 		};
 		self.expect_closing_delimiter(t!("|>"), token.span)?;
 		Ok(op)
