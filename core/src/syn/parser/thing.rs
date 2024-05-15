@@ -278,7 +278,7 @@ impl Parser<'_> {
 				}
 			}
 			TokenKind::Number(NumberKind::Exponent) if self.flexible_record_id => {
-				let mut text = self.lexer.string.take().unwrap();
+				let text = self.lexer.string.take().unwrap();
 				if text.bytes().any(|x| !x.is_ascii_alphanumeric()) {
 					unexpected!(self, token.kind, "a identifier");
 				}
