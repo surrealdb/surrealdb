@@ -281,12 +281,15 @@ pub async fn init(
 		.with_auth_enabled(auth_enabled)
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
-	#[cfg(any(
-		feature = "storage-surrealkv",
-		feature = "storage-rocksdb",
-		feature = "storage-fdb",
-		feature = "storage-tikv",
-		feature = "storage-speedb"
+	#[cfg(all(
+		feature = "sql2",
+		any(
+			feature = "kv-surrealkv",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		)
 	))]
 	let mut dbs = dbs.with_temporary_directory(temporary_directory);
 	if let Some(engine_options) = opt.engine {
