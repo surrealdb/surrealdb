@@ -1,12 +1,15 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-#[cfg(any(
-	feature = "storage-surrealkv",
-	feature = "storage-rocksdb",
-	feature = "storage-fdb",
-	feature = "storage-tikv",
-	feature = "storage-speedb"
+#[cfg(all(
+	feature = "sql2",
+	any(
+		feature = "kv-surrealkv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	)
 ))]
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -45,12 +48,15 @@ pub struct StartCommandDbsOptions {
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
-	#[cfg(any(
-		feature = "storage-surrealkv",
-		feature = "storage-speedb",
-		feature = "storage-rocksdb",
-		feature = "storage-fdb",
-		feature = "storage-tikv",
+	#[cfg(all(
+		feature = "sql2",
+		any(
+			feature = "kv-surrealkv",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		)
 	))]
 	#[arg(help = "Sets the directory for storing temporary database files")]
 	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
@@ -233,12 +239,15 @@ pub async fn init(
 		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
 		auth_level_enabled,
 		caps,
-		#[cfg(any(
-			feature = "storage-surrealkv",
-			feature = "storage-rocksdb",
-			feature = "storage-fdb",
-			feature = "storage-tikv",
-			feature = "storage-speedb"
+		#[cfg(all(
+			feature = "sql2",
+			any(
+				feature = "kv-surrealkv",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			)
 		))]
 		temporary_directory,
 	}: StartCommandDbsOptions,
