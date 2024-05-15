@@ -4,11 +4,11 @@ use clap::Args;
 #[cfg(all(
 	feature = "sql2",
 	any(
-		feature = "kv-surrealkv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
+		feature = "storage-surrealkv",
+		feature = "storage-rocksdb",
+		feature = "storage-fdb",
+		feature = "storage-tikv",
+		feature = "storage-speedb"
 	)
 ))]
 use std::path::PathBuf;
@@ -51,11 +51,11 @@ pub struct StartCommandDbsOptions {
 	#[cfg(all(
 		feature = "sql2",
 		any(
-			feature = "kv-surrealkv",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
+			feature = "storage-surrealkv",
+			feature = "storage-rocksdb",
+			feature = "storage-fdb",
+			feature = "storage-tikv",
+			feature = "storage-speedb"
 		)
 	))]
 	#[arg(help = "Sets the directory for storing temporary database files")]
@@ -242,11 +242,11 @@ pub async fn init(
 		#[cfg(all(
 			feature = "sql2",
 			any(
-				feature = "kv-surrealkv",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
+				feature = "storage-surrealkv",
+				feature = "storage-rocksdb",
+				feature = "storage-fdb",
+				feature = "storage-tikv",
+				feature = "storage-speedb"
 			)
 		))]
 		temporary_directory,
@@ -293,11 +293,11 @@ pub async fn init(
 	#[cfg(all(
 		feature = "sql2",
 		any(
-			feature = "kv-surrealkv",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
+			feature = "storage-surrealkv",
+			feature = "storage-rocksdb",
+			feature = "storage-fdb",
+			feature = "storage-tikv",
+			feature = "storage-speedb"
 		)
 	))]
 	let mut dbs = dbs.with_temporary_directory(temporary_directory);

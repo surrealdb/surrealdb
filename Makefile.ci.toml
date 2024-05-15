@@ -60,7 +60,6 @@ args = [
     "--skip", "database_upgrade"
 ]
 
-
 [tasks.test-experimental-parser]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
