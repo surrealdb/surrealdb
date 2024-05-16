@@ -574,12 +574,12 @@ impl<'a> Processor<'a> {
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
-				let mut collector = IndexCollector::new(ctx, opt, table);
+				let mut collector = IndexCollector::new(opt, table);
 
 				// Get the first batch
 				{
 					let mut tx = txn.lock().await;
-					iterator.next_batch(&mut tx, PROCESSOR_BATCH_SIZE, &mut collector).await?;
+					iterator.next_batch(ctx, &mut tx, PROCESSOR_BATCH_SIZE, &mut collector).await?;
 				}
 
 				while !collector.to_process.is_empty() {
@@ -594,7 +594,9 @@ impl<'a> Processor<'a> {
 					// Get the next batch
 					{
 						let mut tx = txn.lock().await;
-						iterator.next_batch(&mut tx, PROCESSOR_BATCH_SIZE, &mut collector).await?;
+						iterator
+							.next_batch(ctx, &mut tx, PROCESSOR_BATCH_SIZE, &mut collector)
+							.await?;
 					}
 				}
 				// Everything ok
@@ -612,16 +614,14 @@ impl<'a> Processor<'a> {
 }
 
 struct IndexCollector<'a> {
-	ctx: &'a Context<'a>,
 	opt: &'a Options,
 	table: &'a Table,
 	to_process: Vec<Processed>,
 }
 
 impl<'a> IndexCollector<'a> {
-	fn new(ctx: &'a Context<'a>, opt: &'a Options, table: &'a Table) -> Self {
+	fn new(opt: &'a Options, table: &'a Table) -> Self {
 		Self {
-			ctx,
 			opt,
 			table,
 			to_process: Vec::new(),
@@ -633,16 +633,12 @@ impl<'a> ThingCollector for IndexCollector<'a> {
 		&mut self,
 		run: &mut kvs::Transaction,
 		record: CollectorRecord,
-	) -> Result<bool, Error> {
-		// Check if the context is finished
-		if self.ctx.is_done() {
-			return Ok(false);
-		}
+	) -> Result<(), Error> {
 		let (rid, ir) = record;
 
 		// If the record is from another table we can skip
 		if !rid.tb.eq(self.table.as_str()) {
-			return Ok(true);
+			return Ok(());
 		}
 
 		// Fetch the data from the store
@@ -661,6 +657,6 @@ impl<'a> ThingCollector for IndexCollector<'a> {
 			val,
 		};
 		self.to_process.push(pro);
-		Ok(true)
+		Ok(())
 	}
 }

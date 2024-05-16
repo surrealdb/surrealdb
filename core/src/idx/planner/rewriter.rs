@@ -11,7 +11,7 @@ impl<'a> KnnConditionRewriter<'a> {
 	// This function rebuild the same condition, but replaces any KnnExpression by a `true` value
 	pub(super) fn build(expressions: &'a KnnExpressions, cond: &Cond) -> Option<Cond> {
 		let b = Self(expressions);
-		b.eval_value(&cond.0).map(|v| Cond(v))
+		b.eval_value(&cond.0).map(Cond)
 	}
 
 	fn eval_value(&self, v: &Value) -> Option<Value> {
@@ -97,8 +97,8 @@ impl<'a> KnnConditionRewriter<'a> {
 	fn eval_id(&self, id: &Id) -> Option<Id> {
 		match id {
 			Id::Number(_) | Id::String(_) | Id::Generate(_) => Some(id.clone()),
-			Id::Array(a) => self.eval_array(a).map(|a| Id::Array(a)),
-			Id::Object(o) => self.eval_object(o).map(|o| Id::Object(o)),
+			Id::Array(a) => self.eval_array(a).map(Id::Array),
+			Id::Object(o) => self.eval_object(o).map(Id::Object),
 		}
 	}
 
@@ -125,10 +125,10 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Part::First
 			| Part::Field(_)
 			| Part::Index(_) => Some(p.clone()),
-			Part::Where(v) => self.eval_value(v).map(|v| Part::Where(v)),
+			Part::Where(v) => self.eval_value(v).map(Part::Where),
 			Part::Graph(_) => None,
-			Part::Value(v) => self.eval_value(v).map(|v| Part::Value(v)),
-			Part::Start(v) => self.eval_value(v).map(|v| Part::Start(v)),
+			Part::Value(v) => self.eval_value(v).map(Part::Value),
+			Part::Start(v) => self.eval_value(v).map(Part::Start),
 			Part::Method(n, p) => self.eval_values(p).map(|v| Part::Method(n.clone(), v)),
 		}
 	}
@@ -159,8 +159,8 @@ impl<'a> KnnConditionRewriter<'a> {
 
 	fn eval_bound(&self, b: &Bound<Id>) -> Option<Bound<Id>> {
 		match b {
-			Bound::Included(id) => self.eval_id(id).map(|id| Bound::Included(id)),
-			Bound::Excluded(id) => self.eval_id(id).map(|id| Bound::Excluded(id)),
+			Bound::Included(id) => self.eval_id(id).map(Bound::Included),
+			Bound::Excluded(id) => self.eval_id(id).map(Bound::Excluded),
 			Bound::Unbounded => Some(Bound::Unbounded),
 		}
 	}

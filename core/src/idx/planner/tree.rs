@@ -19,7 +19,7 @@ pub(super) struct Tree {
 	pub(super) index_map: IndexesMap,
 	pub(super) with_indexes: Vec<IndexRef>,
 	pub(super) knn_expressions: KnnExpressions,
-	pub(super) knn_condition: Option<Cond>,
+	pub(super) _knn_condition: Option<Cond>,
 }
 
 impl Tree {
@@ -50,7 +50,7 @@ impl Tree {
 				index_map: b.index_map,
 				with_indexes: b.with_indexes,
 				knn_expressions: b.knn_expressions,
-				knn_condition,
+				_knn_condition: knn_condition,
 			}))
 		} else {
 			Ok(None)
