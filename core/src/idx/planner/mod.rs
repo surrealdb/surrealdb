@@ -2,6 +2,7 @@ pub(crate) mod executor;
 pub(crate) mod iterators;
 pub(in crate::idx) mod knn;
 pub(crate) mod plan;
+mod rewriter;
 mod tree;
 
 use crate::ctx::Context;

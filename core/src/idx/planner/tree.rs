@@ -3,6 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::planner::executor::{KnnExpression, KnnExpressions};
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
+use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
@@ -18,6 +19,7 @@ pub(super) struct Tree {
 	pub(super) index_map: IndexesMap,
 	pub(super) with_indexes: Vec<IndexRef>,
 	pub(super) knn_expressions: KnnExpressions,
+	pub(super) knn_condition: Option<Cond>,
 }
 
 impl Tree {
@@ -35,11 +37,20 @@ impl Tree {
 		let mut b = TreeBuilder::new(ctx, opt, txn, table, with);
 		if let Some(cond) = cond {
 			let root = b.eval_value(stk, 0, &cond.0).await?;
+			let knn_condition = if b.knn_expressions.is_empty() {
+				None
+			} else {
+				KnnConditionRewriter::build(&b.knn_expressions, cond)
+			};
+			if let Some(c) = &knn_condition {
+				println!("KNN COND: {c}");
+			}
 			Ok(Some(Self {
 				root,
 				index_map: b.index_map,
 				with_indexes: b.with_indexes,
 				knn_expressions: b.knn_expressions,
+				knn_condition,
 			}))
 		} else {
 			Ok(None)

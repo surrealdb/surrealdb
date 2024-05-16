@@ -1,10 +1,11 @@
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::key::index::Index;
+use crate::kvs;
 use crate::kvs::{Key, Limit, ScanPage};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Thing, Value};
@@ -60,7 +61,7 @@ pub(crate) enum ThingIterator {
 impl ThingIterator {
 	pub(crate) async fn next_batch<T: ThingCollector>(
 		&mut self,
-		tx: &Transaction,
+		tx: &mut kvs::Transaction,
 		size: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
@@ -75,7 +76,7 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(tx, size, collector).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
-			Self::Things(i) => Ok(i.next_batch(size, collector)),
+			Self::Things(i) => i.next_batch(tx, size, collector).await,
 		}
 	}
 }
@@ -83,18 +84,21 @@ impl ThingIterator {
 pub(crate) type CollectorRecord = (Thing, IteratorRecord);
 
 pub(crate) trait ThingCollector {
-	fn add(&mut self, record: CollectorRecord);
+	async fn add(
+		&mut self,
+		tx: &mut kvs::Transaction,
+		record: CollectorRecord,
+	) -> Result<bool, Error>;
 }
 
-impl ThingCollector for Vec<CollectorRecord> {
-	fn add(&mut self, record: CollectorRecord) {
-		self.push(record);
-	}
-}
-
-impl ThingCollector for VecDeque<CollectorRecord> {
-	fn add(&mut self, record: CollectorRecord) {
-		self.push_back(record);
+impl ThingCollector for VecDeque<(Thing, IteratorRecord)> {
+	async fn add(
+		&mut self,
+		_tx: &mut kvs::Transaction,
+		record: CollectorRecord,
+	) -> Result<bool, Error> {
+		self.push_back((record.0, record.1));
+		Ok(true)
 	}
 }
 
@@ -124,7 +128,7 @@ impl IndexEqualThingIterator {
 	}
 
 	async fn next_scan<T: ThingCollector>(
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		irf: IteratorRef,
 		beg: &mut Vec<u8>,
 		end: &[u8],
@@ -133,9 +137,7 @@ impl IndexEqualThingIterator {
 	) -> Result<usize, Error> {
 		let min = beg.clone();
 		let max = end.to_owned();
-		let res = txn
-			.lock()
-			.await
+		let res = tx
 			.scan_paged(
 				ScanPage {
 					range: min..max,
@@ -150,18 +152,23 @@ impl IndexEqualThingIterator {
 			key.push(0x00);
 			*beg = key;
 		}
-		let count = res.len();
-		res.into_iter().for_each(|(_, val)| collector.add((val.into(), irf.into())));
+		let mut count = 0;
+		for (_, val) in res {
+			if !collector.add(tx, (val.into(), irf.into())).await? {
+				break;
+			}
+			count += 1;
+		}
 		Ok(count)
 	}
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
-		Self::next_scan(txn, self.irf, &mut self.beg, &self.end, limit, collector).await
+		Self::next_scan(tx, self.irf, &mut self.beg, &self.end, limit, collector).await
 	}
 }
 
@@ -270,15 +277,13 @@ impl IndexRangeThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
-		let res = txn
-			.lock()
-			.await
+		let res = tx
 			.scan_paged(
 				ScanPage {
 					range: min..max,
@@ -295,8 +300,10 @@ impl IndexRangeThingIterator {
 		let mut count = 0;
 		for (k, v) in res {
 			if self.r.matches(&k) {
-				collector.add((v.into(), self.irf.into()));
 				count += 1;
+				if !collector.add(tx, (v.into(), self.irf.into())).await? {
+					break;
+				}
 			}
 		}
 		Ok(count)
@@ -338,13 +345,13 @@ impl IndexUnionThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
 		while let Some(r) = &mut self.current {
 			let count =
-				IndexEqualThingIterator::next_scan(txn, self.irf, &mut r.0, &r.1, limit, collector)
+				IndexEqualThingIterator::next_scan(tx, self.irf, &mut r.0, &r.1, limit, collector)
 					.await?;
 			if count != 0 {
 				return Ok(count);
@@ -390,7 +397,7 @@ impl JoinThingIterator {
 impl JoinThingIterator {
 	async fn next_current_remote_batch(
 		&mut self,
-		tx: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 	) -> Result<bool, Error> {
 		loop {
@@ -409,7 +416,7 @@ impl JoinThingIterator {
 
 	async fn next_current_local<F>(
 		&mut self,
-		tx: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		new_iter: F,
 	) -> Result<bool, Error>
@@ -435,7 +442,7 @@ impl JoinThingIterator {
 
 	async fn next_batch<T: ThingCollector, F>(
 		&mut self,
-		tx: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 		new_iter: F,
@@ -471,7 +478,7 @@ impl IndexJoinThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		tx: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
@@ -507,17 +514,16 @@ impl UniqueEqualThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		collector: &mut T,
 	) -> Result<usize, Error> {
-		let mut count = 0;
 		if let Some(key) = self.key.take() {
-			if let Some(val) = txn.lock().await.get(key).await? {
-				collector.add((val.into(), self.irf.into()));
-				count += 1;
+			if let Some(val) = tx.get(key).await? {
+				collector.add(tx, (val.into(), self.irf.into())).await?;
+				return Ok(1);
 			}
 		}
-		Ok(count)
+		Ok(0)
 	}
 }
 
@@ -578,7 +584,7 @@ impl UniqueRangeThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		mut limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
@@ -588,7 +594,6 @@ impl UniqueRangeThingIterator {
 		let min = self.r.beg.clone();
 		let max = self.r.end.clone();
 		limit += 1;
-		let mut tx = txn.lock().await;
 		let res = tx
 			.scan_paged(
 				ScanPage {
@@ -606,15 +611,17 @@ impl UniqueRangeThingIterator {
 				return Ok(count);
 			}
 			if self.r.matches(&k) {
-				collector.add((v.into(), self.irf.into()));
 				count += 1;
+				if !collector.add(tx, (v.into(), self.irf.into())).await? {
+					break;
+				}
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
 			if let Some(v) = tx.get(end).await? {
-				collector.add((v.into(), self.irf.into()));
 				count += 1;
+				collector.add(tx, (v.into(), self.irf.into())).await?;
 			}
 		}
 		self.done = true;
@@ -651,16 +658,17 @@ impl UniqueUnionThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
-		let mut run = txn.lock().await;
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if let Some(val) = run.get(key).await? {
-				collector.add((val.into(), self.irf.into()));
+			if let Some(val) = tx.get(key).await? {
 				count += 1;
+				if !collector.add(tx, (val.into(), self.irf.into())).await? {
+					break;
+				}
 				if count >= limit {
 					break;
 				}
@@ -684,7 +692,7 @@ impl UniqueJoinThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		tx: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
@@ -716,24 +724,31 @@ impl MatchesThingIterator {
 
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
 		let mut count = 0;
 		if let Some(hits) = &mut self.hits {
-			let mut run = txn.lock().await;
 			while limit > count {
-				if let Some((thg, doc_id)) = hits.next(&mut run).await? {
-					collector.add((
-						thg,
-						IteratorRecord {
-							irf: self.irf,
-							doc_id: Some(doc_id),
-							dist: None,
-						},
-					));
+				if let Some((thg, doc_id)) = hits.next(tx).await? {
 					count += 1;
+					if !collector
+						.add(
+							tx,
+							(
+								thg,
+								IteratorRecord {
+									irf: self.irf,
+									doc_id: Some(doc_id),
+									dist: None,
+								},
+							),
+						)
+						.await?
+					{
+						break;
+					}
 				} else {
 					break;
 				}
@@ -763,26 +778,31 @@ impl MtreeKnnIterator {
 	}
 	async fn next_batch<T: ThingCollector>(
 		&mut self,
-		txn: &Transaction,
+		tx: &mut kvs::Transaction,
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
-		let mut tx = txn.lock().await;
 		let mut count = 0;
 		while limit > count {
 			if let Some((doc_id, dist)) = self.res.pop_front() {
-				if let Some(doc_key) =
-					self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await?
-				{
-					collector.add((
-						doc_key.into(),
-						IteratorRecord {
-							irf: self.irf,
-							doc_id: Some(doc_id),
-							dist: Some(dist),
-						},
-					));
+				if let Some(doc_key) = self.doc_ids.read().await.get_doc_key(tx, doc_id).await? {
 					count += 1;
+					if !collector
+						.add(
+							tx,
+							(
+								doc_key.into(),
+								IteratorRecord {
+									irf: self.irf,
+									doc_id: Some(doc_id),
+									dist: Some(dist),
+								},
+							),
+						)
+						.await?
+					{
+						break;
+					}
 				}
 			} else {
 				break;
@@ -804,23 +824,36 @@ impl HnswKnnIterator {
 			res,
 		}
 	}
-	fn next_batch<T: ThingCollector>(&mut self, limit: u32, collector: &mut T) -> usize {
+	async fn next_batch<T: ThingCollector>(
+		&mut self,
+		tx: &mut kvs::Transaction,
+		limit: u32,
+		collector: &mut T,
+	) -> Result<usize, Error> {
 		let mut count = 0;
 		while limit > count {
 			if let Some((thg, dist)) = self.res.pop_front() {
-				collector.add((
-					thg,
-					IteratorRecord {
-						irf: self.irf,
-						doc_id: None,
-						dist: Some(dist),
-					},
-				));
 				count += 1;
+				if !collector
+					.add(
+						tx,
+						(
+							thg,
+							IteratorRecord {
+								irf: self.irf,
+								doc_id: None,
+								dist: Some(dist),
+							},
+						),
+					)
+					.await?
+				{
+					break;
+				}
 			} else {
 				break;
 			}
 		}
-		count as usize
+		Ok(count as usize)
 	}
 }

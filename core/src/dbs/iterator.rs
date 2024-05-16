@@ -34,7 +34,7 @@ pub(crate) enum Iterable {
 
 pub(crate) struct Processed {
 	pub(crate) rid: Option<Thing>,
-	pub(crate) ix: Option<IteratorRecord>,
+	pub(crate) ir: Option<IteratorRecord>,
 	pub(crate) val: Operable,
 }
 

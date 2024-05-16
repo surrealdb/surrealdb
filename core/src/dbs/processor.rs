@@ -5,15 +5,17 @@ use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
-use crate::idx::planner::iterators::IteratorRef;
+use crate::idx::planner::iterators::{CollectorRecord, IteratorRef, ThingCollector};
 use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
+use crate::kvs;
 use crate::kvs::ScanPage;
 use crate::sql::dir::Dir;
 use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use reblessive::tree::Stk;
+use std::mem;
 use std::ops::Bound;
 
 impl Iterable {
@@ -176,7 +178,7 @@ impl<'a> Processor<'a> {
 		// Pass the value through
 		let pro = Processed {
 			rid: None,
-			ix: None,
+			ir: None,
 			val: Operable::Value(v),
 		};
 		// Process the document record
@@ -205,7 +207,7 @@ impl<'a> Processor<'a> {
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v),
-			ix: None,
+			ir: None,
 			val,
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -227,7 +229,7 @@ impl<'a> Processor<'a> {
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v),
-			ix: None,
+			ir: None,
 			val: Operable::Value(Value::None),
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -261,7 +263,7 @@ impl<'a> Processor<'a> {
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v),
-			ix: None,
+			ir: None,
 			val,
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -296,7 +298,7 @@ impl<'a> Processor<'a> {
 		// Process the document record
 		let pro = Processed {
 			rid: Some(v),
-			ix: None,
+			ir: None,
 			val,
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -348,7 +350,7 @@ impl<'a> Processor<'a> {
 				// Process the record
 				let pro = Processed {
 					rid: Some(rid),
-					ix: None,
+					ir: None,
 					val,
 				};
 				self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -420,7 +422,7 @@ impl<'a> Processor<'a> {
 				// Process the record
 				let pro = Processed {
 					rid: Some(rid),
-					ix: None,
+					ir: None,
 					val,
 				};
 				self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -545,7 +547,7 @@ impl<'a> Processor<'a> {
 					// Process the record
 					let pro = Processed {
 						rid: Some(rid),
-						ix: None,
+						ir: None,
 						val,
 					};
 					self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -572,46 +574,28 @@ impl<'a> Processor<'a> {
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
-				let mut records = Vec::new();
-				iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut records).await?;
-				while !records.is_empty() {
+				let mut collector = IndexCollector::new(ctx, opt, table);
+
+				// Get the first batch
+				{
+					let mut tx = txn.lock().await;
+					iterator.next_batch(&mut tx, PROCESSOR_BATCH_SIZE, &mut collector).await?;
+				}
+
+				while !collector.to_process.is_empty() {
 					// Check if the context is finished
 					if ctx.is_done() {
 						break;
 					}
-
-					for (thing, ix) in records {
-						// Check the context
-						if ctx.is_done() {
-							break;
-						}
-
-						// If the record is from another table we can skip
-						if !thing.tb.eq(table.as_str()) {
-							continue;
-						}
-
-						// Fetch the data from the store
-						let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
-						let val = txn.lock().await.get(key.clone()).await?;
-						let rid = Thing::from((key.tb, key.id));
-						// Parse the data from the store
-						let val = Operable::Value(match val {
-							Some(v) => Value::from(v),
-							None => Value::None,
-						});
-						// Process the document record
-						let pro = Processed {
-							rid: Some(rid),
-							ix: Some(ix),
-							val,
-						};
+					// Process the records
+					for pro in mem::take(&mut collector.to_process) {
 						self.process(stk, ctx, opt, txn, stm, pro).await?;
 					}
-
-					// Collect the next batch of ids
-					records = Vec::new();
-					iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut records).await?;
+					// Get the next batch
+					{
+						let mut tx = txn.lock().await;
+						iterator.next_batch(&mut tx, PROCESSOR_BATCH_SIZE, &mut collector).await?;
+					}
 				}
 				// Everything ok
 				return Ok(());
@@ -624,5 +608,59 @@ impl<'a> Processor<'a> {
 		Err(Error::QueryNotExecutedDetail {
 			message: "No QueryExecutor has been found.".to_string(),
 		})
+	}
+}
+
+struct IndexCollector<'a> {
+	ctx: &'a Context<'a>,
+	opt: &'a Options,
+	table: &'a Table,
+	to_process: Vec<Processed>,
+}
+
+impl<'a> IndexCollector<'a> {
+	fn new(ctx: &'a Context<'a>, opt: &'a Options, table: &'a Table) -> Self {
+		Self {
+			ctx,
+			opt,
+			table,
+			to_process: Vec::new(),
+		}
+	}
+}
+impl<'a> ThingCollector for IndexCollector<'a> {
+	async fn add(
+		&mut self,
+		run: &mut kvs::Transaction,
+		record: CollectorRecord,
+	) -> Result<bool, Error> {
+		// Check if the context is finished
+		if self.ctx.is_done() {
+			return Ok(false);
+		}
+		let (rid, ir) = record;
+
+		// If the record is from another table we can skip
+		if !rid.tb.eq(self.table.as_str()) {
+			return Ok(true);
+		}
+
+		// Fetch the data from the store
+		let key = thing::new(self.opt.ns(), self.opt.db(), &rid.tb, &rid.id);
+		let val = run.get(key.clone()).await?;
+		let rid = Thing::from((key.tb, key.id));
+		// Parse the data from the store
+		let val = Operable::Value(match val {
+			Some(v) => Value::from(v),
+			None => Value::None,
+		});
+
+		let pro = Processed {
+			rid: Some(rid),
+			ir: Some(ir),
+			val,
+		};
+		self.to_process.push(pro);
+		Ok(true)
 	}
 }
