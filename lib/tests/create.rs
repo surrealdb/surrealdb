@@ -417,7 +417,7 @@ async fn create_with_subquery_execution() -> Result<(), Error> {
 		"[
 			{
 				address: {
-					city: 'Whiterun',
+					city: 'London',
 					id: address:test
 				},
 				id: person:test
@@ -431,13 +431,13 @@ async fn create_with_subquery_execution() -> Result<(), Error> {
 		"[
 			{
 				address: {
-					city: 'Whiterun',
+					city: 'London',
 					id: address:test
 				},
 				id: person:test
 			},
 			{
-				city: 'Whiterun',
+				city: 'London',
 				id: address:test
 			}
 		]",
