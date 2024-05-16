@@ -533,7 +533,6 @@ mod tests {
 	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::Array;
 
 	fn test_distance(dist: Distance, a1: &[f64], a2: &[f64], res: f64) {
 		// Convert the arrays to Vec<Number>
@@ -547,10 +546,8 @@ mod tests {
 
 		// Check the "Vector" optimised implementations
 		for t in [VectorType::F64] {
-			let v1: SharedVector =
-				Vector::try_from_array(t, &Array::from(v1.clone())).unwrap().into();
-			let v2: SharedVector =
-				Vector::try_from_array(t, &Array::from(v2.clone())).unwrap().into();
+			let v1: SharedVector = Vector::try_from_vector(t, &v1).unwrap().into();
+			let v2: SharedVector = Vector::try_from_vector(t, &v2).unwrap().into();
 			assert_eq!(dist.calculate(&v1, &v2), res);
 		}
 	}

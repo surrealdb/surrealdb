@@ -614,7 +614,7 @@ pub(super) mod tests {
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::{Array, Number};
+	use crate::sql::{Array, Number, Value};
 	use crate::syn::Parse;
 	use flate2::read::GzDecoder;
 	#[cfg(debug_assertions)]
@@ -683,7 +683,7 @@ pub(super) mod tests {
 			}
 			let line = line_result?;
 			let array = Array::parse(&line);
-			let vec = Vector::try_from_array(t, &array)?.into();
+			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
 			res.push((i as DocId, vec));
 		}
 		Ok(res)
@@ -699,7 +699,7 @@ pub(super) mod tests {
 		for _ in 0..dim {
 			vec.push(gen.generate(rng));
 		}
-		let vec = Vector::try_from_array(t, &Array::from(vec)).unwrap();
+		let vec = Vector::try_from_vector(t, &vec).unwrap();
 		if vec.is_null() {
 			// Some similarities (cosine) is undefined for null vector.
 			new_random_vec(rng, t, dim, gen)
