@@ -39,6 +39,7 @@ mod object;
 mod prime;
 mod stmt;
 mod thing;
+mod token;
 mod token_buffer;
 
 #[cfg(test)]

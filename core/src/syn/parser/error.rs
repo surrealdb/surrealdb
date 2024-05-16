@@ -77,6 +77,7 @@ pub enum ParseErrorKind {
 	},
 	ExceededObjectDepthLimit,
 	ExceededQueryDepthLimit,
+	DurationOverflow,
 	NoWhitespace,
 }
 
@@ -295,6 +296,15 @@ impl ParseError {
 				RenderedError {
 					text: text.to_string(),
 					snippets: vec![snippet_error, snippet_hint],
+				}
+			}
+			ParseErrorKind::DurationOverflow => {
+				let text = "Duration specified exceeds maximum allowed value";
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
 				}
 			}
 		}

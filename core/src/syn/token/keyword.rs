@@ -119,6 +119,7 @@ keyword! {
 	Only => "ONLY",
 	Option => "OPTION",
 	Order => "ORDER",
+	Original => "ORIGINAL",
 	Parallel => "PARALLEL",
 	Param => "PARAM",
 	Passhash => "PASSHASH",

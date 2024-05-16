@@ -28,22 +28,18 @@ impl Parser<'_> {
 				token.span,
 			));
 		}
-		if token.kind == t!("'r") && double {
+		if token.kind == t!("'") && double {
 			unexpected!(self, token.kind, "a single quote")
 		}
-		if token.kind == t!("\"r") && !double {
+		if token.kind == t!("\"") && !double {
 			unexpected!(self, token.kind, "a double quote")
 		}
-		debug_assert!(matches!(token.kind, TokenKind::CloseRecordString { .. }));
 		Ok(thing)
 	}
 
 	fn peek_can_start_id(&mut self) -> bool {
-		self.peek_can_be_ident()
-			|| matches!(
-				self.peek_kind(),
-				TokenKind::Number(_) | t!("{") | t!("[") | TokenKind::Duration
-			)
+		self.peek_can_start_ident()
+			|| matches!(self.peek_kind(), TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-"))
 	}
 
 	pub async fn parse_thing_or_range(
@@ -55,10 +51,13 @@ impl Parser<'_> {
 
 		enter_flexible_ident!(this = self =>(self.flexible_record_id){
 
+			// Peek first to filter out white space
 			this.peek();
 			this.no_whitespace()?;
 
+			// If this starts with a range operator this is a range with no start bound
 			if this.eat(t!("..")) {
+				// Check for inclusive
 				let end = if this.eat(t!("=")) {
 					this.no_whitespace()?;
 					let id = stk.run(|stk| this.parse_id(stk)).await?;
@@ -77,9 +76,11 @@ impl Parser<'_> {
 				})));
 			}
 
+			// Didn't eat range yet so we need to parse the id.
 			let beg = if this.peek_can_start_id(){
 					let id = stk.run(|ctx| this.parse_id(ctx)).await?;
 
+					// check for exclusive
 					if this.eat(t!(">")) {
 						this.no_whitespace()?;
 						Bound::Excluded(id)
@@ -90,6 +91,8 @@ impl Parser<'_> {
 					Bound::Unbounded
 				};
 
+			// Check if this is actually a range.
+			// If we already ate the exclusive it must be a range.
 			if this.eat(t!("..")) {
 				let end = if this.eat(t!("=")) {
 					this.no_whitespace()?;
@@ -138,6 +141,7 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parse an range
 	pub async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
 		let tb = self.next_token_value::<Ident>()?.0;
 
@@ -147,7 +151,8 @@ impl Parser<'_> {
 			this.peek();
 			this.no_whitespace()?;
 
-			let beg = if this.peek_can_be_ident() {
+			// Check for beginning id
+			let beg = if this.peek_can_start_ident() {
 				this.peek();
 				this.no_whitespace()?;
 
@@ -178,7 +183,8 @@ impl Parser<'_> {
 			this.peek();
 			this.no_whitespace()?;
 
-			let end = if this.peek_can_be_ident() {
+			// parse ending id.
+			let end = if this.peek_can_start_ident() {
 				let id = ctx.run(|ctx| this.parse_id(ctx)).await?;
 				if inclusive {
 					Bound::Included(id)
@@ -228,78 +234,125 @@ impl Parser<'_> {
 		let token = self.next();
 		match token.kind {
 			t!("{") => {
+				// object record id
 				let object = enter_flexible_ident!(this = self => (false){
 					this.parse_object(stk, token.span).await
 				})?;
 				Ok(Id::Object(object))
 			}
 			t!("[") => {
+				// array record id
 				let array = enter_flexible_ident!(this = self => (false){
 					this.parse_array(stk, token.span).await
 				})?;
 				Ok(Id::Array(array))
 			}
 			t!("+") => {
+				// starting with a + so it must be a number
 				self.peek();
 				self.no_whitespace()?;
-				expected!(self, TokenKind::Number(NumberKind::Integer));
-				let text = self.lexer.string.take().unwrap();
-				if let Ok(number) = text.parse() {
+				let digits = expected!(self, TokenKind::Digits);
+				let digits_string = self.lexer.string.take().unwrap();
+
+				let peek = self.peek();
+
+				// Test for some invalid syntax types.
+				if digits.is_followed_by(&peek) {
+					match peek.kind {
+						t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
+							// TODO(delskayn) explain that record-id's cant have matissas,
+							// exponents or a number suffix
+							unexpected!(self, peek.kind, "an integer");
+						}
+						x if Self::tokenkind_continues_ident(x) => {
+							unexpected!(self, x, "an integer");
+						}
+						// allowed
+						_ => {}
+					}
+				}
+
+				if let Ok(number) = digits_string.parse() {
 					Ok(Id::Number(number))
 				} else {
-					Ok(Id::String(text))
+					Ok(Id::String(digits_string))
 				}
 			}
 			t!("-") => {
+				// starting with a - so it must be a number
 				self.peek();
 				self.no_whitespace()?;
-				expected!(self, TokenKind::Number(NumberKind::Integer));
-				let text = self.lexer.string.take().unwrap();
-				if let Ok(number) = text.parse::<u64>() {
+				let digits = expected!(self, TokenKind::Digits);
+				let digits_string = self.lexer.string.take().unwrap();
+
+				let peek = self.peek();
+
+				// Test for some invalid syntax types.
+				if digits.is_followed_by(&peek) {
+					match peek.kind {
+						t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
+							// TODO(delskayn) explain that record-id's cant have matissas,
+							// exponents or a number suffix
+							unexpected!(self, peek.kind, "an integer");
+						}
+						x if Self::tokenkind_continues_ident(x) => {
+							unexpected!(self, x, "an integer");
+						}
+						// allowed
+						_ => {}
+					}
+				}
+
+				if let Ok(number) = digits_string.parse::<u64>() {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.cmp(&((i64::MAX as u64) + 1)) {
 						Ordering::Less => Ok(Id::Number(-(number as i64))),
 						Ordering::Equal => Ok(Id::Number(i64::MIN)),
-						Ordering::Greater => Ok(Id::String(format!("-{}", text))),
+						Ordering::Greater => Ok(Id::String(format!("-{}", digits_string))),
 					}
 				} else {
-					Ok(Id::String(text))
+					Ok(Id::String(format!("-{}", digits_string)))
 				}
 			}
-			TokenKind::Number(NumberKind::Integer) => {
-				// Id handle numbers more loose then other parts of the code.
-				// If number can't fit in a i64 it will instead be parsed as a string.
-				let text = self.lexer.string.take().unwrap();
-				if let Ok(number) = text.parse() {
-					Ok(Id::Number(number))
-				} else {
-					Ok(Id::String(text))
+			TokenKind::Digits => {
+				// digits, possibly a number or possible an identifier if flexible_record_id is
+				// enabled.
+				let peek = self.peek();
+
+				if token.is_followed_by(&peek) {
+					match peek.kind {
+						t!(".") => {
+							// TODO(delskayn) explain that record-id's cant have matissas,
+							// exponents or a number suffix
+							unexpected!(self, peek.kind, "a record-id");
+						}
+						x if Self::tokenkind_can_start_ident(x) => {
+							if self.flexible_record_id {
+								// flexible_record_id enabled
+								// Glue the digits into an identifier.
+								let buffer = self.lexer.reader.span(token.span);
+								let buffer = std::str::from_utf8(buffer).unwrap().to_owned();
+								if let Err(e) = self.glue_ident(token, &mut buffer) {
+									return Err(ParseError::new(
+										ParseErrorKind::Unexpected {
+											found: x,
+											expected: "an record-id",
+										},
+										e,
+									));
+								}
+								return Ok(Id::String(buffer));
+							}
+
+							unexpected!(self, x, "an record-id")
+						}
+						_ => {}
+					}
 				}
-			}
-			TokenKind::Number(NumberKind::Decimal | NumberKind::DecimalExponent)
-				if self.flexible_record_id =>
-			{
-				let mut text = self.lexer.string.take().unwrap();
-				text.push('d');
-				text.push('e');
-				text.push('c');
-				Ok(Id::String(text))
-			}
-			TokenKind::Number(NumberKind::Float) if self.flexible_record_id => {
-				let mut text = self.lexer.string.take().unwrap();
-				text.push('f');
-				Ok(Id::String(text))
-			}
-			TokenKind::Duration if self.flexible_record_id => {
-				self.lexer.duration = None;
-				let slice = self.lexer.reader.span(token.span);
-				if slice.iter().any(|x| *x > 0b0111_1111) {
-					unexpected!(self, token.kind, "a identifier");
-				}
-				// Should be valid utf-8 as it was already parsed by the lexer
-				let text = String::from_utf8(slice.to_vec()).unwrap();
-				Ok(Id::String(text))
+
+				let span = self.lexer.reader.span(token.span);
+				Ok(Id::Number(std::str::from_utf8(span).unwrap().parse::<i64>()?))
 			}
 			t!("ULID") => {
 				// TODO: error message about how to use `ulid` as an identifier.

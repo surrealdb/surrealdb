@@ -1,13 +1,7 @@
-use crate::{
-	sql::{Datetime, Duration, Regex, Uuid},
-	syn::token::{Span, Token, TokenKind},
-};
 use thiserror::Error;
 
 mod byte;
 mod char;
-mod datetime;
-mod duration;
 mod ident;
 mod js;
 pub mod keywords;
@@ -15,12 +9,13 @@ mod number;
 mod reader;
 mod strand;
 mod unicode;
-mod uuid;
 
 #[cfg(test)]
 mod test;
 
 pub use reader::{BytesReader, CharError};
+
+use crate::syn::token::{t, Span, Token, TokenKind};
 
 /// A error returned by the lexer when an invalid token is encountered.
 ///
@@ -39,16 +34,6 @@ pub enum Error {
 	InvalidUtf8,
 	#[error("expected next character to be '{0}'")]
 	ExpectedEnd(char),
-	#[error("failed to lex date-time, {0}")]
-	DateTime(#[from] datetime::Error),
-	#[error("failed to lex uuid, {0}")]
-	Uuid(#[from] uuid::Error),
-	#[error("failed to lex duration, {0}")]
-	Duration(#[from] duration::Error),
-	#[error("failed to lex number, {0}")]
-	Number(#[from] number::Error),
-	#[error("failed to parse regex, {0}")]
-	Regex(regex::Error),
 }
 
 impl From<CharError> for Error {
@@ -84,10 +69,6 @@ pub struct Lexer<'a> {
 	/// like for example strings with escape characters.
 	scratch: String,
 
-	/// Allow the next parsed idents to be flexible, i.e. support idents which don't start with a
-	/// number.
-	pub flexible_ident: bool,
-
 	// below are a collection of storage for values produced by tokens.
 	// For performance reasons we wan't to keep the tokens as small as possible.
 	// As only some tokens have an additional value associated with them we don't store that value
@@ -102,10 +83,6 @@ pub struct Lexer<'a> {
 	// different precisions or formats. The only way to support all is to delay parsing the
 	// actual number value to when the parser can decide on a format.
 	pub string: Option<String>,
-	pub duration: Option<Duration>,
-	pub datetime: Option<Datetime>,
-	pub regex: Option<Regex>,
-	pub uuid: Option<Uuid>,
 	pub error: Option<Error>,
 }
 
@@ -121,12 +98,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			whitespace_span: None,
 			scratch: String::new(),
-			flexible_ident: false,
 			string: None,
-			datetime: None,
-			duration: None,
-			regex: None,
-			uuid: None,
 			error: None,
 		}
 	}
@@ -137,13 +109,8 @@ impl<'a> Lexer<'a> {
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
-		self.flexible_ident = false;
 		self.whitespace_span = None;
 		self.string = None;
-		self.datetime = None;
-		self.duration = None;
-		self.regex = None;
-		self.uuid = None;
 		self.error = None;
 	}
 
@@ -161,12 +128,7 @@ impl<'a> Lexer<'a> {
 			last_offset: 0,
 			whitespace_span: None,
 			scratch: self.scratch,
-			flexible_ident: false,
 			string: self.string,
-			datetime: self.datetime,
-			duration: self.duration,
-			regex: self.regex,
-			uuid: self.uuid,
 			error: self.error,
 		}
 	}
@@ -325,14 +287,10 @@ impl<'a> Lexer<'a> {
 					continue;
 				}
 				b'"' => {
-					return self.finish_token(TokenKind::CloseRecordString {
-						double: true,
-					});
+					return self.finish_token(t!("\""));
 				}
 				b'\'' => {
-					return self.finish_token(TokenKind::CloseRecordString {
-						double: false,
-					});
+					return self.finish_token(t!("'"));
 				}
 				b'-' => match self.reader.next() {
 					Some(b'-') => {
@@ -372,44 +330,6 @@ impl<'a> Lexer<'a> {
 				},
 			}
 		}
-	}
-
-	/// Lex only a datetime without enclosing delimiters.
-	///
-	/// Used for reusing lexer lexing code for parsing datetimes. Should not be called during
-	/// normal parsing.
-	pub fn lex_only_datetime(&mut self) -> Result<Datetime, Error> {
-		self.lex_datetime_raw_err().map_err(Error::DateTime)
-	}
-
-	/// Lex only a duration.
-	///
-	/// Used for reusing lexer lexing code for parsing durations. Should not be used during normal
-	/// parsing.
-	pub fn lex_only_duration(&mut self) -> Result<Duration, Error> {
-		match self.reader.next() {
-			Some(x @ b'0'..=b'9') => {
-				self.scratch.push(x as char);
-				while let Some(x @ b'0'..=b'9') = self.reader.peek() {
-					self.reader.next();
-					self.scratch.push(x as char);
-				}
-				self.lex_duration_err().map_err(Error::Duration)
-			}
-			Some(x) => {
-				let char = self.reader.convert_to_char(x)?;
-				Err(Error::UnexpectedCharacter(char))
-			}
-			None => Err(Error::UnexpectedEof),
-		}
-	}
-
-	/// Lex only a UUID.
-	///
-	/// Used for reusing lexer lexing code for parsing UUID's. Should not be used during normal
-	/// parsing.
-	pub fn lex_only_uuid(&mut self) -> Result<Uuid, Error> {
-		Ok(self.lex_uuid_err_inner()?)
 	}
 }
 

@@ -26,25 +26,78 @@ macro_rules! t {
 	};
 
 	("r\"") => {
-		$crate::syn::token::TokenKind::OpenRecordString {
-			double: true,
-		}
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::RecordIdDouble)
 	};
 	("r'") => {
-		$crate::syn::token::TokenKind::OpenRecordString {
-			double: false,
-		}
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::RecordId)
 	};
-
+	("u\"") => {
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::UuidDouble)
+	};
+	("u'") => {
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::Uuid)
+	};
+	("d\"") => {
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::DateTimeDouble)
+	};
+	("d'") => {
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::DateTime)
+	};
+	("\"") => {
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::PlainDouble)
+	};
+	("'") => {
+		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::Plain)
+	};
 	("\"r") => {
-		$crate::syn::token::TokenKind::CloseRecordString {
+		$crate::syn::token::TokenKind::CloseString {
 			double: true,
 		}
 	};
 	("'r") => {
-		$crate::syn::token::TokenKind::CloseRecordString {
+		$crate::syn::token::TokenKind::CloseString {
 			double: false,
 		}
+	};
+
+	("ns") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Nano)
+	};
+	("us") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Micro)
+	};
+	("µs") => {
+		$crate::syn::token::TokenKind::DurationSuffix(
+			$crate::syn::token::DurationSuffix::MicroUnicode,
+		)
+	};
+	("ms") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Milli)
+	};
+	("s") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Second)
+	};
+	("m") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Minute)
+	};
+	("h") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Hour)
+	};
+	("d") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Day)
+	};
+	("w") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Week)
+	};
+	("y") => {
+		$crate::syn::token::TokenKind::DurationSuffix($crate::syn::token::DurationSuffix::Year)
+	};
+
+	("f") => {
+		$crate::syn::token::TokenKind::NumberSuffix($crate::syn::token::NumberSuffix::Float)
+	};
+	("dec") => {
+		$crate::syn::token::TokenKind::NumberSuffix($crate::syn::token::NumberSuffix::Decimal)
 	};
 
 	("<") => {
@@ -143,9 +196,6 @@ macro_rules! t {
 
 	("$param") => {
 		$crate::syn::token::TokenKind::Parameter
-	};
-	("123") => {
-		$crate::syn::token::TokenKind::Number(_)
 	};
 
 	("!") => {

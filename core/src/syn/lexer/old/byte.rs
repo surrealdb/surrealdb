@@ -1,5 +1,3 @@
-use std::mem;
-
 use crate::syn::{
 	lexer::{
 		unicode::{byte, chars},
@@ -141,8 +139,14 @@ impl<'a> Lexer<'a> {
 			}
 		}
 
-		self.string = Some(mem::take(&mut self.scratch));
-		self.finish_token(TokenKind::Regex)
+		match self.scratch.parse() {
+			Ok(x) => {
+				self.scratch.clear();
+				self.regex = Some(x);
+				self.finish_token(TokenKind::Regex)
+			}
+			Err(e) => self.invalid_token(Error::Regex(e)),
+		}
 	}
 
 	/// Lex the next token, starting from the given byte.
@@ -339,136 +343,39 @@ impl<'a> Lexer<'a> {
 				return self.next_token_inner();
 			}
 			b'`' => return self.lex_surrounded_ident(true),
-			b'"' => t!("\""),
-			b'\'' => t!("'"),
-			b'd' => match self.reader.peek() {
-				Some(b'"') => {
-					self.reader.next();
-					t!("d\"")
-				}
-				Some(b'\'') => {
-					self.reader.next();
-					t!("d'")
-				}
-				Some(b'e') => {
-					self.reader.next();
-
-					let Some(b'c') = self.reader.peek() else {
-						self.scratch.push('d');
-						return self.lex_ident_from_next_byte(b'e');
-					};
-
-					self.reader.next();
-
-					if self.reader.peek().map(|x| x.is_ascii_alphanumeric()).unwrap_or(false) {
-						self.scratch.push('d');
-						self.scratch.push('e');
-						return self.lex_ident_from_next_byte(b'c');
+			b'"' => return self.lex_strand(true),
+			b'\'' => return self.lex_strand(false),
+			b'd' => {
+				match self.reader.peek() {
+					Some(b'"') => {
+						self.reader.next();
+						return self.lex_datetime(true);
 					}
-
-					t!("dec")
-				}
-				Some(x) if !x.is_ascii_alphabetic() => {
-					t!("d")
-				}
-				None => {
-					t!("d")
-				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'd');
-				}
-			},
-			b'f' => match self.reader.peek() {
-				Some(x) if !x.is_ascii_alphabetic() => {
-					t!("f")
-				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'f');
-				}
-			},
-			b'n' => match self.reader.peek() {
-				Some(b's') => {
-					self.reader.next();
-					if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-						self.scratch.push('n');
-						return self.lex_ident_from_next_byte(b's');
+					Some(b'\'') => {
+						self.reader.next();
+						return self.lex_datetime(false);
 					}
-					t!("ns")
+					_ => {}
 				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'n');
-				}
-			},
-			b'm' => match self.reader.peek() {
-				Some(b's') => {
-					self.reader.next();
-					if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-						self.scratch.push('m');
-						return self.lex_ident_from_next_byte(b's');
+				return self.lex_ident_from_next_byte(b'd');
+			}
+			b'u' => {
+				match self.reader.peek() {
+					Some(b'"') => {
+						self.reader.next();
+						return self.lex_uuid(true);
 					}
-					t!("ms")
-				}
-				Some(x) if !x.is_ascii_alphabetic() => {
-					t!("m")
-				}
-				None => {
-					t!("m")
-				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'n');
-				}
-			},
-			b's' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b's');
-				} else {
-					t!("s")
-				}
-			}
-			b'h' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b'h');
-				} else {
-					t!("h")
-				}
-			}
-			b'w' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b'w');
-				} else {
-					t!("w")
-				}
-			}
-			b'y' => {
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.lex_ident_from_next_byte(b'y');
-				} else {
-					t!("y")
-				}
-			}
-			b'u' => match self.reader.peek() {
-				Some(b'"') => {
-					self.reader.next();
-					t!("u\"")
-				}
-				Some(b'\'') => {
-					self.reader.next();
-					t!("u'")
-				}
-				Some(b's') => {
-					self.reader.next();
-					if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-						self.scratch.push('u');
-						return self.lex_ident_from_next_byte(b's');
+					Some(b'\'') => {
+						self.reader.next();
+						return self.lex_uuid(false);
 					}
-					t!("us")
+					_ => {}
 				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'u');
-				}
-			},
+				return self.lex_ident_from_next_byte(b'u');
+			}
+			b'e' => {}
 			b'r' => match self.reader.peek() {
-				Some(b'"') => {
+				Some(b'\"') => {
 					self.reader.next();
 					t!("r\"")
 				}
@@ -476,21 +383,12 @@ impl<'a> Lexer<'a> {
 					self.reader.next();
 					t!("r'")
 				}
-				_ => {
-					return self.lex_ident_from_next_byte(b'r');
-				}
+				_ => return self.lex_ident_from_next_byte(byte),
 			},
-			b'e' => {
-				return self.lex_exponent(b'e');
-			}
-			b'E' => {
-				return self.lex_exponent(b'E');
-			}
-			x @ b'0'..=b'9' => return self.lex_digits(x),
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 				return self.lex_ident_from_next_byte(byte);
 			}
-			//b'0'..=b'9' => return self.lex_number(byte),
+			b'0'..=b'9' => return self.lex_number(byte),
 			x => return self.invalid_token(Error::UnexpectedCharacter(x as char)),
 		};
 

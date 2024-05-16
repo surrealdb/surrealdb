@@ -4,7 +4,7 @@ use crate::{
 	sql::{Function, Ident, Model},
 	syn::{
 		parser::mac::{expected, unexpected},
-		token::{t, NumberKind, TokenKind},
+		token::{t, TokenKind},
 	},
 };
 
@@ -52,26 +52,30 @@ impl Parser<'_> {
 		}
 		let start = expected!(self, t!("<")).span;
 
-		let token = self.lexer.lex_only_integer();
+		let token = self.next();
 		let major = match token.kind {
-			TokenKind::Number(NumberKind::Integer) => self.token_value::<u64>(token)?,
-			x => unexpected!(self, x, "a integer"),
+			TokenKind::Digits => {
+				std::str::from_utf8(self.lexer.reader.span(token.span)).unwrap().parse()?
+			}
+			x => unexpected!(self, x, "an integer"),
 		};
 
 		expected!(self, t!("."));
 
-		let token = self.lexer.lex_only_integer();
 		let minor = match token.kind {
-			TokenKind::Number(NumberKind::Integer) => self.token_value::<u64>(token)?,
-			x => unexpected!(self, x, "a integer"),
+			TokenKind::Digits => {
+				std::str::from_utf8(self.lexer.reader.span(token.span)).unwrap().parse()?
+			}
+			x => unexpected!(self, x, "an integer"),
 		};
 
 		expected!(self, t!("."));
 
-		let token = self.lexer.lex_only_integer();
 		let patch = match token.kind {
-			TokenKind::Number(NumberKind::Integer) => self.token_value::<u64>(token)?,
-			x => unexpected!(self, x, "a integer"),
+			TokenKind::Digits => {
+				std::str::from_utf8(self.lexer.reader.span(token.span)).unwrap().parse()?
+			}
+			x => unexpected!(self, x, "an integer"),
 		};
 
 		self.expect_closing_delimiter(t!(">"), start)?;

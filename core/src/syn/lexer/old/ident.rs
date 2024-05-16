@@ -2,16 +2,10 @@ use std::mem;
 
 use unicase::UniCase;
 
-use crate::syn::{
-	lexer::{keywords::KEYWORDS, Error, Lexer},
-	token::{NumberKind, Token, TokenKind},
-};
+use crate::syn::lexer::{keywords::KEYWORDS, Error, Lexer};
+use crate::syn::token::{NumberKind, Token, TokenKind};
 
-use super::unicode::chars;
-
-fn is_identifier_continue(x: u8) -> bool {
-	matches!(x, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-}
+use super::unicode::{chars, U8Ext};
 
 impl<'a> Lexer<'a> {
 	/// Lex a parameter in the form of `$[a-zA-Z0-9_]*`
@@ -41,6 +35,7 @@ impl<'a> Lexer<'a> {
 	/// by `[a-zA-Z0-9_]*`.
 	pub fn lex_ident_from_next_byte(&mut self, start: u8) -> Token {
 		debug_assert!(matches!(start, b'a'..=b'z' | b'A'..=b'Z' | b'_'));
+		debug_assert_eq!(self.scratch, "");
 		self.scratch.push(start as char);
 		self.lex_ident()
 	}
@@ -51,7 +46,7 @@ impl<'a> Lexer<'a> {
 	pub fn lex_ident(&mut self) -> Token {
 		loop {
 			if let Some(x) = self.reader.peek() {
-				if is_identifier_continue(x) {
+				if x.is_identifier_continue() {
 					self.scratch.push(x as char);
 					self.reader.next();
 					continue;
@@ -69,7 +64,7 @@ impl<'a> Lexer<'a> {
 
 			if self.scratch == "NaN" {
 				self.scratch.clear();
-				return self.finish_token(TokenKind::NaN);
+				return self.finish_token(TokenKind::Number(NumberKind::NaN));
 			} else {
 				self.string = Some(mem::take(&mut self.scratch));
 				return self.finish_token(TokenKind::Identifier);

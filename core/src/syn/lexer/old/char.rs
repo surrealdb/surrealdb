@@ -30,18 +30,6 @@ impl<'a> Lexer<'a> {
 			'⊄' => t!("⊄"),
 			'×' => t!("×"),
 			'÷' => t!("÷"),
-			'µ' => {
-				let Some(b's') = self.reader.peek() else {
-					return self.invalid_token(Error::UnexpectedCharacter('µ'));
-				};
-				self.reader.next();
-
-				if self.reader.peek().map(|x| x.is_ascii_alphabetic()).unwrap_or(false) {
-					return self.invalid_token(Error::UnexpectedCharacter('µ'));
-				}
-
-				t!("µs")
-			}
 			x => return self.invalid_token(Error::UnexpectedCharacter(x)),
 		};
 		self.finish_token(kind)

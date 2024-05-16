@@ -1,4 +1,9 @@
-use crate::syn::token::{Algorithm, DistanceKind, Keyword, Language, TokenKind, VectorTypeKind};
+use crate::syn::token::VectorTypeKind;
+use crate::{
+	sql::change_feed_include::ChangeFeedInclude,
+	sql::{language::Language, Algorithm},
+	syn::token::{DistanceKind, Keyword, TokenKind},
+};
 use phf::{phf_map, phf_set};
 use unicase::UniCase;
 
@@ -155,7 +160,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ONLY") => TokenKind::Keyword(Keyword::Only),
 	UniCase::ascii("OPTION") => TokenKind::Keyword(Keyword::Option),
 	UniCase::ascii("ORDER") => TokenKind::Keyword(Keyword::Order),
-	UniCase::ascii("ORIGINAL") => TokenKind::Keyword(Keyword::Original),
 	UniCase::ascii("PARALLEL") => TokenKind::Keyword(Keyword::Parallel),
 	UniCase::ascii("PARAM") => TokenKind::Keyword(Keyword::Param),
 	UniCase::ascii("PASSHASH") => TokenKind::Keyword(Keyword::Passhash),
@@ -353,6 +357,8 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
 	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 
+	// Change Feed keywords
+	UniCase::ascii("ORIGINAL") => TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original),
 };
 
 const fn jwks_token_kind() -> TokenKind {

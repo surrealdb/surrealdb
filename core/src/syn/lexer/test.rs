@@ -1,6 +1,4 @@
-use chrono::{FixedOffset, NaiveDate, Offset, TimeZone, Utc};
-
-use crate::syn::token::{t, NumberKind, TokenKind};
+use crate::syn::token::{t, DurationSuffix, TokenKind};
 
 macro_rules! test_case(
 	($source:expr => [$($token:expr),*$(,)?]) => {
@@ -99,15 +97,16 @@ fn identifiers() {
 			____wdw____ +
 		"#
 			=> [
-			TokenKind::Invalid,
+			TokenKind::Digits, // 123123
+			TokenKind::Identifier, // adwad
 			t!("+"),
-			TokenKind::Identifier,
+			TokenKind::Identifier, // akdwkj
 			t!("+"),
-			TokenKind::Identifier,
+			TokenKind::Identifier, // akdwkj1231312313123
 			t!("+"),
-			TokenKind::Identifier,
+			TokenKind::Identifier, // _a_k_d_wkj1231312313123
 			t!("+"),
-			TokenKind::Identifier,
+			TokenKind::Identifier, // ____wdw____
 			t!("+"),
 		]
 	}
@@ -121,15 +120,21 @@ fn numbers() {
 
 		"#
 			=> [
-			TokenKind::Number(NumberKind::Integer),
+			TokenKind::Digits, // 123123
 			t!("+"),
-			TokenKind::Number(NumberKind::Mantissa),
+			TokenKind::Digits, // 32010230
+			t!("."),
+			TokenKind::Digits, // 123012031
 			t!("+"),
-			TokenKind::Number(NumberKind::Decimal),
+			TokenKind::Digits, // 33043030
+			t!("dec"),
 			t!("+"),
-			TokenKind::Number(NumberKind::Float),
+			TokenKind::Digits, // 33043030
+			t!("f"),
 			t!("+"),
-			TokenKind::Number(NumberKind::DecimalExponent),
+			TokenKind::Digits, // 303
+			TokenKind::Exponent , // e10
+			t!("dec"),
 			t!("+"),
 		]
 	}
@@ -138,7 +143,8 @@ fn numbers() {
 		"+123129decs+"
 			=> [
 				t!("+"),
-				TokenKind::Invalid,
+				TokenKind::Digits, // 123129
+				TokenKind::Identifier, // decs
 				t!("+"),
 			]
 	}
@@ -147,7 +153,8 @@ fn numbers() {
 		"+39349fs+"
 			=> [
 				t!("+"),
-				TokenKind::Invalid,
+				TokenKind::Digits, // 39349
+				TokenKind::Identifier, // fs
 				t!("+"),
 			]
 	}
@@ -156,7 +163,8 @@ fn numbers() {
 		"+394393df+"
 			=> [
 				t!("+"),
-				TokenKind::Invalid,
+				TokenKind::Digits, // 39349
+				TokenKind::Identifier, // df
 				t!("+"),
 			]
 	}
@@ -165,7 +173,8 @@ fn numbers() {
 		"+32932932def+"
 			=> [
 				t!("+"),
-				TokenKind::Invalid,
+				TokenKind::Digits, // 32932932
+				TokenKind::Identifier, // def
 				t!("+"),
 			]
 	}
@@ -174,7 +183,8 @@ fn numbers() {
 		"+329239329z+"
 			=> [
 				t!("+"),
-				TokenKind::Invalid,
+				TokenKind::Digits, // 329239329
+				TokenKind::Identifier, // z
 				t!("+"),
 			]
 	}
@@ -189,53 +199,78 @@ fn duration() {
 			1nsa+1ans+1aus+1usa+1ams+1msa+1am+1ma+1ah+1ha+1aw+1wa+1ay+1ya+1µsa
 		"#
 			=> [
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Nano),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::MicroUnicode),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Micro),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Milli),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Second),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Minute),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Hour),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Week),
 			t!("+"),
-			TokenKind::Duration,
+			TokenKind::Digits,
+			TokenKind::DurationSuffix(DurationSuffix::Year),
 
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
-			TokenKind::Invalid,
+			TokenKind::Digits,
+			TokenKind::Identifier,
 			t!("+"),
+			TokenKind::Digits,
 			TokenKind::Invalid,
+			TokenKind::Identifier,
 		]
 	}
 }
@@ -249,233 +284,4 @@ fn keyword() {
 			t!("SELECT"),
 		]
 	}
-}
-
-#[test]
-fn uuid() {
-	let mut lexer =
-		crate::syn::lexer::Lexer::new(r#" u"e72bee20-f49b-11ec-b939-0242ac120002" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {} @ ", error);
-	}
-	assert_eq!(token.kind, TokenKind::Uuid);
-	let uuid = lexer.uuid.take().unwrap();
-	assert_eq!(uuid.0.to_string(), "e72bee20-f49b-11ec-b939-0242ac120002");
-
-	let mut lexer =
-		crate::syn::lexer::Lexer::new(r#" u"b19bc00b-aa98-486c-ae37-c8e1c54295b1" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {} @ ", error);
-	}
-	assert_eq!(token.kind, TokenKind::Uuid);
-	let uuid = lexer.uuid.take().unwrap();
-	assert_eq!(uuid.0.to_string(), "b19bc00b-aa98-486c-ae37-c8e1c54295b1");
-}
-
-#[test]
-fn date_time_just_date() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2012-04-23" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {} @ ", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let expected_datetime = Utc
-		.fix()
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23).unwrap().and_hms_nano_opt(0, 0, 0, 0).unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_zone_time() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2020-01-01T00:00:00Z" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {} @ ", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let expected_datetime = Utc
-		.fix()
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2020, 1, 1).unwrap().and_hms_nano_opt(0, 0, 0, 0).unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_time_with_time() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43Z" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {} @ ", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let expected_datetime = Utc
-		.fix()
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23).unwrap().and_hms_nano_opt(18, 25, 43, 0).unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_time_nanos() {
-	let mut lexer = crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.5631Z" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {} @ ", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let expected_datetime = Utc
-		.fix()
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23)
-				.unwrap()
-				.and_hms_nano_opt(18, 25, 43, 563_100_000)
-				.unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_time_timezone_utc() {
-	let mut lexer =
-		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.0000511Z" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {}", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let expected_datetime = Utc
-		.fix()
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23)
-				.unwrap()
-				.and_hms_nano_opt(18, 25, 43, 51_100)
-				.unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_time_timezone_pacific() {
-	let mut lexer =
-		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.511-08:00" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {}", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let offset = FixedOffset::west_opt(8 * 3600).unwrap();
-	let expected_datetime = offset
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23)
-				.unwrap()
-				.and_hms_nano_opt(18, 25, 43, 511_000_000)
-				.unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_time_timezone_pacific_partial() {
-	let mut lexer =
-		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.511+08:30" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {}", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let offset = FixedOffset::east_opt(8 * 3600 + 30 * 60).unwrap();
-	let expected_datetime = offset
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23)
-				.unwrap()
-				.and_hms_nano_opt(18, 25, 43, 511_000_000)
-				.unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_time_timezone_utc_nanoseconds() {
-	let mut lexer =
-		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.5110000Z" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {}", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let offset = Utc.fix();
-	let expected_datetime = offset
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23)
-				.unwrap()
-				.and_hms_nano_opt(18, 25, 43, 511_000_000)
-				.unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-	assert_eq!(datetime.0, expected_datetime);
-}
-
-#[test]
-fn date_time_timezone_utc_sub_nanoseconds() {
-	let mut lexer =
-		crate::syn::lexer::Lexer::new(r#" d"2012-04-23T18:25:43.0000511Z" "#.as_bytes());
-	let token = lexer.next_token();
-	if let Some(error) = lexer.error {
-		println!("ERROR: {}", error);
-	}
-	assert_eq!(token.kind, TokenKind::DateTime);
-	let datetime = lexer.datetime.take().unwrap();
-	let offset = Utc.fix();
-	let expected_datetime = offset
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23)
-				.unwrap()
-				.and_hms_nano_opt(18, 25, 43, 51_100)
-				.unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-	assert_eq!(datetime.0, expected_datetime);
 }

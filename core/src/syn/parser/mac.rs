@@ -1,12 +1,21 @@
 /// A macro for requiring a certain token to be next, returning an error otherwise..
 macro_rules! unexpected {
-	($parser:expr, $found:expr, $expected:expr) => {
+	(@ $span:expr, $parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {
+		unexpected!(@withSpan, $span, $parser,$found, $(=> $explain:expr)?)
+	};
+
+	($parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {
+		let span = $parser.recent_span;
+		unexpected!(@withSpan, span, $parser,$found,$(=> $explain:expr)?)
+	};
+
+	(@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr) => {
 		match $found {
 			$crate::syn::token::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
 				return Err($crate::syn::parser::ParseError::new(
 					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
-					$parser.recent_span(),
+					$span
 				));
 			}
 			$crate::syn::token::TokenKind::Eof => {
@@ -15,7 +24,7 @@ macro_rules! unexpected {
 					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
 						expected,
 					},
-					$parser.recent_span(),
+					$span
 				));
 			}
 			x => {
@@ -25,7 +34,39 @@ macro_rules! unexpected {
 						found: x,
 						expected,
 					},
-					$parser.recent_span(),
+					$span
+				));
+			}
+		}
+	};
+
+	(@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr => $explain:expr) => {
+		match $found {
+			$crate::syn::token::TokenKind::Invalid => {
+				let error = $parser.lexer.error.take().unwrap();
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
+					$span
+				));
+			}
+			$crate::syn::token::TokenKind::Eof => {
+				let expected = $expected;
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
+						expected,
+					},
+					$span
+				));
+			}
+			x => {
+				let expected = $expected;
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::UnexpectedExplain {
+						found: x,
+						expected,
+						explain: $explain,
+					},
+					$span
 				));
 			}
 		}

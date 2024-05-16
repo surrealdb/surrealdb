@@ -1,12 +1,13 @@
 use geo::Point;
+use ndarray_stats::MaybeNan;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
 	enter_object_recursion, enter_query_recursion,
 	sql::{
-		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Part, Script, Strand, Subquery, Table,
-		Value,
+		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Strand, Subquery,
+		Table, Value,
 	},
 	syn::{
 		lexer::Lexer,
@@ -14,7 +15,7 @@ use crate::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, NumberKind, Span, TokenKind},
+		token::{t, Span, TokenKind},
 	},
 };
 
@@ -92,7 +93,7 @@ impl Parser<'_> {
 			t!("fn") => self.parse_custom_function(ctx).await.map(|x| Value::Function(Box::new(x))),
 			t!("ml") => self.parse_model(ctx).await.map(|x| Value::Model(Box::new(x))),
 			x => {
-				if !self.peek_can_be_ident() {
+				if !self.peek_can_start_ident() {
 					unexpected!(self, x, "a value")
 				}
 
@@ -421,68 +422,85 @@ impl Parser<'_> {
 				Subquery::Rebuild(stmt)
 			}
 			t!("+") | t!("-") => {
-				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
-				if let TokenKind::Number(kind) = self.peek_token_at(1).kind {
-					// take the value so we don't overwrite it if the next token happens to be an
-					// strand or an ident, both of which are invalid syntax.
-					let number_value = self.lexer.string.take().unwrap();
-					if self.peek_token_at(2).kind == t!(",") {
-						match kind {
-							NumberKind::Decimal | NumberKind::NaN => {
+				let peek_digits = self.peek_token_at(1);
+
+				if peek_digits.follows_from(&peek) && matches!(peek_digits.kind, TokenKind::Digits)
+				{
+					let before = self.recent_span();
+					let number = self.next_token_value::<Number>()?;
+					let after = self.last_span();
+					if self.eat(t!(",")) {
+						match number {
+							Number::Decimal(_) => {
 								return Err(ParseError::new(
 									ParseErrorKind::UnexpectedExplain {
-										found: TokenKind::Number(kind),
+										found: TokenKind::Digits,
 										expected: "a non-decimal, non-nan number",
 										explain: "coordinate numbers can't be NaN or a decimal",
 									},
-									peek.span,
+									before.covers(after),
+								));
+							}
+							Number::Float(x) if x.is_nan() => {
+								return Err(ParseError::new(
+									ParseErrorKind::UnexpectedExplain {
+										found: TokenKind::Digits,
+										expected: "a non-decimal, non-nan number",
+										explain: "coordinate numbers can't be NaN or a decimal",
+									},
+									before.covers(after),
 								));
 							}
 							_ => {}
 						}
-
-						self.lexer.string = Some(number_value);
-						let a = self.parse_signed_float()?;
-						self.next();
-						let b = self.parse_signed_float()?;
+						let x = number.as_float();
+						let y = self.next_token_value::<f64>()?;
 						self.expect_closing_delimiter(t!(")"), start)?;
-						return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
+						return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
+					} else {
+						self.expect_closing_delimiter(t!(")"), start)?;
+						return Ok(Subquery::Value(Value::Number(number)));
 					}
-					self.lexer.string = Some(number_value);
 				}
+
 				Subquery::Value(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
-			TokenKind::Number(kind) => {
-				// handle possible coordinate in the shape of ([-+]?number,[-+]?number)
-				// take the value so we don't overwrite it if the next token happens to be an
-				// strand or an ident, both of which are invalid syntax.
-				let number_value = self.lexer.string.take().unwrap();
-				if self.peek_token_at(1).kind == t!(",") {
-					match kind {
-						NumberKind::Decimal | NumberKind::NaN => {
+			TokenKind::Digits => {
+				let before = self.recent_span();
+				let number = self.next_token_value::<Number>()?;
+				let after = self.last_span();
+				if self.eat(t!(",")) {
+					match number {
+						Number::Decimal(_) => {
 							return Err(ParseError::new(
 								ParseErrorKind::UnexpectedExplain {
-									found: TokenKind::Number(kind),
+									found: TokenKind::Digits,
 									expected: "a non-decimal, non-nan number",
 									explain: "coordinate numbers can't be NaN or a decimal",
 								},
-								peek.span,
+								before.covers(after),
+							));
+						}
+						Number::Float(x) if x.is_nan() => {
+							return Err(ParseError::new(
+								ParseErrorKind::UnexpectedExplain {
+									found: TokenKind::Digits,
+									expected: "a non-decimal, non-nan number",
+									explain: "coordinate numbers can't be NaN or a decimal",
+								},
+								before.covers(after),
 							));
 						}
 						_ => {}
 					}
-					self.pop_peek();
-					// was a semicolon, put the strand back for code reuse.
-					self.lexer.string = Some(number_value);
-					let a = self.token_value::<f64>(peek)?;
-					// eat the semicolon.
-					self.next();
-					let b = self.parse_signed_float()?;
+					let x = number.as_float();
+					let y = self.next_token_value::<f64>()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Value::Geometry(Geometry::Point(Point::from((a, b)))));
+					return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
+				} else {
+					self.expect_closing_delimiter(t!(")"), start)?;
+					return Ok(Subquery::Value(Value::Number(number)));
 				}
-				self.lexer.string = Some(number_value);
-				Subquery::Value(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 			}
 			_ => {
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
