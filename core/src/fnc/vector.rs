@@ -46,7 +46,6 @@ pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {
 
 pub mod distance {
 	use crate::ctx::Context;
-	use crate::dbs::Transaction;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
 	use crate::fnc::get_execution_context;
@@ -67,15 +66,15 @@ pub mod distance {
 		Ok(a.hamming_distance(&b)?.into())
 	}
 
-	pub async fn knn(
-		(ctx, txn, doc): (&Context<'_>, Option<&Transaction>, Option<&CursorDoc<'_>>),
-		_: (),
-	) -> Result<Value, Error> {
-		if let Some((_txn, _exe, _doc, _thg)) = get_execution_context(ctx, txn, doc) {
-			todo!()
-		} else {
-			Ok(Value::None)
+	pub fn knn((ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>), _: ()) -> Result<Value, Error> {
+		if let Some((_exe, doc, _thg)) = get_execution_context(ctx, doc) {
+			if let Some(ir) = doc.ir {
+				if let Some(d) = ir.dist() {
+					return Ok(d.into());
+				}
+			}
 		}
+		Ok(Value::None)
 	}
 
 	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value, Error> {

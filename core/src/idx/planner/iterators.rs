@@ -13,6 +13,36 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub(crate) type IteratorRef = u16;
+
+#[derive(Debug)]
+pub(crate) struct IteratorRecord {
+	irf: IteratorRef,
+	doc_id: Option<DocId>,
+	dist: Option<f64>,
+}
+
+impl IteratorRecord {
+	pub(crate) fn irf(&self) -> IteratorRef {
+		self.irf
+	}
+	pub(crate) fn doc_id(&self) -> Option<DocId> {
+		self.doc_id
+	}
+
+	pub(crate) fn dist(&self) -> Option<f64> {
+		self.dist
+	}
+}
+impl From<IteratorRef> for IteratorRecord {
+	fn from(irf: IteratorRef) -> Self {
+		IteratorRecord {
+			irf,
+			doc_id: None,
+			dist: None,
+		}
+	}
+}
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
@@ -23,8 +53,8 @@ pub(crate) enum ThingIterator {
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
-	Knn(DocIdsIterator),
-	Things(ThingsIterator),
+	Knn(MtreeKnnIterator),
+	Things(HnswKnnIterator),
 }
 
 impl ThingIterator {
@@ -50,33 +80,44 @@ impl ThingIterator {
 	}
 }
 
+pub(crate) type CollectorRecord = (Thing, IteratorRecord);
+
 pub(crate) trait ThingCollector {
-	fn add(&mut self, thing: Thing, doc_id: Option<DocId>);
+	fn add(&mut self, record: CollectorRecord);
 }
 
-impl ThingCollector for Vec<(Thing, Option<DocId>)> {
-	fn add(&mut self, thing: Thing, doc_id: Option<DocId>) {
-		self.push((thing, doc_id));
+impl ThingCollector for Vec<CollectorRecord> {
+	fn add(&mut self, record: CollectorRecord) {
+		self.push(record);
 	}
 }
 
-impl ThingCollector for VecDeque<(Thing, Option<DocId>)> {
-	fn add(&mut self, thing: Thing, doc_id: Option<DocId>) {
-		self.push_back((thing, doc_id));
+impl ThingCollector for VecDeque<CollectorRecord> {
+	fn add(&mut self, record: CollectorRecord) {
+		self.push_back(record);
 	}
 }
 
 pub(crate) struct IndexEqualThingIterator {
+	irf: IteratorRef,
 	beg: Vec<u8>,
 	end: Vec<u8>,
 }
 
 impl IndexEqualThingIterator {
-	pub(super) fn new(ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, v: &Value) -> Self {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+		v: &Value,
+	) -> Self {
 		let a = Array::from(v.clone());
 		let beg = Index::prefix_ids_beg(ns, db, ix_what, ix_name, &a);
 		let end = Index::prefix_ids_end(ns, db, ix_what, ix_name, &a);
 		Self {
+			irf,
 			beg,
 			end,
 		}
@@ -84,6 +125,7 @@ impl IndexEqualThingIterator {
 
 	async fn next_scan<T: ThingCollector>(
 		txn: &Transaction,
+		irf: IteratorRef,
 		beg: &mut Vec<u8>,
 		end: &[u8],
 		limit: u32,
@@ -109,7 +151,7 @@ impl IndexEqualThingIterator {
 			*beg = key;
 		}
 		let count = res.len();
-		res.into_iter().for_each(|(_, val)| collector.add(val.into(), None));
+		res.into_iter().for_each(|(_, val)| collector.add((val.into(), irf.into())));
 		Ok(count)
 	}
 
@@ -119,7 +161,7 @@ impl IndexEqualThingIterator {
 		limit: u32,
 		collector: &mut T,
 	) -> Result<usize, Error> {
-		Self::next_scan(txn, &mut self.beg, &self.end, limit, collector).await
+		Self::next_scan(txn, self.irf, &mut self.beg, &self.end, limit, collector).await
 	}
 }
 
@@ -168,11 +210,13 @@ impl RangeScan {
 }
 
 pub(crate) struct IndexRangeThingIterator {
+	irf: IteratorRef,
 	r: RangeScan,
 }
 
 impl IndexRangeThingIterator {
 	pub(super) fn new(
+		irf: IteratorRef,
 		ns: &str,
 		db: &str,
 		ix_what: &Ident,
@@ -183,6 +227,7 @@ impl IndexRangeThingIterator {
 		let beg = Self::compute_beg(ns, db, ix_what, ix_name, from);
 		let end = Self::compute_end(ns, db, ix_what, ix_name, to);
 		Self {
+			irf,
 			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
 		}
 	}
@@ -250,7 +295,7 @@ impl IndexRangeThingIterator {
 		let mut count = 0;
 		for (k, v) in res {
 			if self.r.matches(&k) {
-				collector.add(v.into(), None);
+				collector.add((v.into(), self.irf.into()));
 				count += 1;
 			}
 		}
@@ -259,12 +304,20 @@ impl IndexRangeThingIterator {
 }
 
 pub(crate) struct IndexUnionThingIterator {
+	irf: IteratorRef,
 	values: VecDeque<(Vec<u8>, Vec<u8>)>,
 	current: Option<(Vec<u8>, Vec<u8>)>,
 }
 
 impl IndexUnionThingIterator {
-	pub(super) fn new(ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, a: &Array) -> Self {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+		a: &Array,
+	) -> Self {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
 		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> =
 			a.0.iter()
@@ -277,6 +330,7 @@ impl IndexUnionThingIterator {
 				.collect();
 		let current = values.pop_front();
 		Self {
+			irf,
 			values,
 			current,
 		}
@@ -290,7 +344,8 @@ impl IndexUnionThingIterator {
 	) -> Result<usize, Error> {
 		while let Some(r) = &mut self.current {
 			let count =
-				IndexEqualThingIterator::next_scan(txn, &mut r.0, &r.1, limit, collector).await?;
+				IndexEqualThingIterator::next_scan(txn, self.irf, &mut r.0, &r.1, limit, collector)
+					.await?;
 			if count != 0 {
 				return Ok(count);
 			}
@@ -307,7 +362,7 @@ struct JoinThingIterator {
 	ix_name: Ident,
 	remote_iterators: VecDeque<ThingIterator>,
 	current_remote: Option<ThingIterator>,
-	current_remote_batch: VecDeque<(Thing, Option<DocId>)>,
+	current_remote_batch: VecDeque<CollectorRecord>,
 	current_local: Option<ThingIterator>,
 	distinct: Trie<Key, bool>,
 }
@@ -402,15 +457,16 @@ impl JoinThingIterator {
 	}
 }
 
-pub(crate) struct IndexJoinThingIterator(JoinThingIterator);
+pub(crate) struct IndexJoinThingIterator(IteratorRef, JoinThingIterator);
 
 impl IndexJoinThingIterator {
 	pub(super) fn new(
+		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Self {
-		Self(JoinThingIterator::new(opt, ix, remote_iterators))
+		Self(irf, JoinThingIterator::new(opt, ix, remote_iterators))
 	}
 
 	async fn next_batch<T: ThingCollector>(
@@ -420,22 +476,31 @@ impl IndexJoinThingIterator {
 		collector: &mut T,
 	) -> Result<usize, Error> {
 		let new_iter = |ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, value: Value| {
-			let it = IndexEqualThingIterator::new(ns, db, ix_what, ix_name, &value);
+			let it = IndexEqualThingIterator::new(self.0, ns, db, ix_what, ix_name, &value);
 			ThingIterator::IndexEqual(it)
 		};
-		self.0.next_batch(tx, limit, collector, new_iter).await
+		self.1.next_batch(tx, limit, collector, new_iter).await
 	}
 }
 
 pub(crate) struct UniqueEqualThingIterator {
+	irf: IteratorRef,
 	key: Option<Key>,
 }
 
 impl UniqueEqualThingIterator {
-	pub(super) fn new(ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, v: &Value) -> Self {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: &str,
+		db: &str,
+		ix_what: &Ident,
+		ix_name: &Ident,
+		v: &Value,
+	) -> Self {
 		let a = Array::from(v.to_owned());
 		let key = Index::new(ns, db, ix_what, ix_name, &a, None).into();
 		Self {
+			irf,
 			key: Some(key),
 		}
 	}
@@ -448,7 +513,7 @@ impl UniqueEqualThingIterator {
 		let mut count = 0;
 		if let Some(key) = self.key.take() {
 			if let Some(val) = txn.lock().await.get(key).await? {
-				collector.add(val.into(), None);
+				collector.add((val.into(), self.irf.into()));
 				count += 1;
 			}
 		}
@@ -457,12 +522,14 @@ impl UniqueEqualThingIterator {
 }
 
 pub(crate) struct UniqueRangeThingIterator {
+	irf: IteratorRef,
 	r: RangeScan,
 	done: bool,
 }
 
 impl UniqueRangeThingIterator {
 	pub(super) fn new(
+		irf: IteratorRef,
 		ns: &str,
 		db: &str,
 		ix_what: &Ident,
@@ -473,6 +540,7 @@ impl UniqueRangeThingIterator {
 		let beg = Self::compute_beg(ns, db, ix_what, ix_name, from);
 		let end = Self::compute_end(ns, db, ix_what, ix_name, to);
 		Self {
+			irf,
 			r: RangeScan::new(beg, from.inclusive, end, to.inclusive),
 			done: false,
 		}
@@ -538,14 +606,14 @@ impl UniqueRangeThingIterator {
 				return Ok(count);
 			}
 			if self.r.matches(&k) {
-				collector.add(v.into(), None);
+				collector.add((v.into(), self.irf.into()));
 				count += 1;
 			}
 		}
 		let end = self.r.end.clone();
 		if self.r.matches(&end) {
 			if let Some(v) = tx.get(end).await? {
-				collector.add(v.into(), None);
+				collector.add((v.into(), self.irf.into()));
 				count += 1;
 			}
 		}
@@ -555,11 +623,17 @@ impl UniqueRangeThingIterator {
 }
 
 pub(crate) struct UniqueUnionThingIterator {
+	irf: IteratorRef,
 	keys: VecDeque<Key>,
 }
 
 impl UniqueUnionThingIterator {
-	pub(super) fn new(opt: &Options, ix: &DefineIndexStatement, a: &Array) -> Self {
+	pub(super) fn new(
+		irf: IteratorRef,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		a: &Array,
+	) -> Self {
 		// We create a VecDeque to hold the key for each value in the array.
 		let keys: VecDeque<Key> =
 			a.0.iter()
@@ -570,6 +644,7 @@ impl UniqueUnionThingIterator {
 				})
 				.collect();
 		Self {
+			irf,
 			keys,
 		}
 	}
@@ -584,7 +659,7 @@ impl UniqueUnionThingIterator {
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
 			if let Some(val) = run.get(key).await? {
-				collector.add(val.into(), None);
+				collector.add((val.into(), self.irf.into()));
 				count += 1;
 				if count >= limit {
 					break;
@@ -595,15 +670,16 @@ impl UniqueUnionThingIterator {
 	}
 }
 
-pub(crate) struct UniqueJoinThingIterator(JoinThingIterator);
+pub(crate) struct UniqueJoinThingIterator(IteratorRef, JoinThingIterator);
 
 impl UniqueJoinThingIterator {
 	pub(super) fn new(
+		irf: IteratorRef,
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		remote_iterators: VecDeque<ThingIterator>,
 	) -> Self {
-		Self(JoinThingIterator::new(opt, ix, remote_iterators))
+		Self(irf, JoinThingIterator::new(opt, ix, remote_iterators))
 	}
 
 	async fn next_batch<T: ThingCollector>(
@@ -613,21 +689,27 @@ impl UniqueJoinThingIterator {
 		collector: &mut T,
 	) -> Result<usize, Error> {
 		let new_iter = |ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident, value: Value| {
-			let it = UniqueEqualThingIterator::new(ns, db, ix_what, ix_name, &value);
+			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix_what, ix_name, &value);
 			ThingIterator::UniqueEqual(it)
 		};
-		self.0.next_batch(tx, limit, collector, new_iter).await
+		self.1.next_batch(tx, limit, collector, new_iter).await
 	}
 }
 
 pub(crate) struct MatchesThingIterator {
+	irf: IteratorRef,
 	hits: Option<HitsIterator>,
 }
 
 impl MatchesThingIterator {
-	pub(super) async fn new(fti: &FtIndex, terms_docs: TermsDocs) -> Result<Self, Error> {
+	pub(super) async fn new(
+		irf: IteratorRef,
+		fti: &FtIndex,
+		terms_docs: TermsDocs,
+	) -> Result<Self, Error> {
 		let hits = fti.new_hits_iterator(terms_docs)?;
 		Ok(Self {
+			irf,
 			hits,
 		})
 	}
@@ -643,7 +725,14 @@ impl MatchesThingIterator {
 			let mut run = txn.lock().await;
 			while limit > count {
 				if let Some((thg, doc_id)) = hits.next(&mut run).await? {
-					collector.add(thg, Some(doc_id));
+					collector.add((
+						thg,
+						IteratorRecord {
+							irf: self.irf,
+							doc_id: Some(doc_id),
+							dist: None,
+						},
+					));
 					count += 1;
 				} else {
 					break;
@@ -654,14 +743,20 @@ impl MatchesThingIterator {
 	}
 }
 
-pub(crate) struct DocIdsIterator {
+pub(crate) struct MtreeKnnIterator {
+	irf: IteratorRef,
 	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<DocId>,
+	res: VecDeque<(DocId, f64)>,
 }
 
-impl DocIdsIterator {
-	pub(super) fn new(doc_ids: Arc<RwLock<DocIds>>, res: VecDeque<DocId>) -> Self {
+impl MtreeKnnIterator {
+	pub(super) fn new(
+		irf: IteratorRef,
+		doc_ids: Arc<RwLock<DocIds>>,
+		res: VecDeque<(DocId, f64)>,
+	) -> Self {
 		Self {
+			irf,
 			doc_ids,
 			res,
 		}
@@ -675,11 +770,18 @@ impl DocIdsIterator {
 		let mut tx = txn.lock().await;
 		let mut count = 0;
 		while limit > count {
-			if let Some(doc_id) = self.res.pop_front() {
+			if let Some((doc_id, dist)) = self.res.pop_front() {
 				if let Some(doc_key) =
 					self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await?
 				{
-					collector.add(doc_key.into(), Some(doc_id));
+					collector.add((
+						doc_key.into(),
+						IteratorRecord {
+							irf: self.irf,
+							doc_id: Some(doc_id),
+							dist: Some(dist),
+						},
+					));
 					count += 1;
 				}
 			} else {
@@ -690,21 +792,30 @@ impl DocIdsIterator {
 	}
 }
 
-pub(crate) struct ThingsIterator {
-	res: VecDeque<Thing>,
+pub(crate) struct HnswKnnIterator {
+	irf: IteratorRef,
+	res: VecDeque<(Thing, f64)>,
 }
 
-impl ThingsIterator {
-	pub(super) fn new(res: VecDeque<Thing>) -> Self {
+impl HnswKnnIterator {
+	pub(super) fn new(irf: IteratorRef, res: VecDeque<(Thing, f64)>) -> Self {
 		Self {
+			irf,
 			res,
 		}
 	}
 	fn next_batch<T: ThingCollector>(&mut self, limit: u32, collector: &mut T) -> usize {
 		let mut count = 0;
 		while limit > count {
-			if let Some(thg) = self.res.pop_front() {
-				collector.add(thg, None);
+			if let Some((thg, dist)) = self.res.pop_front() {
+				collector.add((
+					thg,
+					IteratorRecord {
+						irf: self.irf,
+						doc_id: None,
+						dist: Some(dist),
+					},
+				));
 				count += 1;
 			} else {
 				break;

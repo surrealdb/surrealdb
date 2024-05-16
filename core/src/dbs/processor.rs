@@ -5,7 +5,7 @@ use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
 use crate::kvs::ScanPage;
@@ -141,17 +141,17 @@ impl<'a> Processor<'a> {
 				}
 				Iterable::Range(v) => self.process_range(stk, ctx, opt, txn, stm, v).await?,
 				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, txn, stm, e).await?,
-				Iterable::Index(t, ir) => {
+				Iterable::Index(t, irf) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&t.0) {
 							// We set the query executor matching the current table in the Context
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_index(stk, &ctx, opt, txn, stm, &t, ir).await;
+							return self.process_index(stk, &ctx, opt, txn, stm, &t, irf).await;
 						}
 					}
-					self.process_index(stk, ctx, opt, txn, stm, &t, ir).await?
+					self.process_index(stk, ctx, opt, txn, stm, &t, irf).await?
 				}
 				Iterable::Mergeable(v, o) => {
 					self.process_mergeable(stk, ctx, opt, txn, stm, v, o).await?
@@ -175,9 +175,8 @@ impl<'a> Processor<'a> {
 	) -> Result<(), Error> {
 		// Pass the value through
 		let pro = Processed {
-			ir: None,
 			rid: None,
-			doc_id: None,
+			ix: None,
 			val: Operable::Value(v),
 		};
 		// Process the document record
@@ -205,9 +204,8 @@ impl<'a> Processor<'a> {
 		});
 		// Process the document record
 		let pro = Processed {
-			ir: None,
 			rid: Some(v),
-			doc_id: None,
+			ix: None,
 			val,
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -228,9 +226,8 @@ impl<'a> Processor<'a> {
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Process the document record
 		let pro = Processed {
-			ir: None,
 			rid: Some(v),
-			doc_id: None,
+			ix: None,
 			val: Operable::Value(Value::None),
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -263,9 +260,8 @@ impl<'a> Processor<'a> {
 		let val = Operable::Mergeable(x, o);
 		// Process the document record
 		let pro = Processed {
-			ir: None,
 			rid: Some(v),
-			doc_id: None,
+			ix: None,
 			val,
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -299,9 +295,8 @@ impl<'a> Processor<'a> {
 		let val = Operable::Relatable(f, x, w);
 		// Process the document record
 		let pro = Processed {
-			ir: None,
 			rid: Some(v),
-			doc_id: None,
+			ix: None,
 			val,
 		};
 		self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -352,9 +347,8 @@ impl<'a> Processor<'a> {
 				let val = Operable::Value(val);
 				// Process the record
 				let pro = Processed {
-					ir: None,
 					rid: Some(rid),
-					doc_id: None,
+					ix: None,
 					val,
 				};
 				self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -425,9 +419,8 @@ impl<'a> Processor<'a> {
 				let val = Operable::Value(val);
 				// Process the record
 				let pro = Processed {
-					ir: None,
 					rid: Some(rid),
-					doc_id: None,
+					ix: None,
 					val,
 				};
 				self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -551,9 +544,8 @@ impl<'a> Processor<'a> {
 					});
 					// Process the record
 					let pro = Processed {
-						ir: None,
 						rid: Some(rid),
-						doc_id: None,
+						ix: None,
 						val,
 					};
 					self.process(stk, ctx, opt, txn, stm, pro).await?;
@@ -574,21 +566,21 @@ impl<'a> Processor<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		table: &Table,
-		ir: IteratorRef,
+		irf: IteratorRef,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
-			if let Some(mut iterator) = exe.new_iterator(opt, ir).await? {
-				let mut things = Vec::new();
-				iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut things).await?;
-				while !things.is_empty() {
+			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
+				let mut records = Vec::new();
+				iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut records).await?;
+				while !records.is_empty() {
 					// Check if the context is finished
 					if ctx.is_done() {
 						break;
 					}
 
-					for (thing, doc_id) in things {
+					for (thing, ix) in records {
 						// Check the context
 						if ctx.is_done() {
 							break;
@@ -610,17 +602,16 @@ impl<'a> Processor<'a> {
 						});
 						// Process the document record
 						let pro = Processed {
-							ir: Some(ir),
 							rid: Some(rid),
-							doc_id,
+							ix: Some(ix),
 							val,
 						};
 						self.process(stk, ctx, opt, txn, stm, pro).await?;
 					}
 
 					// Collect the next batch of ids
-					things = Vec::new();
-					iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut things).await?;
+					records = Vec::new();
+					iterator.next_batch(txn, PROCESSOR_BATCH_SIZE, &mut records).await?;
 				}
 				// Everything ok
 				return Ok(());

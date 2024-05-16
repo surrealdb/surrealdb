@@ -432,7 +432,7 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 		id: &Idiom,
 	) -> Result<Option<IndexOperator>, Error> {
-		if let Operator::Knn(k, None, None) = op {
+		if let Operator::Knn(k, None) = op {
 			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions
@@ -444,15 +444,10 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn eval_hnsw_knn(&mut self, op: &Operator, n: &Node) -> Result<Option<IndexOperator>, Error> {
-		if let Operator::Knn(Some(n1), None, n2) = op {
+		if let Operator::Ann(k, ef) = op {
 			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
-				let (k, ef) = if let Some(n2) = n2 {
-					(Some(*n1), *n2)
-				} else {
-					(None, *n1)
-				};
-				return Ok(Some(IndexOperator::Ann(vec, k, ef)));
+				return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
 			}
 		}
 		Ok(None)
@@ -464,11 +459,11 @@ impl<'a> TreeBuilder<'a> {
 		val: &Node,
 		exp: &Arc<Expression>,
 	) -> Result<(), Error> {
-		if let Operator::Knn(Some(k), d, _) = exp.operator() {
+		if let Operator::Knn(k, Some(d)) = exp.operator() {
 			if let Node::Computed(v) = val {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
 				self.knn_expressions
-					.insert(exp.clone(), KnnExpression::new(Some(*k), id.clone(), vec, d.clone()));
+					.insert(exp.clone(), KnnExpression::new(*k, id.clone(), vec, Some(d.clone())));
 			}
 		}
 		Ok(())

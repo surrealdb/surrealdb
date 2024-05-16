@@ -7,9 +7,8 @@ mod tree;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::{
-	InnerQueryExecutor, IteratorEntry, IteratorRef, QueryExecutor,
-};
+use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
+use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
@@ -120,13 +119,13 @@ impl<'a> QueryPlanner<'a> {
 	fn add(
 		&mut self,
 		tb: Table,
-		irf: Option<IteratorRef>,
+		ir: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 	) {
 		self.executors.insert(tb.0.clone(), exe.into());
-		if let Some(irf) = irf {
-			it.ingest(Iterable::Index(tb, irf));
+		if let Some(ir) = ir {
+			it.ingest(Iterable::Index(tb, ir));
 		}
 	}
 	pub(crate) fn has_executors(&self) -> bool {

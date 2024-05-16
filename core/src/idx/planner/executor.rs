@@ -9,9 +9,9 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::iterators::{
-	DocIdsIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, MatchesThingIterator, ThingIterator, ThingsIterator,
-	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
+	HnswKnnIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
+	IndexUnionThingIterator, IteratorRecord, IteratorRef, MatchesThingIterator, MtreeKnnIterator,
+	ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
 	UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
@@ -36,19 +36,14 @@ use tokio::sync::RwLock;
 pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Option<Distance>);
 
 pub(super) struct KnnExpression {
-	k: Option<u32>,
+	k: u32,
 	id: Idiom,
 	obj: Arc<Vec<Number>>,
 	d: Option<Distance>,
 }
 
 impl KnnExpression {
-	pub(super) fn new(
-		k: Option<u32>,
-		id: Idiom,
-		obj: Arc<Vec<Number>>,
-		d: Option<Distance>,
-	) -> Self {
+	pub(super) fn new(k: u32, id: Idiom, obj: Arc<Vec<Number>>, d: Option<Distance>) -> Self {
 		Self {
 			k,
 			id,
@@ -80,8 +75,6 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 		Self(Arc::new(value))
 	}
 }
-
-pub(crate) type IteratorRef = u16;
 
 pub(super) enum IteratorEntry {
 	Single(Arc<Expression>, IndexOption),
@@ -163,7 +156,7 @@ impl InnerQueryExecutor {
 						}
 					}
 					Index::MTree(p) => {
-						if let IndexOperator::Knn(a, Some(k)) = io.op() {
+						if let IndexOperator::Knn(a, k) = io.op() {
 							let mut tx = txn.lock().await;
 							let entry = match mt_map.entry(ix_ref) {
 								Entry::Occupied(e) => MtEntry::new(&mut tx, e.get(), a, *k).await?,
@@ -186,17 +179,17 @@ impl InnerQueryExecutor {
 						}
 					}
 					Index::Hnsw(p) => {
-						if let IndexOperator::Ann(a, Some(n), ef) = io.op() {
+						if let IndexOperator::Ann(a, k, ef) = io.op() {
 							let entry = match hnsw_map.entry(ix_ref) {
 								Entry::Occupied(e) => {
-									HnswEntry::new(e.get().clone(), a, *n, *ef).await?
+									HnswEntry::new(e.get().clone(), a, *k, *ef).await?
 								}
 								Entry::Vacant(e) => {
 									let hnsw = ctx
 										.get_index_stores()
 										.get_index_hnsw(opt, idx_def, p)
 										.await;
-									let entry = HnswEntry::new(hnsw.clone(), a, *n, *ef).await?;
+									let entry = HnswEntry::new(hnsw.clone(), a, *k, *ef).await?;
 									e.insert(hnsw);
 									entry
 								}
@@ -210,9 +203,7 @@ impl InnerQueryExecutor {
 		}
 
 		for (exp, knn) in knns {
-			if let Some(k) = knn.k {
-				knn_entries.insert(exp, (KnnPriorityList::new(k as usize), knn.id, knn.obj, knn.d));
-			}
+			knn_entries.insert(exp, (KnnPriorityList::new(knn.k as usize), knn.id, knn.obj, knn.d));
 		}
 
 		Ok(Self {
@@ -285,8 +276,8 @@ impl QueryExecutor {
 	}
 
 	/// Returns `true` if the expression is matching the current iterator.
-	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
-		match self.0.it_entries.get(ir as usize) {
+	pub(crate) fn is_iterator_expression(&self, irf: IteratorRef, exp: &Expression) -> bool {
+		match self.0.it_entries.get(irf as usize) {
 			Some(IteratorEntry::Single(e, ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
 			_ => false,
@@ -312,13 +303,13 @@ impl QueryExecutor {
 	pub(crate) async fn new_iterator(
 		&self,
 		opt: &Options,
-		it_ref: IteratorRef,
+		irf: IteratorRef,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(it_entry) = self.0.it_entries.get(it_ref as usize) {
+		if let Some(it_entry) = self.0.it_entries.get(irf as usize) {
 			match it_entry {
-				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, it_ref, io).await,
-				IteratorEntry::Range(_, ir, from, to) => {
-					Ok(self.new_range_iterator(opt, *ir, from, to))
+				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, irf, io).await,
+				IteratorEntry::Range(_, ixr, from, to) => {
+					Ok(self.new_range_iterator(opt, *ixr, from, to))
 				}
 			}
 		} else {
@@ -329,20 +320,18 @@ impl QueryExecutor {
 	async fn new_single_iterator(
 		&self,
 		opt: &Options,
-		it_ref: IteratorRef,
+		irf: IteratorRef,
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(ix) = self.get_index_def(io.ix_ref()) {
 			match ix.index {
-				Index::Idx => Ok(self.new_index_iterator(opt, it_ref, ix, io.clone()).await?),
-				Index::Uniq => {
-					Ok(self.new_unique_index_iterator(opt, it_ref, ix, io.clone()).await?)
-				}
+				Index::Idx => Ok(self.new_index_iterator(opt, irf, ix, io.clone()).await?),
+				Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, ix, io.clone()).await?),
 				Index::Search {
 					..
-				} => self.new_search_index_iterator(it_ref, io.clone()).await,
-				Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(it_ref)),
-				Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(it_ref)),
+				} => self.new_search_index_iterator(irf, io.clone()).await,
+				Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
+				Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
 			}
 		} else {
 			Ok(None)
@@ -352,13 +341,14 @@ impl QueryExecutor {
 	async fn new_index_iterator(
 		&self,
 		opt: &Options,
-		it_ref: IteratorRef,
+		irf: IteratorRef,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
 				Some(ThingIterator::IndexEqual(IndexEqualThingIterator::new(
+					irf,
 					opt.ns(),
 					opt.db(),
 					&ix.what,
@@ -367,11 +357,11 @@ impl QueryExecutor {
 				)))
 			}
 			IndexOperator::Union(value) => Some(ThingIterator::IndexUnion(
-				IndexUnionThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+				IndexUnionThingIterator::new(irf, opt.ns(), opt.db(), &ix.what, &ix.name, value),
 			)),
 			IndexOperator::Join(ios) => {
-				let iterators = self.build_iterators(opt, it_ref, ios).await?;
-				let index_join = Box::new(IndexJoinThingIterator::new(opt, ix, iterators));
+				let iterators = self.build_iterators(opt, irf, ios).await?;
+				let index_join = Box::new(IndexJoinThingIterator::new(irf, opt, ix, iterators));
 				Some(ThingIterator::IndexJoin(index_join))
 			}
 			_ => None,
@@ -389,6 +379,7 @@ impl QueryExecutor {
 			match ix.index {
 				Index::Idx => {
 					return Some(ThingIterator::IndexRange(IndexRangeThingIterator::new(
+						ir,
 						opt.ns(),
 						opt.db(),
 						&ix.what,
@@ -399,6 +390,7 @@ impl QueryExecutor {
 				}
 				Index::Uniq => {
 					return Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(
+						ir,
 						opt.ns(),
 						opt.db(),
 						&ix.what,
@@ -416,20 +408,20 @@ impl QueryExecutor {
 	async fn new_unique_index_iterator(
 		&self,
 		opt: &Options,
-		it_ref: IteratorRef,
+		irf: IteratorRef,
 		ix: &DefineIndexStatement,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => Some(ThingIterator::UniqueEqual(
-				UniqueEqualThingIterator::new(opt.ns(), opt.db(), &ix.what, &ix.name, value),
+				UniqueEqualThingIterator::new(irf, opt.ns(), opt.db(), &ix.what, &ix.name, value),
 			)),
 			IndexOperator::Union(value) => {
-				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(opt, ix, value)))
+				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(irf, opt, ix, value)))
 			}
 			IndexOperator::Join(ios) => {
-				let iterators = self.build_iterators(opt, it_ref, ios).await?;
-				let unique_join = Box::new(UniqueJoinThingIterator::new(opt, ix, iterators));
+				let iterators = self.build_iterators(opt, irf, ios).await?;
+				let unique_join = Box::new(UniqueJoinThingIterator::new(irf, opt, ix, iterators));
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			_ => None,
@@ -438,14 +430,15 @@ impl QueryExecutor {
 
 	async fn new_search_index_iterator(
 		&self,
-		it_ref: IteratorRef,
+		irf: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
 			if let Matches(_, _) = io.op() {
 				if let Some(fti) = self.0.ft_map.get(&io.ix_ref()) {
 					if let Some(fte) = self.0.exp_entries.get(exp) {
-						let it = MatchesThingIterator::new(fti, fte.0.terms_docs.clone()).await?;
+						let it =
+							MatchesThingIterator::new(irf, fti, fte.0.terms_docs.clone()).await?;
 						return Ok(Some(ThingIterator::Matches(it)));
 					}
 				}
@@ -454,23 +447,20 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
-	fn new_mtree_index_knn_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
+	fn new_mtree_index_knn_iterator(&self, irf: IteratorRef) -> Option<ThingIterator> {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
 			if let Some(mte) = self.0.mt_entries.get(exp) {
-				let it = DocIdsIterator::new(
-					mte.doc_ids.clone(),
-					mte.res.iter().map(|(d, _)| *d).collect(),
-				);
+				let it = MtreeKnnIterator::new(irf, mte.doc_ids.clone(), mte.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
 		}
 		None
 	}
 
-	fn new_hnsw_index_ann_iterator(&self, it_ref: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(it_ref as usize) {
+	fn new_hnsw_index_ann_iterator(&self, irf: IteratorRef) -> Option<ThingIterator> {
+		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
 			if let Some(he) = self.0.hnsw_entries.get(exp) {
-				let it = ThingsIterator::new(he.res.iter().map(|(thg, _)| thg.clone()).collect());
+				let it = HnswKnnIterator::new(irf, he.res.clone());
 				return Some(ThingIterator::Things(it));
 			}
 		}
@@ -480,12 +470,12 @@ impl QueryExecutor {
 	async fn build_iterators(
 		&self,
 		opt: &Options,
-		it_ref: IteratorRef,
+		irf: IteratorRef,
 		ios: &[IndexOption],
 	) -> Result<VecDeque<ThingIterator>, Error> {
 		let mut iterators = VecDeque::with_capacity(ios.len());
 		for io in ios {
-			if let Some(it) = Box::pin(self.new_single_iterator(opt, it_ref, io)).await? {
+			if let Some(it) = Box::pin(self.new_single_iterator(opt, irf, io)).await? {
 				iterators.push_back(it);
 			}
 		}
@@ -644,15 +634,20 @@ impl QueryExecutor {
 		txn: &Transaction,
 		match_ref: &Value,
 		rid: &Thing,
-		mut doc_id: Option<DocId>,
+		ir: Option<&IteratorRecord>,
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
 				let mut run = txn.lock().await;
+				let mut doc_id = if let Some(ir) = ir {
+					ir.doc_id()
+				} else {
+					None
+				};
 				if doc_id.is_none() {
 					let key: Key = rid.into();
-					doc_id = e.0.doc_ids.read().await.get_doc_id(&mut run, key).await?;
-				};
+					doc_id = e.0.doc_ids.read().await.get_doc_id(&mut run, key).await?
+				}
 				if let Some(doc_id) = doc_id {
 					let score = scorer.score(&mut run, doc_id).await?;
 					if let Some(score) = score {

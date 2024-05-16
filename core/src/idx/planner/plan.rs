@@ -166,7 +166,7 @@ pub(super) enum Plan {
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
 	/// A reference o the index definition
-	ir: IndexRef,
+	ix_ref: IndexRef,
 	id: Idiom,
 	id_pos: IdiomPosition,
 	op: Arc<IndexOperator>,
@@ -180,14 +180,19 @@ pub(super) enum IndexOperator {
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
-	Knn(Arc<Vec<Number>>, Option<u32>),
-	Ann(Arc<Vec<Number>>, Option<u32>, u32),
+	Knn(Arc<Vec<Number>>, u32),
+	Ann(Arc<Vec<Number>>, u32, u32),
 }
 
 impl IndexOption {
-	pub(super) fn new(ir: IndexRef, id: Idiom, id_pos: IdiomPosition, op: IndexOperator) -> Self {
+	pub(super) fn new(
+		ix_ref: IndexRef,
+		id: Idiom,
+		id_pos: IdiomPosition,
+		op: IndexOperator,
+	) -> Self {
 		Self {
-			ir,
+			ix_ref,
 			id,
 			id_pos,
 			op: Arc::new(op),
@@ -199,7 +204,7 @@ impl IndexOption {
 	}
 
 	pub(super) fn ix_ref(&self) -> IndexRef {
-		self.ir
+		self.ix_ref
 	}
 
 	pub(super) fn op(&self) -> &IndexOperator {
@@ -225,7 +230,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
 		let mut e = HashMap::new();
-		if let Some(ix) = ix_def.get(self.ir as usize) {
+		if let Some(ix) = ix_def.get(self.ix_ref as usize) {
 			e.insert("index", Value::from(ix.name.0.to_owned()));
 		}
 		match self.op() {
@@ -259,13 +264,13 @@ impl IndexOption {
 				e.insert("value", v.to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
-				let op = Value::from(Operator::Knn(*k, None, None).to_string());
+				let op = Value::from(Operator::Knn(*k, None).to_string());
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
 			IndexOperator::Ann(a, k, ef) => {
-				let op = Value::from(Operator::Knn(*k, None, Some(*ef)).to_string());
+				let op = Value::from(Operator::Ann(*k, *ef).to_string());
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);

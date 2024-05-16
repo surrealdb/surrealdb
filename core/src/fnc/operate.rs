@@ -201,7 +201,7 @@ fn get_executor_option<'a>(
 	if let Some(doc) = doc {
 		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
 			if let Some(ir) = doc.ir {
-				if exe.is_iterator_expression(ir, exp) {
+				if exe.is_iterator_expression(ir.irf(), exp) {
 					return ExecutorOption::PreMatch;
 				}
 			}

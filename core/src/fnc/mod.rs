@@ -57,7 +57,7 @@ pub async fn run(
 	{
 		stk.run(|stk| asynchronous(stk, ctx, Some(opt), Some(txn), doc, name, args)).await
 	} else {
-		synchronous(ctx, name, args)
+		synchronous(ctx, doc, name, args)
 	}
 }
 
@@ -87,7 +87,12 @@ macro_rules! dispatch {
 }
 
 /// Attempts to run any synchronous function.
-pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub fn synchronous(
+	ctx: &Context<'_>,
+	doc: Option<&CursorDoc<'_>>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	dispatch!(
 		name,
 		args,
@@ -364,6 +369,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"vector::distance::chebyshev" => vector::distance::chebyshev,
 		"vector::distance::euclidean" => vector::distance::euclidean,
 		"vector::distance::hamming" => vector::distance::hamming,
+		"vector::distance::knn" => vector::distance::knn((ctx, doc)),
 		"vector::distance::mahalanobis" => vector::distance::mahalanobis,
 		"vector::distance::manhattan" => vector::distance::manhattan,
 		"vector::distance::minkowski" => vector::distance::minkowski,
@@ -428,8 +434,6 @@ pub async fn asynchronous(
 		//
 		"type::field" => r#type::field((stk,ctx, opt, txn, doc)).await,
 		"type::fields" => r#type::fields((stk,ctx, opt, txn, doc)).await,
-		//
-		"vector::distance::knn" => vector::distance::knn((ctx, txn, doc)).await,
 	)
 }
 
@@ -516,16 +520,13 @@ mod tests {
 
 fn get_execution_context<'a>(
 	ctx: &'a Context<'_>,
-	txn: Option<&'a Transaction>,
 	doc: Option<&'a CursorDoc<'_>>,
-) -> Option<(&'a Transaction, &'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
-	if let Some(txn) = txn {
-		if let Some(doc) = doc {
-			if let Some(thg) = doc.rid {
-				if let Some(pla) = ctx.get_query_planner() {
-					if let Some(exe) = pla.get_query_executor(&thg.tb) {
-						return Some((txn, exe, doc, thg));
-					}
+) -> Option<(&'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
+	if let Some(doc) = doc {
+		if let Some(thg) = doc.rid {
+			if let Some(pla) = ctx.get_query_planner() {
+				if let Some(exe) = pla.get_query_executor(&thg.tb) {
+					return Some((exe, doc, thg));
 				}
 			}
 		}
