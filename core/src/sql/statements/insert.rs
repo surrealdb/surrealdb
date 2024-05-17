@@ -166,7 +166,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 
 fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing, Error> {
 	match into {
-		Some(into) => v.rid().generate(&into, true),
+		Some(into) => v.rid().generate(into, true),
 		None => match v.rid() {
 			Value::Thing(v) => match v {
 				Thing {
