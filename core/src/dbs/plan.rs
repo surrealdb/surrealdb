@@ -131,7 +131,7 @@ impl ExplainItem {
 					("thing-1", Value::Thing(t1.to_owned())),
 					("thing-2", Value::Thing(t2.to_owned())),
 					("thing-3", Value::Thing(t3.to_owned())),
-					("value", v.to_owned().into()),
+					("value", v.to_owned()),
 				],
 			},
 			Iterable::Index(t, ir) => {
