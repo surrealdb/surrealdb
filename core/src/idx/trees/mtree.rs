@@ -96,6 +96,7 @@ impl MTreeIndex {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(in crate::idx) async fn knn_search(
 		&self,
 		stk: &mut Stk,
@@ -115,7 +116,7 @@ impl MTreeIndex {
 		// Do the search
 		let res = mtree.knn_search(stk, ctx, opt, txn, &self.store, &vector, k, &mut cond).await?;
 		// Resolve the doc_id to Thing and the optional value
-		Ok(cond.convert_result(ctx, txn, res.docs).await?)
+		cond.convert_result(ctx, txn, res.docs).await
 	}
 
 	pub(crate) async fn remove_document(
@@ -180,6 +181,7 @@ impl MTree {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
 		stk: &mut Stk,

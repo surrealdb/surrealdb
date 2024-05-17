@@ -98,6 +98,7 @@ impl IteratorEntry {
 	}
 }
 impl InnerQueryExecutor {
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn new(
 		stk: &mut Stk,
 		ctx: &Context<'_>,
@@ -116,7 +117,7 @@ impl InnerQueryExecutor {
 		let mut hnsw_map: HashMap<IndexRef, SharedHnswIndex> = HashMap::default();
 		let mut hnsw_entries = HashMap::default();
 		let mut knn_entries = HashMap::with_capacity(knns.len());
-		let knn_condition = knn_condition.map(|c| Arc::new(c));
+		let knn_condition = knn_condition.map(Arc::new);
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Idioms and MatchRef
@@ -736,6 +737,7 @@ pub(super) struct MtEntry {
 }
 
 impl MtEntry {
+	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &Context<'_>,
