@@ -2,6 +2,7 @@ use crate::idx::planner::executor::KnnExpressions;
 use crate::sql::{
 	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
 };
+
 use std::collections::BTreeMap;
 use std::ops::Bound;
 

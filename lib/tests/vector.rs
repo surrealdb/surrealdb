@@ -276,7 +276,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_mtree_knn_with_limit() -> Result<(), Error> {
+async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 	let sql = r"
 		DEFINE INDEX mt_pt1 ON pts FIELDS point MTREE DIMENSION 1;
 		INSERT INTO pts [
@@ -291,10 +291,10 @@ async fn select_mtree_knn_with_limit() -> Result<(), Error> {
 		LET $pt = [44f];
 		SELECT id, flag, vector::distance::knn() AS distance FROM pts
 			WHERE flag = true && point <|2|> $pt
-			ORDER BY distance DESC EXPLAIN;
+			ORDER BY distance EXPLAIN;
 		SELECT id, flag, vector::distance::knn() AS distance FROM pts
 			WHERE flag = true && point <|2|> $pt
-			ORDER BY distance DESC;
+			ORDER BY distance;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

@@ -19,7 +19,7 @@ pub(super) struct Tree {
 	pub(super) index_map: IndexesMap,
 	pub(super) with_indexes: Vec<IndexRef>,
 	pub(super) knn_expressions: KnnExpressions,
-	pub(super) _knn_condition: Option<Cond>,
+	pub(super) knn_condition: Option<Cond>,
 }
 
 impl Tree {
@@ -42,15 +42,12 @@ impl Tree {
 			} else {
 				KnnConditionRewriter::build(&b.knn_expressions, cond)
 			};
-			if let Some(c) = &knn_condition {
-				println!("KNN COND: {c}");
-			}
 			Ok(Some(Self {
 				root,
 				index_map: b.index_map,
 				with_indexes: b.with_indexes,
 				knn_expressions: b.knn_expressions,
-				_knn_condition: knn_condition,
+				knn_condition,
 			}))
 		} else {
 			Ok(None)

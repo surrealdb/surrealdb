@@ -1,3 +1,6 @@
+use crate::ctx::Context;
+use crate::dbs;
+use crate::dbs::Options;
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 use reblessive::tree::Stk;
@@ -13,6 +16,7 @@ use tokio::sync::RwLock;
 use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
+use crate::idx::planner::checker::ConditionChecker;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{
@@ -92,12 +96,16 @@ impl MTreeIndex {
 		Ok(())
 	}
 
-	pub(crate) async fn knn_search(
+	pub(in crate::idx) async fn knn_search(
 		&self,
-		tx: &mut Transaction,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &dbs::Transaction,
 		v: &Vec<Number>,
 		k: usize,
-	) -> Result<VecDeque<(DocId, f64)>, Error> {
+		mut cond: ConditionChecker,
+	) -> Result<VecDeque<(Thing, f64, Option<Value>)>, Error> {
 		// Extract the vector
 		let vector = Vector::try_from_vector(self.vector_type, v)?;
 		vector.check_dimension(self.dim)?;
@@ -105,8 +113,9 @@ impl MTreeIndex {
 		// Lock the index
 		let mtree = self.mtree.read().await;
 		// Do the search
-		let res = mtree.knn_search(tx, &self.store, &vector, k).await?;
-		Ok(res.docs)
+		let res = mtree.knn_search(stk, ctx, opt, txn, &self.store, &vector, k, &mut cond).await?;
+		// Resolve the doc_id to Thing and the optional value
+		Ok(cond.convert_result(ctx, txn, res.docs).await?)
 	}
 
 	pub(crate) async fn remove_document(
@@ -173,10 +182,14 @@ impl MTree {
 
 	pub async fn knn_search(
 		&self,
-		tx: &mut Transaction,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &dbs::Transaction,
 		store: &MTreeStore,
 		v: &SharedVector,
 		k: usize,
+		condition_checker: &mut ConditionChecker,
 	) -> Result<KnnResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("knn_search - v: {:?} - k: {}", v, k);
@@ -189,7 +202,7 @@ impl MTree {
 		let mut visited_nodes = HashMap::new();
 		while let Some(e) = queue.pop() {
 			let id = e.id();
-			let node = store.get_node(tx, id).await?;
+			let node = store.get_node_txn(txn, id).await?;
 			#[cfg(debug_assertions)]
 			{
 				debug!("Visit node id: {}", id);
@@ -206,7 +219,17 @@ impl MTree {
 						if res.check_add(d) {
 							#[cfg(debug_assertions)]
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
-							res.add(d, &Ids64::Bits(p.docs.clone()));
+							let mut docs = Ids64::Empty;
+							for doc in &p.docs {
+								if condition_checker.check_truthy(stk, ctx, opt, txn, doc).await? {
+									if let Some(new_docs) = docs.insert(doc) {
+										docs = new_docs;
+									}
+								}
+							}
+							if !docs.is_empty() {
+								res.add(d, &docs, condition_checker);
+							}
 						}
 					}
 				}

@@ -744,8 +744,7 @@ impl Parser<'_> {
 								self.pop_peek();
 								keep_pruned_connections = true;
 							}
-							t => {
-								println!("TOKEN: {t:?}");
+							_ => {
 								break;
 							}
 						}

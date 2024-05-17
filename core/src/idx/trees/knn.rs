@@ -1,4 +1,5 @@
 use crate::idx::docids::DocId;
+use crate::idx::planner::checker::ConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
@@ -531,16 +532,22 @@ impl KnnResultBuilder {
 		}
 	}
 	pub(super) fn check_add(&self, dist: f64) -> bool {
-		if self.docs.len() < self.knn {
-			true
-		} else if let Some(pr) = self.priority_list.keys().last() {
-			dist <= pr.0
-		} else {
-			true
+		if self.docs.len() >= self.knn {
+			if let Some(pr) = self.priority_list.keys().last() {
+				if dist > pr.0 {
+					return false;
+				}
+			}
 		}
+		true
 	}
 
-	pub(super) fn add(&mut self, dist: f64, docs: &Ids64) {
+	pub(super) fn add(
+		&mut self,
+		dist: f64,
+		docs: &Ids64,
+		condition_checker: &mut ConditionChecker,
+	) {
 		let pr = FloatKey(dist);
 		docs.append_to(&mut self.docs);
 		match self.priority_list.entry(pr) {
@@ -562,6 +569,9 @@ impl KnnResultBuilder {
 				if docs_len - d.len() >= self.knn {
 					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
 						evicted_docs.remove_to(&mut self.docs);
+						for doc_id in evicted_docs.iter() {
+							condition_checker.expire(doc_id);
+						}
 					}
 				}
 			}
@@ -611,6 +621,7 @@ pub struct KnnResult {
 pub(super) mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
+	use crate::idx::planner::checker::ConditionChecker;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};

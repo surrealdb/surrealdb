@@ -1,9 +1,10 @@
+pub(in crate::idx) mod checker;
 pub(crate) mod executor;
 pub(crate) mod iterators;
 pub(in crate::idx) mod knn;
 pub(crate) mod plan;
-mod rewriter;
-mod tree;
+pub(in crate::idx) mod rewriter;
+pub(in crate::idx) mod tree;
 
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Transaction};
@@ -66,6 +67,7 @@ impl<'a> QueryPlanner<'a> {
 					&t,
 					tree.index_map,
 					tree.knn_expressions,
+					tree.knn_condition,
 				)
 				.await?;
 				match PlanBuilder::build(tree.root, self.with, tree.with_indexes)? {

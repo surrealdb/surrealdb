@@ -3,6 +3,7 @@ mod layer;
 
 use crate::err::Error;
 use crate::idx::docids::DocId;
+use crate::idx::planner::checker::ConditionChecker;
 use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::layer::HnswLayer;
@@ -157,7 +158,7 @@ impl HnswIndex {
 			if builder.check_add(e_dist) {
 				if let Some(v) = self.hnsw.get_vector(&e_id) {
 					if let Some((docs, _)) = self.vec_docs.get(v) {
-						builder.add(e_dist, docs);
+						builder.add(e_dist, docs, &mut ConditionChecker::Hnsw);
 					}
 				}
 			}

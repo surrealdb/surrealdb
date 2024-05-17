@@ -16,6 +16,7 @@ use crate::sql::{Edges, Range, Table, Thing, Value};
 use channel::Sender;
 use reblessive::tree::Stk;
 use std::ops::Bound;
+use std::vec;
 
 impl Iterable {
 	#[allow(clippy::too_many_arguments)]
@@ -72,7 +73,7 @@ impl Iterable {
 	}
 }
 
-enum Processor<'a> {
+pub(crate) enum Processor<'a> {
 	Iterator(Option<&'a mut SyncDistinct>, &'a mut Iterator),
 	#[cfg(not(target_arch = "wasm32"))]
 	Channel(Option<AsyncDistinct>, Sender<Processed>),
@@ -613,7 +614,13 @@ impl<'a> Processor<'a> {
 			iterator.next_batch(ctx, &mut tx, PROCESSOR_BATCH_SIZE).await?;
 		let mut to_process = Vec::with_capacity(records.len());
 		for r in records {
-			let v = Self::fetch_record(&mut tx, opt, &r).await?;
+			let v = if let Some(v) = r.2 {
+				// The value may be already be fetched by the KNN iterator to evaluate the condition
+				v
+			} else {
+				// Otherwise we have to fetch the record
+				Iterable::fetch_thing(&mut tx, opt, &r.0).await?
+			};
 			let p = Processed {
 				rid: Some(r.0),
 				ir: Some(r.1),
@@ -623,17 +630,19 @@ impl<'a> Processor<'a> {
 		}
 		Ok(to_process)
 	}
+}
 
+impl Iterable {
 	/// Returns the value from the store, or Value::None it the value does not exist.
-	pub(crate) async fn fetch_record(
+	pub(crate) async fn fetch_thing(
 		tx: &mut kvs::Transaction,
 		opt: &Options,
-		record: &CollectorRecord,
+		thg: &Thing,
 	) -> Result<Value, Error> {
 		// Fetch the data from the store
-		let key = thing::new(opt.ns(), opt.db(), &record.0.tb, &record.0.id);
+		let key = thing::new(opt.ns(), opt.db(), &thg.tb, &thg.id);
 		// Fetch and parse the data from the store
-		let val = tx.get(key.clone()).await?.map(Value::from).unwrap_or(Value::None);
+		let val = tx.get(key).await?.map(Value::from).unwrap_or(Value::None);
 		// Return the result
 		Ok(val)
 	}

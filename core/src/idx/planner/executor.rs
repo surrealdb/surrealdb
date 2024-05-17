@@ -2,12 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::idx::docids::{DocId, DocIds};
+use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
+use crate::idx::planner::checker::ConditionChecker;
 use crate::idx::planner::iterators::{
 	HnswKnnIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
 	IndexUnionThingIterator, IteratorRecord, IteratorRef, MatchesThingIterator, MtreeKnnIterator,
@@ -22,11 +23,10 @@ use crate::idx::planner::{IterationStage, KnnSet};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
-use crate::kvs;
 use crate::kvs::{Key, TransactionType};
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Expression, Idiom, Number, Object, Table, Thing, Value};
+use crate::sql::{Cond, Expression, Idiom, Number, Object, Table, Thing, Value};
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -106,6 +106,7 @@ impl InnerQueryExecutor {
 		table: &Table,
 		im: IndexesMap,
 		knns: KnnExpressions,
+		knn_condition: Option<Cond>,
 	) -> Result<Self, Error> {
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
@@ -115,6 +116,7 @@ impl InnerQueryExecutor {
 		let mut hnsw_map: HashMap<IndexRef, SharedHnswIndex> = HashMap::default();
 		let mut hnsw_entries = HashMap::default();
 		let mut knn_entries = HashMap::with_capacity(knns.len());
+		let knn_condition = knn_condition.map(|c| Arc::new(c));
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Idioms and MatchRef
@@ -157,20 +159,44 @@ impl InnerQueryExecutor {
 					}
 					Index::MTree(p) => {
 						if let IndexOperator::Knn(a, k) = io.op() {
-							let mut tx = txn.lock().await;
 							let entry = match mt_map.entry(ix_ref) {
-								Entry::Occupied(e) => MtEntry::new(&mut tx, e.get(), a, *k).await?,
+								Entry::Occupied(e) => {
+									MtEntry::new(
+										stk,
+										ctx,
+										opt,
+										txn,
+										e.get(),
+										a,
+										*k,
+										knn_condition.clone(),
+									)
+									.await?
+								}
 								Entry::Vacant(e) => {
 									let ikb = IndexKeyBase::new(opt, idx_def);
-									let mt = MTreeIndex::new(
-										ctx.get_index_stores(),
-										&mut tx,
-										ikb,
-										p,
-										TransactionType::Read,
+									let mt = {
+										let mut tx = txn.lock().await;
+										MTreeIndex::new(
+											ctx.get_index_stores(),
+											&mut tx,
+											ikb,
+											p,
+											TransactionType::Read,
+										)
+										.await?
+									};
+									let entry = MtEntry::new(
+										stk,
+										ctx,
+										opt,
+										txn,
+										&mt,
+										a,
+										*k,
+										knn_condition.clone(),
 									)
 									.await?;
-									let entry = MtEntry::new(&mut tx, &mt, a, *k).await?;
 									e.insert(mt);
 									entry
 								}
@@ -450,7 +476,7 @@ impl QueryExecutor {
 	fn new_mtree_index_knn_iterator(&self, irf: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
 			if let Some(mte) = self.0.mt_entries.get(exp) {
-				let it = MtreeKnnIterator::new(irf, mte.doc_ids.clone(), mte.res.clone());
+				let it = MtreeKnnIterator::new(irf, mte.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
 		}
@@ -706,21 +732,24 @@ impl FtEntry {
 
 #[derive(Clone)]
 pub(super) struct MtEntry {
-	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<(DocId, f64)>,
+	res: VecDeque<(Thing, f64, Option<Value>)>,
 }
 
 impl MtEntry {
 	async fn new(
-		tx: &mut kvs::Transaction,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
 		mt: &MTreeIndex,
 		o: &Vec<Number>,
 		k: u32,
+		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
-		let res = mt.knn_search(tx, o, k as usize).await?;
+		let cond_checker = ConditionChecker::new_mtree(cond, mt.doc_ids());
+		let res = mt.knn_search(stk, ctx, opt, txn, o, k as usize, cond_checker).await?;
 		Ok(Self {
 			res,
-			doc_ids: mt.doc_ids(),
 		})
 	}
 }

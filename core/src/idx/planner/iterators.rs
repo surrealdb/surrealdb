@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::idx::docids::{DocId, DocIds};
+use crate::idx::docids::DocId;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
@@ -12,8 +12,6 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Thing, Value};
 use radix_trie::Trie;
 use std::collections::VecDeque;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub(crate) type IteratorRef = u16;
 
@@ -132,7 +130,7 @@ impl ThingIterator {
 			Self::IndexUnion(i) => i.next_batch(ctx, tx, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, tx, size).await,
 			Self::Matches(i) => i.next_batch(ctx, tx, size).await,
-			Self::Knn(i) => i.next_batch(ctx, tx, size).await,
+			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, tx, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, tx, size)).await,
 			Self::Things(i) => i.next_batch(ctx, size),
@@ -788,40 +786,31 @@ impl MatchesThingIterator {
 
 pub(crate) struct MtreeKnnIterator {
 	irf: IteratorRef,
-	doc_ids: Arc<RwLock<DocIds>>,
-	res: VecDeque<(DocId, f64)>,
+	res: VecDeque<(Thing, f64, Option<Value>)>,
 }
 
 impl MtreeKnnIterator {
-	pub(super) fn new(
-		irf: IteratorRef,
-		doc_ids: Arc<RwLock<DocIds>>,
-		res: VecDeque<(DocId, f64)>,
-	) -> Self {
+	pub(super) fn new(irf: IteratorRef, res: VecDeque<(Thing, f64, Option<Value>)>) -> Self {
 		Self {
 			irf,
-			doc_ids,
 			res,
 		}
 	}
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		ctx: &Context<'_>,
-		tx: &mut kvs::Transaction,
 		limit: u32,
 	) -> Result<B, Error> {
 		let limit = limit as usize;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
 		while limit > records.len() && !ctx.is_done() {
-			if let Some((doc_id, dist)) = self.res.pop_front() {
-				if let Some(doc_key) = self.doc_ids.read().await.get_doc_key(tx, doc_id).await? {
-					let ir = IteratorRecord {
-						irf: self.irf,
-						doc_id: Some(doc_id),
-						dist: Some(dist),
-					};
-					records.add((doc_key.into(), ir, None));
-				}
+			if let Some((thing, dist, val)) = self.res.pop_front() {
+				let ir = IteratorRecord {
+					irf: self.irf,
+					doc_id: None,
+					dist: Some(dist),
+				};
+				records.add((thing, ir, val));
 			} else {
 				break;
 			}
