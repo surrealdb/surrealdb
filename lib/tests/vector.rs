@@ -346,3 +346,75 @@ async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
+	let sql = r"
+		DEFINE INDEX hn_pt1 ON pts FIELDS point HNSW DIMENSION 1;
+		INSERT INTO pts [
+			{ id: pts:1, point: [ 10f ], flag: true },
+			{ id: pts:2, point: [ 20f ], flag: false },
+			{ id: pts:3, point: [ 30f ], flag: true },
+			{ id: pts:4, point: [ 40f ], flag: false },
+			{ id: pts:5, point: [ 50f ], flag: true },
+			{ id: pts:6, point: [ 60f ], flag: false },
+			{ id: pts:7, point: [ 70f ], flag: true }
+		];
+		LET $pt = [44f];
+		SELECT id, flag, vector::distance::knn() AS distance FROM pts
+			WHERE flag = true && point <|2,40|> $pt
+			ORDER BY distance EXPLAIN;
+		SELECT id, flag, vector::distance::knn() AS distance FROM pts
+			WHERE flag = true && point <|2,40|> $pt
+			ORDER BY distance;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	skip_ok(&mut res, 3)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+					{
+						detail: {
+							plan: {
+								index: 'hn_pt1',
+								operator: '<|2,40|>',
+								value: [44f]
+							},
+							table: 'pts',
+						},
+						operation: 'Iterate Index'
+					},
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					id: pts:5,
+					flag: true,
+					distance: 6f
+				},
+				{
+					id: pts:3,
+					flag: true,
+					distance: 14f
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	Ok(())
+}
