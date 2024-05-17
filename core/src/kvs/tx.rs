@@ -2561,7 +2561,10 @@ impl Transaction {
 						if res.is_empty() {
 							break;
 						}
-						// Loop over results
+
+						let mut normal: Vec<String> = vec![];
+
+						// Categorize results
 						for (k, v) in res.into_iter() {
 							// Parse the key and the value
 							let k: crate::key::thing::Thing = (&k).into();
@@ -2576,10 +2579,17 @@ impl Transaction {
 								}
 								// This is a normal record
 								_ => {
-									let sql = format!("UPDATE {t} CONTENT {v};");
-									chn.send(bytes!(sql)).await?;
+									normal.push(v.to_string());
 								}
 							}
+						}
+
+						// Add batches of insert statements
+						for records in normal.chunks(1000).into_iter() {
+							let tb_name = &tb.name;
+							let values = records.join(", ");
+							let sql = format!("INSERT INTO {tb_name} [ {values} ]");
+							chn.send(bytes!(sql)).await?;
 						}
 						continue;
 					}
