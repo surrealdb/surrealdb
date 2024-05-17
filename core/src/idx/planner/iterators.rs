@@ -111,8 +111,7 @@ pub(crate) enum ThingIterator {
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
-	Knn(MtreeKnnIterator),
-	Things(HnswKnnIterator),
+	Knn(KnnIterator),
 }
 
 impl ThingIterator {
@@ -133,7 +132,6 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, tx, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, tx, size)).await,
-			Self::Things(i) => i.next_batch(ctx, size),
 		}
 	}
 }
@@ -784,13 +782,15 @@ impl MatchesThingIterator {
 	}
 }
 
-pub(crate) struct MtreeKnnIterator {
+pub(crate) type KnnIteratorResult = (Thing, f64, Option<Value>);
+
+pub(crate) struct KnnIterator {
 	irf: IteratorRef,
-	res: VecDeque<(Thing, f64, Option<Value>)>,
+	res: VecDeque<KnnIteratorResult>,
 }
 
-impl MtreeKnnIterator {
-	pub(super) fn new(irf: IteratorRef, res: VecDeque<(Thing, f64, Option<Value>)>) -> Self {
+impl KnnIterator {
+	pub(super) fn new(irf: IteratorRef, res: VecDeque<KnnIteratorResult>) -> Self {
 		Self {
 			irf,
 			res,
@@ -811,37 +811,6 @@ impl MtreeKnnIterator {
 					dist: Some(dist),
 				};
 				records.add((thing, ir, val));
-			} else {
-				break;
-			}
-		}
-		Ok(records)
-	}
-}
-
-pub(crate) struct HnswKnnIterator {
-	irf: IteratorRef,
-	res: VecDeque<(Thing, f64)>,
-}
-
-impl HnswKnnIterator {
-	pub(super) fn new(irf: IteratorRef, res: VecDeque<(Thing, f64)>) -> Self {
-		Self {
-			irf,
-			res,
-		}
-	}
-	fn next_batch<B: IteratorBatch>(&mut self, ctx: &Context<'_>, limit: u32) -> Result<B, Error> {
-		let limit = limit as usize;
-		let mut records = B::with_capacity(limit.min(self.res.len()));
-		while limit > records.len() && !ctx.is_done() {
-			if let Some((thg, dist)) = self.res.pop_front() {
-				let ir = IteratorRecord {
-					irf: self.irf,
-					doc_id: None,
-					dist: Some(dist),
-				};
-				records.add((thg, ir, None));
 			} else {
 				break;
 			}

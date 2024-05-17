@@ -3,6 +3,8 @@ use crate::dbs::{Iterable, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
+use crate::idx::planner::iterators::KnnIteratorResult;
+use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::sql::{Cond, Thing, Value};
 use hashbrown::hash_map::Entry;
 use hashbrown::HashMap;
@@ -12,16 +14,29 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub enum ConditionChecker {
-	Hnsw,
-	MTree(MTreeChecker),
-	MTreeCondition(MTreeConditionChecker),
+pub enum ConditionChecker<'a> {
+	Hnsw(HnswChecker),
+	HnswCondition(HnswConditionChecker<'a>),
+	MTree(MTreeChecker<'a>),
+	MTreeCondition(MTreeConditionChecker<'a>),
+	#[cfg(debug_assertions)]
+	#[allow(dead_code)]
+	None,
 }
-impl ConditionChecker {
-	pub(in crate::idx) fn new_mtree(cond: Option<Arc<Cond>>, doc_ids: Arc<RwLock<DocIds>>) -> Self {
+impl<'a> ConditionChecker<'a> {
+	pub(in crate::idx) fn new_mtree(
+		ctx: &'a Context<'_>,
+		opt: &'a Options,
+		txn: &'a Transaction,
+		cond: Option<Arc<Cond>>,
+		doc_ids: Arc<RwLock<DocIds>>,
+	) -> Self {
 		if let Some(cond) = cond {
 			if Cond(Value::Bool(true)).ne(cond.as_ref()) {
 				return Self::MTreeCondition(MTreeConditionChecker {
+					ctx,
+					opt,
+					txn,
 					cond,
 					doc_ids,
 					cache: Default::default(),
@@ -29,63 +44,91 @@ impl ConditionChecker {
 			}
 		}
 		Self::MTree(MTreeChecker {
+			ctx,
+			txn,
 			doc_ids,
 		})
 	}
+
+	pub(in crate::idx) fn new_hnsw(
+		ctx: &'a Context<'_>,
+		opt: &'a Options,
+		txn: &'a Transaction,
+		cond: Option<Arc<Cond>>,
+		h: SharedHnswIndex,
+	) -> Self {
+		if let Some(cond) = cond {
+			if Cond(Value::Bool(true)).ne(cond.as_ref()) {
+				return Self::HnswCondition(HnswConditionChecker {
+					ctx,
+					opt,
+					txn,
+					cond,
+					h,
+					cache: Default::default(),
+				});
+			}
+		}
+		Self::Hnsw(HnswChecker {
+			h,
+		})
+	}
+
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
 		doc_id: DocId,
 	) -> Result<bool, Error> {
 		match self {
-			Self::MTree(_) | Self::Hnsw => Ok(true),
-			Self::MTreeCondition(c) => c.check_truthy(stk, ctx, opt, txn, doc_id).await,
+			Self::MTreeCondition(c) => c.check_truthy(stk, doc_id).await,
+			Self::HnswCondition(c) => c.check_truthy(stk, doc_id).await,
+			_ => Ok(true),
 		}
 	}
 
 	pub(in crate::idx) fn expire(&mut self, doc_id: DocId) {
 		match self {
-			Self::MTree(_) | Self::Hnsw => {}
 			Self::MTreeCondition(c) => c.expire(doc_id),
+			Self::HnswCondition(c) => c.expire(doc_id),
+			_ => {}
 		}
 	}
 
 	pub(in crate::idx) async fn convert_result(
 		&mut self,
-		ctx: &Context<'_>,
-		txn: &Transaction,
 		res: VecDeque<(DocId, f64)>,
-	) -> Result<VecDeque<(Thing, f64, Option<Value>)>, Error> {
+	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		match self {
-			ConditionChecker::Hnsw => todo!(),
-			ConditionChecker::MTree(c) => c.convert_result(ctx, txn, res).await,
-			ConditionChecker::MTreeCondition(c) => c.convert_result(ctx, res).await,
+			ConditionChecker::MTree(c) => c.convert_result(res).await,
+			ConditionChecker::MTreeCondition(c) => c.convert_result(res).await,
+			ConditionChecker::Hnsw(c) => c.convert_result(res).await,
+			ConditionChecker::HnswCondition(c) => c.convert_result(res).await,
+			#[cfg(debug_assertions)]
+			#[allow(dead_code)]
+			_ => Ok(VecDeque::from([])),
 		}
 	}
 }
 
-pub struct MTreeChecker {
+pub struct MTreeChecker<'a> {
+	ctx: &'a Context<'a>,
+	txn: &'a Transaction,
 	doc_ids: Arc<RwLock<DocIds>>,
 }
 
-impl MTreeChecker {
+impl<'a> MTreeChecker<'a> {
 	async fn convert_result(
 		&self,
-		ctx: &Context<'_>,
-		txn: &Transaction,
 		res: VecDeque<(DocId, f64)>,
-	) -> Result<VecDeque<(Thing, f64, Option<Value>)>, Error> {
+	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		if res.is_empty() {
 			return Ok(VecDeque::from([]));
 		}
 		let mut result = VecDeque::with_capacity(res.len());
 		let doc_ids = self.doc_ids.read().await;
-		let mut tx = txn.lock().await;
+		let mut tx = self.txn.lock().await;
 		for (doc_id, dist) in res {
-			if ctx.is_done() {
+			if self.ctx.is_done() {
 				break;
 			}
 			if let Some(key) = doc_ids.get_doc_key(&mut tx, doc_id).await? {
@@ -101,28 +144,24 @@ struct CheckerCacheEntry {
 	truthy: bool,
 }
 
-pub struct MTreeConditionChecker {
+pub struct MTreeConditionChecker<'a> {
+	ctx: &'a Context<'a>,
+	opt: &'a Options,
+	txn: &'a Transaction,
 	cond: Arc<Cond>,
 	doc_ids: Arc<RwLock<DocIds>>,
 	cache: HashMap<DocId, CheckerCacheEntry>,
 }
 
-impl MTreeConditionChecker {
-	async fn check_truthy(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc_id: DocId,
-	) -> Result<bool, Error> {
+impl<'a> MTreeConditionChecker<'a> {
+	async fn check_truthy(&mut self, stk: &mut Stk, doc_id: DocId) -> Result<bool, Error> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
-				let mut tx = txn.lock().await;
+				let mut tx = self.txn.lock().await;
 				if let Some(key) = self.doc_ids.read().await.get_doc_key(&mut tx, doc_id).await? {
 					let rid: Thing = key.into();
-					let val = Iterable::fetch_thing(&mut tx, opt, &rid).await?;
+					let val = Iterable::fetch_thing(&mut tx, self.opt, &rid).await?;
 					let (record, truthy) = if !val.is_none_or_null() {
 						let (value, truthy) = {
 							let cursor_doc = CursorDoc {
@@ -132,7 +171,7 @@ impl MTreeConditionChecker {
 							};
 							let truthy = self
 								.cond
-								.compute(stk, ctx, opt, txn, Some(&cursor_doc))
+								.compute(stk, self.ctx, self.opt, self.txn, Some(&cursor_doc))
 								.await?
 								.is_truthy();
 							(cursor_doc.doc.into_owned(), truthy)
@@ -163,12 +202,11 @@ impl MTreeConditionChecker {
 
 	async fn convert_result(
 		&mut self,
-		ctx: &Context<'_>,
 		res: VecDeque<(DocId, f64)>,
-	) -> Result<VecDeque<(Thing, f64, Option<Value>)>, Error> {
+	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		let mut result = VecDeque::with_capacity(res.len());
 		for (doc_id, dist) in res {
-			if ctx.is_done() {
+			if self.ctx.is_done() {
 				break;
 			}
 			if let Some(e) = self.cache.remove(&doc_id) {
@@ -180,5 +218,44 @@ impl MTreeConditionChecker {
 			}
 		}
 		Ok(result)
+	}
+}
+
+pub struct HnswChecker {
+	h: SharedHnswIndex,
+}
+
+impl HnswChecker {
+	async fn convert_result(
+		&self,
+		_res: VecDeque<(DocId, f64)>,
+	) -> Result<VecDeque<KnnIteratorResult>, Error> {
+		todo!()
+	}
+}
+
+pub struct HnswConditionChecker<'a> {
+	ctx: &'a Context<'a>,
+	opt: &'a Options,
+	txn: &'a Transaction,
+	cond: Arc<Cond>,
+	h: SharedHnswIndex,
+	cache: HashMap<DocId, CheckerCacheEntry>,
+}
+
+impl<'a> HnswConditionChecker<'a> {
+	async fn convert_result(
+		&self,
+		_res: VecDeque<(DocId, f64)>,
+	) -> Result<VecDeque<KnnIteratorResult>, Error> {
+		todo!()
+	}
+
+	async fn check_truthy(&mut self, _stk: &mut Stk, _doc_id: DocId) -> Result<bool, Error> {
+		todo!()
+	}
+
+	fn expire(&mut self, doc_id: DocId) {
+		self.cache.remove(&doc_id);
 	}
 }

@@ -4,6 +4,7 @@ mod layer;
 use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::planner::checker::ConditionChecker;
+use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::layer::HnswLayer;
@@ -17,6 +18,7 @@ use hashbrown::HashMap;
 use radix_trie::Trie;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
+use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use std::collections::VecDeque;
 
@@ -129,36 +131,38 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	pub fn knn_search(
+	pub async fn knn_search(
 		&self,
+		stk: &mut Stk,
 		o: &Vec<Number>,
 		n: usize,
 		ef: usize,
-	) -> Result<VecDeque<(Thing, f64)>, Error> {
+		mut chk: ConditionChecker<'_>,
+	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		// Extract the vector
 		let vector = Vector::try_from_vector(self.vector_type, o)?;
 		vector.check_dimension(self.dim)?;
 		// Do the search
-		let res = self.search(&vector.into(), n, ef);
-		Ok(self.result(res))
+		let res = self.search(stk, &vector.into(), n, ef, &mut chk);
+		chk.convert_result(res.docs).await
 	}
 
-	fn result(&self, res: KnnResult) -> VecDeque<(Thing, f64)> {
-		res.docs
-			.into_iter()
-			.filter_map(|(doc_id, dist)| self.docs.get(doc_id).map(|t| (t.clone(), dist)))
-			.collect()
-	}
-
-	fn search(&self, o: &SharedVector, n: usize, ef: usize) -> KnnResult {
-		let neighbors = self.hnsw.knn_search(o, n, ef);
+	fn search(
+		&self,
+		stk: &mut Stk,
+		o: &SharedVector,
+		n: usize,
+		ef: usize,
+		chk: &mut ConditionChecker,
+	) -> KnnResult {
+		let neighbors = self.hnsw.knn_search(stk, o, n, ef, chk);
 
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
 				if let Some(v) = self.hnsw.get_vector(&e_id) {
 					if let Some((docs, _)) = self.vec_docs.get(v) {
-						builder.add(e_dist, docs, &mut ConditionChecker::Hnsw);
+						builder.add(e_dist, docs, chk);
 					}
 				}
 			}
@@ -200,14 +204,6 @@ impl HnswDocs {
 		}
 	}
 
-	fn get(&self, doc_id: DocId) -> Option<Thing> {
-		if let Some(t) = self.ids_doc.get(doc_id as usize) {
-			t.clone()
-		} else {
-			None
-		}
-	}
-
 	fn remove(&mut self, rid: &Thing) -> Option<DocId> {
 		let doc_key: Key = rid.into();
 		if let Some(doc_id) = self.doc_ids.remove(&doc_key) {
@@ -226,7 +222,14 @@ impl HnswDocs {
 trait HnswMethods: Send + Sync {
 	fn insert(&mut self, q_pt: SharedVector) -> ElementId;
 	fn remove(&mut self, e_id: ElementId) -> bool;
-	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)>;
+	fn knn_search(
+		&self,
+		stk: &mut Stk,
+		q: &SharedVector,
+		k: usize,
+		efs: usize,
+		condition_checker: &mut ConditionChecker,
+	) -> Vec<(f64, ElementId)>;
 	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector>;
 	#[cfg(test)]
 	fn check_hnsw_properties(&self, expected_count: usize);
@@ -449,7 +452,14 @@ where
 		removed
 	}
 
-	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
+	fn knn_search(
+		&self,
+		_stk: &mut Stk,
+		q: &SharedVector,
+		k: usize,
+		efs: usize,
+		_chk: &mut ConditionChecker,
+	) -> Vec<(f64, ElementId)> {
 		#[cfg(debug_assertions)]
 		let expected_w_len = self.elements.elements.len().min(k);
 		if let Some(mut ep_id) = self.enter_point {
@@ -498,6 +508,7 @@ mod tests {
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use hashbrown::{hash_map::Entry, HashMap, HashSet};
 	use ndarray::Array1;
+	use reblessive::tree::Stk;
 	use roaring::RoaringTreemap;
 	use std::sync::Arc;
 	use test_log::test;
@@ -515,12 +526,13 @@ mod tests {
 		}
 		set
 	}
-	fn find_collection_hnsw(h: &Box<dyn HnswMethods>, collection: &TestCollection) {
+	fn find_collection_hnsw(stk: &mut Stk, h: &Box<dyn HnswMethods>, collection: &TestCollection) {
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
 			let obj = obj.clone().into();
 			for knn in 1..max_knn {
-				let res = h.knn_search(&obj, knn, 80);
+				let mut chk = ConditionChecker::None;
+				let res = h.knn_search(stk, &obj, knn, 80, &mut chk);
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
@@ -557,10 +569,17 @@ mod tests {
 		}
 	}
 
-	fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
-		let mut h = HnswIndex::new_hnsw(p);
-		insert_collection_hnsw(&mut h, collection);
-		find_collection_hnsw(&h, &collection);
+	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
+		let mut stack = reblessive::tree::TreeStack::new();
+		stack
+			.enter(|stk| {
+				let mut h = HnswIndex::new_hnsw(p);
+				insert_collection_hnsw(&mut h, collection);
+				find_collection_hnsw(stk, &h, &collection);
+			})
+			.finish()
+			.await
+			.unwrap();
 	}
 
 	fn new_params(
@@ -655,12 +674,13 @@ mod tests {
 		map
 	}
 
-	fn find_collection_hnsw_index(h: &mut HnswIndex, collection: &TestCollection) {
+	fn find_collection_hnsw_index(stk: &mut Stk, h: &mut HnswIndex, collection: &TestCollection) {
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let obj: SharedVector = obj.clone().into();
-				let res = h.search(&obj, knn, 500);
+				let mut chk = ConditionChecker::None;
+				let res = h.search(stk, &obj, knn, 500, &mut chk);
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 					if collection.is_unique() {
@@ -718,7 +738,7 @@ mod tests {
 		);
 		let mut h = HnswIndex::new(&p);
 		let map = insert_collection_hnsw_index(&mut h, &collection);
-		find_collection_hnsw_index(&mut h, &collection);
+		find_collection_hnsw_index(stk, &mut h, &collection);
 		delete_hnsw_index_collection(&mut h, &collection, map);
 	}
 
@@ -822,24 +842,31 @@ mod tests {
 			let collection = collection.clone();
 			let h = h.clone();
 			let f = tokio::spawn(async move {
-				let mut total_recall = 0.0;
-				for (_, pt) in queries.to_vec_ref() {
-					let knn = 10;
-					let hnsw_res = h.search(pt, knn, efs);
-					assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
-					let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
-					let rec = brute_force_res.recall(&hnsw_res);
-					if rec == 1.0 {
-						assert_eq!(brute_force_res.docs, hnsw_res.docs);
-					}
-					total_recall += rec;
-				}
-				let recall = total_recall / queries.to_vec_ref().len() as f64;
-				info!("EFS: {efs} - Recall: {recall}");
-				assert!(
-					recall >= expected_recall,
-					"EFS: {efs} - Recall: {recall} - Expected: {expected_recall}"
-				);
+				let mut stack = reblessive::tree::TreeStack::new();
+				stack
+					.enter(|stk| async {
+						let mut total_recall = 0.0;
+						for (_, pt) in queries.to_vec_ref() {
+							let knn = 10;
+							let mut chk = ConditionChecker::None;
+							let hnsw_res = h.search(stk, pt, knn, efs, &mut chk);
+							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
+							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
+							let rec = brute_force_res.recall(&hnsw_res);
+							if rec == 1.0 {
+								assert_eq!(brute_force_res.docs, hnsw_res.docs);
+							}
+							total_recall += rec;
+						}
+						let recall = total_recall / queries.to_vec_ref().len() as f64;
+						info!("EFS: {efs} - Recall: {recall}");
+						assert!(
+							recall >= expected_recall,
+							"EFS: {efs} - Recall: {recall} - Expected: {expected_recall}"
+						);
+					})
+					.finish()
+					.await;
 			});
 			futures.push(f);
 		}

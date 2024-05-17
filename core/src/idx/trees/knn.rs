@@ -822,7 +822,7 @@ pub(super) mod tests {
 
 	#[test]
 	fn knn_result_builder_test() {
-		let mut checked = ConditionChecker::Hnsw;
+		let mut checked = ConditionChecker::None;
 		let mut b = KnnResultBuilder::new(7);
 		b.add(0.0, &Ids64::One(5), &mut checked);
 		b.add(0.2, &Ids64::Vec3([0, 1, 2]), &mut checked);

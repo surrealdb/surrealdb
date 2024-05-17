@@ -1,6 +1,4 @@
-use crate::ctx::Context;
 use crate::dbs;
-use crate::dbs::Options;
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 use reblessive::tree::Stk;
@@ -17,6 +15,7 @@ use crate::err::Error;
 
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::planner::checker::ConditionChecker;
+use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{
@@ -96,17 +95,14 @@ impl MTreeIndex {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	pub(in crate::idx) async fn knn_search(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
 		txn: &dbs::Transaction,
 		v: &Vec<Number>,
 		k: usize,
-		mut cond: ConditionChecker,
-	) -> Result<VecDeque<(Thing, f64, Option<Value>)>, Error> {
+		mut chk: ConditionChecker<'_>,
+	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		// Extract the vector
 		let vector = Vector::try_from_vector(self.vector_type, v)?;
 		vector.check_dimension(self.dim)?;
@@ -114,9 +110,9 @@ impl MTreeIndex {
 		// Lock the index
 		let mtree = self.mtree.read().await;
 		// Do the search
-		let res = mtree.knn_search(stk, ctx, opt, txn, &self.store, &vector, k, &mut cond).await?;
+		let res = mtree.knn_search(stk, txn, &self.store, &vector, k, &mut chk).await?;
 		// Resolve the doc_id to Thing and the optional value
-		cond.convert_result(ctx, txn, res.docs).await
+		chk.convert_result(res.docs).await
 	}
 
 	pub(crate) async fn remove_document(
@@ -181,17 +177,14 @@ impl MTree {
 		}
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
 		txn: &dbs::Transaction,
 		store: &MTreeStore,
 		v: &SharedVector,
 		k: usize,
-		condition_checker: &mut ConditionChecker,
+		condition_checker: &mut ConditionChecker<'_>,
 	) -> Result<KnnResult, Error> {
 		#[cfg(debug_assertions)]
 		debug!("knn_search - v: {:?} - k: {}", v, k);
@@ -223,7 +216,7 @@ impl MTree {
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
 							let mut docs = Ids64::Empty;
 							for doc in &p.docs {
-								if condition_checker.check_truthy(stk, ctx, opt, txn, doc).await? {
+								if condition_checker.check_truthy(stk, doc).await? {
 									if let Some(new_docs) = docs.insert(doc) {
 										docs = new_docs;
 									}
@@ -1461,9 +1454,7 @@ mod tests {
 	use std::collections::VecDeque;
 	use std::sync::Arc;
 
-	use crate::ctx::Context;
 	use crate::dbs;
-	use crate::dbs::Options;
 	use crate::err::Error;
 	use test_log::test;
 
@@ -1567,8 +1558,6 @@ mod tests {
 
 	async fn delete_collection(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
@@ -1587,8 +1576,8 @@ mod tests {
 			all_deleted = all_deleted && deleted;
 			if deleted {
 				let (st, txn) = new_operation(ds, t, TransactionType::Read, cache_size).await;
-				let mut checked = ConditionChecker::Hnsw;
-				let res = t.knn_search(stk, ctx, opt, &txn, &st, obj, 1, &mut checked).await?;
+				let mut checked = ConditionChecker::None;
+				let res = t.knn_search(stk, &txn, &st, obj, 1, &mut checked).await?;
 				assert!(
 					!res.docs.iter().any(|(id, _)| id == doc_id),
 					"Found: {} {:?}",
@@ -1616,8 +1605,6 @@ mod tests {
 
 	async fn find_collection(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
 		ds: &Datastore,
 		t: &mut MTree,
 		collection: &TestCollection,
@@ -1627,8 +1614,8 @@ mod tests {
 		let max_knn = 20.max(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
-				let mut checker = ConditionChecker::Hnsw;
-				let res = t.knn_search(stk, ctx, opt, &txn, &st, obj, knn, &mut checker).await?;
+				let mut checker = ConditionChecker::None;
+				let res = t.knn_search(stk, &txn, &st, obj, knn, &mut checker).await?;
 				let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 				if collection.is_unique() {
 					assert!(
@@ -1662,8 +1649,6 @@ mod tests {
 
 	async fn check_full_knn(
 		stk: &mut Stk,
-		ctx: &Context<'_>,
-		opt: &Options,
 		ds: &Datastore,
 		t: &mut MTree,
 		map: &HashMap<DocId, SharedVector>,
@@ -1671,8 +1656,8 @@ mod tests {
 	) -> Result<(), Error> {
 		let (st, txn) = new_operation(ds, t, TransactionType::Read, cache_size).await;
 		for obj in map.values() {
-			let mut checker = ConditionChecker::Hnsw;
-			let res = t.knn_search(stk, ctx, opt, &txn, &st, obj, map.len(), &mut checker).await?;
+			let mut checker = ConditionChecker::None;
+			let res = t.knn_search(stk, &txn, &st, obj, map.len(), &mut checker).await?;
 			assert_eq!(
 				map.len(),
 				res.docs.len(),
@@ -1716,8 +1701,6 @@ mod tests {
 					collection.len(),
 					vector_type,
 				);
-				let ctx = Context::default();
-				let opt = Options::default();
 				let ds = Datastore::new("memory").await?;
 				let mut t = MTree::new(MState::new(*capacity), distance.clone());
 
@@ -1727,14 +1710,13 @@ mod tests {
 					insert_collection_batch(stk, &ds, &mut t, &collection, cache_size).await?
 				};
 				if check_find {
-					find_collection(stk, &ctx, &opt, &ds, &mut t, &collection, cache_size).await?;
+					find_collection(stk, &ds, &mut t, &collection, cache_size).await?;
 				}
 				if check_full {
-					check_full_knn(stk, &ctx, &opt, &ds, &mut t, &map, cache_size).await?;
+					check_full_knn(stk, &ds, &mut t, &map, cache_size).await?;
 				}
 				if check_delete {
-					delete_collection(stk, &ctx, &opt, &ds, &mut t, &collection, cache_size)
-						.await?;
+					delete_collection(stk, &ds, &mut t, &collection, cache_size).await?;
 				}
 			}
 		}

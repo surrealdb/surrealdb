@@ -10,10 +10,10 @@ use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::checker::ConditionChecker;
 use crate::idx::planner::iterators::{
-	HnswKnnIterator, IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRecord, IteratorRef, MatchesThingIterator, MtreeKnnIterator,
-	ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
-	UniqueUnionThingIterator,
+	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
+	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
+	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
+	UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::KnnPriorityList;
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -209,14 +209,36 @@ impl InnerQueryExecutor {
 						if let IndexOperator::Ann(a, k, ef) = io.op() {
 							let entry = match hnsw_map.entry(ix_ref) {
 								Entry::Occupied(e) => {
-									HnswEntry::new(e.get().clone(), a, *k, *ef).await?
+									HnswEntry::new(
+										stk,
+										ctx,
+										opt,
+										txn,
+										e.get().clone(),
+										a,
+										*k,
+										*ef,
+										knn_condition.clone(),
+									)
+									.await?
 								}
 								Entry::Vacant(e) => {
 									let hnsw = ctx
 										.get_index_stores()
 										.get_index_hnsw(opt, idx_def, p)
 										.await;
-									let entry = HnswEntry::new(hnsw.clone(), a, *k, *ef).await?;
+									let entry = HnswEntry::new(
+										stk,
+										ctx,
+										opt,
+										txn,
+										hnsw.clone(),
+										a,
+										*k,
+										*ef,
+										knn_condition.clone(),
+									)
+									.await?;
 									e.insert(hnsw);
 									entry
 								}
@@ -477,7 +499,7 @@ impl QueryExecutor {
 	fn new_mtree_index_knn_iterator(&self, irf: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
 			if let Some(mte) = self.0.mt_entries.get(exp) {
-				let it = MtreeKnnIterator::new(irf, mte.res.clone());
+				let it = KnnIterator::new(irf, mte.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
 		}
@@ -487,8 +509,8 @@ impl QueryExecutor {
 	fn new_hnsw_index_ann_iterator(&self, irf: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(exp, ..)) = self.0.it_entries.get(irf as usize) {
 			if let Some(he) = self.0.hnsw_entries.get(exp) {
-				let it = HnswKnnIterator::new(irf, he.res.clone());
-				return Some(ThingIterator::Things(it));
+				let it = KnnIterator::new(irf, he.res.clone());
+				return Some(ThingIterator::Knn(it));
 			}
 		}
 		None
@@ -733,7 +755,7 @@ impl FtEntry {
 
 #[derive(Clone)]
 pub(super) struct MtEntry {
-	res: VecDeque<(Thing, f64, Option<Value>)>,
+	res: VecDeque<KnnIteratorResult>,
 }
 
 impl MtEntry {
@@ -748,8 +770,8 @@ impl MtEntry {
 		k: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
-		let cond_checker = ConditionChecker::new_mtree(cond, mt.doc_ids());
-		let res = mt.knn_search(stk, ctx, opt, txn, o, k as usize, cond_checker).await?;
+		let cond_checker = ConditionChecker::new_mtree(ctx, opt, txn, cond, mt.doc_ids());
+		let res = mt.knn_search(stk, txn, o, k as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})
@@ -758,12 +780,23 @@ impl MtEntry {
 
 #[derive(Clone)]
 pub(super) struct HnswEntry {
-	res: VecDeque<(Thing, f64)>,
+	res: VecDeque<KnnIteratorResult>,
 }
 
 impl HnswEntry {
-	async fn new(h: SharedHnswIndex, v: &Vec<Number>, n: u32, ef: u32) -> Result<Self, Error> {
-		let res = h.read().await.knn_search(v, n as usize, ef as usize)?;
+	async fn new(
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		h: SharedHnswIndex,
+		v: &Vec<Number>,
+		n: u32,
+		ef: u32,
+		cond: Option<Arc<Cond>>,
+	) -> Result<Self, Error> {
+		let cond_checker = ConditionChecker::new_hnsw(ctx, opt, txn, cond, h.clone());
+		let res = h.read().await.knn_search(stk, v, n as usize, ef as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})
