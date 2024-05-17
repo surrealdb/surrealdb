@@ -60,7 +60,10 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 	{
 		match key {
 			"into" => {
-				self.into = Some(value.serialize(ser::value::Serializer.wrap())?);
+				self.into = match value.serialize(ser::value::Serializer.wrap())? {
+					Value::None => None,
+					v => Some(v),
+				};
 			}
 			"data" => {
 				self.data = Some(value.serialize(ser::data::Serializer.wrap())?);
