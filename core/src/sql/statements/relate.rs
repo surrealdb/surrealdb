@@ -57,13 +57,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								_ => {
-									return Err(Error::RelateStatement {
+									return Err(Error::RelateStatementOut {
 										value: v.to_string(),
 									})
 								}
 							},
 							v => {
-								return Err(Error::RelateStatement {
+								return Err(Error::RelateStatementOut {
 									value: v.to_string(),
 								})
 							}
@@ -73,13 +73,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						return Err(Error::RelateStatement {
+						return Err(Error::RelateStatementOut {
 							value: v.to_string(),
 						})
 					}
 				},
 				v => {
-					return Err(Error::RelateStatement {
+					return Err(Error::RelateStatementOut {
 						value: v.to_string(),
 					})
 				}
@@ -99,13 +99,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								None => {
-									return Err(Error::RelateStatement {
+									return Err(Error::RelateStatementId {
 										value: v.to_string(),
 									})
 								}
 							},
 							v => {
-								return Err(Error::RelateStatement {
+								return Err(Error::RelateStatementId {
 									value: v.to_string(),
 								})
 							}
@@ -115,13 +115,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						return Err(Error::RelateStatement {
+						return Err(Error::RelateStatementId {
 							value: v.to_string(),
 						})
 					}
 				},
 				v => {
-					return Err(Error::RelateStatement {
+					return Err(Error::RelateStatementId {
 						value: v.to_string(),
 					})
 				}
@@ -151,7 +151,7 @@ impl RelateStatement {
 					},
 					// The relation can not be any other type
 					v => {
-						return Err(Error::RelateStatement {
+						return Err(Error::RelateStatementOut {
 							value: v.to_string(),
 						})
 					}

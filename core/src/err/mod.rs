@@ -458,6 +458,24 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'in' is '{value}'")]
+	RelateStatementIn {
+		value: String,
+	},
+
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'id' is '{value}'")]
+	RelateStatementId {
+		value: String,
+	},
+
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'out' is '{value}'")]
+	RelateStatementOut {
+		value: String,
+	},
+
 	/// Can not execute DELETE statement using the specified value
 	#[error("Can not execute DELETE statement using value '{value}'")]
 	DeleteStatement {
@@ -467,6 +485,24 @@ pub enum Error {
 	/// Can not execute INSERT statement using the specified value
 	#[error("Can not execute INSERT statement using value '{value}'")]
 	InsertStatement {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'in' is '{value}'")]
+	InsertStatementIn {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'id' is '{value}'")]
+	InsertStatementId {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'out' is '{value}'")]
+	InsertStatementOut {
 		value: String,
 	},
 
