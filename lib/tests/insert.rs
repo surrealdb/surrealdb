@@ -517,3 +517,131 @@ async fn insert_statement_unique_index() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn insert_relation() -> Result<(), Error> {
+	let sql = "
+		INSERT INTO person [
+			{ id: person:1 },
+			{ id: person:2 },
+			{ id: person:3 },
+		];
+		INSERT RELATION INTO likes {
+			in: person:1,
+			id: 'object',
+			out: person:2,
+		};
+		INSERT RELATION INTO likes [
+			{
+				in: person:1,
+				id: 'array',
+				out: person:2,
+			},
+			{
+				in: person:2,
+				id: 'array_twoo',
+				out: person:3,
+			}
+		];
+		INSERT RELATION INTO likes (in, id, out)
+			VALUES (person:1, 'values', person:2);
+		SELECT VALUE ->likes FROM person;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: person:1 }, { id: person:2 }, { id: person:3 }]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"
+		[
+			{
+					id: likes:object,
+					in: person:1,
+					out: person:2
+			}
+		]
+	",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"
+		[
+			{
+                id: likes:array,
+                in: person:1,
+                out: person:2
+			},
+			{
+				id: likes:array_twoo,
+				in: person:2,
+				out: person:3
+			}
+		]
+	",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"
+		[
+			{
+                id: likes:values,
+                in: person:1,
+                out: person:2
+       		}
+		]
+	",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"
+		[
+			[
+                likes:array,
+                likes:object,
+                likes:values
+			],
+			[
+				likes:array_twoo
+			],
+			[]
+		]
+	",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn insert_invalid_relation() -> Result<(), Error> {
+	let sql = "
+		INSERT RELATION INTO likes {
+			id: 'object',
+		};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	match res.remove(0).result {
+		Err(Error::RelateStatement {
+			value,
+		}) if value == "NONE" => (),
+		_ => panic!("Expected Error::RelateStatement"),
+	}
+	//
+	Ok(())
+}
