@@ -2563,19 +2563,17 @@ impl Transaction {
 						}
 
 						let mut normal: Vec<String> = vec![];
+						let mut relation: Vec<String> = vec![];
 
 						// Categorize results
-						for (k, v) in res.into_iter() {
+						for (_, v) in res.into_iter() {
 							// Parse the key and the value
-							let k: crate::key::thing::Thing = (&k).into();
 							let v: Value = (&v).into();
-							let t = Thing::from((k.tb, k.id));
 							// Check if this is a graph edge
 							match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 								// This is a graph edge record
-								(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
-									let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
-									chn.send(bytes!(sql)).await?;
+								(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
+									relation.push(v.to_string());
 								}
 								// This is a normal record
 								_ => {
@@ -2584,11 +2582,19 @@ impl Transaction {
 							}
 						}
 
-						// Add batches of insert statements
+						// Add batches of INSERT statements
 						for records in normal.chunks(1000).into_iter() {
 							let tb_name = &tb.name;
 							let values = records.join(", ");
 							let sql = format!("INSERT INTO {tb_name} [ {values} ]");
+							chn.send(bytes!(sql)).await?;
+						}
+
+						// Add batches of INSERT RELATION statements
+						for records in relation.chunks(1000).into_iter() {
+							let tb_name = &tb.name;
+							let values = records.join(", ");
+							let sql = format!("INSERT RELATION INTO {tb_name} [ {values} ]");
 							chn.send(bytes!(sql)).await?;
 						}
 						continue;
