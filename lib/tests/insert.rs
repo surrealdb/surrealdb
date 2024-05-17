@@ -630,17 +630,67 @@ async fn insert_invalid_relation() -> Result<(), Error> {
 		INSERT RELATION INTO likes {
 			id: 'object',
 		};
+
+		INSERT RELATION {
+			in: person:1,
+		};
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
+	assert_eq!(res.len(), 2);
 	//
 	match res.remove(0).result {
-		Err(Error::RelateStatement {
+		Err(Error::InsertStatementIn {
 			value,
 		}) if value == "NONE" => (),
-		_ => panic!("Expected Error::RelateStatement"),
+		found => panic!("Expected Err(Error::InsertStatementIn), found '{:?}'", found),
+	}
+	//
+	match res.remove(0).result {
+		Err(Error::InsertStatementId {
+			value,
+		}) if value == "NONE" => (),
+		found => panic!("Expected Err(Error::InsertStatementId), found '{:?}'", found),
+	}
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn insert_without_into() -> Result<(), Error> {
+	let sql = "
+		INSERT [
+			{ id: test:1 }
+		];
+
+		INSERT { id: test:2 };
+		INSERT (id) VALUES (test:3);
+
+		INSERT {};
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: test:1 }]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: test:2 }]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: test:3 }]");
+	assert_eq!(tmp, val);
+	//
+	match res.remove(0).result {
+		Err(Error::InsertStatementId {
+			value,
+		}) if value == "NONE" => (),
+		found => panic!("Expected Err(Error::RelateStatementId), found '{:?}'", found),
 	}
 	//
 	Ok(())
