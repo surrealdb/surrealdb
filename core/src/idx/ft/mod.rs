@@ -490,6 +490,10 @@ impl HitsIterator {
 		}
 	}
 
+	pub(crate) fn len(&self) -> usize {
+		self.iter.len()
+	}
+
 	pub(crate) async fn next(
 		&mut self,
 		tx: &mut kvs::Transaction,

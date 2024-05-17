@@ -5,7 +5,7 @@ use crate::dbs::distinct::AsyncDistinct;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement, Transaction};
 use crate::err::Error;
-use crate::idx::planner::iterators::{CollectorRecord, IteratorRef, ThingCollector};
+use crate::idx::planner::iterators::{CollectorRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::IterationStage;
 use crate::key::{graph, thing};
 use crate::kvs;
@@ -15,7 +15,6 @@ use crate::sql::{Edges, Range, Table, Thing, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use channel::Sender;
 use reblessive::tree::Stk;
-use std::mem;
 use std::ops::Bound;
 
 impl Iterable {
@@ -574,30 +573,21 @@ impl<'a> Processor<'a> {
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(mut iterator) = exe.new_iterator(opt, irf).await? {
-				let mut collector = IndexCollector::new(opt, table);
-
 				// Get the first batch
-				{
-					let mut tx = txn.lock().await;
-					iterator.next_batch(ctx, &mut tx, PROCESSOR_BATCH_SIZE, &mut collector).await?;
-				}
+				let mut to_process = Self::next_batch(ctx, opt, txn, &mut iterator).await?;
 
-				while !collector.to_process.is_empty() {
+				while !to_process.is_empty() {
 					// Check if the context is finished
 					if ctx.is_done() {
 						break;
 					}
 					// Process the records
-					for pro in mem::take(&mut collector.to_process) {
+					// TODO: par_iter
+					for pro in to_process {
 						self.process(stk, ctx, opt, txn, stm, pro).await?;
 					}
 					// Get the next batch
-					{
-						let mut tx = txn.lock().await;
-						iterator
-							.next_batch(ctx, &mut tx, PROCESSOR_BATCH_SIZE, &mut collector)
-							.await?;
-					}
+					to_process = Self::next_batch(ctx, opt, txn, &mut iterator).await?;
 				}
 				// Everything ok
 				return Ok(());
@@ -611,52 +601,40 @@ impl<'a> Processor<'a> {
 			message: "No QueryExecutor has been found.".to_string(),
 		})
 	}
-}
 
-struct IndexCollector<'a> {
-	opt: &'a Options,
-	table: &'a Table,
-	to_process: Vec<Processed>,
-}
-
-impl<'a> IndexCollector<'a> {
-	fn new(opt: &'a Options, table: &'a Table) -> Self {
-		Self {
-			opt,
-			table,
-			to_process: Vec::new(),
+	async fn next_batch(
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		iterator: &mut ThingIterator,
+	) -> Result<Vec<Processed>, Error> {
+		let mut tx = txn.lock().await;
+		let records: Vec<CollectorRecord> =
+			iterator.next_batch(ctx, &mut tx, PROCESSOR_BATCH_SIZE).await?;
+		let mut to_process = Vec::with_capacity(records.len());
+		for r in records {
+			let v = Self::fetch_record(&mut tx, opt, &r).await?;
+			let p = Processed {
+				rid: Some(r.0),
+				ir: Some(r.1),
+				val: Operable::Value(v),
+			};
+			to_process.push(p);
 		}
+		Ok(to_process)
 	}
-}
-impl<'a> ThingCollector for IndexCollector<'a> {
-	async fn add(
-		&mut self,
-		run: &mut kvs::Transaction,
-		record: CollectorRecord,
-	) -> Result<(), Error> {
-		let (rid, ir) = record;
 
-		// If the record is from another table we can skip
-		if !rid.tb.eq(self.table.as_str()) {
-			return Ok(());
-		}
-
+	/// Returns the value from the store, or Value::None it the value does not exist.
+	pub(crate) async fn fetch_record(
+		tx: &mut kvs::Transaction,
+		opt: &Options,
+		record: &CollectorRecord,
+	) -> Result<Value, Error> {
 		// Fetch the data from the store
-		let key = thing::new(self.opt.ns(), self.opt.db(), &rid.tb, &rid.id);
-		let val = run.get(key.clone()).await?;
-		let rid = Thing::from((key.tb, key.id));
-		// Parse the data from the store
-		let val = Operable::Value(match val {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		});
-
-		let pro = Processed {
-			rid: Some(rid),
-			ir: Some(ir),
-			val,
-		};
-		self.to_process.push(pro);
-		Ok(())
+		let key = thing::new(opt.ns(), opt.db(), &record.0.tb, &record.0.id);
+		// Fetch and parse the data from the store
+		let val = tx.get(key.clone()).await?.map(Value::from).unwrap_or(Value::None);
+		// Return the result
+		Ok(val)
 	}
 }
