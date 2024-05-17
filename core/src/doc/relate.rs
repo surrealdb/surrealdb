@@ -20,6 +20,8 @@ impl<'a> Document<'a> {
 		match self.current.doc.is_some() {
 			// Create new edge
 			false => {
+				// Merge record data
+				self.merge(stk, ctx, opt, txn, stm).await?;
 				// Store record edges
 				self.edges(ctx, opt, stm).await?;
 				// Alter record data
@@ -49,6 +51,8 @@ impl<'a> Document<'a> {
 			}
 			// Update old edge
 			true => {
+				// Merge record data
+				self.merge(stk, ctx, opt, txn, stm).await?;
 				// Check if allowed
 				self.allow(stk, ctx, opt, stm).await?;
 				// Store record edges

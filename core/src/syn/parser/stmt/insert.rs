@@ -13,6 +13,7 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<InsertStatement> {
+		let relation = self.eat(t!("RELATION"));
 		let ignore = self.eat(t!("IGNORE"));
 		expected!(self, t!("INTO"));
 		let next = self.next();
@@ -82,6 +83,7 @@ impl Parser<'_> {
 			output,
 			timeout,
 			parallel,
+			relation,
 		})
 	}
 

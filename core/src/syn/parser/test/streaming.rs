@@ -575,6 +575,7 @@ fn statements() -> Vec<Statement> {
 			output: Some(Output::After),
 			timeout: None,
 			parallel: false,
+			relation: false,
 		}),
 		Statement::Kill(KillStatement {
 			id: Value::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),

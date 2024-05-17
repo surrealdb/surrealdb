@@ -135,7 +135,7 @@ impl RelateStatement {
 				let w = w.clone();
 				match &self.kind.compute(stk, ctx, opt, doc).await? {
 					// The relation has a specific record id
-					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w)),
+					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
 					// The relation does not have a specific record id
 					Value::Table(tb) => match &self.data {
 						// There is a data clause so check for a record id
@@ -144,10 +144,10 @@ impl RelateStatement {
 								Some(id) => id.generate(tb, false)?,
 								None => tb.generate(),
 							};
-							i.ingest(Iterable::Relatable(f, id, w))
+							i.ingest(Iterable::Relatable(f, id, w, None))
 						}
 						// There is no data clause so create a record id
-						None => i.ingest(Iterable::Relatable(f, tb.generate(), w)),
+						None => i.ingest(Iterable::Relatable(f, tb.generate(), w, None)),
 					},
 					// The relation can not be any other type
 					v => {

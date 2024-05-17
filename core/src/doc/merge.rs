@@ -23,6 +23,11 @@ impl<'a> Document<'a> {
 			let v = v.compute(stk, ctx, opt, Some(&self.current)).await?;
 			self.current.doc.to_mut().merge(v)?;
 		}
+		// This is an INSERT RELATION statement
+		if let Workable::Relate(_, _, Some(v)) = &self.extras {
+			let v = v.compute(stk, ctx, opt, txn, Some(&self.current)).await?;
+			self.current.doc.to_mut().merge(v)?;
+		}
 		// Set default field values
 		self.current.doc.to_mut().def(rid);
 		// Carry on

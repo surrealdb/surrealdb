@@ -23,7 +23,7 @@ impl<'a> Document<'a> {
 			let ins = match pro.val {
 				Operable::Value(v) => (v, Workable::Normal),
 				Operable::Mergeable(v, o) => (v, Workable::Insert(o)),
-				Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
+				Operable::Relatable(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			};
 			// Setup a new document
 			let mut doc = Document::new(pro.rid.as_ref(), pro.ir.as_ref(), &ins.0, ins.1);
@@ -57,7 +57,7 @@ impl<'a> Document<'a> {
 						val: match doc.extras {
 							Workable::Normal => Operable::Value(val),
 							Workable::Insert(o) => Operable::Mergeable(val, o),
-							Workable::Relate(f, w) => Operable::Relatable(f, val, w),
+							Workable::Relate(f, w, o) => Operable::Relatable(f, val, w, o),
 						},
 					};
 					// Go to top of loop

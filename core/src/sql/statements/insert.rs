@@ -2,14 +2,16 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Data, Output, Timeout, Value};
+use crate::sql::paths::IN;
+use crate::sql::paths::OUT;
+use crate::sql::{Data, Output, Thing, Timeout, Value};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -21,6 +23,8 @@ pub struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
+	#[revision(start = 2)]
+	pub relation: bool,
 }
 
 impl InsertStatement {
@@ -57,8 +61,8 @@ impl InsertStatement {
 						}
 						// Specify the new table record id
 						let id = o.rid().generate(&into, true)?;
-						// Pass the mergeable to the iterator
-						i.ingest(Iterable::Mergeable(id, o));
+						// Pass the value to the iterator
+						i.ingest(iterable(id, o, self.relation)?)
 					}
 				}
 				// Check if this is a modern statement
@@ -69,15 +73,15 @@ impl InsertStatement {
 							for v in v {
 								// Specify the new table record id
 								let id = v.rid().generate(&into, true)?;
-								// Pass the mergeable to the iterator
-								i.ingest(Iterable::Mergeable(id, v));
+								// Pass the value to the iterator
+								i.ingest(iterable(id, v, self.relation)?)
 							}
 						}
 						Value::Object(_) => {
 							// Specify the new table record id
 							let id = v.rid().generate(&into, true)?;
-							// Pass the mergeable to the iterator
-							i.ingest(Iterable::Mergeable(id, v));
+							// Pass the value to the iterator
+							i.ingest(iterable(id, v, self.relation)?)
 						}
 						v => {
 							return Err(Error::InsertStatement {
@@ -121,5 +125,30 @@ impl fmt::Display for InsertStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
+	}
+}
+
+fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
+	match relation {
+		false => Ok(Iterable::Mergeable(id, v)),
+		true => {
+			let r#in = match v.pick(&*IN) {
+				Value::Thing(v) => v,
+				v => {
+					return Err(Error::RelateStatement {
+						value: v.to_string(),
+					})
+				}
+			};
+			let out = match v.pick(&*OUT) {
+				Value::Thing(v) => v,
+				v => {
+					return Err(Error::RelateStatement {
+						value: v.to_string(),
+					})
+				}
+			};
+			Ok(Iterable::Relatable(r#in, id, out, Some(v)))
+		}
 	}
 }

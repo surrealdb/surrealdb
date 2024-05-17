@@ -117,12 +117,21 @@ impl ExplainItem {
 				name: "Iterate Mergeable".into(),
 				details: vec![("thing", Value::Thing(t.to_owned())), ("value", v.to_owned())],
 			},
-			Iterable::Relatable(t1, t2, t3) => Self {
+			Iterable::Relatable(t1, t2, t3, None) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
 					("thing-1", Value::Thing(t1.to_owned())),
 					("thing-2", Value::Thing(t2.to_owned())),
 					("thing-3", Value::Thing(t3.to_owned())),
+				],
+			},
+			Iterable::Relatable(t1, t2, t3, Some(v)) => Self {
+				name: "Iterate Relatable".into(),
+				details: vec![
+					("thing-1", Value::Thing(t1.to_owned())),
+					("thing-2", Value::Thing(t2.to_owned())),
+					("thing-3", Value::Thing(t3.to_owned())),
+					("value", v.to_owned().into()),
 				],
 			},
 			Iterable::Index(t, ir) => {

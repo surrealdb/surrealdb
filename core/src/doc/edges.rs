@@ -26,7 +26,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record edges
-		if let Workable::Relate(l, r) = &self.extras {
+		if let Workable::Relate(l, r, _) = &self.extras {
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
