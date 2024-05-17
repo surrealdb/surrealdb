@@ -58,7 +58,7 @@ impl InsertStatement {
 				}
 			},
 		};
-
+		// Parse the data expression
 		match &self.data {
 			// Check if this is a traditional statement
 			Data::ValuesExpression(v) => {
