@@ -92,9 +92,9 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_CLIENT_IP", long)]
 	#[arg(default_value = "socket", value_enum)]
 	client_ip: ClientIp,
-	#[arg(help = "The hostname or ip address to listen for connections on")]
+	#[arg(help = "The hostname or IP address to listen for connections on")]
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
-	#[arg(default_value = "0.0.0.0:8000")]
+	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
 
 	//
