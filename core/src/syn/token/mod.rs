@@ -6,6 +6,7 @@ mod keyword;
 pub(crate) use keyword::keyword_t;
 pub use keyword::Keyword;
 mod mac;
+use crate::sql::{language::Language, Algorithm};
 pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.
@@ -293,53 +294,6 @@ pub enum NumberSuffix {
 	Decimal,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
-#[non_exhaustive]
-pub enum Language {
-	Arabic,
-	Danish,
-	Dutch,
-	English,
-	French,
-	German,
-	Greek,
-	Hungarian,
-	Italian,
-	Norwegian,
-	Portuguese,
-	Romanian,
-	Russian,
-	Spanish,
-	Swedish,
-	Tamil,
-	Turkish,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
-#[non_exhaustive]
-pub enum Algorithm {
-	EdDSA,
-	Es256,
-	Es384,
-	Es512,
-	Hs256,
-	Hs384,
-	Hs512,
-	Ps256,
-	Ps384,
-	Ps512,
-	Rs256,
-	Rs384,
-	Rs512,
-	Jwks, // Not an argorithm.
-}
-
-impl Default for Algorithm {
-	fn default() -> Self {
-		Self::Hs512
-	}
-}
-
 impl Algorithm {
 	pub fn as_str(&self) -> &'static str {
 		match self {
@@ -361,32 +315,8 @@ impl Algorithm {
 	}
 }
 
-impl Language {
-	pub fn as_str(&self) -> &'static str {
-		match self {
-			Self::Arabic => "ARABIC",
-			Self::Danish => "DANISH",
-			Self::Dutch => "DUTCH",
-			Self::English => "ENGLISH",
-			Self::French => "FRENCH",
-			Self::German => "GERMAN",
-			Self::Greek => "GREEK",
-			Self::Hungarian => "HUNGARIAN",
-			Self::Italian => "ITALIAN",
-			Self::Norwegian => "NORWEGIAN",
-			Self::Portuguese => "PORTUGUESE",
-			Self::Romanian => "ROMANIAN",
-			Self::Russian => "RUSSIAN",
-			Self::Spanish => "SPANISH",
-			Self::Swedish => "SWEDISH",
-			Self::Tamil => "TAMIL",
-			Self::Turkish => "TURKISH",
-		}
-	}
-}
-
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum StringKind {
+pub enum QouteKind {
 	/// `'`
 	Plain,
 	/// `"`
@@ -405,10 +335,18 @@ pub enum StringKind {
 	DateTimeDouble,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum NumberKind {
+	Decimal,
+	Float,
+	Integer,
+}
+
 /// The type of token
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 #[non_exhaustive]
 pub enum TokenKind {
+	WhiteSpace,
 	Keyword(Keyword),
 	Algorithm(Algorithm),
 	Language(Language),
@@ -417,8 +355,14 @@ pub enum TokenKind {
 	Operator(Operator),
 	OpenDelim(Delim),
 	CloseDelim(Delim),
-	// a token denoting the opening of a string, i.e. `r"`
-	OpenString(StringKind),
+	/// a token denoting the opening of a string, i.e. `r"`
+	Qoute(QouteKind),
+	/// Not produced by the lexer but only the result of token gluing.
+	Number(NumberKind),
+	/// Not produced by the lexer but only the result of token gluing.
+	Duration,
+	/// Not produced by the lexer but only the result of token gluing.
+	Strand,
 	Regex,
 	/// A parameter like `$name`.
 	Parameter,
@@ -480,15 +424,7 @@ const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
-		matches!(
-			self,
-			TokenKind::Identifier
-				| TokenKind::Uuid
-				| TokenKind::DateTime
-				| TokenKind::Strand
-				| TokenKind::Parameter
-				| TokenKind::Regex
-		)
+		matches!(self, TokenKind::Identifier)
 	}
 
 	pub fn can_be_identifier(&self) -> bool {
@@ -535,11 +471,8 @@ impl TokenKind {
 			TokenKind::CloseDelim(Delim::Brace) => "}",
 			TokenKind::CloseDelim(Delim::Bracket) => "]",
 			TokenKind::DurationSuffix(x) => x.as_str(),
-			TokenKind::Uuid => "a uuid",
-			TokenKind::DateTime => "a date-time",
 			TokenKind::Strand => "a strand",
 			TokenKind::Parameter => "a parameter",
-			TokenKind::Duration => "a duration",
 			TokenKind::Number(_) => "a number",
 			TokenKind::Identifier => "an identifier",
 			TokenKind::Regex => "a regex",

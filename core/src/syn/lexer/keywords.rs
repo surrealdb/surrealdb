@@ -1,4 +1,7 @@
-use crate::syn::token::{Algorithm, DistanceKind, Keyword, Language, TokenKind, VectorTypeKind};
+use crate::{
+	sql::{language::Language, Algorithm},
+	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
+};
 use phf::{phf_map, phf_set};
 use unicase::UniCase;
 

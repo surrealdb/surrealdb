@@ -1,15 +1,15 @@
 /// A macro for requiring a certain token to be next, returning an error otherwise..
 macro_rules! unexpected {
-	(@ $span:expr, $parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {
-		unexpected!(@withSpan, $span, $parser,$found, $(=> $explain:expr)?)
-	};
+	(@ $span:expr, $parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {{
+		unexpected!(@@withSpan, $span, $parser,$found, $expected $(=> $explain)?)
+	}};
 
-	($parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {
-		let span = $parser.recent_span;
-		unexpected!(@withSpan, span, $parser,$found,$(=> $explain:expr)?)
-	};
+	($parser:expr, $found:expr, $expected:expr $(=> $explain:expr)?) => {{
+		let span = $parser.recent_span();
+		unexpected!(@@withSpan, span, $parser,$found, $expected $(=> $explain)?)
+	}};
 
-	(@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr) => {
+	(@@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr) => {
 		match $found {
 			$crate::syn::token::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
@@ -40,7 +40,7 @@ macro_rules! unexpected {
 		}
 	};
 
-	(@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr => $explain:expr) => {
+	(@@withSpan, $span:expr, $parser:expr, $found:expr, $expected:expr => $explain:expr) => {
 		match $found {
 			$crate::syn::token::TokenKind::Invalid => {
 				let error = $parser.lexer.error.take().unwrap();
@@ -184,39 +184,6 @@ macro_rules! enter_query_recursion {
 		$this.query_recursion -= 1;
         #[allow(unused_mut)]
 		let mut $name = Dropper($this);
-		{
-			$($t)*
-		}
-	}};
-}
-
-#[macro_export]
-macro_rules! enter_flexible_ident{
-	($name:ident = $this:expr => ($enabled:expr){ $($t:tt)* }) => {{
-		struct Dropper<'a, 'b>(&'a mut $crate::syn::parser::Parser<'b>,bool);
-		impl Drop for Dropper<'_, '_> {
-			fn drop(&mut self) {
-				self.0.lexer.flexible_ident = self.1;
-			}
-		}
-		impl<'a> ::std::ops::Deref for Dropper<'_,'a>{
-			type Target = $crate::syn::parser::Parser<'a>;
-
-			fn deref(&self) -> &Self::Target{
-				self.0
-			}
-		}
-
-		impl<'a> ::std::ops::DerefMut for Dropper<'_,'a>{
-			fn deref_mut(&mut self) -> &mut Self::Target{
-				self.0
-			}
-		}
-
-		let enabled = $this.lexer.flexible_ident;
-		$this.lexer.flexible_ident = $enabled;
-        #[allow(unused_mut)]
-		let mut $name = Dropper($this,enabled);
 		{
 			$($t)*
 		}

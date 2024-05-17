@@ -2,14 +2,13 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
-	enter_flexible_ident,
 	sql::{id::Gen, Id, Ident, Range, Thing, Value},
 	syn::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, NumberKind, TokenKind},
+		token::{t, TokenKind},
 	},
 };
 use std::{cmp::Ordering, ops::Bound};
@@ -21,19 +20,14 @@ impl Parser<'_> {
 		// call.
 		debug_assert_eq!(self.token_buffer.len(), 0);
 		// manually handle the trailing `"`.
-		let token = self.lexer.lex_record_string_close();
-		if token.kind == TokenKind::Invalid {
-			return Err(ParseError::new(
-				ParseErrorKind::InvalidToken(self.lexer.error.take().unwrap()),
-				token.span,
-			));
-		}
-		if token.kind == t!("'") && double {
-			unexpected!(self, token.kind, "a single quote")
-		}
-		if token.kind == t!("\"") && !double {
-			unexpected!(self, token.kind, "a double quote")
-		}
+		self.peek();
+		self.no_whitespace()?;
+
+		if double {
+			expected!(self, t!("\""));
+		} else {
+			expected!(self, t!("'"));
+		};
 		Ok(thing)
 	}
 
@@ -49,96 +43,93 @@ impl Parser<'_> {
 	) -> ParseResult<Value> {
 		expected!(self, t!(":"));
 
-		enter_flexible_ident!(this = self =>(self.flexible_record_id){
+		// Peek first to filter out white space
+		self.peek();
+		self.no_whitespace()?;
 
-			// Peek first to filter out white space
-			this.peek();
-			this.no_whitespace()?;
-
-			// If this starts with a range operator this is a range with no start bound
-			if this.eat(t!("..")) {
-				// Check for inclusive
-				let end = if this.eat(t!("=")) {
-					this.no_whitespace()?;
-					let id = stk.run(|stk| this.parse_id(stk)).await?;
-					Bound::Included(id)
-				} else if this.peek_can_start_id() {
-						this.no_whitespace()?;
-						let id = stk.run(|stk| this.parse_id(stk)).await?;
-						Bound::Excluded(id)
-					} else {
-						Bound::Unbounded
-					};
-				return Ok(Value::Range(Box::new(Range {
-					tb: ident,
-					beg: Bound::Unbounded,
-					end,
-				})));
-			}
-
-			// Didn't eat range yet so we need to parse the id.
-			let beg = if this.peek_can_start_id(){
-					let id = stk.run(|ctx| this.parse_id(ctx)).await?;
-
-					// check for exclusive
-					if this.eat(t!(">")) {
-						this.no_whitespace()?;
-						Bound::Excluded(id)
-					} else {
-						Bound::Included(id)
-					}
-				} else {
-					Bound::Unbounded
-				};
-
-			// Check if this is actually a range.
-			// If we already ate the exclusive it must be a range.
-			if this.eat(t!("..")) {
-				let end = if this.eat(t!("=")) {
-					this.no_whitespace()?;
-					let id = stk.run(|ctx| this.parse_id(ctx)).await?;
-					Bound::Included(id)
-				} else if this.peek_can_start_id(){
-						this.no_whitespace()?;
-						let id = stk.run(|ctx| this.parse_id(ctx)).await?;
-						Bound::Excluded(id)
-					} else {
-						Bound::Unbounded
-					};
-				Ok(Value::Range(Box::new(Range {
-					tb: ident,
-					beg,
-					end,
-				})))
+		// If self starts with a range operator self is a range with no start bound
+		if self.eat(t!("..")) {
+			// Check for inclusive
+			let end = if self.eat(t!("=")) {
+				self.no_whitespace()?;
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				Bound::Included(id)
+			} else if self.peek_can_start_id() {
+				self.no_whitespace()?;
+				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				Bound::Excluded(id)
 			} else {
-				let id = match beg {
-					Bound::Unbounded => {
-						if this.peek_kind() == t!("$param") {
-							return Err(ParseError::new(
+				Bound::Unbounded
+			};
+			return Ok(Value::Range(Box::new(Range {
+				tb: ident,
+				beg: Bound::Unbounded,
+				end,
+			})));
+		}
+
+		// Didn't eat range yet so we need to parse the id.
+		let beg = if self.peek_can_start_id() {
+			let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+
+			// check for exclusive
+			if self.eat(t!(">")) {
+				self.no_whitespace()?;
+				Bound::Excluded(id)
+			} else {
+				Bound::Included(id)
+			}
+		} else {
+			Bound::Unbounded
+		};
+
+		// Check if self is actually a range.
+		// If we already ate the exclusive it must be a range.
+		if self.eat(t!("..")) {
+			let end = if self.eat(t!("=")) {
+				self.no_whitespace()?;
+				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Included(id)
+			} else if self.peek_can_start_id() {
+				self.no_whitespace()?;
+				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
+				Bound::Excluded(id)
+			} else {
+				Bound::Unbounded
+			};
+			Ok(Value::Range(Box::new(Range {
+				tb: ident,
+				beg,
+				end,
+			})))
+		} else {
+			let id = match beg {
+				Bound::Unbounded => {
+					if self.peek_kind() == t!("$param") {
+						return Err(ParseError::new(
 									ParseErrorKind::UnexpectedExplain {
 										found: t!("$param"),
 										expected: "a record-id id",
 										explain: "you can create a record-id from a param with the function 'type::thing'",
 									},
-									this.recent_span(),
+									self.recent_span(),
 									));
-						}
+					}
 
-						// we haven't matched anythong so far so we still want any type of id.
-						unexpected!(this, this.peek_kind(), "a record-id id")
-					}
-					Bound::Excluded(_) => {
-						// we have matched a bounded id but we don't see an range operator.
-						unexpected!(this, this.peek_kind(), "the range operator `..`")
-					}
-					Bound::Included(id) => id,
-				};
-				Ok(Value::Thing(Thing {
-					tb: ident,
-					id,
-				}))
-			}
-		})
+					// we haven't matched anythong so far so we still want any type of id.
+					unexpected!(self, self.peek_kind(), "a record-id id")
+				}
+				Bound::Excluded(_) => {
+					// we have matched a bounded id but we don't see an range operator.
+					unexpected!(self, self.peek_kind(), "the range operator `..`")
+				}
+				Bound::Included(id) => id,
+			};
+			Ok(Value::Thing(Thing {
+				tb: ident,
+				id,
+			}))
+		}
 	}
 
 	/// Parse an range
@@ -147,67 +138,63 @@ impl Parser<'_> {
 
 		expected!(self, t!(":"));
 
-		enter_flexible_ident!(this = self =>(self.flexible_record_id){
-			this.peek();
-			this.no_whitespace()?;
+		self.peek();
+		self.no_whitespace()?;
 
-			// Check for beginning id
-			let beg = if this.peek_can_start_ident() {
-				this.peek();
-				this.no_whitespace()?;
+		// Check for beginning id
+		let beg = if self.peek_can_start_ident() {
+			self.peek();
+			self.no_whitespace()?;
 
-				let id = ctx.run(|ctx| this.parse_id(ctx)).await?;
+			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 
-				this.peek();
-				this.no_whitespace()?;
+			self.peek();
+			self.no_whitespace()?;
 
-				if this.eat(t!(">")) {
-					Bound::Excluded(id)
-				} else {
-					Bound::Included(id)
-				}
+			if self.eat(t!(">")) {
+				Bound::Excluded(id)
 			} else {
-				Bound::Unbounded
-			};
+				Bound::Included(id)
+			}
+		} else {
+			Bound::Unbounded
+		};
 
-			this.peek();
-			this.no_whitespace()?;
+		self.peek();
+		self.no_whitespace()?;
 
-			expected!(this, t!(".."));
+		expected!(self, t!(".."));
 
-			this.peek();
-			this.no_whitespace()?;
+		self.peek();
+		self.no_whitespace()?;
 
-			let inclusive = this.eat(t!("="));
+		let inclusive = self.eat(t!("="));
 
-			this.peek();
-			this.no_whitespace()?;
+		self.peek();
+		self.no_whitespace()?;
 
-			// parse ending id.
-			let end = if this.peek_can_start_ident() {
-				let id = ctx.run(|ctx| this.parse_id(ctx)).await?;
-				if inclusive {
-					Bound::Included(id)
-				} else {
-					Bound::Excluded(id)
-				}
+		// parse ending id.
+		let end = if self.peek_can_start_ident() {
+			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+			if inclusive {
+				Bound::Included(id)
 			} else {
-				Bound::Unbounded
-			};
+				Bound::Excluded(id)
+			}
+		} else {
+			Bound::Unbounded
+		};
 
-			Ok(Range {
-				tb,
-				beg,
-				end,
-			})
+		Ok(Range {
+			tb,
+			beg,
+			end,
 		})
 	}
 
 	pub async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
 		let ident = self.next_token_value::<Ident>()?.0;
-		enter_flexible_ident!(this = self =>(self.flexible_record_id){
-			this.parse_thing_from_ident(ctx, ident).await
-		})
+		self.parse_thing_from_ident(ctx, ident).await
 	}
 
 	pub async fn parse_thing_from_ident(
@@ -217,12 +204,10 @@ impl Parser<'_> {
 	) -> ParseResult<Thing> {
 		expected!(self, t!(":"));
 
-		let id = enter_flexible_ident!(this = self =>(self.flexible_record_id){
-			this.peek();
-			this.no_whitespace()?;
+		self.peek();
+		self.no_whitespace()?;
 
-			ctx.run(|ctx| this.parse_id(ctx)).await
-		})?;
+		let id = ctx.run(|ctx| self.parse_id(ctx)).await;
 
 		Ok(Thing {
 			tb: ident,
@@ -235,16 +220,12 @@ impl Parser<'_> {
 		match token.kind {
 			t!("{") => {
 				// object record id
-				let object = enter_flexible_ident!(this = self => (false){
-					this.parse_object(stk, token.span).await
-				})?;
+				let object = self.parse_object(stk, token.span).await;
 				Ok(Id::Object(object))
 			}
 			t!("[") => {
 				// array record id
-				let array = enter_flexible_ident!(this = self => (false){
-					this.parse_array(stk, token.span).await
-				})?;
+				let array = self.parse_array(stk, token.span).await;
 				Ok(Id::Array(array))
 			}
 			t!("+") => {

@@ -26,28 +26,28 @@ macro_rules! t {
 	};
 
 	("r\"") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::RecordIdDouble)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::RecordIdDouble)
 	};
 	("r'") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::RecordId)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::RecordId)
 	};
 	("u\"") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::UuidDouble)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::UuidDouble)
 	};
 	("u'") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::Uuid)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Uuid)
 	};
 	("d\"") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::DateTimeDouble)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::DateTimeDouble)
 	};
 	("d'") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::DateTime)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::DateTime)
 	};
 	("\"") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::PlainDouble)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::PlainDouble)
 	};
 	("'") => {
-		$crate::syn::token::TokenKind::OpenString($crate::syn::token::StringKind::Plain)
+		$crate::syn::token::TokenKind::Qoute($crate::syn::token::QouteKind::Plain)
 	};
 	("\"r") => {
 		$crate::syn::token::TokenKind::CloseString {

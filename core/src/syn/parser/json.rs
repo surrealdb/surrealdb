@@ -6,7 +6,7 @@ use crate::{
 	sql::{Array, Ident, Object, Strand, Value},
 	syn::{
 		parser::mac::expected,
-		token::{t, Span, TokenKind},
+		token::{t, QouteKind, Span, TokenKind},
 	},
 };
 
@@ -21,17 +21,16 @@ impl Parser<'_> {
 			t!("false") => Ok(Value::Bool(false)),
 			t!("{") => self.parse_json_object(ctx, token.span).await.map(Value::Object),
 			t!("[") => self.parse_json_array(ctx, token.span).await.map(Value::Array),
-			TokenKind::Duration => self.token_value(token).map(Value::Duration),
-			TokenKind::DateTime => self.token_value(token).map(Value::Datetime),
-			TokenKind::Strand => {
+			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
+				let strand: Strand = self.token_value(token)?;
 				if self.legacy_strands {
-					self.parse_legacy_strand(ctx).await
-				} else {
-					Ok(Value::Strand(Strand(self.lexer.string.take().unwrap())))
+					if let Some(x) = self.reparse_legacy_strand(ctx, &strand.0).await {
+						return Ok(x);
+					}
 				}
+				Ok(Value::Strand(strand))
 			}
-			TokenKind::Number(_) => self.token_value(token).map(Value::Number),
-			TokenKind::Uuid => self.token_value(token).map(Value::Uuid),
+			TokenKind::Digits => self.parse_number_like_prime(),
 			_ => {
 				let ident = self.token_value::<Ident>(token)?.0;
 				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)

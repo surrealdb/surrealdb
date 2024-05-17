@@ -3,7 +3,10 @@ use reblessive::Stk;
 use crate::{
 	sql::{Function, Ident, Model},
 	syn::{
-		parser::mac::{expected, unexpected},
+		parser::{
+			mac::{expected, unexpected},
+			ParseError, ParseErrorKind,
+		},
 		token::{t, TokenKind},
 	},
 };
@@ -53,28 +56,34 @@ impl Parser<'_> {
 		let start = expected!(self, t!("<")).span;
 
 		let token = self.next();
-		let major = match token.kind {
-			TokenKind::Digits => {
-				std::str::from_utf8(self.lexer.reader.span(token.span)).unwrap().parse()?
-			}
+		let major: u32 = match token.kind {
+			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
+				.unwrap()
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, token.span))?,
 			x => unexpected!(self, x, "an integer"),
 		};
 
 		expected!(self, t!("."));
 
-		let minor = match token.kind {
-			TokenKind::Digits => {
-				std::str::from_utf8(self.lexer.reader.span(token.span)).unwrap().parse()?
-			}
+		let minor: u32 = match token.kind {
+			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
+				.unwrap()
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, token.span))?,
 			x => unexpected!(self, x, "an integer"),
 		};
 
 		expected!(self, t!("."));
 
-		let patch = match token.kind {
-			TokenKind::Digits => {
-				std::str::from_utf8(self.lexer.reader.span(token.span)).unwrap().parse()?
-			}
+		let patch: u32 = match token.kind {
+			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
+				.unwrap()
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, token.span))?,
 			x => unexpected!(self, x, "an integer"),
 		};
 

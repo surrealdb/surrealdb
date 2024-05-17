@@ -28,6 +28,16 @@ impl<const S: usize> TokenBuffer<S> {
 	}
 
 	#[inline]
+	pub fn push_front(&mut self, token: Token) {
+		let next_read = self.read.checked_sub(1).unwrap_or(S - 1);
+		if next_read == self.write {
+			panic!("token buffer full");
+		}
+		self.buffer[next_read as usize] = token;
+		self.read = next_read;
+	}
+
+	#[inline]
 	pub fn pop(&mut self) -> Option<Token> {
 		if self.write == self.read {
 			return None;
@@ -55,6 +65,10 @@ impl<const S: usize> TokenBuffer<S> {
 		} else {
 			self.write - self.read
 		}
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.write != self.read
 	}
 
 	pub fn at(&mut self, at: u8) -> Option<Token> {

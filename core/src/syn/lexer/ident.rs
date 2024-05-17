@@ -4,7 +4,7 @@ use unicase::UniCase;
 
 use crate::syn::{
 	lexer::{keywords::KEYWORDS, Error, Lexer},
-	token::{NumberKind, Token, TokenKind},
+	token::{Token, TokenKind},
 };
 
 use super::unicode::chars;

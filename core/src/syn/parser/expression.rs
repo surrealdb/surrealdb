@@ -8,9 +8,8 @@ use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
 use crate::syn::token::Token;
 use crate::syn::{
 	parser::{mac::expected, ParseErrorKind, ParseResult, Parser},
-	token::{t, NumberKind, TokenKind},
+	token::{t, TokenKind},
 };
-use std::cmp::Ordering;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -137,8 +136,8 @@ impl Parser<'_> {
 			t!("+") => {
 				// +123 is a single number token, so parse it as such
 				let p = self.peek_token_at(1);
-				if p.follows_from(&token) && matches!(p, TokenKind::Digits) {
-					return self.next_token_value::<Number>();
+				if p.follows_from(&token) && matches!(p.kind, TokenKind::Digits) {
+					return self.next_token_value::<Number>().map(Value::Number);
 				}
 				self.pop_peek();
 
@@ -147,8 +146,8 @@ impl Parser<'_> {
 			t!("-") => {
 				// -123 is a single number token, so parse it as such
 				let p = self.peek_token_at(1);
-				if p.follows_from(&token) && matches!(p, TokenKind::Digits) {
-					return self.next_token_value::<Number>();
+				if p.follows_from(&token) && matches!(p.kind, TokenKind::Digits) {
+					return self.next_token_value::<Number>().map(Value::Number);
 				}
 
 				self.pop_peek();

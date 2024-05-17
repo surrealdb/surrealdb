@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use thiserror::Error;
 
 mod byte;
@@ -15,7 +17,7 @@ mod test;
 
 pub use reader::{BytesReader, CharError};
 
-use crate::syn::token::{t, Span, Token, TokenKind};
+use crate::syn::token::{Span, Token, TokenKind};
 
 /// A error returned by the lexer when an invalid token is encountered.
 ///
@@ -83,6 +85,7 @@ pub struct Lexer<'a> {
 	// different precisions or formats. The only way to support all is to delay parsing the
 	// actual number value to when the parser can decide on a format.
 	pub string: Option<String>,
+	pub duration: Option<Duration>,
 	pub error: Option<Error>,
 }
 
@@ -265,70 +268,6 @@ impl<'a> Lexer<'a> {
 			true
 		} else {
 			false
-		}
-	}
-
-	/// Lex a single `"` character with possible leading whitespace.
-	///
-	/// Used for parsing record strings.
-	pub fn lex_record_string_close(&mut self) -> Token {
-		loop {
-			let Some(byte) = self.reader.next() else {
-				return self.invalid_token(Error::UnexpectedEof);
-			};
-			match byte {
-				unicode::byte::CR
-				| unicode::byte::FF
-				| unicode::byte::LF
-				| unicode::byte::SP
-				| unicode::byte::VT
-				| unicode::byte::TAB => {
-					self.eat_whitespace();
-					continue;
-				}
-				b'"' => {
-					return self.finish_token(t!("\""));
-				}
-				b'\'' => {
-					return self.finish_token(t!("'"));
-				}
-				b'-' => match self.reader.next() {
-					Some(b'-') => {
-						self.eat_single_line_comment();
-						continue;
-					}
-					Some(x) => match self.reader.convert_to_char(x) {
-						Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
-						Err(e) => return self.invalid_token(e.into()),
-					},
-					None => return self.invalid_token(Error::UnexpectedEof),
-				},
-				b'/' => match self.reader.next() {
-					Some(b'*') => {
-						if let Err(e) = self.eat_multi_line_comment() {
-							return self.invalid_token(e);
-						}
-						continue;
-					}
-					Some(b'/') => {
-						self.eat_single_line_comment();
-						continue;
-					}
-					Some(x) => match self.reader.convert_to_char(x) {
-						Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
-						Err(e) => return self.invalid_token(e.into()),
-					},
-					None => return self.invalid_token(Error::UnexpectedEof),
-				},
-				b'#' => {
-					self.eat_single_line_comment();
-					continue;
-				}
-				x => match self.reader.convert_to_char(x) {
-					Ok(c) => return self.invalid_token(Error::UnexpectedCharacter(c)),
-					Err(e) => return self.invalid_token(e.into()),
-				},
-			}
 		}
 	}
 }

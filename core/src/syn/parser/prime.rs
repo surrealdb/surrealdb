@@ -24,15 +24,9 @@ impl Parser<'_> {
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
 	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+		// TODO(delskayn) DateTime|UUID
 		match self.peek_kind() {
-			TokenKind::Duration => {
-				let duration = self.next_token_value()?;
-				Ok(Value::Duration(duration))
-			}
-			TokenKind::DateTime => {
-				let datetime = self.next_token_value()?;
-				Ok(Value::Datetime(datetime))
-			}
+			TokenKind::Digits => return self.parse_number_like_prime(),
 			t!("r\"") => {
 				self.pop_peek();
 				let thing = self.parse_record_string(ctx, true).await?;
@@ -118,6 +112,10 @@ impl Parser<'_> {
 		}
 	}
 
+	pub fn parse_number_like_prime(&mut self) -> ParseResult<Value> {
+		todo!()
+	}
+
 	/// Parse an expressions
 	pub async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
@@ -146,35 +144,6 @@ impl Parser<'_> {
 				let next = expected!(self, t!("{")).span;
 				let block = self.parse_block(ctx, next).await?;
 				return Ok(Value::Future(Box::new(crate::sql::Future(block))));
-			}
-			TokenKind::Strand => {
-				self.pop_peek();
-				if self.legacy_strands {
-					return self.parse_legacy_strand(ctx).await;
-				} else {
-					let strand = self.token_value(token)?;
-					return Ok(Value::Strand(strand));
-				}
-			}
-			TokenKind::Duration => {
-				self.pop_peek();
-				let duration = self.token_value(token)?;
-				Value::Duration(duration)
-			}
-			TokenKind::Number(_) => {
-				self.pop_peek();
-				let number = self.token_value(token)?;
-				Value::Number(number)
-			}
-			TokenKind::Uuid => {
-				self.pop_peek();
-				let uuid = self.token_value(token)?;
-				Value::Uuid(uuid)
-			}
-			TokenKind::DateTime => {
-				self.pop_peek();
-				let datetime = self.token_value(token)?;
-				Value::Datetime(datetime)
 			}
 			t!("r\"") => {
 				self.pop_peek();
@@ -459,7 +428,7 @@ impl Parser<'_> {
 						return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
 					} else {
 						self.expect_closing_delimiter(t!(")"), start)?;
-						return Ok(Subquery::Value(Value::Number(number)));
+						return Ok(Value::Number(number));
 					}
 				}
 
@@ -499,7 +468,7 @@ impl Parser<'_> {
 					return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
 				} else {
 					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Subquery::Value(Value::Number(number)));
+					return Ok(Value::Number(number));
 				}
 			}
 			_ => {
@@ -635,18 +604,17 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or uuid if the string
 	/// matches.
-	pub async fn parse_legacy_strand(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		let text = self.lexer.string.take().unwrap();
+	pub async fn reparse_legacy_strand(&mut self, ctx: &mut Stk, text: &str) -> Option<Value> {
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx).await {
-			return Ok(Value::Thing(x));
+			return Some(Value::Thing(x));
 		}
 		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_datetime() {
-			return Ok(Value::Datetime(x));
+			return Some(Value::Datetime(x));
 		}
 		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_uuid() {
-			return Ok(Value::Uuid(x));
+			return Some(Value::Uuid(x));
 		}
-		Ok(Value::Strand(Strand(text)))
+		None
 	}
 
 	async fn parse_script(&mut self, ctx: &mut Stk) -> ParseResult<Function> {

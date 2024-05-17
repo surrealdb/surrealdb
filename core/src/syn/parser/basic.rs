@@ -1,11 +1,10 @@
 use std::{
 	num::{ParseFloatError, ParseIntError},
 	str::FromStr,
-	time::Duration,
+	time::Duration as StdDuration,
 };
 
 use crate::{
-	key::root::ns::suffix,
 	sql::{
 		duration::{
 			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
@@ -15,12 +14,10 @@ use crate::{
 		Datetime, Duration, Ident, Number, Param, Regex, Strand, Table, Uuid,
 	},
 	syn::{
-		parser::mac::unexpected,
-		token::{t, DurationSuffix, NumberSuffix, StringKind, Token, TokenKind},
+		parser::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser},
+		token::{t, DurationSuffix, NumberSuffix, QouteKind, Token, TokenKind},
 	},
 };
-
-use super::{ParseError, ParseErrorKind, ParseResult, Parser};
 
 /// A trait for parsing single tokens with a specific value.
 pub trait TokenValue: Sized {
@@ -57,7 +54,7 @@ impl TokenValue for Ident {
 				Ok(Ident(buffer))
 			}
 			TokenKind::Exponent => {
-				let mut str = parser.lexer.reader.span(token.span);
+				let str = parser.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8
 				let mut buffer = std::str::from_utf8(str).unwrap().to_owned();
 				if let Err(span) = parser.glue_ident(token, &mut buffer) {
@@ -109,14 +106,10 @@ where
 					_ => {}
 				}
 			}
-			let res = digits_string.parse().map_err(|e| {
-				ParseError::new(
-					ParseErrorKind::InvalidInteger {
-						error: e,
-					},
-					token.span,
-				)
-			})?;
+			let res = digits_string
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, token.span))?;
 			Ok(res)
 		}
 		x => unexpected!(parser, x, "an integer"),
@@ -155,11 +148,11 @@ where
 {
 	// find initial  digits
 	let mut buffer: String = match token.kind {
-		TokenKind::NaN => return Ok("NaN".parse()?),
+		TokenKind::NaN => return Ok("NaN".parse().unwrap()),
 		TokenKind::Digits => {
 			let span = parser.lexer.reader.span(token.span);
 			// filter out all the '_'
-			span.iter().filter(|x| x != b'_').map(|x| x as char).collect()
+			span.iter().copied().filter(|x| *x != b'_').map(|x| x as char).collect()
 		}
 
 		x => unexpected!(parser, x, "a floating point number"),
@@ -175,7 +168,8 @@ where
 		));
 	}
 
-	return Ok(buffer.parse()?);
+	let span = token.span.covers(parser.last_span());
+	buffer.parse().map_err(ParseErrorKind::InvalidFloat).map_err(|e| ParseError::new(e, span))
 }
 
 impl TokenValue for f32 {
@@ -224,7 +218,8 @@ impl TokenValue for Number {
 					.reader
 					.span(digits_token.span)
 					.iter()
-					.filter(|x| x != b'_')
+					.copied()
+					.filter(|x| *x != b'_')
 					.map(|x| x as char)
 					.collect()
 			}
@@ -249,36 +244,51 @@ impl TokenValue for Number {
 						.reader
 						.span(digits_token.span)
 						.iter()
-						.filter(|x| x != b'_')
+						.copied()
+						.filter(|x| *x != b'_')
 						.map(|x| x as char),
 				);
 				buffer
 			}
-			TokenKind::NaN => Ok(Number::Float(f64::NAN)),
+			TokenKind::NaN => return Ok(Number::Float(f64::NAN)),
 			TokenKind::Digits => parser
 				.lexer
 				.reader
 				.span(token.span)
 				.iter()
-				.filter(|x| x != b'_')
+				.copied()
+				.filter(|x| *x != b'_')
 				.map(|x| x as char)
 				.collect(),
 			x => unexpected!(parser, x, "a number"),
 		};
 
 		let p = parser.peek();
-		if !p.follows_from(&token) {
-			return Ok(Number::Int(number_buffer.parse()?));
+		if !p.follows_from(&digits_token) {
+			let s = token.span.covers(digits_token.span);
+			let v = number_buffer
+				.parse()
+				.map_err(ParseErrorKind::InvalidInteger)
+				.map_err(|e| ParseError::new(e, s))?;
+			return Ok(Number::Int(v));
 		}
 
 		match p.kind {
 			TokenKind::NumberSuffix(NumberSuffix::Decimal) => {
-				parser.pop_peek();
-				return Ok(Number::Decimal(number_buffer.parse()?));
+				let s = token.span.covers(p.span);
+				let v = number_buffer
+					.parse()
+					.map_err(ParseErrorKind::InvalidDecimal)
+					.map_err(|e| ParseError::new(e, s))?;
+				return Ok(Number::Decimal(v));
 			}
 			TokenKind::NumberSuffix(NumberSuffix::Float) => {
-				parser.pop_peek();
-				return Ok(Number::Float(number_buffer.parse()?));
+				let s = token.span.covers(p.span);
+				let v = number_buffer
+					.parse()
+					.map_err(ParseErrorKind::InvalidFloat)
+					.map_err(|e| ParseError::new(e, s))?;
+				return Ok(Number::Float(v));
 			}
 			t!(".") | TokenKind::Exponent => {
 				let mut number_buffer = number_buffer;
@@ -291,7 +301,12 @@ impl TokenValue for Number {
 						span,
 					));
 				}
-				return Ok(Number::Float(number_buffer.parse()?));
+				let s = token.span.covers(parser.last_span());
+				let v = number_buffer
+					.parse()
+					.map_err(ParseErrorKind::InvalidFloat)
+					.map_err(|e| ParseError::new(e, s))?;
+				return Ok(Number::Float(v));
 			}
 			x => {
 				unexpected!(parser, x, "a number")
@@ -313,110 +328,12 @@ impl TokenValue for Param {
 }
 
 impl TokenValue for Duration {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let mut duration = Duration::ZERO;
-
-		let mut digits_span = match token.kind {
-			TokenKind::Digits => parser.lexer.reader.span(token.span),
-			x => unexpected!(parser, x, "a duration"),
-		};
-
-		let mut cur = token;
-		loop {
-			let p = parser.peek();
-			if !p.follows_from(&cur) {
-				unexpected!(parser, p.kind, "a duration")
-			}
-
-			let suffix = match p.kind {
-				TokenKind::DurationSuffix(x) => x,
-				x => unexpected!(parser, x, "a duration"),
-			};
-
-			parser.pop_peek();
-
-			let mut digits_str = std::str::from_utf8(digits_span).unwrap();
-
-			let addition = match suffix {
-				DurationSuffix::Nano => Duration::from_nanos(digits_str.parse()?),
-				DurationSuffix::Micro | DurationSuffix::MicroUnicode => {
-					Duration::from_micros(digits_str.parse()?)
-				}
-				DurationSuffix::Milli => Duration::from_millis(digits_str.parse()?),
-				DurationSuffix::Second => Duration::from_secs(digits_str.parse()?),
-				DurationSuffix::Minute => {
-					let minutes = digits_str
-						.parse::<u64>()?
-						.checked_mul(SECONDS_PER_MINUTE)
-						.ok_or_else(|x| {
-							let span = token.span.covers(p.span);
-							ParseError::new(ParseErrorKind::DurationOverflow, span)
-						});
-					Duration::from_secs(minutes)
-				}
-				DurationSuffix::Hour => {
-					let minutes =
-						digits_str.parse::<u64>()?.checked_mul(SECONDS_PER_HOUR).ok_or_else(|x| {
-							let span = token.span.covers(p.span);
-							ParseError::new(ParseErrorKind::DurationOverflow, span)
-						});
-					Duration::from_secs(minutes)
-				}
-				DurationSuffix::Day => {
-					let minutes =
-						digits_str.parse::<u64>()?.checked_mul(SECONDS_PER_DAY).ok_or_else(|x| {
-							let span = token.span.covers(p.span);
-							ParseError::new(ParseErrorKind::DurationOverflow, span)
-						});
-					Duration::from_secs(minutes)
-				}
-				DurationSuffix::Week => {
-					let minutes =
-						digits_str.parse::<u64>()?.checked_mul(SECONDS_PER_WEEK).ok_or_else(|x| {
-							let span = token.span.covers(p.span);
-							ParseError::new(ParseErrorKind::DurationOverflow, span)
-						});
-					Duration::from_secs(minutes)
-				}
-				DurationSuffix::Year => {
-					let minutes =
-						digits_str.parse::<u64>()?.checked_mul(SECONDS_PER_YEAR).ok_or_else(|x| {
-							let span = token.span.covers(p.span);
-							ParseError::new(ParseErrorKind::DurationOverflow, span)
-						});
-					Duration::from_secs(minutes)
-				}
-			};
-
-			duration = duration.checked_add(addition).ok_or_else(|x| {
-				let span = token.span.covers(p.span);
-				ParseError::new(ParseErrorKind::DurationOverflow, span)
-			})?;
-
-			let p = parser.peek();
-			if !p.follows_from(&cur) {
-				break;
-			}
-
-			match p.kind {
-				TokenKind::Digits => {
-					parser.pop_peek();
-					digits_span = parser.lexer.reader.span(p.span);
-				}
-				x if Parser::tokenkind_continues_ident(x) => {
-					unexpected!(parser, x, "a duration")
-				}
-				_ => break,
-			}
-		}
-
-		Ok(duration)
-	}
+	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {}
 }
 
 impl TokenValue for Datetime {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let TokenKind::OpenString(StringKind::DateTime) = token.kind else {
+		let TokenKind::Qoute(QouteKind::DateTime) = token.kind else {
 			unexpected!(parser, token.kind, "a datetime")
 		};
 		let datetime = parser.lexer.datetime.take().expect("token data was already consumed");
@@ -427,9 +344,12 @@ impl TokenValue for Datetime {
 impl TokenValue for Strand {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
 		match token.kind {
-			TokenKind::OpenString(StringKind::Plain) => {
-				let strand = parser.lexer.string.take().unwrap();
-				Ok(Strand(strand))
+			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
+				let t = parser.lexer.relex_strand(token);
+				let TokenKind::Strand = t.kind else {
+					unexpected!(parser, t.kind, "a strand")
+				};
+				return Ok(Strand(parser.lexer.string.take().unwrap()));
 			}
 			x => unexpected!(parser, x, "a strand"),
 		}
@@ -438,7 +358,7 @@ impl TokenValue for Strand {
 
 impl TokenValue for Uuid {
 	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let TokenKind::OpenString(StringKind::Uuid) = token.kind else {
+		let TokenKind::Qoute(QouteKind::Uuid) = token.kind else {
 			unexpected!(parser, token.kind, "a datetime")
 		};
 		Ok(parser.lexer.uuid.take().unwrap())

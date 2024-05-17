@@ -48,17 +48,12 @@ pub enum ParseErrorKind {
 		should_close: Span,
 	},
 	/// An error for parsing an integer
-	InvalidInteger {
-		error: ParseIntError,
-	},
+	InvalidInteger(ParseIntError),
 	/// An error for parsing an float
-	InvalidFloat {
-		error: ParseFloatError,
-	},
+	InvalidFloat(ParseFloatError),
 	/// An error for parsing an decimal.
-	InvalidDecimal {
-		error: rust_decimal::Error,
-	},
+	InvalidDecimal(rust_decimal::Error),
+	InvalidIdent,
 	DisallowedStatement {
 		found: TokenKind,
 		expected: TokenKind,
@@ -209,9 +204,7 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
-			ParseErrorKind::InvalidInteger {
-				ref error,
-			} => {
+			ParseErrorKind::InvalidInteger(ref error) => {
 				let text = format!("failed to parse integer, {error}");
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
@@ -220,9 +213,7 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
-			ParseErrorKind::InvalidFloat {
-				ref error,
-			} => {
+			ParseErrorKind::InvalidFloat(ref error) => {
 				let text = format!("failed to parse floating point, {error}");
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
@@ -231,9 +222,7 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
-			ParseErrorKind::InvalidDecimal {
-				ref error,
-			} => {
+			ParseErrorKind::InvalidDecimal(ref error) => {
 				let text = format!("failed to parse decimal number, {error}");
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);

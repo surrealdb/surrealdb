@@ -267,14 +267,22 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Last
 			}
-			t!("123") => Part::Index(self.next_token_value()?),
+			t!("+") | TokenKind::Digits => Part::Index(self.next_token_value()?),
+			t!("-") => {
+				if let TokenKind::Digits = self.peek_token_at(1).kind {
+					unexpected!(self, t!("-"),"$, * or a number" => "an index can't be negative");
+				}
+				unexpected!(self, t!("-"), "$, * or a number");
+			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 				Part::Where(value)
 			}
 			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
-			TokenKind::Strand => Part::Value(Value::Strand(self.next_token_value()?)),
+			TokenKind::Qoute(_x) => {
+				todo!()
+			}
 			_ => {
 				let idiom = self.parse_basic_idiom()?;
 				Part::Value(Value::Idiom(idiom))
@@ -318,9 +326,17 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::Last
 						}
-						t!("123") => {
+						TokenKind::Digits | t!("+") => {
 							let number = self.token_value(token)?;
 							Part::Index(number)
+						}
+						t!("-") => {
+							let peek_digit = self.peek_token_at(1);
+							if let TokenKind::Digits = peek_digit.kind {
+								let span = self.recent_span().covers(peek_digit.span);
+								unexpected!(@ span, self, t!("-"),"$, * or a number" => "an index can't be negative");
+							}
+							unexpected!(self, t!("-"), "$, * or a number");
 						}
 						x => unexpected!(self, x, "$, * or a number"),
 					};
@@ -356,9 +372,17 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::All
 						}
-						t!("123") => {
-							let number = self.next_token_value()?;
+						TokenKind::Digits | t!("+") => {
+							let number = self.token_value(token)?;
 							Part::Index(number)
+						}
+						t!("-") => {
+							let peek_digit = self.peek_token_at(1);
+							if let TokenKind::Digits = peek_digit.kind {
+								let span = self.recent_span().covers(peek_digit.span);
+								unexpected!(@ span, self, t!("-"),"$, * or a number" => "an index can't be negative");
+							}
+							unexpected!(self, t!("-"), "$, * or a number");
 						}
 						x => unexpected!(self, x, "$, * or a number"),
 					};

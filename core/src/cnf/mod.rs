@@ -41,7 +41,6 @@ pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> =
 
 #[cfg(any(
 	feature = "kv-surrealkv",
-	feature = "kv-file",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-tikv",

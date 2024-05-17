@@ -5,7 +5,7 @@ use reblessive::Stk;
 
 use crate::{
 	enter_object_recursion,
-	sql::{Block, Geometry, Object, Strand, Value},
+	sql::{Block, Geometry, Number, Object, Strand, Value},
 	syn::{
 		parser::{mac::expected, ParseError, ParseErrorKind, ParseResult, Parser},
 		token::{t, Span, TokenKind},
@@ -666,9 +666,10 @@ impl Parser<'_> {
 				let str = self.lexer.string.take().unwrap();
 				Ok(str)
 			}
-			TokenKind::Number(_) => {
+			TokenKind::Digits => {
 				self.pop_peek();
-				Ok(self.lexer.string.take().unwrap())
+				let number = self.next_token_value::<Number>()?.to_string();
+				Ok(number)
 			}
 			x => unexpected!(self, x, "an object key"),
 		}
