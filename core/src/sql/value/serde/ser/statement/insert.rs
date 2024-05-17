@@ -91,10 +91,10 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		match (self.into, self.data, self.ignore, self.parallel, self.relation) {
-			(Some(into), Some(data), Some(ignore), Some(parallel), Some(relation)) => {
+		match (self.data, self.ignore, self.parallel, self.relation) {
+			(Some(data), Some(ignore), Some(parallel), Some(relation)) => {
 				Ok(InsertStatement {
-					into,
+					into: self.into,
 					data,
 					ignore,
 					parallel,

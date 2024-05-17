@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
-use crate::sql::{Data, Output, Thing, Timeout, Value};
+use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value};
 use derive::Store;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -16,7 +16,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct InsertStatement {
-	pub into: Value,
+	pub into: Option<Value>,
 	pub data: Data,
 	pub ignore: bool,
 	pub update: Option<Data>,
@@ -47,56 +47,61 @@ impl InsertStatement {
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_projections(false);
 		// Parse the expression
-		match self.into.compute(stk, ctx, opt, doc).await? {
-			Value::Table(into) => match &self.data {
-				// Check if this is a traditional statement
-				Data::ValuesExpression(v) => {
-					for v in v {
-						// Create a new empty base object
-						let mut o = Value::base();
-						// Set each field from the expression
-						for (k, v) in v.iter() {
-							let v = v.compute(stk, ctx, opt, None).await?;
-							o.set(stk, ctx, opt, k, v).await?;
-						}
-						// Specify the new table record id
-						let id = o.rid().generate(&into, true)?;
-						// Pass the value to the iterator
-						i.ingest(iterable(id, o, self.relation)?)
-					}
+		let into = match &self.into {
+			None => None,
+			Some(into) => match into.compute(stk, ctx, opt, doc).await? {
+				Value::Table(into) => Some(into),
+				v => {
+					return Err(Error::InsertStatement {
+						value: v.to_string(),
+					})
 				}
-				// Check if this is a modern statement
-				Data::SingleExpression(v) => {
-					let v = v.compute(stk, ctx, opt, doc).await?;
-					match v {
-						Value::Array(v) => {
-							for v in v {
-								// Specify the new table record id
-								let id = v.rid().generate(&into, true)?;
-								// Pass the value to the iterator
-								i.ingest(iterable(id, v, self.relation)?)
-							}
-						}
-						Value::Object(_) => {
+			}
+		};
+
+		match &self.data {
+			// Check if this is a traditional statement
+			Data::ValuesExpression(v) => {
+				for v in v {
+					// Create a new empty base object
+					let mut o = Value::base();
+					// Set each field from the expression
+					for (k, v) in v.iter() {
+						let v = v.compute(stk, ctx, opt, None).await?;
+						o.set(stk, ctx, opt, k, v).await?;
+					}
+					// Specify the new table record id
+					let id = gen_id(&o, &into)?;
+					// Pass the value to the iterator
+					i.ingest(iterable(id, o, self.relation)?)
+				}
+			}
+			// Check if this is a modern statement
+			Data::SingleExpression(v) => {
+				let v = v.compute(stk, ctx, opt, doc).await?;
+				match v {
+					Value::Array(v) => {
+						for v in v {
 							// Specify the new table record id
-							let id = v.rid().generate(&into, true)?;
+							let id = gen_id(&v, &into)?;
 							// Pass the value to the iterator
 							i.ingest(iterable(id, v, self.relation)?)
 						}
-						v => {
-							return Err(Error::InsertStatement {
-								value: v.to_string(),
-							})
-						}
+					}
+					Value::Object(_) => {
+						// Specify the new table record id
+						let id = gen_id(&v, &into)?;
+						// Pass the value to the iterator
+						i.ingest(iterable(id, v, self.relation)?)
+					}
+					v => {
+						return Err(Error::InsertStatement {
+							value: v.to_string(),
+						})
 					}
 				}
-				_ => unreachable!(),
-			},
-			v => {
-				return Err(Error::InsertStatement {
-					value: v.to_string(),
-				})
 			}
+			_ => unreachable!(),
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
@@ -108,10 +113,16 @@ impl InsertStatement {
 impl fmt::Display for InsertStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("INSERT")?;
+		if self.relation {
+			f.write_str(" RELATION")?
+		}
 		if self.ignore {
 			f.write_str(" IGNORE")?
 		}
-		write!(f, " INTO {} {}", self.into, self.data)?;
+		if let Some(into) = &self.into {
+			write!(f, " INTO {}", into)?;
+		}
+		write!(f, "{}", self.data)?;
 		if let Some(ref v) = self.update {
 			write!(f, " {v}")?
 		}
@@ -149,6 +160,21 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 				}
 			};
 			Ok(Iterable::Relatable(r#in, id, out, Some(v)))
+		}
+	}
+}
+
+fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing, Error> {
+	match into {
+		Some(into) => v.rid().generate(&into, true),
+		None => match v.rid() {
+			Value::Thing(Thing { id: Id::Generate(_), .. }) => Err(Error::InsertStatementId {
+				value: v.to_string(),
+			}),
+			Value::Thing(v) => Ok(v),
+			_ => Err(Error::InsertStatementId {
+				value: v.to_string(),
+			})
 		}
 	}
 }

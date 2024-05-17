@@ -99,7 +99,11 @@ fn insert_statement(params: &mut [Value]) -> (bool, InsertStatement) {
 	};
 	let one = !data.is_array();
 	let mut stmt = InsertStatement::default();
-	stmt.into = what;
+	stmt.into = match what {
+		Value::None => None,
+		Value::Null => None,
+		what => Some(what),
+	};
 	stmt.data = Data::SingleExpression(data);
 	stmt.output = Some(Output::After);
 	(one, stmt)

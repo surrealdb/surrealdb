@@ -522,7 +522,7 @@ fn statements() -> Vec<Statement> {
 			error: Value::Duration(Duration(std::time::Duration::from_secs(1))),
 		}),
 		Statement::Insert(InsertStatement {
-			into: Value::Param(Param(Ident("foo".to_owned()))),
+			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
 			data: Data::ValuesExpression(vec![
 				vec![
 					(
