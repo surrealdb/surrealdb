@@ -136,7 +136,11 @@ impl From<Claims> for Value {
 						continue;
 					}
 				};
-				out.insert(claim, claim_value);
+				out.insert(
+					// Strip namespace prefix to store only cannonical claim names
+					claim.strip_prefix("https://surrealdb.com/").unwrap_or(&claim).to_owned(),
+					claim_value,
+				);
 			}
 		}
 		// Return value

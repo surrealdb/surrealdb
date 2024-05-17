@@ -1385,6 +1385,86 @@ mod tests {
 		}
 	}
 
+	#[tokio::test]
+	async fn test_token_scope_namespaced_claims() {
+		use std::collections::HashMap;
+
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE TOKEN token ON SCOPE test TYPE HS512 VALUE '{secret}';").as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let now = Utc::now().timestamp();
+		let later = (Utc::now() + Duration::hours(1)).timestamp();
+
+		//
+		// Token with valid namespaced claims
+		//
+		{
+			let claims_json = format!(
+				r#"
+				{{
+					"iss": "surrealdb-test",
+					"iat": {now},
+					"nbf": {now},
+					"exp": {later},
+					"https://surrealdb.com/tk": "token",
+					"https://surrealdb.com/ns": "test",
+					"https://surrealdb.com/db": "test",
+					"https://surrealdb.com/sc": "test",
+					"https://surrealdb.com/string_claim": "test",
+					"https://surrealdb.com/object_claim": {{
+						"https://surrealdb.com/test": "test"
+					}}
+				}}
+				"#
+			);
+			let claims = serde_json::from_str::<Claims>(&claims_json).unwrap();
+			// Create the token
+			let enc = match encode(&HEADER, &claims, &key) {
+				Ok(enc) => enc,
+				Err(err) => panic!("Failed to decode token: {:?}", err),
+			};
+			// Signin with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+
+			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.sc, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "token");
+			assert!(sess.au.is_scope());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			let tk = match sess.tk {
+				Some(Value::Object(tk)) => tk,
+				_ => panic!("Session token is not an object"),
+			};
+			// First level custom claims are extracted without the namespace prefix
+			let string_claim = tk.get("string_claim").unwrap();
+			assert_eq!(*string_claim, Value::Strand("test".into()));
+			let object_claim = tk.get("object_claim").unwrap();
+			let mut test_object: HashMap<String, Value> = HashMap::new();
+			// Second level object claim attributes are extracted literally
+			test_object
+				.insert("https://surrealdb.com/test".to_string(), Value::Strand("test".into()));
+			assert_eq!(*object_claim, Value::Object(test_object.into()));
+		}
+	}
+
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
 	async fn test_token_scope_jwks() {
