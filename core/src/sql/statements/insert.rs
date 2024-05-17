@@ -46,7 +46,7 @@ impl InsertStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_projections(false);
-		// Parse the expression
+		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
 			Some(into) => match into.compute(stk, ctx, opt, doc).await? {
