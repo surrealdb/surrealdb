@@ -92,18 +92,16 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 
 	fn end(self) -> Result<Self::Ok, Error> {
 		match (self.data, self.ignore, self.parallel, self.relation) {
-			(Some(data), Some(ignore), Some(parallel), Some(relation)) => {
-				Ok(InsertStatement {
-					into: self.into,
-					data,
-					ignore,
-					parallel,
-					update: self.update,
-					output: self.output,
-					timeout: self.timeout,
-					relation,
-				})
-			}
+			(Some(data), Some(ignore), Some(parallel), Some(relation)) => Ok(InsertStatement {
+				into: self.into,
+				data,
+				ignore,
+				parallel,
+				update: self.update,
+				output: self.output,
+				timeout: self.timeout,
+				relation,
+			}),
 			_ => Err(Error::custom("`InsertStatement` missing required value(s)")),
 		}
 	}
