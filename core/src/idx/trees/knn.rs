@@ -822,11 +822,12 @@ pub(super) mod tests {
 
 	#[test]
 	fn knn_result_builder_test() {
+		let mut checked = ConditionChecker::Hnsw;
 		let mut b = KnnResultBuilder::new(7);
-		b.add(0.0, &Ids64::One(5));
-		b.add(0.2, &Ids64::Vec3([0, 1, 2]));
-		b.add(0.2, &Ids64::One(3));
-		b.add(0.2, &Ids64::Vec2([6, 8]));
+		b.add(0.0, &Ids64::One(5), &mut checked);
+		b.add(0.2, &Ids64::Vec3([0, 1, 2]), &mut checked);
+		b.add(0.2, &Ids64::One(3), &mut checked);
+		b.add(0.2, &Ids64::Vec2([6, 8]), &mut checked);
 		let res = b.build(
 			#[cfg(debug_assertions)]
 			HashMap::new(),

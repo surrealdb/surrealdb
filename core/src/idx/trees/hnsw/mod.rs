@@ -490,6 +490,7 @@ where
 mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
+	use crate::idx::planner::checker::ConditionChecker;
 	use crate::idx::trees::hnsw::{HnswIndex, HnswMethods};
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
@@ -894,9 +895,10 @@ mod tests {
 		fn knn(&self, pt: &SharedVector, dist: Distance, n: usize) -> KnnResult {
 			let mut b = KnnResultBuilder::new(n);
 			for (doc_id, doc_pt) in self.to_vec_ref() {
+				let mut checker = ConditionChecker::Hnsw;
 				let d = dist.calculate(doc_pt, pt);
 				if b.check_add(d) {
-					b.add(d, &Ids64::One(*doc_id));
+					b.add(d, &Ids64::One(*doc_id), &mut checker);
 				}
 			}
 			b.build(
