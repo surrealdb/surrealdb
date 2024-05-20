@@ -671,6 +671,16 @@ mod tests {
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
+	// This test is only relevant in debug mode, because debug_assert!
+	// macros are used to check for nul bytes.
+	#[cfg(debug_assertions)]
+	#[test]
+	#[should_panic(expected = "assertion failed: !s.contains('\\0')")]
+	fn strand_with_nul_should_panic() {
+		let strand = Strand("foo\0bar".to_owned());
+		let _value = to_value(&strand).unwrap();
+	}
+
 	#[test]
 	fn duration() {
 		let duration = Duration::default();
