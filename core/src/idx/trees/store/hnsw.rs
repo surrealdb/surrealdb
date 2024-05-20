@@ -1,4 +1,4 @@
-use crate::idx::trees::hnsw::HnswIndex;
+use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Key;
 use crate::sql::index::HnswParams;

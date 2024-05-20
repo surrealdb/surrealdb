@@ -1,458 +1,23 @@
+mod docs;
+mod elements;
+mod flavor;
 mod heuristic;
+pub mod index;
 mod layer;
 
 use crate::err::Error;
-use crate::idx::docids::DocId;
 use crate::idx::planner::checker::ConditionChecker;
-use crate::idx::planner::iterators::KnnIteratorResult;
-use crate::idx::trees::dynamicset::{ArraySet, DynamicSet, HashBrownSet};
+use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
+use crate::idx::trees::hnsw::index::{HnswSearchContext, VecDocs};
 use crate::idx::trees::hnsw::layer::HnswLayer;
-use crate::idx::trees::knn::{DoublePriorityQueue, Ids64, KnnResult, KnnResultBuilder};
-use crate::idx::trees::vector::{SharedVector, Vector};
-use crate::kvs::Key;
-use crate::sql::index::{Distance, HnswParams, VectorType};
-use crate::sql::{Number, Thing, Value};
-use hashbrown::hash_map::Entry;
-use hashbrown::HashMap;
-use radix_trie::Trie;
+use crate::idx::trees::knn::DoublePriorityQueue;
+use crate::idx::trees::vector::SharedVector;
+use crate::sql::index::HnswParams;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use roaring::RoaringTreemap;
-use std::collections::VecDeque;
-
-pub struct HnswIndex {
-	dim: usize,
-	vector_type: VectorType,
-	hnsw: HnswFlavor,
-	docs: HnswDocs,
-	vec_docs: VecDocs,
-}
-
-type VecDocs = HashMap<SharedVector, (Ids64, ElementId)>;
-
-type ASet<const N: usize> = ArraySet<ElementId, N>;
-type HSet = HashBrownSet<ElementId>;
-
-enum HnswFlavor {
-	H5_9(Hnsw<ASet<9>, ASet<5>>),
-	H5_17(Hnsw<ASet<17>, ASet<5>>),
-	H5_25(Hnsw<ASet<25>, ASet<5>>),
-	H5set(Hnsw<HSet, ASet<5>>),
-	H9_17(Hnsw<ASet<17>, ASet<9>>),
-	H9_25(Hnsw<ASet<25>, ASet<9>>),
-	H9set(Hnsw<HSet, ASet<9>>),
-	H13_25(Hnsw<ASet<25>, ASet<13>>),
-	H13set(Hnsw<HSet, ASet<13>>),
-	H17set(Hnsw<HSet, ASet<17>>),
-	H21set(Hnsw<HSet, ASet<21>>),
-	H25set(Hnsw<HSet, ASet<25>>),
-	H29set(Hnsw<HSet, ASet<29>>),
-	Hset(Hnsw<HSet, HSet>),
-}
-
-impl HnswFlavor {
-	fn new(p: &HnswParams) -> Self {
-		match p.m {
-			1..=4 => match p.m0 {
-				1..=8 => Self::H5_9(Hnsw::<ASet<9>, ASet<5>>::new(p)),
-				9..=16 => Self::H5_17(Hnsw::<ASet<17>, ASet<5>>::new(p)),
-				17..=24 => Self::H5_25(Hnsw::<ASet<25>, ASet<5>>::new(p)),
-				_ => Self::H5set(Hnsw::<HSet, ASet<5>>::new(p)),
-			},
-			5..=8 => match p.m0 {
-				1..=16 => Self::H9_17(Hnsw::<ASet<17>, ASet<9>>::new(p)),
-				17..=24 => Self::H9_25(Hnsw::<ASet<25>, ASet<9>>::new(p)),
-				_ => Self::H9set(Hnsw::<HSet, ASet<9>>::new(p)),
-			},
-			9..=12 => match p.m0 {
-				17..=24 => Self::H13_25(Hnsw::<ASet<25>, ASet<13>>::new(p)),
-				_ => Self::H13set(Hnsw::<HSet, ASet<13>>::new(p)),
-			},
-			13..=16 => Self::H17set(Hnsw::<HSet, ASet<17>>::new(p)),
-			17..=20 => Self::H21set(Hnsw::<HSet, ASet<21>>::new(p)),
-			21..=24 => Self::H25set(Hnsw::<HSet, ASet<25>>::new(p)),
-			25..=28 => Self::H29set(Hnsw::<HSet, ASet<29>>::new(p)),
-			_ => Self::Hset(Hnsw::<HSet, HSet>::new(p)),
-		}
-	}
-
-	fn insert(&mut self, q_pt: SharedVector) -> ElementId {
-		match self {
-			HnswFlavor::H5_9(h) => h.insert(q_pt),
-			HnswFlavor::H5_17(h) => h.insert(q_pt),
-			HnswFlavor::H5_25(h) => h.insert(q_pt),
-			HnswFlavor::H5set(h) => h.insert(q_pt),
-			HnswFlavor::H9_17(h) => h.insert(q_pt),
-			HnswFlavor::H9_25(h) => h.insert(q_pt),
-			HnswFlavor::H9set(h) => h.insert(q_pt),
-			HnswFlavor::H13_25(h) => h.insert(q_pt),
-			HnswFlavor::H13set(h) => h.insert(q_pt),
-			HnswFlavor::H17set(h) => h.insert(q_pt),
-			HnswFlavor::H21set(h) => h.insert(q_pt),
-			HnswFlavor::H25set(h) => h.insert(q_pt),
-			HnswFlavor::H29set(h) => h.insert(q_pt),
-			HnswFlavor::Hset(h) => h.insert(q_pt),
-		}
-	}
-	fn remove(&mut self, e_id: ElementId) -> bool {
-		match self {
-			HnswFlavor::H5_9(h) => h.remove(e_id),
-			HnswFlavor::H5_17(h) => h.remove(e_id),
-			HnswFlavor::H5_25(h) => h.remove(e_id),
-			HnswFlavor::H5set(h) => h.remove(e_id),
-			HnswFlavor::H9_17(h) => h.remove(e_id),
-			HnswFlavor::H9_25(h) => h.remove(e_id),
-			HnswFlavor::H9set(h) => h.remove(e_id),
-			HnswFlavor::H13_25(h) => h.remove(e_id),
-			HnswFlavor::H13set(h) => h.remove(e_id),
-			HnswFlavor::H17set(h) => h.remove(e_id),
-			HnswFlavor::H21set(h) => h.remove(e_id),
-			HnswFlavor::H25set(h) => h.remove(e_id),
-			HnswFlavor::H29set(h) => h.remove(e_id),
-			HnswFlavor::Hset(h) => h.remove(e_id),
-		}
-	}
-	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
-		match self {
-			HnswFlavor::H5_9(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H5_17(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H5_25(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H5set(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H9_17(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H9_25(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H9set(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H13_25(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H13set(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H17set(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H21set(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H25set(h) => h.knn_search(q, k, efs),
-			HnswFlavor::H29set(h) => h.knn_search(q, k, efs),
-			HnswFlavor::Hset(h) => h.knn_search(q, k, efs),
-		}
-	}
-	async fn knn_search_checked(
-		&self,
-		q: &SharedVector,
-		k: usize,
-		efs: usize,
-		vec_docs: &VecDocs,
-		stk: &mut Stk,
-		condition_checker: &mut ConditionChecker<'_>,
-	) -> Result<Vec<(f64, ElementId)>, Error> {
-		match self {
-			HnswFlavor::H5_9(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H5_17(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H5_25(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H5set(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H9_17(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H9_25(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H9set(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H13_25(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H13set(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H17set(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H21set(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H25set(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::H29set(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-			HnswFlavor::Hset(h) => {
-				h.knn_search_checked(q, k, efs, vec_docs, stk, condition_checker).await
-			}
-		}
-	}
-	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
-		match self {
-			HnswFlavor::H5_9(h) => h.get_vector(e_id),
-			HnswFlavor::H5_17(h) => h.get_vector(e_id),
-			HnswFlavor::H5_25(h) => h.get_vector(e_id),
-			HnswFlavor::H5set(h) => h.get_vector(e_id),
-			HnswFlavor::H9_17(h) => h.get_vector(e_id),
-			HnswFlavor::H9_25(h) => h.get_vector(e_id),
-			HnswFlavor::H9set(h) => h.get_vector(e_id),
-			HnswFlavor::H13_25(h) => h.get_vector(e_id),
-			HnswFlavor::H13set(h) => h.get_vector(e_id),
-			HnswFlavor::H17set(h) => h.get_vector(e_id),
-			HnswFlavor::H21set(h) => h.get_vector(e_id),
-			HnswFlavor::H25set(h) => h.get_vector(e_id),
-			HnswFlavor::H29set(h) => h.get_vector(e_id),
-			HnswFlavor::Hset(h) => h.get_vector(e_id),
-		}
-	}
-	#[cfg(test)]
-	fn check_hnsw_properties(&self, expected_count: usize) {
-		match self {
-			HnswFlavor::H5_9(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H5_17(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H5_25(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H5set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H9_17(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H9_25(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H9set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H13_25(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H13set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H17set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H21set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H25set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H29set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::Hset(h) => h.check_hnsw_properties(expected_count),
-		}
-	}
-}
-
-impl HnswIndex {
-	pub fn new(p: &HnswParams) -> Self {
-		Self {
-			dim: p.dimension as usize,
-			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(p),
-			docs: HnswDocs::default(),
-			vec_docs: HashMap::default(),
-		}
-	}
-
-	pub fn index_document(&mut self, rid: &Thing, content: &Vec<Value>) -> Result<(), Error> {
-		// Resolve the doc_id
-		let doc_id = self.docs.resolve(rid);
-		// Index the values
-		for value in content {
-			// Extract the vector
-			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
-			vector.check_dimension(self.dim)?;
-			self.insert(vector.into(), doc_id);
-		}
-		Ok(())
-	}
-
-	fn insert(&mut self, o: SharedVector, d: DocId) {
-		match self.vec_docs.entry(o) {
-			Entry::Occupied(mut e) => {
-				let (docs, element_id) = e.get_mut();
-				if let Some(new_docs) = docs.insert(d) {
-					let element_id = *element_id;
-					e.insert((new_docs, element_id));
-				}
-			}
-			Entry::Vacant(e) => {
-				let o = e.key().clone();
-				let element_id = self.hnsw.insert(o);
-				e.insert((Ids64::One(d), element_id));
-			}
-		}
-	}
-
-	fn remove(&mut self, o: SharedVector, d: DocId) {
-		if let Entry::Occupied(mut e) = self.vec_docs.entry(o) {
-			let (docs, e_id) = e.get_mut();
-			if let Some(new_docs) = docs.remove(d) {
-				let e_id = *e_id;
-				if new_docs.is_empty() {
-					e.remove();
-					self.hnsw.remove(e_id);
-				} else {
-					e.insert((new_docs, e_id));
-				}
-			}
-		}
-	}
-
-	pub(crate) fn remove_document(
-		&mut self,
-		rid: &Thing,
-		content: &Vec<Value>,
-	) -> Result<(), Error> {
-		if let Some(doc_id) = self.docs.remove(rid) {
-			for v in content {
-				// Extract the vector
-				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
-				vector.check_dimension(self.dim)?;
-				// Remove the vector
-				self.remove(vector.into(), doc_id);
-			}
-		}
-		Ok(())
-	}
-
-	pub(crate) fn get_thing(&self, doc_id: DocId) -> Option<&Thing> {
-		if let Some(r) = self.docs.ids_doc.get(doc_id as usize) {
-			r.as_ref()
-		} else {
-			None
-		}
-	}
-
-	pub async fn knn_search(
-		&self,
-		o: &Vec<Number>,
-		n: usize,
-		ef: usize,
-		stk: &mut Stk,
-		mut chk: ConditionChecker<'_>,
-	) -> Result<VecDeque<KnnIteratorResult>, Error> {
-		// Extract the vector
-		let vector: SharedVector = Vector::try_from_vector(self.vector_type, o)?.into();
-		vector.check_dimension(self.dim)?;
-		// Do the search
-		let result = self.search(&vector, n, ef, stk, &mut chk).await?;
-		let res = chk.convert_result(result.docs).await?;
-		Ok(res)
-	}
-
-	async fn search(
-		&self,
-		o: &SharedVector,
-		n: usize,
-		ef: usize,
-		stk: &mut Stk,
-		chk: &mut ConditionChecker<'_>,
-	) -> Result<KnnResult, Error> {
-		let neighbors = match chk {
-			ConditionChecker::Hnsw(_) => self.hnsw.knn_search(o, n, ef),
-			ConditionChecker::HnswCondition(_) => {
-				self.hnsw.knn_search_checked(o, n, ef, &self.vec_docs, stk, chk).await?
-			}
-			#[cfg(test)]
-			ConditionChecker::None => self.hnsw.knn_search(o, n, ef),
-			_ => unreachable!(),
-		};
-		let result = self.build_result(neighbors, n, chk);
-		Ok(result)
-	}
-
-	fn build_result(
-		&self,
-		neighbors: Vec<(f64, ElementId)>,
-		n: usize,
-		chk: &mut ConditionChecker<'_>,
-	) -> KnnResult {
-		let mut builder = KnnResultBuilder::new(n);
-		for (e_dist, e_id) in neighbors {
-			if builder.check_add(e_dist) {
-				if let Some(v) = self.hnsw.get_vector(&e_id) {
-					if let Some((docs, _)) = self.vec_docs.get(v) {
-						builder.add(e_dist, docs, chk);
-					}
-				}
-			}
-		}
-		builder.build(
-			#[cfg(debug_assertions)]
-			HashMap::new(),
-		)
-	}
-}
-
-#[derive(Default)]
-struct HnswDocs {
-	doc_ids: Trie<Key, DocId>,
-	ids_doc: Vec<Option<Thing>>,
-	available: RoaringTreemap,
-}
-
-impl HnswDocs {
-	fn resolve(&mut self, rid: &Thing) -> DocId {
-		let doc_key: Key = rid.into();
-		if let Some(doc_id) = self.doc_ids.get(&doc_key) {
-			*doc_id
-		} else {
-			let doc_id = self.next_doc_id();
-			self.ids_doc.push(Some(rid.clone()));
-			self.doc_ids.insert(doc_key, doc_id);
-			doc_id
-		}
-	}
-
-	fn next_doc_id(&mut self) -> DocId {
-		if let Some(doc_id) = self.available.iter().next() {
-			self.available.remove(doc_id);
-			doc_id
-		} else {
-			self.ids_doc.len() as DocId
-		}
-	}
-
-	fn remove(&mut self, rid: &Thing) -> Option<DocId> {
-		let doc_key: Key = rid.into();
-		if let Some(doc_id) = self.doc_ids.remove(&doc_key) {
-			let n = doc_id as usize;
-			if n < self.ids_doc.len() {
-				self.ids_doc[n] = None;
-			}
-			self.available.insert(doc_id);
-			Some(doc_id)
-		} else {
-			None
-		}
-	}
-}
-
-#[cfg(test)]
-fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
-where
-	L0: DynamicSet<ElementId>,
-	L: DynamicSet<ElementId>,
-{
-	assert_eq!(h.elements.elements.len(), expected_count);
-	for layer in h.layers.iter() {
-		layer.check_props(&h.elements);
-	}
-}
-
-struct HnswElements {
-	elements: HashMap<ElementId, SharedVector>,
-	next_element_id: ElementId,
-	dist: Distance,
-}
-
-impl HnswElements {
-	fn new(dist: Distance) -> Self {
-		Self {
-			elements: Default::default(),
-			next_element_id: 0,
-			dist,
-		}
-	}
-
-	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
-		self.elements.get(e_id)
-	}
-
-	fn distance(&self, a: &SharedVector, b: &SharedVector) -> f64 {
-		self.dist.calculate(a, b)
-	}
-	fn get_distance(&self, q: &SharedVector, e_id: &ElementId) -> Option<f64> {
-		self.elements.get(e_id).map(|e_pt| self.dist.calculate(e_pt, q))
-	}
-
-	fn remove(&mut self, e_id: &ElementId) {
-		self.elements.remove(e_id);
-	}
-}
 
 struct Hnsw<L0, L>
 where
@@ -494,7 +59,7 @@ where
 
 	fn insert_level(&mut self, q_pt: SharedVector, q_level: usize) -> ElementId {
 		// Attribute an ID to the vector
-		let q_id = self.elements.next_element_id;
+		let q_id = self.elements.next_element_id();
 		let top_up_layers = self.layers.len();
 
 		// Be sure we have existing (up) layers if required
@@ -503,7 +68,7 @@ where
 		}
 
 		// Store the vector
-		self.elements.elements.insert(q_id, q_pt.clone());
+		self.elements.insert(q_id, q_pt.clone());
 
 		if let Some(ep_id) = self.enter_point {
 			// We already have an enter_point, let's insert the element in the layers
@@ -513,7 +78,7 @@ where
 			self.insert_first_element(q_id, q_level);
 		}
 
-		self.elements.next_element_id += 1;
+		self.elements.inc_next_element_id();
 		q_id
 	}
 
@@ -622,18 +187,9 @@ where
 		removed
 	}
 
-	fn knn_search(&self, q: &SharedVector, k: usize, efs: usize) -> Vec<(f64, ElementId)> {
-		#[cfg(debug_assertions)]
-		let expected_w_len = self.elements.elements.len().min(k);
-		if let Some((ep_dist, ep_id)) = self.search_ep(q) {
-			let w = self.layer0.search_single(&self.elements, q, ep_dist, ep_id, efs);
-			#[cfg(debug_assertions)]
-			if w.len() < expected_w_len {
-				debug!(
-						"0 search_layer - ep_id: {ep_id:?} - ef_search: {efs} - k: {k} - w.len: {} < {expected_w_len}",
-						w.len()
-					);
-			}
+	fn knn_search(&self, pt: &SharedVector, k: usize, ef: usize) -> Vec<(f64, ElementId)> {
+		if let Some((ep_dist, ep_id)) = self.search_ep(pt) {
+			let w = self.layer0.search_single(&self.elements, pt, ep_dist, ep_id, ef);
 			w.to_vec_limit(k)
 		} else {
 			vec![]
@@ -642,40 +198,33 @@ where
 
 	async fn knn_search_checked(
 		&self,
-		q: &SharedVector,
+		pt: &SharedVector,
 		k: usize,
-		efs: usize,
+		ef: usize,
 		vec_docs: &VecDocs,
 		stk: &mut Stk,
 		chk: &mut ConditionChecker<'_>,
 	) -> Result<Vec<(f64, ElementId)>, Error> {
-		#[cfg(debug_assertions)]
-		let expected_w_len = self.elements.elements.len().min(k);
-		if let Some((ep_dist, ep_id)) = self.search_ep(q) {
-			let w = self
-				.layer0
-				.search_single_checked(&self.elements, q, ep_dist, ep_id, efs, vec_docs, stk, chk)
-				.await?;
-			#[cfg(debug_assertions)]
-			if w.len() < expected_w_len {
-				debug!(
-						"0 search_layer - ep_id: {ep_id:?} - ef_search: {efs} - k: {k} - w.len: {} < {expected_w_len}",
-						w.len()
-					);
+		if let Some((ep_dist, ep_id)) = self.search_ep(pt) {
+			if let Some(ep_pt) = self.elements.get_vector(&ep_id) {
+				let search = HnswSearchContext::new(&self.elements, Some(vec_docs), pt, ef);
+				let w = self
+					.layer0
+					.search_single_checked(&search, ep_pt, ep_dist, ep_id, stk, chk)
+					.await?;
+				return Ok(w.to_vec_limit(k));
 			}
-			Ok(w.to_vec_limit(k))
-		} else {
-			Ok(vec![])
 		}
+		Ok(vec![])
 	}
 
-	fn search_ep(&self, q: &SharedVector) -> Option<(f64, ElementId)> {
+	fn search_ep(&self, pt: &SharedVector) -> Option<(f64, ElementId)> {
 		if let Some(mut ep_id) = self.enter_point {
 			let mut ep_dist =
-				self.elements.get_distance(q, &ep_id).unwrap_or_else(|| unreachable!());
+				self.elements.get_distance(pt, &ep_id).unwrap_or_else(|| unreachable!());
 			for layer in self.layers.iter().rev() {
 				(ep_dist, ep_id) = layer
-					.search_single(&self.elements, q, ep_dist, ep_id, 1)
+					.search_single(&self.elements, pt, ep_dist, ep_id, 1)
 					.peek_first()
 					.unwrap_or_else(|| unreachable!());
 			}
@@ -695,11 +244,24 @@ where
 }
 
 #[cfg(test)]
+fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
+where
+	L0: DynamicSet<ElementId>,
+	L: DynamicSet<ElementId>,
+{
+	assert_eq!(h.elements.len(), expected_count);
+	for layer in h.layers.iter() {
+		layer.check_props(&h.elements);
+	}
+}
+
+#[cfg(test)]
 mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::ConditionChecker;
-	use crate::idx::trees::hnsw::{HnswFlavor, HnswIndex};
+	use crate::idx::trees::hnsw::flavor::HnswFlavor;
+	use crate::idx::trees::hnsw::index::HnswIndex;
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -859,7 +421,7 @@ mod tests {
 					e.insert(HashSet::from([*doc_id]));
 				}
 			}
-			h.hnsw.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len());
 		}
 		map
 	}
@@ -915,7 +477,7 @@ mod tests {
 					e.remove();
 				}
 			}
-			h.hnsw.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len());
 		}
 	}
 

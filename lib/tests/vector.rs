@@ -347,10 +347,10 @@ async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 	let sql = r"
-		DEFINE INDEX hn_pt1 ON pts FIELDS point HNSW DIMENSION 1 M 12 EFC 150;
+		DEFINE INDEX hn_pt1 ON pts FIELDS point HNSW DIMENSION 1;
 		INSERT INTO pts [
 			{ id: pts:1, point: [ 10f ], flag: true },
 			{ id: pts:2, point: [ 20f ], flag: false },
@@ -362,10 +362,10 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 		];
 		LET $pt = [44f];
 		SELECT id, flag, vector::distance::knn() AS distance FROM pts
-			WHERE flag = true && point <|2,80|> $pt
+			WHERE flag = true AND point <|2,40|> $pt
 			ORDER BY distance EXPLAIN;
 		SELECT id, flag, vector::distance::knn() AS distance FROM pts
-			WHERE flag = true && point <|2,80|> $pt
+			WHERE flag = true AND point <|2,40|> $pt
 			ORDER BY distance;
 	";
 	let dbs = new_ds().await?;
@@ -382,7 +382,7 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 						detail: {
 							plan: {
 								index: 'hn_pt1',
-								operator: '<|2,80|>',
+								operator: '<|2,40|>',
 								value: [44f]
 							},
 							table: 'pts',
@@ -403,14 +403,14 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 	let val = Value::parse(
 		"[
 				{
-					id: pts:5,
+					distance: 6f,
 					flag: true,
-					distance: 6f
+					id: pts:5
 				},
 				{
-					id: pts:3,
+					distance: 14f,
 					flag: true,
-					distance: 14f
+					id: pts:3
 				}
 			]",
 	);
