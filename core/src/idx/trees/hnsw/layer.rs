@@ -1,10 +1,13 @@
+use crate::err::Error;
+use crate::idx::planner::checker::ConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::{ElementId, HnswElements};
+use crate::idx::trees::hnsw::{ElementId, HnswElements, VecDocs};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use hashbrown::HashSet;
+use reblessive::tree::Stk;
 
 #[derive(Debug)]
 pub(super) struct HnswLayer<S>
@@ -49,6 +52,24 @@ where
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
 		self.search(elements, q, candidates, visited, w, ef)
+	}
+
+	#[allow(clippy::too_many_arguments)]
+	pub(super) async fn search_single_checked(
+		&self,
+		elements: &HnswElements,
+		q: &SharedVector,
+		ep_dist: f64,
+		ep_id: ElementId,
+		ef: usize,
+		vec_docs: &VecDocs,
+		stk: &mut Stk,
+		chk: &mut ConditionChecker<'_>,
+	) -> Result<DoublePriorityQueue, Error> {
+		let visited = HashSet::from([ep_id]);
+		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
+		let w = candidates.clone();
+		self.search_checked(elements, q, candidates, visited, w, ef, vec_docs, stk, chk).await
 	}
 
 	pub(super) fn search_multi(
@@ -103,29 +124,85 @@ where
 		} else {
 			return w;
 		};
+
 		while let Some((dist, doc)) = candidates.pop_first() {
 			if dist > f_dist {
 				break;
 			}
 			if let Some(neighbourhood) = self.graph.get_edges(&doc) {
 				for &e_id in neighbourhood.iter() {
-					if visited.insert(e_id) {
-						if let Some(e_pt) = elements.get_vector(&e_id) {
-							let e_dist = elements.distance(e_pt, q);
-							if e_dist < f_dist || w.len() < ef {
-								candidates.push(e_dist, e_id);
-								w.push(e_dist, e_id);
-								if w.len() > ef {
-									w.pop_last();
-								}
-								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
+					// Did we already visit it?
+					if !visited.insert(e_id) {
+						continue;
+					}
+					if let Some(e_pt) = elements.get_vector(&e_id) {
+						let e_dist = elements.distance(e_pt, q);
+						if e_dist < f_dist || w.len() < ef {
+							candidates.push(e_dist, e_id);
+							w.push(e_dist, e_id);
+							if w.len() > ef {
+								w.pop_last();
 							}
+							f_dist = w.peek_last_dist().unwrap(); // w can't be empty
 						}
 					}
 				}
 			}
 		}
 		w
+	}
+
+	#[allow(clippy::too_many_arguments)]
+	pub(super) async fn search_checked(
+		&self,
+		elements: &HnswElements,
+		q: &SharedVector,
+		mut candidates: DoublePriorityQueue,
+		mut visited: HashSet<ElementId>,
+		mut w: DoublePriorityQueue,
+		ef: usize,
+		vec_docs: &VecDocs,
+		stk: &mut Stk,
+		chk: &mut ConditionChecker<'_>,
+	) -> Result<DoublePriorityQueue, Error> {
+		let mut f_dist = if let Some(d) = w.peek_last_dist() {
+			d
+		} else {
+			return Ok(w);
+		};
+
+		while let Some((dist, doc)) = candidates.pop_first() {
+			if dist > f_dist {
+				break;
+			}
+			if let Some(neighbourhood) = self.graph.get_edges(&doc) {
+				for &e_id in neighbourhood.iter() {
+					// Did we already visit it?
+					if !visited.insert(e_id) {
+						continue;
+					}
+					if let Some(e_pt) = elements.get_vector(&e_id) {
+						let e_dist = elements.distance(e_pt, q);
+						if e_dist < f_dist || w.len() < ef {
+							candidates.push(e_dist, e_id);
+							if let Some(docs) = vec_docs.get(e_pt).map(|(doc_ids, _)| doc_ids) {
+								if chk.check_hnsw_truthy(stk, docs).await? {
+									w.push(e_dist, e_id);
+									if w.len() > ef {
+										if let Some((_, id)) = w.pop_last() {
+											chk.expire(id);
+										}
+									}
+								}
+							}
+
+							f_dist = w.peek_last_dist().unwrap(); // w can't be empty
+						}
+					}
+				}
+			}
+		}
+		Ok(w)
 	}
 
 	pub(super) fn insert(

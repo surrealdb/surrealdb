@@ -216,7 +216,7 @@ impl MTree {
 							debug!("Add: {d} - obj: {o:?} - docs: {:?}", p.docs);
 							let mut docs = Ids64::Empty;
 							for doc in &p.docs {
-								if condition_checker.check_truthy(stk, doc).await? {
+								if condition_checker.check_mtree_truthy(stk, doc).await? {
 									if let Some(new_docs) = docs.insert(doc) {
 										docs = new_docs;
 									}

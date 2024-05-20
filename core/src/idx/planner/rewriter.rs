@@ -197,7 +197,7 @@ impl<'a> KnnConditionRewriter<'a> {
 	}
 
 	fn eval_value_expression(&self, e: &Expression) -> Option<Value> {
-		if self.0.contains_key(e) {
+		if self.0.contains(e) {
 			return Some(Value::Bool(true));
 		}
 		self.eval_expression(e).map(|e| e.into())

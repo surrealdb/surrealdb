@@ -67,6 +67,7 @@ impl<'a> QueryPlanner<'a> {
 					&t,
 					tree.index_map,
 					tree.knn_expressions,
+					tree.knn_brute_force_expressions,
 					tree.knn_condition,
 				)
 				.await?;

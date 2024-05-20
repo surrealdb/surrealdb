@@ -217,7 +217,7 @@ async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[Str
 
 fn knn_lookup_objects(h: &HnswIndex, samples: &[Array]) {
 	for a in samples {
-		let r = h.knn_search(a, NN, EF_SEARCH).unwrap();
+		let r = h.search(a, NN, EF_SEARCH).unwrap();
 		assert_eq!(r.len(), NN);
 	}
 }

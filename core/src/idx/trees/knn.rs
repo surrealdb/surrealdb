@@ -176,7 +176,7 @@ impl Ord for FloatKey {
 /// When identifiers are added or removed, the method returned the most appropriate
 /// variant (if required).
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum Ids64 {
+pub(in crate::idx) enum Ids64 {
 	#[allow(dead_code)] // Will be used with HNSW
 	Empty,
 	One(u64),
@@ -355,7 +355,7 @@ impl Ids64 {
 		}
 	}
 
-	fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
+	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
 		match &self {
 			Self::Empty => Box::new(EmptyIterator {}),
 			Self::One(d) => Box::new(OneDocIterator(Some(*d))),
@@ -542,12 +542,7 @@ impl KnnResultBuilder {
 		true
 	}
 
-	pub(super) fn add(
-		&mut self,
-		dist: f64,
-		docs: &Ids64,
-		condition_checker: &mut ConditionChecker,
-	) {
+	pub(super) fn add(&mut self, dist: f64, docs: &Ids64, chk: &mut ConditionChecker) {
 		let pr = FloatKey(dist);
 		docs.append_to(&mut self.docs);
 		match self.priority_list.entry(pr) {
@@ -569,9 +564,7 @@ impl KnnResultBuilder {
 				if docs_len - d.len() >= self.knn {
 					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
 						evicted_docs.remove_to(&mut self.docs);
-						for doc_id in evicted_docs.iter() {
-							condition_checker.expire(doc_id);
-						}
+						chk.expires(evicted_docs);
 					}
 				}
 			}
@@ -822,12 +815,12 @@ pub(super) mod tests {
 
 	#[test]
 	fn knn_result_builder_test() {
-		let mut checked = ConditionChecker::None;
+		let mut chk = ConditionChecker::None;
 		let mut b = KnnResultBuilder::new(7);
-		b.add(0.0, &Ids64::One(5), &mut checked);
-		b.add(0.2, &Ids64::Vec3([0, 1, 2]), &mut checked);
-		b.add(0.2, &Ids64::One(3), &mut checked);
-		b.add(0.2, &Ids64::Vec2([6, 8]), &mut checked);
+		b.add(0.0, &Ids64::One(5), &mut chk);
+		b.add(0.2, &Ids64::Vec3([0, 1, 2]), &mut chk);
+		b.add(0.2, &Ids64::One(3), &mut chk);
+		b.add(0.2, &Ids64::Vec2([6, 8]), &mut chk);
 		let res = b.build(
 			#[cfg(debug_assertions)]
 			HashMap::new(),

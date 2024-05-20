@@ -33,17 +33,17 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(super) type KnnEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Option<Distance>);
+pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 
-pub(super) struct KnnExpression {
+pub(super) struct KnnBruteForceExpression {
 	k: u32,
 	id: Idiom,
 	obj: Arc<Vec<Number>>,
-	d: Option<Distance>,
+	d: Distance,
 }
 
-impl KnnExpression {
-	pub(super) fn new(k: u32, id: Idiom, obj: Arc<Vec<Number>>, d: Option<Distance>) -> Self {
+impl KnnBruteForceExpression {
+	pub(super) fn new(k: u32, id: Idiom, obj: Arc<Vec<Number>>, d: Distance) -> Self {
 		Self {
 			k,
 			id,
@@ -53,7 +53,9 @@ impl KnnExpression {
 	}
 }
 
-pub(super) type KnnExpressions = HashMap<Arc<Expression>, KnnExpression>;
+pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expression>, KnnBruteForceExpression>;
+
+pub(super) type KnnExpressions = HashSet<Arc<Expression>>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -67,7 +69,7 @@ pub(super) struct InnerQueryExecutor {
 	index_definitions: Vec<DefineIndexStatement>,
 	mt_entries: HashMap<Arc<Expression>, MtEntry>,
 	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
-	knn_entries: HashMap<Arc<Expression>, KnnEntry>,
+	knn_bruteforce_entries: HashMap<Arc<Expression>, KnnBruteForceEntry>,
 }
 
 impl From<InnerQueryExecutor> for QueryExecutor {
@@ -107,6 +109,7 @@ impl InnerQueryExecutor {
 		table: &Table,
 		im: IndexesMap,
 		knns: KnnExpressions,
+		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
 	) -> Result<Self, Error> {
 		let mut mr_entries = HashMap::default();
@@ -116,7 +119,7 @@ impl InnerQueryExecutor {
 		let mut mt_entries = HashMap::default();
 		let mut hnsw_map: HashMap<IndexRef, SharedHnswIndex> = HashMap::default();
 		let mut hnsw_entries = HashMap::default();
-		let mut knn_entries = HashMap::with_capacity(knns.len());
+		let mut knn_bruteforce_entries = HashMap::with_capacity(knns.len());
 		let knn_condition = knn_condition.map(Arc::new);
 
 		// Create all the instances of FtIndex
@@ -251,8 +254,9 @@ impl InnerQueryExecutor {
 			}
 		}
 
-		for (exp, knn) in knns {
-			knn_entries.insert(exp, (KnnPriorityList::new(knn.k as usize), knn.id, knn.obj, knn.d));
+		for (exp, knn) in kbtes {
+			knn_bruteforce_entries
+				.insert(exp, (KnnPriorityList::new(knn.k as usize), knn.id, knn.obj, knn.d));
 		}
 
 		Ok(Self {
@@ -264,7 +268,7 @@ impl InnerQueryExecutor {
 			index_definitions: im.definitions,
 			mt_entries,
 			hnsw_entries,
-			knn_entries,
+			knn_bruteforce_entries,
 		})
 	}
 
@@ -299,7 +303,7 @@ impl QueryExecutor {
 			}
 			Ok(Value::Bool(false))
 		} else {
-			if let Some((p, id, val, Some(dist))) = self.0.knn_entries.get(exp) {
+			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
 				let v: Vec<Number> = id.compute(stk, ctx, opt, txn, doc).await?.try_into()?;
 				let dist = dist.compute(&v, val.as_ref())?;
 				p.add(dist, thg).await;
@@ -309,8 +313,8 @@ impl QueryExecutor {
 	}
 
 	pub(super) async fn build_knn_set(&self) -> KnnSet {
-		let mut set = HashMap::with_capacity(self.0.knn_entries.len());
-		for (exp, (p, _, _, _)) in &self.0.knn_entries {
+		let mut set = HashMap::with_capacity(self.0.knn_bruteforce_entries.len());
+		for (exp, (p, _, _, _)) in &self.0.knn_bruteforce_entries {
 			set.insert(exp.clone(), p.build().await);
 		}
 		set
@@ -320,8 +324,8 @@ impl QueryExecutor {
 		self.0.table.eq(tb)
 	}
 
-	pub(crate) fn has_knn(&self) -> bool {
-		!self.0.knn_entries.is_empty()
+	pub(crate) fn has_bruteforce_knn(&self) -> bool {
+		!self.0.knn_bruteforce_entries.is_empty()
 	}
 
 	/// Returns `true` if the expression is matching the current iterator.
@@ -784,6 +788,7 @@ pub(super) struct HnswEntry {
 }
 
 impl HnswEntry {
+	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &Context<'_>,
@@ -796,7 +801,7 @@ impl HnswEntry {
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
 		let cond_checker = ConditionChecker::new_hnsw(ctx, opt, txn, cond, h.clone());
-		let res = h.read().await.knn_search(stk, v, n as usize, ef as usize, cond_checker).await?;
+		let res = h.read().await.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
 		Ok(Self {
 			res,
 		})

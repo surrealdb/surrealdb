@@ -1,7 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::{KnnExpression, KnnExpressions};
+use crate::idx::planner::executor::{
+	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
+};
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs;
@@ -19,6 +21,7 @@ pub(super) struct Tree {
 	pub(super) index_map: IndexesMap,
 	pub(super) with_indexes: Vec<IndexRef>,
 	pub(super) knn_expressions: KnnExpressions,
+	pub(super) knn_brute_force_expressions: KnnBruteForceExpressions,
 	pub(super) knn_condition: Option<Cond>,
 }
 
@@ -47,6 +50,7 @@ impl Tree {
 				index_map: b.index_map,
 				with_indexes: b.with_indexes,
 				knn_expressions: b.knn_expressions,
+				knn_brute_force_expressions: b.knn_brute_force_expressions,
 				knn_condition,
 			}))
 		} else {
@@ -67,6 +71,7 @@ struct TreeBuilder<'a> {
 	resolved_idioms: HashMap<Idiom, Node>,
 	index_map: IndexesMap,
 	with_indexes: Vec<IndexRef>,
+	knn_brute_force_expressions: HashMap<Arc<Expression>, KnnBruteForceExpression>,
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Idiom, RecordOptions>,
 	group_sequence: GroupRef,
@@ -105,6 +110,7 @@ impl<'a> TreeBuilder<'a> {
 			resolved_idioms: Default::default(),
 			index_map: Default::default(),
 			with_indexes,
+			knn_brute_force_expressions: Default::default(),
 			knn_expressions: Default::default(),
 			idioms_record_options: Default::default(),
 			group_sequence: 0,
@@ -399,8 +405,8 @@ impl<'a> TreeBuilder<'a> {
 					Index::Search {
 						..
 					} => Self::eval_matches_operator(op, n),
-					Index::MTree(_) => self.eval_mtree_knn(e, op, n, id)?,
-					Index::Hnsw(_) => self.eval_hnsw_knn(op, n)?,
+					Index::MTree(_) => self.eval_mtree_knn(e, op, n)?,
+					Index::Hnsw(_) => self.eval_hnsw_knn(e, op, n)?,
 				};
 				if let Some(op) = op {
 					let io = IndexOption::new(*ir, id.clone(), p, op);
@@ -438,23 +444,27 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 		op: &Operator,
 		n: &Node,
-		id: &Idiom,
 	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Knn(k, None) = op {
 			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
-				self.knn_expressions
-					.insert(exp.clone(), KnnExpression::new(*k, id.clone(), vec.clone(), None));
+				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Knn(vec, *k)));
 			}
 		}
 		Ok(None)
 	}
 
-	fn eval_hnsw_knn(&mut self, op: &Operator, n: &Node) -> Result<Option<IndexOperator>, Error> {
+	fn eval_hnsw_knn(
+		&mut self,
+		exp: &Arc<Expression>,
+		op: &Operator,
+		n: &Node,
+	) -> Result<Option<IndexOperator>, Error> {
 		if let Operator::Ann(k, ef) = op {
 			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
+				self.knn_expressions.insert(exp.clone());
 				return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
 			}
 		}
@@ -470,8 +480,11 @@ impl<'a> TreeBuilder<'a> {
 		if let Operator::Knn(k, Some(d)) = exp.operator() {
 			if let Node::Computed(v) = val {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().try_into()?);
-				self.knn_expressions
-					.insert(exp.clone(), KnnExpression::new(*k, id.clone(), vec, Some(d.clone())));
+				self.knn_expressions.insert(exp.clone());
+				self.knn_brute_force_expressions.insert(
+					exp.clone(),
+					KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone()),
+				);
 			}
 		}
 		Ok(())

@@ -62,7 +62,7 @@ impl Iterable {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(tb) {
-							return exe.has_knn();
+							return exe.has_bruteforce_knn();
 						}
 					}
 				}
