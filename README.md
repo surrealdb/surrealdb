@@ -265,7 +265,7 @@ With strongly-typed data types, data can be fully modelled right in the database
 
 ```sql
 UPDATE person SET
-	waist = <int> "34.59",
+	waist = <int> "34",
 	height = <float> 201,
 	score = <decimal> 0.3 + 0.3 + 0.3 + 0.1
 ;
@@ -275,7 +275,7 @@ Store dynamically computed fields which are calculated when retrieved.
 
 ```sql
 CREATE person SET
-	birthday = "2007-06-22",
+	birthday = <datetime> "2007-06-22",
 	can_drive = <future> { time::now() > birthday + 18y }
 ;
 ```
