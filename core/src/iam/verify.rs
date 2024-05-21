@@ -1416,6 +1416,7 @@ mod tests {
 					"iat": {now},
 					"nbf": {now},
 					"exp": {later},
+					"https://surrealdb.com/iss": "surrealdb-other-test",
 					"https://surrealdb.com/tk": "token",
 					"https://surrealdb.com/ns": "test",
 					"https://surrealdb.com/db": "test",
@@ -1453,6 +1454,9 @@ mod tests {
 				Some(Value::Object(tk)) => tk,
 				_ => panic!("Session token is not an object"),
 			};
+			// Private claims should not be overwritten
+			let iss = tk.get("iss").unwrap();
+			assert_eq!(*iss, Value::Strand("surrealdb-test".into()));
 			// First level custom claims are extracted without the namespace prefix
 			let string_claim = tk.get("string_claim").unwrap();
 			assert_eq!(*string_claim, Value::Strand("test".into()));
@@ -1465,6 +1469,8 @@ mod tests {
 
 			// TODO(gguillemas): Kept for backward compatibility. Remove in 2.0.0.
 			// Check that the claims are still accessible by their original names
+			let iss = tk.get("https://surrealdb.com/iss").unwrap();
+			assert_eq!(*iss, Value::Strand("surrealdb-other-test".into()));
 			let string_claim = tk.get("https://surrealdb.com/string_claim").unwrap();
 			assert_eq!(*string_claim, Value::Strand("test".into()));
 			let object_claim = tk.get("https://surrealdb.com/object_claim").unwrap();
