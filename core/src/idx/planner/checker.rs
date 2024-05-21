@@ -84,6 +84,8 @@ impl<'a> ConditionChecker<'a> {
 		match self {
 			Self::MTreeCondition(c) => c.check_truthy(stk, doc_id).await,
 			Self::MTree(_) => Ok(true),
+			#[cfg(test)]
+			Self::None => Ok(true),
 			_ => unreachable!(),
 		}
 	}
@@ -96,6 +98,8 @@ impl<'a> ConditionChecker<'a> {
 		match self {
 			Self::HnswCondition(c) => c.check_any_truthy(stk, doc_ids).await,
 			Self::Hnsw(_) => Ok(true),
+			#[cfg(test)]
+			Self::None => Ok(true),
 			_ => unreachable!(),
 		}
 	}

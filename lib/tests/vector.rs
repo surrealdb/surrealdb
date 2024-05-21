@@ -162,8 +162,8 @@ async fn select_where_brute_force_knn() -> Result<(), Error> {
 		CREATE pts:3 SET point = [8,9,10,11];
 		LET $pt = [2,3,4,5];
 		SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;
-		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
-		SELECT id, vector::distance::euclidean(point, $pt) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt PARALLEL;
+		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
+		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt PARALLEL;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -395,6 +395,78 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 						},
 						operation: 'Collector'
 					}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					distance: 6f,
+					flag: true,
+					id: pts:5
+				},
+				{
+					distance: 14f,
+					flag: true,
+					id: pts:3
+				}
+			]",
+	);
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	//
+	Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
+	let sql = r"
+		INSERT INTO pts [
+			{ id: pts:1, point: [ 10f ], flag: true },
+			{ id: pts:2, point: [ 20f ], flag: false },
+			{ id: pts:3, point: [ 30f ], flag: true },
+			{ id: pts:4, point: [ 40f ], flag: false },
+			{ id: pts:5, point: [ 50f ], flag: true },
+			{ id: pts:6, point: [ 60f ], flag: false },
+			{ id: pts:7, point: [ 70f ], flag: true }
+		];
+		LET $pt = [44f];
+		SELECT id, flag, vector::distance::knn() AS distance FROM pts
+			WHERE flag = true AND point <|2,EUCLIDEAN|> $pt
+			ORDER BY distance EXPLAIN;
+		SELECT id, flag, vector::distance::knn() AS distance FROM pts
+			WHERE flag = true AND point <|2,EUCLIDEAN|> $pt
+			ORDER BY distance;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	//
+	skip_ok(&mut res, 2)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					detail: {
+						table: 'pts'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						reason: 'NO INDEX FOUND'
+					},
+					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
 			]",
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));

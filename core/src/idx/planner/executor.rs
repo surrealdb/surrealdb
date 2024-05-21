@@ -15,11 +15,11 @@ use crate::idx::planner::iterators::{
 	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
 	UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
-use crate::idx::planner::knn::KnnPriorityList;
+use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexRef, IndexesMap};
-use crate::idx::planner::{IterationStage, KnnSet};
+use crate::idx::planner::IterationStage;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::IndexKeyBase;
@@ -292,14 +292,8 @@ impl QueryExecutor {
 		exp: &Expression,
 	) -> Result<Value, Error> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
-			if let Some(e) = e {
-				if let Some(e) = e.get(thg.tb.as_str()) {
-					if let Some(things) = e.get(exp) {
-						if things.contains(thg) {
-							return Ok(Value::Bool(true));
-						}
-					}
-				}
+			if let Some(results) = e {
+				return Ok(results.contains(exp, thg).into());
 			}
 			Ok(Value::Bool(false))
 		} else {
@@ -312,12 +306,12 @@ impl QueryExecutor {
 		}
 	}
 
-	pub(super) async fn build_knn_set(&self) -> KnnSet {
-		let mut set = HashMap::with_capacity(self.0.knn_bruteforce_entries.len());
-		for (exp, (p, _, _, _)) in &self.0.knn_bruteforce_entries {
-			set.insert(exp.clone(), p.build().await);
+	pub(super) async fn build_bruteforce_knn_result(&self) -> KnnBruteForceResult {
+		let mut result = KnnBruteForceResult::with_capacity(self.0.knn_bruteforce_entries.len());
+		for (e, (p, _, _, _)) in &self.0.knn_bruteforce_entries {
+			result.insert(e.clone(), p.build().await);
 		}
-		set
+		result
 	}
 
 	pub(crate) fn is_table(&self, tb: &str) -> bool {
