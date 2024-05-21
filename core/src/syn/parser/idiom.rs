@@ -239,6 +239,7 @@ impl Parser<'_> {
 				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
 				Part::Graph(graph)
 			}
+			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
 			_ => Part::Field(self.next_token_value()?),
 		};
 		let start = vec![start];
