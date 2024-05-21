@@ -1,14 +1,46 @@
+<br>
+
+<p align="center">
+    <img width=120 src="https://raw.githubusercontent.com/surrealdb/icons/main/surreal.svg" />
+    &nbsp;
+    <img width=120 src="https://raw.githubusercontent.com/surrealdb/icons/main/rust.svg" />
+</p>
+
+<h3 align="center">The official SurrealDB SDK for Rust.</h3>
+
+<br>
+
+<p align="center">
+    <a href="https://github.com/surrealdb/surrealdb.js"><img src="https://img.shields.io/badge/status-available-ff00bb.svg?style=flat-square"></a>
+    &nbsp;
+    <a href="https://surrealdb.com/docs/integration/libraries/rust"><img src="https://img.shields.io/badge/docs-view-44cc11.svg?style=flat-square"></a>
+	&nbsp;
+    <a href="https://docs.rs/surrealdb/latest/surrealdb/"><img src="https://img.shields.io/badge/docs.rs-view-f4c153.svg?style=flat-square"></a>
+    &nbsp;
+	<a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/v/surrealdb?color=dca282&style=flat-square"></a>
+	&nbsp;
+	<a href="https://crates.io/crates/surrealdb"><img src="https://img.shields.io/crates/d/surrealdb?style=flat-square"></a>
+</p>
+
+<p align="center">
+    <a href="https://surrealdb.com/discord"><img src="https://img.shields.io/discord/902568124350599239?label=discord&style=flat-square&color=5a66f6"></a>
+    &nbsp;
+    <a href="https://twitter.com/surrealdb"><img src="https://img.shields.io/badge/twitter-follow_us-1d9bf0.svg?style=flat-square"></a>
+    &nbsp;
+    <a href="https://www.linkedin.com/company/surrealdb/"><img src="https://img.shields.io/badge/linkedin-connect_with_us-0a66c2.svg?style=flat-square"></a>
+    &nbsp;
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img src="https://img.shields.io/badge/youtube-subscribe-fc1c1c.svg?style=flat-square"></a>
+</p>
+
 # surrealdb
 
-The official SurrealDB library for Rust.
-
-[![](https://img.shields.io/badge/status-beta-ff00bb.svg?style=flat-square)](https://github.com/surrealdb/surrealdb) [![](https://img.shields.io/badge/docs-view-44cc11.svg?style=flat-square)](https://surrealdb.com/docs/integration/libraries/rust) [![](https://img.shields.io/badge/license-Apache_License_2.0-00bfff.svg?style=flat-square)](https://github.com/surrealdb/surrealdb)
+The official SurrealDB SDK for Rust.
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/whatissurreal.svg?raw=true">&nbsp;&nbsp;What is SurrealDB?</h2>
 
 SurrealDB is an end-to-end cloud native database for web, mobile, serverless, jamstack, backend, and traditional applications. SurrealDB reduces the development time of modern applications by simplifying your database and API stack, removing the need for most server-side components, allowing you to build secure, performant apps quicker and cheaper. SurrealDB acts as both a database and a modern, realtime, collaborative API backend layer. SurrealDB can run as a single server or in a highly-available, highly-scalable distributed mode - with support for SQL querying from client devices, GraphQL, ACID transactions, WebSocket connections, structured and unstructured data, graph querying, full-text indexing, geospatial querying, and row-by-row permissions-based access.
 
-View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), the product [roadmap](https://surrealdb.com/roadmap), and [documentation](https://surrealdb.com/docs).
+View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), and [documentation](https://surrealdb.com/docs).
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Features</h2>
 
@@ -24,7 +56,12 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 - [x] Asynchronous, lock-free connections
 - [x] TLS support via either [`rustls`](https://crates.io/crates/rustls) or [`native-tls`](https://crates.io/crates/native-tls)
 
-<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/installation.svg?raw=true">&nbsp;&nbsp;Installation</h2>
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/documentation.svg?raw=true">&nbsp;&nbsp;Documentation</h2>
+
+
+View the SDK documentation [here](https://surrealdb.com/docs/integration/libraries/rust).
+
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/installation.svg?raw=true">&nbsp;&nbsp;How to install</h2>
 
 To add this crate as a Rust dependency, simply run
 
