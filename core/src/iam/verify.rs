@@ -1462,6 +1462,16 @@ mod tests {
 			test_object
 				.insert("https://surrealdb.com/test".to_string(), Value::Strand("test".into()));
 			assert_eq!(*object_claim, Value::Object(test_object.into()));
+
+			// TODO(gguillemas): Kept for backward compatibility. Remove in 2.0.0.
+			// Check that the claims are still accessible by their original names
+			let string_claim = tk.get("https://surrealdb.com/string_claim").unwrap();
+			assert_eq!(*string_claim, Value::Strand("test".into()));
+			let object_claim = tk.get("https://surrealdb.com/object_claim").unwrap();
+			let mut test_object: HashMap<String, Value> = HashMap::new();
+			test_object
+				.insert("https://surrealdb.com/test".to_string(), Value::Strand("test".into()));
+			assert_eq!(*object_claim, Value::Object(test_object.into()));
 		}
 	}
 
