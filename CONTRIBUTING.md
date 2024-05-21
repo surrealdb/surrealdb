@@ -44,7 +44,7 @@ To listen to code changes as you develop, use the following command:
 cargo watch -x 'run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root memory'
 ```
 
-SurrealDB runs by default on port 8000. To change the default port, use the following command:
+By default, SurrealDB runs locally on port 8000. To change the default listening address or port, use the following command:
 
 ```bash
 cargo run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root --bind 0.0.0.0:9000 memory
