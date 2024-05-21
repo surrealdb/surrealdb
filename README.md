@@ -87,7 +87,6 @@
     <a href="https://surrealdb.com/discord"><img height="25" src="./img/social/discord.svg" alt="Discord"></a>
     &nbsp;
     <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="./img/social/stack-overflow.svg" alt="StackOverflow"></a>
-
 </p>
 
 <br>
@@ -247,6 +246,7 @@ iex "& { $(irm https://windows.surrealdb.com) } -Nightly"
 ```
 
 <h4><a href="https://surrealdb.com/install"><img width="20" src="./img/docker.svg"></a>&nbsp;Run using Docker</h4>
+
 Docker can be used to manage and run SurrealDB database instances without the need to install any command-line tools. The SurrealDB docker container contains the full command-line tools for importing and exporting data from a running server, or for running a server itself.
 
 ```bash
