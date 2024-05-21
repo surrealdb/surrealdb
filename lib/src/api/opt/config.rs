@@ -1,10 +1,13 @@
 use crate::{dbs::Capabilities, iam::Level};
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
+#[cfg(all(
+	feature = "sql2",
+	any(
+		feature = "kv-surrealkv",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	)
 ))]
 use std::path::PathBuf;
 use std::time::Duration;
