@@ -4,7 +4,7 @@ version = "1.5.0"
 edition = "2021"
 
 [dependencies]
-surrealdb = { path = "../../../lib", version = "1.5.0", features = ["kv-surrealkv", "sql2"] }
+surrealdb = { path = "../../../lib", version = "1.5.0", features = ["kv-tikv"] }
 tokio = { version = "1", features = ["full"] }
 
 [workspace]
