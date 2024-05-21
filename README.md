@@ -188,7 +188,9 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
     &nbsp;
     <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="WebAssembly" src="https://raw.githubusercontent.com/surrealdb/icons/main/webassembly.svg" /></a>
 	&nbsp;
-    <a href="https://surrealdb.com/docs/integration/sdks/react"><img width=60 title="React" src="https://raw.githubusercontent.com/surrealdb/icons/main/reactjs.svg" /></a>
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="React" src="https://raw.githubusercontent.com/surrealdb/icons/main/reactjs.svg" /></a>
+	&nbsp;
+    <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Next.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/nextjs.svg" /></a>
 	&nbsp;
     <a href="https://surrealdb.com/docs/integration/sdks/ember"><img width=60 title="Ember.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/emberjs.svg" /></a>
 </p>
