@@ -140,7 +140,7 @@ impl From<Claims> for Value {
 				if let Some(canonical_claim) = claim.strip_prefix("https://surrealdb.com/") {
 					// TODO(gguillemas): Kept for backward compatibility. Remove in 2.0.0.
 					out.insert(claim.to_owned(), claim_value.clone());
-					// Avoid replacing a private claim
+					// Avoid replacing a public claim with a private one
 					if !out.contains_key(canonical_claim) {
 						out.insert(canonical_claim.to_owned(), claim_value);
 					}
