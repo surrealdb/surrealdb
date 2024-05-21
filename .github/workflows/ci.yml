@@ -131,35 +131,6 @@ jobs:
       - name: Check wasm
         run: cargo make ci-check-wasm
 
-  check-sdk-build:
-    name: Check sdk build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-
-      - name: Check sql1
-        working-directory: tests/sdk/sql1
-        run: cargo build
-
-      - name: Check sql2
-        working-directory: tests/sdk/sql2
-        run: cargo build
-
   clippy:
     name: Check clippy
     runs-on: ubuntu-latest
@@ -383,6 +354,35 @@ jobs:
         env:
           RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo make test-experimental-parser
+
+  test-sdk-build:
+    name: Test SDK build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Build sql1
+        working-directory: tests/sdk/sql1
+        run: cargo build
+
+      - name: Build sql2
+        working-directory: tests/sdk/sql2
+        run: cargo build
 
   ws-engine:
     name: WebSocket engine
