@@ -1092,6 +1092,7 @@ impl Transaction {
 			let res = res.values;
 			// Exit when settled
 			if res.is_empty() {
+				#[cfg(debug_assertions)]
 				trace!("Delr page was empty");
 				break;
 			}
