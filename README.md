@@ -206,6 +206,12 @@ The quickest way to get going with SurrealDB on macOS is to use Homebrew. This w
 brew install surrealdb/tap/surreal
 ```
 
+If you want a binary with all of the latest features, which is published every night, you can install the `nightly` version:.
+
+```bash
+brew install surrealdb/tap/surreal-nightly
+```
+
 <h4><a href="https://surrealdb.com/install"><img width="20" src="./img/linux.svg"></a>&nbsp;Install on Linux</h4>
 
 The easiest and preferred way to get going with SurrealDB on Unix operating systems is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
@@ -214,7 +220,13 @@ The easiest and preferred way to get going with SurrealDB on Unix operating syst
 curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh
 ```
 
-If you want a binary newer than what's currently released, you can install the nightly one.
+If you want to run a beta release, before the next version is released, you can install the `beta` version:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh -s -- --beta
+```
+
+If you want a binary with all of the latest features, which is published every night, you can install the `nightly` version:.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh -s -- --nightly
@@ -226,6 +238,12 @@ The easiest and preferred way to get going with SurrealDB on Windows is to insta
 
 ```ps1
 iwr https://windows.surrealdb.com -useb | iex
+```
+
+If you want a binary with all of the latest features, which is published every night, you can install the `nightly` version:.
+
+```ps1
+iex "& { $(irm https://windows.surrealdb.com) } -Nightly"
 ```
 
 <h4><a href="https://surrealdb.com/install"><img width="20" src="./img/docker.svg"></a>&nbsp;Run using Docker</h4>
