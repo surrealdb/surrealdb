@@ -267,9 +267,9 @@ With strongly-typed data types, data can be fully modelled right in the database
 
 ```sql
 UPDATE person SET
-	waist = <int> "34",
-	height = <float> 201,
-	score = <decimal> 0.3 + 0.3 + 0.3 + 0.1
+    waist = <int> "34",
+    height = <float> 201,
+    score = <decimal> 0.3 + 0.3 + 0.3 + 0.1
 ;
 ```
 
@@ -277,8 +277,8 @@ Store dynamically computed fields which are calculated when retrieved.
 
 ```sql
 CREATE person SET
-	birthday = <datetime> "2007-06-22",
-	can_drive = <future> { time::now() > birthday + 18y }
+    birthday = <datetime> "2007-06-22",
+    can_drive = <future> { time::now() > birthday + 18y }
 ;
 ```
 
@@ -299,7 +299,7 @@ DEFINE INDEX email ON TABLE user COLUMNS email UNIQUE;
 
 -- Create a new event whenever a user changes their email address
 DEFINE EVENT email ON TABLE user WHEN $before.email != $after.email THEN (
-	CREATE event SET user = $value, time = time::now(), value = $after.email, action = 'email_changed'
+    CREATE event SET user = $value, time = time::now(), value = $after.email, action = 'email_changed'
 );
 ```
 
@@ -308,14 +308,14 @@ Connect records together with fully directed graph edge connections.
 ```sql
 -- Add a graph edge between user:tobie and article:surreal
 RELATE user:tobie->write->article:surreal
-	SET time.written = time::now()
+    SET time.written = time::now()
 ;
 
 -- Add a graph edge between specific users and developers
 LET $from = (SELECT users FROM company:surrealdb);
 LET $devs = (SELECT * FROM user WHERE tags CONTAINS 'developer');
 RELATE $from->like->$devs UNIQUE
-	SET time.connected = time::now()
+    SET time.connected = time::now()
 ;
 ```
 
@@ -342,15 +342,15 @@ Store GeoJSON geographical data types, including points, lines and polygons.
 
 ```sql
 UPDATE city:london SET
-	centre = (-0.118092, 51.509865),
-	boundary = {
-		type: "Polygon",
-		coordinates: [[
-			[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
-			[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
-			[-0.38314819, 51.37692386]
-		]]
-	}
+    centre = (-0.118092, 51.509865),
+    boundary = {
+        type: "Polygon",
+        coordinates: [[
+            [-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+            [0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+            [-0.38314819, 51.37692386]
+        ]]
+    }
 ;
 ```
 
@@ -358,17 +358,17 @@ Write custom embedded logic using JavaScript functions.
 
 ```sql
 CREATE film SET
-	ratings = [
-		{ rating: 6, user: user:bt8e39uh1ouhfm8ko8s0 },
-		{ rating: 8, user: user:bsilfhu88j04rgs0ga70 },
-	],
-	featured = function() {
-		return this.ratings.filter(r => {
-			return r.rating >= 7;
-		}).map(r => {
-			return { ...r, rating: r.rating * 10 };
-		});
-	}
+    ratings = [
+        { rating: 6, user: user:bt8e39uh1ouhfm8ko8s0 },
+        { rating: 8, user: user:bsilfhu88j04rgs0ga70 },
+    ],
+    featured = function() {
+        return this.ratings.filter(r => {
+            return r.rating >= 7;
+        }).map(r => {
+            return { ...r, rating: r.rating * 10 };
+        });
+    }
 ;
 ```
 
@@ -377,20 +377,20 @@ Specify granular access permissions for client and application access.
 ```sql
 -- Specify access permissions for the 'post' table
 DEFINE TABLE post SCHEMALESS
-	PERMISSIONS
-		FOR select
-			-- Published posts can be selected
-			WHERE published = true
-			-- A user can select all their own posts
-			OR user = $auth.id
-		FOR create, update
-			-- A user can create or update their own posts
-			WHERE user = $auth.id
-		FOR delete
-			-- A user can delete their own posts
-			WHERE user = $auth.id
-			-- Or an admin can delete any posts
-			OR $auth.admin = true
+    PERMISSIONS
+        FOR select
+            -- Published posts can be selected
+            WHERE published = true
+            -- A user can select all their own posts
+            OR user = $auth.id
+        FOR create, update
+            -- A user can create or update their own posts
+            WHERE user = $auth.id
+        FOR delete
+            -- A user can delete their own posts
+            WHERE user = $auth.id
+            -- Or an admin can delete any posts
+            OR $auth.admin = true
 ;
 ```
 
