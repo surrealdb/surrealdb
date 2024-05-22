@@ -220,8 +220,8 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}
 
-	if auth {
-		extra_args.push_str(" --auth");
+	if !auth {
+		extra_args.push_str(" --unauthenticated");
 	}
 
 	if enable_auth_level {

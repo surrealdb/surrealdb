@@ -122,7 +122,6 @@ Here is an example of `.env` file.
 
 ```dotenv
 SURREAL_LOG=trace
-SURREAL_AUTH=true
 SURREAL_USER=root
 SURREAL_PASS=root
 SURREAL_CAPS_ALLOW_ALL=true
