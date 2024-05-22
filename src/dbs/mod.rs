@@ -30,10 +30,10 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_TRANSACTION_TIMEOUT", long)]
 	#[arg(value_parser = super::cli::validator::duration)]
 	transaction_timeout: Option<Duration>,
-	#[arg(help = "Whether to enable authentication", help_heading = "Authentication")]
-	#[arg(env = "SURREAL_AUTH", long = "auth")]
+	#[arg(help = "Whether to allow unauthenticated access", help_heading = "Authentication")]
+	#[arg(env = "SURREAL_UNAUTHENTICATED", long = "unauthenticated")]
 	#[arg(default_value_t = false)]
-	auth_enabled: bool,
+	unauthenticated: bool,
 	// TODO(gguillemas): Remove this argument once the legacy authentication is deprecated in v2.0.0
 	#[arg(
 		help = "Whether to enable explicit authentication level selection",
@@ -229,7 +229,7 @@ pub async fn init(
 		strict_mode,
 		query_timeout,
 		transaction_timeout,
-		auth_enabled,
+		unauthenticated,
 		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
 		auth_level_enabled,
 		caps,
@@ -255,10 +255,8 @@ pub async fn init(
 	if let Some(v) = transaction_timeout {
 		debug!("Maximum transaction processing timeout is {v:?}");
 	}
-	// Log whether authentication is enabled
-	if auth_enabled {
-		info!("✅🔒 Authentication is enabled 🔒✅");
-	} else {
+	// Log whether authentication is disabled
+	if unauthenticated {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
 	// Log whether authentication levels are enabled
@@ -278,7 +276,7 @@ pub async fn init(
 		.with_strict_mode(strict_mode)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
-		.with_auth_enabled(auth_enabled)
+		.with_auth_enabled(!unauthenticated)
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
 	#[cfg(any(
