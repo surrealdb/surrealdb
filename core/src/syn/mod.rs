@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Module containing the implementation of the surrealql tokens, lexer, and parser.
 
 use crate::{
