@@ -219,6 +219,17 @@ impl<'a> Statement<'a> {
 			_ => false,
 		}
 	}
+
+	/// Returns any PARALLEL clause if specified
+	#[inline]
+	#[allow(dead_code)]
+	pub fn tempdir(&self) -> bool {
+		match self {
+			Statement::Select(v) => v.tempfiles,
+			_ => false,
+		}
+	}
+
 	/// Returns any EXPLAIN clause if specified
 	#[inline]
 	pub fn explain(&self) -> Option<&Explain> {

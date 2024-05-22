@@ -489,6 +489,7 @@ fn statements() -> Vec<Statement> {
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
+			tempfiles: false,
 			explain: Some(Explain(true)),
 		}),
 		Statement::Set(SetStatement {

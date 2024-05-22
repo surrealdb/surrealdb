@@ -38,13 +38,6 @@ pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
 	Ok(path)
 }
 
-#[cfg(any(
-	feature = "storage-surrealkv",
-	feature = "storage-rocksdb",
-	feature = "storage-fdb",
-	feature = "storage-tikv",
-	feature = "storage-speedb"
-))]
 pub(crate) fn dir_exists(path: &str) -> Result<PathBuf, String> {
 	let path = path_exists(path)?;
 	if !path.is_dir() {

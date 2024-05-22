@@ -24,7 +24,7 @@ resolver = "2"
 [features]
 # Public features
 default = ["kv-mem"]
-kv-mem = ["dep:echodb", "tokio/time"]
+kv-mem = ["dep:echodb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-indxdb = ["dep:indxdb"]
 kv-speedb = ["dep:speedb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]

@@ -13,14 +13,7 @@ use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
-))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,24 +56,7 @@ pub struct Context<'a> {
 	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
-	// Is the datastore in memory? (KV-MEM, WASM)
-	is_memory: bool,
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
+	#[cfg(not(target_arch = "wasm32"))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 }
@@ -107,24 +83,7 @@ impl<'a> Context<'a> {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
-		#[cfg(any(
-			feature = "kv-surrealkv",
-			feature = "kv-file",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
-		))]
-		is_memory: bool,
-		#[cfg(any(
-			feature = "kv-surrealkv",
-			feature = "kv-file",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
-		))]
-		temporary_directory: Option<Arc<PathBuf>>,
+		#[cfg(not(target_arch = "wasm32"))] temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -137,23 +96,7 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			is_memory,
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
+			#[cfg(not(target_arch = "wasm32"))]
 			temporary_directory,
 		};
 		if let Some(timeout) = time_out {
@@ -174,23 +117,7 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			is_memory: false,
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
+			#[cfg(not(target_arch = "wasm32"))]
 			temporary_directory: None,
 		}
 	}
@@ -208,23 +135,7 @@ impl<'a> Context<'a> {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			is_memory: parent.is_memory,
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
+			#[cfg(not(target_arch = "wasm32"))]
 			temporary_directory: parent.temporary_directory.clone(),
 		}
 	}
@@ -341,27 +252,7 @@ impl<'a> Context<'a> {
 		matches!(self.done(), Some(Reason::Timedout))
 	}
 
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
-	/// Return true if the underlying Datastore is KV-MEM (Or WASM)
-	pub fn is_memory(&self) -> bool {
-		self.is_memory
-	}
-
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
+	#[cfg(not(target_arch = "wasm32"))]
 	/// Return the location of the temporary directory if any
 	pub fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
 		self.temporary_directory.as_ref()

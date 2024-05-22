@@ -785,6 +785,7 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			version: Some(Version(Datetime(expected_datetime))),
 			timeout: None,
 			parallel: false,
+			tempfiles: false,
 			explain: Some(Explain(true)),
 		}),
 	);

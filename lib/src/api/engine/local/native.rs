@@ -146,14 +146,7 @@ pub(crate) fn router(
 			.with_transaction_timeout(address.config.transaction_timeout)
 			.with_capabilities(address.config.capabilities);
 
-		#[cfg(any(
-			feature = "kv-surrealkv",
-			feature = "kv-file",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
-		))]
+		#[cfg(not(target_arch = "wasm32"))]
 		let kvs = match address.config.temporary_directory {
 			Some(tmp_dir) => kvs.with_temporary_directory(tmp_dir),
 			_ => kvs,

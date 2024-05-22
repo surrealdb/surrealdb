@@ -1,13 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
-))]
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -92,14 +85,7 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
+	#[cfg(not(target_arch = "wasm32"))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	pub(crate) lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
@@ -375,14 +361,7 @@ impl Datastore {
 			index_stores: IndexStores::default(),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
+			#[cfg(not(target_arch = "wasm32"))]
 			temporary_directory: None,
 			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
@@ -437,14 +416,7 @@ impl Datastore {
 		self
 	}
 
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
 		self.temporary_directory = Some(Arc::new(path));
 		self
@@ -463,22 +435,6 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
-	}
-
-	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
-	pub(crate) fn is_memory(&self) -> bool {
-		#[cfg(feature = "kv-mem")]
-		if matches!(self.inner, Inner::Mem(_)) {
-			return true;
-		};
-		false
 	}
 
 	/// Is authentication level enabled for this Datastore?
@@ -1187,23 +1143,7 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			self.is_memory(),
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
+			#[cfg(not(target_arch = "wasm32"))]
 			self.temporary_directory.clone(),
 		)?;
 		// Setup the notification channel

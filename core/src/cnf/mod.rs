@@ -39,14 +39,7 @@ pub const PROCESSOR_BATCH_SIZE: u32 = 50;
 pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS", bool, false);
 
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
-))]
+#[cfg(not(target_arch = "wasm32"))]
 /// Specifies the buffer limit for external sorting.
 /// If the environment variable is not present or cannot be parsed, a default value of 50,000 is used.
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: Lazy<usize> =

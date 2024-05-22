@@ -298,14 +298,7 @@ impl Iterator {
 		self.setup_start(stk, &cancel_ctx, opt, txn, stm).await?;
 		// Prepare the results with possible optimisations on groups
 		self.results = self.results.prepare(
-			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
+			#[cfg(not(target_arch = "wasm32"))]
 			ctx,
 			stm,
 		)?;
