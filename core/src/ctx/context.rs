@@ -13,7 +13,15 @@ use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,7 +64,15 @@ pub struct Context<'a> {
 	index_stores: IndexStores,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 }
@@ -83,7 +99,16 @@ impl<'a> Context<'a> {
 		time_out: Option<Duration>,
 		capabilities: Capabilities,
 		index_stores: IndexStores,
-		#[cfg(not(target_arch = "wasm32"))] temporary_directory: Option<Arc<PathBuf>>,
+		#[cfg(any(
+			feature = "kv-mem",
+			feature = "kv-surrealkv",
+			feature = "kv-file",
+			feature = "kv-rocksdb",
+			feature = "kv-fdb",
+			feature = "kv-tikv",
+			feature = "kv-speedb"
+		))]
+		temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -96,7 +121,15 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(capabilities),
 			index_stores,
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			temporary_directory,
 		};
 		if let Some(timeout) = time_out {
@@ -117,7 +150,15 @@ impl<'a> Context<'a> {
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			temporary_directory: None,
 		}
 	}
@@ -135,7 +176,15 @@ impl<'a> Context<'a> {
 			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			temporary_directory: parent.temporary_directory.clone(),
 		}
 	}
@@ -252,7 +301,15 @@ impl<'a> Context<'a> {
 		matches!(self.done(), Some(Reason::Timedout))
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	/// Return the location of the temporary directory if any
 	pub fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
 		self.temporary_directory.as_ref()

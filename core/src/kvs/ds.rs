@@ -1,6 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	feature = "kv-file",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-tikv",
+	feature = "kv-speedb"
+))]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -85,7 +93,15 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	pub(crate) lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
@@ -361,7 +377,15 @@ impl Datastore {
 			index_stores: IndexStores::default(),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			temporary_directory: None,
 			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
@@ -416,7 +440,15 @@ impl Datastore {
 		self
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
 		self.temporary_directory = Some(Arc::new(path));
 		self
@@ -1143,7 +1175,15 @@ impl Datastore {
 			self.query_timeout,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(any(
+				feature = "kv-mem",
+				feature = "kv-surrealkv",
+				feature = "kv-file",
+				feature = "kv-rocksdb",
+				feature = "kv-fdb",
+				feature = "kv-tikv",
+				feature = "kv-speedb"
+			))]
 			self.temporary_directory.clone(),
 		)?;
 		// Setup the notification channel

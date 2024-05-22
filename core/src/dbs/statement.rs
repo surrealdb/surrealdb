@@ -222,7 +222,15 @@ impl<'a> Statement<'a> {
 
 	/// Returns any TEMPFILES clause if specified
 	#[inline]
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
 	pub fn tempfiles(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.tempfiles,
