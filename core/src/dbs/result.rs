@@ -57,7 +57,9 @@ impl Results {
 			feature = "kv-speedb"
 		))]
 		if !ctx.is_memory() {
-			return Ok(Self::File(Box::new(FileCollector::new(ctx.temporary_directory())?)));
+			if let Some(temp_dir) = ctx.temporary_directory() {
+				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
+			}
 		}
 		Ok(Self::Memory(Default::default()))
 	}
