@@ -51,12 +51,16 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 #[command(version = RELEASE.as_str(), about = INFO, before_help = LOGO)]
 #[command(disable_version_flag = false, arg_required_else_help = true)]
 struct Cli {
+	#[arg(help = "Whether to allow web check for client version upgrades at start")]
+	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", global(true), long)]
+	#[arg(default_value_t = true)]
+	//
+	// #[arg(help = "The logging level for the database server")]
+	// #[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
+	// #[arg(value_parser = CustomEnvFilterParser::new())]
+	online_version_check: bool,
 	#[command(subcommand)]
 	command: Commands,
-	#[arg(help = "Whether to allow web check for client version upgrades at start")]
-	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
-	#[arg(default_value_t = true)]
-	online_version_check: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -104,6 +108,7 @@ pub async fn init() -> ExitCode {
 	println!("{DEBUG_BUILD_WARNING}");
 
 	// After parsing arguments, we check the version online
+	warn!("Version upgrade was: {}", args.online_version_check);
 	if args.online_version_check {
 		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
 		if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
