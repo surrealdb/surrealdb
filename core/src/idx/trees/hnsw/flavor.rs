@@ -1,8 +1,9 @@
 use crate::err::Error;
-use crate::idx::planner::checker::ConditionChecker;
+use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{ArraySet, HashBrownSet};
+use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::index::VecDocs;
-use crate::idx::trees::hnsw::{ElementId, Hnsw};
+use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::SharedVector;
 use crate::sql::index::HnswParams;
 use reblessive::tree::Stk;
@@ -89,53 +90,75 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.remove(e_id),
 		}
 	}
-	pub(super) fn knn_search(
-		&self,
-		pt: &SharedVector,
-		k: usize,
-		ef: usize,
-	) -> Vec<(f64, ElementId)> {
+	pub(super) fn knn_search(&self, search: &HnswSearch) -> Vec<(f64, ElementId)> {
 		match self {
-			HnswFlavor::H5_9(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H5_17(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H5_25(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H5set(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H9_17(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H9_25(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H9set(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H13_25(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H13set(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H17set(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H21set(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H25set(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::H29set(h) => h.knn_search(pt, k, ef),
-			HnswFlavor::Hset(h) => h.knn_search(pt, k, ef),
+			HnswFlavor::H5_9(h) => h.knn_search(search),
+			HnswFlavor::H5_17(h) => h.knn_search(search),
+			HnswFlavor::H5_25(h) => h.knn_search(search),
+			HnswFlavor::H5set(h) => h.knn_search(search),
+			HnswFlavor::H9_17(h) => h.knn_search(search),
+			HnswFlavor::H9_25(h) => h.knn_search(search),
+			HnswFlavor::H9set(h) => h.knn_search(search),
+			HnswFlavor::H13_25(h) => h.knn_search(search),
+			HnswFlavor::H13set(h) => h.knn_search(search),
+			HnswFlavor::H17set(h) => h.knn_search(search),
+			HnswFlavor::H21set(h) => h.knn_search(search),
+			HnswFlavor::H25set(h) => h.knn_search(search),
+			HnswFlavor::H29set(h) => h.knn_search(search),
+			HnswFlavor::Hset(h) => h.knn_search(search),
 		}
 	}
 	pub(super) async fn knn_search_checked(
 		&self,
-		pt: &SharedVector,
-		k: usize,
-		ef: usize,
+		search: &HnswSearch,
+		hnsw_docs: &HnswDocs,
 		vec_docs: &VecDocs,
 		stk: &mut Stk,
-		chk: &mut ConditionChecker<'_>,
+		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<Vec<(f64, ElementId)>, Error> {
 		match self {
-			HnswFlavor::H5_9(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H5_17(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H5_25(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H5set(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H9_17(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H9_25(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H9set(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H13_25(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H13set(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H17set(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H21set(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H25set(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::H29set(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
-			HnswFlavor::Hset(h) => h.knn_search_checked(pt, k, ef, vec_docs, stk, chk).await,
+			HnswFlavor::H5_9(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H5_17(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H5_25(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H5set(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H9_17(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H9_25(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H9set(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H13_25(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H13set(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H17set(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H21set(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H25set(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::H29set(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
+			HnswFlavor::Hset(h) => {
+				h.knn_search_checked(search, hnsw_docs, vec_docs, stk, chk).await
+			}
 		}
 	}
 	pub(super) fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {

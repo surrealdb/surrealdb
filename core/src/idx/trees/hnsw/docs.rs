@@ -5,7 +5,7 @@ use radix_trie::Trie;
 use roaring::RoaringTreemap;
 
 #[derive(Default)]
-pub(super) struct HnswDocs {
+pub(in crate::idx) struct HnswDocs {
 	doc_ids: Trie<Key, DocId>,
 	ids_doc: Vec<Option<Thing>>,
 	available: RoaringTreemap,
@@ -33,7 +33,7 @@ impl HnswDocs {
 		}
 	}
 
-	pub(super) fn get_thing(&self, doc_id: DocId) -> Option<&Thing> {
+	pub(in crate::idx) fn get_thing(&self, doc_id: DocId) -> Option<&Thing> {
 		if let Some(r) = self.ids_doc.get(doc_id as usize) {
 			r.as_ref()
 		} else {

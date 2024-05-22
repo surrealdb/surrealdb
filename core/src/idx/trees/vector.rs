@@ -446,7 +446,7 @@ impl Vector {
 		}
 	}
 
-	pub fn try_from_vector(t: VectorType, v: &Vec<Number>) -> Result<Self, Error> {
+	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self, Error> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(v.len());
@@ -477,7 +477,7 @@ impl Vector {
 		Ok(res)
 	}
 
-	fn check_vector_number<T>(v: &Vec<Number>, vec: &mut Vec<T>) -> Result<(), Error>
+	fn check_vector_number<T>(v: &[Number], vec: &mut Vec<T>) -> Result<(), Error>
 	where
 		T: for<'a> TryFrom<&'a Number, Error = Error>,
 	{

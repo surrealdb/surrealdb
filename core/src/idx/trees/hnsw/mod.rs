@@ -1,4 +1,4 @@
-mod docs;
+pub(in crate::idx) mod docs;
 mod elements;
 mod flavor;
 mod heuristic;
@@ -6,11 +6,12 @@ pub mod index;
 mod layer;
 
 use crate::err::Error;
-use crate::idx::planner::checker::ConditionChecker;
+use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::{HnswSearchContext, VecDocs};
+use crate::idx::trees::hnsw::index::{HnswCheckedSearchContext, VecDocs};
 use crate::idx::trees::hnsw::layer::HnswLayer;
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
@@ -19,6 +20,21 @@ use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
 
+struct HnswSearch {
+	pt: SharedVector,
+	k: usize,
+	ef: usize,
+}
+
+impl HnswSearch {
+	pub(super) fn new(pt: SharedVector, k: usize, ef: usize) -> Self {
+		Self {
+			pt,
+			k,
+			ef,
+		}
+	}
+}
 struct Hnsw<L0, L>
 where
 	L0: DynamicSet<ElementId>,
@@ -187,10 +203,11 @@ where
 		removed
 	}
 
-	fn knn_search(&self, pt: &SharedVector, k: usize, ef: usize) -> Vec<(f64, ElementId)> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(pt) {
-			let w = self.layer0.search_single(&self.elements, pt, ep_dist, ep_id, ef);
-			w.to_vec_limit(k)
+	fn knn_search(&self, search: &HnswSearch) -> Vec<(f64, ElementId)> {
+		if let Some((ep_dist, ep_id)) = self.search_ep(&search.pt) {
+			let w =
+				self.layer0.search_single(&self.elements, &search.pt, ep_dist, ep_id, search.ef);
+			w.to_vec_limit(search.k)
 		} else {
 			vec![]
 		}
@@ -198,21 +215,26 @@ where
 
 	async fn knn_search_checked(
 		&self,
-		pt: &SharedVector,
-		k: usize,
-		ef: usize,
+		search: &HnswSearch,
+		hnsw_docs: &HnswDocs,
 		vec_docs: &VecDocs,
 		stk: &mut Stk,
-		chk: &mut ConditionChecker<'_>,
+		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<Vec<(f64, ElementId)>, Error> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(pt) {
+		if let Some((ep_dist, ep_id)) = self.search_ep(&search.pt) {
 			if let Some(ep_pt) = self.elements.get_vector(&ep_id) {
-				let search = HnswSearchContext::new(&self.elements, Some(vec_docs), pt, ef);
+				let search_ctx = HnswCheckedSearchContext::new(
+					&self.elements,
+					hnsw_docs,
+					vec_docs,
+					&search.pt,
+					search.ef,
+				);
 				let w = self
 					.layer0
-					.search_single_checked(&search, ep_pt, ep_dist, ep_id, stk, chk)
+					.search_single_checked(&search_ctx, ep_pt, ep_dist, ep_id, stk, chk)
 					.await?;
-				return Ok(w.to_vec_limit(k));
+				return Ok(w.to_vec_limit(search.k));
 			}
 		}
 		Ok(vec![])
@@ -259,9 +281,10 @@ where
 mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
-	use crate::idx::planner::checker::ConditionChecker;
+	use crate::idx::planner::checker::HnswConditionChecker;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::HnswIndex;
+	use crate::idx::trees::hnsw::HnswSearch;
 	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -289,9 +312,9 @@ mod tests {
 	fn find_collection_hnsw(h: &HnswFlavor, collection: &TestCollection) {
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
-			let obj = obj.clone().into();
 			for knn in 1..max_knn {
-				let res = h.knn_search(&obj, knn, 80);
+				let search = HnswSearch::new(obj.clone(), knn, 80);
+				let res = h.knn_search(&search);
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
@@ -434,7 +457,9 @@ mod tests {
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
-				let res = h.search(obj, knn, 500, stk, &mut ConditionChecker::None).await.unwrap();
+				let mut chk = HnswConditionChecker::default();
+				let search = HnswSearch::new(obj.clone(), knn, 500);
+				let res = h.search(&search, stk, &mut chk).await.unwrap();
 				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
 					if collection.is_unique() {
@@ -557,11 +582,9 @@ mod tests {
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let mut h = HnswFlavor::new(&p);
 		insert_collection_hnsw(&mut h, &collection);
-		let pt = new_i16_vec(-2, -3);
-		let knn = 10;
-		let efs = 501;
-		let res = h.knn_search(&pt, knn, efs);
-		assert_eq!(res.len(), knn);
+		let search = HnswSearch::new(new_i16_vec(-2, -3), 10, 501);
+		let res = h.knn_search(&search);
+		assert_eq!(res.len(), 10);
 	}
 
 	async fn test_recall(
@@ -608,10 +631,9 @@ mod tests {
 						let mut total_recall = 0.0;
 						for (_, pt) in queries.to_vec_ref() {
 							let knn = 10;
-							let hnsw_res = h
-								.search(pt, knn, efs, stk, &mut ConditionChecker::None)
-								.await
-								.unwrap();
+							let mut chk = HnswConditionChecker::default();
+							let search = HnswSearch::new(pt.clone(), knn, efs);
+							let hnsw_res = h.search(&search, stk, &mut chk).await.unwrap();
 							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = brute_force_res.recall(&hnsw_res);
@@ -684,10 +706,9 @@ mod tests {
 		fn knn(&self, pt: &SharedVector, dist: Distance, n: usize) -> KnnResult {
 			let mut b = KnnResultBuilder::new(n);
 			for (doc_id, doc_pt) in self.to_vec_ref() {
-				let mut chk = ConditionChecker::None;
 				let d = dist.calculate(doc_pt, pt);
 				if b.check_add(d) {
-					b.add(d, &Ids64::One(*doc_id), &mut chk);
+					b.add(d, &Ids64::One(*doc_id));
 				}
 			}
 			b.build(

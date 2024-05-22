@@ -1,15 +1,17 @@
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
 use flate2::read::GzDecoder;
+use reblessive::TreeStack;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
-use surrealdb::idx::trees::hnsw::HnswIndex;
 use surrealdb::sql::index::Distance;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::idx::planner::checker::HnswConditionChecker;
+use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::sql::index::{HnswParams, VectorType};
-use surrealdb_core::sql::{value, Array, Id, Thing, Value};
+use surrealdb_core::sql::{value, Array, Id, Number, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
 
 const EF_CONSTRUCTION: u16 = 150;
@@ -45,14 +47,15 @@ fn bench_hnsw_no_db(c: &mut Criterion) {
 	let hnsw = insert_objects(&samples);
 
 	let samples = new_vectors_from_file(QUERYING_SOURCE);
-	let samples: Vec<Array> = samples.into_iter().map(|(_, a)| a).collect();
+	let samples: Vec<Vec<Number>> =
+		samples.into_iter().map(|(_, a)| convert_array_to_vec_number(a)).collect();
 
 	// Knn lookup benchmark group
 	{
 		let mut group = get_group(c, GROUP_NAME, samples.len(), 10);
 		let id = format!("lookup len: {}", samples.len());
 		group.bench_function(id, |b| {
-			b.iter(|| knn_lookup_objects(&hnsw, &samples));
+			b.to_async(Runtime::new().unwrap()).iter(|| knn_lookup_objects(&hnsw, &samples));
 		});
 		group.finish();
 	}
@@ -175,6 +178,19 @@ fn new_vectors_from_file(path: &str) -> Vec<(Thing, Array)> {
 	}
 	res
 }
+
+fn convert_array_to_vec_number(a: Array) -> Vec<Number> {
+	a.into_iter()
+		.map(|v| {
+			if let Value::Number(n) = v {
+				n
+			} else {
+				panic!("Wrong value {}", v);
+			}
+		})
+		.collect()
+}
+
 async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 	let ds = Datastore::new("memory").await.unwrap();
 	if with_index {
@@ -215,11 +231,20 @@ async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[Str
 	ds
 }
 
-fn knn_lookup_objects(h: &HnswIndex, samples: &[Array]) {
-	for a in samples {
-		let r = h.search(a, NN, EF_SEARCH).unwrap();
-		assert_eq!(r.len(), NN);
-	}
+async fn knn_lookup_objects(h: &HnswIndex, samples: &[Vec<Number>]) {
+	let mut stack = TreeStack::new();
+	stack
+		.enter(|stk| async {
+			for v in samples {
+				let r = h
+					.knn_search(v, NN, EF_SEARCH, stk, HnswConditionChecker::default())
+					.await
+					.unwrap();
+				assert_eq!(r.len(), NN);
+			}
+		})
+		.finish()
+		.await;
 }
 
 async fn knn_lookup_objects_db(ds: &Datastore, session: &Session, selects: &[String]) {

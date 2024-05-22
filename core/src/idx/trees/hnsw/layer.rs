@@ -1,9 +1,9 @@
 use crate::err::Error;
-use crate::idx::planner::checker::ConditionChecker;
+use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::HnswSearchContext;
+use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
@@ -57,12 +57,12 @@ where
 
 	pub(super) async fn search_single_checked(
 		&self,
-		search: &HnswSearchContext<'_>,
+		search: &HnswCheckedSearchContext<'_>,
 		ep_pt: &SharedVector,
 		ep_dist: f64,
 		ep_id: ElementId,
 		stk: &mut Stk,
-		chk: &mut ConditionChecker<'_>,
+		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<DoublePriorityQueue, Error> {
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
@@ -152,12 +152,12 @@ where
 
 	pub(super) async fn search_checked(
 		&self,
-		search: &HnswSearchContext<'_>,
+		search: &HnswCheckedSearchContext<'_>,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
 		stk: &mut Stk,
-		chk: &mut ConditionChecker<'_>,
+		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<DoublePriorityQueue, Error> {
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 
@@ -193,16 +193,16 @@ where
 	}
 
 	pub(super) async fn add_if_truthy(
-		search: &HnswSearchContext<'_>,
+		search: &HnswCheckedSearchContext<'_>,
 		w: &mut DoublePriorityQueue,
 		e_pt: &SharedVector,
 		e_dist: f64,
 		e_id: ElementId,
 		stk: &mut Stk,
-		chk: &mut ConditionChecker<'_>,
+		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<bool, Error> {
 		if let Some(docs) = search.get_docs(e_pt) {
-			if chk.check_hnsw_truthy(stk, docs).await? {
+			if chk.check_truthy(stk, search.docs(), docs).await? {
 				w.push(e_dist, e_id);
 				if w.len() > search.ef() {
 					if let Some((_, id)) = w.pop_last() {

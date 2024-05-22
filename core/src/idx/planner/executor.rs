@@ -8,7 +8,7 @@ use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
-use crate::idx::planner::checker::ConditionChecker;
+use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
 	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
@@ -179,17 +179,16 @@ impl InnerQueryExecutor {
 								}
 								Entry::Vacant(e) => {
 									let ikb = IndexKeyBase::new(opt, idx_def);
-									let mt = {
-										let mut tx = txn.lock().await;
-										MTreeIndex::new(
-											ctx.get_index_stores(),
-											&mut tx,
-											ikb,
-											p,
-											TransactionType::Read,
-										)
-										.await?
-									};
+									let mut tx = txn.lock().await;
+									let mt = MTreeIndex::new(
+										ctx.get_index_stores(),
+										&mut tx,
+										ikb,
+										p,
+										TransactionType::Read,
+									)
+									.await?;
+									drop(tx);
 									let entry = MtEntry::new(
 										stk,
 										ctx,
@@ -566,9 +565,13 @@ impl QueryExecutor {
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
-		let mut run = txn.lock().await;
 		let doc_key: Key = thg.into();
-		if let Some(doc_id) = ft.0.doc_ids.read().await.get_doc_id(&mut run, doc_key).await? {
+		let mut run = txn.lock().await;
+		let di = ft.0.doc_ids.read().await;
+		let doc_id = di.get_doc_id(&mut run, doc_key).await?;
+		drop(di);
+		drop(run);
+		if let Some(doc_id) = doc_id {
 			let term_goals = ft.0.terms_docs.len();
 			// If there is no terms, it can't be a match
 			if term_goals == 0 {
@@ -613,6 +616,7 @@ impl QueryExecutor {
 		let terms = ft.0.terms.read().await;
 		// Extract the terms set from the record
 		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, txn, &terms, v).await?;
+		drop(terms);
 		Ok(ft.0.query_terms_set.is_subset(&t))
 	}
 
@@ -646,7 +650,7 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let mut run = txn.lock().await;
-			return ft
+			let res = ft
 				.highlight(
 					&mut run,
 					thg,
@@ -658,6 +662,8 @@ impl QueryExecutor {
 					doc,
 				)
 				.await;
+			drop(run);
+			return res;
 		}
 		Ok(Value::None)
 	}
@@ -671,7 +677,9 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let mut run = txn.lock().await;
-			return ft.extract_offsets(&mut run, thg, &e.0.query_terms_list, partial).await;
+			let res = ft.extract_offsets(&mut run, thg, &e.0.query_terms_list, partial).await;
+			drop(run);
+			return res;
 		}
 		Ok(Value::None)
 	}
@@ -693,14 +701,18 @@ impl QueryExecutor {
 				};
 				if doc_id.is_none() {
 					let key: Key = rid.into();
-					doc_id = e.0.doc_ids.read().await.get_doc_id(&mut run, key).await?
+					let di = e.0.doc_ids.read().await;
+					doc_id = di.get_doc_id(&mut run, key).await?;
+					drop(di);
 				}
 				if let Some(doc_id) = doc_id {
 					let score = scorer.score(&mut run, doc_id).await?;
 					if let Some(score) = score {
+						drop(run);
 						return Ok(Value::from(score));
 					}
 				}
+				drop(run);
 			}
 		}
 		Ok(Value::None)
@@ -735,6 +747,7 @@ impl FtEntry {
 				ft.extract_querying_terms(stk, ctx, opt, txn, qs.to_owned()).await?;
 			let mut tx = txn.lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
+			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),
@@ -764,11 +777,15 @@ impl MtEntry {
 		opt: &Options,
 		txn: &Transaction,
 		mt: &MTreeIndex,
-		o: &Vec<Number>,
+		o: &[Number],
 		k: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
-		let cond_checker = ConditionChecker::new_mtree(ctx, opt, txn, cond, mt.doc_ids());
+		let cond_checker = if let Some(cond) = cond {
+			MTreeConditionChecker::new_cond(ctx, opt, txn, cond)
+		} else {
+			MTreeConditionChecker::new(txn)
+		};
 		let res = mt.knn_search(stk, txn, o, k as usize, cond_checker).await?;
 		Ok(Self {
 			res,
@@ -789,13 +806,19 @@ impl HnswEntry {
 		opt: &Options,
 		txn: &Transaction,
 		h: SharedHnswIndex,
-		v: &Vec<Number>,
+		v: &[Number],
 		n: u32,
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
-		let cond_checker = ConditionChecker::new_hnsw(ctx, opt, txn, cond, h.clone());
-		let res = h.read().await.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
+		let cond_checker = if let Some(cond) = cond {
+			HnswConditionChecker::new_cond(ctx, opt, txn, cond)
+		} else {
+			HnswConditionChecker::default()
+		};
+		let h = h.read().await;
+		let res = h.knn_search(v, n as usize, ef as usize, stk, cond_checker).await?;
+		drop(h);
 		Ok(Self {
 			res,
 		})

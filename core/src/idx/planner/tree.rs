@@ -213,9 +213,11 @@ impl<'a> TreeBuilder<'a> {
 			}
 			// Try to detect an indexed record field
 			if let Some(ro) = self.resolve_record_field(&mut tx, schema.fields.as_ref(), i).await? {
+				drop(tx);
 				return Ok(Node::RecordField(i.clone(), ro));
 			}
 		}
+		drop(tx);
 		Ok(Node::NonIndexedField(i.clone()))
 	}
 

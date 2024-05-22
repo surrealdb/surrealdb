@@ -1,11 +1,11 @@
 use crate::err::Error;
 use crate::idx::docids::DocId;
-use crate::idx::planner::checker::ConditionChecker;
+use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
-use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::sql::index::{HnswParams, VectorType};
@@ -25,22 +25,25 @@ pub struct HnswIndex {
 
 pub(super) type VecDocs = HashMap<SharedVector, (Ids64, ElementId)>;
 
-pub(super) struct HnswSearchContext<'a> {
+pub(super) struct HnswCheckedSearchContext<'a> {
 	elements: &'a HnswElements,
-	vec_docs: Option<&'a VecDocs>,
+	docs: &'a HnswDocs,
+	vec_docs: &'a VecDocs,
 	pt: &'a SharedVector,
 	ef: usize,
 }
 
-impl<'a> HnswSearchContext<'a> {
+impl<'a> HnswCheckedSearchContext<'a> {
 	pub(super) fn new(
 		elements: &'a HnswElements,
-		vec_docs: Option<&'a VecDocs>,
+		docs: &'a HnswDocs,
+		vec_docs: &'a VecDocs,
 		pt: &'a SharedVector,
 		ef: usize,
 	) -> Self {
 		Self {
 			elements,
+			docs,
 			vec_docs,
 			pt,
 			ef,
@@ -55,12 +58,12 @@ impl<'a> HnswSearchContext<'a> {
 		self.ef
 	}
 
+	pub(super) fn docs(&self) -> &HnswDocs {
+		self.docs
+	}
+
 	pub(super) fn get_docs(&self, pt: &SharedVector) -> Option<&Ids64> {
-		if let Some(vec_docs) = self.vec_docs {
-			vec_docs.get(pt).map(|(doc_ids, _)| doc_ids)
-		} else {
-			None
-		}
+		self.vec_docs.get(pt).map(|(doc_ids, _)| doc_ids)
 	}
 
 	pub(super) fn elements(&self) -> &HnswElements {
@@ -143,54 +146,51 @@ impl HnswIndex {
 
 	pub async fn knn_search(
 		&self,
-		o: &Vec<Number>,
-		n: usize,
+		pt: &[Number],
+		k: usize,
 		ef: usize,
 		stk: &mut Stk,
-		mut chk: ConditionChecker<'_>,
+		mut chk: HnswConditionChecker<'_>,
 	) -> Result<VecDeque<KnnIteratorResult>, Error> {
 		// Extract the vector
-		let vector: SharedVector = Vector::try_from_vector(self.vector_type, o)?.into();
+		let vector: SharedVector = Vector::try_from_vector(self.vector_type, pt)?.into();
 		vector.check_dimension(self.dim)?;
+		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
-		let result = self.search(&vector, n, ef, stk, &mut chk).await?;
-		let res = chk.convert_result(result.docs).await?;
+		let result = self.search(&search, stk, &mut chk).await?;
+		let res = chk.convert_result(&self.docs, result.docs).await?;
 		Ok(res)
 	}
 
 	pub(super) async fn search(
 		&self,
-		pt: &SharedVector,
-		k: usize,
-		ef: usize,
+		search: &HnswSearch,
 		stk: &mut Stk,
-		chk: &mut ConditionChecker<'_>,
+		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<KnnResult, Error> {
+		// Do the search
 		let neighbors = match chk {
-			ConditionChecker::Hnsw(_) => self.hnsw.knn_search(pt, k, ef),
-			ConditionChecker::HnswCondition(_) => {
-				self.hnsw.knn_search_checked(pt, k, ef, &self.vec_docs, stk, chk).await?
+			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(search),
+			HnswConditionChecker::HnswCondition(_) => {
+				self.hnsw.knn_search_checked(search, &self.docs, &self.vec_docs, stk, chk).await?
 			}
-			#[cfg(test)]
-			ConditionChecker::None => self.hnsw.knn_search(pt, k, ef),
-			_ => unreachable!(),
 		};
-		let result = self.build_result(neighbors, k, chk);
-		Ok(result)
+		Ok(self.build_result(neighbors, search.k, chk))
 	}
 
 	fn build_result(
 		&self,
 		neighbors: Vec<(f64, ElementId)>,
 		n: usize,
-		chk: &mut ConditionChecker<'_>,
+		chk: &mut HnswConditionChecker<'_>,
 	) -> KnnResult {
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist) {
 				if let Some(v) = self.hnsw.get_vector(&e_id) {
 					if let Some((docs, _)) = self.vec_docs.get(v) {
-						builder.add(e_dist, docs, chk);
+						let evicted_docs = builder.add(e_dist, docs);
+						chk.expires(evicted_docs);
 					}
 				}
 			}
@@ -199,10 +199,6 @@ impl HnswIndex {
 			#[cfg(debug_assertions)]
 			HashMap::new(),
 		)
-	}
-
-	pub(in crate::idx) fn get_thing(&self, doc_id: DocId) -> Option<&Thing> {
-		self.docs.get_thing(doc_id)
 	}
 
 	#[cfg(test)]

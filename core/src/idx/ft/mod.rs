@@ -108,7 +108,9 @@ impl FtIndex {
 	) -> Result<Self, Error> {
 		let mut tx = txn.lock().await;
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
-		Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, tt).await
+		let res = Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, tt).await;
+		drop(tx);
+		res
 	}
 	async fn with_analyzer(
 		ixs: &IndexStores,
@@ -194,13 +196,17 @@ impl FtIndex {
 	) -> Result<(), Error> {
 		let mut tx = txn.lock().await;
 		// Extract and remove the doc_id (if any)
-		if let Some(doc_id) = self.doc_ids.write().await.remove_doc(&mut tx, rid.into()).await? {
+		let mut doc_ids = self.doc_ids.write().await;
+		let doc_id = doc_ids.remove_doc(&mut tx, rid.into()).await?;
+		drop(doc_ids);
+		if let Some(doc_id) = doc_id {
 			self.state.doc_count -= 1;
 
 			// Remove the doc length
-			if let Some(doc_lengths) =
-				self.doc_lengths.write().await.remove_doc_length(&mut tx, doc_id).await?
-			{
+			let mut doc_lengths = self.doc_lengths.write().await;
+			let dl = doc_lengths.remove_doc_length(&mut tx, doc_id).await?;
+			drop(doc_lengths);
+			if let Some(doc_lengths) = dl {
 				self.state.total_docs_lengths -= doc_lengths as u128;
 			}
 
@@ -218,6 +224,8 @@ impl FtIndex {
 						t.remove_term_id(&mut tx, term_id).await?;
 					}
 				}
+				drop(p);
+				drop(t);
 				// Remove the offsets if any
 				if self.highlighting {
 					for term_id in term_list {
@@ -227,6 +235,7 @@ impl FtIndex {
 				}
 			}
 		}
+		drop(tx);
 		Ok(())
 	}
 
@@ -241,9 +250,11 @@ impl FtIndex {
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let mut tx = txn.lock().await;
-		let resolved = self.doc_ids.write().await.resolve_doc_id(&mut tx, rid.into()).await?;
-		let doc_id = *resolved.doc_id();
+		let mut doc_ids = self.doc_ids.write().await;
+		let resolved = doc_ids.resolve_doc_id(&mut tx, rid.into()).await?;
+		drop(doc_ids);
 		drop(tx);
+		let doc_id = *resolved.doc_id();
 
 		// Extract the doc_lengths, terms en frequencies (and offset)
 		let mut t = self.terms.write().await;
@@ -270,6 +281,7 @@ impl FtIndex {
 			}
 		}
 		dl.set_doc_length(&mut tx, doc_id, doc_length).await?;
+		drop(dl);
 
 		// Retrieve the existing terms for this document (if any)
 		let term_ids_key = self.index_key_base.new_bk_key(doc_id);
@@ -302,6 +314,8 @@ impl FtIndex {
 				}
 			}
 		}
+		drop(p);
+		drop(t);
 
 		if self.highlighting {
 			// Set the offset if any
@@ -333,6 +347,7 @@ impl FtIndex {
 
 		// Update the states
 		tx.set(self.state_key.clone(), self.state.try_to_val()?).await?;
+		drop(tx);
 		Ok(())
 	}
 
@@ -347,6 +362,7 @@ impl FtIndex {
 		let t = self.terms.read().await;
 		let res =
 			self.analyzer.extract_querying_terms(stk, ctx, opt, txn, &t, query_string).await?;
+		drop(t);
 		Ok(res)
 	}
 
@@ -422,7 +438,10 @@ impl FtIndex {
 		doc: &Value,
 	) -> Result<Value, Error> {
 		let doc_key: Key = thg.into();
-		if let Some(doc_id) = self.doc_ids.read().await.get_doc_id(tx, doc_key).await? {
+		let di = self.doc_ids.read().await;
+		let doc_id = di.get_doc_id(tx, doc_key).await?;
+		drop(di);
+		if let Some(doc_id) = doc_id {
 			let mut hl = Highlighter::new(prefix, suffix, partial, idiom, doc);
 			for (term_id, term_len) in terms.iter().flatten() {
 				let o = self.offsets.get_offsets(tx, doc_id, *term_id).await?;
@@ -443,7 +462,10 @@ impl FtIndex {
 		partial: bool,
 	) -> Result<Value, Error> {
 		let doc_key: Key = thg.into();
-		if let Some(doc_id) = self.doc_ids.read().await.get_doc_id(tx, doc_key).await? {
+		let di = self.doc_ids.read().await;
+		let doc_id = di.get_doc_id(tx, doc_key).await?;
+		drop(di);
+		if let Some(doc_id) = doc_id {
 			let mut or = Offseter::new(partial);
 			for (term_id, term_len) in terms.iter().flatten() {
 				let o = self.offsets.get_offsets(tx, doc_id, *term_id).await?;
@@ -459,12 +481,14 @@ impl FtIndex {
 	pub(crate) async fn statistics(&self, txn: &Transaction) -> Result<FtStatistics, Error> {
 		// TODO do parallel execution
 		let mut run = txn.lock().await;
-		Ok(FtStatistics {
+		let res = FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(&mut run).await?,
 			terms: self.terms.read().await.statistics(&mut run).await?,
 			doc_lengths: self.doc_lengths.read().await.statistics(&mut run).await?,
 			postings: self.postings.read().await.statistics(&mut run).await?,
-		})
+		};
+		drop(run);
+		Ok(res)
 	}
 
 	pub(crate) async fn finish(&self, tx: &Transaction) -> Result<(), Error> {
@@ -473,6 +497,7 @@ impl FtIndex {
 		self.doc_lengths.write().await.finish(&mut run).await?;
 		self.postings.write().await.finish(&mut run).await?;
 		self.terms.write().await.finish(&mut run).await?;
+		drop(run);
 		Ok(())
 	}
 }
@@ -503,11 +528,14 @@ impl HitsIterator {
 		&mut self,
 		tx: &mut kvs::Transaction,
 	) -> Result<Option<(Thing, DocId)>, Error> {
+		let di = self.doc_ids.read().await;
 		for doc_id in self.iter.by_ref() {
-			if let Some(doc_key) = self.doc_ids.read().await.get_doc_key(tx, doc_id).await? {
+			if let Some(doc_key) = di.get_doc_key(tx, doc_id).await? {
+				drop(di);
 				return Ok(Some((doc_key.into(), doc_id)));
 			}
 		}
+		drop(di);
 		Ok(None)
 	}
 }
@@ -550,6 +578,7 @@ mod tests {
 		} else {
 			panic!("hits is none");
 		}
+		drop(tx);
 	}
 
 	async fn search(
@@ -609,7 +638,9 @@ mod tests {
 
 	pub(super) async fn finish(txn: &Transaction, fti: FtIndex) {
 		fti.finish(txn).await.unwrap();
-		txn.lock().await.commit().await.unwrap();
+		let mut tx = txn.lock().await;
+		tx.commit().await.unwrap();
+		drop(tx);
 	}
 
 	#[test(tokio::test)]

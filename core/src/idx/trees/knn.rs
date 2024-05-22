@@ -1,5 +1,4 @@
 use crate::idx::docids::DocId;
-use crate::idx::planner::checker::ConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
@@ -542,7 +541,7 @@ impl KnnResultBuilder {
 		true
 	}
 
-	pub(super) fn add(&mut self, dist: f64, docs: &Ids64, chk: &mut ConditionChecker) {
+	pub(super) fn add(&mut self, dist: f64, docs: &Ids64) -> Ids64 {
 		let pr = FloatKey(dist);
 		docs.append_to(&mut self.docs);
 		match self.priority_list.entry(pr) {
@@ -564,11 +563,12 @@ impl KnnResultBuilder {
 				if docs_len - d.len() >= self.knn {
 					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
 						evicted_docs.remove_to(&mut self.docs);
-						chk.expires(evicted_docs);
+						return evicted_docs;
 					}
 				}
 			}
 		}
+		Ids64::Empty
 	}
 
 	pub(super) fn build(
@@ -614,7 +614,6 @@ pub struct KnnResult {
 pub(super) mod tests {
 	use crate::err::Error;
 	use crate::idx::docids::DocId;
-	use crate::idx::planner::checker::ConditionChecker;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
@@ -815,12 +814,11 @@ pub(super) mod tests {
 
 	#[test]
 	fn knn_result_builder_test() {
-		let mut chk = ConditionChecker::None;
 		let mut b = KnnResultBuilder::new(7);
-		b.add(0.0, &Ids64::One(5), &mut chk);
-		b.add(0.2, &Ids64::Vec3([0, 1, 2]), &mut chk);
-		b.add(0.2, &Ids64::One(3), &mut chk);
-		b.add(0.2, &Ids64::Vec2([6, 8]), &mut chk);
+		b.add(0.0, &Ids64::One(5));
+		b.add(0.2, &Ids64::Vec3([0, 1, 2]));
+		b.add(0.2, &Ids64::One(3));
+		b.add(0.2, &Ids64::Vec2([6, 8]));
 		let res = b.build(
 			#[cfg(debug_assertions)]
 			HashMap::new(),

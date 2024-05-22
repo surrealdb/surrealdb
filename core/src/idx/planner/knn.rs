@@ -26,10 +26,14 @@ impl KnnPriorityList {
 		if i.check_add(&dist) {
 			i.add(dist, thing);
 		}
+		drop(i);
 	}
 
 	pub(super) async fn build(&self) -> HashMap<Arc<Thing>, Number> {
-		self.0.lock().await.build()
+		let l = self.0.lock().await;
+		let r = l.build();
+		drop(l);
+		r
 	}
 }
 
