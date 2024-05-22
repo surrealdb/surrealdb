@@ -385,10 +385,8 @@ impl Parser<'_> {
 				Subquery::Rebuild(stmt)
 			}
 			t!("+") | t!("-") => {
-				let peek_digits = self.peek_token_at(1);
-
-				if peek_digits.follows_from(&peek) && matches!(peek_digits.kind, TokenKind::Digits)
-				{
+				let peek_digits = self.peek_whitespace_token_at(1);
+				if matches!(peek_digits.kind, TokenKind::Digits) {
 					let before = self.recent_span();
 					let number = self.next_token_value::<Number>()?;
 					let after = self.last_span();

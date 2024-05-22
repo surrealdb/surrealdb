@@ -1,9 +1,0 @@
-{
-  "rust-analyzer.check.command": "clippy",
-  "rust-analyzer.cargo.features": [
-    "wasm",
-    "ml",
-    "kv-mem"
-  ],
-  "rust-analyzer.cargo.noDefaultFeatures": true
-}

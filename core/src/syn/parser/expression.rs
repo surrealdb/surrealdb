@@ -135,8 +135,8 @@ impl Parser<'_> {
 		let operator = match token.kind {
 			t!("+") => {
 				// +123 is a single number token, so parse it as such
-				let p = self.peek_token_at(1);
-				if p.follows_from(&token) && matches!(p.kind, TokenKind::Digits) {
+				let p = self.peek_whitespace_token_at(1);
+				if matches!(p.kind, TokenKind::Digits) {
 					return self.next_token_value::<Number>().map(Value::Number);
 				}
 				self.pop_peek();
@@ -145,8 +145,8 @@ impl Parser<'_> {
 			}
 			t!("-") => {
 				// -123 is a single number token, so parse it as such
-				let p = self.peek_token_at(1);
-				if p.follows_from(&token) && matches!(p.kind, TokenKind::Digits) {
+				let p = self.peek_whitespace_token_at(1);
+				if matches!(p.kind, TokenKind::Digits) {
 					return self.next_token_value::<Number>().map(Value::Number);
 				}
 

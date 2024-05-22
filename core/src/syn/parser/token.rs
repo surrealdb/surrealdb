@@ -205,14 +205,13 @@ impl Parser<'_> {
 
 		match start.kind {
 			t!("+") | t!("-") => {
-				self.pop_peek();
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
 				start = self.next_whitespace();
 				if start.kind != TokenKind::Digits {
 					unexpected!(self, start.kind, "a number")
 				}
+				// If an ident was already peeked it might have skipped whitespace which this function
+				// needs. Triggering this assert means there is a bug in the parser.
+				assert!(!self.has_peek());
 			}
 			TokenKind::NaN => return Ok(start),
 			TokenKind::Number(_) => return Ok(start),
