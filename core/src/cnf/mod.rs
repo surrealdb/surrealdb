@@ -21,7 +21,7 @@ pub static MAX_COMPUTATION_DEPTH: Lazy<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
 /// Specifies the names of parameters which can not be specified in a query.
-pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];
+pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
 /// The characters which are supported in server record IDs.
 pub const ID_CHARS: [char; 36] = [
@@ -35,9 +35,9 @@ pub const SERVER_NAME: &str = "SurrealDB";
 /// Datastore processor batch size for scan operations
 pub const PROCESSOR_BATCH_SIZE: u32 = 50;
 
-/// Forward all signup/signin query errors to a client trying authenticate to a scope. Do not use in production.
-pub static INSECURE_FORWARD_SCOPE_ERRORS: Lazy<bool> =
-	lazy_env_parse!("SURREAL_INSECURE_FORWARD_SCOPE_ERRORS", bool, false);
+/// Forward all signup/signin query errors to a client performing record access. Do not use in production.
+pub static INSECURE_FORWARD_RECORD_ACCESS_ERRORS: Lazy<bool> =
+	lazy_env_parse!("SURREAL_INSECURE_FORWARD_RECORD_ACCESS_ERRORS", bool, false);
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Specifies the buffer limit for external sorting.

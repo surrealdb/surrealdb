@@ -1251,7 +1251,7 @@ impl Datastore {
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
-	/// For example, this is used when processing a SCOPE SIGNUP or SCOPE
+	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
 	///
 	/// ```rust,no_run

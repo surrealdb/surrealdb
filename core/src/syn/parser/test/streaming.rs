@@ -1,5 +1,6 @@
 use crate::{
 	sql::{
+		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
@@ -8,13 +9,13 @@ use crate::{
 		statements::{
 			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-			CreateStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineTokenStatement, DeleteStatement, ForeachStatement,
-			IfelseStatement, InfoStatement, InsertStatement, KillStatement, OutputStatement,
-			RelateStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveStatement,
-			SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
+			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
+			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
+			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineStatement, DefineTableStatement, DeleteStatement,
+			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
+			RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 		},
 		tokenizer::Tokenizer,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
@@ -46,7 +47,7 @@ static SOURCE: &str = r#"
 	DEFINE FUNCTION fn::foo::bar($a: number, $b: array<bool,3>) {
 		RETURN a
 	} COMMENT 'test' PERMISSIONS FULL;
-	DEFINE TOKEN a ON SCOPE b TYPE EDDSA VALUE "foo" COMMENT "bar";
+	DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar";
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
@@ -73,7 +74,6 @@ static SOURCE: &str = r#"
 	IF foo { bar } ELSE IF faz { baz } ELSE { baq };
 	INFO FOR ROOT;
 	INFO FOR NAMESPACE;
-	INFO FOR SCOPE scope;
 	INFO FOR USER user ON namespace;
 	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 		WITH INDEX index,index_2
@@ -191,11 +191,21 @@ fn statements() -> Vec<Statement> {
 			permissions: Permission::Full,
 			if_not_exists: false,
 		})),
-		Statement::Define(DefineStatement::Token(DefineTokenStatement {
+		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
-			base: Base::Sc(Ident("b".to_string())),
-			kind: Algorithm::EdDSA,
-			code: "foo".to_string(),
+			base: Base::Db,
+			kind: AccessType::Record(RecordAccess {
+				duration: Some(Duration::from_hours(1)),
+				signup: None,
+				signin: None,
+				jwt: JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: "foo".to_string(),
+					}),
+					issue: None,
+				},
+			}),
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
 		})),
@@ -435,7 +445,6 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Info(InfoStatement::Root(false)),
 		Statement::Info(InfoStatement::Ns(false)),
-		Statement::Info(InfoStatement::Sc(Ident("scope".to_owned()), false)),
 		Statement::Info(InfoStatement::User(Ident("user".to_owned()), Some(Base::Ns), false)),
 		Statement::Select(SelectStatement {
 			expr: Fields(
