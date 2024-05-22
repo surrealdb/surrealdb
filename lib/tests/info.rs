@@ -39,7 +39,7 @@ async fn info_for_ns() {
 	let sql = r#"
         DEFINE DATABASE DB;
         DEFINE USER user ON NS PASSWORD 'pass';
-        DEFINE TOKEN token ON NS TYPE HS512 VALUE 'secret';
+        DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret';
         INFO FOR NS
     "#;
 	let dbs = new_ds().await.unwrap();
@@ -52,7 +52,7 @@ async fn info_for_ns() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let output_regex = Regex::new(
-		r"\{ databases: \{ DB: .* \}, tokens: \{ token: .* \}, users: \{ user: .* \} \}",
+		r"\{ accesses: \{ access: .* \}, databases: \{ DB: .* \}, users: \{ user: .* \} \}",
 	)
 	.unwrap();
 	let out_str = out.unwrap().to_string();
@@ -68,9 +68,9 @@ async fn info_for_ns() {
 async fn info_for_db() {
 	let sql = r#"
         DEFINE TABLE TB;
-        DEFINE SCOPE account SESSION 24h;
+        DEFINE ACCESS jwt ON DB TYPE JWT ALGORITHM HS512 KEY 'secret';
+        DEFINE ACCESS record ON DB TYPE RECORD DURATION 24h;
         DEFINE USER user ON DB PASSWORD 'pass';
-        DEFINE TOKEN token ON DB TYPE HS512 VALUE 'secret';
         DEFINE FUNCTION fn::greet() {RETURN "Hello";};
         DEFINE PARAM $param VALUE "foo";
         DEFINE ANALYZER analyzer TOKENIZERS BLANK;
@@ -85,33 +85,7 @@ async fn info_for_db() {
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
-	let output_regex = Regex::new(r"\{ analyzers: \{ analyzer: .* \}, functions: \{ greet: .* \}, params: \{ param: .* \}, scopes: \{ account: .* \}, tables: \{ TB: .* \}, tokens: \{ token: .* \}, users: \{ user: .* \} \}").unwrap();
-	let out_str = out.unwrap().to_string();
-	assert!(
-		output_regex.is_match(&out_str),
-		"Output '{}' doesn't match regex '{}'",
-		out_str,
-		output_regex
-	);
-}
-
-#[tokio::test]
-async fn info_for_scope() {
-	let sql = r#"
-        DEFINE SCOPE account SESSION 24h;
-        DEFINE TOKEN token ON SCOPE account TYPE HS512 VALUE 'secret';
-        INFO FOR SCOPE account;
-    "#;
-	let dbs = new_ds().await.unwrap();
-	let ses = Session::owner().with_ns("ns").with_db("db");
-
-	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
-	assert_eq!(res.len(), 3);
-
-	let out = res.pop().unwrap().output();
-	assert!(out.is_ok(), "Unexpected error: {:?}", out);
-
-	let output_regex = Regex::new(r"\{ tokens: \{ token: .* \} \}").unwrap();
+	let output_regex = Regex::new(r"\{ accesses: \{ jwt: .*, record: .* \}, analyzers: \{ analyzer: .* \}, functions: \{ greet: .* \}, params: \{ param: .* \}, tables: \{ TB: .* \}, users: \{ user: .* \} \}").unwrap();
 	let out_str = out.unwrap().to_string();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -273,8 +247,8 @@ async fn permissions_checks_info_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -312,48 +286,9 @@ async fn permissions_checks_info_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
     ];
-
-	let test_cases = [
-		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
-		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
-		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
-	];
-
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
-	assert!(res.is_ok(), "{}", res.unwrap_err());
-}
-
-#[tokio::test]
-async fn permissions_checks_info_scope() {
-	let scenario = HashMap::from([
-		("prepare", "DEFINE SCOPE scope SESSION 1h"),
-		("test", "INFO FOR SCOPE scope"),
-		("check", "INFO FOR SCOPE scope"),
-	]);
-
-	// Define the expected results for the check statement when the test statement succeeded and when it failed
-	let check_results = [vec!["{ tokens: {  } }"], vec!["{ tokens: {  } }"]];
 
 	let test_cases = [
 		// Root level

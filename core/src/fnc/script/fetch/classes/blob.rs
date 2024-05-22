@@ -26,7 +26,7 @@ fn append_blob_part<'js>(
 	const LINE_ENDING: &[u8] = b"\n";
 
 	if let Some(object) = value.as_object() {
-		if let Some(x) = Class::<Blob>::from_object(object.clone()) {
+		if let Some(x) = Class::<Blob>::from_object(object) {
 			data.extend_from_slice(&x.borrow().data);
 			return Ok(());
 		}
@@ -210,7 +210,7 @@ mod test {
 			const NATIVE_LINE_ENDING: &str = "\n";
 
 			ctx.globals().set("NATIVE_LINE_ENDING",NATIVE_LINE_ENDING).unwrap();
-			ctx.eval::<Promise<()>,_>(r#"(async () => {
+			ctx.eval::<Promise,_>(r#"(async () => {
 				let blob = new Blob();
 				assert.eq(blob.size,0);
 				assert.eq(blob.type,"");
@@ -233,7 +233,7 @@ mod test {
 					assert.mustThrow(() => new Blob("text"));
 				assert.mustThrow(() => new Blob(["text"], {endings: "invalid value"}));
 			})()
-			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
+			"#).catch(&ctx).unwrap().into_future::<()>().await.catch(&ctx).unwrap();
 		})
 		.await
 	}

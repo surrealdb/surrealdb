@@ -12,15 +12,6 @@ use crate::sql::value::Value;
 use channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
-))]
-use std::env;
 use std::fmt::{self, Debug};
 #[cfg(any(
 	feature = "kv-surrealkv",
@@ -30,7 +21,7 @@ use std::fmt::{self, Debug};
 	feature = "kv-tikv",
 	feature = "kv-speedb"
 ))]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -91,7 +82,7 @@ pub struct Context<'a> {
 		feature = "kv-speedb"
 	))]
 	// The temporary directory
-	temporary_directory: Arc<PathBuf>,
+	temporary_directory: Option<Arc<PathBuf>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -133,7 +124,7 @@ impl<'a> Context<'a> {
 			feature = "kv-tikv",
 			feature = "kv-speedb"
 		))]
-		temporary_directory: Arc<PathBuf>,
+		temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<Context<'a>, Error> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -200,7 +191,7 @@ impl<'a> Context<'a> {
 				feature = "kv-tikv",
 				feature = "kv-speedb"
 			))]
-			temporary_directory: Arc::new(env::temp_dir()),
+			temporary_directory: None,
 		}
 	}
 
@@ -371,8 +362,8 @@ impl<'a> Context<'a> {
 		feature = "kv-tikv",
 		feature = "kv-speedb"
 	))]
-	/// Return the location of the temporary directory
-	pub fn temporary_directory(&self) -> &Path {
+	/// Return the location of the temporary directory if any
+	pub fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
 		self.temporary_directory.as_ref()
 	}
 

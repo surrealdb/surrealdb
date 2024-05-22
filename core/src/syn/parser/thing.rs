@@ -277,10 +277,25 @@ impl Parser<'_> {
 					Ok(Id::String(text))
 				}
 			}
-			TokenKind::Number(NumberKind::Decimal | NumberKind::DecimalExponent)
-				if self.flexible_record_id =>
-			{
+			TokenKind::Number(NumberKind::Exponent) if self.flexible_record_id => {
+				let text = self.lexer.string.take().unwrap();
+				if text.bytes().any(|x| !x.is_ascii_alphanumeric()) {
+					unexpected!(self, token.kind, "a identifier");
+				}
+				Ok(Id::String(text))
+			}
+			TokenKind::Number(NumberKind::Decimal) if self.flexible_record_id => {
 				let mut text = self.lexer.string.take().unwrap();
+				text.push('d');
+				text.push('e');
+				text.push('c');
+				Ok(Id::String(text))
+			}
+			TokenKind::Number(NumberKind::DecimalExponent) if self.flexible_record_id => {
+				let mut text = self.lexer.string.take().unwrap();
+				if text.bytes().any(|x| !x.is_ascii_alphanumeric()) {
+					unexpected!(self, token.kind, "a identifier");
+				}
 				text.push('d');
 				text.push('e');
 				text.push('c');
@@ -565,5 +580,7 @@ mod tests {
 		assert_ident_parses_correctly("1ns");
 		assert_ident_parses_correctly("1ns1");
 		assert_ident_parses_correctly("1ns1h");
+		assert_ident_parses_correctly("000e8");
+		assert_ident_parses_correctly("000e8bla");
 	}
 }
