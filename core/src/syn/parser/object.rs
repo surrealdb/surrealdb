@@ -58,8 +58,14 @@ impl Parser<'_> {
 				.await
 				.map(Value::Object);
 		};
-		let type_value = self.next_token_value::<Strand>()?.0;
 
+		// We know it is a strand so check if the type is one of the allowe geometry types.
+		// If it is, there are some which all take roughly the save type of value and produce a
+		// similar output, which is parsed with parse_geometry_after_type
+		//
+		// GeometryCollection however has a different object key for its value, so it is handled
+		// appart from the others.
+		let type_value = self.next_token_value::<Strand>()?.0;
 		match type_value.as_str() {
 			"Point" => {
 				// we matched a type correctly but the field containing the geometry value
@@ -131,6 +137,7 @@ impl Parser<'_> {
 
 				let coord_key = self.parse_object_key()?;
 				if coord_key != "geometries" {
+					expected!(self, t!(":"));
 					// invalid field key, not a Geometry
 					return self
 						.parse_object_from_key(
@@ -147,6 +154,7 @@ impl Parser<'_> {
 
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 
+				// check for an object end, if it doesn't end it is not a geometry.
 				if !self.eat(t!(",")) {
 					self.expect_closing_delimiter(t!("}"), start)?;
 				} else {
@@ -167,6 +175,7 @@ impl Parser<'_> {
 					self.pop_peek();
 				}
 
+				// try to convert to the right value.
 				if let Value::Array(x) = value {
 					// test first to avoid a cloning.
 					if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
@@ -190,11 +199,13 @@ impl Parser<'_> {
 					]))));
 				}
 
+				// Couldn't convert so it is a normal object.
 				Ok(Value::Object(Object(BTreeMap::from([
 					(key, Value::Strand(type_value.into())),
 					(coord_key, value),
 				]))))
 			}
+			// key was not one of the allowed keys so it is a normal object.
 			_ => self
 				.parse_object_from_map(
 					ctx,
@@ -323,16 +334,20 @@ impl Parser<'_> {
 		start: Span,
 		key: String,
 	) -> ParseResult<Value> {
+		// 'geometries' key can only happen in a GeometryCollection, so try to parse that.
 		expected!(self, t!(":"));
 
 		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
 
-		if !self.eat(t!(",")) {
+		// if the object ends here, it is not a geometry.
+		if !self.eat(t!(",")) || self.peek_kind() == t!("}") {
 			self.expect_closing_delimiter(t!("}"), start)?;
 			return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
 		}
 
+		// parse the next objectkey
 		let type_key = self.parse_object_key()?;
+		// it if isn't 'type' this object is not a geometry, so bail.
 		if type_key != "type" {
 			expected!(self, t!(":"));
 			return self
@@ -341,7 +356,7 @@ impl Parser<'_> {
 				.map(Value::Object);
 		}
 		expected!(self, t!(":"));
-
+		// check if the next key is a strand.
 		let (t!("\"") | t!("'")) = self.peek_kind() else {
 			// not the right value also move back to parsing an object.
 			return self
@@ -352,6 +367,7 @@ impl Parser<'_> {
 
 		let type_value = self.next_token_value::<Strand>()?.0;
 		let ate_comma = self.eat(t!(","));
+
 		if type_value == "GeometryCollection" {
 			if self.eat(t!("}")) {
 				if let Value::Array(ref x) = value {
@@ -374,6 +390,9 @@ impl Parser<'_> {
 				}
 			}
 		}
+
+		// Either type value didn't match or gemoetry value didn't match.
+		// Regardless the current object is not a geometry.
 
 		if !ate_comma {
 			self.expect_closing_delimiter(t!("}"), start)?;
