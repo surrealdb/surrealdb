@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::statements::RemoveTokenStatement;
+use crate::sql::statements::RemoveAccessStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Base;
 use crate::sql::Ident;
@@ -12,18 +12,18 @@ use serde::ser::Serialize;
 pub struct Serializer;
 
 impl ser::Serializer for Serializer {
-	type Ok = RemoveTokenStatement;
+	type Ok = RemoveAccessStatement;
 	type Error = Error;
 
-	type SerializeSeq = Impossible<RemoveTokenStatement, Error>;
-	type SerializeTuple = Impossible<RemoveTokenStatement, Error>;
-	type SerializeTupleStruct = Impossible<RemoveTokenStatement, Error>;
-	type SerializeTupleVariant = Impossible<RemoveTokenStatement, Error>;
-	type SerializeMap = Impossible<RemoveTokenStatement, Error>;
-	type SerializeStruct = SerializeRemoveTokenStatement;
-	type SerializeStructVariant = Impossible<RemoveTokenStatement, Error>;
+	type SerializeSeq = Impossible<RemoveAccessStatement, Error>;
+	type SerializeTuple = Impossible<RemoveAccessStatement, Error>;
+	type SerializeTupleStruct = Impossible<RemoveAccessStatement, Error>;
+	type SerializeTupleVariant = Impossible<RemoveAccessStatement, Error>;
+	type SerializeMap = Impossible<RemoveAccessStatement, Error>;
+	type SerializeStruct = SerializeRemoveAccessStatement;
+	type SerializeStructVariant = Impossible<RemoveAccessStatement, Error>;
 
-	const EXPECTED: &'static str = "a struct `RemoveTokenStatement`";
+	const EXPECTED: &'static str = "a struct `RemoveAccessStatement`";
 
 	#[inline]
 	fn serialize_struct(
@@ -31,20 +31,20 @@ impl ser::Serializer for Serializer {
 		_name: &'static str,
 		_len: usize,
 	) -> Result<Self::SerializeStruct, Error> {
-		Ok(SerializeRemoveTokenStatement::default())
+		Ok(SerializeRemoveAccessStatement::default())
 	}
 }
 
 #[derive(Default)]
 #[non_exhaustive]
-pub struct SerializeRemoveTokenStatement {
+pub struct SerializeRemoveAccessStatement {
 	name: Ident,
 	base: Base,
 	if_exists: bool,
 }
 
-impl serde::ser::SerializeStruct for SerializeRemoveTokenStatement {
-	type Ok = RemoveTokenStatement;
+impl serde::ser::SerializeStruct for SerializeRemoveAccessStatement {
+	type Ok = RemoveAccessStatement;
 	type Error = Error;
 
 	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Error>
@@ -63,7 +63,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveTokenStatement {
 			}
 			key => {
 				return Err(Error::custom(format!(
-					"unexpected field `RemoveTokenStatement::{key}`"
+					"unexpected field `RemoveAccessStatement::{key}`"
 				)));
 			}
 		}
@@ -71,7 +71,7 @@ impl serde::ser::SerializeStruct for SerializeRemoveTokenStatement {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		Ok(RemoveTokenStatement {
+		Ok(RemoveAccessStatement {
 			name: self.name,
 			base: self.base,
 			if_exists: self.if_exists,
@@ -85,8 +85,8 @@ mod tests {
 
 	#[test]
 	fn default() {
-		let stmt = RemoveTokenStatement::default();
-		let value: RemoveTokenStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		let stmt = RemoveAccessStatement::default();
+		let value: RemoveAccessStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 }

@@ -1,26 +1,30 @@
 use reblessive::Stk;
 
+use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
 use crate::{
 	sql::{
+		access_type,
+		base::Base,
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
-			DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-			DefineNamespaceStatement, DefineParamStatement, DefineScopeStatement, DefineStatement,
-			DefineTableStatement, DefineTokenStatement, DefineUserStatement,
+			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+			DefineTableStatement, DefineUserStatement,
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType, Values,
+		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
+		Values,
 	},
 	syn::{
 		parser::{
 			mac::{expected, unexpected},
 			ParseResult, Parser,
 		},
-		token::{t, TokenKind},
+		token::{t, Keyword, TokenKind},
 	},
 };
 
@@ -31,8 +35,8 @@ impl Parser<'_> {
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
-			t!("TOKEN") => self.parse_define_token().map(DefineStatement::Token),
-			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Scope),
+			t!("TOKEN") => self.parse_define_token().map(DefineStatement::Access),
+			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Access),
 			t!("PARAM") => self.parse_define_param(ctx).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(ctx).await.map(DefineStatement::Table),
 			t!("EVENT") => {
@@ -43,6 +47,7 @@ impl Parser<'_> {
 			}
 			t!("INDEX") => self.parse_define_index().map(DefineStatement::Index),
 			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
+			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			x => unexpected!(self, x, "a define statement keyword"),
 		}
 	}
@@ -211,7 +216,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_token(&mut self) -> ParseResult<DefineTokenStatement> {
+	pub async fn parse_define_access(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAccessStatement> {
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -221,9 +229,10 @@ impl Parser<'_> {
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
-		let base = self.parse_base(true)?;
+		// TODO: Parse base should no longer take an argument.
+		let base = self.parse_base(false)?;
 
-		let mut res = DefineTokenStatement {
+		let mut res = DefineAccessStatement {
 			name,
 			base,
 			if_not_exists,
@@ -236,17 +245,49 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
-				t!("VALUE") => {
-					self.pop_peek();
-					res.code = self.next_token_value::<Strand>()?.0;
-				}
 				t!("TYPE") => {
 					self.pop_peek();
-					match self.next().kind {
-						TokenKind::Algorithm(x) => {
-							res.kind = x;
+					match self.peek_kind() {
+						t!("JWT") => {
+							self.pop_peek();
+							res.kind = AccessType::Jwt(self.parse_jwt(None)?);
 						}
-						x => unexpected!(self, x, "a token algorithm"),
+						t!("RECORD") => {
+							self.pop_peek();
+							let mut ac = access_type::RecordAccess {
+								..Default::default()
+							};
+							loop {
+								match self.peek_kind() {
+									t!("DURATION") => {
+										self.pop_peek();
+										ac.duration = Some(self.next_token_value()?);
+										// By default, token duration matches session duration
+										// The token duration can be modified in the WITH JWT clause
+										if let Some(ref mut iss) = ac.jwt.issue {
+											iss.duration = ac.duration;
+										}
+									}
+									t!("SIGNUP") => {
+										self.pop_peek();
+										ac.signup =
+											Some(stk.run(|stk| self.parse_value(stk)).await?);
+									}
+									t!("SIGNIN") => {
+										self.pop_peek();
+										ac.signin =
+											Some(stk.run(|stk| self.parse_value(stk)).await?);
+									}
+									_ => break,
+								}
+							}
+							if self.eat(t!("WITH")) {
+								expected!(self, t!("JWT"));
+								ac.jwt = self.parse_jwt(Some(AccessType::Record(ac.clone())))?;
+							}
+							res.kind = AccessType::Record(ac);
+						}
+						_ => break,
 					}
 				}
 				_ => break,
@@ -256,7 +297,8 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_scope(&mut self, stk: &mut Stk) -> ParseResult<DefineScopeStatement> {
+	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
+	pub fn parse_define_token(&mut self) -> ParseResult<DefineAccessStatement> {
 		let if_not_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -265,10 +307,127 @@ impl Parser<'_> {
 			false
 		};
 		let name = self.next_token_value()?;
-		let mut res = DefineScopeStatement {
+		expected!(self, t!("ON"));
+		let base = self.parse_base(true)?;
+
+		let mut res = DefineAccessStatement {
 			name,
-			code: DefineScopeStatement::random_code(),
+			base: base.clone(),
 			if_not_exists,
+			..Default::default()
+		};
+
+		match base {
+			// DEFINE TOKEN ON SCOPE is now record access with JWT
+			Base::Sc(_) => {
+				res.base = Base::Db;
+				let mut ac = access_type::RecordAccess {
+					..Default::default()
+				};
+				ac.jwt.issue = None;
+				loop {
+					match self.peek_kind() {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = Some(self.next_token_value()?);
+						}
+						// For backward compatibility, value is always expected after type
+						// This matches the display format of the legacy statement
+						t!("TYPE") => {
+							self.pop_peek();
+							match self.next().kind {
+								TokenKind::Algorithm(alg) => {
+									expected!(self, t!("VALUE"));
+									ac.jwt.verify = access_type::JwtAccessVerify::Key(
+										access_type::JwtAccessVerifyKey {
+											alg,
+											key: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
+								TokenKind::Keyword(Keyword::Jwks) => {
+									expected!(self, t!("VALUE"));
+									ac.jwt.verify = access_type::JwtAccessVerify::Jwks(
+										access_type::JwtAccessVerifyJwks {
+											url: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
+								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
+							}
+						}
+						_ => break,
+					}
+				}
+				res.kind = AccessType::Record(ac);
+			}
+			// DEFINE TOKEN anywhere else is now JWT access
+			_ => {
+				let mut ac = access_type::JwtAccess {
+					issue: None,
+					..Default::default()
+				};
+				loop {
+					match self.peek_kind() {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = Some(self.next_token_value()?);
+						}
+						// For backward compatibility, value is always expected after type
+						// This matches the display format of the legacy statement
+						t!("TYPE") => {
+							self.pop_peek();
+							match self.next().kind {
+								TokenKind::Algorithm(alg) => {
+									expected!(self, t!("VALUE"));
+									ac.verify = access_type::JwtAccessVerify::Key(
+										access_type::JwtAccessVerifyKey {
+											alg,
+											key: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
+								TokenKind::Keyword(Keyword::Jwks) => {
+									expected!(self, t!("VALUE"));
+									ac.verify = access_type::JwtAccessVerify::Jwks(
+										access_type::JwtAccessVerifyJwks {
+											url: self.next_token_value::<Strand>()?.0,
+										},
+									);
+								}
+								x => unexpected!(self, x, "a token algorithm or 'JWKS'"),
+							}
+						}
+						_ => break,
+					}
+				}
+				res.kind = AccessType::Jwt(ac);
+			}
+		}
+
+		Ok(res)
+	}
+
+	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
+	pub async fn parse_define_scope(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAccessStatement> {
+		let if_not_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		let name = self.next_token_value()?;
+		let mut res = DefineAccessStatement {
+			name,
+			base: Base::Db,
+			if_not_exists,
+			..Default::default()
+		};
+		let mut ac = access_type::RecordAccess {
 			..Default::default()
 		};
 
@@ -280,19 +439,25 @@ impl Parser<'_> {
 				}
 				t!("SESSION") => {
 					self.pop_peek();
-					res.session = Some(self.next_token_value()?);
+					ac.duration = Some(self.next_token_value()?);
+					// By default, token duration matches session duration.
+					if let Some(ref mut iss) = ac.jwt.issue {
+						iss.duration = ac.duration;
+					}
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
-					res.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signup = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				t!("SIGNIN") => {
 					self.pop_peek();
-					res.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
+					ac.signin = Some(stk.run(|stk| self.parse_value(stk)).await?);
 				}
 				_ => break,
 			}
 		}
+
+		res.kind = AccessType::Record(ac);
 
 		Ok(res)
 	}
@@ -911,5 +1076,111 @@ impl Parser<'_> {
 			names.push(self.next_token_value()?);
 		}
 		Ok(Kind::Record(names))
+	}
+
+	pub fn parse_jwt(&mut self, ac: Option<AccessType>) -> ParseResult<access_type::JwtAccess> {
+		let mut res = access_type::JwtAccess {
+			// By default, a JWT access method is only used to verify.
+			issue: None,
+			..Default::default()
+		};
+
+		let mut iss = access_type::JwtAccessIssue {
+			..Default::default()
+		};
+
+		// If an access method was passed, inherit any relevant defaults.
+		// This will become a match statement whenever more access methods are available.
+		if let Some(AccessType::Record(ac)) = ac {
+			// By default, token duration is inherited from session duration in record access.
+			iss.duration = ac.duration;
+		}
+
+		match self.peek_kind() {
+			t!("ALGORITHM") => {
+				self.pop_peek();
+				match self.next().kind {
+					TokenKind::Algorithm(alg) => match self.next().kind {
+						t!("KEY") => {
+							let key = self.next_token_value::<Strand>()?.0;
+							res.verify = access_type::JwtAccessVerify::Key(
+								access_type::JwtAccessVerifyKey {
+									alg,
+									key: key.to_owned(),
+								},
+							);
+
+							// Currently, issuer and verifier must use the same algorithm.
+							iss.alg = alg;
+
+							// If the algorithm is symmetric, the issuer and verifier keys are the same.
+							// For asymmetric algorithms, the key needs to be explicitly defined.
+							if alg.is_symmetric() {
+								iss.key = key;
+								// Since all the issuer data is known, it can already be assigned.
+								// Cloning allows updating the original with any explicit issuer data.
+								res.issue = Some(iss.clone());
+							}
+						}
+						x => unexpected!(self, x, "a key"),
+					},
+					x => unexpected!(self, x, "a valid algorithm"),
+				}
+			}
+			t!("URL") => {
+				self.pop_peek();
+				let url = self.next_token_value::<Strand>()?.0;
+				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
+					url,
+				});
+			}
+			x => unexpected!(self, x, "`ALGORITHM`, or `URL`"),
+		}
+
+		if self.eat(t!("WITH")) {
+			expected!(self, t!("ISSUER"));
+			loop {
+				match self.peek_kind() {
+					t!("ALGORITHM") => {
+						self.pop_peek();
+						match self.next().kind {
+							TokenKind::Algorithm(alg) => {
+								// If an algorithm is already defined, a different value is not expected.
+								if let JwtAccessVerify::Key(ref ver) = res.verify {
+									if alg != ver.alg {
+										unexpected!(
+											self,
+											t!("ALGORITHM"),
+											"a compatible algorithm or no algorithm"
+										);
+									}
+								}
+								iss.alg = alg;
+							}
+							x => unexpected!(self, x, "a valid algorithm"),
+						}
+					}
+					t!("KEY") => {
+						self.pop_peek();
+						let key = self.next_token_value::<Strand>()?.0;
+						// If the algorithm is symmetric and a key is already defined, a different key is not expected.
+						if let JwtAccessVerify::Key(ref ver) = res.verify {
+							if ver.alg.is_symmetric() && key != ver.key {
+								unexpected!(self, t!("KEY"), "a symmetric key or no key");
+							}
+						}
+						iss.key = key;
+					}
+					t!("DURATION") => {
+						self.pop_peek();
+						iss.duration = Some(self.next_token_value()?);
+					}
+					_ => break,
+				}
+			}
+			res.issue = Some(iss);
+		}
+
+		Ok(res)
 	}
 }
