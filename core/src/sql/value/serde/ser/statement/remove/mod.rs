@@ -1,3 +1,4 @@
+mod access;
 mod analyzer;
 mod database;
 mod event;
@@ -6,9 +7,7 @@ mod function;
 mod index;
 mod namespace;
 mod param;
-mod scope;
 mod table;
-mod token;
 mod user;
 
 use crate::err::Error;
@@ -59,8 +58,7 @@ impl ser::Serializer for Serializer {
 			"Analyzer" => {
 				Ok(RemoveStatement::Analyzer(value.serialize(analyzer::Serializer.wrap())?))
 			}
-			"Token" => Ok(RemoveStatement::Token(value.serialize(token::Serializer.wrap())?)),
-			"Scope" => Ok(RemoveStatement::Scope(value.serialize(scope::Serializer.wrap())?)),
+			"Access" => Ok(RemoveStatement::Access(value.serialize(access::Serializer.wrap())?)),
 			"Param" => Ok(RemoveStatement::Param(value.serialize(param::Serializer.wrap())?)),
 			"Table" => Ok(RemoveStatement::Table(value.serialize(table::Serializer.wrap())?)),
 			"Event" => Ok(RemoveStatement::Event(value.serialize(event::Serializer.wrap())?)),
@@ -108,15 +106,8 @@ mod tests {
 	}
 
 	#[test]
-	fn token() {
-		let stmt = RemoveStatement::Token(Default::default());
-		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
-		assert_eq!(stmt, serialized);
-	}
-
-	#[test]
-	fn scope() {
-		let stmt = RemoveStatement::Scope(Default::default());
+	fn access() {
+		let stmt = RemoveStatement::Access(Default::default());
 		let serialized = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(stmt, serialized);
 	}

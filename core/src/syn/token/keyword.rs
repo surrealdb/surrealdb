@@ -24,7 +24,9 @@ macro_rules! keyword {
 }
 
 keyword! {
+	Access => "ACCESS",
 	After => "AFTER",
+	Algorithm => "ALGORITHM",
 	All => "ALL",
 	Analyze => "ANALYZE",
 	Analyzer => "ANALYZER",
@@ -93,6 +95,9 @@ keyword! {
 	Into => "INTO",
 	If => "IF",
 	Is => "IS",
+	Issuer => "ISSUER",
+	Jwt => "JWT",
+	Jwks => "JWKS",
 	Key => "KEY",
 	KeepPrunedConnections => "KEEP_PRUNED_CONNECTIONS",
 	Kill => "KILL",
@@ -169,6 +174,7 @@ keyword! {
 	Unset => "UNSET",
 	Update => "UPDATE",
 	Uppercase => "UPPERCASE",
+	Url => "URL",
 	Use => "USE",
 	User => "USER",
 	Value => "VALUE",
