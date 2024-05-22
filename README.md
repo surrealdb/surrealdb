@@ -172,7 +172,7 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
 	&nbsp;
     <a href="https://surrealdb.com/docs/integration/sdks/javascript"><img width=60 title="Deno" src="https://raw.githubusercontent.com/surrealdb/icons/main/deno.svg" /></a>
 	&nbsp;
-	<a href="https://surrealdb.com/docs/integration/sdks/python"><img width=60 title="Deno" src="https://raw.githubusercontent.com/surrealdb/icons/main/python.svg" /></a>
+	<a href="https://surrealdb.com/docs/integration/sdks/python"><img width=60 title="Python" src="https://raw.githubusercontent.com/surrealdb/icons/main/python.svg" /></a>
 	&nbsp;
     <a href="https://surrealdb.com/docs/integration/sdks/golang"><img width=60 title="Golang" src="https://raw.githubusercontent.com/surrealdb/icons/main/golang.svg" /></a>
 	&nbsp;
