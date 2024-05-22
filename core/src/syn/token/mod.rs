@@ -365,8 +365,8 @@ impl TokenKind {
 		)
 	}
 
-	fn algorithm_as_str(algo: Algorithm) -> &'static str {
-		match algo {
+	fn algorithm_as_str(alg: Algorithm) -> &'static str {
+		match alg {
 			Algorithm::EdDSA => "EDDSA",
 			Algorithm::Es256 => "ES256",
 			Algorithm::Es384 => "ES384",
@@ -380,7 +380,6 @@ impl TokenKind {
 			Algorithm::Rs256 => "RS256",
 			Algorithm::Rs384 => "RS384",
 			Algorithm::Rs512 => "RS512",
-			Algorithm::Jwks => "JWKS",
 		}
 	}
 

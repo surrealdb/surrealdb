@@ -2,6 +2,7 @@ use super::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
+use crate::sql::Value;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -150,6 +151,54 @@ impl TryFrom<Number> for Decimal {
 			},
 			Number::Decimal(x) => Ok(x),
 		}
+	}
+}
+
+impl TryFrom<&Number> for f64 {
+	type Error = Error;
+
+	fn try_from(n: &Number) -> Result<Self, Self::Error> {
+		Ok(n.to_float())
+	}
+}
+
+impl TryFrom<&Number> for f32 {
+	type Error = Error;
+
+	fn try_from(n: &Number) -> Result<Self, Self::Error> {
+		n.to_float().to_f32().ok_or_else(|| Error::ConvertTo {
+			from: Value::Number(n.clone()),
+			into: "f32".to_string(),
+		})
+	}
+}
+
+impl TryFrom<&Number> for i64 {
+	type Error = Error;
+
+	fn try_from(n: &Number) -> Result<Self, Self::Error> {
+		Ok(n.to_int())
+	}
+}
+impl TryFrom<&Number> for i32 {
+	type Error = Error;
+
+	fn try_from(n: &Number) -> Result<Self, Self::Error> {
+		n.to_int().to_i32().ok_or_else(|| Error::ConvertTo {
+			from: Value::Number(n.clone()),
+			into: "i32".to_string(),
+		})
+	}
+}
+
+impl TryFrom<&Number> for i16 {
+	type Error = Error;
+
+	fn try_from(n: &Number) -> Result<Self, Self::Error> {
+		n.to_int().to_i16().ok_or_else(|| Error::ConvertTo {
+			from: Value::Number(n.clone()),
+			into: "i16".to_string(),
+		})
 	}
 }
 

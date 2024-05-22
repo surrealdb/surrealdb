@@ -1,13 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-file",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
-))]
-use std::env;
 use std::fmt;
 #[cfg(any(
 	feature = "kv-surrealkv",
@@ -110,7 +101,7 @@ pub struct Datastore {
 		feature = "kv-speedb"
 	))]
 	// The temporary directory
-	temporary_directory: Arc<PathBuf>,
+	temporary_directory: Option<Arc<PathBuf>>,
 	pub(crate) lq_cf_store: Arc<RwLock<LiveQueryTracker>>,
 }
 
@@ -392,7 +383,7 @@ impl Datastore {
 				feature = "kv-tikv",
 				feature = "kv-speedb"
 			))]
-			temporary_directory: Arc::new(env::temp_dir()),
+			temporary_directory: None,
 			lq_cf_store: Arc::new(RwLock::new(LiveQueryTracker::new())),
 		})
 	}
@@ -454,8 +445,8 @@ impl Datastore {
 		feature = "kv-tikv",
 		feature = "kv-speedb"
 	))]
-	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
-		self.temporary_directory = Arc::new(path.unwrap_or_else(env::temp_dir));
+	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
+		self.temporary_directory = Some(Arc::new(path));
 		self
 	}
 
@@ -1320,7 +1311,7 @@ impl Datastore {
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
-	/// For example, this is used when processing a SCOPE SIGNUP or SCOPE
+	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
 	///
 	/// ```rust,no_run

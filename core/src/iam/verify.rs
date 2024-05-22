@@ -4,94 +4,70 @@ use crate::err::Error;
 use crate::iam::jwks;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::sql::access_type::{AccessType, JwtAccessVerify};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
 use crate::syn;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
-use jsonwebtoken::{decode, DecodingKey, Header, Validation};
+use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
 use std::str::{self, FromStr};
 use std::sync::Arc;
 
-async fn config(
-	_kvs: &Datastore,
-	de_kind: Algorithm,
-	de_code: String,
-	_token_header: Header,
-) -> Result<(DecodingKey, Validation), Error> {
-	if de_kind == Algorithm::Jwks {
-		#[cfg(not(feature = "jwks"))]
-		{
-			warn!("Failed to verify a token defined as JWKS when the feature is not enabled");
-			Err(Error::InvalidAuth)
-		}
-		#[cfg(feature = "jwks")]
-		// The key identifier header must be present
-		if let Some(kid) = _token_header.kid {
-			jwks::config(_kvs, &kid, &de_code, _token_header.alg).await
-		} else {
-			Err(Error::MissingTokenHeader("kid".to_string()))
-		}
-	} else {
-		config_alg(de_kind, de_code)
-	}
-}
-
-fn config_alg(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
-	match algo {
+fn config(alg: Algorithm, key: String) -> Result<(DecodingKey, Validation), Error> {
+	match alg {
 		Algorithm::Hs256 => Ok((
-			DecodingKey::from_secret(code.as_ref()),
+			DecodingKey::from_secret(key.as_ref()),
 			Validation::new(jsonwebtoken::Algorithm::HS256),
 		)),
 		Algorithm::Hs384 => Ok((
-			DecodingKey::from_secret(code.as_ref()),
+			DecodingKey::from_secret(key.as_ref()),
 			Validation::new(jsonwebtoken::Algorithm::HS384),
 		)),
 		Algorithm::Hs512 => Ok((
-			DecodingKey::from_secret(code.as_ref()),
+			DecodingKey::from_secret(key.as_ref()),
 			Validation::new(jsonwebtoken::Algorithm::HS512),
 		)),
 		Algorithm::EdDSA => Ok((
-			DecodingKey::from_ed_pem(code.as_ref())?,
+			DecodingKey::from_ed_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::EdDSA),
 		)),
 		Algorithm::Es256 => Ok((
-			DecodingKey::from_ec_pem(code.as_ref())?,
+			DecodingKey::from_ec_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::ES256),
 		)),
 		Algorithm::Es384 => Ok((
-			DecodingKey::from_ec_pem(code.as_ref())?,
+			DecodingKey::from_ec_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::ES384),
 		)),
 		Algorithm::Es512 => Ok((
-			DecodingKey::from_ec_pem(code.as_ref())?,
+			DecodingKey::from_ec_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::ES384),
 		)),
 		Algorithm::Ps256 => Ok((
-			DecodingKey::from_rsa_pem(code.as_ref())?,
+			DecodingKey::from_rsa_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::PS256),
 		)),
 		Algorithm::Ps384 => Ok((
-			DecodingKey::from_rsa_pem(code.as_ref())?,
+			DecodingKey::from_rsa_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::PS384),
 		)),
 		Algorithm::Ps512 => Ok((
-			DecodingKey::from_rsa_pem(code.as_ref())?,
+			DecodingKey::from_rsa_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::PS512),
 		)),
 		Algorithm::Rs256 => Ok((
-			DecodingKey::from_rsa_pem(code.as_ref())?,
+			DecodingKey::from_rsa_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS256),
 		)),
 		Algorithm::Rs384 => Ok((
-			DecodingKey::from_rsa_pem(code.as_ref())?,
+			DecodingKey::from_rsa_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS384),
 		)),
 		Algorithm::Rs512 => Ok((
-			DecodingKey::from_rsa_pem(code.as_ref())?,
+			DecodingKey::from_rsa_pem(key.as_ref())?,
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
-		Algorithm::Jwks => Err(Error::InvalidAuth), // We should never get here
 	}
 }
 
@@ -215,96 +191,87 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	}
 	// Check the token authentication claims
 	match token_data.claims {
-		// Check if this is scope token authentication
+		// Check if this is record access
 		Claims {
 			ns: Some(ns),
 			db: Some(db),
-			sc: Some(sc),
-			tk: Some(tk),
-			id,
-			..
-		} => {
-			// Log the decoded authentication claims
-			trace!("Authenticating to scope `{}` with token `{}`", sc, tk);
-			// Create a new readonly transaction
-			let mut tx = kvs.transaction(Read, Optimistic).await?;
-			// Parse the record id
-			let id = match id {
-				Some(id) => syn::thing(&id)?.into(),
-				None => Value::None,
-			};
-			// Get the scope token
-			let de = tx.get_sc_token(&ns, &db, &sc, &tk).await?;
-			// Obtain the configuration with which to verify the token
-			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
-			// Verify the token
-			decode::<Claims>(token, &cf.0, &cf.1)?;
-			// Log the success
-			debug!("Authenticated to scope `{}` with token `{}`", sc, tk);
-			// Set the session
-			session.sd = Some(id);
-			session.tk = Some(value);
-			session.ns = Some(ns.to_owned());
-			session.db = Some(db.to_owned());
-			session.sc = Some(sc.to_owned());
-			session.exp = token_data.claims.exp;
-			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.to_string(),
-				Default::default(),
-				Level::Scope(ns, db, sc),
-			)));
-			Ok(())
-		}
-		// Check if this is scope authentication
-		Claims {
-			ns: Some(ns),
-			db: Some(db),
-			sc: Some(sc),
+			ac: Some(ac),
 			id: Some(id),
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!("Authenticating to scope `{}`", sc);
+			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
 			let id = syn::thing(&id)?;
-			// Get the scope
-			let de = tx.get_sc(&ns, &db, &sc).await?;
-			let cf = config_alg(Algorithm::Hs512, de.code)?;
+			// Get the database access method
+			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			// Obtain the configuration to verify the token based on the access method
+			let cf = match de.kind {
+				AccessType::Record(ac) => match ac.jwt.verify {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key),
+					#[cfg(feature = "jwks")]
+					JwtAccessVerify::Jwks(jwks) => {
+						if let Some(kid) = token_data.header.kid {
+							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+						} else {
+							Err(Error::MissingTokenHeader("kid".to_string()))
+						}
+					}
+					#[cfg(not(feature = "jwks"))]
+					_ => return Err(Error::AccessMethodMismatch),
+				},
+				_ => return Err(Error::AccessMethodMismatch),
+			}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
-			debug!("Authenticated to scope `{}`", sc);
+			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.sc = Some(sc.to_owned());
-			session.sd = Some(Value::from(id.to_owned()));
+			session.ac = Some(ac.to_owned());
+			session.rd = Some(Value::from(id.to_owned()));
 			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				Default::default(),
-				Level::Scope(ns, db, sc),
+				Level::Record(ns, db, id.to_string()),
 			)));
 			Ok(())
 		}
-		// Check if this is database token authentication
+		// Check if this is database access
 		Claims {
 			ns: Some(ns),
 			db: Some(db),
-			tk: Some(tk),
+			ac: Some(ac),
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!("Authenticating to database `{}` with token `{}`", db, tk);
+			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
-			// Get the database token
-			let de = tx.get_db_token(&ns, &db, &tk).await?;
-			// Obtain the configuration with which to verify the token
-			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
+			// Get the database access method
+			let de = tx.get_db_access(&ns, &db, &ac).await?;
+			// Obtain the configuration to verify the token based on the access method
+			let cf = match de.kind {
+				AccessType::Jwt(ac) => match ac.verify {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key),
+					#[cfg(feature = "jwks")]
+					JwtAccessVerify::Jwks(jwks) => {
+						if let Some(kid) = token_data.header.kid {
+							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+						} else {
+							Err(Error::MissingTokenHeader("kid".to_string()))
+						}
+					}
+					#[cfg(not(feature = "jwks"))]
+					_ => return Err(Error::AccessMethodMismatch),
+				},
+				_ => return Err(Error::AccessMethodMismatch),
+			}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -320,11 +287,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					.collect::<Result<Vec<_>, _>>()?,
 			};
 			// Log the success
-			debug!("Authenticated to database `{}` with token `{}`", db, tk);
+			debug!("Authenticated to database `{}` with access method `{}`", db, ac);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
+			session.ac = Some(ac.to_owned());
 			session.exp = token_data.claims.exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
@@ -333,7 +301,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			)));
 			Ok(())
 		}
-		// Check if this is database authentication
+		// Check if this is database authentication with user credentials
 		Claims {
 			ns: Some(ns),
 			db: Some(db),
@@ -349,7 +317,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to database `{db}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config_alg(Algorithm::Hs512, de.code)?;
+			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -366,20 +334,35 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			)));
 			Ok(())
 		}
-		// Check if this is namespace token authentication
+		// Check if this is namespace access
 		Claims {
 			ns: Some(ns),
-			tk: Some(tk),
+			ac: Some(ac),
 			..
 		} => {
 			// Log the decoded authentication claims
-			trace!("Authenticating to namespace `{}` with token `{}`", ns, tk);
+			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(Read, Optimistic).await?;
-			// Get the namespace token
-			let de = tx.get_ns_token(&ns, &tk).await?;
-			// Obtain the configuration with which to verify the token
-			let cf = config(kvs, de.kind, de.code, token_data.header).await?;
+			// Get the namespace access method
+			let de = tx.get_ns_access(&ns, &ac).await?;
+			// Obtain the configuration to verify the token based on the access method
+			let cf = match de.kind {
+				AccessType::Jwt(ac) => match ac.verify {
+					JwtAccessVerify::Key(key) => config(key.alg, key.key),
+					#[cfg(feature = "jwks")]
+					JwtAccessVerify::Jwks(jwks) => {
+						if let Some(kid) = token_data.header.kid {
+							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+						} else {
+							Err(Error::MissingTokenHeader("kid".to_string()))
+						}
+					}
+					#[cfg(not(feature = "jwks"))]
+					_ => return Err(Error::AccessMethodMismatch),
+				},
+				_ => return Err(Error::AccessMethodMismatch),
+			}?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Parse the roles
@@ -395,16 +378,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					.collect::<Result<Vec<_>, _>>()?,
 			};
 			// Log the success
-			trace!("Authenticated to namespace `{}` with token `{}`", ns, tk);
+			trace!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
+			session.ac = Some(ac.to_owned());
 			session.exp = token_data.claims.exp;
 			session.au =
 				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
 			Ok(())
 		}
-		// Check if this is namespace authentication
+		// Check if this is namespace authentication with user credentials
 		Claims {
 			ns: Some(ns),
 			id: Some(id),
@@ -419,7 +403,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to namespace `{ns}`: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config_alg(Algorithm::Hs512, de.code)?;
+			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -435,7 +419,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			)));
 			Ok(())
 		}
-		// Check if this is root level authentication
+		// Check if this is root authentication with user credentials
 		Claims {
 			id: Some(id),
 			..
@@ -449,7 +433,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				trace!("Error while authenticating to root: {e}");
 				Error::InvalidAuth
 			})?;
-			let cf = config_alg(Algorithm::Hs512, de.code)?;
+			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(token, &cf.0, &cf.1)?;
 			// Log the success
@@ -814,7 +798,7 @@ mod tests {
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-			tk: Some("token".to_string()),
+			ac: Some("token".to_string()),
 			ns: Some("test".to_string()),
 			..Claims::default()
 		};
@@ -822,7 +806,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE TOKEN token ON NS TYPE HS512 VALUE '{secret}'").as_str(),
+			format!("DEFINE ACCESS token ON NS TYPE JWT ALGORITHM HS512 KEY '{secret}'").as_str(),
 			&sess,
 			None,
 		)
@@ -921,7 +905,7 @@ mod tests {
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-			tk: Some("token".to_string()),
+			ac: Some("token".to_string()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
 			..Claims::default()
@@ -930,7 +914,8 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE TOKEN token ON DB TYPE HS512 VALUE '{secret}'").as_str(),
+			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}'")
+				.as_str(),
 			&sess,
 			None,
 		)
@@ -1023,7 +1008,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn test_token_scope() {
+	async fn test_token_db_record() {
 		let secret = "jwt_secret";
 		let key = EncodingKey::from_secret(secret.as_ref());
 		let claims = Claims {
@@ -1031,17 +1016,25 @@ mod tests {
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-			tk: Some("token".to_string()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
-			sc: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			id: Some("user:test".to_string()),
 			..Claims::default()
 		};
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE TOKEN token ON SCOPE test TYPE HS512 VALUE '{secret}';").as_str(),
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY '{secret}';
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
 			&sess,
 			None,
 		)
@@ -1050,7 +1043,7 @@ mod tests {
 
 		//
 		// Test without roles defined
-		// Roles should be ignored in scope authentication
+		// Roles should be ignored in record access
 		//
 		{
 			// Prepare the claims object
@@ -1065,9 +1058,9 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
-			assert!(sess.au.is_scope());
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
+			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
@@ -1078,7 +1071,7 @@ mod tests {
 
 		//
 		// Test with roles defined
-		// Roles should be ignored in scope authentication
+		// Roles should be ignored in record access
 		//
 		{
 			// Prepare the claims object
@@ -1093,9 +1086,9 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
-			assert!(sess.au.is_scope());
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
+			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
@@ -1121,12 +1114,12 @@ mod tests {
 		}
 
 		//
-		// Test with valid token invalid sc
+		// Test with valid token invalid access method
 		//
 		{
 			// Prepare the claims object
 			let mut claims = claims.clone();
-			claims.sc = Some("invalid".to_string());
+			claims.ac = Some("invalid".to_string());
 			// Create the token
 			let enc = encode(&HEADER, &claims, &key).unwrap();
 			// Signin with the token
@@ -1156,7 +1149,7 @@ mod tests {
 		// Test with generic user identifier
 		//
 		{
-			let resource_id = "user:`2k9qnabxuxh8k4d5gfto`".to_string();
+			let resource_id = "user:⟨2k9qnabxuxh8k4d5gfto⟩".to_string();
 			// Prepare the claims object
 			let mut claims = claims.clone();
 			claims.id = Some(resource_id.clone());
@@ -1169,11 +1162,11 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
-			assert!(sess.au.is_scope());
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), resource_id);
+			assert!(sess.au.is_record());
 			let user_id = syn::thing(&resource_id).unwrap();
-			assert_eq!(sess.sd, Some(Value::from(user_id)));
+			assert_eq!(sess.rd, Some(Value::from(user_id)));
 		}
 
 		//
@@ -1195,11 +1188,11 @@ mod tests {
 				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 				assert_eq!(sess.ns, Some("test".to_string()));
 				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.sc, Some("test".to_string()));
-				assert_eq!(sess.au.id(), "token");
-				assert!(sess.au.is_scope());
+				assert_eq!(sess.ac, Some("token".to_string()));
+				assert_eq!(sess.au.id(), resource_id);
+				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.sd, Some(Value::from(user_id)));
+				assert_eq!(sess.rd, Some(Value::from(user_id)));
 			}
 		}
 
@@ -1222,11 +1215,11 @@ mod tests {
 				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 				assert_eq!(sess.ns, Some("test".to_string()));
 				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.sc, Some("test".to_string()));
-				assert_eq!(sess.au.id(), "token");
-				assert!(sess.au.is_scope());
+				assert_eq!(sess.ac, Some("token".to_string()));
+				assert_eq!(sess.au.id(), resource_id);
+				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.sd, Some(Value::from(user_id)));
+				assert_eq!(sess.rd, Some(Value::from(user_id)));
 			}
 		}
 
@@ -1250,11 +1243,11 @@ mod tests {
 				assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 				assert_eq!(sess.ns, Some("test".to_string()));
 				assert_eq!(sess.db, Some("test".to_string()));
-				assert_eq!(sess.sc, Some("test".to_string()));
-				assert_eq!(sess.au.id(), "token");
-				assert!(sess.au.is_scope());
+				assert_eq!(sess.ac, Some("token".to_string()));
+				assert_eq!(sess.au.id(), resource_id);
+				assert!(sess.au.is_record());
 				let user_id = syn::thing(&resource_id).unwrap();
-				assert_eq!(sess.sd, Some(Value::from(user_id)));
+				assert_eq!(sess.rd, Some(Value::from(user_id)));
 			}
 		}
 
@@ -1277,16 +1270,16 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
-			assert!(sess.au.is_scope());
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), resource_id);
+			assert!(sess.au.is_record());
 			let user_id = syn::thing(&resource_id).unwrap();
-			assert_eq!(sess.sd, Some(Value::from(user_id)));
+			assert_eq!(sess.rd, Some(Value::from(user_id)));
 		}
 	}
 
 	#[tokio::test]
-	async fn test_token_scope_custom_claims() {
+	async fn test_token_db_record_custom_claims() {
 		use std::collections::HashMap;
 
 		let secret = "jwt_secret";
@@ -1295,7 +1288,15 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE TOKEN token ON SCOPE test TYPE HS512 VALUE '{secret}';").as_str(),
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY '{secret}';
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
 			&sess,
 			None,
 		)
@@ -1315,10 +1316,10 @@ mod tests {
 					"iat": {now},
 					"nbf": {now},
 					"exp": {later},
-					"tk": "token",
 					"ns": "test",
 					"db": "test",
-					"sc": "test",
+					"ac": "token",
+					"id": "user:test",
 
 					"string_claim": "test",
 					"bool_claim": true,
@@ -1351,9 +1352,9 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
-			assert!(sess.au.is_scope());
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
+			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
@@ -1387,7 +1388,7 @@ mod tests {
 
 	#[cfg(feature = "jwks")]
 	#[tokio::test]
-	async fn test_token_scope_jwks() {
+	async fn test_token_db_record_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
@@ -1448,8 +1449,15 @@ mod tests {
 
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE TOKEN token ON SCOPE test TYPE JWKS VALUE '{server_url}/{jwks_path}';")
-				.as_str(),
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT URL '{server_url}/{jwks_path}';
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
 			&sess,
 			None,
 		)
@@ -1470,16 +1478,16 @@ mod tests {
 			iat: Some(Utc::now().timestamp()),
 			nbf: Some(Utc::now().timestamp()),
 			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-			tk: Some("token".to_string()),
 			ns: Some("test".to_string()),
 			db: Some("test".to_string()),
-			sc: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			id: Some("user:test".to_string()),
 			..Claims::default()
 		};
 
 		//
 		// Test without roles defined
-		// Roles should be ignored in scope authentication
+		// Roles should be ignored in record access
 		//
 		{
 			// Prepare the claims object
@@ -1494,9 +1502,9 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with token: {:?}", res);
 			assert_eq!(sess.ns, Some("test".to_string()));
 			assert_eq!(sess.db, Some("test".to_string()));
-			assert_eq!(sess.sc, Some("test".to_string()));
-			assert_eq!(sess.au.id(), "token");
-			assert!(sess.au.is_scope());
+			assert_eq!(sess.ac, Some("token".to_string()));
+			assert_eq!(sess.au.id(), "user:test");
+			assert!(sess.au.is_record());
 			assert_eq!(sess.au.level().ns(), Some("test"));
 			assert_eq!(sess.au.level().db(), Some("test"));
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");

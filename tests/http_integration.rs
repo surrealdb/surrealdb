@@ -1160,14 +1160,14 @@ mod http_integration {
 			.default_headers(headers)
 			.build()?;
 
-		// Create a scope
+		// Define a record access method
 		{
 			let res = client
 				.post(format!("http://{addr}/sql"))
 				.basic_auth(USER, Some(PASS))
 				.body(
 					r#"
-					DEFINE SCOPE scope SESSION 24h
+					DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
 						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 					;
@@ -1178,13 +1178,13 @@ mod http_integration {
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
 		}
 
-		// Signup into the scope
+		// Signup using the defined record access method
 		{
 			let req_body = serde_json::to_string(
 				json!({
 					"ns": ns,
 					"db": db,
-					"sc": "scope",
+					"ac": "user",
 					"email": "email@email.com",
 					"pass": "pass",
 				})

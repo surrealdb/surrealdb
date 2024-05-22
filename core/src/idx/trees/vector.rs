@@ -1,28 +1,313 @@
 use crate::err::Error;
-use crate::fnc::util::math::deviation::deviation;
-use crate::fnc::util::math::mean::Mean;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Array, Number, Value};
+use ahash::AHasher;
+use hashbrown::HashSet;
+use linfa_linalg::norm::Norm;
+use ndarray::{Array1, LinalgScalar, Zip};
+use ndarray_stats::DeviationExt;
+use num_traits::Zero;
 use revision::revisioned;
+use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::borrow::Borrow;
-use std::cmp::Ordering;
-use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::{Mul, Sub};
+use std::cmp::PartialEq;
+use std::hash::{Hash, Hasher};
+use std::ops::{Add, Deref, Div, Sub};
 use std::sync::Arc;
 
 /// In the context of a Symmetric MTree index, the term object refers to a vector, representing the indexed item.
-#[revisioned(revision = 1)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Vector {
+	F64(Array1<f64>),
+	F32(Array1<f32>),
+	I64(Array1<i64>),
+	I32(Array1<i32>),
+	I16(Array1<i16>),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize)]
+#[non_exhaustive]
+enum SerializedVector {
 	F64(Vec<f64>),
 	F32(Vec<f32>),
 	I64(Vec<i64>),
 	I32(Vec<i32>),
 	I16(Vec<i16>),
+}
+
+impl From<&Vector> for SerializedVector {
+	fn from(value: &Vector) -> Self {
+		match value {
+			Vector::F64(v) => Self::F64(v.to_vec()),
+			Vector::F32(v) => Self::F32(v.to_vec()),
+			Vector::I64(v) => Self::I64(v.to_vec()),
+			Vector::I32(v) => Self::I32(v.to_vec()),
+			Vector::I16(v) => Self::I16(v.to_vec()),
+		}
+	}
+}
+
+impl From<SerializedVector> for Vector {
+	fn from(value: SerializedVector) -> Self {
+		match value {
+			SerializedVector::F64(v) => Self::F64(Array1::from_vec(v)),
+			SerializedVector::F32(v) => Self::F32(Array1::from_vec(v)),
+			SerializedVector::I64(v) => Self::I64(Array1::from_vec(v)),
+			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v)),
+			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v)),
+		}
+	}
+}
+
+impl Vector {
+	#[inline]
+	fn chebyshev<T>(a: &Array1<T>, b: &Array1<T>) -> f64
+	where
+		T: ToFloat,
+	{
+		a.iter()
+			.zip(b.iter())
+			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
+			.fold(0.0_f64, f64::max)
+	}
+
+	fn chebyshev_distance(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => a.linf_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F32(a), Self::F32(b)) => {
+				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
+			}
+			(Self::I64(a), Self::I64(b)) => {
+				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
+			}
+			(Self::I32(a), Self::I32(b)) => {
+				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
+			}
+			(Self::I16(a), Self::I16(b)) => Self::chebyshev(a, b),
+			_ => f64::NAN,
+		}
+	}
+
+	#[inline]
+	fn cosine_distance_f64(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
+		let dot_product = a.dot(b);
+		let norm_a = a.norm_l2();
+		let norm_b = b.norm_l2();
+		1.0 - dot_product / (norm_a * norm_b)
+	}
+
+	#[inline]
+	fn cosine_distance_f32(a: &Array1<f32>, b: &Array1<f32>) -> f64 {
+		let dot_product = a.dot(b) as f64;
+		let norm_a = a.norm_l2() as f64;
+		let norm_b = b.norm_l2() as f64;
+		1.0 - dot_product / (norm_a * norm_b)
+	}
+
+	#[inline]
+	fn cosine_dist<T>(a: &Array1<T>, b: &Array1<T>) -> f64
+	where
+		T: ToFloat + LinalgScalar,
+	{
+		let dot_product = a.dot(b).to_float();
+		let norm_a = a.mapv(|x| x.to_float() * x.to_float()).sum().sqrt();
+		let norm_b = b.mapv(|x| x.to_float() * x.to_float()).sum().sqrt();
+		1.0 - dot_product / (norm_a * norm_b)
+	}
+
+	fn cosine_distance(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => Self::cosine_distance_f64(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::cosine_distance_f32(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::cosine_dist(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::cosine_dist(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::cosine_dist(a, b),
+			_ => f64::INFINITY,
+		}
+	}
+
+	#[inline]
+	fn euclidean<T>(a: &Array1<T>, b: &Array1<T>) -> f64
+	where
+		T: ToFloat,
+	{
+		Zip::from(a).and(b).map_collect(|x, y| (x.to_float() - y.to_float()).powi(2)).sum().sqrt()
+	}
+	fn euclidean_distance(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F32(a), Self::F32(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::I64(a), Self::I64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::I32(a), Self::I32(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::I16(a), Self::I16(b)) => Self::euclidean(a, b),
+			_ => f64::INFINITY,
+		}
+	}
+
+	#[inline]
+	fn hamming<T>(a: &Array1<T>, b: &Array1<T>) -> f64
+	where
+		T: PartialEq,
+	{
+		Zip::from(a).and(b).fold(0, |acc, a, b| {
+			if a != b {
+				acc + 1
+			} else {
+				acc
+			}
+		}) as f64
+	}
+
+	fn hamming_distance(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => Self::hamming(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::hamming(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::hamming(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::hamming(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::hamming(a, b),
+			_ => f64::INFINITY,
+		}
+	}
+
+	#[inline]
+	fn jaccard_f64(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
+		let mut union: HashSet<u64> = a.iter().map(|f| f.to_bits()).collect();
+		let intersection_size = b.iter().fold(0, |acc, n| {
+			if !union.insert(n.to_bits()) {
+				acc + 1
+			} else {
+				acc
+			}
+		}) as f64;
+		1.0 - intersection_size / union.len() as f64
+	}
+
+	#[inline]
+	fn jaccard_f32(a: &Array1<f32>, b: &Array1<f32>) -> f64 {
+		let mut union: HashSet<u32> = a.iter().map(|f| f.to_bits()).collect();
+		let intersection_size = b.iter().fold(0, |acc, n| {
+			if !union.insert(n.to_bits()) {
+				acc + 1
+			} else {
+				acc
+			}
+		}) as f64;
+		intersection_size / union.len() as f64
+	}
+
+	#[inline]
+	fn jaccard_integers<T>(a: &Array1<T>, b: &Array1<T>) -> f64
+	where
+		T: Eq + Hash + Clone,
+	{
+		let mut union: HashSet<T> = a.iter().cloned().collect();
+		let intersection_size = b.iter().cloned().fold(0, |acc, n| {
+			if !union.insert(n) {
+				acc + 1
+			} else {
+				acc
+			}
+		}) as f64;
+		intersection_size / union.len() as f64
+	}
+
+	pub(super) fn jaccard_similarity(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => Self::jaccard_f64(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::jaccard_f32(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::jaccard_integers(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::jaccard_integers(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::jaccard_integers(a, b),
+			_ => f64::NAN,
+		}
+	}
+
+	#[inline]
+	fn manhattan<T>(a: &Array1<T>, b: &Array1<T>) -> f64
+	where
+		T: Sub<Output = T> + ToFloat + Copy,
+	{
+		a.iter().zip(b.iter()).map(|(&a, &b)| (a - b).to_float().abs()).sum()
+	}
+
+	pub(super) fn manhattan_distance(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => a.l1_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F32(a), Self::F32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
+			(Self::I64(a), Self::I64(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
+			(Self::I32(a), Self::I32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
+			(Self::I16(a), Self::I16(b)) => Self::manhattan(a, b),
+			_ => f64::NAN,
+		}
+	}
+
+	#[inline]
+	fn minkowski<T>(a: &Array1<T>, b: &Array1<T>, order: f64) -> f64
+	where
+		T: ToFloat,
+	{
+		let dist: f64 = a
+			.iter()
+			.zip(b.iter())
+			.map(|(a, b)| (a.to_float() - b.to_float()).abs().powf(order))
+			.sum();
+		dist.powf(1.0 / order)
+	}
+
+	pub(super) fn minkowski_distance(&self, other: &Self, order: f64) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => Self::minkowski(a, b, order),
+			(Self::F32(a), Self::F32(b)) => Self::minkowski(a, b, order),
+			(Self::I64(a), Self::I64(b)) => Self::minkowski(a, b, order),
+			(Self::I32(a), Self::I32(b)) => Self::minkowski(a, b, order),
+			(Self::I16(a), Self::I16(b)) => Self::minkowski(a, b, order),
+			_ => f64::NAN,
+		}
+	}
+
+	#[inline]
+	fn pearson<T>(x: &Array1<T>, y: &Array1<T>) -> f64
+	where
+		T: ToFloat + Clone + FromPrimitive + Add<Output = T> + Div<Output = T> + Zero,
+	{
+		let mean_x = x.mean().unwrap().to_float();
+		let mean_y = y.mean().unwrap().to_float();
+
+		let mut sum_xy = 0.0;
+		let mut sum_x2 = 0.0;
+		let mut sum_y2 = 0.0;
+
+		for (xi, yi) in x.iter().zip(y.iter()) {
+			let diff_x = xi.to_float() - mean_x;
+			let diff_y = yi.to_float() - mean_y;
+			sum_xy += diff_x * diff_y;
+			sum_x2 += diff_x.powi(2);
+			sum_y2 += diff_y.powi(2);
+		}
+
+		let numerator = sum_xy;
+		let denominator = (sum_x2 * sum_y2).sqrt();
+
+		if denominator == 0.0 {
+			return 0.0; // Return 0 if the denominator is 0
+		}
+
+		numerator / denominator
+	}
+
+	fn pearson_similarity(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => Self::pearson(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::pearson(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::pearson(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::pearson(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::pearson(a, b),
+			_ => f64::NAN,
+		}
+	}
 }
 
 /// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
@@ -34,15 +319,17 @@ pub enum Vector {
 pub struct SharedVector(Arc<Vector>, u64);
 impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
-		let mut h = DefaultHasher::new();
+		let mut h = AHasher::default();
 		v.hash(&mut h);
-		Self(v.into(), h.finish())
+		Self(Arc::new(v), h.finish())
 	}
 }
 
-impl Borrow<Vector> for &SharedVector {
-	fn borrow(&self) -> &Vector {
-		self.0.as_ref()
+impl Deref for SharedVector {
+	type Target = Vector;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 
@@ -59,25 +346,14 @@ impl PartialEq for SharedVector {
 }
 impl Eq for SharedVector {}
 
-impl PartialOrd for SharedVector {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for SharedVector {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.0.as_ref().cmp(other.0.as_ref())
-	}
-}
-
 impl Serialize for SharedVector {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
 		// We only serialize the vector part, not the u64
-		self.0.serialize(serializer)
+		let ser: SerializedVector = self.0.as_ref().into();
+		ser.serialize(serializer)
 	}
 }
 
@@ -87,8 +363,7 @@ impl<'de> Deserialize<'de> for SharedVector {
 		D: Deserializer<'de>,
 	{
 		// We deserialize into a vector and construct the struct
-		// assuming some default or dummy value for the u64, e.g., 0
-		let v = Vector::deserialize(deserializer)?;
+		let v: Vector = SerializedVector::deserialize(deserializer)?.into();
 		Ok(v.into())
 	}
 }
@@ -120,76 +395,51 @@ impl Hash for Vector {
 	}
 }
 
-impl PartialEq for Vector {
-	fn eq(&self, other: &Self) -> bool {
-		use Vector::*;
-		match (self, other) {
-			(F64(v), F64(v_o)) => v == v_o,
-			(F32(v), F32(v_o)) => v == v_o,
-			(I64(v), I64(v_o)) => v == v_o,
-			(I32(v), I32(v_o)) => v == v_o,
-			(I16(v), I16(v_o)) => v == v_o,
-			_ => false,
-		}
-	}
-}
-
-impl Eq for Vector {}
-
-impl PartialOrd for Vector {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for Vector {
-	fn cmp(&self, other: &Self) -> Ordering {
-		use Vector::*;
-		match (self, other) {
-			(F64(v), F64(v_o)) => v.partial_cmp(v_o).unwrap_or(Ordering::Equal),
-			(F32(v), F32(v_o)) => v.partial_cmp(v_o).unwrap_or(Ordering::Equal),
-			(I64(v), I64(v_o)) => v.cmp(v_o),
-			(I32(v), I32(v_o)) => v.cmp(v_o),
-			(I16(v), I16(v_o)) => v.cmp(v_o),
-			(F64(_), _) => Ordering::Less,
-			(_, F64(_)) => Ordering::Greater,
-			(F32(_), _) => Ordering::Less,
-			(_, F32(_)) => Ordering::Greater,
-			(I64(_), _) => Ordering::Less,
-			(_, I64(_)) => Ordering::Greater,
-			(I32(_), _) => Ordering::Less,
-			(_, I32(_)) => Ordering::Greater,
-		}
-	}
-}
-
 impl Vector {
-	pub(super) fn new(t: VectorType, d: usize) -> Self {
-		match t {
-			VectorType::F64 => Self::F64(Vec::with_capacity(d)),
-			VectorType::F32 => Self::F32(Vec::with_capacity(d)),
-			VectorType::I64 => Self::I64(Vec::with_capacity(d)),
-			VectorType::I32 => Self::I32(Vec::with_capacity(d)),
-			VectorType::I16 => Self::I16(Vec::with_capacity(d)),
-		}
-	}
-
 	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self, Error> {
-		let mut vec = Vector::new(t, d);
-		vec.check_vector_value(v)?;
-		Ok(vec)
+		let res = match t {
+			VectorType::F64 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Vector::F64(Array1::from_vec(vec))
+			}
+			VectorType::F32 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Vector::F32(Array1::from_vec(vec))
+			}
+			VectorType::I64 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Vector::I64(Array1::from_vec(vec))
+			}
+			VectorType::I32 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Vector::I32(Array1::from_vec(vec))
+			}
+			VectorType::I16 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Vector::I16(Array1::from_vec(vec))
+			}
+		};
+		Ok(res)
 	}
 
-	fn check_vector_value(&mut self, value: &Value) -> Result<(), Error> {
+	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<(), Error>
+	where
+		T: for<'a> TryFrom<&'a Number, Error = Error>,
+	{
 		match value {
 			Value::Array(a) => {
 				for v in a.0.iter() {
-					self.check_vector_value(v)?;
+					Self::check_vector_value(v, vec)?;
 				}
 				Ok(())
 			}
 			Value::Number(n) => {
-				self.add(n);
+				vec.push(n.try_into()?);
 				Ok(())
 			}
 			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
@@ -197,10 +447,43 @@ impl Vector {
 	}
 
 	pub fn try_from_array(t: VectorType, a: &Array) -> Result<Self, Error> {
-		let mut vec = Vector::new(t, a.len());
+		let res = match t {
+			VectorType::F64 => {
+				let mut vec = Vec::with_capacity(a.len());
+				Self::check_vector_array(a, &mut vec)?;
+				Vector::F64(Array1::from_vec(vec))
+			}
+			VectorType::F32 => {
+				let mut vec = Vec::with_capacity(a.len());
+				Self::check_vector_array(a, &mut vec)?;
+				Vector::F32(Array1::from_vec(vec))
+			}
+			VectorType::I64 => {
+				let mut vec = Vec::with_capacity(a.len());
+				Self::check_vector_array(a, &mut vec)?;
+				Vector::I64(Array1::from_vec(vec))
+			}
+			VectorType::I32 => {
+				let mut vec = Vec::with_capacity(a.len());
+				Self::check_vector_array(a, &mut vec)?;
+				Vector::I32(Array1::from_vec(vec))
+			}
+			VectorType::I16 => {
+				let mut vec = Vec::with_capacity(a.len());
+				Self::check_vector_array(a, &mut vec)?;
+				Vector::I16(Array1::from_vec(vec))
+			}
+		};
+		Ok(res)
+	}
+
+	fn check_vector_array<T>(a: &Array, vec: &mut Vec<T>) -> Result<(), Error>
+	where
+		T: for<'a> TryFrom<&'a Number, Error = Error>,
+	{
 		for v in &a.0 {
 			if let Value::Number(n) = v {
-				vec.add(n);
+				vec.push(n.try_into()?);
 			} else {
 				return Err(Error::InvalidVectorType {
 					current: v.clone().to_string(),
@@ -208,17 +491,7 @@ impl Vector {
 				});
 			}
 		}
-		Ok(vec)
-	}
-
-	pub(super) fn add(&mut self, n: &Number) {
-		match self {
-			Self::F64(v) => v.push(n.to_float()),
-			Self::F32(v) => v.push(n.to_float() as f32),
-			Self::I64(v) => v.push(n.to_int()),
-			Self::I32(v) => v.push(n.to_int() as i32),
-			Self::I16(v) => v.push(n.to_int() as i16),
-		};
+		Ok(())
 	}
 
 	pub(super) fn len(&self) -> usize {
@@ -242,238 +515,22 @@ impl Vector {
 		}
 	}
 
-	fn dot<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: Mul<Output = T> + Copy + ToFloat,
-	{
-		a.iter().zip(b.iter()).map(|(&x, &y)| x.to_float() * y.to_float()).sum::<f64>()
-	}
-
-	fn magnitude<T>(v: &[T]) -> f64
-	where
-		T: ToFloat + Copy,
-	{
-		v.iter()
-			.map(|&x| {
-				let x = x.to_float();
-				x * x
-			})
-			.sum::<f64>()
-			.sqrt()
-	}
-
-	fn normalize<T>(v: &[T]) -> Vec<f64>
-	where
-		T: ToFloat + Copy,
-	{
-		let mag = Self::magnitude(v);
-		if mag == 0.0 || mag.is_nan() {
-			vec![0.0; v.len()] // Return a zero vector if magnitude is zero
-		} else {
-			v.iter().map(|&x| x.to_float() / mag).collect()
-		}
-	}
-
-	fn cosine<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: ToFloat + Mul<Output = T> + Copy,
-	{
-		let norm_a = Self::normalize(a);
-		let norm_b = Self::normalize(b);
-		let mut s = Self::dot(&norm_a, &norm_b);
-		s = s.clamp(-1.0, 1.0);
-		1.0 - s
-	}
-
-	pub(crate) fn cosine_distance(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::cosine(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::cosine(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::cosine(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::cosine(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::cosine(a, b),
-			_ => f64::NAN,
-		}
-	}
-
 	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<(), Error> {
 		Self::check_expected_dimension(self.len(), expected_dim)
 	}
-
-	fn chebyshev<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: ToFloat,
-	{
-		a.iter()
-			.zip(b.iter())
-			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
-			.fold(f64::MIN, f64::max)
-	}
-
-	pub(crate) fn chebyshev_distance(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::chebyshev(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::chebyshev(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::chebyshev(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::chebyshev(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::chebyshev(a, b),
-			_ => f64::NAN,
-		}
-	}
-
-	fn euclidean<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: ToFloat,
-	{
-		a.iter()
-			.zip(b.iter())
-			.map(|(a, b)| (a.to_float() - b.to_float()).powi(2))
-			.sum::<f64>()
-			.sqrt()
-	}
-
-	pub(crate) fn euclidean_distance(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::euclidean(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::euclidean(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::euclidean(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::euclidean(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::euclidean(a, b),
-			_ => f64::INFINITY,
-		}
-	}
-	fn hamming<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: PartialEq,
-	{
-		a.iter().zip(b.iter()).filter(|&(a, b)| a != b).count() as f64
-	}
-
-	pub(crate) fn hamming_distance(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::hamming(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::hamming(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::hamming(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::hamming(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::hamming(a, b),
-			_ => f64::NAN,
-		}
-	}
-
-	fn jaccard_f64(a: &[f64], b: &[f64]) -> f64 {
-		let mut union: HashSet<u64> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
-		let intersection_size = b.iter().filter(|n| !union.insert(n.to_bits())).count() as f64;
-		intersection_size / union.len() as f64
-	}
-
-	fn jaccard_f32(a: &[f32], b: &[f32]) -> f64 {
-		let mut union: HashSet<u32> = HashSet::from_iter(a.iter().map(|f| f.to_bits()));
-		let intersection_size = b.iter().filter(|n| !union.insert(n.to_bits())).count() as f64;
-		intersection_size / union.len() as f64
-	}
-
-	fn jaccard_integers<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: Eq + Hash,
-	{
-		let mut union: HashSet<&T> = HashSet::from_iter(a.iter());
-		let intersection_size = b.iter().filter(|n| !union.insert(n)).count() as f64;
-		intersection_size / union.len() as f64
-	}
-
-	pub(crate) fn jaccard_similarity(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::jaccard_f64(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::jaccard_f32(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::jaccard_integers(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::jaccard_integers(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::jaccard_integers(a, b),
-			_ => f64::NAN,
-		}
-	}
-
-	fn manhattan<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: Sub<Output = T> + ToFloat + Copy,
-	{
-		a.iter().zip(b.iter()).map(|(&a, &b)| ((a - b).to_float()).abs()).sum()
-	}
-
-	pub(crate) fn manhattan_distance(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::manhattan(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::manhattan(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::manhattan(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::manhattan(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::manhattan(a, b),
-			_ => f64::NAN,
-		}
-	}
-
-	fn minkowski<T>(a: &[T], b: &[T], order: f64) -> f64
-	where
-		T: ToFloat,
-	{
-		let dist: f64 = a
-			.iter()
-			.zip(b.iter())
-			.map(|(a, b)| (a.to_float() - b.to_float()).abs().powf(order))
-			.sum();
-		dist.powf(1.0 / order)
-	}
-
-	pub(crate) fn minkowski_distance(&self, other: &Self, order: f64) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::minkowski(a, b, order),
-			(Self::F32(a), Self::F32(b)) => Self::minkowski(a, b, order),
-			(Self::I64(a), Self::I64(b)) => Self::minkowski(a, b, order),
-			(Self::I32(a), Self::I32(b)) => Self::minkowski(a, b, order),
-			(Self::I16(a), Self::I16(b)) => Self::minkowski(a, b, order),
-			_ => f64::NAN,
-		}
-	}
-
-	fn pearson<T>(a: &[T], b: &[T]) -> f64
-	where
-		T: ToFloat,
-	{
-		let m1 = a.mean();
-		let m2 = b.mean();
-		let covar: f64 =
-			a.iter().zip(b.iter()).map(|(x, y)| (x.to_float() - m1) * (y.to_float() - m2)).sum();
-		let covar = covar / a.len() as f64;
-		let std_dev1 = deviation(a, m1, false);
-		let std_dev2 = deviation(b, m2, false);
-		covar / (std_dev1 * std_dev2)
-	}
-
-	fn pearson_similarity(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::pearson(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::pearson(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::pearson(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::pearson(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::pearson(a, b),
-			_ => f64::NAN,
-		}
-	}
 }
+
 impl Distance {
-	pub(super) fn calculate<V>(&self, a: V, b: V) -> f64
-	where
-		V: Borrow<Vector>,
-	{
+	pub(super) fn calculate(&self, a: &Vector, b: &Vector) -> f64 {
 		match self {
-			Distance::Chebyshev => a.borrow().chebyshev_distance(b.borrow()),
-			Distance::Cosine => a.borrow().cosine_distance(b.borrow()),
-			Distance::Euclidean => a.borrow().euclidean_distance(b.borrow()),
-			Distance::Hamming => a.borrow().hamming_distance(b.borrow()),
-			Distance::Jaccard => a.borrow().jaccard_similarity(b.borrow()),
-			Distance::Manhattan => a.borrow().manhattan_distance(b.borrow()),
-			Distance::Minkowski(order) => {
-				a.borrow().minkowski_distance(b.borrow(), order.to_float())
-			}
-			Distance::Pearson => a.borrow().pearson_similarity(b.borrow()),
+			Distance::Chebyshev => a.chebyshev_distance(b),
+			Distance::Cosine => a.cosine_distance(b),
+			Distance::Euclidean => a.euclidean_distance(b),
+			Distance::Hamming => a.hamming_distance(b),
+			Distance::Jaccard => a.jaccard_similarity(b),
+			Distance::Manhattan => a.manhattan_distance(b),
+			Distance::Minkowski(order) => a.minkowski_distance(b, order.to_float()),
+			Distance::Pearson => a.pearson_similarity(b),
 		}
 	}
 }
@@ -481,7 +538,7 @@ impl Distance {
 #[cfg(test)]
 mod tests {
 	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
-	use crate::idx::trees::vector::Vector;
+	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
 	use crate::sql::Array;
 
@@ -497,8 +554,10 @@ mod tests {
 
 		// Check the "Vector" optimised implementations
 		for t in [VectorType::F64] {
-			let v1 = Vector::try_from_array(t, &Array::from(v1.clone())).unwrap();
-			let v2 = Vector::try_from_array(t, &Array::from(v2.clone())).unwrap();
+			let v1: SharedVector =
+				Vector::try_from_array(t, &Array::from(v1.clone())).unwrap().into();
+			let v2: SharedVector =
+				Vector::try_from_array(t, &Array::from(v2.clone())).unwrap().into();
 			assert_eq!(dist.calculate(&v1, &v2), res);
 		}
 	}

@@ -1051,6 +1051,46 @@ async fn function_array_reverse() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_shuffle() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::shuffle([]);
+		RETURN array::shuffle(3);
+		RETURN array::shuffle([4]);
+		RETURN array::shuffle([1,1,1]);
+		RETURN array::shuffle([1,2,"text",3,3,4]); // find a way to check randomness
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(
+		matches!(
+			&tmp,
+			Err(e) if e.to_string() == "Incorrect arguments for function array::shuffle(). Argument 1 was the wrong type. Expected a array but found 3"
+		),
+		"{tmp:?}"
+	);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[4]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,1,1]");
+	assert_eq!(tmp, val);
+	//
+	let _ = res.remove(0).result?;
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_slice() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::slice([]);
