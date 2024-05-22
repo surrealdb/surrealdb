@@ -281,6 +281,7 @@ pub async fn init(
 		.with_auth_enabled(auth_enabled)
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
+
 	#[cfg(any(
 		feature = "storage-surrealkv",
 		feature = "storage-rocksdb",
@@ -288,7 +289,11 @@ pub async fn init(
 		feature = "storage-tikv",
 		feature = "storage-speedb"
 	))]
-	let mut dbs = dbs.with_temporary_directory(temporary_directory);
+	let mut dbs = match temporary_directory {
+		Some(tmp_dir) => dbs.with_temporary_directory(tmp_dir),
+		_ => dbs,
+	};
+
 	if let Some(engine_options) = opt.engine {
 		dbs = dbs.with_engine_options(engine_options);
 	}
