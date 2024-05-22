@@ -1131,6 +1131,16 @@ mod cli_integration {
 		}
 	}
 
+	#[cfg(all(
+		feature = "sql2",
+		any(
+			feature = "storage-surrealkv",
+			feature = "storage-rocksdb",
+			feature = "storage-fdb",
+			feature = "storage-tikv",
+			feature = "storage-speedb"
+		)
+	))]
 	#[test(tokio::test)]
 	async fn test_temporary_directory() {
 		info!("* The path is a non-existing directory");

@@ -1,0 +1,14 @@
+[package]
+name = "sdk_test_sql1"
+version = "1.5.0"
+edition = "2021"
+
+[dependencies]
+surrealdb = { path = "../../../lib", version = "1.5.0", features = ["kv-tikv"] }
+tokio = { version = "1", features = ["full"] }
+
+[workspace]
+
+[[bin]]
+path = "main.rs"
+name = "sdk_test_sql1"
