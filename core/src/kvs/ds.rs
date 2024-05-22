@@ -1,13 +1,5 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-#[cfg(any(
-	feature = "kv-surrealkv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-tikv",
-	feature = "kv-speedb"
-))]
-use std::env;
 use std::fmt;
 #[cfg(any(
 	feature = "kv-surrealkv",
@@ -118,7 +110,7 @@ pub struct Datastore {
 		feature = "kv-speedb"
 	))]
 	// The temporary directory
-	temporary_directory: Arc<PathBuf>,
+	temporary_directory: Option<Arc<PathBuf>>,
 }
 
 /// We always want to be circulating the live query information
@@ -400,7 +392,7 @@ impl Datastore {
 				feature = "kv-tikv",
 				feature = "kv-speedb"
 			))]
-			temporary_directory: Arc::new(env::temp_dir()),
+			temporary_directory: None,
 		})
 	}
 
@@ -460,8 +452,8 @@ impl Datastore {
 		feature = "kv-tikv",
 		feature = "kv-speedb"
 	))]
-	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
-		self.temporary_directory = Arc::new(path.unwrap_or_else(env::temp_dir));
+	pub fn with_temporary_directory(mut self, path: PathBuf) -> Self {
+		self.temporary_directory = Some(Arc::new(path));
 		self
 	}
 
