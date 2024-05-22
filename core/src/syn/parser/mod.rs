@@ -308,6 +308,19 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	/// Eat the next token if it is of the given kind.
+	/// Returns whether a token was eaten.
+	///
+	/// Unlike [`Parser::eat`] this doesn't skip whitespace tokens
+	pub fn eat_whitespace(&mut self, token: TokenKind) -> bool {
+		if token == self.peek_whitespace().kind {
+			self.token_buffer.pop();
+			true
+		} else {
+			false
+		}
+	}
+
 	/// Forces the next token to be the given one.
 	/// Used in token gluing to replace the current one with the glued token.
 	fn prepend_token(&mut self, token: Token) {
@@ -317,7 +330,13 @@ impl<'a> Parser<'a> {
 	/// Returns the string for a given span of the source.
 	/// Will panic if the given span was not valid for the source, or invalid utf8
 	fn span_str(&self, span: Span) -> &'a str {
-		std::str::from_utf8(self.lexer.reader.span(span)).expect("invalid span segment for source")
+		std::str::from_utf8(self.span_bytes(span)).expect("invalid span segment for source")
+	}
+
+	/// Returns the string for a given span of the source.
+	/// Will panic if the given span was not valid for the source, or invalid utf8
+	fn span_bytes(&self, span: Span) -> &'a [u8] {
+		self.lexer.reader.span(span)
 	}
 
 	/// Checks if the next token is of the given kind. If it isn't it returns a UnclosedDelimiter

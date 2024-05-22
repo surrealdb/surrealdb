@@ -105,6 +105,38 @@ macro_rules! expected {
 	}};
 }
 
+/// A macro for indicating that the parser encountered an token which it didn't expect.
+macro_rules! expected_whitespace {
+	($parser:expr, $($kind:tt)*) => {{
+		let token = $parser.next_whitespace();
+		match token.kind {
+			$($kind)* => token,
+			$crate::syn::parser::TokenKind::Invalid => {
+				let error = $parser.lexer.error.take().unwrap();
+				return Err($crate::syn::parser::ParseError::new(
+					$crate::syn::parser::ParseErrorKind::InvalidToken(error),
+					$parser.recent_span(),
+				));
+			}
+			x => {
+				let expected = $($kind)*.as_str();
+				let kind = if let $crate::syn::token::TokenKind::Eof = x {
+					$crate::syn::parser::ParseErrorKind::UnexpectedEof {
+						expected,
+					}
+				} else {
+					$crate::syn::parser::ParseErrorKind::Unexpected {
+						found: x,
+						expected,
+					}
+				};
+
+				return Err($crate::syn::parser::ParseError::new(kind, $parser.last_span()));
+			}
+		}
+	}};
+}
+
 #[cfg(test)]
 #[macro_export]
 macro_rules! test_parse {
@@ -191,6 +223,7 @@ macro_rules! enter_query_recursion {
 }
 
 pub(super) use expected;
+pub(super) use expected_whitespace;
 pub(super) use unexpected;
 
 #[cfg(test)]

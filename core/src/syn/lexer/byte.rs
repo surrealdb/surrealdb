@@ -1,5 +1,3 @@
-use std::mem;
-
 use crate::syn::{
 	lexer::{
 		unicode::{byte, chars},
@@ -111,7 +109,6 @@ impl<'a> Lexer<'a> {
 		debug_assert_eq!(token.kind, t!("/"));
 		debug_assert_eq!(token.span.offset + 1, self.last_offset);
 		debug_assert_eq!(token.span.len, 1);
-		debug_assert_eq!(self.scratch, "");
 
 		self.last_offset = token.span.offset;
 		loop {
@@ -119,21 +116,13 @@ impl<'a> Lexer<'a> {
 				Some(b'\\') => {
 					if let Some(b'/') = self.reader.peek() {
 						self.reader.next();
-						self.scratch.push('/')
-					} else {
-						self.scratch.push('\\')
 					}
 				}
 				Some(b'/') => break,
 				Some(x) => {
-					if x.is_ascii() {
-						self.scratch.push(x as char);
-					} else {
-						match self.reader.complete_char(x) {
-							Ok(x) => {
-								self.scratch.push(x);
-							}
-							Err(e) => return self.invalid_token(e.into()),
+					if !x.is_ascii() {
+						if let Err(e) = self.reader.complete_char(x) {
+							return self.invalid_token(e.into());
 						}
 					}
 				}
@@ -141,7 +130,6 @@ impl<'a> Lexer<'a> {
 			}
 		}
 
-		self.string = Some(mem::take(&mut self.scratch));
 		self.finish_token(TokenKind::Regex)
 	}
 

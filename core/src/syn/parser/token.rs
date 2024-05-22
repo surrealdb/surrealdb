@@ -1,7 +1,5 @@
 //! Implements token gluing logic.
 
-use nom::AsChar;
-
 use crate::{
 	sql::duration::{
 		SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
@@ -15,6 +13,7 @@ use crate::{
 use std::time::Duration as StdDuration;
 
 impl Parser<'_> {
+	/// Returns if a token kind can start an identifier.
 	pub fn tokenkind_can_start_ident(t: TokenKind) -> bool {
 		matches!(
 			t,
@@ -26,6 +25,7 @@ impl Parser<'_> {
 				| TokenKind::Identifier
 				| TokenKind::NumberSuffix(_)
 				| TokenKind::DurationSuffix(
+					// All except Micro unicode
 					DurationSuffix::Nano
 						| DurationSuffix::Micro | DurationSuffix::Milli
 						| DurationSuffix::Second | DurationSuffix::Minute
@@ -35,6 +35,7 @@ impl Parser<'_> {
 		)
 	}
 
+	/// Returns if a token kind can start continue an identifier.
 	pub fn tokenkind_continues_ident(t: TokenKind) -> bool {
 		matches!(
 			t,
@@ -46,6 +47,7 @@ impl Parser<'_> {
 				| TokenKind::Identifier
 				| TokenKind::NumberSuffix(_)
 				| TokenKind::NaN | TokenKind::DurationSuffix(
+				// All except Micro unicode
 				DurationSuffix::Nano
 					| DurationSuffix::Micro
 					| DurationSuffix::Milli
@@ -68,6 +70,7 @@ impl Parser<'_> {
 		Self::tokenkind_can_start_ident(self.peek_kind())
 	}
 
+	/// Glue an token and immediately consume it.
 	pub fn glue_next(&mut self) -> ParseResult<Token> {
 		self.glue()?;
 		Ok(self.next())
@@ -88,7 +91,6 @@ impl Parser<'_> {
 					Ok(token)
 				}
 			}
-			t!("\"") | t!("'") => self.glue_plain_strand(),
 			_ => Ok(token),
 		}
 	}
@@ -483,156 +485,5 @@ impl Parser<'_> {
 		let token = self.lexer.relex_strand(start);
 		self.prepend_token(token);
 		Ok(token)
-	}
-
-	pub fn glue_uuid_strand(&mut self) -> ParseResult<Token> {
-		let start = self.peek_whitespace();
-		let double = match start.kind {
-			t!("u\"") => true,
-			t!("u'") => false,
-			_ => return Ok(start),
-		};
-
-		let mut uuid_buffer = [0u8; 16];
-
-		self.eat_uuid_hex(&mut uuid_buffer[0..4])?;
-
-		let next = self.peek_whitespace();
-		let t!("-") = next.kind else {
-			unexpected!(self, next.kind, "a '-' seperator");
-		};
-
-		self.eat_uuid_hex(&mut uuid_buffer[4..6])?;
-
-		let next = self.peek_whitespace();
-		let t!("-") = next.kind else {
-			unexpected!(self, next.kind, "a '-' seperator");
-		};
-
-		self.eat_uuid_hex(&mut uuid_buffer[6..8])?;
-
-		let next = self.peek_whitespace();
-		let t!("-") = next.kind else {
-			unexpected!(self, next.kind, "a '-' seperator");
-		};
-
-		self.eat_uuid_hex(&mut uuid_buffer[8..10])?;
-
-		let next = self.peek_whitespace();
-		let t!("-") = next.kind else {
-			unexpected!(self, next.kind, "a '-' seperator");
-		};
-
-		self.eat_uuid_hex(&mut uuid_buffer[10..16])?;
-
-		let next = self.peek_whitespace();
-		match next.kind {
-			t!("\"") if double => {}
-			t!("'") if !double => {}
-			_ => {
-				return Err(ParseError::new(
-					ParseErrorKind::UnclosedDelimiter {
-						expected: if double {
-							t!("\"")
-						} else {
-							t!("'")
-						},
-						should_close: start.span,
-					},
-					next.span,
-				));
-			}
-		}
-		self.pop_peek();
-
-		// At this point this should not be able to fail as we already validated the
-		self.lexer.uuid = Some(uuid::Uuid::from_bytes(uuid_buffer));
-		let token = Token {
-			kind: TokenKind::Uuid,
-			span: start.span.covers(self.last_span()),
-		};
-		self.prepend_token(token);
-		Ok(token)
-	}
-
-	fn eat_uuid_hex(&mut self, buffer: &mut [u8]) -> ParseResult<()> {
-		fn ascii_to_hex(b: u8) -> Option<u8> {
-			if (b'0'..=b'9').contains(&b) {
-				return Some(b - b'0');
-			}
-
-			if (b'a'..=b'f').contains(&b) {
-				return Some(b - b'a');
-			}
-
-			None
-		}
-
-		let start_token = self.peek_whitespace();
-		let mut cur = start_token;
-		loop {
-			match cur.kind {
-				TokenKind::Identifier => {
-					self.pop_peek();
-					break;
-				}
-				TokenKind::Exponent | TokenKind::Digits => {
-					self.pop_peek();
-					cur = self.peek_whitespace();
-				}
-				_ => unexpected!(self, TokenKind::Strand, "UUID hex digits"),
-			}
-		}
-
-		let span = start_token.span.covers(cur.span);
-		let span_str = self.span_str(span);
-
-		if !span_str.bytes().all(|x| x.is_hex_digit()) {
-			unexpected!(@span, self, TokenKind::Strand, "UUID hex digits")
-		}
-		let required_len = buffer.len() * 2;
-
-		for (idx, byte) in buffer.iter_mut().enumerate() {
-			let b = span_str.as_bytes().get(idx * 2 + 1).copied().ok_or_else(|| {
-				ParseError::new(
-					ParseErrorKind::InvalidUuidPart {
-						length: required_len,
-					},
-					span,
-				)
-			})?;
-			let a = span_str.as_bytes()[idx * 2];
-
-			let a = ascii_to_hex(a).ok_or_else(|| {
-				ParseError::new(
-					ParseErrorKind::Unexpected {
-						found: TokenKind::Strand,
-						expected: "UUID hex digits",
-					},
-					span,
-				)
-			})?;
-			let b = ascii_to_hex(b).ok_or_else(|| {
-				ParseError::new(
-					ParseErrorKind::Unexpected {
-						found: TokenKind::Strand,
-						expected: "UUID hex digits",
-					},
-					span,
-				)
-			})?;
-
-			*byte = a << 4 | b
-		}
-
-		Ok(())
-	}
-
-	pub fn glue_regex(&mut self) -> ParseResult<Token> {
-		let next = self.peek();
-		match self.peek_kind() {
-			t!("/") => Ok(self.lexer.relex_regex(next)),
-			_ => Ok(next),
-		}
 	}
 }
