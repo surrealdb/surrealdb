@@ -14,15 +14,30 @@ use super::{ParseResult, Parser};
 
 impl Parser<'_> {
 	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		let token = self.next();
+		let token = self.peek();
 		match token.kind {
-			t!("NULL") => Ok(Value::Null),
-			t!("true") => Ok(Value::Bool(true)),
-			t!("false") => Ok(Value::Bool(false)),
-			t!("{") => self.parse_json_object(ctx, token.span).await.map(Value::Object),
-			t!("[") => self.parse_json_array(ctx, token.span).await.map(Value::Array),
+			t!("NULL") => {
+				self.pop_peek();
+				Ok(Value::Null)
+			}
+			t!("true") => {
+				self.pop_peek();
+				Ok(Value::Bool(true))
+			}
+			t!("false") => {
+				self.pop_peek();
+				Ok(Value::Bool(false))
+			}
+			t!("{") => {
+				self.pop_peek();
+				self.parse_json_object(ctx, token.span).await.map(Value::Object)
+			}
+			t!("[") => {
+				self.pop_peek();
+				self.parse_json_array(ctx, token.span).await.map(Value::Array)
+			}
 			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
-				let strand: Strand = self.token_value(token)?;
+				let strand: Strand = self.next_token_value()?;
 				if self.legacy_strands {
 					if let Some(x) = self.reparse_legacy_strand(ctx, &strand.0).await {
 						return Ok(x);
@@ -32,7 +47,7 @@ impl Parser<'_> {
 			}
 			TokenKind::Digits => self.parse_number_like_prime(),
 			_ => {
-				let ident = self.token_value::<Ident>(token)?.0;
+				let ident = self.next_token_value::<Ident>()?.0;
 				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)
 			}
 		}

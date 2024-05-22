@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 mod byte;
@@ -16,6 +17,7 @@ mod unicode;
 mod test;
 
 pub use reader::{BytesReader, CharError};
+use uuid::Uuid;
 
 use crate::syn::token::{Span, Token, TokenKind};
 
@@ -86,6 +88,8 @@ pub struct Lexer<'a> {
 	// actual number value to when the parser can decide on a format.
 	pub string: Option<String>,
 	pub duration: Option<Duration>,
+	pub datetime: Option<DateTime<Utc>>,
+	pub uuid: Option<Uuid>,
 	pub error: Option<Error>,
 }
 
@@ -103,6 +107,9 @@ impl<'a> Lexer<'a> {
 			scratch: String::new(),
 			string: None,
 			error: None,
+			duration: None,
+			datetime: None,
+			uuid: None,
 		}
 	}
 
@@ -133,6 +140,9 @@ impl<'a> Lexer<'a> {
 			scratch: self.scratch,
 			string: self.string,
 			error: self.error,
+			duration: self.duration,
+			datetime: self.datetime,
+			uuid: self.uuid,
 		}
 	}
 

@@ -15,15 +15,14 @@ impl Parser<'_> {
 	) -> ParseResult<InsertStatement> {
 		let ignore = self.eat(t!("IGNORE"));
 		expected!(self, t!("INTO"));
-		let next = self.next();
 		// TODO: Explain that more complicated expressions are not allowed here.
-		let into = match next.kind {
+		let into = match self.peek_kind() {
 			t!("$param") => {
-				let param = self.token_value(next)?;
+				let param = self.next_token_value()?;
 				Value::Param(param)
 			}
 			_ => {
-				let table = self.token_value(next)?;
+				let table = self.next_token_value()?;
 				Value::Table(table)
 			}
 		};

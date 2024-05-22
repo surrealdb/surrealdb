@@ -1,16 +1,14 @@
 use geo::Point;
-use ndarray_stats::MaybeNan;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
 	enter_object_recursion, enter_query_recursion,
 	sql::{
-		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Strand, Subquery,
-		Table, Value,
+		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Subquery, Table,
+		Value,
 	},
 	syn::{
-		lexer::Lexer,
 		parser::{
 			mac::{expected, unexpected},
 			ParseError, ParseErrorKind,
@@ -68,11 +66,7 @@ impl Parser<'_> {
 				let start = self.pop_peek().span;
 				self.parse_mock(start).map(Value::Mock)
 			}
-			t!("/") => {
-				let token = self.pop_peek();
-				let regex = self.lexer.relex_regex(token);
-				self.token_value(regex).map(Value::Regex)
-			}
+			t!("/") => self.next_token_value().map(Value::Regex),
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -91,11 +85,12 @@ impl Parser<'_> {
 					unexpected!(self, x, "a value")
 				}
 
-				let token = self.next();
-				match self.peek_kind() {
-					t!("::") | t!("(") => self.parse_builtin(ctx, token.span).await,
+				let span = self.glue()?.span;
+
+				match self.peek_token_at(1).kind {
+					t!("::") | t!("(") => self.parse_builtin(ctx, span).await,
 					t!(":") => {
-						let str = self.token_value::<Ident>(token)?.0;
+						let str = self.next_token_value::<Ident>()?.0;
 						self.parse_thing_or_range(ctx, str).await
 					}
 					x => {
@@ -104,7 +99,7 @@ impl Parser<'_> {
 							// always an invalid production so just return error.
 							unexpected!(self, x, "a value");
 						} else {
-							Ok(Value::Table(self.token_value(token)?))
+							Ok(Value::Table(self.next_token_value()?))
 						}
 					}
 				}
@@ -156,8 +151,7 @@ impl Parser<'_> {
 				Value::Thing(thing)
 			}
 			t!("$param") => {
-				self.pop_peek();
-				let param = self.token_value(token)?;
+				let param = self.next_token_value()?;
 				Value::Param(param)
 			}
 			t!("FUNCTION") => {
@@ -205,8 +199,7 @@ impl Parser<'_> {
 			}
 			t!("/") => {
 				self.pop_peek();
-				let regex = self.lexer.relex_regex(token);
-				self.token_value(regex).map(Value::Regex)?
+				self.next_token_value().map(Value::Regex)?
 			}
 			t!("RETURN")
 			| t!("SELECT")
@@ -228,20 +221,21 @@ impl Parser<'_> {
 				self.parse_model(ctx).await.map(|x| Value::Model(Box::new(x)))?
 			}
 			_ => {
-				self.pop_peek();
-				match self.peek_kind() {
+				self.glue()?;
+
+				match self.peek_token_at(1).kind {
 					t!("::") | t!("(") => self.parse_builtin(ctx, token.span).await?,
 					t!(":") => {
-						let str = self.token_value::<Ident>(token)?.0;
+						let str = self.next_token_value::<Ident>()?.0;
 						self.parse_thing_or_range(ctx, str).await?
 					}
 					x => {
 						if x.has_data() {
 							unexpected!(self, x, "a value");
 						} else if self.table_as_field {
-							Value::Idiom(Idiom(vec![Part::Field(self.token_value(token)?)]))
+							Value::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
 						} else {
-							Value::Table(self.token_value(token)?)
+							Value::Table(self.next_token_value()?)
 						}
 					}
 				}
@@ -608,10 +602,10 @@ impl Parser<'_> {
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx).await {
 			return Some(Value::Thing(x));
 		}
-		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_datetime() {
+		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
 			return Some(Value::Datetime(x));
 		}
-		if let Ok(x) = Lexer::new(text.as_bytes()).lex_only_uuid() {
+		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
 			return Some(Value::Uuid(x));
 		}
 		None

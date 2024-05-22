@@ -4,9 +4,9 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		change_feed_include::ChangeFeedInclude, changefeed::ChangeFeed, index::Distance,
-		index::VectorType, Base, Cond, Data, Duration, Fetch, Fetchs, Field, Fields, Group, Groups,
-		Ident, Idiom, Output, Permission, Permissions, Tables, Timeout, Value, View,
+		changefeed::ChangeFeed, index::Distance, index::VectorType, Base, Cond, Data, Duration,
+		Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output, Permission, Permissions,
+		Tables, Timeout, Value, View,
 	},
 	syn::{
 		parser::{
@@ -342,7 +342,7 @@ impl Parser<'_> {
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
 		let expiry = self.next_token_value::<Duration>()?.0;
 		let store_diff = if self.eat(t!("INCLUDE")) {
-			expected!(self, TokenKind::ChangeFeedInclude(ChangeFeedInclude::Original));
+			expected!(self, t!("ORIGINAL"));
 			true
 		} else {
 			false

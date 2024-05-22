@@ -65,10 +65,14 @@ pub enum ParseErrorKind {
 	InvalidPath {
 		possibly: Option<&'static str>,
 	},
+	InvalidRegex(regex::Error),
 	MissingField {
 		field: Span,
 		idiom: String,
 		kind: MissingKind,
+	},
+	InvalidUuidPart {
+		length: usize,
 	},
 	ExceededObjectDepthLimit,
 	ExceededQueryDepthLimit,
@@ -98,7 +102,7 @@ impl ParseError {
 
 	/// Create a rendered error from the string this error was generated from.
 	pub fn render_on_inner(source: &str, kind: &ParseErrorKind, at: Span) -> RenderedError {
-		match &kind {
+		match kind {
 			ParseErrorKind::Unexpected {
 				found,
 				expected,
@@ -231,6 +235,15 @@ impl ParseError {
 					snippets: vec![snippet],
 				}
 			}
+			ParseErrorKind::InvalidRegex(ref error) => {
+				let text = format!("failed to parse regex, {error}");
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
 			ParseErrorKind::NoWhitespace => {
 				let text = "Whitespace is dissallowed in this position";
 				let locations = Location::range_of_span(source, at);
@@ -293,6 +306,28 @@ impl ParseError {
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {
 					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidIdent => {
+				let text = "Duration specified exceeds maximum allowed value";
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text: text.to_string(),
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidUuidPart {
+				length,
+			} => {
+				let text = format!(
+					"Uuid hex section not the correct length, needs to be {length} characters"
+				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
 					snippets: vec![snippet],
 				}
 			}

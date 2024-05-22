@@ -327,7 +327,7 @@ impl Parser<'_> {
 							Part::Last
 						}
 						TokenKind::Digits | t!("+") => {
-							let number = self.token_value(token)?;
+							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						t!("-") => {
@@ -373,7 +373,7 @@ impl Parser<'_> {
 							Part::All
 						}
 						TokenKind::Digits | t!("+") => {
-							let number = self.token_value(token)?;
+							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						t!("-") => {

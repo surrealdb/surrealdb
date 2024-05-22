@@ -207,7 +207,7 @@ impl Parser<'_> {
 		self.peek();
 		self.no_whitespace()?;
 
-		let id = ctx.run(|ctx| self.parse_id(ctx)).await;
+		let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 
 		Ok(Thing {
 			tb: ident,
@@ -216,124 +216,106 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
-		let token = self.next();
+		let token = self.peek();
 		match token.kind {
 			t!("{") => {
+				self.pop_peek();
 				// object record id
-				let object = self.parse_object(stk, token.span).await;
+				let object = self.parse_object(stk, token.span).await?;
 				Ok(Id::Object(object))
 			}
 			t!("[") => {
+				self.pop_peek();
 				// array record id
-				let array = self.parse_array(stk, token.span).await;
+				let array = self.parse_array(stk, token.span).await?;
 				Ok(Id::Array(array))
 			}
 			t!("+") => {
+				self.pop_peek();
 				// starting with a + so it must be a number
-				self.peek();
-				self.no_whitespace()?;
-				let digits = expected!(self, TokenKind::Digits);
-				let digits_string = self.lexer.string.take().unwrap();
-
-				let peek = self.peek();
-
-				// Test for some invalid syntax types.
-				if digits.is_followed_by(&peek) {
-					match peek.kind {
-						t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
-							// TODO(delskayn) explain that record-id's cant have matissas,
-							// exponents or a number suffix
-							unexpected!(self, peek.kind, "an integer");
-						}
-						x if Self::tokenkind_continues_ident(x) => {
-							unexpected!(self, x, "an integer");
-						}
-						// allowed
-						_ => {}
-					}
+				let digits_token = self.peek_whitespace();
+				match digits_token.kind {
+					TokenKind::Digits => {}
+					x => unexpected!(self, x, "an integer"),
 				}
 
-				if let Ok(number) = digits_string.parse() {
+				let next = self.peek_whitespace();
+				match next.kind {
+					t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
+						// TODO(delskayn) explain that record-id's cant have matissas,
+						// exponents or a number suffix
+						unexpected!(self, next.kind, "an integer");
+					}
+					x if Self::tokenkind_continues_ident(x) => {
+						let span = token.span.covers(next.span);
+						unexpected!(@span, self, x, "an integer");
+					}
+					// allowed
+					_ => {}
+				}
+
+				let digits_str = self.span_str(digits_token.span);
+				if let Ok(number) = digits_str.parse() {
 					Ok(Id::Number(number))
 				} else {
-					Ok(Id::String(digits_string))
+					Ok(Id::String(digits_str.to_owned()))
 				}
 			}
 			t!("-") => {
-				// starting with a - so it must be a number
-				self.peek();
-				self.no_whitespace()?;
-				let digits = expected!(self, TokenKind::Digits);
-				let digits_string = self.lexer.string.take().unwrap();
-
-				let peek = self.peek();
-
-				// Test for some invalid syntax types.
-				if digits.is_followed_by(&peek) {
-					match peek.kind {
-						t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
-							// TODO(delskayn) explain that record-id's cant have matissas,
-							// exponents or a number suffix
-							unexpected!(self, peek.kind, "an integer");
-						}
-						x if Self::tokenkind_continues_ident(x) => {
-							unexpected!(self, x, "an integer");
-						}
-						// allowed
-						_ => {}
-					}
+				self.pop_peek();
+				// starting with a + so it must be a number
+				let digits_token = self.peek_whitespace();
+				match digits_token.kind {
+					TokenKind::Digits => {}
+					x => unexpected!(self, x, "an integer"),
 				}
 
-				if let Ok(number) = digits_string.parse::<u64>() {
+				let next = self.peek_whitespace();
+				match next.kind {
+					t!(".") | TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
+						// TODO(delskayn) explain that record-id's cant have matissas,
+						// exponents or a number suffix
+						unexpected!(self, next.kind, "an integer");
+					}
+					x if Self::tokenkind_continues_ident(x) => {
+						let span = token.span.covers(next.span);
+						unexpected!(@span, self, x, "an integer");
+					}
+					// allowed
+					_ => {}
+				}
+
+				let digits_str = self.span_str(digits_token.span);
+				if let Ok(number) = digits_str.parse::<u64>() {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.cmp(&((i64::MAX as u64) + 1)) {
 						Ordering::Less => Ok(Id::Number(-(number as i64))),
 						Ordering::Equal => Ok(Id::Number(i64::MIN)),
-						Ordering::Greater => Ok(Id::String(format!("-{}", digits_string))),
+						Ordering::Greater => Ok(Id::String(format!("-{}", digits_str))),
 					}
 				} else {
-					Ok(Id::String(format!("-{}", digits_string)))
+					Ok(Id::String(format!("-{}", digits_str)))
 				}
 			}
 			TokenKind::Digits => {
-				// digits, possibly a number or possible an identifier if flexible_record_id is
-				// enabled.
-				let peek = self.peek();
+				let next = self.peek_whitespace_token_at(1);
 
-				if token.is_followed_by(&peek) {
-					match peek.kind {
-						t!(".") => {
-							// TODO(delskayn) explain that record-id's cant have matissas,
-							// exponents or a number suffix
-							unexpected!(self, peek.kind, "a record-id");
-						}
-						x if Self::tokenkind_can_start_ident(x) => {
-							if self.flexible_record_id {
-								// flexible_record_id enabled
-								// Glue the digits into an identifier.
-								let buffer = self.lexer.reader.span(token.span);
-								let buffer = std::str::from_utf8(buffer).unwrap().to_owned();
-								if let Err(e) = self.glue_ident(token, &mut buffer) {
-									return Err(ParseError::new(
-										ParseErrorKind::Unexpected {
-											found: x,
-											expected: "an record-id",
-										},
-										e,
-									));
-								}
-								return Ok(Id::String(buffer));
-							}
-
-							unexpected!(self, x, "an record-id")
-						}
-						_ => {}
+				if Self::tokenkind_can_start_ident(next.kind) {
+					let glued = self.glue_ident(self.flexible_record_id)?;
+					if let TokenKind::Identifier = glued.kind {
+						return Ok(Id::String(self.lexer.string.take().unwrap()));
+					} else {
+						unexpected!(self, glued.kind, "a record-id id")
 					}
 				}
 
-				let span = self.lexer.reader.span(token.span);
-				Ok(Id::Number(std::str::from_utf8(span).unwrap().parse::<i64>()?))
+				let digits_str = self.span_str(next.span);
+				if let Ok(number) = digits_str.parse::<i64>() {
+					Ok(Id::Number(number))
+				} else {
+					Ok(Id::String(digits_str.to_owned()))
+				}
 			}
 			t!("ULID") => {
 				// TODO: error message about how to use `ulid` as an identifier.
@@ -352,7 +334,8 @@ impl Parser<'_> {
 				Ok(Id::Generate(Gen::Rand))
 			}
 			_ => {
-				let ident = self.token_value::<Ident>(token)?.0;
+				self.glue_ident(self.flexible_record_id)?;
+				let ident = self.next_token_value::<Ident>()?.0;
 				Ok(Id::String(ident))
 			}
 		}

@@ -56,8 +56,7 @@ impl Parser<'_> {
 		match key.as_str() {
 			"type" => {
 				// for it to be geometry the next value must be a strand like.
-				let token = self.peek();
-				let strand = self.token_value::<Strand>(token);
+				let strand = self.next_token_value::<Strand>();
 				match strand.as_ref().map(|x| x.as_str()) {
 					Ok("Point") => {
 						// we matched a type correctly but the field containing the geometry value
@@ -262,7 +261,8 @@ impl Parser<'_> {
 						.map(Value::Object);
 				}
 				let peek = self.peek();
-				let strand = self.token_value::<Strand>(peek);
+				// TODO: Fix this.
+				let strand = self.next_token_value::<Strand>();
 				// match the type and then match the coordinates field to a value of that type.
 				let (ate_comma, type_value) = match strand.as_ref().map(|x| x.as_str()) {
 					Ok("Point") => {

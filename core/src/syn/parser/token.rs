@@ -1,5 +1,7 @@
 //! Implements token gluing logic.
 
+use nom::AsChar;
+
 use crate::{
 	sql::duration::{
 		SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
@@ -86,6 +88,7 @@ impl Parser<'_> {
 					Ok(token)
 				}
 			}
+			t!("\"") | t!("'") => self.glue_plain_strand(),
 			_ => Ok(token),
 		}
 	}
@@ -118,7 +121,7 @@ impl Parser<'_> {
 				assert!(!self.has_peek());
 				self.span_str(start.span).to_owned()
 			}
-			x => unexpected!(self, x, "an identifier"),
+			_ => return Ok(start),
 		};
 
 		let mut prev = start;
@@ -209,6 +212,7 @@ impl Parser<'_> {
 					unexpected!(self, start.kind, "a number")
 				}
 			}
+			TokenKind::NaN => return Ok(start),
 			TokenKind::Number(_) => return Ok(start),
 			TokenKind::Digits => {
 				self.pop_peek();
@@ -216,7 +220,7 @@ impl Parser<'_> {
 				// needs. Triggering this assert means there is a bug in the parser.
 				assert!(!self.has_peek());
 			}
-			x => unexpected!(self, x, "a number"),
+			_ => return Ok(start),
 		};
 
 		let mut kind = NumberKind::Integer;
@@ -290,8 +294,7 @@ impl Parser<'_> {
 				// needs. Triggering this assert means there is a bug in the parser.
 				assert!(!self.has_peek());
 			}
-			TokenKind::Duration => return Ok(start),
-			x => unexpected!(self, x, "a duration"),
+			_ => return Ok(start),
 		};
 
 		let mut cur = start;
@@ -411,7 +414,7 @@ impl Parser<'_> {
 			TokenKind::NumberSuffix(NumberSuffix::Float) => {
 				return Ok(start);
 			}
-			x => unexpected!(self, x, "a floating point number"),
+			_ => return Ok(start),
 		}
 
 		// check for mantissa
@@ -466,5 +469,170 @@ impl Parser<'_> {
 		self.prepend_token(token);
 
 		Ok(token)
+	}
+
+	pub fn glue_plain_strand(&mut self) -> ParseResult<Token> {
+		let start = self.peek_whitespace();
+		match start.kind {
+			t!("\"") | t!("'") => {}
+			_ => return Ok(start),
+		};
+
+		assert!(!self.has_peek());
+
+		let token = self.lexer.relex_strand(start);
+		self.prepend_token(token);
+		Ok(token)
+	}
+
+	pub fn glue_uuid_strand(&mut self) -> ParseResult<Token> {
+		let start = self.peek_whitespace();
+		let double = match start.kind {
+			t!("u\"") => true,
+			t!("u'") => false,
+			_ => return Ok(start),
+		};
+
+		let mut uuid_buffer = [0u8; 16];
+
+		self.eat_uuid_hex(&mut uuid_buffer[0..4])?;
+
+		let next = self.peek_whitespace();
+		let t!("-") = next.kind else {
+			unexpected!(self, next.kind, "a '-' seperator");
+		};
+
+		self.eat_uuid_hex(&mut uuid_buffer[4..6])?;
+
+		let next = self.peek_whitespace();
+		let t!("-") = next.kind else {
+			unexpected!(self, next.kind, "a '-' seperator");
+		};
+
+		self.eat_uuid_hex(&mut uuid_buffer[6..8])?;
+
+		let next = self.peek_whitespace();
+		let t!("-") = next.kind else {
+			unexpected!(self, next.kind, "a '-' seperator");
+		};
+
+		self.eat_uuid_hex(&mut uuid_buffer[8..10])?;
+
+		let next = self.peek_whitespace();
+		let t!("-") = next.kind else {
+			unexpected!(self, next.kind, "a '-' seperator");
+		};
+
+		self.eat_uuid_hex(&mut uuid_buffer[10..16])?;
+
+		let next = self.peek_whitespace();
+		match next.kind {
+			t!("\"") if double => {}
+			t!("'") if !double => {}
+			_ => {
+				return Err(ParseError::new(
+					ParseErrorKind::UnclosedDelimiter {
+						expected: if double {
+							t!("\"")
+						} else {
+							t!("'")
+						},
+						should_close: start.span,
+					},
+					next.span,
+				));
+			}
+		}
+		self.pop_peek();
+
+		// At this point this should not be able to fail as we already validated the
+		self.lexer.uuid = Some(uuid::Uuid::from_bytes(uuid_buffer));
+		let token = Token {
+			kind: TokenKind::Uuid,
+			span: start.span.covers(self.last_span()),
+		};
+		self.prepend_token(token);
+		Ok(token)
+	}
+
+	fn eat_uuid_hex(&mut self, buffer: &mut [u8]) -> ParseResult<()> {
+		fn ascii_to_hex(b: u8) -> Option<u8> {
+			if (b'0'..=b'9').contains(&b) {
+				return Some(b - b'0');
+			}
+
+			if (b'a'..=b'f').contains(&b) {
+				return Some(b - b'a');
+			}
+
+			None
+		}
+
+		let start_token = self.peek_whitespace();
+		let mut cur = start_token;
+		loop {
+			match cur.kind {
+				TokenKind::Identifier => {
+					self.pop_peek();
+					break;
+				}
+				TokenKind::Exponent | TokenKind::Digits => {
+					self.pop_peek();
+					cur = self.peek_whitespace();
+				}
+				_ => unexpected!(self, TokenKind::Strand, "UUID hex digits"),
+			}
+		}
+
+		let span = start_token.span.covers(cur.span);
+		let span_str = self.span_str(span);
+
+		if !span_str.bytes().all(|x| x.is_hex_digit()) {
+			unexpected!(@span, self, TokenKind::Strand, "UUID hex digits")
+		}
+		let required_len = buffer.len() * 2;
+
+		for (idx, byte) in buffer.iter_mut().enumerate() {
+			let b = span_str.as_bytes().get(idx * 2 + 1).copied().ok_or_else(|| {
+				ParseError::new(
+					ParseErrorKind::InvalidUuidPart {
+						length: required_len,
+					},
+					span,
+				)
+			})?;
+			let a = span_str.as_bytes()[idx * 2];
+
+			let a = ascii_to_hex(a).ok_or_else(|| {
+				ParseError::new(
+					ParseErrorKind::Unexpected {
+						found: TokenKind::Strand,
+						expected: "UUID hex digits",
+					},
+					span,
+				)
+			})?;
+			let b = ascii_to_hex(b).ok_or_else(|| {
+				ParseError::new(
+					ParseErrorKind::Unexpected {
+						found: TokenKind::Strand,
+						expected: "UUID hex digits",
+					},
+					span,
+				)
+			})?;
+
+			*byte = a << 4 | b
+		}
+
+		Ok(())
+	}
+
+	pub fn glue_regex(&mut self) -> ParseResult<Token> {
+		let next = self.peek();
+		match self.peek_kind() {
+			t!("/") => Ok(self.lexer.relex_regex(next)),
+			_ => Ok(next),
+		}
 	}
 }

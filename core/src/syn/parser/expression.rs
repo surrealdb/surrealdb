@@ -198,14 +198,14 @@ impl Parser<'_> {
 	pub fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
 		let amount = self.next_token_value()?;
 		let op = if self.eat(t!(",")) {
-			let token = self.next();
-			match &token.kind {
-				TokenKind::Distance(k) => {
+			match self.peek_kind(){
+				TokenKind::Distance(ref k) => {
+					self.pop_peek();
 					let d = self.convert_distance(k).map(Some)?;
 					Operator::Knn(amount, d)
 				},
 				TokenKind::Digits => {
-					let ef = self.token_value(token)?;
+					let ef = self.next_token_value()?;
 					Operator::Ann(amount, ef)
 				}
 				_ => {

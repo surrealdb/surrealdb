@@ -361,6 +361,8 @@ pub enum TokenKind {
 	Number(NumberKind),
 	/// Not produced by the lexer but only the result of token gluing.
 	Duration,
+	Uuid,
+	Datetime,
 	/// Not produced by the lexer but only the result of token gluing.
 	Strand,
 	Regex,
@@ -424,7 +426,14 @@ const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
-		matches!(self, TokenKind::Identifier)
+		matches!(
+			self,
+			TokenKind::Identifier
+				| TokenKind::Datetime
+				| TokenKind::Duration
+				| TokenKind::Uuid
+				| TokenKind::Regex
+		)
 	}
 
 	pub fn can_be_identifier(&self) -> bool {

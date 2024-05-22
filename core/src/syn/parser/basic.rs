@@ -1,74 +1,28 @@
 use std::{
 	num::{ParseFloatError, ParseIntError},
 	str::FromStr,
-	time::Duration as StdDuration,
 };
 
 use crate::{
 	sql::{
-		duration::{
-			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
-			SECONDS_PER_YEAR,
-		},
-		language::Language,
-		Datetime, Duration, Ident, Number, Param, Regex, Strand, Table, Uuid,
+		language::Language, Datetime, Duration, Ident, Number, Param, Regex, Strand, Table, Uuid,
 	},
 	syn::{
 		parser::{mac::unexpected, ParseError, ParseErrorKind, ParseResult, Parser},
-		token::{t, DurationSuffix, NumberSuffix, QouteKind, Token, TokenKind},
+		token::{t, NumberKind, QouteKind, TokenKind},
 	},
 };
 
 /// A trait for parsing single tokens with a specific value.
 pub trait TokenValue: Sized {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self>;
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self>;
 }
 
 impl TokenValue for Ident {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		match token.kind {
-			TokenKind::Keyword(_)
-			| TokenKind::Language(_)
-			| TokenKind::Algorithm(_)
-			| TokenKind::Distance(_)
-			| TokenKind::VectorType(_) => {
-				let str = parser.lexer.reader.span(token.span);
-				// Lexer should ensure that the token is valid utf-8
-				let str = std::str::from_utf8(str).unwrap().to_owned();
-				Ok(Ident(str))
-			}
-			TokenKind::DurationSuffix(suffix) => {
-				if !suffix.can_be_ident() {
-					unexpected!(parser, token.kind, "an identifier")
-				}
-				let mut buffer = suffix.as_str().to_owned();
-				if let Err(span) = parser.glue_ident(token, &mut buffer) {
-					return Err(ParseError::new(
-						ParseErrorKind::Unexpected {
-							found: parser.peek_kind(),
-							expected: "an identifier",
-						},
-						span,
-					));
-				}
-				Ok(Ident(buffer))
-			}
-			TokenKind::Exponent => {
-				let str = parser.lexer.reader.span(token.span);
-				// Lexer should ensure that the token is valid utf-8
-				let mut buffer = std::str::from_utf8(str).unwrap().to_owned();
-				if let Err(span) = parser.glue_ident(token, &mut buffer) {
-					return Err(ParseError::new(
-						ParseErrorKind::Unexpected {
-							found: parser.peek_kind(),
-							expected: "an identifier",
-						},
-						span,
-					));
-				}
-				Ok(Ident(buffer))
-			}
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		match parser.glue_ident(false)?.kind {
 			TokenKind::Identifier => {
+				parser.pop_peek();
 				let str = parser.lexer.string.take().unwrap();
 				Ok(Ident(str))
 			}
@@ -80,36 +34,42 @@ impl TokenValue for Ident {
 }
 
 impl TokenValue for Table {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parser.token_value::<Ident>(token).map(|x| Table(x.0))
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parser.next_token_value::<Ident>().map(|x| Table(x.0))
 	}
 }
 
 /// Generic integer parsing method,
 /// works for all unsigned integers.
-fn parse_integer<I>(parser: &mut Parser<'_>, token: Token) -> ParseResult<I>
+fn parse_integer<I>(parser: &mut Parser<'_>) -> ParseResult<I>
 where
 	I: FromStr<Err = ParseIntError>,
 {
-	match token.kind {
+	let peek = parser.peek();
+	match peek.kind {
 		TokenKind::Digits => {
+			parser.pop_peek();
 			let digits_string = parser.lexer.string.take().unwrap();
-			let p = parser.peek();
-			if p.follows_from(&token) {
-				match p.kind {
-					t!(".")
-					| TokenKind::NumberSuffix(_)
-					| TokenKind::DurationSuffix(_)
-					| TokenKind::Exponent => {
-						unexpected!(parser, p.kind, "an integer")
-					}
-					_ => {}
+
+			assert!(!parser.has_peek());
+
+			let p = parser.peek_whitespace();
+			match p.kind {
+				t!(".") => {
+					unexpected!(parser, p.kind, "an integer")
 				}
+				t!("dec") => {
+					unexpected!(parser, p.kind, "an integer" => "decimal numbers not supported here")
+				}
+				x if Parser::tokenkind_continues_ident(x) => {
+					unexpected!(parser, p.kind, "an integer")
+				}
+				_ => {}
 			}
 			let res = digits_string
 				.parse()
 				.map_err(ParseErrorKind::InvalidInteger)
-				.map_err(|e| ParseError::new(e, token.span))?;
+				.map_err(|e| ParseError::new(e, peek.span))?;
 			Ok(res)
 		}
 		x => unexpected!(parser, x, "an integer"),
@@ -117,208 +77,137 @@ where
 }
 
 impl TokenValue for u64 {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parse_integer(parser, token)
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_integer(parser)
 	}
 }
 
 impl TokenValue for u32 {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parse_integer(parser, token)
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_integer(parser)
 	}
 }
 
 impl TokenValue for u16 {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parse_integer(parser, token)
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_integer(parser)
 	}
 }
 
 impl TokenValue for u8 {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parse_integer(parser, token)
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_integer(parser)
 	}
 }
 
 /// Generic float parsing method,
 /// works for both f32 and f64
-fn parse_float<F>(parser: &mut Parser<'_>, token: Token) -> ParseResult<F>
+fn parse_float<F>(parser: &mut Parser<'_>) -> ParseResult<F>
 where
 	F: FromStr<Err = ParseFloatError>,
 {
+	let peek = parser.peek();
 	// find initial  digits
-	let mut buffer: String = match token.kind {
+	match peek.kind {
 		TokenKind::NaN => return Ok("NaN".parse().unwrap()),
-		TokenKind::Digits => {
-			let span = parser.lexer.reader.span(token.span);
-			// filter out all the '_'
-			span.iter().copied().filter(|x| *x != b'_').map(|x| x as char).collect()
+		TokenKind::Digits => {}
+		x => unexpected!(parser, x, "a floating point number"),
+	};
+	let float_token = parser.glue_float()?;
+	match float_token.kind {
+		TokenKind::Number(NumberKind::Float) => {
+			parser.pop_peek();
 		}
-
 		x => unexpected!(parser, x, "a floating point number"),
 	};
 
-	if let Err(span) = parser.glue_float(token, &mut buffer) {
-		return Err(ParseError::new(
-			ParseErrorKind::Unexpected {
-				found: parser.peek_kind(),
-				expected: "a floating point number",
-			},
-			span,
-		));
-	}
-
-	let span = token.span.covers(parser.last_span());
-	buffer.parse().map_err(ParseErrorKind::InvalidFloat).map_err(|e| ParseError::new(e, span))
+	let span = parser.span_str(float_token.span);
+	// remove the possible "f" number suffix
+	span.strip_suffix("f")
+		.unwrap_or(span)
+		.parse()
+		.map_err(ParseErrorKind::InvalidFloat)
+		.map_err(|e| ParseError::new(e, float_token.span))
 }
 
 impl TokenValue for f32 {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parse_float(parser, token)
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_float(parser)
 	}
 }
 
 impl TokenValue for f64 {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		parse_float(parser, token)
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		parse_float(parser)
 	}
 }
 
 impl TokenValue for Language {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		match token.kind {
-			TokenKind::Language(x) => Ok(x),
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		match parser.peek_kind() {
+			TokenKind::Language(x) => {
+				parser.pop_peek();
+				Ok(x)
+			}
 			// `NO` can both be used as a keyword and as a language.
-			t!("NO") => Ok(Language::Norwegian),
+			t!("NO") => {
+				parser.pop_peek();
+				Ok(Language::Norwegian)
+			}
 			x => unexpected!(parser, x, "a language"),
 		}
 	}
 }
 
 impl TokenValue for Number {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let mut digits_token = token;
-		// handle +/-/digits/NaN
-		let number_buffer: String = match digits_token.kind {
-			t!("+") => {
-				// next must be a digit or it is an invalid number
-				let p = parser.peek();
-				if !p.follows_from(&digits_token) {
-					unexpected!(parser, digits_token.kind, "a number")
-				}
-
-				let TokenKind::Digits = p.kind else {
-					unexpected!(parser, digits_token.kind, "a number")
-				};
-
-				digits_token = p;
-
-				parser
-					.lexer
-					.reader
-					.span(digits_token.span)
-					.iter()
-					.copied()
-					.filter(|x| *x != b'_')
-					.map(|x| x as char)
-					.collect()
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let number = parser.glue_number()?;
+		let number_kind = match number.kind {
+			TokenKind::NaN => {
+				parser.pop_peek();
+				return Ok(Number::Float(f64::NAN));
 			}
-			t!("-") => {
-				// next must be a digit or it is an invalid number
-				let p = parser.peek();
-				if !p.follows_from(&digits_token) {
-					unexpected!(parser, digits_token.kind, "a number")
-				}
-
-				let TokenKind::Digits = p.kind else {
-					unexpected!(parser, digits_token.kind, "a number")
-				};
-
-				digits_token = p;
-
-				let mut buffer = String::new();
-				buffer.push('-');
-				buffer.extend(
-					parser
-						.lexer
-						.reader
-						.span(digits_token.span)
-						.iter()
-						.copied()
-						.filter(|x| *x != b'_')
-						.map(|x| x as char),
-				);
-				buffer
-			}
-			TokenKind::NaN => return Ok(Number::Float(f64::NAN)),
-			TokenKind::Digits => parser
-				.lexer
-				.reader
-				.span(token.span)
-				.iter()
-				.copied()
-				.filter(|x| *x != b'_')
-				.map(|x| x as char)
-				.collect(),
+			TokenKind::Number(x) => x,
 			x => unexpected!(parser, x, "a number"),
 		};
 
-		let p = parser.peek();
-		if !p.follows_from(&digits_token) {
-			let s = token.span.covers(digits_token.span);
-			let v = number_buffer
-				.parse()
-				.map_err(ParseErrorKind::InvalidInteger)
-				.map_err(|e| ParseError::new(e, s))?;
-			return Ok(Number::Int(v));
-		}
+		parser.pop_peek();
+		let span = parser.span_str(number.span);
 
-		match p.kind {
-			TokenKind::NumberSuffix(NumberSuffix::Decimal) => {
-				let s = token.span.covers(p.span);
-				let v = number_buffer
-					.parse()
-					.map_err(ParseErrorKind::InvalidDecimal)
-					.map_err(|e| ParseError::new(e, s))?;
-				return Ok(Number::Decimal(v));
+		match number_kind {
+			NumberKind::Decimal => {
+				let decimal =
+					span.strip_suffix("dec").unwrap_or(span).parse().map_err(|e| {
+						ParseError::new(ParseErrorKind::InvalidDecimal(e), number.span)
+					})?;
+
+				Ok(Number::Decimal(decimal))
 			}
-			TokenKind::NumberSuffix(NumberSuffix::Float) => {
-				let s = token.span.covers(p.span);
-				let v = number_buffer
-					.parse()
-					.map_err(ParseErrorKind::InvalidFloat)
-					.map_err(|e| ParseError::new(e, s))?;
-				return Ok(Number::Float(v));
+			NumberKind::Float => {
+				let float =
+					span.strip_suffix("f").unwrap_or(span).parse().map_err(|e| {
+						ParseError::new(ParseErrorKind::InvalidFloat(e), number.span)
+					})?;
+
+				Ok(Number::Float(float))
 			}
-			t!(".") | TokenKind::Exponent => {
-				let mut number_buffer = number_buffer;
-				if let Err(span) = parser.glue_float(digits_token, &mut number_buffer) {
-					return Err(ParseError::new(
-						ParseErrorKind::Unexpected {
-							found: parser.peek_kind(),
-							expected: "a number",
-						},
-						span,
-					));
-				}
-				let s = token.span.covers(parser.last_span());
-				let v = number_buffer
-					.parse()
-					.map_err(ParseErrorKind::InvalidFloat)
-					.map_err(|e| ParseError::new(e, s))?;
-				return Ok(Number::Float(v));
-			}
-			x => {
-				unexpected!(parser, x, "a number")
+			NumberKind::Integer => {
+				let integer =
+					span.strip_suffix("f").unwrap_or(span).parse().map_err(|e| {
+						ParseError::new(ParseErrorKind::InvalidInteger(e), number.span)
+					})?;
+
+				Ok(Number::Int(integer))
 			}
 		}
 	}
 }
 
 impl TokenValue for Param {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		match token.kind {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		match parser.peek_kind() {
 			TokenKind::Parameter => {
+				parser.pop_peek();
 				let param = parser.lexer.string.take().unwrap();
 				Ok(Param(Ident(param)))
 			}
@@ -328,21 +217,32 @@ impl TokenValue for Param {
 }
 
 impl TokenValue for Duration {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {}
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		match parser.glue_duration()?.kind {
+			TokenKind::Duration => {
+				parser.pop_peek();
+				return Ok(Duration(parser.lexer.duration.unwrap()));
+			}
+			x => unexpected!(parser, x, "a duration"),
+		}
+	}
 }
 
 impl TokenValue for Datetime {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let TokenKind::Qoute(QouteKind::DateTime) = token.kind else {
-			unexpected!(parser, token.kind, "a datetime")
-		};
-		let datetime = parser.lexer.datetime.take().expect("token data was already consumed");
-		Ok(datetime)
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		match parser.glue_duration()?.kind {
+			TokenKind::Datetime => {
+				parser.pop_peek();
+				return Ok(Datetime(parser.lexer.datetime.unwrap()));
+			}
+			x => unexpected!(parser, x, "a datetime"),
+		}
 	}
 }
 
 impl TokenValue for Strand {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
 		match token.kind {
 			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
 				let t = parser.lexer.relex_strand(token);
@@ -357,32 +257,40 @@ impl TokenValue for Strand {
 }
 
 impl TokenValue for Uuid {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let TokenKind::Qoute(QouteKind::Uuid) = token.kind else {
-			unexpected!(parser, token.kind, "a datetime")
-		};
-		Ok(parser.lexer.uuid.take().unwrap())
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		match parser.glue_uuid_strand()?.kind {
+			TokenKind::Uuid => {
+				parser.pop_peek();
+				return Ok(Uuid(parser.lexer.uuid.unwrap()));
+			}
+			x => unexpected!(parser, x, "a uuid"),
+		}
 	}
 }
 
 impl TokenValue for Regex {
-	fn from_token(parser: &mut Parser<'_>, token: Token) -> ParseResult<Self> {
-		let TokenKind::Regex = token.kind else {
-			unexpected!(parser, token.kind, "a regex")
-		};
-		Ok(parser.lexer.regex.take().expect("token data was already consumed"))
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		match parser.glue_regex()?.kind {
+			TokenKind::Regex => {
+				let span = parser.pop_peek().span;
+				let regex = parser
+					.lexer
+					.string
+					.take()
+					.unwrap()
+					.parse()
+					.map_err(|e| ParseError::new(ParseErrorKind::InvalidRegex(e), span))?;
+				return Ok(Regex(regex));
+			}
+			x => unexpected!(parser, x, "a regex"),
+		}
 	}
 }
 
 impl Parser<'_> {
 	/// Parse a token value from the next token in the parser.
 	pub fn next_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
-		let next = self.peek();
-		let res = V::from_token(self, next);
-		if res.is_ok() {
-			self.pop_peek();
-		}
-		res
+		V::from_token(self)
 	}
 
 	pub fn parse_signed_float(&mut self) -> ParseResult<f64> {
@@ -396,10 +304,5 @@ impl Parser<'_> {
 		} else {
 			Ok(res)
 		}
-	}
-
-	/// Parse a token value from the given token.
-	pub fn token_value<V: TokenValue>(&mut self, token: Token) -> ParseResult<V> {
-		V::from_token(self, token)
 	}
 }
