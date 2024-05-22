@@ -397,6 +397,56 @@ async fn create_with_unique_index_on_two_fields() -> Result<(), Error> {
 	Ok(())
 }
 
+#[tokio::test]
+async fn create_with_subquery_execution() -> Result<(), Error> {
+	let sql = "
+		CREATE person:test CONTENT {
+			address: (CREATE ONLY address CONTENT {
+				id: 'test', city: 'London'
+			})
+		};
+		SELECT * FROM person, address;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				address: {
+					city: 'London',
+					id: address:test
+				},
+				id: person:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				address: {
+					city: 'London',
+					id: address:test
+				},
+				id: person:test
+			},
+			{
+				city: 'London',
+				id: address:test
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 //
 // Permissions
 //

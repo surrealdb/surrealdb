@@ -184,6 +184,7 @@
 "array::push("
 "array::remove("
 "array::reverse("
+"array::shuffle("
 "array::slice("
 "array::sort("
 "array::sort::asc("

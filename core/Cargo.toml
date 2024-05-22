@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.0.0-1.5.0"
+version = "2.0.0"
 rust-version = "1.77.0"
 readme = "../lib/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -40,7 +40,7 @@ kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = ["dep:surrealkv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-ml = ["dep:surrealml", "dep:ndarray"]
+ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
 arbitrary = [
     "dep:arbitrary",
@@ -59,6 +59,7 @@ targets = []
 
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
+ahash = "0.8.11"
 arbitrary = { version = "1.3.2", features = ["derive"], optional = true }
 argon2 = "0.5.2"
 ascii = { version = "0.3.2", package = "any_ascii" }
@@ -86,10 +87,11 @@ futures = "0.3.29"
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.27.0", features = ["use-serde"] }
 geo-types = { version = "0.7.12", features = ["arbitrary"] }
+hashbrown = { version = "0.14.5", features = ["serde"] }
 hex = { version = "0.4.3" }
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
-js = { version = "0.5.1", package = "rquickjs", features = [
+js = { version = "0.6.2", package = "rquickjs", features = [
     "array-buffer",
     "bindgen",
     "classes",
@@ -102,9 +104,12 @@ js = { version = "0.5.1", package = "rquickjs", features = [
 ], optional = true }
 jsonwebtoken = { version = "8.3.0-surreal.1", package = "surrealdb-jsonwebtoken" }
 lexicmp = "0.1.0"
+linfa-linalg = "=0.1.0"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
-ndarray = { version = "0.15.6", optional = true }
+ndarray = { version = "=0.15.6" }
+ndarray-stats = "=0.5.1"
+num-traits = "0.2.18"
 nom = { version = "7.1.3", features = ["alloc"] }
 num_cpus = "1.16.0"
 object_store = { version = "0.8.0", optional = false }
@@ -115,7 +120,7 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.5.1"
 radix_trie = { version = "0.2.1", features = ["serde"] }
 rand = "0.8.5"
-reblessive = { version = "0.3.3", features = ["tree"] }
+reblessive = { version = "0.3.5", features = ["tree"] }
 regex = "1.10.2"
 regex-syntax = { version = "0.8.2", optional = true, features = ["arbitrary"] }
 reqwest = { version = "0.11.22", default-features = false, features = [
@@ -152,6 +157,7 @@ url = "2.5.0"
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 env_logger = "0.10.1"
+flate2 = "1.0.28"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion"] }
 serial_test = "2.0.0"
 temp-dir = "0.1.11"
