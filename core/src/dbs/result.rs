@@ -27,7 +27,7 @@ impl Results {
 			return Ok(Self::Groups(GroupsCollector::new(stm)));
 		}
 		#[cfg(not(target_arch = "wasm32"))]
-		if stm.tempdir() {
+		if stm.tempfiles() {
 			if let Some(temp_dir) = ctx.temporary_directory() {
 				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
 			}

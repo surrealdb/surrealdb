@@ -123,6 +123,9 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 			"parallel" => {
 				self.parallel = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
 			}
+			"tempfiles" => {
+				self.tempfiles = Some(value.serialize(ser::primitive::bool::Serializer.wrap())?);
+			}
 			"explain" => {
 				self.explain = value.serialize(ser::explain::opt::Serializer.wrap())?;
 			}

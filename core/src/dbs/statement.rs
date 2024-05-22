@@ -207,7 +207,7 @@ impl<'a> Statement<'a> {
 	}
 	/// Returns any PARALLEL clause if specified
 	#[inline]
-	#[allow(dead_code)]
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,
@@ -220,10 +220,10 @@ impl<'a> Statement<'a> {
 		}
 	}
 
-	/// Returns any PARALLEL clause if specified
+	/// Returns any TEMPFILES clause if specified
 	#[inline]
-	#[allow(dead_code)]
-	pub fn tempdir(&self) -> bool {
+	#[cfg(not(target_arch = "wasm32"))]
+	pub fn tempfiles(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.tempfiles,
 			_ => false,
