@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-file",
 	feature = "kv-rocksdb",
@@ -20,6 +21,7 @@ pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
 		feature = "kv-file",
 		feature = "kv-rocksdb",
@@ -35,6 +37,7 @@ impl Results {
 	pub(super) fn prepare(
 		&mut self,
 		#[cfg(any(
+			feature = "kv-mem",
 			feature = "kv-surrealkv",
 			feature = "kv-file",
 			feature = "kv-rocksdb",
@@ -49,6 +52,7 @@ impl Results {
 			return Ok(Self::Groups(GroupsCollector::new(stm)));
 		}
 		#[cfg(any(
+			feature = "kv-mem",
 			feature = "kv-surrealkv",
 			feature = "kv-file",
 			feature = "kv-rocksdb",
@@ -56,8 +60,10 @@ impl Results {
 			feature = "kv-tikv",
 			feature = "kv-speedb"
 		))]
-		if !ctx.is_memory() {
-			return Ok(Self::File(Box::new(FileCollector::new(ctx.temporary_directory())?)));
+		if stm.tempfiles() {
+			if let Some(temp_dir) = ctx.temporary_directory() {
+				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
+			}
 		}
 		Ok(Self::Memory(Default::default()))
 	}
@@ -77,6 +83,7 @@ impl Results {
 				s.push(val);
 			}
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -98,6 +105,7 @@ impl Results {
 		match self {
 			Self::Memory(m) => m.sort(orders),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -115,6 +123,7 @@ impl Results {
 			Self::None => {}
 			Self::Memory(m) => m.start_limit(start, limit),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -132,6 +141,7 @@ impl Results {
 			Self::None => 0,
 			Self::Memory(s) => s.len(),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -148,6 +158,7 @@ impl Results {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -167,6 +178,7 @@ impl Results {
 				s.explain(exp);
 			}
 			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",

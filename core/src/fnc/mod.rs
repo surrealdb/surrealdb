@@ -230,13 +230,13 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
 		//
+		"session::ac" => session::ac(ctx),
 		"session::db" => session::db(ctx),
 		"session::id" => session::id(ctx),
 		"session::ip" => session::ip(ctx),
 		"session::ns" => session::ns(ctx),
 		"session::origin" => session::origin(ctx),
-		"session::sc" => session::sc(ctx),
-		"session::sd" => session::sd(ctx),
+		"session::rd" => session::rd(ctx),
 		"session::token" => session::token(ctx),
 		//
 		"string::concat" => string::concat,
