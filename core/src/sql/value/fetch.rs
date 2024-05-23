@@ -36,6 +36,18 @@ impl Value {
 						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
 						None => Ok(()),
 					},
+					Part::Value(f) => {
+						let x = stk.run(|stk|f.compute(stk, ctx, opt, txn, None)).await?;
+						match x {
+							Value::Strand(s) => {
+								match v.get_mut(s.as_str()) {
+									Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
+									None => Ok(()),
+								}
+							}
+							_=> Ok(())
+						}
+					}
 					Part::Index(i) => match v.get_mut(&i.to_string()) {
 						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, txn, path.next())).await,
 						None => Ok(()),
