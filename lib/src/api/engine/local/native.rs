@@ -147,6 +147,7 @@ pub(crate) fn router(
 			.with_capabilities(address.config.capabilities);
 
 		#[cfg(any(
+			feature = "kv-mem",
 			feature = "kv-surrealkv",
 			feature = "kv-file",
 			feature = "kv-rocksdb",

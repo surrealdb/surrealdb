@@ -14,6 +14,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-file",
 	feature = "kv-rocksdb",
@@ -64,16 +65,7 @@ pub struct Context<'a> {
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
-	// Is the datastore in memory? (KV-MEM, WASM)
-	is_memory: bool,
-	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
 		feature = "kv-file",
 		feature = "kv-rocksdb",
@@ -108,15 +100,7 @@ impl<'a> Context<'a> {
 		capabilities: Capabilities,
 		index_stores: IndexStores,
 		#[cfg(any(
-			feature = "kv-surrealkv",
-			feature = "kv-file",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-tikv",
-			feature = "kv-speedb"
-		))]
-		is_memory: bool,
-		#[cfg(any(
+			feature = "kv-mem",
 			feature = "kv-surrealkv",
 			feature = "kv-file",
 			feature = "kv-rocksdb",
@@ -138,15 +122,7 @@ impl<'a> Context<'a> {
 			capabilities: Arc::new(capabilities),
 			index_stores,
 			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			is_memory,
-			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -175,15 +151,7 @@ impl<'a> Context<'a> {
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			is_memory: false,
-			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -209,15 +177,7 @@ impl<'a> Context<'a> {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			#[cfg(any(
-				feature = "kv-surrealkv",
-				feature = "kv-file",
-				feature = "kv-rocksdb",
-				feature = "kv-fdb",
-				feature = "kv-tikv",
-				feature = "kv-speedb"
-			))]
-			is_memory: parent.is_memory,
-			#[cfg(any(
+				feature = "kv-mem",
 				feature = "kv-surrealkv",
 				feature = "kv-file",
 				feature = "kv-rocksdb",
@@ -342,19 +302,7 @@ impl<'a> Context<'a> {
 	}
 
 	#[cfg(any(
-		feature = "kv-surrealkv",
-		feature = "kv-file",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-speedb"
-	))]
-	/// Return true if the underlying Datastore is KV-MEM (Or WASM)
-	pub fn is_memory(&self) -> bool {
-		self.is_memory
-	}
-
-	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
 		feature = "kv-file",
 		feature = "kv-rocksdb",

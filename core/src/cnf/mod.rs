@@ -40,6 +40,7 @@ pub static INSECURE_FORWARD_RECORD_ACCESS_ERRORS: Lazy<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_RECORD_ACCESS_ERRORS", bool, false);
 
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-file",
 	feature = "kv-rocksdb",

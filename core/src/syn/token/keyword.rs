@@ -159,6 +159,7 @@ keyword! {
 	Start => "START",
 	Structure => "STRUCTURE",
 	Table => "TABLE",
+	TempFiles => "TEMPFILES",
 	TermsCache => "TERMS_CACHE",
 	TermsOrder => "TERMS_ORDER",
 	Then => "THEN",

@@ -207,7 +207,7 @@ impl<'a> Statement<'a> {
 	}
 	/// Returns any PARALLEL clause if specified
 	#[inline]
-	#[allow(dead_code)]
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,
@@ -219,6 +219,25 @@ impl<'a> Statement<'a> {
 			_ => false,
 		}
 	}
+
+	/// Returns any TEMPFILES clause if specified
+	#[inline]
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-surrealkv",
+		feature = "kv-file",
+		feature = "kv-rocksdb",
+		feature = "kv-fdb",
+		feature = "kv-tikv",
+		feature = "kv-speedb"
+	))]
+	pub fn tempfiles(&self) -> bool {
+		match self {
+			Statement::Select(v) => v.tempfiles,
+			_ => false,
+		}
+	}
+
 	/// Returns any EXPLAIN clause if specified
 	#[inline]
 	pub fn explain(&self) -> Option<&Explain> {

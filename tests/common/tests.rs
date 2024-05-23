@@ -1,4 +1,5 @@
 use super::common::{self, Format, Socket, DB, NS, PASS, USER};
+use assert_fs::TempDir;
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
@@ -1538,4 +1539,47 @@ async fn relate_rpc() {
 
 	// Test passed
 	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn temporary_directory() {
+	// Setup database server
+	let temp_dir = TempDir::new().unwrap();
+	let (addr, mut server) =
+		common::start_server_with_temporary_directory(temp_dir.to_string_lossy().as_ref())
+			.await
+			.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// create records
+	socket.send_message_query("CREATE test:a, test:b").await.unwrap();
+	// These selects use the memory collector
+	let mut res =
+		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
+	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "Memory" }, "operation": "Collector" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// And return the correct result
+	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
+	let expected = json!([{"id": "test:b" }, { "id": "test:a" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// This one should the file collector
+	let mut res = socket
+		.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES EXPLAIN")
+		.await
+		.unwrap();
+	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "TempFiles" }, "operation": "Collector" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// And return the correct result
+	let mut res =
+		socket.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES").await.unwrap();
+	let expected = json!([{"id": "test:b" }, { "id": "test:a" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// Test passed
+	server.finish().unwrap();
+	// Cleanup
+	temp_dir.close().unwrap();
 }
