@@ -19,7 +19,7 @@ impl DockerContainer {
 		let mut args =
 			Arguments::new(["run", "-p", &format!("127.0.0.1:8000:{DOCKER_EXPOSED_PORT}"), "-d"]);
 		args.add([docker_image]);
-		args.add(["start", "--auth", "--user", user, "--pass", pass]);
+		args.add(["start", "--user", user, "--pass", pass]);
 		args.add([format!("file:{file_path}")]);
 		let id = Self::docker(args);
 		Self {

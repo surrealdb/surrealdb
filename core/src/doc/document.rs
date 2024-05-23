@@ -120,10 +120,14 @@ impl<'a> Document<'a> {
 		}
 	}
 
+	/// Get the current document, as it is being modified
+	#[allow(unused)]
 	pub(crate) fn current_doc(&self) -> &Value {
 		self.current.doc.as_ref()
 	}
 
+	/// Get the initial version of the document before it is modified
+	#[allow(unused)]
 	pub(crate) fn initial_doc(&self) -> &Value {
 		self.initial.doc.as_ref()
 	}

@@ -50,7 +50,7 @@ impl Lexer<'_> {
 		match self.reader.peek() {
 			Some(b'd' | b'f') => {
 				// not an integer but parse anyway for error reporting.
-				return self.lex_suffix(false, false);
+				return self.lex_suffix(false, false, false);
 			}
 			Some(x) if x.is_ascii_alphabetic() => return self.invalid_suffix_token(),
 			_ => {}
@@ -96,7 +96,7 @@ impl Lexer<'_> {
 						return self.finish_number_token(NumberKind::Integer);
 					}
 				}
-				b'f' | b'd' => return self.lex_suffix(false, false),
+				b'f' | b'd' => return self.lex_suffix(false, false, false),
 				// Oxc2 is the start byte of 'µ'
 				0xc2 | b'n' | b'u' | b'm' | b'h' | b'w' | b'y' | b's' => {
 					// duration suffix, switch to lexing duration.
@@ -132,13 +132,13 @@ impl Lexer<'_> {
 	}
 
 	/// Lex a number suffix, either 'f' or 'dec'.
-	fn lex_suffix(&mut self, had_mantissa: bool, had_exponent: bool) -> Token {
+	fn lex_suffix(&mut self, had_mantissa: bool, had_exponent: bool, had_operator: bool) -> Token {
 		match self.reader.peek() {
 			Some(b'f') => {
 				// float suffix
 				self.reader.next();
 				if let Some(true) = self.reader.peek().map(|x| x.is_identifier_continue()) {
-					if self.flexible_ident && !had_mantissa {
+					if self.flexible_ident && !had_mantissa && !had_operator {
 						self.scratch.push('f');
 						self.lex_ident()
 					} else {
@@ -158,7 +158,7 @@ impl Lexer<'_> {
 				self.reader.next();
 				let checkpoint = self.reader.offset();
 				if !self.eat(b'e') {
-					if !had_mantissa && !had_exponent {
+					if !had_mantissa && !had_exponent && !had_operator {
 						self.reader.backup(checkpoint - 1);
 						return self.lex_duration();
 					} else if !had_mantissa && self.flexible_ident {
@@ -215,7 +215,7 @@ impl Lexer<'_> {
 					self.scratch.push('e');
 					return self.lex_exponent(true);
 				}
-				b'f' | b'd' => return self.lex_suffix(true, false),
+				b'f' | b'd' => return self.lex_suffix(true, false, false),
 				b'a'..=b'z' | b'A'..=b'Z' => {
 					// invalid token, random identifier characters immediately after number.
 					self.scratch.clear();
@@ -230,33 +230,39 @@ impl Lexer<'_> {
 
 	/// Lexes the exponent of a number, i.e. `e10` in `1.1e10`;
 	fn lex_exponent(&mut self, had_mantissa: bool) -> Token {
-		loop {
-			match self.reader.peek() {
-				Some(x @ b'-' | x @ b'+') => {
-					self.reader.next();
-					self.scratch.push(x as char);
-				}
-				Some(x @ b'0'..=b'9') => {
-					self.scratch.push(x as char);
-					break;
-				}
-				_ => {
-					if self.flexible_ident && !had_mantissa {
-						return self.lex_ident();
-					}
-					// random other character, expected atleast one digit.
-					return self.invalid_token(LexError::Number(Error::DigitExpectedExponent));
-				}
-			}
+		let mut had_operator = false;
+		let mut peek = self.reader.peek();
+
+		if let Some(x @ b'-' | x @ b'+') = peek {
+			had_operator = true;
+			self.reader.next();
+			self.scratch.push(x as char);
+			peek = self.reader.peek();
 		}
-		self.reader.next();
+
+		if let Some(x @ b'0'..=b'9') = peek {
+			self.reader.next();
+			self.scratch.push(x as char);
+		} else {
+			if self.flexible_ident && !had_mantissa && !had_operator {
+				return self.lex_ident();
+			}
+			return self.invalid_token(LexError::Number(Error::DigitExpectedExponent));
+		}
+
 		loop {
 			match self.reader.peek() {
 				Some(x @ (b'0'..=b'9' | b'_')) => {
 					self.reader.next();
 					self.scratch.push(x as char);
 				}
-				Some(b'f' | b'd') => return self.lex_suffix(had_mantissa, true),
+				Some(b'f' | b'd') => return self.lex_suffix(had_mantissa, true, had_operator),
+				Some(x) if x.is_identifier_continue() => {
+					if self.flexible_ident && !had_operator && !had_mantissa {
+						return self.lex_ident();
+					}
+					return self.invalid_token(LexError::Number(Error::InvalidSuffix));
+				}
 				_ => {
 					let kind = if had_mantissa {
 						NumberKind::MantissaExponent

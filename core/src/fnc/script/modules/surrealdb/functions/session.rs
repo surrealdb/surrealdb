@@ -12,7 +12,7 @@ impl_module_def!(
 	"ip" => run,
 	"ns" => run,
 	"origin" => run,
-	"sc" => run,
-	"sd" => run,
+	"ac" => run,
+	"rd" => run,
 	"token" => run
 );

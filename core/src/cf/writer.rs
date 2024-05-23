@@ -101,7 +101,15 @@ impl Writer {
 				},
 			);
 		} else {
-			self.buf.push(ns.to_string(), db.to_string(), tb.to_string(), TableMutation::Del(id));
+			self.buf.push(
+				ns.to_string(),
+				db.to_string(),
+				tb.to_string(),
+				match store_difference {
+					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+					false => TableMutation::Del(id),
+				},
+			);
 		}
 	}
 

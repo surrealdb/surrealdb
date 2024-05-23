@@ -7,9 +7,9 @@ use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::fflags::FFLAGS;
+use crate::sql::paths::AC;
 use crate::sql::paths::META;
-use crate::sql::paths::SC;
-use crate::sql::paths::SD;
+use crate::sql::paths::RD;
 use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::statements::LiveStatement;
@@ -161,8 +161,8 @@ impl<'a> Document<'a> {
 			// This ensures that we are using the session
 			// of the user who created the LIVE query.
 			let mut lqctx = Context::background();
-			lqctx.add_value("auth", sess.pick(SD.as_ref()));
-			lqctx.add_value("scope", sess.pick(SC.as_ref()));
+			lqctx.add_value("access", sess.pick(AC.as_ref()));
+			lqctx.add_value("auth", sess.pick(RD.as_ref()));
 			lqctx.add_value("token", sess.pick(TK.as_ref()));
 			lqctx.add_value("session", sess);
 			// We need to create a new options which we will

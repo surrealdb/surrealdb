@@ -28,6 +28,9 @@ pub enum TableMutation {
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
 	/// Means that we have already applied the add "/note" operation to achieve the recorded result
 	SetWithDiff(Thing, Value, Vec<Operation>),
+	#[revision(start = 2)]
+	/// Delete a record where the ID is stored, and the now-deleted value
+	DelWithOriginal(Thing, Value),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -106,15 +109,25 @@ impl TableMutation {
 				h
 			}
 			TableMutation::Del(t) => {
-				// TODO(SUR-329): Store update in delete for diff and notification
-				let mut other = BTreeMap::<String, Value>::new();
-				other.insert("id".to_string(), Value::Thing(t));
-				let o = Object::from(other);
-				h.insert("delete".to_string(), Value::Object(o));
+				h.insert(
+					"delete".to_string(),
+					Value::Object(Object::from(map! {
+						"id".to_string() => Value::Thing(t)
+					})),
+				);
 				h
 			}
 			TableMutation::Def(t) => {
 				h.insert("define_table".to_string(), Value::from(t));
+				h
+			}
+			TableMutation::DelWithOriginal(id, _val) => {
+				h.insert(
+					"delete".to_string(),
+					Value::Object(Object::from(map! {
+					"id".to_string() => Value::Thing(id),
+					})),
+				);
 				h
 			}
 		};
@@ -152,6 +165,7 @@ impl Display for TableMutation {
 			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
 			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
+			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
 			TableMutation::Def(t) => write!(f, "{}", t),
 		}
 	}
@@ -277,6 +291,13 @@ mod tests {
 						}],
 					),
 					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+					TableMutation::DelWithOriginal(
+						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						Value::Object(Object::from(map! {
+								"id" => Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+								"note" => Value::from("surreal"),
+						})),
+					),
 					TableMutation::Def(DefineTableStatement {
 						name: "mytb".into(),
 						..DefineTableStatement::default()
@@ -288,7 +309,7 @@ mod tests {
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
-			r#"{"changes":[{"update":{"id":"mytb:tobie","note":"surreal"}},{"update":{"id":"mytb:tobie2","note":"surreal"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
+			r#"{"changes":[{"current":{"id":"mytb:tobie","note":"surreal"},"update":[{"op":"add","path":"/`/note`","value":"surreal"}]},{"current":{"id":"mytb:tobie2","note":"surreal"},"update":[{"op":"remove","path":"/`/temp`"}]},{"delete":{"id":"mytb:tobie"}},{"delete":{"id":"mytb:tobie"}},{"define_table":{"name":"mytb"}}],"versionstamp":65536}"#
 		);
 	}
 }

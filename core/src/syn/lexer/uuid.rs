@@ -15,7 +15,7 @@ pub enum Error {
 	InvalidRange,
 	#[error("expected uuid-strand to end")]
 	ExpectedStrandEnd,
-	#[error("missing a uuid seperator")]
+	#[error("missing a uuid separator")]
 	MissingSeperator,
 }
 
