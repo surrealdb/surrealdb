@@ -1,13 +1,6 @@
 use crate::cli::CF;
 use crate::err::Error;
 use clap::Args;
-#[cfg(any(
-	feature = "storage-surrealkv",
-	feature = "storage-rocksdb",
-	feature = "storage-fdb",
-	feature = "storage-tikv",
-	feature = "storage-speedb"
-))]
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -45,13 +38,6 @@ pub struct StartCommandDbsOptions {
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
-	#[cfg(any(
-		feature = "storage-surrealkv",
-		feature = "storage-speedb",
-		feature = "storage-rocksdb",
-		feature = "storage-fdb",
-		feature = "storage-tikv",
-	))]
 	#[arg(help = "Sets the directory for storing temporary database files")]
 	#[arg(env = "SURREAL_TEMPORARY_DIRECTORY", long = "temporary-directory")]
 	#[arg(value_parser = super::cli::validator::dir_exists)]
@@ -233,13 +219,6 @@ pub async fn init(
 		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
 		auth_level_enabled,
 		caps,
-		#[cfg(any(
-			feature = "storage-surrealkv",
-			feature = "storage-rocksdb",
-			feature = "storage-fdb",
-			feature = "storage-tikv",
-			feature = "storage-speedb"
-		))]
 		temporary_directory,
 	}: StartCommandDbsOptions,
 ) -> Result<(), Error> {
@@ -280,13 +259,6 @@ pub async fn init(
 		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
 
-	#[cfg(any(
-		feature = "storage-surrealkv",
-		feature = "storage-rocksdb",
-		feature = "storage-fdb",
-		feature = "storage-tikv",
-		feature = "storage-speedb"
-	))]
 	let mut dbs = match temporary_directory {
 		Some(tmp_dir) => dbs.with_temporary_directory(tmp_dir),
 		_ => dbs,

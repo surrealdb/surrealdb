@@ -191,6 +191,16 @@ pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Err
 	start_server(StartServerArguments::default()).await
 }
 
+pub async fn start_server_with_temporary_directory(
+	path: &str,
+) -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		temporary_directory: Some(path.to_string()),
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server(
 	StartServerArguments {
 		path,

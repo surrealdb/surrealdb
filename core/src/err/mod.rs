@@ -12,6 +12,7 @@ use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-file",
 	feature = "kv-rocksdb",
@@ -1070,6 +1071,7 @@ impl From<reqwest::Error> for Error {
 }
 
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-file",
 	feature = "kv-rocksdb",
