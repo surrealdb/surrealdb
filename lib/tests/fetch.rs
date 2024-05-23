@@ -21,11 +21,13 @@ async fn create_relate_select() -> Result<(), Error> {
 		SELECT *, ->bought->product.* AS products FROM user;
 		SELECT *, ->bought AS products FROM user FETCH products;
 		SELECT *, ->(bought AS purchases) FROM user FETCH purchases, purchases.out;
+		LET $param1 = \"purchases\";
+		SELECT *, ->(bought AS purchases) FROM user FETCH $param1, purchases.out;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 12);
+	assert_eq!(res.len(), 14);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -231,6 +233,54 @@ async fn create_relate_select() -> Result<(), Error> {
 	);
 	assert_eq!(tmp, val);
 	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: user:jaime,
+				name: 'Jaime',
+				purchases: [
+					{
+						id: bought:3,
+						in: user:jaime,
+						out: {
+							id: product:laptop,
+							price: 3000
+						},
+						payment_method: 'VISA'
+					}
+				]
+			},
+			{
+				id: user:tobie,
+				name: 'Tobie',
+				purchases: [
+					{
+						id: bought:1,
+						in: user:tobie,
+						out: {
+							id: product:phone,
+							price: 1000
+						},
+						payment_method: 'VISA'
+					},
+					{
+						id: bought:2,
+						in: user:tobie,
+						out: {
+							id: product:laptop,
+							price: 3000
+						},
+						payment_method: 'VISA'
+					}
+				]
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	// Remove LET statement result
+	res.remove(0);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"[
