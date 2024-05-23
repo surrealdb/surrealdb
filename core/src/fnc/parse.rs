@@ -92,7 +92,7 @@ pub mod url {
 	pub fn port((string,): (String,)) -> Result<Value, Error> {
 		// Parse the URL
 		match Url::parse(&string) {
-			Ok(v) => match v.port() {
+			Ok(v) => match v.port_or_known_default() {
 				Some(v) => Ok(v.into()),
 				None => Ok(Value::None),
 			},
