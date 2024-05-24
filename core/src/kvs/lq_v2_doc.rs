@@ -209,7 +209,7 @@ mod test_check_lqs_and_send_notifications {
 	use crate::fflags::FFLAGS;
 	use crate::iam::{Auth, Role};
 	use crate::kvs::lq_v2_doc::construct_document;
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::Datastore;
 	use crate::sql::paths::{OBJ_PATH_ACCESS, OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
@@ -217,7 +217,6 @@ mod test_check_lqs_and_send_notifications {
 	const SETUP: Lazy<Arc<TestSuite>> = Lazy::new(|| Arc::new(block_on(setup_test_suite_init())));
 
 	struct TestSuite {
-		ds: Datastore,
 		ns: String,
 		db: String,
 		tb: String,
@@ -249,7 +248,6 @@ mod test_check_lqs_and_send_notifications {
 		.for_each(drop);
 
 		TestSuite {
-			ds,
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),
@@ -265,12 +263,6 @@ mod test_check_lqs_and_send_notifications {
 		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
 		let opt = a_usable_options(&sender);
-		let tx = SETUP
-			.ds
-			.transaction(TransactionType::Write, LockType::Optimistic)
-			.await
-			.unwrap()
-			.enclose();
 
 		// WHEN:
 		// Construct document we are validating
@@ -289,7 +281,6 @@ mod test_check_lqs_and_send_notifications {
 				stk,
 				&opt,
 				&Statement::Create(&executed_statement),
-				&tx,
 				&[&live_statement],
 				&sender,
 			)
@@ -309,7 +300,6 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
-		tx.lock().await.cancel().await.unwrap();
 	}
 
 	#[test_log::test(tokio::test)]
@@ -321,12 +311,6 @@ mod test_check_lqs_and_send_notifications {
 		// Setup channels used for listening to LQs
 		let (sender, receiver) = channel::unbounded();
 		let opt = a_usable_options(&sender);
-		let tx = SETUP
-			.ds
-			.transaction(TransactionType::Write, LockType::Optimistic)
-			.await
-			.unwrap()
-			.enclose();
 
 		// WHEN:
 		// Construct document we are validating
@@ -345,7 +329,6 @@ mod test_check_lqs_and_send_notifications {
 				stk,
 				&opt,
 				&Statement::Delete(&executed_statement),
-				&tx,
 				&[&live_statement],
 				&sender,
 			)
@@ -367,7 +350,6 @@ mod test_check_lqs_and_send_notifications {
 			notification
 		);
 		assert!(receiver.try_recv().is_err());
-		tx.lock().await.cancel().await.unwrap();
 	}
 
 	// Live queries will have authentication info associated with them

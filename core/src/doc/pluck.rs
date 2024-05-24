@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
@@ -20,7 +20,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
@@ -36,11 +35,11 @@ impl<'a> Document<'a> {
 				}
 				Output::After => {
 					// Output the full document after all changes were applied
-					self.current.doc.compute(stk, ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Output::Before => {
 					// Output the full document before any changes were applied
-					self.initial.doc.compute(stk, ctx, opt, txn, Some(&self.initial)).await
+					self.initial.doc.compute(stk, ctx, opt, Some(&self.initial)).await
 				}
 				Output::Fields(v) => {
 					// Configure the context
@@ -48,28 +47,28 @@ impl<'a> Document<'a> {
 					ctx.add_value("after", self.current.doc.as_ref());
 					ctx.add_value("before", self.initial.doc.as_ref());
 					// Output the specified fields
-					v.compute(stk, &ctx, opt, txn, Some(&self.current), false).await
+					v.compute(stk, &ctx, opt, Some(&self.current), false).await
 				}
 			},
 			None => match stm {
 				Statement::Live(s) => match s.expr.len() {
 					0 => Ok(self.initial.doc.diff(&self.current.doc, Idiom::default()).into()),
-					_ => s.expr.compute(stk, ctx, opt, txn, Some(&self.current), false).await,
+					_ => s.expr.compute(stk, ctx, opt, Some(&self.current), false).await,
 				},
 				Statement::Select(s) => {
-					s.expr.compute(stk, ctx, opt, txn, Some(&self.current), s.group.is_some()).await
+					s.expr.compute(stk, ctx, opt, Some(&self.current), s.group.is_some()).await
 				}
 				Statement::Create(_) => {
-					self.current.doc.compute(stk, ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Statement::Update(_) => {
-					self.current.doc.compute(stk, ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Statement::Relate(_) => {
-					self.current.doc.compute(stk, ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				Statement::Insert(_) => {
-					self.current.doc.compute(stk, ctx, opt, txn, Some(&self.current)).await
+					self.current.doc.compute(stk, ctx, opt, Some(&self.current)).await
 				}
 				_ => Err(Error::Ignore),
 			},
@@ -79,13 +78,13 @@ impl<'a> Document<'a> {
 			// Should we run permissions checks?
 			if opt.check_perms(Action::View) {
 				// Loop through all field statements
-				for fd in self.fd(opt, txn).await?.iter() {
+				for fd in self.fd(opt, ctx.transaction()?).await?.iter() {
 					// Loop over each field in document
 					for k in out.each(&fd.name).iter() {
 						// Process the field permissions
 						match &fd.permissions.select {
 							Permission::Full => (),
-							Permission::None => out.del(stk, ctx, opt, txn, k).await?,
+							Permission::None => out.del(stk, ctx, opt, k).await?,
 							Permission::Specific(e) => {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
@@ -96,11 +95,11 @@ impl<'a> Document<'a> {
 								ctx.add_value("value", &val);
 								// Process the PERMISSION clause
 								if !e
-									.compute(stk, &ctx, opt, txn, Some(&self.current))
+									.compute(stk, &ctx, opt, Some(&self.current))
 									.await?
 									.is_truthy()
 								{
-									out.del(stk, &ctx, opt, txn, k).await?
+									out.del(stk, &ctx, opt, k).await?
 								}
 							}
 						}
@@ -111,7 +110,7 @@ impl<'a> Document<'a> {
 		// Remove any omitted fields from output
 		if let Some(v) = stm.omit() {
 			for v in v.iter() {
-				out.del(stk, ctx, opt, txn, v).await?;
+				out.del(stk, ctx, opt, v).await?;
 			}
 		}
 		// Remove metadata fields on output

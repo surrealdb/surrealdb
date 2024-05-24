@@ -20,9 +20,9 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Was this force targeted at a specific index?
 		let targeted_force = matches!(opt.force, Force::Index(_));
 		// Collect indexes or skip
@@ -45,10 +45,10 @@ impl<'a> Document<'a> {
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Calculate old values
-			let o = build_opt_values(stk, ctx, opt, txn, ix, &self.initial).await?;
+			let o = build_opt_values(stk, ctx, opt, ix, &self.initial).await?;
 
 			// Calculate new values
-			let n = build_opt_values(stk, ctx, opt, txn, ix, &self.current).await?;
+			let n = build_opt_values(stk, ctx, opt, ix, &self.current).await?;
 
 			// Update the index entries
 			if targeted_force || o != n {
@@ -59,8 +59,8 @@ impl<'a> Document<'a> {
 				match &ix.index {
 					Index::Uniq => ic.index_unique(txn).await?,
 					Index::Idx => ic.index_non_unique(txn).await?,
-					Index::Search(p) => ic.index_full_text(stk, ctx, txn, p).await?,
-					Index::MTree(p) => ic.index_mtree(stk, ctx, txn, p).await?,
+					Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
+					Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 					Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 				};
 			}
@@ -78,7 +78,6 @@ async fn build_opt_values(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
-	txn: &Transaction,
 	ix: &DefineIndexStatement,
 	doc: &CursorDoc<'_>,
 ) -> Result<Option<Vec<Value>>, Error> {
@@ -87,7 +86,7 @@ async fn build_opt_values(
 	}
 	let mut o = Vec::with_capacity(ix.cols.len());
 	for i in ix.cols.iter() {
-		let v = i.compute(stk, ctx, opt, txn, Some(doc)).await?;
+		let v = i.compute(stk, ctx, opt, Some(doc)).await?;
 		o.push(v);
 	}
 	Ok(Some(o))
@@ -358,38 +357,27 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
-		txn: &Transaction,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 
-		let mut ft = FtIndex::new(
-			ctx.get_index_stores(),
-			self.opt,
-			txn,
-			&p.az,
-			ikb,
-			p,
-			TransactionType::Write,
-		)
-		.await?;
+		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
-			ft.index_document(stk, ctx, self.opt, txn, self.rid, n).await?;
+			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
 		} else {
-			ft.remove_document(txn, self.rid).await?;
+			ft.remove_document(ctx, self.rid).await?;
 		}
-		ft.finish(txn).await
+		ft.finish(ctx).await
 	}
 
 	async fn index_mtree(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
-		txn: &Transaction,
 		p: &MTreeParams,
 	) -> Result<(), Error> {
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.transaction()?.lock().await;
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let mut mt =
 			MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, TransactionType::Write)

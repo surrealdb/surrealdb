@@ -1,7 +1,7 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Workable;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use reblessive::tree::Stk;
@@ -12,7 +12,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Get the record id
@@ -21,7 +20,7 @@ impl<'a> Document<'a> {
 		self.current.doc.to_mut().def(rid);
 		// This is an INSERT statement
 		if let Workable::Insert(v) = &self.extras {
-			let v = v.compute(stk, ctx, opt, txn, Some(&self.current)).await?;
+			let v = v.compute(stk, ctx, opt, Some(&self.current)).await?;
 			self.current.doc.to_mut().merge(v)?;
 		}
 		// Set default field values

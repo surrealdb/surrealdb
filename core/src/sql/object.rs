@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
@@ -220,12 +220,11 @@ impl Object {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {
-			match v.compute(stk, ctx, opt, txn, doc).await {
+			match v.compute(stk, ctx, opt, doc).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};

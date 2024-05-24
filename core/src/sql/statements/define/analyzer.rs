@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -28,15 +28,14 @@ pub struct DefineAnalyzerStatement {
 impl DefineAnalyzerStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.transaction()?.lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if analyzer already exists

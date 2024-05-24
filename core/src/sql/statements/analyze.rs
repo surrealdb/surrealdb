@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -32,7 +31,6 @@ impl AnalyzeStatement {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
@@ -40,6 +38,7 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
+				let txn = ctx.transaction()?;
 				let ix = txn
 					.lock()
 					.await
@@ -50,16 +49,9 @@ impl AnalyzeStatement {
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let ft = FtIndex::new(
-							ctx.get_index_stores(),
-							opt,
-							txn,
-							p.az.as_str(),
-							ikb,
-							p,
-							TransactionType::Read,
-						)
-						.await?;
+						let ft =
+							FtIndex::new(ctx, opt, p.az.as_str(), ikb, p, TransactionType::Read)
+								.await?;
 						ft.statistics(txn).await?.into()
 					}
 					Index::MTree(p) => {

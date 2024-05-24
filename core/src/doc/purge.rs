@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::dir::Dir;
@@ -19,7 +19,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if changed
@@ -27,7 +26,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Clone transaction
-		let run = txn.clone();
+		let run = ctx.transaction()?.clone();
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Get the record id
@@ -70,7 +69,7 @@ impl<'a> Document<'a> {
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
-					stm.compute(stk, ctx, opt, txn, None).await?;
+					stm.compute(stk, ctx, opt, None).await?;
 				}
 			}
 		}

@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
@@ -216,7 +216,6 @@ pub(crate) async fn matches(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
-	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
 	l: Value,
@@ -225,9 +224,7 @@ pub(crate) async fn matches(
 	let res = match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => true,
 		ExecutorOption::None => false,
-		ExecutorOption::Execute(exe, thg) => {
-			exe.matches(stk, ctx, opt, txn, thg, exp, l, r).await?
-		}
+		ExecutorOption::Execute(exe, thg) => exe.matches(stk, ctx, opt, thg, exp, l, r).await?,
 	};
 	Ok(res.into())
 }
@@ -236,14 +233,13 @@ pub(crate) async fn knn(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
-	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	exp: &Expression,
 ) -> Result<Value, Error> {
 	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),
-		ExecutorOption::Execute(exe, thg) => exe.knn(stk, ctx, opt, txn, thg, doc, exp).await,
+		ExecutorOption::Execute(exe, thg) => exe.knn(stk, ctx, opt, thg, doc, exp).await,
 	}
 }
 

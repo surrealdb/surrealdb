@@ -1,22 +1,21 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 
 impl<'a> Document<'a> {
 	pub async fn changefeeds(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
 		}
+		let txn = ctx.transaction()?;
 		//
 		let tb = self.tb(opt, txn).await?;
 		// Clone transaction

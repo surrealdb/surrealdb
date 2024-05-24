@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
@@ -102,7 +102,6 @@ impl Expression {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		let (l, o, r) = match self {
@@ -110,7 +109,7 @@ impl Expression {
 				o,
 				v,
 			} => {
-				let operand = v.compute(stk, ctx, opt, txn, doc).await?;
+				let operand = v.compute(stk, ctx, opt, doc).await?;
 				return match o {
 					Operator::Neg => fnc::operate::neg(operand),
 					// TODO: Check if it is a number?
@@ -126,7 +125,7 @@ impl Expression {
 			} => (l, o, r),
 		};
 
-		let l = l.compute(stk, ctx, opt, txn, doc).await?;
+		let l = l.compute(stk, ctx, opt, doc).await?;
 		match o {
 			Operator::Or => {
 				if l.is_truthy() {
@@ -150,7 +149,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = r.compute(stk, ctx, opt, txn, doc).await?;
+		let r = r.compute(stk, ctx, opt, doc).await?;
 		match o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
@@ -187,11 +186,9 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
-			Operator::Matches(_) => {
-				fnc::operate::matches(stk, ctx, opt, txn, doc, self, l, r).await
-			}
+			Operator::Matches(_) => fnc::operate::matches(stk, ctx, opt, doc, self, l, r).await,
 			Operator::Knn(_, _) | Operator::Ann(_, _) => {
-				fnc::operate::knn(stk, ctx, opt, txn, doc, self).await
+				fnc::operate::knn(stk, ctx, opt, doc, self).await
 			}
 			_ => unreachable!(),
 		}

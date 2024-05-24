@@ -502,9 +502,9 @@ impl Datastore {
 				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
 				// Create and save a new root users
 				let stm = DefineUserStatement::from((Base::Root, username, password));
-				let ctx = Context::default();
+				let ctx = Context::default().set_transaction(txn.clone());
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-				let _ = stm.compute(&ctx, &opt, &txn, None).await?;
+				let _ = stm.compute(&ctx, &opt, None).await?;
 				// We added a new user, so commit the transaction
 				txn.lock().await.commit().await?;
 				// Everything ok
@@ -1276,7 +1276,7 @@ impl Datastore {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1350,8 +1350,10 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let ctx = ctx.set_transaction(txn.clone());
+
 		// Compute the value
-		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await;
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await;
 		// Store any data
 		match (res.is_ok(), val.writeable()) {
 			// If the compute was successful, then commit if writeable
@@ -1479,10 +1481,10 @@ mod test {
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
 		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let ctx = ctx.set_transaction(txn);
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
-		let res =
-			stack.enter(|stk| val.compute(stk, &ctx, &opt, &txn, None)).finish().await.unwrap();
+		let res = stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(2)));
 		Ok(())
 	}

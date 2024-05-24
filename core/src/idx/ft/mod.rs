@@ -98,17 +98,17 @@ impl VersionedSerdeState for State {}
 
 impl FtIndex {
 	pub(crate) async fn new(
-		ixs: &IndexStores,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		az: &str,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
 	) -> Result<Self, Error> {
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.transaction()?.lock().await;
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
-		let res = Self::with_analyzer(ixs, &mut tx, az, index_key_base, p, tt).await;
+		let res =
+			Self::with_analyzer(ctx.get_index_stores(), &mut tx, az, index_key_base, p, tt).await;
 		drop(tx);
 		res
 	}
@@ -191,10 +191,10 @@ impl FtIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		rid: &Thing,
 	) -> Result<(), Error> {
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.transaction()?.lock().await;
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
 		let doc_id = doc_ids.remove_doc(&mut tx, rid.into()).await?;
@@ -244,10 +244,10 @@ impl FtIndex {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Resolve the doc_id
 		let mut tx = txn.lock().await;
 		let mut doc_ids = self.doc_ids.write().await;
@@ -261,13 +261,13 @@ impl FtIndex {
 		let (doc_length, terms_and_frequencies, offsets) = if self.highlighting {
 			let (dl, tf, ofs) = self
 				.analyzer
-				.extract_terms_with_frequencies_with_offsets(stk, ctx, opt, txn, &mut t, content)
+				.extract_terms_with_frequencies_with_offsets(stk, ctx, opt, &mut t, content)
 				.await?;
 			(dl, tf, Some(ofs))
 		} else {
 			let (dl, tf) = self
 				.analyzer
-				.extract_terms_with_frequencies(stk, ctx, opt, txn, &mut t, content)
+				.extract_terms_with_frequencies(stk, ctx, opt, &mut t, content)
 				.await?;
 			(dl, tf, None)
 		};
@@ -356,12 +356,10 @@ impl FtIndex {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		query_string: String,
 	) -> Result<(TermsList, TermsSet), Error> {
 		let t = self.terms.read().await;
-		let res =
-			self.analyzer.extract_querying_terms(stk, ctx, opt, txn, &t, query_string).await?;
+		let res = self.analyzer.extract_querying_terms(stk, ctx, opt, &t, query_string).await?;
 		drop(t);
 		Ok(res)
 	}
@@ -491,8 +489,8 @@ impl FtIndex {
 		Ok(res)
 	}
 
-	pub(crate) async fn finish(&self, tx: &Transaction) -> Result<(), Error> {
-		let mut run = tx.lock().await;
+	pub(crate) async fn finish(&self, ctx: &Context<'_>) -> Result<(), Error> {
+		let mut run = ctx.transaction()?.lock().await;
 		self.doc_ids.write().await.finish(&mut run).await?;
 		self.doc_lengths.write().await.finish(&mut run).await?;
 		self.postings.write().await.finish(&mut run).await?;
@@ -585,13 +583,12 @@ mod tests {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		fti: &FtIndex,
 		qs: &str,
 	) -> (Option<HitsIterator>, BM25Scorer) {
 		let (term_list, _) =
-			fti.extract_querying_terms(stk, ctx, opt, txn, qs.to_string()).await.unwrap();
-		let mut tx = txn.lock().await;
+			fti.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
+		let mut tx = ctx.transaction().unwrap().lock().await;
 		let td = Arc::new(fti.get_terms_docs(&mut tx, &term_list).await.unwrap());
 		drop(tx);
 		let scr = fti.new_scorer(td.clone()).unwrap().unwrap();
@@ -605,11 +602,9 @@ mod tests {
 		az: &DefineAnalyzerStatement,
 		order: u32,
 		hl: bool,
-	) -> (Context<'a>, Options, Transaction, FtIndex) {
-		let ctx = Context::default();
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let txn = Arc::new(Mutex::new(tx));
-		let mut tx = txn.lock().await;
+	) -> (Context<'a>, Options, FtIndex) {
+		let mut ctx = Context::default();
+		let mut tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let fti = FtIndex::with_analyzer(
 			ctx.get_index_stores(),
 			&mut tx,
@@ -632,15 +627,15 @@ mod tests {
 		)
 		.await
 		.unwrap();
-		drop(tx);
-		(ctx, Options::default(), txn, fti)
+		let txn = Arc::new(Mutex::new(tx));
+		ctx.set_transaction_mut(txn);
+		(ctx, Options::default(), fti)
 	}
 
-	pub(super) async fn finish(txn: &Transaction, fti: FtIndex) {
-		fti.finish(txn).await.unwrap();
-		let mut tx = txn.lock().await;
+	pub(super) async fn finish(ctx: &Context<'_>, fti: FtIndex) {
+		fti.finish(ctx).await.unwrap();
+		let mut tx = ctx.transaction().unwrap().lock().await;
 		tx.commit().await.unwrap();
-		drop(tx);
 	}
 
 	#[test(tokio::test)]
@@ -661,19 +656,12 @@ mod tests {
 		stack
 			.enter(|stk| async {
 				// Add one document
-				let (ctx, opt, txn, mut fti) =
+				let (ctx, opt, mut fti) =
 					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-				fti.index_document(
-					stk,
-					&ctx,
-					&opt,
-					&txn,
-					&doc1,
-					vec![Value::from("hello the world")],
-				)
-				.await
-				.unwrap();
-				finish(&txn, fti).await;
+				fti.index_document(stk, &ctx, &opt, &doc1, vec![Value::from("hello the world")])
+					.await
+					.unwrap();
+				finish(&ctx, fti).await;
 			})
 			.finish()
 			.await;
@@ -681,60 +669,54 @@ mod tests {
 		stack
 			.enter(|stk| async {
 				// Add two documents
-				let (ctx, opt, txn, mut fti) =
+				let (ctx, opt, mut fti) =
 					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-				fti.index_document(
-					stk,
-					&ctx,
-					&opt,
-					&txn,
-					&doc2,
-					vec![Value::from("a yellow hello")],
-				)
-				.await
-				.unwrap();
-				fti.index_document(stk, &ctx, &opt, &txn, &doc3, vec![Value::from("foo bar")])
+				fti.index_document(stk, &ctx, &opt, &doc2, vec![Value::from("a yellow hello")])
 					.await
 					.unwrap();
-				finish(&txn, fti).await;
+				fti.index_document(stk, &ctx, &opt, &doc3, vec![Value::from("foo bar")])
+					.await
+					.unwrap();
+				finish(&ctx, fti).await;
 			})
 			.finish()
 			.await;
 
 		stack
 			.enter(|stk| async {
-				let (ctx, opt, txn, fti) =
+				let (ctx, opt, fti) =
 					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+				let txn = ctx.transaction().unwrap();
 				// Check the statistics
-				let statistics = fti.statistics(&txn).await.unwrap();
+				let statistics = fti.statistics(txn).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 7);
 				assert_eq!(statistics.postings.keys_count, 8);
 				assert_eq!(statistics.doc_ids.keys_count, 3);
 				assert_eq!(statistics.doc_lengths.keys_count, 3);
 
 				// Search & score
-				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "hello").await;
+				let (hits, scr) = search(stk, &ctx, &opt, &fti, "hello").await;
 				check_hits(
-					&txn,
+					txn,
 					hits,
 					scr,
 					vec![(&doc1, Some(-0.4859746)), (&doc2, Some(-0.4859746))],
 				)
 				.await;
 
-				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "world").await;
+				let (hits, scr) = search(stk, &ctx, &opt, &fti, "world").await;
 				check_hits(&txn, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
 
-				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "yellow").await;
+				let (hits, scr) = search(stk, &ctx, &opt, &fti, "yellow").await;
 				check_hits(&txn, hits, scr, vec![(&doc2, Some(0.4859746))]).await;
 
-				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "foo").await;
+				let (hits, scr) = search(stk, &ctx, &opt, &fti, "foo").await;
 				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
-				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "bar").await;
+				let (hits, scr) = search(stk, &ctx, &opt, &fti, "bar").await;
 				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
-				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "dummy").await;
+				let (hits, _) = search(stk, &ctx, &opt, &fti, "dummy").await;
 				assert!(hits.is_none());
 			})
 			.finish()
@@ -743,26 +725,27 @@ mod tests {
 		stack
 			.enter(|stk| async {
 				// Reindex one document
-				let (ctx, opt, txn, mut fti) =
+				let (ctx, opt, mut fti) =
 					tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-				fti.index_document(stk, &ctx, &opt, &txn, &doc3, vec![Value::from("nobar foo")])
+				fti.index_document(stk, &ctx, &opt, &doc3, vec![Value::from("nobar foo")])
 					.await
 					.unwrap();
-				finish(&txn, fti).await;
+				finish(&ctx, fti).await;
 
-				let (ctx, opt, txn, fti) =
+				let (ctx, opt, fti) =
 					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
+				let txn = ctx.transaction().unwrap();
 
 				// We can still find 'foo'
-				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "foo").await;
+				let (hits, scr) = search(stk, &ctx, &opt, &fti, "foo").await;
 				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
 				// We can't anymore find 'bar'
-				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "bar").await;
+				let (hits, _) = search(stk, &ctx, &opt, &fti, "bar").await;
 				assert!(hits.is_none());
 
 				// We can now find 'nobar'
-				let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "nobar").await;
+				let (hits, scr) = search(stk, &ctx, &opt, &fti, "nobar").await;
 				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 			})
 			.finish()
@@ -770,21 +753,21 @@ mod tests {
 
 		{
 			// Remove documents
-			let (_, _, txn, mut fti) =
+			let (ctx, _, mut fti) =
 				tx_fti(&ds, TransactionType::Write, &az, btree_order, false).await;
-			fti.remove_document(&txn, &doc1).await.unwrap();
-			fti.remove_document(&txn, &doc2).await.unwrap();
-			fti.remove_document(&txn, &doc3).await.unwrap();
-			finish(&txn, fti).await;
+			fti.remove_document(&ctx, &doc1).await.unwrap();
+			fti.remove_document(&ctx, &doc2).await.unwrap();
+			fti.remove_document(&ctx, &doc3).await.unwrap();
+			finish(&ctx, fti).await;
 		}
 
 		stack
 			.enter(|stk| async {
-				let (ctx, opt, txn, fti) =
+				let (ctx, opt, fti) =
 					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
-				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "hello").await;
+				let (hits, _) = search(stk, &ctx, &opt, &fti, "hello").await;
 				assert!(hits.is_none());
-				let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "foo").await;
+				let (hits, _) = search(stk, &ctx, &opt, &fti, "foo").await;
 				assert!(hits.is_none());
 			})
 			.finish()
@@ -812,13 +795,12 @@ mod tests {
 			let btree_order = 5;
 			stack
 				.enter(|stk| async {
-					let (ctx, opt, txn, mut fti) =
+					let (ctx, opt, mut fti) =
 						tx_fti(&ds, TransactionType::Write, &az, btree_order, hl).await;
 					fti.index_document(
 						stk,
 						&ctx,
 						&opt,
-						&txn,
 						&doc1,
 						vec![Value::from("the quick brown fox jumped over the lazy dog")],
 					)
@@ -828,7 +810,6 @@ mod tests {
 						stk,
 						&ctx,
 						&opt,
-						&txn,
 						&doc2,
 						vec![Value::from("the fast fox jumped over the lazy dog")],
 					)
@@ -838,7 +819,6 @@ mod tests {
 						stk,
 						&ctx,
 						&opt,
-						&txn,
 						&doc3,
 						vec![Value::from("the dog sat there and did nothing")],
 					)
@@ -848,21 +828,21 @@ mod tests {
 						stk,
 						&ctx,
 						&opt,
-						&txn,
 						&doc4,
 						vec![Value::from("the other animals sat there watching")],
 					)
 					.await
 					.unwrap();
-					finish(&txn, fti).await;
+					finish(&ctx, fti).await;
 				})
 				.finish()
 				.await;
 
 			stack
 				.enter(|stk| async {
-					let (ctx, opt, txn, fti) =
+					let (ctx, opt, fti) =
 						tx_fti(&ds, TransactionType::Read, &az, btree_order, hl).await;
+					let txn = ctx.transaction().unwrap();
 
 					let statistics = fti.statistics(&txn).await.unwrap();
 					assert_eq!(statistics.terms.keys_count, 17);
@@ -870,7 +850,7 @@ mod tests {
 					assert_eq!(statistics.doc_ids.keys_count, 4);
 					assert_eq!(statistics.doc_lengths.keys_count, 4);
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "the").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "the").await;
 					check_hits(
 						&txn,
 						hits,
@@ -884,7 +864,7 @@ mod tests {
 					)
 					.await;
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "dog").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "dog").await;
 					check_hits(
 						&txn,
 						hits,
@@ -897,25 +877,25 @@ mod tests {
 					)
 					.await;
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "fox").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "fox").await;
 					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "over").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "over").await;
 					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "lazy").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "lazy").await;
 					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "jumped").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "jumped").await;
 					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "nothing").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "nothing").await;
 					check_hits(&txn, hits, scr, vec![(&doc3, Some(0.87105393))]).await;
 
-					let (hits, scr) = search(stk, &ctx, &opt, &txn, &fti, "animals").await;
+					let (hits, scr) = search(stk, &ctx, &opt, &fti, "animals").await;
 					check_hits(&txn, hits, scr, vec![(&doc4, Some(0.92279965))]).await;
 
-					let (hits, _) = search(stk, &ctx, &opt, &txn, &fti, "dummy").await;
+					let (hits, _) = search(stk, &ctx, &opt, &fti, "dummy").await;
 					assert!(hits.is_none());
 				})
 				.finish()
@@ -970,11 +950,10 @@ mod tests {
 		rid: &Thing,
 		content: &Value,
 	) {
-		let (ctx, opt, txn, mut fti) =
-			tx_fti(ds, TransactionType::Write, az, btree_order, false).await;
-		fti.remove_document(&txn, rid).await.unwrap();
-		fti.index_document(stk, &ctx, &opt, &txn, rid, vec![content.clone()]).await.unwrap();
-		finish(&txn, fti).await;
+		let (ctx, opt, mut fti) = tx_fti(ds, TransactionType::Write, az, btree_order, false).await;
+		fti.remove_document(&ctx, rid).await.unwrap();
+		fti.index_document(stk, &ctx, &opt, rid, vec![content.clone()]).await.unwrap();
+		finish(&ctx, fti).await;
 	}
 
 	#[test(tokio::test)]
@@ -991,33 +970,31 @@ mod tests {
 		for i in 0..5 {
 			debug!("Attempt {i}");
 			{
-				let (ctx, opt, txn, mut fti) =
-					tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
+				let (ctx, opt, mut fti) = tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
 				stack
-					.enter(|stk| {
-						fti.index_document(stk, &ctx, &opt, &txn, &doc, vec![content.clone()])
-					})
+					.enter(|stk| fti.index_document(stk, &ctx, &opt, &doc, vec![content.clone()]))
 					.finish()
 					.await
 					.unwrap();
-				finish(&txn, fti).await;
+				finish(&ctx, fti).await;
 			}
 
 			{
-				let (_, _, txn, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
-				let s = fti.statistics(&txn).await.unwrap();
+				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
+				let s = fti.statistics(&ctx.transaction().unwrap()).await.unwrap();
 				assert_eq!(s.terms.keys_count, 113);
 			}
 
 			{
-				let (_, _, txn, mut fti) = tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
-				fti.remove_document(&txn, &doc).await.unwrap();
-				finish(&txn, fti).await;
+				let (ctx, _, mut fti) = tx_fti(&ds, TransactionType::Write, &az, 5, false).await;
+				fti.remove_document(&ctx, &doc).await.unwrap();
+				finish(&ctx, fti).await;
 			}
 
 			{
-				let (_, _, txn, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
-				let s = fti.statistics(&txn).await.unwrap();
+				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
+				let txn = ctx.transaction().unwrap();
+				let s = fti.statistics(txn).await.unwrap();
 				assert_eq!(s.terms.keys_count, 0);
 			}
 		}

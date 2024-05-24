@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -22,7 +22,6 @@ impl SleepStatement {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -57,11 +56,11 @@ mod tests {
 	#[tokio::test]
 	async fn test_sleep_compute() {
 		let time = SystemTime::now();
-		let (ctx, opt, txn) = mock().await;
+		let (ctx, opt) = mock().await;
 		let stm = SleepStatement {
 			duration: Duration(time::Duration::from_micros(500)),
 		};
-		let value = stm.compute(&ctx, &opt, &txn, None).await.unwrap();
+		let value = stm.compute(&ctx, &opt, None).await.unwrap();
 		assert!(time.elapsed().unwrap() >= time::Duration::from_micros(500));
 		assert_eq!(value, Value::None);
 	}

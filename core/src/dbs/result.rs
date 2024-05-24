@@ -12,7 +12,7 @@ use crate::dbs::plan::Explanation;
 ))]
 use crate::dbs::store::file_store::FileCollector;
 use crate::dbs::store::MemoryCollector;
-use crate::dbs::{Options, Statement, Transaction};
+use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::{Orders, Value};
 use reblessive::tree::Stk;
@@ -73,7 +73,6 @@ impl Results {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		val: Value,
 	) -> Result<(), Error> {
@@ -95,7 +94,7 @@ impl Results {
 				e.push(val)?;
 			}
 			Self::Groups(g) => {
-				g.push(stk, ctx, opt, txn, stm, val).await?;
+				g.push(stk, ctx, opt, stm, val).await?;
 			}
 		}
 		Ok(())

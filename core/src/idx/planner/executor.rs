@@ -105,7 +105,6 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		table: &Table,
 		im: IndexesMap,
 		knns: KnnExpressions,
@@ -124,28 +123,26 @@ impl InnerQueryExecutor {
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Idioms and MatchRef
+		let txn = ctx.transaction()?;
 		for (exp, io) in im.options {
 			let ix_ref = io.ix_ref();
 			if let Some(idx_def) = im.definitions.get(ix_ref as usize) {
 				match &idx_def.index {
 					Index::Search(p) => {
 						let ft_entry = match ft_map.entry(ix_ref) {
-							Entry::Occupied(e) => {
-								FtEntry::new(stk, ctx, opt, txn, e.get(), io).await?
-							}
+							Entry::Occupied(e) => FtEntry::new(stk, ctx, opt, e.get(), io).await?,
 							Entry::Vacant(e) => {
 								let ikb = IndexKeyBase::new(opt, idx_def);
 								let ft = FtIndex::new(
-									ctx.get_index_stores(),
+									ctx,
 									opt,
-									txn,
 									p.az.as_str(),
 									ikb,
 									p,
 									TransactionType::Read,
 								)
 								.await?;
-								let fte = FtEntry::new(stk, ctx, opt, txn, &ft, io).await?;
+								let fte = FtEntry::new(stk, ctx, opt, &ft, io).await?;
 								e.insert(ft);
 								fte
 							}
@@ -169,7 +166,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										e.get(),
 										a,
 										*k,
@@ -193,7 +189,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										&mt,
 										a,
 										*k,
@@ -215,7 +210,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										e.get().clone(),
 										a,
 										*k,
@@ -233,7 +227,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										hnsw.clone(),
 										a,
 										*k,
@@ -279,13 +272,11 @@ impl InnerQueryExecutor {
 }
 
 impl QueryExecutor {
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn knn(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		thg: &Thing,
 		doc: Option<&CursorDoc<'_>>,
 		exp: &Expression,
@@ -297,7 +288,7 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
-				let v: Vec<Number> = id.compute(stk, ctx, opt, txn, doc).await?.try_into()?;
+				let v: Vec<Number> = id.compute(stk, ctx, opt, doc).await?.try_into()?;
 				let dist = dist.compute(&v, val.as_ref())?;
 				p.add(dist, thg).await;
 			}
@@ -538,7 +529,6 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		thg: &Thing,
 		exp: &Expression,
 		l: Value,
@@ -547,10 +537,10 @@ impl QueryExecutor {
 		if let Some(ft) = self.0.exp_entries.get(exp) {
 			if let Some(ix_def) = self.get_index_def(ft.0.index_option.ix_ref()) {
 				if self.0.table.eq(&ix_def.what.0) {
-					return self.matches_with_doc_id(txn, thg, ft).await;
+					return self.matches_with_doc_id(ctx.transaction()?, thg, ft).await;
 				}
 			}
-			return self.matches_with_value(stk, ctx, opt, txn, ft, l, r).await;
+			return self.matches_with_value(stk, ctx, opt, ft, l, r).await;
 		}
 
 		// If no previous case were successful, we end up with a user error
@@ -592,13 +582,11 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn matches_with_value(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		ft: &FtEntry,
 		l: Value,
 		r: Value,
@@ -615,7 +603,7 @@ impl QueryExecutor {
 		};
 		let terms = ft.0.terms.read().await;
 		// Extract the terms set from the record
-		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, txn, &terms, v).await?;
+		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, &terms, v).await?;
 		drop(terms);
 		Ok(ft.0.query_terms_set.is_subset(&t))
 	}
@@ -640,7 +628,7 @@ impl QueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn highlight(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		thg: &Thing,
 		prefix: Value,
 		suffix: Value,
@@ -649,7 +637,7 @@ impl QueryExecutor {
 		doc: &Value,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
-			let mut run = txn.lock().await;
+			let mut run = ctx.transaction()?.lock().await;
 			let res = ft
 				.highlight(
 					&mut run,
@@ -686,14 +674,14 @@ impl QueryExecutor {
 
 	pub(crate) async fn score(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		match_ref: &Value,
 		rid: &Thing,
 		ir: Option<&IteratorRecord>,
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
-				let mut run = txn.lock().await;
+				let mut run = ctx.transaction()?.lock().await;
 				let mut doc_id = if let Some(ir) = ir {
 					ir.doc_id()
 				} else {
@@ -738,14 +726,13 @@ impl FtEntry {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
 			let (terms_list, terms_set) =
-				ft.extract_querying_terms(stk, ctx, opt, txn, qs.to_owned()).await?;
-			let mut tx = txn.lock().await;
+				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			let mut tx = ctx.transaction()?.lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
 			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
@@ -775,12 +762,12 @@ impl MtEntry {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		mt: &MTreeIndex,
 		o: &[Number],
 		k: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
+		let txn = ctx.transaction()?;
 		let cond_checker = if let Some(cond) = cond {
 			MTreeConditionChecker::new_cond(ctx, opt, txn, cond)
 		} else {
@@ -804,13 +791,13 @@ impl HnswEntry {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		h: SharedHnswIndex,
 		v: &[Number],
 		n: u32,
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
+		let txn = ctx.transaction()?;
 		let cond_checker = if let Some(cond) = cond {
 			HnswConditionChecker::new_cond(ctx, opt, txn, cond)
 		} else {

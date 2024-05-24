@@ -25,7 +25,7 @@ pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
 
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::Value;
@@ -63,22 +63,21 @@ impl RemoveStatement {
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
-			Self::Namespace(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Database(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Function(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Access(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Param(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Table(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Event(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Field(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Index(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Analyzer(ref v) => v.compute(ctx, opt, txn).await,
-			Self::User(ref v) => v.compute(ctx, opt, txn).await,
-			Self::Model(ref v) => v.compute(ctx, opt, txn).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt).await,
+			Self::Database(ref v) => v.compute(ctx, opt).await,
+			Self::Function(ref v) => v.compute(ctx, opt).await,
+			Self::Access(ref v) => v.compute(ctx, opt).await,
+			Self::Param(ref v) => v.compute(ctx, opt).await,
+			Self::Table(ref v) => v.compute(ctx, opt).await,
+			Self::Event(ref v) => v.compute(ctx, opt).await,
+			Self::Field(ref v) => v.compute(ctx, opt).await,
+			Self::Index(ref v) => v.compute(ctx, opt).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
+			Self::User(ref v) => v.compute(ctx, opt).await,
+			Self::Model(ref v) => v.compute(ctx, opt).await,
 		}
 	}
 }

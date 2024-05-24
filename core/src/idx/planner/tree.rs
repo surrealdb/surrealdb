@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -32,12 +32,11 @@ impl Tree {
 		stk: &mut Stk,
 		ctx: &'a Context<'_>,
 		opt: &'a Options,
-		txn: &'a Transaction,
 		table: &'a Table,
 		cond: &'a Option<Cond>,
 		with: &'a Option<With>,
 	) -> Result<Option<Self>, Error> {
-		let mut b = TreeBuilder::new(ctx, opt, txn, table, with);
+		let mut b = TreeBuilder::new(ctx, opt, table, with);
 		if let Some(cond) = cond {
 			let root = b.eval_value(stk, 0, &cond.0).await?;
 			let knn_condition = if b.knn_expressions.is_empty() {
@@ -62,7 +61,6 @@ impl Tree {
 struct TreeBuilder<'a> {
 	ctx: &'a Context<'a>,
 	opt: &'a Options,
-	txn: &'a Transaction,
 	table: &'a Table,
 	with: &'a Option<With>,
 	schemas: HashMap<Table, SchemaCache>,
@@ -90,7 +88,6 @@ impl<'a> TreeBuilder<'a> {
 	fn new(
 		ctx: &'a Context<'_>,
 		opt: &'a Options,
-		txn: &'a Transaction,
 		table: &'a Table,
 		with: &'a Option<With>,
 	) -> Self {
@@ -101,7 +98,6 @@ impl<'a> TreeBuilder<'a> {
 		Self {
 			ctx,
 			opt,
-			txn,
 			table,
 			with,
 			schemas: Default::default(),
@@ -159,7 +155,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node, Error> {
 		Ok(if n == Node::Computable {
-			match v.compute(stk, self.ctx, self.opt, self.txn, None).await {
+			match v.compute(stk, self.ctx, self.opt, None).await {
 				Ok(v) => Node::Computed(Arc::new(v)),
 				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
 			}
@@ -171,7 +167,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node, Error> {
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
-			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, self.txn, None)).await?);
+			values.push(stk.run(|stk| v.compute(stk, self.ctx, self.opt, None)).await?);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
@@ -190,7 +186,7 @@ impl<'a> TreeBuilder<'a> {
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
 			if x.is_param() {
-				let v = stk.run(|stk| i.compute(stk, self.ctx, self.opt, self.txn, None)).await?;
+				let v = stk.run(|stk| i.compute(stk, self.ctx, self.opt, None)).await?;
 				return stk.run(|stk| self.eval_value(stk, group, &v)).await;
 			}
 		}
@@ -202,7 +198,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
-		let mut tx = self.txn.lock().await;
+		let mut tx = self.ctx.transaction()?.lock().await;
 		self.lazy_load_schema_resolver(&mut tx, self.table).await?;
 
 		// Try to detect if it matches an index

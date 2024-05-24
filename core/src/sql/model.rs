@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -57,7 +57,6 @@ impl Model {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
@@ -69,9 +68,12 @@ impl Model {
 		// Get the model definition
 		let val = {
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.transaction()?.lock().await;
 			// Get the function definition
-			run.get_and_cache_db_model(opt.ns(), opt.db(), &self.name, &self.version).await?
+			let val =
+				run.get_and_cache_db_model(opt.ns(), opt.db(), &self.name, &self.version).await?;
+			drop(run);
+			val
 		};
 		// Calculate the model path
 		let path = format!(
@@ -95,7 +97,7 @@ impl Model {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !stk.run(|stk| e.compute(stk, ctx, opt, txn, doc)).await?.is_truthy() {
+					if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 						return Err(Error::FunctionPermissions {
 							name: self.name.to_owned(),
 						});
@@ -106,9 +108,7 @@ impl Model {
 		// Compute the function arguments
 		let mut args = stk
 			.scope(|stk| {
-				try_join_all(
-					self.args.iter().map(|v| stk.run(|stk| v.compute(stk, ctx, opt, txn, doc))),
-				)
+				try_join_all(self.args.iter().map(|v| stk.run(|stk| v.compute(stk, ctx, opt, doc))))
 			})
 			.await?;
 		// Check the minimum argument length
@@ -224,7 +224,6 @@ impl Model {
 		_stk: &mut Stk,
 		_ctx: &Context<'_>,
 		_opt: &Options,
-		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Err(Error::InvalidModel {

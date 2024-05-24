@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
-use crate::dbs::{Options, Statement, Transaction};
+use crate::dbs::{Options, Statement};
 use crate::err::Error;
 use crate::sql::function::OptimisedAggregate;
 use crate::sql::value::{TryAdd, TryDiv, Value};
@@ -63,7 +63,6 @@ impl GroupsCollector {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		obj: Value,
 	) -> Result<(), Error> {
@@ -82,7 +81,7 @@ impl GroupsCollector {
 				.grp
 				.entry(arr)
 				.or_insert_with(|| self.base.iter().map(|a| a.new_instance()).collect());
-			Self::pushes(stk, ctx, opt, txn, agr, &self.idioms, obj).await?
+			Self::pushes(stk, ctx, opt, agr, &self.idioms, obj).await?
 		}
 		Ok(())
 	}
@@ -91,14 +90,13 @@ impl GroupsCollector {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		agrs: &mut [Aggregator],
 		idioms: &[Idiom],
 		obj: Value,
 	) -> Result<(), Error> {
 		for (agr, idiom) in agrs.iter_mut().zip(idioms) {
-			let val = stk.run(|stk| obj.get(stk, ctx, opt, txn, None, idiom)).await?;
-			agr.push(stk, ctx, opt, txn, val).await?;
+			let val = stk.run(|stk| obj.get(stk, ctx, opt, None, idiom)).await?;
+			agr.push(stk, ctx, opt, val).await?;
 		}
 		Ok(())
 	}
@@ -112,7 +110,6 @@ impl GroupsCollector {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<MemoryCollector, Error> {
 		let mut results = MemoryCollector::default();
@@ -143,18 +140,16 @@ impl GroupsCollector {
 										let x = if matches!(a, OptimisedAggregate::None) {
 											// The aggregation is not optimised, let's compute it with the values
 											let vals = agr.take();
-											f.aggregate(vals)
-												.compute(stk, ctx, opt, txn, None)
-												.await?
+											f.aggregate(vals).compute(stk, ctx, opt, None).await?
 										} else {
 											// The aggregation is optimised, just get the value
 											agr.compute(a)?
 										};
-										obj.set(stk, ctx, opt, txn, idiom.as_ref(), x).await?;
+										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
 									}
 									_ => {
 										let x = agr.take().first();
-										obj.set(stk, ctx, opt, txn, idiom.as_ref(), x).await?;
+										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
 									}
 								}
 							}
@@ -263,14 +258,13 @@ impl Aggregator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		val: Value,
 	) -> Result<(), Error> {
 		if let Some(ref mut c) = self.count {
 			*c += 1;
 		}
 		if let Some((ref f, ref mut c)) = self.count_function {
-			if f.aggregate(val.clone()).compute(stk, ctx, opt, txn, None).await?.is_truthy() {
+			if f.aggregate(val.clone()).compute(stk, ctx, opt, None).await?.is_truthy() {
 				*c += 1;
 			}
 		}

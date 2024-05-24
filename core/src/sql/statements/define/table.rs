@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Force, Options, Transaction};
+use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -46,13 +46,12 @@ impl DefineTableStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.transaction()?.lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if table already exists
@@ -133,7 +132,7 @@ impl DefineTableStatement {
 					what: Values(vec![Value::Table(v.clone())]),
 					..UpdateStatement::default()
 				};
-				stm.compute(stk, ctx, opt, txn, doc).await?;
+				stm.compute(stk, ctx, opt, doc).await?;
 			}
 		} else if dt.changefeed.is_some() {
 			run.record_table_change(opt.ns(), opt.db(), self.name.0.as_str(), &dt);

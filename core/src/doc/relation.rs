@@ -1,18 +1,17 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 
 impl<'a> Document<'a> {
 	pub async fn relation(
 		&mut self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		let tb = self.tb(opt, txn).await?;
+		let tb = self.tb(opt, ctx.transaction()?).await?;
 
 		let rid = self.id.as_ref().unwrap();
 		match stm {

@@ -205,8 +205,7 @@ impl CheckerCacheEntry {
 						ir: None,
 						doc: Cow::Owned(val),
 					};
-					let truthy =
-						cond.compute(stk, ctx, opt, txn, Some(&cursor_doc)).await?.is_truthy();
+					let truthy = cond.compute(stk, ctx, opt, Some(&cursor_doc)).await?.is_truthy();
 					(cursor_doc.doc.into_owned(), truthy)
 				};
 				return Ok(CheckerCacheEntry {

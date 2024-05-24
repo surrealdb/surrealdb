@@ -19,38 +19,34 @@ use std::ops::Bound;
 use std::vec;
 
 impl Iterable {
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn iterate(
 		self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
 		dis: Option<&mut SyncDistinct>,
 	) -> Result<(), Error> {
 		if self.iteration_stage_check(ctx) {
-			Processor::Iterator(dis, ite).process_iterable(stk, ctx, opt, txn, stm, self).await
+			Processor::Iterator(dis, ite).process_iterable(stk, ctx, opt, stm, self).await
 		} else {
 			Ok(())
 		}
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn channel(
 		self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		chn: Sender<Processed>,
 		dis: Option<AsyncDistinct>,
 	) -> Result<(), Error> {
 		if self.iteration_stage_check(ctx) {
-			Processor::Channel(dis, chn).process_iterable(stk, ctx, opt, txn, stm, self).await
+			Processor::Channel(dis, chn).process_iterable(stk, ctx, opt, stm, self).await
 		} else {
 			Ok(())
 		}
@@ -85,7 +81,6 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		pro: Processed,
 	) -> Result<(), Error> {
@@ -97,7 +92,7 @@ impl<'a> Processor<'a> {
 					false
 				};
 				if !is_processed {
-					ite.process(stk, ctx, opt, txn, stm, pro).await;
+					ite.process(stk, ctx, opt, stm, pro).await;
 				}
 			}
 			#[cfg(not(target_arch = "wasm32"))]
@@ -120,15 +115,14 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		iterable: Iterable,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match iterable {
-				Iterable::Value(v) => self.process_value(stk, ctx, opt, txn, stm, v).await?,
-				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, txn, stm, v).await?,
-				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, txn, stm, v).await?,
+				Iterable::Value(v) => self.process_value(stk, ctx, opt, stm, v).await?,
+				Iterable::Thing(v) => self.process_thing(stk, ctx, opt, stm, v).await?,
+				Iterable::Defer(v) => self.process_defer(stk, ctx, opt, stm, v).await?,
 				Iterable::Table(v) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&v.0) {
@@ -136,13 +130,13 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_table(stk, &ctx, opt, txn, stm, &v).await;
+							return self.process_table(stk, &ctx, opt, stm, &v).await;
 						}
 					}
-					self.process_table(stk, ctx, opt, txn, stm, &v).await?
+					self.process_table(stk, ctx, opt, stm, &v).await?
 				}
-				Iterable::Range(v) => self.process_range(stk, ctx, opt, txn, stm, v).await?,
-				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, txn, stm, e).await?,
+				Iterable::Range(v) => self.process_range(stk, ctx, opt, stm, v).await?,
+				Iterable::Edges(e) => self.process_edge(stk, ctx, opt, stm, e).await?,
 				Iterable::Index(t, irf) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(&t.0) {
@@ -150,16 +144,16 @@ impl<'a> Processor<'a> {
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = Context::new(ctx);
 							ctx.set_query_executor(exe.clone());
-							return self.process_index(stk, &ctx, opt, txn, stm, &t, irf).await;
+							return self.process_index(stk, &ctx, opt, stm, &t, irf).await;
 						}
 					}
-					self.process_index(stk, ctx, opt, txn, stm, &t, irf).await?
+					self.process_index(stk, ctx, opt, stm, &t, irf).await?
 				}
 				Iterable::Mergeable(v, o) => {
-					self.process_mergeable(stk, ctx, opt, txn, stm, v, o).await?
+					self.process_mergeable(stk, ctx, opt, stm, v, o).await?
 				}
 				Iterable::Relatable(f, v, w) => {
-					self.process_relatable(stk, ctx, opt, txn, stm, f, v, w).await?
+					self.process_relatable(stk, ctx, opt, stm, f, v, w).await?
 				}
 			}
 		}
@@ -171,7 +165,6 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Value,
 	) -> Result<(), Error> {
@@ -182,7 +175,7 @@ impl<'a> Processor<'a> {
 			val: Operable::Value(v),
 		};
 		// Process the document record
-		self.process(stk, ctx, opt, txn, stm, pro).await
+		self.process(stk, ctx, opt, stm, pro).await
 	}
 
 	async fn process_thing(
@@ -190,11 +183,11 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Thing,
 	) -> Result<(), Error> {
 		// Check that the table exists
+		let txn = ctx.transaction()?;
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
 		let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
@@ -210,7 +203,7 @@ impl<'a> Processor<'a> {
 			ir: None,
 			val,
 		};
-		self.process(stk, ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -220,10 +213,10 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Thing,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Process the document record
@@ -232,22 +225,21 @@ impl<'a> Processor<'a> {
 			ir: None,
 			val: Operable::Value(Value::None),
 		};
-		self.process(stk, ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn process_mergeable(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Thing,
 		o: Value,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -266,7 +258,7 @@ impl<'a> Processor<'a> {
 			ir: None,
 			val,
 		};
-		self.process(stk, ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -277,12 +269,12 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		f: Thing,
 		v: Thing,
 		w: Thing,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Fetch the data from the store
@@ -301,7 +293,7 @@ impl<'a> Processor<'a> {
 			ir: None,
 			val,
 		};
-		self.process(stk, ctx, opt, txn, stm, pro).await?;
+		self.process(stk, ctx, opt, stm, pro).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -311,10 +303,10 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: &Table,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), v, opt.strict).await?;
 		// Prepare the start and end keys
@@ -353,7 +345,7 @@ impl<'a> Processor<'a> {
 					ir: None,
 					val,
 				};
-				self.process(stk, ctx, opt, txn, stm, pro).await?;
+				self.process(stk, ctx, opt, stm, pro).await?;
 			}
 			continue;
 		}
@@ -366,10 +358,10 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		v: Range,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 		// Prepare the range start key
@@ -425,7 +417,7 @@ impl<'a> Processor<'a> {
 					ir: None,
 					val,
 				};
-				self.process(stk, ctx, opt, txn, stm, pro).await?;
+				self.process(stk, ctx, opt, stm, pro).await?;
 			}
 			continue;
 		}
@@ -438,7 +430,6 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		e: Edges,
 	) -> Result<(), Error> {
@@ -511,6 +502,7 @@ impl<'a> Processor<'a> {
 			},
 		};
 		//
+		let txn = ctx.transaction()?;
 		for (beg, end) in keys.iter() {
 			// Loop until no more keys
 			let mut next_page = Some(ScanPage::from(beg.clone()..end.clone()));
@@ -550,7 +542,7 @@ impl<'a> Processor<'a> {
 						ir: None,
 						val,
 					};
-					self.process(stk, ctx, opt, txn, stm, pro).await?;
+					self.process(stk, ctx, opt, stm, pro).await?;
 				}
 				continue;
 			}
@@ -565,11 +557,11 @@ impl<'a> Processor<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		table: &Table,
 		irf: IteratorRef,
 	) -> Result<(), Error> {
+		let txn = ctx.transaction()?;
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
@@ -585,7 +577,7 @@ impl<'a> Processor<'a> {
 					// Process the records
 					// TODO: par_iter
 					for pro in to_process {
-						self.process(stk, ctx, opt, txn, stm, pro).await?;
+						self.process(stk, ctx, opt, stm, pro).await?;
 					}
 					// Get the next batch
 					to_process = Self::next_batch(ctx, opt, txn, &mut iterator).await?;
