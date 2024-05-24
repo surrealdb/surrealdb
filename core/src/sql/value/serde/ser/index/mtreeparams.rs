@@ -110,16 +110,7 @@ impl serde::ser::SerializeStruct for SerializeMTree {
 
 #[test]
 fn mtree_params() {
-	let params = MTreeParams {
-		dimension: 1,
-		_distance: Default::default(),
-		distance: Default::default(),
-		vector_type: Default::default(),
-		capacity: 2,
-		doc_ids_order: 3,
-		doc_ids_cache: 4,
-		mtree_cache: 5,
-	};
+	let params = MTreeParams::new(1, Default::default(), Default::default(), 2, 3, 4, 5);
 	let serialized = params.serialize(Serializer.wrap()).unwrap();
 	assert_eq!(params, serialized);
 }
