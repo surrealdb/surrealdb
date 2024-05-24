@@ -2,6 +2,7 @@ use crate::sql::{escape::quote_str, strand::Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+use std::fs::write;
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
@@ -88,6 +89,7 @@ impl Uuid {
 
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "u")?;
 		Display::fmt(&quote_str(&self.0.to_string()), f)
 	}
 }

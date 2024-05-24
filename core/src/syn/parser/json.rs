@@ -10,7 +10,7 @@ use crate::{
 	},
 };
 
-use super::{ParseResult, Parser};
+use super::{mac::unexpected, ParseResult, Parser};
 
 impl Parser<'_> {
 	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
@@ -45,7 +45,14 @@ impl Parser<'_> {
 				}
 				Ok(Value::Strand(strand))
 			}
-			TokenKind::Digits => self.parse_number_like_prime(),
+			TokenKind::Digits | TokenKind::Number(_) => {
+				let peek = self.glue()?;
+				match peek.kind {
+					TokenKind::Duration => Ok(Value::Duration(self.next_token_value()?)),
+					TokenKind::Number(_) => Ok(Value::Number(self.next_token_value()?)),
+					x => unexpected!(self, x, "a number"),
+				}
+			}
 			_ => {
 				let ident = self.next_token_value::<Ident>()?.0;
 				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)

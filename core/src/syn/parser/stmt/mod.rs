@@ -467,7 +467,7 @@ impl Parser<'_> {
 	/// Expects `KILL` to already be consumed.
 	pub(crate) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let id = match self.peek_kind() {
-			TokenKind::Uuid => self.next_token_value().map(Value::Uuid)?,
+			t!("u\"") | t!("u'") => self.next_token_value().map(Value::Uuid)?,
 			t!("$param") => self.next_token_value().map(Value::Param)?,
 			x => unexpected!(self, x, "a UUID or a parameter"),
 		};
@@ -603,7 +603,9 @@ impl Parser<'_> {
 
 		let next = self.peek();
 		let since = match next.kind {
-			TokenKind::Number(_) => ShowSince::Versionstamp(self.next_token_value()?),
+			TokenKind::Digits | TokenKind::Number(_) => {
+				ShowSince::Versionstamp(self.next_token_value()?)
+			}
 			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
 			x => unexpected!(self, x, "a version stamp or a date-time"),
 		};

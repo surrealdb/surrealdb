@@ -23,6 +23,8 @@ impl Parser<'_> {
 				| TokenKind::Distance(_)
 				| TokenKind::VectorType(_)
 				| TokenKind::Identifier
+				| TokenKind::Exponent
+				| TokenKind::DatetimeChars(_)
 				| TokenKind::NumberSuffix(_)
 				| TokenKind::DurationSuffix(
 					// All except Micro unicode
@@ -45,6 +47,8 @@ impl Parser<'_> {
 				| TokenKind::Distance(_)
 				| TokenKind::VectorType(_)
 				| TokenKind::Identifier
+				| TokenKind::DatetimeChars(_)
+				| TokenKind::Exponent
 				| TokenKind::NumberSuffix(_)
 				| TokenKind::NaN | TokenKind::DurationSuffix(
 				// All except Micro unicode
@@ -78,11 +82,12 @@ impl Parser<'_> {
 
 	/// Glues the next token together, returning its value, doesnt consume the token.
 	pub fn glue(&mut self) -> ParseResult<Token> {
-		let token = self.peek_whitespace();
+		let token = self.peek();
 		match token.kind {
-			TokenKind::Exponent | TokenKind::NumberSuffix(_) | TokenKind::DurationSuffix(_) => {
-				self.glue_ident(false)
-			}
+			TokenKind::Exponent
+			| TokenKind::NumberSuffix(_)
+			| TokenKind::DurationSuffix(_)
+			| TokenKind::DatetimeChars(_) => self.glue_ident(false),
 			TokenKind::Digits => self.glue_numeric(),
 			t!("+") | t!("-") => {
 				if let TokenKind::Digits = self.peek_whitespace_token_at(1).kind {
@@ -97,34 +102,34 @@ impl Parser<'_> {
 
 	/// Glues all next tokens follow eachother, which can make up an ident into a single string.
 	pub fn glue_ident(&mut self, flexible: bool) -> ParseResult<Token> {
-		let start = self.peek_whitespace();
+		let start = self.peek();
 
 		let mut token_buffer = match start.kind {
-			TokenKind::Identifier => return Ok(start),
 			TokenKind::Exponent | TokenKind::NumberSuffix(_) => {
 				self.pop_peek();
 
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
 				self.span_str(start.span).to_owned()
 			}
 			TokenKind::Digits if flexible => {
 				self.pop_peek();
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
 				self.span_str(start.span).to_owned()
 			}
 			TokenKind::DurationSuffix(x) if x.can_be_ident() => {
 				self.pop_peek();
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
+
 				self.span_str(start.span).to_owned()
 			}
 			_ => return Ok(start),
 		};
+
+		debug_assert!(
+			start.is_followed_by(&self.peek_whitespace()),
+			"a whitespace token was eaten where eating it would disturb parsing\n {:?}@{:?} => {:?}@{:?}",
+			start.kind,
+			start.span,
+			self.peek_whitespace().kind,
+			self.peek_whitespace().span
+		);
 
 		let mut prev = start;
 		loop {
@@ -191,35 +196,53 @@ impl Parser<'_> {
 	}
 
 	pub fn glue_numeric(&mut self) -> ParseResult<Token> {
-		let next = self.peek_whitespace_token_at(1);
-
-		if matches!(next.kind, TokenKind::DurationSuffix(_)) {
-			return self.glue_duration();
+		let peek = self.peek();
+		match peek.kind {
+			TokenKind::Digits => {
+				if matches!(self.peek_whitespace_token_at(1).kind, TokenKind::DurationSuffix(_)) {
+					return self.glue_duration();
+				}
+				self.glue_number()
+			}
+			t!("+") | t!("-") => self.glue_number(),
+			_ => Ok(peek),
 		}
-
-		self.glue_number()
 	}
 
 	pub fn glue_number(&mut self) -> ParseResult<Token> {
-		let mut start = self.peek_whitespace();
+		let start = self.peek();
 
 		match start.kind {
 			t!("+") | t!("-") => {
-				start = self.next_whitespace();
-				if start.kind != TokenKind::Digits {
+				self.pop_peek();
+
+				debug_assert!(
+					start.is_followed_by(&self.peek_whitespace()),
+					"a whitespace token was eaten where eating it would disturb parsing\n {:?}@{:?} => {:?}@{:?}",
+					start.kind,
+					start.span,
+					self.peek_whitespace().kind,
+					self.peek_whitespace().span
+				);
+
+				let n = self.peek_whitespace();
+
+				if n.kind != TokenKind::Digits {
 					unexpected!(self, start.kind, "a number")
 				}
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
+
+				self.pop_peek();
 			}
-			TokenKind::NaN => return Ok(start),
-			TokenKind::Number(_) => return Ok(start),
 			TokenKind::Digits => {
 				self.pop_peek();
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
+				debug_assert!(
+					start.is_followed_by(&self.peek_whitespace()),
+					"a whitespace token was eaten where eating it would disturb parsing\n {:?}@{:?} => {:?}@{:?}",
+					start.kind,
+					start.span,
+					self.peek_whitespace().kind,
+					self.peek_whitespace().span
+				);
 			}
 			_ => return Ok(start),
 		};
@@ -233,6 +256,7 @@ impl Parser<'_> {
 			if next.kind != TokenKind::Digits {
 				unexpected!(self, next.kind, "digits after the dot");
 			}
+			self.pop_peek();
 			kind = NumberKind::Float;
 		}
 
@@ -251,6 +275,7 @@ impl Parser<'_> {
 				TokenKind::Digits => {}
 				x => unexpected!(self, x, "digits after the exponent"),
 			}
+			self.pop_peek();
 			kind = NumberKind::Float;
 		}
 
@@ -287,16 +312,18 @@ impl Parser<'_> {
 	pub fn glue_duration(&mut self) -> ParseResult<Token> {
 		let mut duration = StdDuration::ZERO;
 
-		let start = self.peek_whitespace();
+		let start = self.peek();
 		match start.kind {
 			TokenKind::Digits => {
 				self.pop_peek();
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
 			}
 			_ => return Ok(start),
 		};
+
+		debug_assert!(
+			start.is_followed_by(&self.peek_whitespace()),
+			"a whitespace token was eaten where eating it would disturb parsing"
+		);
 
 		let mut cur = start;
 		loop {
@@ -365,7 +392,7 @@ impl Parser<'_> {
 				ParseError::new(ParseErrorKind::DurationOverflow, span)
 			})?;
 
-			match p.kind {
+			match self.peek_whitespace().kind {
 				TokenKind::Digits => {
 					cur = self.pop_peek();
 				}
@@ -392,14 +419,17 @@ impl Parser<'_> {
 	/// Glues the next tokens which would make up a float together into a single buffer.
 	/// Return err if the tokens would return a invalid float.
 	pub fn glue_float(&mut self) -> ParseResult<Token> {
-		let start = self.peek_whitespace();
+		let start = self.peek();
 
 		match start.kind {
 			t!("+") | t!("-") => {
 				self.pop_peek();
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
+
+				debug_assert!(
+					start.is_followed_by(&self.peek_whitespace()),
+					"a whitespace token was eaten where eating it would disturb parsing"
+				);
+
 				let digits_token = self.peek_whitespace();
 				if TokenKind::Digits != digits_token.kind {
 					let span = start.span.covers(digits_token.span);
@@ -408,9 +438,11 @@ impl Parser<'_> {
 			}
 			TokenKind::Digits => {
 				self.pop_peek();
-				// If an ident was already peeked it might have skipped whitespace which this function
-				// needs. Triggering this assert means there is a bug in the parser.
-				assert!(!self.has_peek());
+
+				debug_assert!(
+					start.is_followed_by(&self.peek_whitespace()),
+					"a whitespace token was eaten where eating it would disturb parsing"
+				);
 			}
 			TokenKind::NumberSuffix(NumberSuffix::Float) => {
 				return Ok(start);
@@ -463,7 +495,7 @@ impl Parser<'_> {
 
 		let span = start.span.covers(self.last_span());
 		let token = Token {
-			kind: TokenKind::NumberSuffix(NumberSuffix::Float),
+			kind: TokenKind::Number(NumberKind::Float),
 			span,
 		};
 
@@ -473,13 +505,11 @@ impl Parser<'_> {
 	}
 
 	pub fn glue_plain_strand(&mut self) -> ParseResult<Token> {
-		let start = self.peek_whitespace();
+		let start = self.peek();
 		match start.kind {
 			t!("\"") | t!("'") => {}
 			_ => return Ok(start),
 		};
-
-		assert!(!self.has_peek());
 
 		let token = self.lexer.relex_strand(start);
 		self.prepend_token(token);

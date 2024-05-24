@@ -5,8 +5,10 @@ use crate::syn::{
 	token::{Span, TokenKind},
 };
 use std::{
+	backtrace::Backtrace,
 	fmt::Write,
 	num::{ParseFloatError, ParseIntError},
+	ops::RangeInclusive,
 };
 
 #[derive(Debug)]
@@ -72,8 +74,17 @@ pub enum ParseErrorKind {
 		kind: MissingKind,
 	},
 	InvalidUuidPart {
-		length: usize,
+		len: usize,
 	},
+	InvalidDatetimePart {
+		len: usize,
+	},
+	OutrangeDatetimePart {
+		range: RangeInclusive<usize>,
+	},
+	TooManyNanosecondsDatetime,
+	InvalidDatetimeDate,
+	InvalidDatetimeTime,
 	ExceededObjectDepthLimit,
 	ExceededQueryDepthLimit,
 	DurationOverflow,
@@ -86,6 +97,7 @@ pub enum ParseErrorKind {
 pub struct ParseError {
 	pub kind: ParseErrorKind,
 	pub at: Span,
+	bt: Backtrace,
 }
 
 impl ParseError {
@@ -94,9 +106,11 @@ impl ParseError {
 		ParseError {
 			kind,
 			at,
+			bt: Backtrace::force_capture(),
 		}
 	}
 	pub fn render_on(&self, source: &str) -> RenderedError {
+		println!("bt: {}", self.bt);
 		Self::render_on_inner(source, &self.kind, self.at)
 	}
 
@@ -319,11 +333,70 @@ impl ParseError {
 				}
 			}
 			ParseErrorKind::InvalidUuidPart {
-				length,
+				len,
 			} => {
 				let text = format!(
-					"Uuid hex section not the correct length, needs to be {length} characters"
+					"Uuid hex section not the correct length, needs to be {len} characters"
 				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidDatetimePart {
+				len,
+			} => {
+				let text = format!(
+					"Datetime digits section not the correct length, needs to be {len} characters"
+				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::OutrangeDatetimePart {
+				range,
+			} => {
+				let text = format!(
+					"Datetime digits not within valid range {}..={}",
+					range.start(),
+					range.end()
+				);
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::TooManyNanosecondsDatetime => {
+				let text = "Too many digits in Datetime nanoseconds".to_owned();
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(
+					source,
+					locations,
+					Some("Nanoseconds can at most be 9 characters"),
+				);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidDatetimeDate => {
+				let text = "Invalid Datetime date".to_owned();
+				let locations = Location::range_of_span(source, at);
+				let snippet = Snippet::from_source_location_range(source, locations, None);
+				RenderedError {
+					text,
+					snippets: vec![snippet],
+				}
+			}
+			ParseErrorKind::InvalidDatetimeTime => {
+				let text = "Datetime time outside of valid time range".to_owned();
 				let locations = Location::range_of_span(source, at);
 				let snippet = Snippet::from_source_location_range(source, locations, None);
 				RenderedError {

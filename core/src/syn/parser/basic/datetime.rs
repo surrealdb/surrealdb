@@ -1,139 +1,186 @@
+use std::ops::RangeInclusive;
+
+use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
+
 use crate::{
-	sql::Uuid,
+	fnc::array::min,
+	sql::Datetime,
 	syn::{
 		parser::{
 			mac::{expected_whitespace, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, TokenKind},
+		token::{t, DatetimeChars, TokenKind},
 	},
 };
 
 impl Parser<'_> {
-	/// Parses a uuid strand.
-	pub fn parse_uuid(&mut self) -> ParseResult<Uuid> {
-		let quote_token = self.peek_whitespace();
-		let double = match quote_token.kind {
-			t!("u\"") => true,
-			t!("u'") => false,
+	pub fn parse_datetime(&mut self) -> ParseResult<Datetime> {
+		let start = self.peek();
+		let double = match start.kind {
+			t!("d\"") => true,
+			t!("d'") => false,
 			x => unexpected!(self, x, "a datetime"),
 		};
 
-		// number of bytes is 4-2-2-2-6
+		self.pop_peek();
 
-		let mut uuid_buffer = [0u8; 16];
+		let start_date = self.peek_whitespace().span;
 
-		self.eat_uuid_hex(&mut uuid_buffer[0..4])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[4..6])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[6..8])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[8..10])?;
-
-		expected_whitespace!(self, t!("-"));
-
-		self.eat_uuid_hex(&mut uuid_buffer[10..16])?;
-
-		let next = self.peek_whitespace();
-		match next.kind {
-			t!("\"") if double => {}
-			t!("'") if !double => {}
-			_ => {
-				return Err(ParseError::new(
-					ParseErrorKind::UnclosedDelimiter {
-						expected: if double {
-							t!("\"")
-						} else {
-							t!("'")
-						},
-						should_close: quote_token.span,
-					},
-					next.span,
-				));
-			}
+		let year_neg = self.eat_whitespace(t!("-"));
+		if !year_neg {
+			self.eat_whitespace(t!("+"));
 		}
 
-		Ok(Uuid(uuid::Uuid::from_bytes(uuid_buffer)))
-	}
+		let year = self.parse_datetime_digits(4, 0..=9999)?;
+		expected_whitespace!(self, t!("-"));
+		let month = self.parse_datetime_digits(2, 1..=12)?;
+		expected_whitespace!(self, t!("-"));
+		let day = self.parse_datetime_digits(2, 1..=31)?;
 
-	/// Eats a uuid hex section, enough to fill the given buffer with bytes.
-	fn eat_uuid_hex(&mut self, buffer: &mut [u8]) -> ParseResult<()> {
-		// A function to covert a hex digit to its number representation.
-		fn ascii_to_hex(b: u8) -> Option<u8> {
-			if (b'0'..=b'9').contains(&b) {
-				return Some(b - b'0');
-			}
+		let date_span = start_date.covers(self.last_span());
 
-			if (b'a'..=b'f').contains(&b) {
-				return Some(b - b'a');
-			}
+		let year = if year_neg {
+			-(year as i32)
+		} else {
+			year as i32
+		};
 
-			if (b'A'..=b'F').contains(&b) {
-				return Some(b - b'A');
-			}
+		let date = NaiveDate::from_ymd_opt(year, month as u32, day as u32)
+			.ok_or_else(|| ParseError::new(ParseErrorKind::InvalidDatetimeDate, date_span))?;
 
-			None
-		}
-		// the amounts of character required is twice the buffer len.
-		// since every character is half a byte.
-		let required_len = buffer.len() * 2;
-
-		// The next token should be digits or an identifier
-		// If it is digits an identifier might be after it.
-		let start_token = self.peek_whitespace();
-		let mut cur = start_token;
-		loop {
-			match cur.kind {
-				TokenKind::Identifier => {
-					self.pop_peek();
-					break;
-				}
-				TokenKind::Exponent | TokenKind::Digits => {
-					self.pop_peek();
-					cur = self.peek_whitespace();
-				}
-				_ => unexpected!(self, TokenKind::Strand, "UUID hex digits"),
-			}
-		}
-
-		// Get the span that covered all eaten tokens.
-		let digits_span = start_token.span.covers(cur.span);
-		let digits_bytes = self.span_bytes(digits_span);
-
-		// for error handling, the incorrect hex character should be returned first, before
-		// returning the not correct length for segment error even if both are valid.
-		if !digits_bytes.into_iter().all(|x| matches!(x,b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')) {
+		if !self.eat(TokenKind::DatetimeChars(DatetimeChars::T)) {
 			return Err(ParseError::new(
 				ParseErrorKind::Unexpected {
-					found: TokenKind::Strand,
-					expected: "UUID hex digits",
+					found: TokenKind::Identifier,
+					expected: "the charater `T`",
 				},
-				digits_span,
+				self.recent_span(),
 			));
 		}
 
-		if digits_bytes.len() != required_len {
+		let start_time = self.peek_whitespace().span;
+
+		let hour = self.parse_datetime_digits(2, 0..=24)?;
+		expected_whitespace!(self, t!(":"));
+		let minute = self.parse_datetime_digits(2, 0..=59)?;
+		expected_whitespace!(self, t!(":"));
+		let second = self.parse_datetime_digits(2, 0..=59)?;
+
+		let nanos = if self.eat_whitespace(t!(".")) {
+			let digits_token = expected_whitespace!(self, TokenKind::Digits);
+			let slice = self.span_bytes(digits_token.span);
+
+			if slice.len() > 9 {
+				return Err(ParseError::new(
+					ParseErrorKind::TooManyNanosecondsDatetime,
+					digits_token.span,
+				));
+			}
+
+			let mut number = 0u32;
+			for i in 0..9 {
+				let Some(c) = slice.get(i).copied() else {
+					// If digits are missing they are counted as 0's
+					for _ in i..9 {
+						number *= 10;
+					}
+					break;
+				};
+				number *= 10;
+				number += (c - b'0') as u32;
+			}
+
+			number
+		} else {
+			0
+		};
+
+		let time_span = start_time.covers(self.last_span());
+
+		let time =
+			NaiveTime::from_hms_nano_opt(hour as u32, minute as u32, second as u32, nanos)
+				.ok_or_else(|| ParseError::new(ParseErrorKind::InvalidDatetimeTime, time_span))?;
+
+		let peek = self.peek_whitespace();
+		let timezone = match peek.kind {
+			t!("+") => self.parse_datetime_timezone(false)?,
+			t!("-") => self.parse_datetime_timezone(true)?,
+			TokenKind::DatetimeChars(DatetimeChars::Z) => {
+				self.pop_peek();
+				Utc.fix()
+			}
+			x => unexpected!(self, x, "`Z` or a timezone"),
+		};
+
+		if double {
+			expected_whitespace!(self, t!("\""));
+		} else {
+			expected_whitespace!(self, t!("'"));
+		}
+
+		let date_time = NaiveDateTime::new(date, time);
+
+		let datetime = timezone
+			.from_local_datetime(&date_time)
+			.earliest()
+			// this should never panic with a fixed offset.
+			.unwrap()
+			.with_timezone(&Utc);
+
+		Ok(Datetime(datetime))
+	}
+
+	fn parse_datetime_timezone(&mut self, neg: bool) -> ParseResult<FixedOffset> {
+		self.pop_peek();
+		let hour = self.parse_datetime_digits(2, 0..=23)?;
+		expected_whitespace!(self, t!(":"));
+		let minute = self.parse_datetime_digits(2, 0..=59)?;
+
+		// The range checks on the digits ensure that the offset can't exceed 23:59 so below
+		// unwraps won't panic.
+		if neg {
+			Ok(FixedOffset::west_opt((hour * 3600 + minute * 60) as i32).unwrap())
+		} else {
+			Ok(FixedOffset::east_opt((hour * 3600 + minute * 60) as i32).unwrap())
+		}
+	}
+
+	fn parse_datetime_digits(
+		&mut self,
+		len: usize,
+		range: RangeInclusive<usize>,
+	) -> ParseResult<usize> {
+		let t = self.peek_whitespace();
+		match t.kind {
+			TokenKind::Digits => {}
+			x => unexpected!(self, x, "datetime digits"),
+		}
+
+		let digits_str = self.span_str(t.span);
+		if digits_str.len() != len {
 			return Err(ParseError::new(
-				ParseErrorKind::InvalidUuidPart {
-					length: required_len,
+				ParseErrorKind::InvalidDatetimePart {
+					len,
 				},
-				digits_span,
+				t.span,
 			));
 		}
 
-		// write into the buffer
-		for (i, b) in buffer.iter_mut().enumerate() {
-			*b = ascii_to_hex(digits_bytes[i * 2]).unwrap() << 4
-				| ascii_to_hex(digits_bytes[i * 2 + 1]).unwrap();
+		self.pop_peek();
+
+		// This should always parse as it has been validated by the lexer.
+		let value = digits_str.parse().unwrap();
+
+		if !range.contains(&value) {
+			return Err(ParseError::new(
+				ParseErrorKind::OutrangeDatetimePart {
+					range,
+				},
+				t.span,
+			));
 		}
 
-		Ok(())
+		Ok(value)
 	}
 }

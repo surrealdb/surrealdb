@@ -432,10 +432,12 @@ impl Parser<'_> {
 			"geometries" => {
 				return self.parse_object_or_geometry_after_geometries(ctx, start, key).await;
 			}
-			_ => self
-				.parse_object_from_key(ctx, key, BTreeMap::new(), start)
-				.await
-				.map(Value::Object),
+			_ => {
+				expected!(self, t!(":"));
+				self.parse_object_from_key(ctx, key, BTreeMap::new(), start)
+					.await
+					.map(Value::Object)
+			}
 		}
 	}
 
@@ -683,12 +685,16 @@ impl Parser<'_> {
 				let str = std::str::from_utf8(str).unwrap().to_owned();
 				Ok(str)
 			}
-			TokenKind::Identifier | TokenKind::Strand => {
+			TokenKind::Identifier => {
 				self.pop_peek();
 				let str = self.lexer.string.take().unwrap();
 				Ok(str)
 			}
-			TokenKind::Digits => {
+			t!("\"") | t!("'") | TokenKind::Strand => {
+				let str = self.next_token_value::<Strand>()?.0;
+				Ok(str)
+			}
+			TokenKind::Digits | TokenKind::Number(_) => {
 				self.pop_peek();
 				let number = self.next_token_value::<Number>()?.to_string();
 				Ok(number)

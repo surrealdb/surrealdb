@@ -49,6 +49,11 @@ impl Location {
 
 	pub fn of_offset(source: &str, offset: usize) -> Self {
 		assert!(offset <= source.len(), "tried to find location of substring in unrelated string");
+
+		if offset == source.len() {
+			// this can happen
+		}
+
 		// Bytes of input prior to line being iterated.
 		let mut bytes_prior = 0;
 		for (line_idx, (line, seperator_len)) in LineIterator::new(source).enumerate() {

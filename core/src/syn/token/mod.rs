@@ -335,11 +335,28 @@ pub enum QouteKind {
 	DateTimeDouble,
 }
 
+impl QouteKind {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			QouteKind::Plain | QouteKind::PlainDouble => "a strand",
+			QouteKind::RecordId | QouteKind::RecordIdDouble => "a record-id strand",
+			QouteKind::Uuid | QouteKind::UuidDouble => "a uuid",
+			QouteKind::DateTime | QouteKind::DateTimeDouble => "a datetime",
+		}
+	}
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum NumberKind {
 	Decimal,
 	Float,
 	Integer,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum DatetimeChars {
+	T,
+	Z,
 }
 
 /// The type of token
@@ -361,8 +378,6 @@ pub enum TokenKind {
 	Number(NumberKind),
 	/// Not produced by the lexer but only the result of token gluing.
 	Duration,
-	Uuid,
-	Datetime,
 	/// Not produced by the lexer but only the result of token gluing.
 	Strand,
 	Regex,
@@ -413,6 +428,8 @@ pub enum TokenKind {
 	Digits,
 	/// A identifier like token which matches a duration suffix.
 	DurationSuffix(DurationSuffix),
+	/// A part of a datetime like token which matches a duration suffix.
+	DatetimeChars(DatetimeChars),
 	/// A identifier like token which matches an exponent.
 	Exponent,
 	/// A identifier like token which matches an number suffix.
@@ -426,14 +443,7 @@ const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
-		matches!(
-			self,
-			TokenKind::Identifier
-				| TokenKind::Datetime
-				| TokenKind::Duration
-				| TokenKind::Uuid
-				| TokenKind::Regex
-		)
+		matches!(self, TokenKind::Identifier | TokenKind::Duration)
 	}
 
 	pub fn can_be_identifier(&self) -> bool {
@@ -443,6 +453,7 @@ impl TokenKind {
 				| TokenKind::Keyword(_)
 				| TokenKind::Language(_)
 				| TokenKind::Algorithm(_)
+				| TokenKind::DatetimeChars(_),
 		)
 	}
 
@@ -505,7 +516,15 @@ impl TokenKind {
 			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
-			_ => todo!(),
+			TokenKind::WhiteSpace => "whitespace",
+			TokenKind::Qoute(x) => x.as_str(),
+			TokenKind::Duration => "a duration",
+			TokenKind::Digits => "a number",
+			TokenKind::NaN => "NaN",
+			// below are small broken up tokens which are most of the time identifiers.
+			TokenKind::DatetimeChars(_) => "an identifier",
+			TokenKind::Exponent => "an identifier",
+			TokenKind::NumberSuffix(_) => "an identifier",
 		}
 	}
 }

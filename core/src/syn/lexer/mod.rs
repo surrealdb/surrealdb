@@ -67,8 +67,6 @@ pub struct Lexer<'a> {
 	pub reader: BytesReader<'a>,
 	/// The one past the last character of the previous token.
 	last_offset: u32,
-	/// The span of whitespace if it was read between two tokens.
-	whitespace_span: Option<Span>,
 	/// A buffer used to build the value of tokens which can't be read straight from the source.
 	/// like for example strings with escape characters.
 	scratch: String,
@@ -103,7 +101,6 @@ impl<'a> Lexer<'a> {
 		Lexer {
 			reader,
 			last_offset: 0,
-			whitespace_span: None,
 			scratch: String::new(),
 			string: None,
 			error: None,
@@ -119,7 +116,6 @@ impl<'a> Lexer<'a> {
 	pub fn reset(&mut self) {
 		self.last_offset = 0;
 		self.scratch.clear();
-		self.whitespace_span = None;
 		self.string = None;
 		self.error = None;
 	}
@@ -136,7 +132,6 @@ impl<'a> Lexer<'a> {
 		Lexer {
 			reader,
 			last_offset: 0,
-			whitespace_span: None,
 			scratch: self.scratch,
 			string: self.string,
 			error: self.error,
@@ -146,30 +141,10 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	/// return the whitespace of the last token buffered, either peeked or poped.
-	pub fn whitespace_span(&self) -> Option<Span> {
-		self.whitespace_span
-	}
-
-	/// Used for seting the span of whitespace between tokens. Will extend the current whitespace
-	/// if there already is one.
-	fn set_whitespace_span(&mut self, span: Span) {
-		if let Some(existing) = self.whitespace_span.as_mut() {
-			*existing = existing.covers(span);
-		} else {
-			self.whitespace_span = Some(span);
-		}
-	}
-
 	/// Returns the next token, driving the lexer forward.
 	///
 	/// If the lexer is at the end the source it will always return the Eof token.
 	pub fn next_token(&mut self) -> Token {
-		self.whitespace_span = None;
-		self.next_token_inner()
-	}
-
-	fn next_token_inner(&mut self) -> Token {
 		let Some(byte) = self.reader.next() else {
 			return self.eof_token();
 		};
@@ -188,17 +163,10 @@ impl<'a> Lexer<'a> {
 		Token {
 			kind: TokenKind::Eof,
 			span: Span {
-				offset: self.last_offset.saturating_sub(1),
-				len: 1,
+				offset: self.last_offset,
+				len: 0,
 			},
 		}
-	}
-
-	/// Skip the last consumed bytes in the reader.
-	///
-	/// The bytes consumed before this point won't be part of the span.
-	fn skip_offset(&mut self) {
-		self.last_offset = self.reader.offset() as u32;
 	}
 
 	/// Return an invalid token.

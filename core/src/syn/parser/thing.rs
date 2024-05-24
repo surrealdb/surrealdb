@@ -5,7 +5,7 @@ use crate::{
 	sql::{id::Gen, Id, Ident, Range, Thing, Value},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
+			mac::{expected, expected_whitespace, unexpected},
 			ParseError, ParseErrorKind,
 		},
 		token::{t, TokenKind},
@@ -16,24 +16,20 @@ use std::{cmp::Ordering, ops::Bound};
 impl Parser<'_> {
 	pub async fn parse_record_string(&mut self, ctx: &mut Stk, double: bool) -> ParseResult<Thing> {
 		let thing = self.parse_thing(ctx).await?;
-		// can't have any tokens in the buffer, since the next token must be produced by a specific
-		// call.
-		debug_assert_eq!(self.token_buffer.len(), 0);
-		// manually handle the trailing `"`.
-		self.peek();
-		self.no_whitespace()?;
+
+		debug_assert!(self.last_span().is_followed_by(&self.peek_whitespace().span));
 
 		if double {
-			expected!(self, t!("\""));
+			expected_whitespace!(self, t!("\""));
 		} else {
-			expected!(self, t!("'"));
+			expected_whitespace!(self, t!("'"));
 		};
 		Ok(thing)
 	}
 
-	fn peek_can_start_id(&mut self) -> bool {
-		self.peek_can_start_ident()
-			|| matches!(self.peek_kind(), TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-"))
+	fn kind_cast_start_id(kind: TokenKind) -> bool {
+		Self::tokenkind_can_start_ident(kind)
+			|| matches!(kind, TokenKind::Digits | t!("{") | t!("[") | t!("+") | t!("-"))
 	}
 
 	pub async fn parse_thing_or_range(
@@ -41,21 +37,15 @@ impl Parser<'_> {
 		stk: &mut Stk,
 		ident: String,
 	) -> ParseResult<Value> {
-		expected!(self, t!(":"));
-
-		// Peek first to filter out white space
-		self.peek();
-		self.no_whitespace()?;
+		expected_whitespace!(self, t!(":"));
 
 		// If self starts with a range operator self is a range with no start bound
-		if self.eat(t!("..")) {
+		if self.eat_whitespace(t!("..")) {
 			// Check for inclusive
-			let end = if self.eat(t!("=")) {
-				self.no_whitespace()?;
+			let end = if self.eat_whitespace(t!("=")) {
 				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Included(id)
-			} else if self.peek_can_start_id() {
-				self.no_whitespace()?;
+			} else if Self::kind_cast_start_id(self.peek_whitespace().kind) {
 				let id = stk.run(|stk| self.parse_id(stk)).await?;
 				Bound::Excluded(id)
 			} else {
@@ -69,12 +59,11 @@ impl Parser<'_> {
 		}
 
 		// Didn't eat range yet so we need to parse the id.
-		let beg = if self.peek_can_start_id() {
+		let beg = if Self::kind_cast_start_id(self.peek_whitespace().kind) {
 			let id = stk.run(|ctx| self.parse_id(ctx)).await?;
 
 			// check for exclusive
-			if self.eat(t!(">")) {
-				self.no_whitespace()?;
+			if self.eat_whitespace(t!(">")) {
 				Bound::Excluded(id)
 			} else {
 				Bound::Included(id)
@@ -85,13 +74,11 @@ impl Parser<'_> {
 
 		// Check if self is actually a range.
 		// If we already ate the exclusive it must be a range.
-		if self.eat(t!("..")) {
-			let end = if self.eat(t!("=")) {
-				self.no_whitespace()?;
+		if self.eat_whitespace(t!("..")) {
+			let end = if self.eat_whitespace(t!("=")) {
 				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
 				Bound::Included(id)
-			} else if self.peek_can_start_id() {
-				self.no_whitespace()?;
+			} else if Self::kind_cast_start_id(self.peek_whitespace().kind) {
 				let id = stk.run(|ctx| self.parse_id(ctx)).await?;
 				Bound::Excluded(id)
 			} else {
@@ -105,7 +92,7 @@ impl Parser<'_> {
 		} else {
 			let id = match beg {
 				Bound::Unbounded => {
-					if self.peek_kind() == t!("$param") {
+					if self.peek_whitespace().kind == t!("$param") {
 						return Err(ParseError::new(
 									ParseErrorKind::UnexpectedExplain {
 										found: t!("$param"),
@@ -117,11 +104,11 @@ impl Parser<'_> {
 					}
 
 					// we haven't matched anythong so far so we still want any type of id.
-					unexpected!(self, self.peek_kind(), "a record-id id")
+					unexpected!(self, self.peek_whitespace().kind, "a record-id id")
 				}
 				Bound::Excluded(_) => {
 					// we have matched a bounded id but we don't see an range operator.
-					unexpected!(self, self.peek_kind(), "the range operator `..`")
+					unexpected!(self, self.peek_whitespace().kind, "the range operator `..`")
 				}
 				Bound::Included(id) => id,
 			};
@@ -136,22 +123,13 @@ impl Parser<'_> {
 	pub async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
 		let tb = self.next_token_value::<Ident>()?.0;
 
-		expected!(self, t!(":"));
-
-		self.peek();
-		self.no_whitespace()?;
+		expected_whitespace!(self, t!(":"));
 
 		// Check for beginning id
-		let beg = if self.peek_can_start_ident() {
-			self.peek();
-			self.no_whitespace()?;
-
+		let beg = if Self::tokenkind_can_start_ident(self.peek_whitespace().kind) {
 			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 
-			self.peek();
-			self.no_whitespace()?;
-
-			if self.eat(t!(">")) {
+			if self.eat_whitespace(t!(">")) {
 				Bound::Excluded(id)
 			} else {
 				Bound::Included(id)
@@ -160,21 +138,12 @@ impl Parser<'_> {
 			Bound::Unbounded
 		};
 
-		self.peek();
-		self.no_whitespace()?;
+		expected_whitespace!(self, t!(".."));
 
-		expected!(self, t!(".."));
-
-		self.peek();
-		self.no_whitespace()?;
-
-		let inclusive = self.eat(t!("="));
-
-		self.peek();
-		self.no_whitespace()?;
+		let inclusive = self.eat_whitespace(t!("="));
 
 		// parse ending id.
-		let end = if self.peek_can_start_ident() {
+		let end = if Self::tokenkind_can_start_ident(self.peek_whitespace().kind) {
 			let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 			if inclusive {
 				Bound::Included(id)
@@ -204,9 +173,6 @@ impl Parser<'_> {
 	) -> ParseResult<Thing> {
 		expected!(self, t!(":"));
 
-		self.peek();
-		self.no_whitespace()?;
-
 		let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
 
 		Ok(Thing {
@@ -216,7 +182,7 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
-		let token = self.peek();
+		let token = self.peek_whitespace();
 		match token.kind {
 			t!("{") => {
 				self.pop_peek();
@@ -304,13 +270,16 @@ impl Parser<'_> {
 				if Self::tokenkind_can_start_ident(next.kind) {
 					let glued = self.glue_ident(self.flexible_record_id)?;
 					if let TokenKind::Identifier = glued.kind {
+						self.pop_peek();
 						return Ok(Id::String(self.lexer.string.take().unwrap()));
 					} else {
 						unexpected!(self, glued.kind, "a record-id id")
 					}
 				}
 
-				let digits_str = self.span_str(next.span);
+				self.pop_peek();
+
+				let digits_str = self.span_str(token.span);
 				if let Ok(number) = digits_str.parse::<i64>() {
 					Ok(Id::Number(number))
 				} else {

@@ -5,8 +5,8 @@ use super::{ParseResult, Parser};
 use crate::{
 	enter_object_recursion, enter_query_recursion,
 	sql::{
-		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Subquery, Table,
-		Value,
+		Array, Dir, Function, Geometry, Ident, Idiom, Mock, Number, Part, Script, Strand, Subquery,
+		Table, Value,
 	},
 	syn::{
 		parser::{
@@ -24,7 +24,9 @@ impl Parser<'_> {
 	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		// TODO(delskayn) DateTime|UUID
 		match self.peek_kind() {
-			TokenKind::Digits => return self.parse_number_like_prime(),
+			TokenKind::Digits | TokenKind::Number(_) | TokenKind::Duration => {
+				self.parse_number_like_prime()
+			}
 			t!("r\"") => {
 				self.pop_peek();
 				let thing = self.parse_record_string(ctx, true).await?;
@@ -34,6 +36,14 @@ impl Parser<'_> {
 				self.pop_peek();
 				let thing = self.parse_record_string(ctx, false).await?;
 				Ok(Value::Thing(thing))
+			}
+			t!("d\"") | t!("d'") => {
+				let datetime = self.next_token_value()?;
+				Ok(Value::Datetime(datetime))
+			}
+			t!("u\"") | t!("u'") => {
+				let uuid = self.next_token_value()?;
+				Ok(Value::Uuid(uuid))
 			}
 			t!("$param") => {
 				let param = self.next_token_value()?;
@@ -88,7 +98,10 @@ impl Parser<'_> {
 				let span = self.glue()?.span;
 
 				match self.peek_token_at(1).kind {
-					t!("::") | t!("(") => self.parse_builtin(ctx, span).await,
+					t!("::") | t!("(") => {
+						self.pop_peek();
+						self.parse_builtin(ctx, span).await
+					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
 						self.parse_thing_or_range(ctx, str).await
@@ -108,7 +121,12 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_number_like_prime(&mut self) -> ParseResult<Value> {
-		todo!()
+		let token = self.glue_numeric()?;
+		match token.kind {
+			TokenKind::Number(_) => self.next_token_value().map(Value::Number),
+			TokenKind::Duration => self.next_token_value().map(Value::Duration),
+			x => unexpected!(self, x, "a value"),
+		}
 	}
 
 	/// Parse an expressions
@@ -149,6 +167,21 @@ impl Parser<'_> {
 				self.pop_peek();
 				let thing = self.parse_record_string(ctx, false).await?;
 				Value::Thing(thing)
+			}
+			t!("d\"") | t!("d'") => {
+				let datetime = self.next_token_value()?;
+				Value::Datetime(datetime)
+			}
+			t!("u\"") | t!("u'") => {
+				let uuid = self.next_token_value()?;
+				Value::Uuid(uuid)
+			}
+			t!("'") | t!("\"") | TokenKind::Strand => {
+				let s = self.next_token_value::<Strand>()?;
+				Value::Strand(s)
+			}
+			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
+				self.parse_number_like_prime()?
 			}
 			t!("$param") => {
 				let param = self.next_token_value()?;
@@ -197,10 +230,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_inner_subquery_or_coordinate(ctx, token.span).await?
 			}
-			t!("/") => {
-				self.pop_peek();
-				self.next_token_value().map(Value::Regex)?
-			}
+			t!("/") => self.next_token_value().map(Value::Regex)?,
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -224,7 +254,10 @@ impl Parser<'_> {
 				self.glue()?;
 
 				match self.peek_token_at(1).kind {
-					t!("::") | t!("(") => self.parse_builtin(ctx, token.span).await?,
+					t!("::") | t!("(") => {
+						self.pop_peek();
+						self.parse_builtin(ctx, token.span).await?
+					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
 						self.parse_thing_or_range(ctx, str).await?
@@ -308,7 +341,6 @@ impl Parser<'_> {
 		match peek.kind {
 			t!("(") => {
 				self.pop_peek();
-				dbg!("called");
 				self.parse_inner_subquery(ctx, Some(peek.span)).await
 			}
 			t!("IF") => {
@@ -384,53 +416,15 @@ impl Parser<'_> {
 				let stmt = self.parse_rebuild_stmt()?;
 				Subquery::Rebuild(stmt)
 			}
-			t!("+") | t!("-") => {
-				let peek_digits = self.peek_whitespace_token_at(1);
-				if matches!(peek_digits.kind, TokenKind::Digits) {
-					let before = self.recent_span();
+			TokenKind::Digits | TokenKind::Number(_) | t!("+") | t!("-") => {
+				let number_token = self.glue()?;
+				if matches!(self.peek_kind(), TokenKind::Number(_))
+					&& self.peek_token_at(1).kind == t!(",")
+				{
 					let number = self.next_token_value::<Number>()?;
-					let after = self.last_span();
-					if self.eat(t!(",")) {
-						match number {
-							Number::Decimal(_) => {
-								return Err(ParseError::new(
-									ParseErrorKind::UnexpectedExplain {
-										found: TokenKind::Digits,
-										expected: "a non-decimal, non-nan number",
-										explain: "coordinate numbers can't be NaN or a decimal",
-									},
-									before.covers(after),
-								));
-							}
-							Number::Float(x) if x.is_nan() => {
-								return Err(ParseError::new(
-									ParseErrorKind::UnexpectedExplain {
-										found: TokenKind::Digits,
-										expected: "a non-decimal, non-nan number",
-										explain: "coordinate numbers can't be NaN or a decimal",
-									},
-									before.covers(after),
-								));
-							}
-							_ => {}
-						}
-						let x = number.as_float();
-						let y = self.next_token_value::<f64>()?;
-						self.expect_closing_delimiter(t!(")"), start)?;
-						return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
-					} else {
-						self.expect_closing_delimiter(t!(")"), start)?;
-						return Ok(Value::Number(number));
-					}
-				}
+					// eat ','
+					self.next();
 
-				Subquery::Value(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
-			}
-			TokenKind::Digits => {
-				let before = self.recent_span();
-				let number = self.next_token_value::<Number>()?;
-				let after = self.last_span();
-				if self.eat(t!(",")) {
 					match number {
 						Number::Decimal(_) => {
 							return Err(ParseError::new(
@@ -439,7 +433,7 @@ impl Parser<'_> {
 									expected: "a non-decimal, non-nan number",
 									explain: "coordinate numbers can't be NaN or a decimal",
 								},
-								before.covers(after),
+								number_token.span,
 							));
 						}
 						Number::Float(x) if x.is_nan() => {
@@ -449,7 +443,7 @@ impl Parser<'_> {
 									expected: "a non-decimal, non-nan number",
 									explain: "coordinate numbers can't be NaN or a decimal",
 								},
-								before.covers(after),
+								number_token.span,
 							));
 						}
 						_ => {}
@@ -459,8 +453,8 @@ impl Parser<'_> {
 					self.expect_closing_delimiter(t!(")"), start)?;
 					return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
 				} else {
-					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Value::Number(number));
+					let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+					Subquery::Value(value)
 				}
 			}
 			_ => {
@@ -708,7 +702,7 @@ mod tests {
 	fn regex_complex() {
 		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
 		let out = Value::parse(sql);
-		assert_eq!(r"/(?i)test/[a-z]+/\s\d\w{1}.*/", format!("{}", out));
+		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", format!("{}", out));
 		let Value::Regex(regex) = out else {
 			panic!()
 		};

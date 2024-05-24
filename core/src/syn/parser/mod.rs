@@ -230,17 +230,23 @@ impl<'a> Parser<'a> {
 
 	/// Returns the next token without consuming it.
 	pub fn peek(&mut self) -> Token {
-		let Some(x) = self.token_buffer.first() else {
-			let res = loop {
-				let res = self.lexer.next_token();
-				if res.kind != TokenKind::WhiteSpace {
-					break res;
-				}
+		loop {
+			let Some(x) = self.token_buffer.first() else {
+				let res = loop {
+					let res = self.lexer.next_token();
+					if res.kind != TokenKind::WhiteSpace {
+						break res;
+					}
+				};
+				self.token_buffer.push(res);
+				return res;
 			};
-			self.token_buffer.push(res);
-			return res;
-		};
-		x
+			if x.kind == TokenKind::WhiteSpace {
+				self.token_buffer.pop();
+				continue;
+			}
+			break x;
+		}
 	}
 
 	/// Returns the next token without consuming it.
@@ -300,8 +306,10 @@ impl<'a> Parser<'a> {
 	/// Eat the next token if it is of the given kind.
 	/// Returns whether a token was eaten.
 	pub fn eat(&mut self, token: TokenKind) -> bool {
-		if token == self.peek().kind {
+		let peek = self.peek();
+		if token == peek.kind {
 			self.token_buffer.pop();
+			self.last_span = peek.span;
 			true
 		} else {
 			false
@@ -313,8 +321,10 @@ impl<'a> Parser<'a> {
 	///
 	/// Unlike [`Parser::eat`] this doesn't skip whitespace tokens
 	pub fn eat_whitespace(&mut self, token: TokenKind) -> bool {
-		if token == self.peek_whitespace().kind {
+		let peek = self.peek_whitespace();
+		if token == peek.kind {
 			self.token_buffer.pop();
+			self.last_span = peek.span;
 			true
 		} else {
 			false
@@ -352,17 +362,6 @@ impl<'a> Parser<'a> {
 			));
 		}
 		Ok(())
-	}
-
-	/// Ensure that there was no whitespace parser between the last token and the current one.
-	///
-	/// This is used in places where whitespace is prohibited like inside a record id.
-	fn no_whitespace(&mut self) -> ParseResult<()> {
-		if let Some(span) = self.lexer.whitespace_span() {
-			Err(ParseError::new(ParseErrorKind::NoWhitespace, span))
-		} else {
-			Ok(())
-		}
 	}
 
 	/// Recover the parser state to after a given span.
@@ -420,7 +419,8 @@ impl<'a> Parser<'a> {
 			}) => {
 				// Ensure the we are sure that the last token was fully parsed.
 				self.backup_after(at);
-				if self.peek().kind != TokenKind::Eof || self.lexer.whitespace_span().is_some() {
+				let peek = self.peek_whitespace();
+				if peek.kind != TokenKind::Eof && peek.kind != TokenKind::WhiteSpace {
 					// if there is a next token or we ate whitespace after the eof we can be sure
 					// that the error is not the result of a token only being partially present.
 					return PartialResult::Ready {

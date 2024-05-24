@@ -3,7 +3,7 @@ use crate::syn::{
 		unicode::{byte, chars},
 		Error, Lexer,
 	},
-	token::{t, Token, TokenKind},
+	token::{t, DatetimeChars, Token, TokenKind},
 };
 
 impl<'a> Lexer<'a> {
@@ -41,8 +41,6 @@ impl<'a> Lexer<'a> {
 				_ => {}
 			}
 		}
-		self.set_whitespace_span(self.current_span());
-		self.skip_offset();
 	}
 
 	/// Eats a multi line comment and returns an error if `*/` would be missing.
@@ -57,8 +55,6 @@ impl<'a> Lexer<'a> {
 				};
 				if b'/' == byte {
 					self.reader.next();
-					self.set_whitespace_span(self.current_span());
-					self.skip_offset();
 					return Ok(());
 				}
 			}
@@ -100,8 +96,6 @@ impl<'a> Lexer<'a> {
 				_ => break,
 			}
 		}
-		self.set_whitespace_span(self.current_span());
-		self.skip_offset();
 	}
 
 	// re-lexes a `/` token to a regex token.
@@ -246,7 +240,7 @@ impl<'a> Lexer<'a> {
 				Some(b'-') => {
 					self.reader.next();
 					self.eat_single_line_comment();
-					return self.next_token_inner();
+					TokenKind::WhiteSpace
 				}
 				Some(b'=') => {
 					self.reader.next();
@@ -367,7 +361,7 @@ impl<'a> Lexer<'a> {
 				}
 			},
 			b'f' => match self.reader.peek() {
-				Some(x) if !x.is_ascii_alphabetic() => {
+				Some(x) if !x.is_ascii_alphanumeric() => {
 					t!("f")
 				}
 				_ => {
@@ -403,7 +397,7 @@ impl<'a> Lexer<'a> {
 					t!("m")
 				}
 				_ => {
-					return self.lex_ident_from_next_byte(b'n');
+					return self.lex_ident_from_next_byte(b'm');
 				}
 			},
 			b's' => {
@@ -468,13 +462,25 @@ impl<'a> Lexer<'a> {
 					return self.lex_ident_from_next_byte(b'r');
 				}
 			},
+			b'Z' => match self.reader.peek() {
+				Some(x) if x.is_ascii_alphabetic() => {
+					return self.lex_ident_from_next_byte(b'Z');
+				}
+				_ => TokenKind::DatetimeChars(DatetimeChars::Z),
+			},
+			b'T' => match self.reader.peek() {
+				Some(x) if x.is_ascii_alphabetic() => {
+					return self.lex_ident_from_next_byte(b'T');
+				}
+				_ => TokenKind::DatetimeChars(DatetimeChars::T),
+			},
 			b'e' => {
 				return self.lex_exponent(b'e');
 			}
 			b'E' => {
 				return self.lex_exponent(b'E');
 			}
-			x @ b'0'..=b'9' => return self.lex_digits(x),
+			b'0'..=b'9' => return self.lex_digits(),
 			b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
 				return self.lex_ident_from_next_byte(byte);
 			}

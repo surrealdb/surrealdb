@@ -123,14 +123,18 @@ impl Parser<'_> {
 	fn prefix_binding_power(&mut self, token: TokenKind) -> Option<((), u8)> {
 		match token {
 			t!("!") | t!("+") | t!("-") => Some(((), 19)),
-			t!("<") if self.peek_token_at(1).kind != t!("FUTURE") => Some(((), 20)),
+			t!("<") => {
+				if self.peek_token_at(1).kind != t!("FUTURE") {
+					Some(((), 20))
+				} else {
+					None
+				}
+			}
 			_ => None,
 		}
 	}
 
 	async fn parse_prefix_op(&mut self, ctx: &mut Stk, min_bp: u8) -> ParseResult<Value> {
-		const I64_ABS_MAX: u64 = 9223372036854775808;
-
 		let token = self.peek();
 		let operator = match token.kind {
 			t!("+") => {
@@ -204,7 +208,7 @@ impl Parser<'_> {
 					let d = self.convert_distance(k).map(Some)?;
 					Operator::Knn(amount, d)
 				},
-				TokenKind::Digits => {
+				TokenKind::Digits | TokenKind::Number(_) => {
 					let ef = self.next_token_value()?;
 					Operator::Ann(amount, ef)
 				}

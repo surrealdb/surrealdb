@@ -8,6 +8,7 @@ use crate::{
 
 mod datetime;
 mod number;
+mod uuid;
 
 /// A trait for parsing single tokens with a specific value.
 pub trait TokenValue: Sized {
@@ -21,6 +22,10 @@ impl TokenValue for Ident {
 				parser.pop_peek();
 				let str = parser.lexer.string.take().unwrap();
 				Ok(Ident(str))
+			}
+			TokenKind::Keyword(_) | TokenKind::Language(_) | TokenKind::Algorithm(_) => {
+				let s = parser.pop_peek().span;
+				Ok(Ident(parser.span_str(s).to_owned()))
 			}
 			x => {
 				unexpected!(parser, x, "an identifier");
@@ -79,13 +84,7 @@ impl TokenValue for Duration {
 
 impl TokenValue for Datetime {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		match parser.glue_duration()?.kind {
-			TokenKind::Datetime => {
-				parser.pop_peek();
-				return Ok(Datetime(parser.lexer.datetime.unwrap()));
-			}
-			x => unexpected!(parser, x, "a datetime"),
-		}
+		parser.parse_datetime()
 	}
 }
 
@@ -93,7 +92,8 @@ impl TokenValue for Strand {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
+			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) | TokenKind::Strand => {
+				parser.pop_peek();
 				let t = parser.lexer.relex_strand(token);
 				let TokenKind::Strand = t.kind else {
 					unexpected!(parser, t.kind, "a strand")
@@ -115,14 +115,19 @@ impl TokenValue for Regex {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		match parser.peek().kind {
 			t!("/") => {
-				assert!(!parser.has_peek());
 				let pop = parser.pop_peek();
+				assert!(!parser.has_peek());
 				let token = parser.lexer.relex_regex(pop);
-				let regex = parser
-					.span_str(token.span)
+				let mut span = token.span;
+
+				// remove the starting and ending `/` characters.
+				span.offset += 1;
+				span.len -= 2;
+
+				let regex = dbg!(parser.span_str(span))
 					.parse()
 					.map_err(|e| ParseError::new(ParseErrorKind::InvalidRegex(e), token.span))?;
-				return Ok(Regex(regex));
+				return Ok(regex);
 			}
 			x => unexpected!(parser, x, "a regex"),
 		}
@@ -133,18 +138,5 @@ impl Parser<'_> {
 	/// Parse a token value from the next token in the parser.
 	pub fn next_token_value<V: TokenValue>(&mut self) -> ParseResult<V> {
 		V::from_token(self)
-	}
-
-	pub fn parse_signed_float(&mut self) -> ParseResult<f64> {
-		let neg = self.eat(t!("-"));
-		if !neg {
-			self.eat(t!("+"));
-		}
-		let res: f64 = self.next_token_value()?;
-		if neg {
-			Ok(-res)
-		} else {
-			Ok(res)
-		}
 	}
 }

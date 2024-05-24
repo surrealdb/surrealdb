@@ -267,9 +267,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				Part::Last
 			}
-			t!("+") | TokenKind::Digits => Part::Index(self.next_token_value()?),
+			t!("+") | TokenKind::Digits | TokenKind::Number(_) => {
+				Part::Index(self.next_token_value()?)
+			}
 			t!("-") => {
-				if let TokenKind::Digits = self.peek_token_at(1).kind {
+				if let TokenKind::Digits = self.peek_whitespace_token_at(1).kind {
 					unexpected!(self, t!("-"),"$, * or a number" => "an index can't be negative");
 				}
 				unexpected!(self, t!("-"), "$, * or a number");
@@ -280,9 +282,7 @@ impl Parser<'_> {
 				Part::Where(value)
 			}
 			t!("$param") => Part::Value(Value::Param(self.next_token_value()?)),
-			TokenKind::Qoute(_x) => {
-				todo!()
-			}
+			TokenKind::Qoute(_x) => Part::Value(Value::Strand(self.next_token_value()?)),
 			_ => {
 				let idiom = self.parse_basic_idiom()?;
 				Part::Value(Value::Idiom(idiom))
@@ -326,12 +326,12 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::Last
 						}
-						TokenKind::Digits | t!("+") => {
+						TokenKind::Digits | t!("+") | TokenKind::Number(_) => {
 							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						t!("-") => {
-							let peek_digit = self.peek_token_at(1);
+							let peek_digit = self.peek_whitespace_token_at(1);
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
 								unexpected!(@ span, self, t!("-"),"$, * or a number" => "an index can't be negative");
@@ -372,12 +372,12 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::All
 						}
-						TokenKind::Digits | t!("+") => {
+						TokenKind::Digits | t!("+") | TokenKind::Number(_) => {
 							let number = self.next_token_value()?;
 							Part::Index(number)
 						}
 						t!("-") => {
-							let peek_digit = self.peek_token_at(1);
+							let peek_digit = self.peek_whitespace_token_at(1);
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
 								unexpected!(@ span, self, t!("-"),"$, * or a number" => "an index can't be negative");

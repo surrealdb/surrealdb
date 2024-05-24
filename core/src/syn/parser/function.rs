@@ -4,7 +4,7 @@ use crate::{
 	sql::{Function, Ident, Model},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
+			mac::{expected, expected_whitespace, unexpected},
 			ParseError, ParseErrorKind,
 		},
 		token::{t, TokenKind},
@@ -65,8 +65,9 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "an integer"),
 		};
 
-		expected!(self, t!("."));
+		expected_whitespace!(self, t!("."));
 
+		let token = self.next_whitespace();
 		let minor: u32 = match token.kind {
 			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
 				.unwrap()
@@ -76,8 +77,9 @@ impl Parser<'_> {
 			x => unexpected!(self, x, "an integer"),
 		};
 
-		expected!(self, t!("."));
+		expected_whitespace!(self, t!("."));
 
+		let token = self.next_whitespace();
 		let patch: u32 = match token.kind {
 			TokenKind::Digits => std::str::from_utf8(self.lexer.reader.span(token.span))
 				.unwrap()

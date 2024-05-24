@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use std::{
 	borrow::Cow,
 	num::{ParseFloatError, ParseIntError},
@@ -28,7 +29,16 @@ fn parse_integer<I>(parser: &mut Parser<'_>) -> ParseResult<I>
 where
 	I: FromStr<Err = ParseIntError>,
 {
-	let peek = parser.peek();
+	let mut peek = parser.peek();
+
+	if let t!("-") = peek.kind {
+		unexpected!(parser,t!("-"),"an integer" => "only positive integers are allowed here")
+	}
+
+	if let t!("+") = peek.kind {
+		peek = parser.peek_whitespace();
+	}
+
 	match peek.kind {
 		TokenKind::Digits => {
 			parser.pop_peek();
@@ -93,7 +103,7 @@ where
 	// find initial  digits
 	match peek.kind {
 		TokenKind::NaN => return Ok("NaN".parse().unwrap()),
-		TokenKind::Digits => {}
+		TokenKind::Digits | t!("+") | t!("-") => {}
 		x => unexpected!(parser, x, "a floating point number"),
 	};
 	let float_token = parser.glue_float()?;
@@ -142,9 +152,16 @@ impl TokenValue for Number {
 
 		match number_kind {
 			NumberKind::Decimal => {
-				let decimal = prepare_number_str(span.strip_suffix("dec").unwrap_or(span))
-					.parse()
-					.map_err(|e| ParseError::new(ParseErrorKind::InvalidDecimal(e), number.span))?;
+				let str = prepare_number_str(span.strip_suffix("dec").unwrap_or(span));
+				let decimal = if str.contains('e') {
+					Decimal::from_scientific(str.as_ref()).map_err(|e| {
+						ParseError::new(ParseErrorKind::InvalidDecimal(e), number.span)
+					})?
+				} else {
+					Decimal::from_str(str.as_ref()).map_err(|e| {
+						ParseError::new(ParseErrorKind::InvalidDecimal(e), number.span)
+					})?
+				};
 
 				Ok(Number::Decimal(decimal))
 			}
