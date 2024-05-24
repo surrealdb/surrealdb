@@ -249,8 +249,8 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 				'de': 'das ist Englisch',
 			},
 			tags: [
-				{ type: 'library', value: 'remote-side' },
-				{ type: 'library', value: 'local-side' },
+				{ type: 'library', value: 'client-side' },
+				{ type: 'library', value: 'server-side' },
 				{ type: 'environment', value: 'frontend' },
 			]
 		};
@@ -289,11 +289,11 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 				tags: [
 					{
 						type: 'library',
-						value: 'remote-side',
+						value: 'client-side',
 					},
 					{
 						type: 'library',
-						value: 'local-side',
+						value: 'server-side',
 					},
 					{
 						type: 'environment',
@@ -310,7 +310,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 		"[
 			{
 				tags: {
-					value: 'remote-side'
+					value: 'client-side'
 				}
 			}
 		]",

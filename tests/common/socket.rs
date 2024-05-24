@@ -67,7 +67,7 @@ pub struct Socket {
 // pub struct Socket(pub WebSocketStream<MaybeTlsStream<TcpStream>>);
 
 impl Socket {
-	/// Close the connection with the WebSocket local
+	/// Close the connection with the WebSocket server
 	pub async fn close(&mut self) -> Result<()> {
 		let (send, recv) = oneshot::channel();
 		self.sender
@@ -81,7 +81,7 @@ impl Socket {
 		Ok(())
 	}
 
-	/// Connect to a WebSocket local using a specific format
+	/// Connect to a WebSocket server using a specific format
 	pub async fn connect(addr: &str, format: Option<Format>, msg_format: Format) -> Result<Self> {
 		let url = format!("ws://{}/rpc", addr);
 		let mut req = url.into_client_request().unwrap();
@@ -273,7 +273,7 @@ impl Socket {
 		}
 	}
 
-	/// Send a text or binary message and receive a reponse from the WebSocket local
+	/// Send a text or binary message and receive a reponse from the WebSocket server
 	pub async fn send_request(
 		&self,
 		method: &str,
@@ -323,7 +323,7 @@ impl Socket {
 		.await?
 	}
 
-	/// Send a USE message to the local and check the response
+	/// Send a USE message to the server and check the response
 	pub async fn send_message_use(
 		&mut self,
 		ns: Option<&str>,
@@ -352,7 +352,7 @@ impl Socket {
 		}
 	}
 
-	/// Send a generic query message to the local and check the response
+	/// Send a generic query message to the server and check the response
 	pub async fn send_message_query(&mut self, query: &str) -> Result<Vec<serde_json::Value>> {
 		// Send message and receive response
 		let msg = self.send_request("query", json!([query])).await?;
@@ -378,7 +378,7 @@ impl Socket {
 		}
 	}
 
-	/// Send a signin authentication query message to the local and check the response
+	/// Send a signin authentication query message to the server and check the response
 	pub async fn send_message_signin(
 		&mut self,
 		user: &str,

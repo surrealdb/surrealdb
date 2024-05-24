@@ -8,7 +8,7 @@ use test_log::test;
 
 #[test(tokio::test)]
 async fn ping() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -26,7 +26,7 @@ async fn ping() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn info() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -72,7 +72,7 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn signup() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -120,7 +120,7 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn signin() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -194,7 +194,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -222,7 +222,7 @@ async fn invalidate() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -244,7 +244,7 @@ async fn authenticate() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn letset() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -265,7 +265,7 @@ async fn letset() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn unset() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -290,7 +290,7 @@ async fn unset() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn select() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -315,7 +315,7 @@ async fn select() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn insert() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -356,7 +356,7 @@ async fn insert() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn create() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -394,7 +394,7 @@ async fn create() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn update() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -435,7 +435,7 @@ async fn update() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn merge() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -477,7 +477,7 @@ async fn merge() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn patch() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -524,7 +524,7 @@ async fn patch() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn delete() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -561,7 +561,7 @@ async fn delete() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn query() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -588,7 +588,7 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn version() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -605,7 +605,7 @@ async fn version() -> Result<(), Box<dyn std::error::Error>> {
 // Validate that the WebSocket is able to process multiple queries concurrently
 #[test(tokio::test)]
 async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -643,7 +643,7 @@ async fn concurrency() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn live() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -710,7 +710,7 @@ async fn live() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn kill() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -813,7 +813,7 @@ async fn kill() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket1 = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -861,7 +861,7 @@ async fn live_second_connection() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket_permanent = Socket::connect(&addr, SERVER, FORMAT).await?;
@@ -926,7 +926,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test(tokio::test)]
 async fn session_expiration() {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
@@ -1035,7 +1035,7 @@ async fn session_expiration() {
 
 #[test(tokio::test)]
 async fn session_expiration_operations() {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
@@ -1290,7 +1290,7 @@ async fn session_expiration_operations() {
 
 #[test(tokio::test)]
 async fn session_reauthentication() {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
@@ -1378,7 +1378,7 @@ async fn session_reauthentication() {
 
 #[test(tokio::test)]
 async fn session_reauthentication_expired() {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
@@ -1467,7 +1467,7 @@ async fn session_reauthentication_expired() {
 
 #[test(tokio::test)]
 async fn run_functions() {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
@@ -1513,7 +1513,7 @@ async fn run_functions() {
 
 #[test(tokio::test)]
 async fn relate_rpc() {
-	// Setup database local
+	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
 	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
@@ -1543,7 +1543,7 @@ async fn relate_rpc() {
 
 #[test(tokio::test)]
 async fn temporary_directory() {
-	// Setup database local
+	// Setup database server
 	let temp_dir = TempDir::new().unwrap();
 	let (addr, mut server) =
 		common::start_server_with_temporary_directory(temp_dir.to_string_lossy().as_ref())

@@ -53,7 +53,7 @@ mod ml_integration {
 	async fn upload_file(addr: &str, ns: &str, db: &str) -> Result<(), Box<dyn std::error::Error>> {
 		let generator = StreamAdapter::new(5, "./tests/linear_test.surml".to_string()).unwrap();
 		let body = Body::wrap_stream(generator);
-		// Prepare HTTP remote
+		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -91,7 +91,7 @@ mod ml_integration {
 		let db = Ulid::new().to_string();
 		let generator = StreamAdapter::new(5, "./tests/should_crash.surml".to_string()).unwrap();
 		let body = Body::wrap_stream(generator);
-		// Prepare HTTP remote
+		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -126,7 +126,7 @@ mod ml_integration {
 		let db = Ulid::new().to_string();
 		let generator = StreamAdapter::new(5, "./tests/no_name.surml".to_string()).unwrap();
 		let body = Body::wrap_stream(generator);
-		// Prepare HTTP remote
+		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -158,7 +158,7 @@ mod ml_integration {
 		let db = Ulid::new().to_string();
 		let generator = StreamAdapter::new(5, "./tests/no_version.surml".to_string()).unwrap();
 		let body = Body::wrap_stream(generator);
-		// Prepare HTTP remote
+		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -191,7 +191,7 @@ mod ml_integration {
 		let generator =
 			StreamAdapter::new(5, "./tests/no_name_or_version.surml".to_string()).unwrap();
 		let body = Body::wrap_stream(generator);
-		// Prepare HTTP remote
+		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -225,7 +225,7 @@ mod ml_integration {
 
 		upload_file(&addr, &ns, &db).await?;
 
-		// Prepare HTTP remote
+		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -261,7 +261,7 @@ mod ml_integration {
 
 		upload_file(&addr, &ns, &db).await?;
 
-		// Prepare HTTP remote
+		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);

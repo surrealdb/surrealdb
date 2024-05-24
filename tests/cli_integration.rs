@@ -253,7 +253,7 @@ mod cli_integration {
 		let output = server.kill().output().err().unwrap();
 
 		// Test the crt/key args but the keys are self signed so don't actually connect.
-		assert!(output.contains("Started web local"), "couldn't start web server: {output}");
+		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
 	}
 
 	#[test(tokio::test)]
@@ -788,9 +788,9 @@ mod cli_integration {
 		info!("* Send SIGINT signal");
 		server
 			.send_signal(nix::sys::signal::Signal::SIGINT)
-			.expect("Failed to send SIGINT to local");
+			.expect("Failed to send SIGINT to server");
 
-		info!("* Waiting for local to exit gracefully ...");
+		info!("* Waiting for server to exit gracefully ...");
 		tokio::select! {
 			_ = async {
 				loop {
@@ -812,9 +812,9 @@ mod cli_integration {
 	async fn test_server_second_signal_handling() {
 		let (addr, mut server) = common::start_server_without_auth().await.unwrap();
 
-		// Create a long-lived WS connection so the local don't shutdown gracefully
+		// Create a long-lived WS connection so the server don't shutdown gracefully
 		let socket =
-			Socket::connect(&addr, None, Format::Json).await.expect("Failed to connect to local");
+			Socket::connect(&addr, None, Format::Json).await.expect("Failed to connect to server");
 
 		let send_future = socket.send_request("query", json!(["SLEEP 30s;"]));
 
@@ -835,7 +835,7 @@ mod cli_integration {
 			info!("* Send first SIGINT signal");
 			server
 				.send_signal(nix::sys::signal::Signal::SIGINT)
-				.expect("Failed to send SIGINT to local");
+				.expect("Failed to send SIGINT to server");
 
 			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
@@ -855,7 +855,7 @@ mod cli_integration {
 
 			server
 				.send_signal(nix::sys::signal::Signal::SIGINT)
-				.expect("Failed to send SIGINT to local");
+				.expect("Failed to send SIGINT to server");
 
 			tokio::time::timeout(time::Duration::from_secs(5), async {
 				loop {
@@ -1149,7 +1149,7 @@ mod cli_integration {
 					panic!("Should not be ok!");
 				}
 				Err(e) => {
-					assert_eq!(e.to_string(), "local failed to start", "{:?}", e);
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
 				}
 			}
 		}
@@ -1171,7 +1171,7 @@ mod cli_integration {
 					panic!("Should not be ok!");
 				}
 				Err(e) => {
-					assert_eq!(e.to_string(), "local failed to start", "{:?}", e);
+					assert_eq!(e.to_string(), "server failed to start", "{:?}", e);
 				}
 			}
 			temp_file.close().unwrap();
