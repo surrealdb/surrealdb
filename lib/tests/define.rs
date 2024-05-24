@@ -854,11 +854,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	skip_ok(res, 2)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -1233,6 +1229,39 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 		panic!("An error was expected.")
 	}
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_on_schemafull_without_permission() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE;
+		DEFINE INDEX idx ON test FIELDS foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	skip_ok(&mut res, 1)?;
+	//
+	let tmp = res.remove(0).result;
+	let s = format!("{:?}", tmp);
+	assert!(
+		tmp.is_err_and(|e| {
+			if let Error::FdNotFound {
+				value,
+			} = e
+			{
+				assert_eq!(value, "foo", "Wrong field: {value}");
+				true
+			} else {
+				false
+			}
+		}),
+		"Expected error, but got: {:?}",
+		s
+	);
 	Ok(())
 }
 
