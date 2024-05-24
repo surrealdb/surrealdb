@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::skip_ok;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -650,6 +651,45 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 
 	let tmp = res.remove(0).result?;
+	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
+	Ok(())
+}
+
+#[tokio::test]
+async fn select_where_matches_edgengram() -> Result<(), Error> {
+	let sql = r#"
+		DEFINE ANALYZER search_autocomplete TOKENIZERS camel,class FILTERS lowercase,edgengram(2,10);
+		DEFINE INDEX index_name_search ON TABLE users COLUMNS profile.name SEARCH ANALYZER search_autocomplete BM25 HIGHLIGHTS;
+		DEFINE INDEX index_display_name_search ON TABLE users COLUMNS profile.display_name SEARCH ANALYZER search_autocomplete BM25 HIGHLIGHTS;
+		CREATE users:1 SET profile = { name: "merryoscar", display_name: "Oscar Merry" };
+		CREATE users:2 SET profile = { name: "nickmalster", display_name: "Nick" };
+		LET $query = 'nickmalster';
+		SELECT *, search::score(1) + search::score(2) AS score
+		FROM users
+		WHERE profile.name @1@ $query
+		OR profile.display_name @2@ $query
+		ORDER BY score DESC
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 7);
+	//
+	skip_ok(res, 6)?;
+
+	let tmp = res.remove(0).result?;
+	let val_docs = Value::parse(
+		"[
+				{
+					id: users:2,
+					profile: {
+						display_name: 'Nick',
+						name: 'nickmalster'
+					},
+					score: 0f
+				}
+			]",
+	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 	Ok(())
 }
