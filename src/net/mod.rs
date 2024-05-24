@@ -108,10 +108,6 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		ID.clone(),
 		AUTH_NS.clone(),
 		AUTH_DB.clone(),
-		// TODO(gguillemas): Remove these headers once the legacy authentication is deprecated in v2.0.0
-		NS_LEGACY.clone(),
-		DB_LEGACY.clone(),
-		ID_LEGACY.clone(),
 	];
 
 	#[cfg(not(feature = "http-compression"))]
@@ -125,10 +121,6 @@ pub async fn init(ct: CancellationToken) -> Result<(), Error> {
 		ID.clone(),
 		AUTH_NS.clone(),
 		AUTH_DB.clone(),
-		// TODO(gguillemas): Remove these headers once the legacy authentication is deprecated in v2.0.0
-		NS_LEGACY.clone(),
-		DB_LEGACY.clone(),
-		ID_LEGACY.clone(),
 	];
 
 	let service = service
