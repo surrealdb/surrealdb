@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
+use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
@@ -625,27 +626,21 @@ impl QueryExecutor {
 		None
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn highlight(
 		&self,
 		ctx: &Context<'_>,
 		thg: &Thing,
-		prefix: Value,
-		suffix: Value,
-		match_ref: Value,
-		partial: bool,
+		hlp: HighlightParams,
 		doc: &Value,
 	) -> Result<Value, Error> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
+		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
 			let mut run = ctx.transaction()?.lock().await;
 			let res = ft
 				.highlight(
 					&mut run,
 					thg,
 					&e.0.query_terms_list,
-					prefix,
-					suffix,
-					partial,
+					hlp,
 					e.0.index_option.id_ref(),
 					doc,
 				)
@@ -757,7 +752,6 @@ pub(super) struct MtEntry {
 }
 
 impl MtEntry {
-	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &Context<'_>,

@@ -551,7 +551,6 @@ impl<'a> Processor<'a> {
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn process_index(
 		&mut self,
 		stk: &mut Stk,

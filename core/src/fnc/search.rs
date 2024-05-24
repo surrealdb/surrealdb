@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
+use crate::idx::ft::highlighter::HighlightParams;
 use crate::sql::Value;
 use reblessive::tree::Stk;
 
@@ -37,11 +38,11 @@ pub async fn score(
 
 pub async fn highlight(
 	(ctx, doc): (&Context<'_>, Option<&CursorDoc<'_>>),
-	(prefix, suffix, match_ref, partial): (Value, Value, Value, Option<Value>),
+	args: (Value, Value, Value, Option<Value>),
 ) -> Result<Value, Error> {
 	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
-		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
-		return exe.highlight(ctx, thg, prefix, suffix, match_ref, partial, doc.doc.as_ref()).await;
+		let hlp: HighlightParams = args.try_into()?;
+		return exe.highlight(ctx, thg, hlp, doc.doc.as_ref()).await;
 	}
 	Ok(Value::None)
 }

@@ -1,6 +1,6 @@
 pub(crate) mod analyzer;
 mod doclength;
-mod highlighter;
+pub(crate) mod highlighter;
 mod offsets;
 mod postings;
 pub(super) mod scorer;
@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::doclength::DocLengths;
-use crate::idx::ft::highlighter::{Highlighter, Offseter};
+use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::BM25Scorer;
@@ -423,15 +423,12 @@ impl FtIndex {
 		Ok(None)
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn highlight(
 		&self,
 		tx: &mut kvs::Transaction,
 		thg: &Thing,
 		terms: &[Option<(TermId, TermLen)>],
-		prefix: Value,
-		suffix: Value,
-		partial: bool,
+		hlp: HighlightParams,
 		idiom: &Idiom,
 		doc: &Value,
 	) -> Result<Value, Error> {
@@ -440,7 +437,7 @@ impl FtIndex {
 		let doc_id = di.get_doc_id(tx, doc_key).await?;
 		drop(di);
 		if let Some(doc_id) = doc_id {
-			let mut hl = Highlighter::new(prefix, suffix, partial, idiom, doc);
+			let mut hl = Highlighter::new(hlp, idiom, doc);
 			for (term_id, term_len) in terms.iter().flatten() {
 				let o = self.offsets.get_offsets(tx, doc_id, *term_id).await?;
 				if let Some(o) = o {
