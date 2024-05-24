@@ -89,6 +89,7 @@ impl Analyzer {
 				}
 			}
 		}
+		drop(tx);
 		Ok((
 			list,
 			TermsSet {
@@ -123,6 +124,7 @@ impl Analyzer {
 				}
 			}
 		}
+		drop(tx);
 		Ok(TermsSet {
 			set,
 			has_unknown_terms,
@@ -176,6 +178,7 @@ impl Analyzer {
 		for (t, f) in tf {
 			tfid.push((terms.resolve_term_id(&mut tx, t).await?, f));
 		}
+		drop(tx);
 		Ok((dl, tfid))
 	}
 
@@ -221,6 +224,7 @@ impl Analyzer {
 			tfid.push((id, o.len() as TermFrequency));
 			osid.push((id, OffsetRecords(o)));
 		}
+		drop(tx);
 		Ok((dl, tfid, osid))
 	}
 

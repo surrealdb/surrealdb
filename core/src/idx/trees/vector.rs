@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::index::{Distance, VectorType};
-use crate::sql::{Array, Number, Value};
+use crate::sql::{Number, Value};
 use ahash::AHasher;
 use hashbrown::HashSet;
 use linfa_linalg::norm::Norm;
@@ -446,50 +446,43 @@ impl Vector {
 		}
 	}
 
-	pub fn try_from_array(t: VectorType, a: &Array) -> Result<Self, Error> {
+	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self, Error> {
 		let res = match t {
 			VectorType::F64 => {
-				let mut vec = Vec::with_capacity(a.len());
-				Self::check_vector_array(a, &mut vec)?;
+				let mut vec = Vec::with_capacity(v.len());
+				Self::check_vector_number(v, &mut vec)?;
 				Vector::F64(Array1::from_vec(vec))
 			}
 			VectorType::F32 => {
-				let mut vec = Vec::with_capacity(a.len());
-				Self::check_vector_array(a, &mut vec)?;
+				let mut vec = Vec::with_capacity(v.len());
+				Self::check_vector_number(v, &mut vec)?;
 				Vector::F32(Array1::from_vec(vec))
 			}
 			VectorType::I64 => {
-				let mut vec = Vec::with_capacity(a.len());
-				Self::check_vector_array(a, &mut vec)?;
+				let mut vec = Vec::with_capacity(v.len());
+				Self::check_vector_number(v, &mut vec)?;
 				Vector::I64(Array1::from_vec(vec))
 			}
 			VectorType::I32 => {
-				let mut vec = Vec::with_capacity(a.len());
-				Self::check_vector_array(a, &mut vec)?;
+				let mut vec = Vec::with_capacity(v.len());
+				Self::check_vector_number(v, &mut vec)?;
 				Vector::I32(Array1::from_vec(vec))
 			}
 			VectorType::I16 => {
-				let mut vec = Vec::with_capacity(a.len());
-				Self::check_vector_array(a, &mut vec)?;
+				let mut vec = Vec::with_capacity(v.len());
+				Self::check_vector_number(v, &mut vec)?;
 				Vector::I16(Array1::from_vec(vec))
 			}
 		};
 		Ok(res)
 	}
 
-	fn check_vector_array<T>(a: &Array, vec: &mut Vec<T>) -> Result<(), Error>
+	fn check_vector_number<T>(v: &[Number], vec: &mut Vec<T>) -> Result<(), Error>
 	where
 		T: for<'a> TryFrom<&'a Number, Error = Error>,
 	{
-		for v in &a.0 {
-			if let Value::Number(n) = v {
-				vec.push(n.try_into()?);
-			} else {
-				return Err(Error::InvalidVectorType {
-					current: v.clone().to_string(),
-					expected: "Number",
-				});
-			}
+		for n in v {
+			vec.push(n.try_into()?);
 		}
 		Ok(())
 	}
@@ -540,7 +533,6 @@ mod tests {
 	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::Array;
 
 	fn test_distance(dist: Distance, a1: &[f64], a2: &[f64], res: f64) {
 		// Convert the arrays to Vec<Number>
@@ -554,10 +546,8 @@ mod tests {
 
 		// Check the "Vector" optimised implementations
 		for t in [VectorType::F64] {
-			let v1: SharedVector =
-				Vector::try_from_array(t, &Array::from(v1.clone())).unwrap().into();
-			let v2: SharedVector =
-				Vector::try_from_array(t, &Array::from(v2.clone())).unwrap().into();
+			let v1: SharedVector = Vector::try_from_vector(t, &v1).unwrap().into();
+			let v2: SharedVector = Vector::try_from_vector(t, &v2).unwrap().into();
 			assert_eq!(dist.calculate(&v1, &v2), res);
 		}
 	}

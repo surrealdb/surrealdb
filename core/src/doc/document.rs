@@ -4,8 +4,7 @@ use crate::dbs::Workable;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::idx::docids::DocId;
-use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::iterators::IteratorRecord;
 use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
@@ -28,24 +27,21 @@ pub(crate) struct Document<'a> {
 #[non_exhaustive]
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub struct CursorDoc<'a> {
-	pub(crate) ir: Option<IteratorRef>,
 	pub(crate) rid: Option<&'a Thing>,
+	pub(crate) ir: Option<&'a IteratorRecord>,
 	pub(crate) doc: Cow<'a, Value>,
-	pub(crate) doc_id: Option<DocId>,
 }
 
 impl<'a> CursorDoc<'a> {
 	pub(crate) fn new(
-		ir: Option<IteratorRef>,
 		rid: Option<&'a Thing>,
-		doc_id: Option<DocId>,
+		ir: Option<&'a IteratorRecord>,
 		doc: Cow<'a, Value>,
 	) -> Self {
 		Self {
-			ir,
 			rid,
+			ir,
 			doc,
-			doc_id,
 		}
 	}
 }
@@ -53,10 +49,9 @@ impl<'a> CursorDoc<'a> {
 impl<'a> From<&'a Value> for CursorDoc<'a> {
 	fn from(doc: &'a Value) -> Self {
 		Self {
-			ir: None,
 			rid: None,
+			ir: None,
 			doc: Cow::Borrowed(doc),
-			doc_id: None,
 		}
 	}
 }
@@ -64,10 +59,9 @@ impl<'a> From<&'a Value> for CursorDoc<'a> {
 impl<'a> From<&'a mut Value> for CursorDoc<'a> {
 	fn from(doc: &'a mut Value) -> Self {
 		Self {
-			ir: None,
 			rid: None,
+			ir: None,
 			doc: Cow::Borrowed(doc),
-			doc_id: None,
 		}
 	}
 }
@@ -86,17 +80,16 @@ impl<'a> From<&Document<'a>> for Vec<u8> {
 
 impl<'a> Document<'a> {
 	pub fn new(
-		ir: Option<IteratorRef>,
 		id: Option<&'a Thing>,
-		doc_id: Option<DocId>,
+		ir: Option<&'a IteratorRecord>,
 		val: &'a Value,
 		extras: Workable,
 	) -> Self {
 		Document {
 			id,
 			extras,
-			current: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
-			initial: CursorDoc::new(ir, id, doc_id, Cow::Borrowed(val)),
+			current: CursorDoc::new(id, ir, Cow::Borrowed(val)),
+			initial: CursorDoc::new(id, ir, Cow::Borrowed(val)),
 		}
 	}
 
@@ -105,9 +98,8 @@ impl<'a> Document<'a> {
 	/// This allows for it to be crafted without needing statements to operate on it
 	#[doc(hidden)]
 	pub fn new_artificial(
-		ir: Option<IteratorRef>,
 		id: Option<&'a Thing>,
-		doc_id: Option<DocId>,
+		ir: Option<&'a IteratorRecord>,
 		val: Cow<'a, Value>,
 		initial: Cow<'a, Value>,
 		extras: Workable,
@@ -115,8 +107,8 @@ impl<'a> Document<'a> {
 		Document {
 			id,
 			extras,
-			current: CursorDoc::new(ir, id, doc_id, val),
-			initial: CursorDoc::new(ir, id, doc_id, initial),
+			current: CursorDoc::new(id, ir, val),
+			initial: CursorDoc::new(id, ir, initial),
 		}
 	}
 

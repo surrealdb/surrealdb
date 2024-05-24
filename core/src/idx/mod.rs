@@ -1,6 +1,6 @@
 pub mod docids;
 pub(crate) mod ft;
-pub(crate) mod planner;
+pub mod planner;
 pub mod trees;
 
 use crate::dbs::Options;

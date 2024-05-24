@@ -9,8 +9,7 @@ use crate::dbs::Statement;
 use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::idx::docids::DocId;
-use crate::idx::planner::executor::IteratorRef;
+use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::IterationStage;
 use crate::sql::edges::Edges;
 use crate::sql::range::Range;
@@ -34,9 +33,8 @@ pub(crate) enum Iterable {
 }
 
 pub(crate) struct Processed {
-	pub(crate) ir: Option<IteratorRef>,
 	pub(crate) rid: Option<Thing>,
-	pub(crate) doc_id: Option<DocId>,
+	pub(crate) ir: Option<IteratorRecord>,
 	pub(crate) val: Operable,
 }
 

@@ -149,7 +149,7 @@ impl fmt::Display for Operator {
 				}
 			}
 			Self::Ann(k, ef) => {
-				write!(f, "<{k},{ef}>")
+				write!(f, "<|{k},{ef}|>")
 			}
 		}
 	}
