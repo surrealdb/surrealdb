@@ -18,8 +18,8 @@ mod api_integration {
 	use surrealdb::opt::auth::Database;
 	use surrealdb::opt::auth::Jwt;
 	use surrealdb::opt::auth::Namespace;
+	use surrealdb::opt::auth::Record as RecordAccess;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::auth::Scope;
 	use surrealdb::opt::Config;
 	use surrealdb::opt::PatchOp;
 	use surrealdb::opt::Resource;

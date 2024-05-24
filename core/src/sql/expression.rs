@@ -190,7 +190,9 @@ impl Expression {
 			Operator::Matches(_) => {
 				fnc::operate::matches(stk, ctx, opt, txn, doc, self, l, r).await
 			}
-			Operator::Knn(_, _) => fnc::operate::knn(stk, ctx, opt, txn, doc, self).await,
+			Operator::Knn(_, _) | Operator::Ann(_, _) => {
+				fnc::operate::knn(stk, ctx, opt, txn, doc, self).await
+			}
 			_ => unreachable!(),
 		}
 	}

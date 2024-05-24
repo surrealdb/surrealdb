@@ -24,6 +24,7 @@ pub(crate) enum ThingIterator {
 	UniqueJoin(Box<UniqueJoinThingIterator>),
 	Matches(MatchesThingIterator),
 	Knn(DocIdsIterator),
+	Things(ThingsIterator),
 }
 
 impl ThingIterator {
@@ -44,6 +45,7 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(tx, size, collector).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(tx, size, collector)).await,
+			Self::Things(i) => Ok(i.next_batch(size, collector)),
 		}
 	}
 }
@@ -685,5 +687,29 @@ impl DocIdsIterator {
 			}
 		}
 		Ok(count as usize)
+	}
+}
+
+pub(crate) struct ThingsIterator {
+	res: VecDeque<Thing>,
+}
+
+impl ThingsIterator {
+	pub(super) fn new(res: VecDeque<Thing>) -> Self {
+		Self {
+			res,
+		}
+	}
+	fn next_batch<T: ThingCollector>(&mut self, limit: u32, collector: &mut T) -> usize {
+		let mut count = 0;
+		while limit > count {
+			if let Some(thg) = self.res.pop_front() {
+				collector.add(thg, None);
+				count += 1;
+			} else {
+				break;
+			}
+		}
+		count as usize
 	}
 }

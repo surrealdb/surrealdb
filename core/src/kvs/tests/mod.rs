@@ -34,7 +34,6 @@ type ClockType = Arc<SizedClock>;
 #[cfg(feature = "kv-mem")]
 mod mem {
 
-	use crate::fflags::FFLAGS;
 	use crate::kvs::tests::{ClockType, Kvs};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType;

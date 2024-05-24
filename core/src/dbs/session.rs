@@ -23,12 +23,12 @@ pub struct Session {
 	pub ns: Option<String>,
 	/// The currently selected database
 	pub db: Option<String>,
-	/// The currently selected authentication scope
-	pub sc: Option<String>,
-	/// The current scope authentication token
+	/// The current access method
+	pub ac: Option<String>,
+	/// The current authentication token
 	pub tk: Option<Value>,
-	/// The current scope authentication data
-	pub sd: Option<Value>,
+	/// The current record authentication data
+	pub rd: Option<Value>,
 	/// The current expiration time of the session
 	pub exp: Option<i64>,
 }
@@ -46,9 +46,9 @@ impl Session {
 		self
 	}
 
-	/// Set the selected database for the session
-	pub fn with_sc(mut self, sc: &str) -> Session {
-		self.sc = Some(sc.to_owned());
+	/// Set the selected access method for the session
+	pub fn with_ac(mut self, ac: &str) -> Session {
+		self.ac = Some(ac.to_owned());
 		self
 	}
 
@@ -84,26 +84,26 @@ impl Session {
 
 	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
-		// Add scope auth data
-		let val: Value = self.sd.to_owned().into();
+		// Add access method data
+		let val: Value = self.ac.to_owned().into();
+		ctx.add_value("access", val);
+		// Add record access data
+		let val: Value = self.rd.to_owned().into();
 		ctx.add_value("auth", val);
-		// Add scope data
-		let val: Value = self.sc.to_owned().into();
-		ctx.add_value("scope", val);
 		// Add token data
 		let val: Value = self.tk.to_owned().into();
 		ctx.add_value("token", val);
 		// Add session value
 		let val: Value = Value::from(map! {
+			"ac".to_string() => self.ac.to_owned().into(),
+			"exp".to_string() => self.exp.to_owned().into(),
 			"db".to_string() => self.db.to_owned().into(),
 			"id".to_string() => self.id.to_owned().into(),
 			"ip".to_string() => self.ip.to_owned().into(),
 			"ns".to_string() => self.ns.to_owned().into(),
 			"or".to_string() => self.or.to_owned().into(),
-			"sc".to_string() => self.sc.to_owned().into(),
-			"sd".to_string() => self.sd.to_owned().into(),
+			"rd".to_string() => self.rd.to_owned().into(),
 			"tk".to_string() => self.tk.to_owned().into(),
-			"exp".to_string() => self.exp.to_owned().into(),
 		});
 		ctx.add_value("session", val);
 		// Output context
@@ -133,19 +133,19 @@ impl Session {
 		sess
 	}
 
-	/// Create a scoped session for a given NS and DB
-	pub fn for_scope(ns: &str, db: &str, sc: &str, rid: Value) -> Session {
+	/// Create a record user session for a given NS and DB
+	pub fn for_record(ns: &str, db: &str, ac: &str, rid: Value) -> Session {
 		Session {
-			au: Arc::new(Auth::for_sc(rid.to_string(), ns, db, sc)),
+			ac: Some(ac.to_owned()),
+			au: Arc::new(Auth::for_record(rid.to_string(), ns, db, ac)),
 			rt: false,
 			ip: None,
 			or: None,
 			id: None,
 			ns: Some(ns.to_owned()),
 			db: Some(db.to_owned()),
-			sc: Some(sc.to_owned()),
 			tk: None,
-			sd: Some(rid),
+			rd: Some(rid),
 			exp: None,
 		}
 	}

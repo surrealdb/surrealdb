@@ -1,6 +1,5 @@
 use once_cell::sync::Lazy;
-use quick_cache::sync::Cache;
-use quick_cache::GuardResult;
+use quick_cache::sync::{Cache, GuardResult};
 use revision::revisioned;
 use serde::{
 	de::{self, Visitor},

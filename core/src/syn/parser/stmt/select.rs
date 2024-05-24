@@ -58,6 +58,7 @@ impl Parser<'_> {
 		let version = self.try_parse_version()?;
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
+		let tempfiles = self.eat(t!("TEMPFILES"));
 		let explain = self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL"))));
 
 		Ok(SelectStatement {
@@ -76,6 +77,7 @@ impl Parser<'_> {
 			version,
 			timeout,
 			parallel,
+			tempfiles,
 			explain,
 		})
 	}

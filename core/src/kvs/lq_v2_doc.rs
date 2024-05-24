@@ -60,6 +60,17 @@ pub(in crate::kvs) fn construct_document(
 			// TODO(SUR-328): reverse diff and apply to doc to retrieve original version of doc
 			Ok(Some(doc))
 		}
+		TableMutation::DelWithOriginal(id, val) => {
+			let doc = Document::new_artificial(
+				None,
+				Some(id),
+				None,
+				Cow::Owned(Value::None),
+				Cow::Borrowed(val),
+				Workable::Normal,
+			);
+			Ok(Some(doc))
+		}
 	}
 }
 
@@ -152,6 +163,31 @@ mod test {
 	}
 
 	#[test]
+	fn test_construct_document_delete_with_original() {
+		let thing = Thing::from(("table", "id"));
+		let original = Value::Object(Object(map! {
+			"id".to_string() => Value::Thing(thing.clone()),
+			"some_key".to_string() => Value::Strand(Strand::from("some_value")),
+		}));
+		let tb_mutation = TableMutation::DelWithOriginal(thing.clone(), original);
+		let doc = construct_document(&tb_mutation).unwrap();
+		let doc = doc.unwrap();
+		// The previous and current doc values are "None", so technically this is a new doc as per
+		// current == None
+		assert!(!doc.is_new(), "{:?}", doc);
+		assert!(doc.is_delete(), "{:?}", doc);
+		assert!(doc.current_doc().is_none());
+		assert!(doc.initial_doc().is_some());
+		match doc.initial_doc() {
+			Value::Object(o) => {
+				assert!(o.contains_key("id"));
+				assert_eq!(o.get("id").unwrap(), &Value::Thing(thing));
+			}
+			_ => panic!("Initial doc should be an object"),
+		}
+	}
+
+	#[test]
 	fn test_construct_document_none_for_schema() {
 		let tb_mutation = TableMutation::Def(DefineTableStatement::default());
 		let doc = construct_document(&tb_mutation).unwrap();
@@ -178,7 +214,7 @@ mod test_check_lqs_and_send_notifications {
 	use crate::iam::{Auth, Role};
 	use crate::kvs::lq_v2_doc::construct_document;
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::paths::{OBJ_PATH_AUTH, OBJ_PATH_SCOPE, OBJ_PATH_TOKEN};
+	use crate::sql::paths::{OBJ_PATH_ACCESS, OBJ_PATH_AUTH, OBJ_PATH_TOKEN};
 	use crate::sql::statements::{CreateStatement, DeleteStatement, LiveStatement};
 	use crate::sql::{Fields, Object, Strand, Table, Thing, Uuid, Value, Values};
 
@@ -189,7 +225,6 @@ mod test_check_lqs_and_send_notifications {
 		ns: String,
 		db: String,
 		tb: String,
-		rid: Value,
 	}
 
 	async fn setup_test_suite_init() -> TestSuite {
@@ -222,7 +257,6 @@ mod test_check_lqs_and_send_notifications {
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),
-			rid: Value::Thing(Thing::from(("user", "test"))),
 		}
 	}
 
@@ -345,8 +379,8 @@ mod test_check_lqs_and_send_notifications {
 	fn a_live_query_statement() -> LiveStatement {
 		let mut stm = LiveStatement::new(Fields::all());
 		let mut session: BTreeMap<String, Value> = BTreeMap::new();
+		session.insert(OBJ_PATH_ACCESS.to_string(), Value::Strand(Strand::from("access")));
 		session.insert(OBJ_PATH_AUTH.to_string(), Value::Strand(Strand::from("auth")));
-		session.insert(OBJ_PATH_SCOPE.to_string(), Value::Strand(Strand::from("scope")));
 		session.insert(OBJ_PATH_TOKEN.to_string(), Value::Strand(Strand::from("token")));
 		let session = Value::Object(Object::from(session));
 		stm.session = Some(session);

@@ -12,6 +12,8 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
+use rand::prelude::SliceRandom;
+
 pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
 	match value {
 		Value::Array(value) => {
@@ -328,6 +330,12 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
 
 pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
 	array.reverse();
+	Ok(array.into())
+}
+
+pub fn shuffle((mut array,): (Array,)) -> Result<Value, Error> {
+	let mut rng = rand::thread_rng();
+	array.0.shuffle(&mut rng);
 	Ok(array.into())
 }
 

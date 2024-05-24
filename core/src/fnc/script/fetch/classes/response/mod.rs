@@ -308,7 +308,7 @@ mod test {
 	#[tokio::test]
 	async fn basic_response_use() {
 		create_test_context!(ctx => {
-			ctx.eval::<Promise<()>,_>(r#"
+			ctx.eval::<Promise,_>(r#"
 				(async () => {
 					let resp = new Response();
 					assert(resp.bodyUsed);
@@ -369,7 +369,7 @@ mod test {
 
 
 				})()
-			"#).catch(&ctx).unwrap().await.catch(&ctx).unwrap();
+			"#).catch(&ctx).unwrap().into_future::<()>().await.catch(&ctx).unwrap();
 		})
 		.await;
 	}

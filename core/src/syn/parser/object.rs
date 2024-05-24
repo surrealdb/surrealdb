@@ -653,7 +653,8 @@ impl Parser<'_> {
 			TokenKind::Keyword(_)
 			| TokenKind::Language(_)
 			| TokenKind::Algorithm(_)
-			| TokenKind::Distance(_) => {
+			| TokenKind::Distance(_)
+			| TokenKind::VectorType(_) => {
 				self.pop_peek();
 				let str = self.lexer.reader.span(token.span);
 				// Lexer should ensure that the token is valid utf-8

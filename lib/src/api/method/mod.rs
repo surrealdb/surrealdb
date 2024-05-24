@@ -393,7 +393,7 @@ where
 		}
 	}
 
-	/// Signs up a user to a specific authentication scope
+	/// Signs up a user with a specific record access method
 	///
 	/// # Examples
 	///
@@ -401,7 +401,7 @@ where
 	/// use serde::Serialize;
 	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
-	/// use surrealdb::opt::auth::Scope;
+	/// use surrealdb::opt::auth::Record;
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams {
@@ -423,19 +423,19 @@ where
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
-	/// // Define the scope
+	/// // Define the user record access
 	/// let sql = r#"
-	///     DEFINE SCOPE user_scope SESSION 24h
+	///     DEFINE ACCESS user_access ON DATABASE TYPE RECORD DURATION 24h
 	///     SIGNUP ( CREATE user SET email = $email, password = crypto::argon2::generate($password) )
 	///     SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password) )
 	/// "#;
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user up
-	/// db.signup(Scope {
+	/// db.signup(Record {
 	///     namespace: "namespace",
 	///     database: "database",
-	///     scope: "user_scope",
+	///     access: "user_access",
 	///     params: AuthParams {
 	///         email: "john.doe@example.com".into(),
 	///         password: "password123".into(),
@@ -453,7 +453,7 @@ where
 		}
 	}
 
-	/// Signs this connection in to a specific authentication scope
+	/// Signs this connection in to a specific authentication level
 	///
 	/// # Examples
 	///
@@ -530,12 +530,12 @@ where
 	/// # }
 	/// ```
 	///
-	/// Scope signin
+	/// Record signin
 	///
 	/// ```no_run
 	/// use serde::Serialize;
 	/// use surrealdb::opt::auth::Root;
-	/// use surrealdb::opt::auth::Scope;
+	/// use surrealdb::opt::auth::Record;
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams {
@@ -551,10 +551,10 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Sign a user in
-	/// db.signin(Scope {
+	/// db.signin(Record {
 	///     namespace: "namespace",
 	///     database: "database",
-	///     scope: "user_scope",
+	///     access: "user_access",
 	///     params: AuthParams {
 	///         email: "john.doe@example.com".into(),
 	///         password: "password123".into(),

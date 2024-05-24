@@ -191,6 +191,16 @@ pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Err
 	start_server(StartServerArguments::default()).await
 }
 
+pub async fn start_server_with_temporary_directory(
+	path: &str,
+) -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		temporary_directory: Some(path.to_string()),
+		..Default::default()
+	})
+	.await
+}
+
 pub async fn start_server(
 	StartServerArguments {
 		path,
@@ -220,8 +230,8 @@ pub async fn start_server(
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}
 
-	if auth {
-		extra_args.push_str(" --auth");
+	if !auth {
+		extra_args.push_str(" --unauthenticated");
 	}
 
 	if enable_auth_level {
