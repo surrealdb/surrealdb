@@ -197,8 +197,11 @@ pub fn with_enough_stack(
 
 #[allow(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
-	for _ in 0..skip {
-		let _ = res.remove(0).result?;
+	for i in 0..skip {
+		let r = res.remove(0).result;
+		let _ = r.is_err_and(|e| {
+			panic!("Statement #{i} fails with: {e}");
+		});
 	}
 	Ok(())
 }
