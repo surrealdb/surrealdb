@@ -35,7 +35,7 @@ use http::header;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, DB_LEGACY, ID, ID_LEGACY, NS, NS_LEGACY};
+use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
