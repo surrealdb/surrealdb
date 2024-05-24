@@ -22,8 +22,8 @@ mod http_integration {
 		let mut headers = reqwest::header::HeaderMap::new();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -219,8 +219,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -305,8 +305,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -359,8 +359,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -431,8 +431,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -467,8 +467,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -691,8 +691,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -753,8 +753,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 
 		let client = reqwest::Client::builder()
@@ -867,8 +867,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		headers.insert(header::ACCEPT_ENCODING, "gzip".parse()?);
 
@@ -900,8 +900,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -976,8 +976,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1064,8 +1064,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1129,8 +1129,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1198,8 +1198,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1267,8 +1267,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1319,8 +1319,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1358,8 +1358,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1455,8 +1455,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1531,8 +1531,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1608,8 +1608,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
