@@ -1,6 +1,6 @@
 [package]
 name = "sdk_test_remote"
-version = "1.5.0"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]
