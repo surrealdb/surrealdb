@@ -73,6 +73,27 @@ pub struct MTreeParams {
 }
 
 impl MTreeParams {
+	pub fn new(
+		dimension: u16,
+		distance: Distance,
+		vector_type: VectorType,
+		capacity: u16,
+		doc_ids_order: u32,
+		doc_ids_cache: u32,
+		mtree_cache: u32,
+	) -> Self {
+		Self {
+			dimension,
+			_distance: Default::default(),
+			distance,
+			vector_type,
+			capacity,
+			doc_ids_order,
+			doc_ids_cache,
+			mtree_cache,
+		}
+	}
+
 	fn convert_old_distance(
 		&mut self,
 		_revision: u16,

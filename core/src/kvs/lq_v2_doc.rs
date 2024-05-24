@@ -16,7 +16,6 @@ pub(in crate::kvs) fn construct_document(
 	match mutation {
 		TableMutation::Set(id, current_value) => {
 			let doc = Document::new_artificial(
-				None,
 				Some(id),
 				None,
 				Cow::Borrowed(current_value),
@@ -31,7 +30,6 @@ pub(in crate::kvs) fn construct_document(
 					"id" => Value::Thing(id.clone()),
 				}));
 			let doc = Document::new_artificial(
-				None,
 				Some(id),
 				None,
 				Cow::Owned(Value::None),
@@ -49,7 +47,6 @@ pub(in crate::kvs) fn construct_document(
 				operations.iter().map(|op| Value::Object(Object::from(op.clone()))).collect(),
 			)))?;
 			let doc = Document::new_artificial(
-				None,
 				Some(id),
 				None,
 				Cow::Borrowed(current_value),
@@ -62,7 +59,6 @@ pub(in crate::kvs) fn construct_document(
 		}
 		TableMutation::DelWithOriginal(id, val) => {
 			let doc = Document::new_artificial(
-				None,
 				Some(id),
 				None,
 				Cow::Owned(Value::None),

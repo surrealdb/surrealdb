@@ -175,7 +175,7 @@ impl Ord for FloatKey {
 /// When identifiers are added or removed, the method returned the most appropriate
 /// variant (if required).
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum Ids64 {
+pub(in crate::idx) enum Ids64 {
 	#[allow(dead_code)] // Will be used with HNSW
 	Empty,
 	One(u64),
@@ -354,7 +354,7 @@ impl Ids64 {
 		}
 	}
 
-	fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
+	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
 		match &self {
 			Self::Empty => Box::new(EmptyIterator {}),
 			Self::One(d) => Box::new(OneDocIterator(Some(*d))),
@@ -531,16 +531,17 @@ impl KnnResultBuilder {
 		}
 	}
 	pub(super) fn check_add(&self, dist: f64) -> bool {
-		if self.docs.len() < self.knn {
-			true
-		} else if let Some(pr) = self.priority_list.keys().last() {
-			dist <= pr.0
-		} else {
-			true
+		if self.docs.len() >= self.knn {
+			if let Some(pr) = self.priority_list.keys().last() {
+				if dist > pr.0 {
+					return false;
+				}
+			}
 		}
+		true
 	}
 
-	pub(super) fn add(&mut self, dist: f64, docs: &Ids64) {
+	pub(super) fn add(&mut self, dist: f64, docs: &Ids64) -> Ids64 {
 		let pr = FloatKey(dist);
 		docs.append_to(&mut self.docs);
 		match self.priority_list.entry(pr) {
@@ -562,10 +563,12 @@ impl KnnResultBuilder {
 				if docs_len - d.len() >= self.knn {
 					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
 						evicted_docs.remove_to(&mut self.docs);
+						return evicted_docs;
 					}
 				}
 			}
 		}
+		Ids64::Empty
 	}
 
 	pub(super) fn build(
@@ -614,7 +617,7 @@ pub(super) mod tests {
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::{Array, Number};
+	use crate::sql::{Array, Number, Value};
 	use crate::syn::Parse;
 	use flate2::read::GzDecoder;
 	#[cfg(debug_assertions)]
@@ -683,7 +686,7 @@ pub(super) mod tests {
 			}
 			let line = line_result?;
 			let array = Array::parse(&line);
-			let vec = Vector::try_from_array(t, &array)?.into();
+			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
 			res.push((i as DocId, vec));
 		}
 		Ok(res)
@@ -699,7 +702,7 @@ pub(super) mod tests {
 		for _ in 0..dim {
 			vec.push(gen.generate(rng));
 		}
-		let vec = Vector::try_from_array(t, &Array::from(vec)).unwrap();
+		let vec = Vector::try_from_vector(t, &vec).unwrap();
 		if vec.is_null() {
 			// Some similarities (cosine) is undefined for null vector.
 			new_random_vec(rng, t, dim, gen)
