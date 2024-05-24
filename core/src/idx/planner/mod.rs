@@ -123,13 +123,13 @@ impl<'a> QueryPlanner<'a> {
 	fn add(
 		&mut self,
 		tb: Table,
-		ir: Option<IteratorRef>,
+		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 	) {
 		self.executors.insert(tb.0.clone(), exe.into());
-		if let Some(ir) = ir {
-			it.ingest(Iterable::Index(tb, ir));
+		if let Some(irf) = irf {
+			it.ingest(Iterable::Index(tb, irf));
 		}
 	}
 	pub(crate) fn has_executors(&self) -> bool {
