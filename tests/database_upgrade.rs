@@ -236,7 +236,7 @@ mod database_upgrade {
 			.await
 			.unwrap_or_else(|| {
 				docker.logs();
-				panic!("No connected client")
+				panic!("No connected remote")
 			});
 		(file_path, docker, client)
 	}

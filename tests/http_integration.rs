@@ -18,7 +18,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
 		let url = &format!("http://{addr}/sql");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
@@ -215,7 +215,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
@@ -506,7 +506,7 @@ mod http_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -583,7 +583,7 @@ mod http_integration {
 
 	#[test(tokio::test)]
 	async fn client_ip_extractor() -> Result<(), Box<dyn std::error::Error>> {
-		// TODO: test the client IP extractor
+		// TODO: test the remote IP extractor
 		Ok(())
 	}
 
@@ -592,7 +592,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/export");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -646,7 +646,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/import");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -718,7 +718,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/rpc");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -754,7 +754,7 @@ mod http_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -979,7 +979,7 @@ mod http_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -1150,7 +1150,7 @@ mod http_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", ns.parse()?);
 		headers.insert("DB", db.parse()?);
@@ -1212,7 +1212,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1326,7 +1326,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1359,7 +1359,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sync");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1435,7 +1435,7 @@ mod http_integration {
 		let num_records = 50;
 		let url = &format!("http://{addr}/key/{table_name}");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1523,7 +1523,7 @@ mod http_integration {
 	async fn key_endpoint_create_all() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1588,7 +1588,7 @@ mod http_integration {
 		let num_records = 10;
 		let url = &format!("http://{addr}/key/{table_name}");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1657,7 +1657,7 @@ mod http_integration {
 		let num_records = 10;
 		let url = &format!("http://{addr}/key/{table_name}");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1726,7 +1726,7 @@ mod http_integration {
 		let num_records = 10;
 		let url = &format!("http://{addr}/key/{table_name}");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1778,7 +1778,7 @@ mod http_integration {
 		let table_name = "table";
 		let url = &format!("http://{addr}/key/{table_name}/1");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1817,7 +1817,7 @@ mod http_integration {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let table_name = "table";
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1914,7 +1914,7 @@ mod http_integration {
 		let table_name = "table";
 		let url = &format!("http://{addr}/key/{table_name}/1");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -1990,7 +1990,7 @@ mod http_integration {
 		let table_name = "table";
 		let url = &format!("http://{addr}/key/{table_name}/1");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);
@@ -2067,7 +2067,7 @@ mod http_integration {
 		let table_name = "table";
 		let base_url = &format!("http://{addr}/key/{table_name}");
 
-		// Prepare HTTP client
+		// Prepare HTTP remote
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("NS", Ulid::new().to_string().parse()?);
 		headers.insert("DB", Ulid::new().to_string().parse()?);

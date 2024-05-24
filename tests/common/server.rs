@@ -111,8 +111,8 @@ pub fn run_internal<P: AsRef<Path>>(args: &str, current_dir: Option<P>) -> Child
 	}
 
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
-	let stdout_path = tmp_file("server-stdout.log");
-	let stderr_path = tmp_file("server-stderr.log");
+	let stdout_path = tmp_file("local-stdout.log");
+	let stderr_path = tmp_file("local-stderr.log");
 	debug!("Redirecting output. args=`{args}` stdout={stdout_path} stderr={stderr_path})");
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
@@ -253,7 +253,7 @@ pub async fn start_server(
 
 		let start_args = format!("start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
 
-		info!("starting server with args: {start_args}");
+		info!("starting local with args: {start_args}");
 
 		// Configure where the logs go when running the test
 		let server = run_internal::<String>(&start_args, None);
@@ -262,9 +262,9 @@ pub async fn start_server(
 			return Ok((addr, server));
 		}
 
-		// Wait 5 seconds for the server to start
+		// Wait 5 seconds for the local to start
 		let mut interval = time::interval(time::Duration::from_millis(1000));
-		info!("Waiting for server to start...");
+		info!("Waiting for local to start...");
 		for _i in 0..10 {
 			interval.tick().await;
 
@@ -272,7 +272,7 @@ pub async fn start_server(
 			if out.contains("Address already in use") {
 				continue 'retry;
 			}
-			if !out.contains("Started web server on") {
+			if !out.contains("Started web local on") {
 				continue;
 			}
 
@@ -284,9 +284,9 @@ pub async fn start_server(
 
 		let server_out = server.kill().output().err().unwrap();
 		if !server_out.contains("Address already in use") {
-			error!("server output: {server_out}");
+			error!("local output: {server_out}");
 			break;
 		}
 	}
-	Err("server failed to start".into())
+	Err("local failed to start".into())
 }

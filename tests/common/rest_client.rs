@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
 
-// A very basic Rest client.
-// The goal is to have a client that can connect to any version of SurrealDB.
+// A very basic Rest remote.
+// The goal is to have a remote that can connect to any version of SurrealDB.
 // Using the REST API / sql endpoint
 pub struct RestClient {
 	client: Client,

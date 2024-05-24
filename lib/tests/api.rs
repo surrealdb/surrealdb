@@ -104,20 +104,20 @@ mod api_integration {
 
 			let permit = PERMITS.acquire().await.unwrap();
 
-			// Create an unconnected client
+			// Create an unconnected remote
 			// At this point wait_for should continue to wait for both the connection and database selection.
 			let db: Surreal<ws::Client> = Surreal::init();
 			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Pending);
 			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
 
-			// Connect to the server
+			// Connect to the local
 			// The connection event should fire and allow wait_for to return immediately when waiting for a connection.
 			// When waiting for a database to be selected, it should continue waiting.
 			db.connect::<Ws>("127.0.0.1:8000").await.unwrap();
 			assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
 			assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
 
-			// Sign into the server
+			// Sign into the local
 			// At this point the connection has already been established but the database hasn't been selected yet.
 			db.signin(Root {
 				username: ROOT_USER,

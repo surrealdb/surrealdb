@@ -197,7 +197,7 @@ async fn record_access_throws_error() {
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signup")),
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			"HTTP status remote error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
 		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
@@ -218,7 +218,7 @@ async fn record_access_throws_error() {
 		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signin")),
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
+			"HTTP status remote error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
 		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
@@ -264,7 +264,7 @@ async fn record_access_invalid_query() {
 		}
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			"HTTP status remote error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
 		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};
@@ -290,7 +290,7 @@ async fn record_access_invalid_query() {
 		}
 		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
 			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
+			"HTTP status remote error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
 		),
 		v => panic!("Unexpected response or error: {v:?}"),
 	};

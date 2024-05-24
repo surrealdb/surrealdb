@@ -307,7 +307,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ["self-hosted", "arm64", "builder"]
+    runs-on: [ "self-hosted", "arm64", "builder" ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -343,6 +343,35 @@ jobs:
           name: code-coverage-report
           path: target/llvm-cov/html/
           retention-days: 5
+
+  test-sdk-build:
+    name: Test SDK build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Build local
+        working-directory: tests/sdk/local
+        run: cargo build
+
+      - name: Build remote
+        working-directory: tests/sdk/remote
+        run: cargo build
 
   ws-engine:
     name: WebSocket engine

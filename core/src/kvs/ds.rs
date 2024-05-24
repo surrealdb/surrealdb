@@ -1021,22 +1021,25 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
-		#![allow(unused_variables)]
+		#[allow(unused_variables)]
 		let write = match write {
 			Read => false,
 			Write => true,
 		};
 
+		#[allow(unused_variables)]
 		let lock = match lock {
 			Pessimistic => true,
 			Optimistic => false,
 		};
 
+		#[allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
@@ -1080,7 +1083,6 @@ impl Datastore {
 		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
 			channel::bounded(LQ_CHANNEL_SIZE);
 
-		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
