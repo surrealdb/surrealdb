@@ -179,14 +179,6 @@ pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Erro
 	.await
 }
 
-pub async fn start_server_with_auth_level() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		enable_auth_level: true,
-		..Default::default()
-	})
-	.await
-}
-
 pub async fn start_server_with_defaults() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments::default()).await
 }
@@ -232,10 +224,6 @@ pub async fn start_server(
 
 	if !auth {
 		extra_args.push_str(" --unauthenticated");
-	}
-
-	if enable_auth_level {
-		extra_args.push_str(" --auth-level-enabled");
 	}
 
 	if !tick_interval.is_zero() {

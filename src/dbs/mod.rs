@@ -27,14 +27,6 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_UNAUTHENTICATED", long = "unauthenticated")]
 	#[arg(default_value_t = false)]
 	unauthenticated: bool,
-	// TODO(gguillemas): Remove this argument once the legacy authentication is deprecated in v2.0.0
-	#[arg(
-		help = "Whether to enable explicit authentication level selection",
-		help_heading = "Authentication"
-	)]
-	#[arg(env = "SURREAL_AUTH_LEVEL_ENABLED", long = "auth-level-enabled")]
-	#[arg(default_value_t = false)]
-	auth_level_enabled: bool,
 	#[command(flatten)]
 	#[command(next_help_heading = "Capabilities")]
 	caps: DbsCapabilities,
@@ -216,8 +208,6 @@ pub async fn init(
 		query_timeout,
 		transaction_timeout,
 		unauthenticated,
-		// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-		auth_level_enabled,
 		caps,
 		temporary_directory,
 	}: StartCommandDbsOptions,
@@ -238,11 +228,6 @@ pub async fn init(
 	if unauthenticated {
 		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
 	}
-	// Log whether authentication levels are enabled
-	// TODO(gguillemas): Remove this condition once the legacy authentication is deprecated in v2.0.0
-	if auth_level_enabled {
-		info!("Authentication levels are enabled");
-	}
 
 	let caps = caps.into();
 	debug!("Server capabilities: {caps}");
@@ -256,7 +241,6 @@ pub async fn init(
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
-		.with_auth_level_enabled(auth_level_enabled)
 		.with_capabilities(caps);
 
 	let mut dbs = match temporary_directory {

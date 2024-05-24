@@ -11,7 +11,7 @@ use http::{request::Parts, StatusCode};
 use hyper::{Request, Response};
 use surrealdb::{
 	dbs::Session,
-	iam::verify::{basic, basic_legacy, token},
+	iam::verify::{basic, token},
 };
 use tower_http::auth::AsyncAuthorizeRequest;
 
@@ -143,19 +143,15 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 
 	// If Basic authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Basic>>>().await {
-		if kvs.is_auth_level_enabled() {
-			basic(
-				kvs,
-				&mut session,
-				au.username(),
-				au.password(),
-				auth_ns.as_deref(),
-				auth_db.as_deref(),
-			)
-			.await?;
-		} else {
-			basic_legacy(kvs, &mut session, au.username(), au.password()).await?;
-		}
+		basic(
+			kvs,
+			&mut session,
+			au.username(),
+			au.password(),
+			auth_ns.as_deref(),
+			auth_db.as_deref(),
+		)
+		.await?;
 	};
 
 	// If Token authentication data was supplied
