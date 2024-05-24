@@ -462,7 +462,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
@@ -471,7 +470,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
-			v.iterate(stk, ctx, opt, txn, stm, self, distinct.as_mut()).await?;
+			v.iterate(stk, ctx, opt, stm, self, distinct.as_mut()).await?;
 		}
 		// Everything processed ok
 		Ok(())
