@@ -263,11 +263,7 @@ impl<'a> Context<'a> {
 	}
 
 	pub(crate) fn tx_lock(&self) -> MutexLockFuture<'_, kvs::Transaction> {
-		if let Some(tx) = &self.transaction {
-			tx.lock()
-		} else {
-			unreachable!()
-		}
+		self.transaction.as_ref().map(|txn| txn.lock()).unwrap_or_else(|| unreachable!())
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
