@@ -102,11 +102,10 @@ impl LiveStatement {
 			// from the LIVE statement to the new one
 			..self.clone()
 		};
-		let txn = ctx.transaction()?;
 		let id = stm.id.0;
 		match FFLAGS.change_feed_live_queries.enabled() {
 			true => {
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				match stm.what.compute(stk, ctx, opt, doc).await? {
 					Value::Table(tb) => {
 						// We modify the table as it can be a $PARAM and the compute evaluates that
@@ -134,7 +133,7 @@ impl LiveStatement {
 			}
 			false => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Process the live query table
 				match stm.what.compute(stk, ctx, opt, doc).await? {
 					Value::Table(tb) => {

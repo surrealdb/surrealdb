@@ -19,7 +19,7 @@ impl<'a> Document<'a> {
 			// Should we run permissions checks?
 			if opt.check_perms(stm.into()) {
 				// Get the table
-				let tb = self.tb(opt, ctx.transaction()?).await?;
+				let tb = self.tb(ctx, opt).await?;
 				// Get the permission clause
 				let perms = if stm.is_delete() {
 					&tb.permissions.delete

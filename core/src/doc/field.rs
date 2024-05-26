@@ -25,7 +25,7 @@ impl<'a> Document<'a> {
 		// Get the user applied input
 		let inp = self.initial.doc.changed(self.current.doc.as_ref());
 		// Loop through all field statements
-		for fd in self.fd(opt, ctx.transaction()?).await?.iter() {
+		for fd in self.fd(ctx, opt).await?.iter() {
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.walk(&fd.name).into_iter() {
 				// Get the initial value

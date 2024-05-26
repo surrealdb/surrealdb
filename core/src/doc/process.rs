@@ -45,7 +45,7 @@ impl<'a> Document<'a> {
 				Err(Error::RetryWithId(v)) => {
 					// Fetch the data from the store
 					let key = crate::key::thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-					let val = ctx.transaction()?.clone().lock().await.get(key).await?;
+					let val = ctx.tx_lock().await.get(key).await?;
 					// Parse the data from the store
 					let val = match val {
 						Some(v) => Value::from(v),

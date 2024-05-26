@@ -42,7 +42,6 @@ impl<'a> Document<'a> {
 		if opt.import {
 			return Ok(());
 		}
-		let txn = ctx.transaction()?;
 		// Was this force targeted at a specific foreign table?
 		let targeted_force = matches!(opt.force, Force::Table(_));
 		// Collect foreign tables or skip
@@ -56,8 +55,8 @@ impl<'a> Document<'a> {
 			{
 				tb.clone()
 			}
-			Force::All => self.ft(opt, txn).await?,
-			_ if self.changed() => self.ft(opt, txn).await?,
+			Force::All => self.ft(ctx, opt).await?,
+			_ if self.changed() => self.ft(ctx, opt).await?,
 			_ => return Ok(()),
 		};
 		// Don't run permissions

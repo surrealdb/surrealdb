@@ -73,7 +73,7 @@ impl Param {
 					opt.valid_for_db()?;
 					let val = {
 						// Claim transaction
-						let mut run = ctx.transaction()?.lock().await;
+						let mut run = ctx.tx_lock().await;
 						// Get the param definition
 						run.get_and_cache_db_param(opt.ns(), opt.db(), v).await
 					};

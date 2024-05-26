@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::DocIds;
@@ -124,7 +124,6 @@ impl InnerQueryExecutor {
 
 		// Create all the instances of FtIndex
 		// Build the FtEntries and map them to Idioms and MatchRef
-		let txn = ctx.transaction()?;
 		for (exp, io) in im.options {
 			let ix_ref = io.ix_ref();
 			if let Some(idx_def) = im.definitions.get(ix_ref as usize) {
@@ -176,7 +175,7 @@ impl InnerQueryExecutor {
 								}
 								Entry::Vacant(e) => {
 									let ikb = IndexKeyBase::new(opt, idx_def);
-									let mut tx = txn.lock().await;
+									let mut tx = ctx.tx_lock().await;
 									let mt = MTreeIndex::new(
 										ctx.get_index_stores(),
 										&mut tx,
@@ -538,7 +537,7 @@ impl QueryExecutor {
 		if let Some(ft) = self.0.exp_entries.get(exp) {
 			if let Some(ix_def) = self.get_index_def(ft.0.index_option.ix_ref()) {
 				if self.0.table.eq(&ix_def.what.0) {
-					return self.matches_with_doc_id(ctx.transaction()?, thg, ft).await;
+					return self.matches_with_doc_id(ctx, thg, ft).await;
 				}
 			}
 			return self.matches_with_value(stk, ctx, opt, ft, l, r).await;
@@ -552,12 +551,12 @@ impl QueryExecutor {
 
 	async fn matches_with_doc_id(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
 		let doc_key: Key = thg.into();
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		let di = ft.0.doc_ids.read().await;
 		let doc_id = di.get_doc_id(&mut run, doc_key).await?;
 		drop(di);
@@ -634,7 +633,7 @@ impl QueryExecutor {
 		doc: &Value,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
-			let mut run = ctx.transaction()?.lock().await;
+			let mut run = ctx.tx_lock().await;
 			let res = ft
 				.highlight(
 					&mut run,
@@ -653,13 +652,13 @@ impl QueryExecutor {
 
 	pub(crate) async fn offsets(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		thg: &Thing,
 		match_ref: Value,
 		partial: bool,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			let res = ft.extract_offsets(&mut run, thg, &e.0.query_terms_list, partial).await;
 			drop(run);
 			return res;
@@ -676,7 +675,7 @@ impl QueryExecutor {
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
-				let mut run = ctx.transaction()?.lock().await;
+				let mut run = ctx.tx_lock().await;
 				let mut doc_id = if let Some(ir) = ir {
 					ir.doc_id()
 				} else {
@@ -727,7 +726,7 @@ impl FtEntry {
 		if let Matches(qs, _) = io.op() {
 			let (terms_list, terms_set) =
 				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
-			let mut tx = ctx.transaction()?.lock().await;
+			let mut tx = ctx.tx_lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
 			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
@@ -761,13 +760,12 @@ impl MtEntry {
 		k: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
-		let txn = ctx.transaction()?;
 		let cond_checker = if let Some(cond) = cond {
-			MTreeConditionChecker::new_cond(ctx, opt, txn, cond)
+			MTreeConditionChecker::new_cond(ctx, opt, cond)
 		} else {
-			MTreeConditionChecker::new(txn)
+			MTreeConditionChecker::new(ctx)
 		};
-		let res = mt.knn_search(stk, txn, o, k as usize, cond_checker).await?;
+		let res = mt.knn_search(stk, ctx, o, k as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})
@@ -791,9 +789,8 @@ impl HnswEntry {
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
-		let txn = ctx.transaction()?;
 		let cond_checker = if let Some(cond) = cond {
-			HnswConditionChecker::new_cond(ctx, opt, txn, cond)
+			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {
 			HnswConditionChecker::default()
 		};

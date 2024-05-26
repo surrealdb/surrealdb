@@ -15,13 +15,13 @@ impl<'a> Document<'a> {
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Get the table
-		let tb = self.tb(opt, ctx.transaction()?).await?;
+		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
 		if tb.full {
 			// Create a vector to store the keys
 			let mut keys: Vec<Idiom> = vec![];
 			// Loop through all field statements
-			for fd in self.fd(opt, ctx.transaction()?).await?.iter() {
+			for fd in self.fd(ctx, opt).await?.iter() {
 				// Is this a schemaless field?
 				match fd.flex {
 					false => {

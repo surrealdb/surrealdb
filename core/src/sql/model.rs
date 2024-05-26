@@ -68,7 +68,7 @@ impl Model {
 		// Get the model definition
 		let val = {
 			// Claim transaction
-			let mut run = ctx.transaction()?.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Get the function definition
 			let val =
 				run.get_and_cache_db_model(opt.ns(), opt.db(), &self.name, &self.version).await?;

@@ -47,7 +47,7 @@ impl DefineAccessStatement {
 		match &self.base {
 			Base::Ns => {
 				// Claim transaction
-				let mut run = ctx.transaction()?.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if access method already exists
@@ -72,7 +72,7 @@ impl DefineAccessStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = ctx.transaction()?.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if access method already exists

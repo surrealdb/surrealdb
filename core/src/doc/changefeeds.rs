@@ -15,13 +15,10 @@ impl<'a> Document<'a> {
 		if !self.changed() {
 			return Ok(());
 		}
-		let txn = ctx.transaction()?;
 		//
-		let tb = self.tb(opt, txn).await?;
-		// Clone transaction
-		let run = txn.clone();
+		let tb = self.tb(ctx, opt).await?;
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Get the database and the table for the record
 		let db = run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
 		// Check if changefeeds are enabled

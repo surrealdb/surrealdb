@@ -17,13 +17,12 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		let txn = ctx.transaction()?;
 		// Check if the table is a view
-		if self.tb(opt, txn).await?.drop {
+		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Store the record edges

@@ -26,7 +26,7 @@ impl<'a> Document<'a> {
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
 		// Loop through all event statements
-		for ev in self.ev(opt, ctx.transaction()?).await?.iter() {
+		for ev in self.ev(ctx, opt).await?.iter() {
 			// Get the event action
 			let met = if stm.is_delete() {
 				Value::from("DELETE")

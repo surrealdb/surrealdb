@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		let tb = self.tb(opt, ctx.transaction()?).await?;
+		let tb = self.tb(ctx, opt).await?;
 
 		let rid = self.id.as_ref().unwrap();
 		match stm {

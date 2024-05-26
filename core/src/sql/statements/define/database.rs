@@ -34,7 +34,7 @@ impl DefineDatabaseStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Claim transaction
-		let mut run = ctx.transaction()?.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if database already exists

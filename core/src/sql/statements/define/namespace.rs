@@ -35,7 +35,7 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
 		// Claim transaction
-		let mut run = ctx.transaction()?.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if namespace already exists

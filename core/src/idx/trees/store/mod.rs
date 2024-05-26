@@ -3,7 +3,7 @@ pub(crate) mod hnsw;
 mod lru;
 pub(crate) mod tree;
 
-use crate::dbs;
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
@@ -69,12 +69,12 @@ where
 
 	pub(in crate::idx) async fn get_node_txn(
 		&self,
-		txn: &dbs::Transaction,
+		ctx: &Context<'_>,
 		node_id: NodeId,
 	) -> Result<Arc<StoredNode<N>>, Error> {
 		match self {
 			Self::Read(r) => {
-				let mut tx = txn.lock().await;
+				let mut tx = ctx.tx_lock().await;
 				let n = r.get_node(&mut tx, node_id).await;
 				drop(tx);
 				n

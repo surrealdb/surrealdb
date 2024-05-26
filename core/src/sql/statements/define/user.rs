@@ -90,7 +90,7 @@ impl DefineUserStatement {
 		match self.base {
 			Base::Root => {
 				// Claim transaction
-				let mut run = ctx.transaction()?.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
@@ -115,7 +115,7 @@ impl DefineUserStatement {
 			}
 			Base::Ns => {
 				// Claim transaction
-				let mut run = ctx.transaction()?.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
@@ -142,7 +142,7 @@ impl DefineUserStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = ctx.transaction()?.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists

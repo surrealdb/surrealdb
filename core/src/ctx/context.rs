@@ -8,8 +8,10 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
+use crate::kvs;
 use crate::sql::value::Value;
 use channel::Sender;
+use futures::lock::MutexLockFuture;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -255,13 +257,17 @@ impl<'a> Context<'a> {
 		self.transaction = Some(txn);
 	}
 
-	pub(crate) fn set_transaction(mut self, txn: Transaction) -> Self {
+	pub fn set_transaction(mut self, txn: Transaction) -> Self {
 		self.transaction = Some(txn);
 		self
 	}
 
-	pub(crate) fn transaction(&self) -> Result<&Transaction, Error> {
-		self.transaction.as_ref().ok_or(Error::Tx("There is no transaction".to_string()))
+	pub(crate) fn tx_lock(&self) -> MutexLockFuture<'_, kvs::Transaction> {
+		if let Some(tx) = &self.transaction {
+			tx.lock()
+		} else {
+			unreachable!()
+		}
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for

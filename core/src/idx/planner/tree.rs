@@ -198,7 +198,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
-		let mut tx = self.ctx.transaction()?.lock().await;
+		let mut tx = self.ctx.tx_lock().await;
 		self.lazy_load_schema_resolver(&mut tx, self.table).await?;
 
 		// Try to detect if it matches an index

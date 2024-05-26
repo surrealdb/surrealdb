@@ -72,7 +72,7 @@ impl Analyzer {
 		let mut list = Vec::with_capacity(tokens.list().len());
 		let mut unique_tokens = HashSet::new();
 		let mut set = HashSet::new();
-		let mut tx = ctx.transaction()?.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		let mut has_unknown_terms = false;
 		for token in tokens.list() {
 			// Tokens can contains duplicated, not need to evaluate them again
@@ -109,7 +109,7 @@ impl Analyzer {
 		self.analyze_value(stk, ctx, opt, content, FilteringStage::Indexing, &mut tv).await?;
 		let mut set = HashSet::new();
 		let mut has_unknown_terms = false;
-		let mut tx = ctx.transaction()?.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		for tokens in tv {
 			for token in tokens.list() {
 				if let Some(term_id) =
@@ -162,7 +162,7 @@ impl Analyzer {
 		}
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tf.len());
-		let mut tx = ctx.transaction()?.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		for (t, f) in tf {
 			tfid.push((terms.resolve_term_id(&mut tx, t).await?, f));
 		}
@@ -204,7 +204,7 @@ impl Analyzer {
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tfos.len());
 		let mut osid = Vec::with_capacity(tfos.len());
-		let mut tx = ctx.transaction()?.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		for (t, o) in tfos {
 			let id = terms.resolve_term_id(&mut tx, t).await?;
 			tfid.push((id, o.len() as TermFrequency));

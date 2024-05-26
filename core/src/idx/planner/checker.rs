@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Options, Transaction};
+use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
@@ -32,15 +32,13 @@ impl<'a> Default for HnswConditionChecker<'a> {
 
 impl<'a> HnswConditionChecker<'a> {
 	pub(in crate::idx) fn new_cond(
-		ctx: &'a Context<'a>,
+		ctx: &'a Context<'_>,
 		opt: &'a Options,
-		txn: &'a Transaction,
 		cond: Arc<Cond>,
 	) -> Self {
 		Self::HnswCondition(HnswCondChecker {
 			ctx,
 			opt,
-			txn,
 			cond,
 			cache: Default::default(),
 		})
@@ -83,28 +81,22 @@ impl<'a> HnswConditionChecker<'a> {
 }
 
 impl<'a> MTreeConditionChecker<'a> {
-	pub fn new_cond(
-		ctx: &'a Context<'_>,
-		opt: &'a Options,
-		txn: &'a Transaction,
-		cond: Arc<Cond>,
-	) -> Self {
+	pub fn new_cond(ctx: &'a Context<'_>, opt: &'a Options, cond: Arc<Cond>) -> Self {
 		if Cond(Value::Bool(true)).ne(cond.as_ref()) {
 			return Self::MTreeCondition(MTreeCondChecker {
 				ctx,
 				opt,
-				txn,
 				cond,
 				cache: Default::default(),
 			});
 		} else {
-			Self::new(txn)
+			Self::new(ctx)
 		}
 	}
 
-	pub fn new(txn: &'a Transaction) -> Self {
+	pub fn new(ctx: &'a Context<'a>) -> Self {
 		Self::MTree(MTreeChecker {
-			txn,
+			ctx,
 		})
 	}
 
@@ -139,7 +131,7 @@ impl<'a> MTreeConditionChecker<'a> {
 }
 
 pub struct MTreeChecker<'a> {
-	txn: &'a Transaction,
+	ctx: &'a Context<'a>,
 }
 
 impl<'a> MTreeChecker<'a> {
@@ -152,7 +144,7 @@ impl<'a> MTreeChecker<'a> {
 			return Ok(VecDeque::from([]));
 		}
 		let mut result = VecDeque::with_capacity(res.len());
-		let mut tx = self.txn.lock().await;
+		let mut tx = self.ctx.tx_lock().await;
 		for (doc_id, dist) in res {
 			if let Some(key) = doc_ids.get_doc_key(&mut tx, doc_id).await? {
 				result.push_back((key.into(), dist, None));
@@ -190,12 +182,11 @@ impl CheckerCacheEntry {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		rid: Option<Thing>,
 		cond: &Cond,
 	) -> Result<Self, Error> {
 		if let Some(rid) = rid {
-			let mut tx = txn.lock().await;
+			let mut tx = ctx.tx_lock().await;
 			let val = Iterable::fetch_thing(&mut tx, opt, &rid).await?;
 			drop(tx);
 			if !val.is_none_or_null() {
@@ -224,7 +215,6 @@ impl CheckerCacheEntry {
 pub struct MTreeCondChecker<'a> {
 	ctx: &'a Context<'a>,
 	opt: &'a Options,
-	txn: &'a Transaction,
 	cond: Arc<Cond>,
 	cache: HashMap<DocId, CheckerCacheEntry>,
 }
@@ -239,18 +229,12 @@ impl<'a> MTreeCondChecker<'a> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
-				let mut tx = self.txn.lock().await;
+				let mut tx = self.ctx.tx_lock().await;
 				let rid = doc_ids.get_doc_key(&mut tx, doc_id).await?.map(|k| k.into());
 				drop(tx);
-				let ent = CheckerCacheEntry::build(
-					stk,
-					self.ctx,
-					self.opt,
-					self.txn,
-					rid,
-					self.cond.as_ref(),
-				)
-				.await?;
+				let ent =
+					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
+						.await?;
 				let truthy = ent.truthy;
 				e.insert(ent);
 				Ok(truthy)
@@ -297,7 +281,6 @@ impl<'a> HnswChecker {
 pub struct HnswCondChecker<'a> {
 	ctx: &'a Context<'a>,
 	opt: &'a Options,
-	txn: &'a Transaction,
 	cond: Arc<Cond>,
 	cache: HashMap<DocId, CheckerCacheEntry>,
 }
@@ -319,15 +302,9 @@ impl<'a> HnswCondChecker<'a> {
 				Entry::Occupied(e) => e.get().truthy,
 				Entry::Vacant(e) => {
 					let rid: Option<Thing> = docs.get_thing(doc_id).cloned();
-					let ent = CheckerCacheEntry::build(
-						stk,
-						self.ctx,
-						self.opt,
-						self.txn,
-						rid,
-						self.cond.as_ref(),
-					)
-					.await?;
+					let ent =
+						CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
+							.await?;
 					let truthy = ent.truthy;
 					e.insert(ent);
 					truthy

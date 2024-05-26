@@ -39,9 +39,8 @@ impl<'a> Document<'a> {
 		}
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender {
-			let txn = ctx.transaction()?;
 			// Loop through all index statements
-			let lq_stms = self.lv(opt, txn).await?;
+			let lq_stms = self.lv(ctx, opt).await?;
 			let borrows = lq_stms.iter().collect::<Vec<_>>();
 			self.check_lqs_and_send_notifications(stk, opt, stm, borrows.as_slice(), chn).await?;
 		}
@@ -82,7 +81,7 @@ impl<'a> Document<'a> {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into()) {
 			// Get the table
-			let tb = self.tb(opt, ctx.transaction()?).await?;
+			let tb = self.tb(ctx, opt).await?;
 			// Process the table permissions
 			match &tb.permissions.select {
 				Permission::None => return Err(Error::Ignore),

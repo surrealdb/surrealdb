@@ -54,10 +54,8 @@ impl ShowStatement {
 	) -> Result<Value, Error> {
 		// Selected DB?
 		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
-		// Clone transaction
-		let txn = ctx.transaction()?.clone();
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Process the show query
 		let tb = self.table.as_deref();
 		let r = crate::cf::read(

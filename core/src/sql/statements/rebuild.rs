@@ -74,8 +74,7 @@ impl RebuildIndexStatement {
 
 			// Get the index definition
 			let ix = ctx
-				.transaction()?
-				.lock()
+				.tx_lock()
 				.await
 				.get_and_cache_tb_index(opt.ns(), opt.db(), self.what.as_str(), self.name.as_str())
 				.await?;

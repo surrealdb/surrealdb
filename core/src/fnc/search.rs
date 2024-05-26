@@ -13,13 +13,8 @@ pub async fn analyze(
 	(az, val): (Value, Value),
 ) -> Result<Value, Error> {
 	if let (Some(opt), Value::Strand(az), Value::Strand(val)) = (opt, az, val) {
-		let az: Analyzer = ctx
-			.transaction()?
-			.lock()
-			.await
-			.get_db_analyzer(opt.ns(), opt.db(), az.as_str())
-			.await?
-			.into();
+		let az: Analyzer =
+			ctx.tx_lock().await.get_db_analyzer(opt.ns(), opt.db(), az.as_str()).await?.into();
 		az.analyze(stk, ctx, opt, val.0).await
 	} else {
 		Ok(Value::None)
@@ -53,7 +48,7 @@ pub async fn offsets(
 ) -> Result<Value, Error> {
 	if let Some((exe, _, thg)) = get_execution_context(ctx, doc) {
 		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
-		return exe.offsets(ctx.transaction()?, thg, match_ref, partial).await;
+		return exe.offsets(ctx, thg, match_ref, partial).await;
 	}
 	Ok(Value::None)
 }

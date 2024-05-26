@@ -1,5 +1,5 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::err::Error;
 use crate::iam::Action;
@@ -144,13 +144,11 @@ impl<'a> Document<'a> {
 	/// Get the table for this document
 	pub async fn tb(
 		&self,
+		ctx: &Context<'a>,
 		opt: &Options,
-		txn: &Transaction,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		// Clone transaction
-		let run = txn.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the table definition
@@ -177,56 +175,56 @@ impl<'a> Document<'a> {
 	/// Get the foreign tables for this document
 	pub async fn ft(
 		&self,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definitions
-		txn.clone().lock().await.all_tb_views(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_views(opt.ns(), opt.db(), &id.tb).await
 	}
 	/// Get the events for this document
 	pub async fn ev(
 		&self,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the event definitions
-		txn.clone().lock().await.all_tb_events(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_events(opt.ns(), opt.db(), &id.tb).await
 	}
 	/// Get the fields for this document
 	pub async fn fd(
 		&self,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the field definitions
-		txn.clone().lock().await.all_tb_fields(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_fields(opt.ns(), opt.db(), &id.tb).await
 	}
 	/// Get the indexes for this document
 	pub async fn ix(
 		&self,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
-		txn.clone().lock().await.all_tb_indexes(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_indexes(opt.ns(), opt.db(), &id.tb).await
 	}
 	// Get the lives for this document
 	pub async fn lv(
 		&self,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definition
-		txn.clone().lock().await.all_tb_lives(opt.ns(), opt.db(), &id.tb).await
+		ctx.tx_lock().await.all_tb_lives(opt.ns(), opt.db(), &id.tb).await
 	}
 }

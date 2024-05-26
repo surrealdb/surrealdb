@@ -74,7 +74,7 @@ impl KillStatement {
 			}
 		};
 		// Claim transaction
-		let mut run = ctx.transaction()?.lock().await;
+		let mut run = ctx.tx_lock().await;
 		if FFLAGS.change_feed_live_queries.enabled() {
 			run.pre_commit_register_async_event(TrackedResult::KillQuery(KillEntry {
 				live_id: live_query_id,

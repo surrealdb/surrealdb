@@ -8,7 +8,7 @@ pub(super) mod termdocs;
 pub(crate) mod terms;
 
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
@@ -105,7 +105,7 @@ impl FtIndex {
 		p: &SearchParams,
 		tt: TransactionType,
 	) -> Result<Self, Error> {
-		let mut tx = ctx.transaction()?.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		let az = tx.get_db_analyzer(opt.ns(), opt.db(), az).await?;
 		let res =
 			Self::with_analyzer(ctx.get_index_stores(), &mut tx, az, index_key_base, p, tt).await;
@@ -194,7 +194,7 @@ impl FtIndex {
 		ctx: &Context<'_>,
 		rid: &Thing,
 	) -> Result<(), Error> {
-		let mut tx = ctx.transaction()?.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
 		let doc_id = doc_ids.remove_doc(&mut tx, rid.into()).await?;
@@ -247,9 +247,8 @@ impl FtIndex {
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<(), Error> {
-		let txn = ctx.transaction()?;
 		// Resolve the doc_id
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		let mut doc_ids = self.doc_ids.write().await;
 		let resolved = doc_ids.resolve_doc_id(&mut tx, rid.into()).await?;
 		drop(doc_ids);
@@ -273,7 +272,7 @@ impl FtIndex {
 		};
 
 		// Set the doc length
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		let mut dl = self.doc_lengths.write().await;
 		if resolved.was_existing() {
 			if let Some(old_doc_length) = dl.get_doc_length_mut(&mut tx, doc_id).await? {
@@ -473,9 +472,9 @@ impl FtIndex {
 		Ok(Value::None)
 	}
 
-	pub(crate) async fn statistics(&self, txn: &Transaction) -> Result<FtStatistics, Error> {
+	pub(crate) async fn statistics(&self, ctx: &Context<'_>) -> Result<FtStatistics, Error> {
 		// TODO do parallel execution
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		let res = FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(&mut run).await?,
 			terms: self.terms.read().await.statistics(&mut run).await?,
@@ -487,7 +486,7 @@ impl FtIndex {
 	}
 
 	pub(crate) async fn finish(&self, ctx: &Context<'_>) -> Result<(), Error> {
-		let mut run = ctx.transaction()?.lock().await;
+		let mut run = ctx.tx_lock().await;
 		self.doc_ids.write().await.finish(&mut run).await?;
 		self.doc_lengths.write().await.finish(&mut run).await?;
 		self.postings.write().await.finish(&mut run).await?;
@@ -538,7 +537,7 @@ impl HitsIterator {
 #[cfg(test)]
 mod tests {
 	use crate::ctx::Context;
-	use crate::dbs::{Options, Transaction};
+	use crate::dbs::Options;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::idx::IndexKeyBase;
@@ -554,12 +553,12 @@ mod tests {
 	use test_log::test;
 
 	async fn check_hits(
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		hits: Option<HitsIterator>,
 		scr: BM25Scorer,
 		e: Vec<(&Thing, Option<Score>)>,
 	) {
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		if let Some(mut hits) = hits {
 			let mut map = HashMap::new();
 			while let Some((k, d)) = hits.next(&mut tx).await.unwrap() {
@@ -585,7 +584,7 @@ mod tests {
 	) -> (Option<HitsIterator>, BM25Scorer) {
 		let (term_list, _) =
 			fti.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
-		let mut tx = ctx.transaction().unwrap().lock().await;
+		let mut tx = ctx.tx_lock().await;
 		let td = Arc::new(fti.get_terms_docs(&mut tx, &term_list).await.unwrap());
 		drop(tx);
 		let scr = fti.new_scorer(td.clone()).unwrap().unwrap();
@@ -631,7 +630,7 @@ mod tests {
 
 	pub(super) async fn finish(ctx: &Context<'_>, fti: FtIndex) {
 		fti.finish(ctx).await.unwrap();
-		let mut tx = ctx.transaction().unwrap().lock().await;
+		let mut tx = ctx.tx_lock().await;
 		tx.commit().await.unwrap();
 	}
 
@@ -683,9 +682,8 @@ mod tests {
 			.enter(|stk| async {
 				let (ctx, opt, fti) =
 					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
-				let txn = ctx.transaction().unwrap();
 				// Check the statistics
-				let statistics = fti.statistics(txn).await.unwrap();
+				let statistics = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 7);
 				assert_eq!(statistics.postings.keys_count, 8);
 				assert_eq!(statistics.doc_ids.keys_count, 3);
@@ -694,7 +692,7 @@ mod tests {
 				// Search & score
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "hello").await;
 				check_hits(
-					txn,
+					&ctx,
 					hits,
 					scr,
 					vec![(&doc1, Some(-0.4859746)), (&doc2, Some(-0.4859746))],
@@ -702,16 +700,16 @@ mod tests {
 				.await;
 
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "world").await;
-				check_hits(&txn, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
+				check_hits(&ctx, hits, scr, vec![(&doc1, Some(0.4859746))]).await;
 
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "yellow").await;
-				check_hits(&txn, hits, scr, vec![(&doc2, Some(0.4859746))]).await;
+				check_hits(&ctx, hits, scr, vec![(&doc2, Some(0.4859746))]).await;
 
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "foo").await;
-				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+				check_hits(&ctx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "bar").await;
-				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+				check_hits(&ctx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
 				let (hits, _) = search(stk, &ctx, &opt, &fti, "dummy").await;
 				assert!(hits.is_none());
@@ -731,11 +729,10 @@ mod tests {
 
 				let (ctx, opt, fti) =
 					tx_fti(&ds, TransactionType::Read, &az, btree_order, false).await;
-				let txn = ctx.transaction().unwrap();
 
 				// We can still find 'foo'
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "foo").await;
-				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+				check_hits(&ctx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 
 				// We can't anymore find 'bar'
 				let (hits, _) = search(stk, &ctx, &opt, &fti, "bar").await;
@@ -743,7 +740,7 @@ mod tests {
 
 				// We can now find 'nobar'
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "nobar").await;
-				check_hits(&txn, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
+				check_hits(&ctx, hits, scr, vec![(&doc3, Some(0.56902087))]).await;
 			})
 			.finish()
 			.await;
@@ -839,9 +836,8 @@ mod tests {
 				.enter(|stk| async {
 					let (ctx, opt, fti) =
 						tx_fti(&ds, TransactionType::Read, &az, btree_order, hl).await;
-					let txn = ctx.transaction().unwrap();
 
-					let statistics = fti.statistics(&txn).await.unwrap();
+					let statistics = fti.statistics(&ctx).await.unwrap();
 					assert_eq!(statistics.terms.keys_count, 17);
 					assert_eq!(statistics.postings.keys_count, 28);
 					assert_eq!(statistics.doc_ids.keys_count, 4);
@@ -849,7 +845,7 @@ mod tests {
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "the").await;
 					check_hits(
-						&txn,
+						&ctx,
 						hits,
 						scr,
 						vec![
@@ -863,7 +859,7 @@ mod tests {
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "dog").await;
 					check_hits(
-						&txn,
+						&ctx,
 						hits,
 						scr,
 						vec![
@@ -875,22 +871,22 @@ mod tests {
 					.await;
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "fox").await;
-					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+					check_hits(&ctx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "over").await;
-					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+					check_hits(&ctx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "lazy").await;
-					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+					check_hits(&ctx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "jumped").await;
-					check_hits(&txn, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
+					check_hits(&ctx, hits, scr, vec![(&doc1, Some(0.0)), (&doc2, Some(0.0))]).await;
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "nothing").await;
-					check_hits(&txn, hits, scr, vec![(&doc3, Some(0.87105393))]).await;
+					check_hits(&ctx, hits, scr, vec![(&doc3, Some(0.87105393))]).await;
 
 					let (hits, scr) = search(stk, &ctx, &opt, &fti, "animals").await;
-					check_hits(&txn, hits, scr, vec![(&doc4, Some(0.92279965))]).await;
+					check_hits(&ctx, hits, scr, vec![(&doc4, Some(0.92279965))]).await;
 
 					let (hits, _) = search(stk, &ctx, &opt, &fti, "dummy").await;
 					assert!(hits.is_none());
@@ -978,7 +974,7 @@ mod tests {
 
 			{
 				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
-				let s = fti.statistics(&ctx.transaction().unwrap()).await.unwrap();
+				let s = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(s.terms.keys_count, 113);
 			}
 
@@ -990,8 +986,7 @@ mod tests {
 
 			{
 				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, &az, 5, false).await;
-				let txn = ctx.transaction().unwrap();
-				let s = fti.statistics(txn).await.unwrap();
+				let s = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(s.terms.keys_count, 0);
 			}
 		}

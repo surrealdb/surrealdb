@@ -25,10 +25,8 @@ impl<'a> Document<'a> {
 		if !self.changed() {
 			return Ok(());
 		}
-		// Clone transaction
-		let run = ctx.transaction()?.clone();
 		// Claim transaction
-		let mut run = run.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Get the record id
 		if let Some(rid) = self.id {
 			// Purge the record data

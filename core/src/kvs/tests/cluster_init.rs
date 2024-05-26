@@ -117,7 +117,7 @@ async fn expired_nodes_get_live_queries_archived() {
 			panic!("Not a uuid: {:?}", res);
 		}
 	}
-	ctx.transaction().unwrap().lock().await.commit().await.unwrap();
+	ctx.tx_lock().await.commit().await.unwrap();
 
 	// Set up second node at a later timestamp
 	let new_node = Uuid::parse_str("04da7d4c-0086-4358-8318-49f0bb168fa7").unwrap();
@@ -208,7 +208,7 @@ async fn single_live_queries_are_garbage_collected() {
 		.await
 		.map_err(|e| format!("Error computing live statement: {:?} {:?}", live_st, e))
 		.unwrap();
-	ctx.transaction().unwrap().lock().await.commit().await.unwrap();
+	ctx.tx_lock().await.commit().await.unwrap();
 
 	// Subject: Perform the action we are testing
 	trace!("Garbage collecting dead sessions");
@@ -284,8 +284,8 @@ async fn bootstrap_does_not_error_on_missing_live_queries() {
 
 	// Now we corrupt the live query entry by leaving the node entry in but removing the table entry
 	let key = crate::key::table::lq::new(namespace, database, table, live_query_to_corrupt);
-	ctx.transaction().unwrap().lock().await.del(key).await.unwrap();
-	ctx.transaction().unwrap().lock().await.commit().await.unwrap();
+	ctx.tx_lock().await.del(key).await.unwrap();
+	ctx.tx_lock().await.commit().await.unwrap();
 
 	// Subject: Perform the action we are testing
 	trace!("Bootstrapping");

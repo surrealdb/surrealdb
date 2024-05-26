@@ -38,9 +38,8 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
-				let txn = ctx.transaction()?;
-				let ix = txn
-					.lock()
+				let ix = ctx
+					.tx_lock()
 					.await
 					.get_and_cache_tb_index(opt.ns(), opt.db(), tb.as_str(), idx.as_str())
 					.await?;
@@ -52,10 +51,10 @@ impl AnalyzeStatement {
 						let ft =
 							FtIndex::new(ctx, opt, p.az.as_str(), ikb, p, TransactionType::Read)
 								.await?;
-						ft.statistics(txn).await?.into()
+						ft.statistics(ctx).await?.into()
 					}
 					Index::MTree(p) => {
-						let mut tx = txn.lock().await;
+						let mut tx = ctx.tx_lock().await;
 						let mt = MTreeIndex::new(
 							ctx.get_index_stores(),
 							&mut tx,

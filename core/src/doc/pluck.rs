@@ -78,7 +78,7 @@ impl<'a> Document<'a> {
 			// Should we run permissions checks?
 			if opt.check_perms(Action::View) {
 				// Loop through all field statements
-				for fd in self.fd(opt, ctx.transaction()?).await?.iter() {
+				for fd in self.fd(ctx, opt).await?.iter() {
 					// Loop over each field in document
 					for k in out.each(&fd.name).iter() {
 						// Process the field permissions

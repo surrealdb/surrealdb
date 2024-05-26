@@ -26,7 +26,7 @@ impl RemoveEventStatement {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 			// Claim transaction
-			let mut run = ctx.transaction()?.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
