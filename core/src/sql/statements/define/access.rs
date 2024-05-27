@@ -3,6 +3,7 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::access_type::{JwtAccessVerify, JwtAccessVerifyKey};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
@@ -31,6 +32,21 @@ impl DefineAccessStatement {
 	/// This value is used by default in every access method other than JWT
 	pub(crate) fn random_key() -> String {
 		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+	}
+
+	/// Returns a version of the statement where potential secrets are redacted
+	/// This function should be used when displaying the statement to datastore users
+	/// This function should NOT be used when displaying the statement for export purposes
+	pub fn redacted(&self) -> DefineAccessStatement {
+		let mut das = self.clone();
+		das.kind = match das.kind {
+			AccessType::Jwt(ac) => AccessType::Jwt(ac.redacted()),
+			AccessType::Record(mut ac) => {
+				ac.jwt = ac.jwt.redacted();
+				AccessType::Record(ac)
+			}
+		};
+		return das;
 	}
 }
 
