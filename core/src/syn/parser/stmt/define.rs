@@ -707,7 +707,7 @@ impl Parser<'_> {
 
 		loop {
 			match self.peek_kind() {
-				// COLUMS and FIELDS are the same tokenkind
+				// COLUMNS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
 					self.pop_peek();
 					res.cols = Idioms(vec![self.parse_local_idiom()?]);
@@ -852,16 +852,15 @@ impl Parser<'_> {
 							_ => break,
 						}
 					}
-					res.index = Index::MTree(crate::sql::index::MTreeParams {
+					res.index = Index::MTree(crate::sql::index::MTreeParams::new(
 						dimension,
-						_distance: Default::default(),
 						distance,
+						vector_type,
 						capacity,
 						doc_ids_order,
 						doc_ids_cache,
 						mtree_cache,
-						vector_type,
-					})
+					))
 				}
 				t!("HNSW") => {
 					self.pop_peek();
@@ -909,8 +908,7 @@ impl Parser<'_> {
 								self.pop_peek();
 								keep_pruned_connections = true;
 							}
-							t => {
-								println!("TOKEN: {t:?}");
+							_ => {
 								break;
 							}
 						}

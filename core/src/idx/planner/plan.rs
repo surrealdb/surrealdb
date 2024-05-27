@@ -3,7 +3,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{GroupRef, IdiomPosition, IndexRef, Node};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::with::With;
-use crate::sql::{Array, Expression, Idiom, Object};
+use crate::sql::{Array, Expression, Idiom, Number, Object};
 use crate::sql::{Operator, Value};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -166,7 +166,7 @@ pub(super) enum Plan {
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(super) struct IndexOption {
 	/// A reference o the index definition
-	ir: IndexRef,
+	ix_ref: IndexRef,
 	id: Idiom,
 	id_pos: IdiomPosition,
 	op: Arc<IndexOperator>,
@@ -180,14 +180,19 @@ pub(super) enum IndexOperator {
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Value),
 	Matches(String, Option<MatchRef>),
-	Knn(Array, u32),
-	Ann(Array, usize, usize),
+	Knn(Arc<Vec<Number>>, u32),
+	Ann(Arc<Vec<Number>>, u32, u32),
 }
 
 impl IndexOption {
-	pub(super) fn new(ir: IndexRef, id: Idiom, id_pos: IdiomPosition, op: IndexOperator) -> Self {
+	pub(super) fn new(
+		ix_ref: IndexRef,
+		id: Idiom,
+		id_pos: IdiomPosition,
+		op: IndexOperator,
+	) -> Self {
 		Self {
-			ir,
+			ix_ref,
 			id,
 			id_pos,
 			op: Arc::new(op),
@@ -199,7 +204,7 @@ impl IndexOption {
 	}
 
 	pub(super) fn ix_ref(&self) -> IndexRef {
-		self.ir
+		self.ix_ref
 	}
 
 	pub(super) fn op(&self) -> &IndexOperator {
@@ -225,7 +230,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self, ix_def: &[DefineIndexStatement]) -> Value {
 		let mut e = HashMap::new();
-		if let Some(ix) = ix_def.get(self.ir as usize) {
+		if let Some(ix) = ix_def.get(self.ix_ref as usize) {
 			e.insert("index", Value::from(ix.name.0.to_owned()));
 		}
 		match self.op() {
@@ -259,12 +264,16 @@ impl IndexOption {
 				e.insert("value", v.to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
-				e.insert("operator", Value::from(format!("<{}>", k)));
-				e.insert("value", Value::Array(a.clone()));
+				let op = Value::from(Operator::Knn(*k, None).to_string());
+				let val = Value::Array(Array::from(a.as_ref().clone()));
+				e.insert("operator", op);
+				e.insert("value", val);
 			}
-			IndexOperator::Ann(a, n, ef) => {
-				e.insert("operator", Value::from(format!("<{},{}>", n, ef)));
-				e.insert("value", Value::Array(a.clone()));
+			IndexOperator::Ann(a, k, ef) => {
+				let op = Value::from(Operator::Ann(*k, *ef).to_string());
+				let val = Value::Array(Array::from(a.as_ref().clone()));
+				e.insert("operator", op);
+				e.insert("value", val);
 			}
 		};
 		Value::from(e)

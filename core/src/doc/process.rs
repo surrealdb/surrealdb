@@ -27,7 +27,7 @@ impl<'a> Document<'a> {
 				Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
 			};
 			// Setup a new document
-			let mut doc = Document::new(pro.ir, pro.rid.as_ref(), pro.doc_id, &ins.0, ins.1);
+			let mut doc = Document::new(pro.rid.as_ref(), pro.ir.as_ref(), &ins.0, ins.1);
 			// Process the statement
 			let res = match stm {
 				Statement::Select(_) => doc.select(stk, ctx, opt, txn, stm).await,
@@ -53,9 +53,8 @@ impl<'a> Document<'a> {
 						None => Value::None,
 					};
 					pro = Processed {
-						ir: None,
-						doc_id: None,
 						rid: Some(v),
+						ir: None,
 						val: match doc.extras {
 							Workable::Normal => Operable::Value(val),
 							Workable::Insert(o) => Operable::Mergeable(val, o),
