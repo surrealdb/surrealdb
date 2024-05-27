@@ -11,7 +11,7 @@ use surrealdb::sql::Value;
 #[tokio::test]
 async fn insert_statement_object_single() -> Result<(), Error> {
 	let sql = "
-		INSERT INTO test {
+		INSERT INTO `test-table` {
 			id: 'tester',
 			test: true,
 			something: 'other',
@@ -23,7 +23,7 @@ async fn insert_statement_object_single() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, test: true, something: 'other' }]");
+	let val = Value::parse("[{ id: `test-table`:tester, test: true, something: 'other' }]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
