@@ -1468,11 +1468,8 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let accesses: Arc<[DefineAccessStatement]> = self.all_ns_accesses(ns).await?;
-		let mut redacted = vec![];
-		for statement in accesses.as_ref() {
-			redacted.push(statement.redacted());
-		}
+		let accesses = self.all_ns_accesses(ns).await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
 		Ok(Arc::from(redacted))
 	}
 
@@ -1547,11 +1544,8 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let accesses: Arc<[DefineAccessStatement]> = self.all_db_accesses(ns, db).await?;
-		let mut redacted = vec![];
-		for statement in accesses.as_ref() {
-			redacted.push(statement.redacted());
-		}
+		let accesses = self.all_db_accesses(ns, db).await?;
+		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
 		Ok(Arc::from(redacted))
 	}
 
