@@ -3,7 +3,6 @@ use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::access_type::{JwtAccessVerify, JwtAccessVerifyKey};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
@@ -46,7 +45,7 @@ impl DefineAccessStatement {
 				AccessType::Record(ac)
 			}
 		};
-		return das;
+		das
 	}
 }
 

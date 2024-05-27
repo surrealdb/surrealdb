@@ -80,7 +80,7 @@ impl JwtAccess {
 			}
 			None => None,
 		};
-		return jwt;
+		jwt
 	}
 }
 
