@@ -485,3 +485,149 @@ async fn permissions_checks_info_user_db() {
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
+
+#[tokio::test]
+async fn access_info_redacted() {
+	// Symmetric
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
+			INFO FOR NS
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h" }, databases: {  }, users: {  } }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
+	// Asymmetric
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private';
+			INFO FOR NS
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION 1h" }, databases: {  }, users: {  } }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
+	// Record
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON NS TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
+			INFO FOR NS
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h" }, databases: {  }, users: {  } }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
+}
+
+#[tokio::test]
+async fn access_info_redacted_structure() {
+	// Symmetric
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret';
+			INFO FOR NS STRUCTURE
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: [{ base: 'NAMESPACE', kind: { jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', duration: 1h, key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
+	// Asymmetric
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private';
+			INFO FOR NS STRUCTURE
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: [{ base: 'NAMESPACE', kind: { jwt: { alg: 'PS512', issuer: "{ alg: 'PS512', duration: 1h, key: '[REDACTED]' }", key: 'public' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
+	// Record
+	{
+		let sql = r#"
+			DEFINE ACCESS access ON NS TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret';
+			INFO FOR NS STRUCTURE
+		"#;
+		let dbs = new_ds().await.unwrap();
+		let ses = Session::owner().with_ns("ns");
+
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
+		assert_eq!(res.len(), 2);
+
+		let out = res.pop().unwrap().output();
+		assert!(out.is_ok(), "Unexpected error: {:?}", out);
+
+		let out_expected =
+			r#"{ accesses: [{ base: 'NAMESPACE', kind: { duration: 1h, jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', duration: 1h, key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'RECORD' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+		let out_str = out.unwrap().to_string();
+		assert_eq!(
+			out_str, out_expected,
+			"Output '{out_str}' doesn't match expected output '{out_expected}'",
+		);
+	}
+}

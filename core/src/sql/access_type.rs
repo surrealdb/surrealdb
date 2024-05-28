@@ -59,6 +59,31 @@ impl Default for JwtAccess {
 	}
 }
 
+impl JwtAccess {
+	pub(crate) fn redacted(&self) -> JwtAccess {
+		let mut jwt = self.clone();
+		jwt.verify = match jwt.verify {
+			JwtAccessVerify::Key(mut key) => {
+				// If algorithm is symmetric, the verification key is a secret
+				if key.alg.is_symmetric() {
+					key.key = "[REDACTED]".to_string();
+				}
+				JwtAccessVerify::Key(key)
+			}
+			// No secrets in JWK
+			JwtAccessVerify::Jwks(jwks) => JwtAccessVerify::Jwks(jwks),
+		};
+		jwt.issue = match jwt.issue {
+			Some(mut issue) => {
+				issue.key = "[REDACTED]".to_string();
+				Some(issue)
+			}
+			None => None,
+		};
+		jwt
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

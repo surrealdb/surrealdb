@@ -25,7 +25,7 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
-	// Does the algorithm us the same key for signing and verification?
+	// Does the algorithm use the same key for signing and verification?
 	pub(crate) fn is_symmetric(self) -> bool {
 		matches!(self, Algorithm::Hs256 | Algorithm::Hs384 | Algorithm::Hs512)
 	}

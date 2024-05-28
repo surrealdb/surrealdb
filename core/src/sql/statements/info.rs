@@ -115,7 +115,7 @@ impl InfoStatement {
 				res.insert("users".to_owned(), tmp.into());
 				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_ns_accesses(opt.ns()).await?.iter() {
+				for v in run.all_ns_accesses_redacted(opt.ns()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("accesses".to_owned(), tmp.into());
@@ -155,7 +155,7 @@ impl InfoStatement {
 				res.insert("params".to_owned(), tmp.into());
 				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_db_accesses(opt.ns(), opt.db()).await?.iter() {
+				for v in run.all_db_accesses_redacted(opt.ns(), opt.db()).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("accesses".to_owned(), tmp.into());
@@ -259,7 +259,7 @@ impl InfoStatement {
 				// Process the accesses
 				res.insert(
 					"accesses".to_owned(),
-					process_arr(run.all_ns_accesses(opt.ns()).await?),
+					process_arr(run.all_ns_accesses_redacted(opt.ns()).await?),
 				);
 				// Ok all good
 				Value::from(res).ok()
@@ -299,7 +299,7 @@ impl InfoStatement {
 				// Process the accesses
 				res.insert(
 					"accesses".to_owned(),
-					process_arr(run.all_db_accesses(opt.ns(), opt.db()).await?),
+					process_arr(run.all_db_accesses_redacted(opt.ns(), opt.db()).await?),
 				);
 				// Process the tables
 				res.insert("tables".to_owned(), process_arr(run.all_tb(opt.ns(), opt.db()).await?));

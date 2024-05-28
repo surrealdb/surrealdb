@@ -32,6 +32,21 @@ impl DefineAccessStatement {
 	pub(crate) fn random_key() -> String {
 		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
 	}
+
+	/// Returns a version of the statement where potential secrets are redacted
+	/// This function should be used when displaying the statement to datastore users
+	/// This function should NOT be used when displaying the statement for export purposes
+	pub fn redacted(&self) -> DefineAccessStatement {
+		let mut das = self.clone();
+		das.kind = match das.kind {
+			AccessType::Jwt(ac) => AccessType::Jwt(ac.redacted()),
+			AccessType::Record(mut ac) => {
+				ac.jwt = ac.jwt.redacted();
+				AccessType::Record(ac)
+			}
+		};
+		das
+	}
 }
 
 impl DefineAccessStatement {
