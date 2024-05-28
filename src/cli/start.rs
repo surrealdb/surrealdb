@@ -97,7 +97,7 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
 	#[arg(help = "Whether to suppress the server name and version header")]
-	#[arg(env = "SURREAL_NO_SERVER_ID_HEADERS", long)]
+	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
 	#[arg(default_value_t = false)]
 	hide_server_id_headers: bool,
 	//
