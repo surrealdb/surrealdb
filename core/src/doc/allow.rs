@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::permission::Permission;
@@ -12,7 +12,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if this record exists
@@ -20,7 +19,7 @@ impl<'a> Document<'a> {
 			// Should we run permissions checks?
 			if opt.check_perms(stm.into()) {
 				// Get the table
-				let tb = self.tb(opt, txn).await?;
+				let tb = self.tb(ctx, opt).await?;
 				// Get the permission clause
 				let perms = if stm.is_delete() {
 					&tb.permissions.delete
@@ -44,7 +43,6 @@ impl<'a> Document<'a> {
 								stk,
 								ctx,
 								opt,
-								txn,
 								Some(match stm.is_delete() {
 									true => &self.initial,
 									false => &self.current,

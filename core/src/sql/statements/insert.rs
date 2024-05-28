@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Options, Statement, Transaction};
+use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Data, Output, Timeout, Value};
@@ -34,7 +34,6 @@ impl InsertStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Valid options?
@@ -44,7 +43,7 @@ impl InsertStatement {
 		// Ensure futures are stored
 		let opt = &opt.new_with_futures(false).with_projections(false);
 		// Parse the expression
-		match self.into.compute(stk, ctx, opt, txn, doc).await? {
+		match self.into.compute(stk, ctx, opt, doc).await? {
 			Value::Table(into) => match &self.data {
 				// Check if this is a traditional statement
 				Data::ValuesExpression(v) => {
@@ -53,8 +52,8 @@ impl InsertStatement {
 						let mut o = Value::base();
 						// Set each field from the expression
 						for (k, v) in v.iter() {
-							let v = v.compute(stk, ctx, opt, txn, None).await?;
-							o.set(stk, ctx, opt, txn, k, v).await?;
+							let v = v.compute(stk, ctx, opt, None).await?;
+							o.set(stk, ctx, opt, k, v).await?;
 						}
 						// Specify the new table record id
 						let id = o.rid().generate(&into, true)?;
@@ -64,7 +63,7 @@ impl InsertStatement {
 				}
 				// Check if this is a modern statement
 				Data::SingleExpression(v) => {
-					let v = v.compute(stk, ctx, opt, txn, doc).await?;
+					let v = v.compute(stk, ctx, opt, doc).await?;
 					match v {
 						Value::Array(v) => {
 							for v in v {
@@ -98,7 +97,7 @@ impl InsertStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(stk, ctx, opt, txn, &stm).await
+		i.output(stk, ctx, opt, &stm).await
 	}
 }
 

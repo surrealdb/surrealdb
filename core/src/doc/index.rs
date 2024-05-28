@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
-use crate::dbs::{Options, Transaction};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
@@ -20,7 +20,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Was this force targeted at a specific index?
@@ -32,12 +31,12 @@ impl<'a> Document<'a> {
 			{
 				ix.clone()
 			}
-			Force::All => self.ix(opt, txn).await?,
-			_ if self.changed() => self.ix(opt, txn).await?,
+			Force::All => self.ix(ctx, opt).await?,
+			_ if self.changed() => self.ix(ctx, opt).await?,
 			_ => return Ok(()),
 		};
 		// Check if the table is a view
-		if self.tb(opt, txn).await?.drop {
+		if self.tb(ctx, opt).await?.drop {
 			return Ok(());
 		}
 		// Get the record id
@@ -45,10 +44,10 @@ impl<'a> Document<'a> {
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Calculate old values
-			let o = build_opt_values(stk, ctx, opt, txn, ix, &self.initial).await?;
+			let o = build_opt_values(stk, ctx, opt, ix, &self.initial).await?;
 
 			// Calculate new values
-			let n = build_opt_values(stk, ctx, opt, txn, ix, &self.current).await?;
+			let n = build_opt_values(stk, ctx, opt, ix, &self.current).await?;
 
 			// Update the index entries
 			if targeted_force || o != n {
@@ -57,10 +56,10 @@ impl<'a> Document<'a> {
 
 				// Index operation dispatching
 				match &ix.index {
-					Index::Uniq => ic.index_unique(txn).await?,
-					Index::Idx => ic.index_non_unique(txn).await?,
-					Index::Search(p) => ic.index_full_text(stk, ctx, txn, p).await?,
-					Index::MTree(p) => ic.index_mtree(stk, ctx, txn, p).await?,
+					Index::Uniq => ic.index_unique(ctx).await?,
+					Index::Idx => ic.index_non_unique(ctx).await?,
+					Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
+					Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 					Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 				};
 			}
@@ -78,7 +77,6 @@ async fn build_opt_values(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
-	txn: &Transaction,
 	ix: &DefineIndexStatement,
 	doc: &CursorDoc<'_>,
 ) -> Result<Option<Vec<Value>>, Error> {
@@ -87,7 +85,7 @@ async fn build_opt_values(
 	}
 	let mut o = Vec::with_capacity(ix.cols.len());
 	for i in ix.cols.iter() {
-		let v = i.compute(stk, ctx, opt, txn, Some(doc)).await?;
+		let v = i.compute(stk, ctx, opt, Some(doc)).await?;
 		o.push(v);
 	}
 	Ok(Some(o))
@@ -281,8 +279,8 @@ impl<'a> IndexOperation<'a> {
 		)
 	}
 
-	async fn index_unique(&mut self, txn: &Transaction) -> Result<(), Error> {
-		let mut run = txn.lock().await;
+	async fn index_unique(&mut self, ctx: &Context<'_>) -> Result<(), Error> {
+		let mut run = ctx.tx_lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -313,8 +311,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_non_unique(&mut self, txn: &Transaction) -> Result<(), Error> {
-		let mut run = txn.lock().await;
+	async fn index_non_unique(&mut self, ctx: &Context<'_>) -> Result<(), Error> {
+		let mut run = ctx.tx_lock().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -358,38 +356,27 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
-		txn: &Transaction,
 		p: &SearchParams,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 
-		let mut ft = FtIndex::new(
-			ctx.get_index_stores(),
-			self.opt,
-			txn,
-			&p.az,
-			ikb,
-			p,
-			TransactionType::Write,
-		)
-		.await?;
+		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
-			ft.index_document(stk, ctx, self.opt, txn, self.rid, n).await?;
+			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
 		} else {
-			ft.remove_document(txn, self.rid).await?;
+			ft.remove_document(ctx, self.rid).await?;
 		}
-		ft.finish(txn).await
+		ft.finish(ctx).await
 	}
 
 	async fn index_mtree(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
-		txn: &Transaction,
 		p: &MTreeParams,
 	) -> Result<(), Error> {
-		let mut tx = txn.lock().await;
+		let mut tx = ctx.tx_lock().await;
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let mut mt =
 			MTreeIndex::new(ctx.get_index_stores(), &mut tx, ikb, p, TransactionType::Write)

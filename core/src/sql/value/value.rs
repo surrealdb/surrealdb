@@ -1,7 +1,7 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::util::string::fuzzy::Fuzzy;
@@ -2626,27 +2626,26 @@ impl Value {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Prevent infinite recursion due to casting, expressions, etc.
 		let opt = &opt.dive(1)?;
 
 		match self {
-			Value::Cast(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Block(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Range(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Idiom(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Function(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Value::Model(v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
-			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, txn, doc)).await,
+			Value::Cast(v) => v.compute(stk, ctx, opt, doc).await,
+			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Block(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Range(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Idiom(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Constant(v) => v.compute(ctx, opt, doc).await,
+			Value::Function(v) => v.compute(stk, ctx, opt, doc).await,
+			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
+			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
+			Value::Expression(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
+use surrealdb_core::ctx::Context;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
 use surrealdb_core::idx::trees::mtree::MTreeIndex;
 use surrealdb_core::idx::IndexKeyBase;
@@ -173,17 +174,18 @@ async fn knn_lookup_objects(
 	let mut tx = txn.lock().await;
 	let mt = Arc::new(mtree_index(ds, &mut tx, vector_size, cache_size, Read).await);
 	drop(tx);
+	let ctx = Arc::new(Context::default().set_transaction(txn));
 
 	let counter = Arc::new(AtomicUsize::new(0));
 
 	let mut consumers = Vec::with_capacity(4);
 	for _ in 0..4 {
-		let (txn, mt, counter) = (txn.clone(), mt.clone(), counter.clone());
+		let (ctx, mt, counter) = (ctx.clone(), mt.clone(), counter.clone());
 		let c = task::spawn(async move {
 			let mut rng = StdRng::from_entropy();
 			while counter.fetch_add(1, Ordering::Relaxed) < samples_size {
 				let object = random_object(&mut rng, vector_size);
-				knn_lookup_object(mt.as_ref(), &txn, object, knn).await;
+				knn_lookup_object(mt.as_ref(), &ctx, object, knn).await;
 			}
 		});
 		consumers.push(c);
@@ -193,17 +195,12 @@ async fn knn_lookup_objects(
 	}
 }
 
-async fn knn_lookup_object(
-	mt: &MTreeIndex,
-	txn: &Arc<Mutex<Transaction>>,
-	object: Vec<Number>,
-	knn: usize,
-) {
+async fn knn_lookup_object(mt: &MTreeIndex, ctx: &Context<'_>, object: Vec<Number>, knn: usize) {
 	let mut stack = TreeStack::new();
 	stack
 		.enter(|stk| async {
-			let chk = MTreeConditionChecker::new(&txn);
-			let r = mt.knn_search(stk, txn, &object, knn, chk).await.unwrap();
+			let chk = MTreeConditionChecker::new(&ctx);
+			let r = mt.knn_search(stk, ctx, &object, knn, chk).await.unwrap();
 			assert_eq!(r.len(), knn);
 		})
 		.finish()

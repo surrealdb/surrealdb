@@ -1,7 +1,6 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
@@ -40,7 +39,6 @@ pub async fn run(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
-	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
@@ -55,7 +53,7 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		stk.run(|stk| asynchronous(stk, ctx, Some(opt), Some(txn), doc, name, args)).await
+		stk.run(|stk| asynchronous(stk, ctx, Some(opt), doc, name, args)).await
 	} else {
 		synchronous(ctx, doc, name, args)
 	}
@@ -385,7 +383,6 @@ pub async fn asynchronous(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: Option<&Options>,
-	txn: Option<&Transaction>,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
@@ -425,15 +422,15 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, txn, opt)).await,
-		"search::score" => search::score((ctx, txn, doc)).await,
-		"search::highlight" => search::highlight((ctx,txn, doc)).await,
-		"search::offsets" => search::offsets((ctx, txn, doc)).await,
+		"search::analyze" => search::analyze((stk,ctx, opt)).await,
+		"search::score" => search::score((ctx, doc)).await,
+		"search::highlight" => search::highlight((ctx, doc)).await,
+		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, opt, txn, doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, opt, txn, doc)).await,
+		"type::field" => r#type::field((stk,ctx, opt, doc)).await,
+		"type::fields" => r#type::fields((stk,ctx, opt, doc)).await,
 	)
 }
 

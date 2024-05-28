@@ -1,8 +1,8 @@
 use crate::ctx::Context;
+use crate::dbs::Action;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Action, Transaction};
 use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
@@ -24,9 +24,8 @@ impl<'a> Document<'a> {
 	pub async fn lives(
 		&self,
 		stk: &mut Stk,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if changed
@@ -41,10 +40,9 @@ impl<'a> Document<'a> {
 		// Check if we can send notifications
 		if let Some(chn) = &opt.sender {
 			// Loop through all index statements
-			let lq_stms = self.lv(opt, txn).await?;
+			let lq_stms = self.lv(ctx, opt).await?;
 			let borrows = lq_stms.iter().collect::<Vec<_>>();
-			self.check_lqs_and_send_notifications(stk, opt, stm, txn, borrows.as_slice(), chn)
-				.await?;
+			self.check_lqs_and_send_notifications(stk, opt, stm, borrows.as_slice(), chn).await?;
 		}
 		// Carry on
 		Ok(())
@@ -56,14 +54,13 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		doc: &CursorDoc<'_>,
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, txn, Some(doc)).await?.is_truthy() {
+			if !cond.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 				// Ignore this document
 				return Err(Error::Ignore);
 			}
@@ -78,14 +75,13 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		doc: &CursorDoc<'_>,
 	) -> Result<(), Error> {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into()) {
 			// Get the table
-			let tb = self.tb(opt, txn).await?;
+			let tb = self.tb(ctx, opt).await?;
 			// Process the table permissions
 			match &tb.permissions.select {
 				Permission::None => return Err(Error::Ignore),
@@ -94,7 +90,7 @@ impl<'a> Document<'a> {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(stk, ctx, opt, txn, Some(doc)).await?.is_truthy() {
+					if !e.compute(stk, ctx, opt, Some(doc)).await?.is_truthy() {
 						return Err(Error::Ignore);
 					}
 				}
@@ -110,7 +106,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		opt: &Options,
 		stm: &Statement<'_>,
-		txn: &Transaction,
 		live_statements: &[&LiveStatement],
 		sender: &Sender<Notification>,
 	) -> Result<(), Error> {
@@ -180,7 +175,7 @@ impl<'a> Document<'a> {
 			// First of all, let's check to see if the WHERE
 			// clause of the LIVE query is matched by this
 			// document. If it is then we can continue.
-			match self.lq_check(stk, &lqctx, &lqopt, txn, &lq, doc).await {
+			match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(Error::Ignore) => {
 					trace!("live query did not match the where clause, skipping");
 					continue;
@@ -192,7 +187,7 @@ impl<'a> Document<'a> {
 			// clause for this table allows this document to
 			// be viewed by the user who created this LIVE
 			// query. If it does, then we can continue.
-			match self.lq_allow(stk, &lqctx, &lqopt, txn, &lq, doc).await {
+			match self.lq_allow(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(Error::Ignore) => {
 					trace!("live query did not have permission to view this document, skipping");
 					continue;
@@ -228,14 +223,14 @@ impl<'a> Document<'a> {
 								let lqopt: &Options = &lqopt.new_with_futures(true);
 								// Output the full document before any changes were applied
 								let mut value =
-									doc.doc.compute(stk, &lqctx, lqopt, txn, Some(doc)).await?;
+									doc.doc.compute(stk, &lqctx, lqopt, Some(doc)).await?;
 
 								// TODO(SUR-349): We need an empty object instead of Value::None for serialisation
 								if value.is_none() {
 									value = Value::Object(Default::default());
 								}
 								// Remove metadata fields on output
-								value.del(stk, &lqctx, lqopt, txn, &*META).await?;
+								value.del(stk, &lqctx, lqopt, &*META).await?;
 								// Output result
 								value
 							},
@@ -250,7 +245,7 @@ impl<'a> Document<'a> {
 						.send(Notification {
 							id: lv.id,
 							action: Action::Create,
-							result: self.pluck(stk, &lqctx, &lqopt, txn, &lq).await?,
+							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
 						})
 						.await?;
 				}
@@ -262,7 +257,7 @@ impl<'a> Document<'a> {
 						.send(Notification {
 							id: lv.id,
 							action: Action::Update,
-							result: self.pluck(stk, &lqctx, &lqopt, txn, &lq).await?,
+							result: self.pluck(stk, &lqctx, &lqopt, &lq).await?,
 						})
 						.await?;
 				}

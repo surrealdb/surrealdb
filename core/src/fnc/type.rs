@@ -1,7 +1,7 @@
 use std::ops::Bound;
 
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::table::Table;
@@ -28,22 +28,16 @@ pub fn duration((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub async fn field(
-	(stk, ctx, opt, txn, doc): (
-		&mut Stk,
-		&Context<'_>,
-		Option<&Options>,
-		Option<&Transaction>,
-		Option<&CursorDoc<'_>>,
-	),
+	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
 	(val,): (String,),
 ) -> Result<Value, Error> {
-	match (opt, txn) {
-		(Some(opt), Some(txn)) => {
+	match opt {
+		Some(opt) => {
 			// Parse the string as an Idiom
 			let idi = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
 			match opt.projections {
-				true => Ok(idi.compute(stk, ctx, opt, txn, doc).await?),
+				true => Ok(idi.compute(stk, ctx, opt, doc).await?),
 				false => Ok(idi.into()),
 			}
 		}
@@ -52,24 +46,18 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(stk, ctx, opt, txn, doc): (
-		&mut Stk,
-		&Context<'_>,
-		Option<&Options>,
-		Option<&Transaction>,
-		Option<&CursorDoc<'_>>,
-	),
+	(stk, ctx, opt, doc): (&mut Stk, &Context<'_>, Option<&Options>, Option<&CursorDoc<'_>>),
 	(val,): (Vec<String>,),
 ) -> Result<Value, Error> {
-	match (opt, txn) {
-		(Some(opt), Some(txn)) => {
+	match opt {
+		Some(opt) => {
 			let mut args: Vec<Value> = Vec::with_capacity(val.len());
 			for v in val {
 				// Parse the string as an Idiom
 				let idi = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
 				match opt.projections {
-					true => args.push(idi.compute(stk, ctx, opt, txn, doc).await?),
+					true => args.push(idi.compute(stk, ctx, opt, doc).await?),
 					false => args.push(idi.into()),
 				}
 			}

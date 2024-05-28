@@ -28,6 +28,7 @@ use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
 use crate::idg::u32::U32;
+#[cfg(debug_assertions)]
 use crate::key::debug::sprint_key;
 use crate::key::error::KeyCategory;
 use crate::key::key_req::KeyRequirements;

@@ -26,7 +26,6 @@ pub use user::DefineUserStatement;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -66,22 +65,21 @@ impl DefineStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		match self {
-			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Param(ref v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Self::Table(ref v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Index(ref v) => v.compute(stk, ctx, opt, txn, doc).await,
-			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::User(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Model(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Access(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Database(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Function(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Param(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Event(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Field(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Index(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt, doc).await,
+			Self::User(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Model(ref v) => v.compute(ctx, opt, doc).await,
+			Self::Access(ref v) => v.compute(ctx, opt, doc).await,
 		}
 	}
 }

@@ -1,9 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
+use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
@@ -105,7 +106,6 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		table: &Table,
 		im: IndexesMap,
 		knns: KnnExpressions,
@@ -130,22 +130,19 @@ impl InnerQueryExecutor {
 				match &idx_def.index {
 					Index::Search(p) => {
 						let ft_entry = match ft_map.entry(ix_ref) {
-							Entry::Occupied(e) => {
-								FtEntry::new(stk, ctx, opt, txn, e.get(), io).await?
-							}
+							Entry::Occupied(e) => FtEntry::new(stk, ctx, opt, e.get(), io).await?,
 							Entry::Vacant(e) => {
 								let ikb = IndexKeyBase::new(opt, idx_def);
 								let ft = FtIndex::new(
-									ctx.get_index_stores(),
+									ctx,
 									opt,
-									txn,
 									p.az.as_str(),
 									ikb,
 									p,
 									TransactionType::Read,
 								)
 								.await?;
-								let fte = FtEntry::new(stk, ctx, opt, txn, &ft, io).await?;
+								let fte = FtEntry::new(stk, ctx, opt, &ft, io).await?;
 								e.insert(ft);
 								fte
 							}
@@ -169,7 +166,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										e.get(),
 										a,
 										*k,
@@ -179,7 +175,7 @@ impl InnerQueryExecutor {
 								}
 								Entry::Vacant(e) => {
 									let ikb = IndexKeyBase::new(opt, idx_def);
-									let mut tx = txn.lock().await;
+									let mut tx = ctx.tx_lock().await;
 									let mt = MTreeIndex::new(
 										ctx.get_index_stores(),
 										&mut tx,
@@ -193,7 +189,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										&mt,
 										a,
 										*k,
@@ -215,7 +210,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										e.get().clone(),
 										a,
 										*k,
@@ -233,7 +227,6 @@ impl InnerQueryExecutor {
 										stk,
 										ctx,
 										opt,
-										txn,
 										hnsw.clone(),
 										a,
 										*k,
@@ -279,13 +272,11 @@ impl InnerQueryExecutor {
 }
 
 impl QueryExecutor {
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn knn(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		thg: &Thing,
 		doc: Option<&CursorDoc<'_>>,
 		exp: &Expression,
@@ -297,7 +288,7 @@ impl QueryExecutor {
 			Ok(Value::Bool(false))
 		} else {
 			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
-				let v: Vec<Number> = id.compute(stk, ctx, opt, txn, doc).await?.try_into()?;
+				let v: Vec<Number> = id.compute(stk, ctx, opt, doc).await?.try_into()?;
 				let dist = dist.compute(&v, val.as_ref())?;
 				p.add(dist, thg).await;
 			}
@@ -538,7 +529,6 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		thg: &Thing,
 		exp: &Expression,
 		l: Value,
@@ -547,10 +537,10 @@ impl QueryExecutor {
 		if let Some(ft) = self.0.exp_entries.get(exp) {
 			if let Some(ix_def) = self.get_index_def(ft.0.index_option.ix_ref()) {
 				if self.0.table.eq(&ix_def.what.0) {
-					return self.matches_with_doc_id(txn, thg, ft).await;
+					return self.matches_with_doc_id(ctx, thg, ft).await;
 				}
 			}
-			return self.matches_with_value(stk, ctx, opt, txn, ft, l, r).await;
+			return self.matches_with_value(stk, ctx, opt, ft, l, r).await;
 		}
 
 		// If no previous case were successful, we end up with a user error
@@ -561,12 +551,12 @@ impl QueryExecutor {
 
 	async fn matches_with_doc_id(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		thg: &Thing,
 		ft: &FtEntry,
 	) -> Result<bool, Error> {
 		let doc_key: Key = thg.into();
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		let di = ft.0.doc_ids.read().await;
 		let doc_id = di.get_doc_id(&mut run, doc_key).await?;
 		drop(di);
@@ -592,13 +582,11 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	async fn matches_with_value(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		ft: &FtEntry,
 		l: Value,
 		r: Value,
@@ -615,7 +603,7 @@ impl QueryExecutor {
 		};
 		let terms = ft.0.terms.read().await;
 		// Extract the terms set from the record
-		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, txn, &terms, v).await?;
+		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, &terms, v).await?;
 		drop(terms);
 		Ok(ft.0.query_terms_set.is_subset(&t))
 	}
@@ -637,27 +625,21 @@ impl QueryExecutor {
 		None
 	}
 
-	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn highlight(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		thg: &Thing,
-		prefix: Value,
-		suffix: Value,
-		match_ref: Value,
-		partial: bool,
+		hlp: HighlightParams,
 		doc: &Value,
 	) -> Result<Value, Error> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
-			let mut run = txn.lock().await;
+		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
+			let mut run = ctx.tx_lock().await;
 			let res = ft
 				.highlight(
 					&mut run,
 					thg,
 					&e.0.query_terms_list,
-					prefix,
-					suffix,
-					partial,
+					hlp,
 					e.0.index_option.id_ref(),
 					doc,
 				)
@@ -670,13 +652,13 @@ impl QueryExecutor {
 
 	pub(crate) async fn offsets(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		thg: &Thing,
 		match_ref: Value,
 		partial: bool,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			let res = ft.extract_offsets(&mut run, thg, &e.0.query_terms_list, partial).await;
 			drop(run);
 			return res;
@@ -686,14 +668,14 @@ impl QueryExecutor {
 
 	pub(crate) async fn score(
 		&self,
-		txn: &Transaction,
+		ctx: &Context<'_>,
 		match_ref: &Value,
 		rid: &Thing,
 		ir: Option<&IteratorRecord>,
 	) -> Result<Value, Error> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				let mut doc_id = if let Some(ir) = ir {
 					ir.doc_id()
 				} else {
@@ -738,14 +720,13 @@ impl FtEntry {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		ft: &FtIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>, Error> {
 		if let Matches(qs, _) = io.op() {
 			let (terms_list, terms_set) =
-				ft.extract_querying_terms(stk, ctx, opt, txn, qs.to_owned()).await?;
-			let mut tx = txn.lock().await;
+				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			let mut tx = ctx.tx_lock().await;
 			let terms_docs = Arc::new(ft.get_terms_docs(&mut tx, &terms_list).await?);
 			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
@@ -770,23 +751,21 @@ pub(super) struct MtEntry {
 }
 
 impl MtEntry {
-	#[allow(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		mt: &MTreeIndex,
 		o: &[Number],
 		k: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
 		let cond_checker = if let Some(cond) = cond {
-			MTreeConditionChecker::new_cond(ctx, opt, txn, cond)
+			MTreeConditionChecker::new_cond(ctx, opt, cond)
 		} else {
-			MTreeConditionChecker::new(txn)
+			MTreeConditionChecker::new(ctx)
 		};
-		let res = mt.knn_search(stk, txn, o, k as usize, cond_checker).await?;
+		let res = mt.knn_search(stk, ctx, o, k as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})
@@ -804,7 +783,6 @@ impl HnswEntry {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		h: SharedHnswIndex,
 		v: &[Number],
 		n: u32,
@@ -812,7 +790,7 @@ impl HnswEntry {
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self, Error> {
 		let cond_checker = if let Some(cond) = cond {
-			HnswConditionChecker::new_cond(ctx, opt, txn, cond)
+			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {
 			HnswConditionChecker::default()
 		};

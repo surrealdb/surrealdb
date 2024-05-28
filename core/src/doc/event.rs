@@ -1,6 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::{Options, Transaction};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -13,7 +13,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check import
@@ -27,7 +26,7 @@ impl<'a> Document<'a> {
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
 		// Loop through all event statements
-		for ev in self.ev(opt, txn).await?.iter() {
+		for ev in self.ev(ctx, opt).await?.iter() {
 			// Get the event action
 			let met = if stm.is_delete() {
 				Value::from("DELETE")
@@ -48,11 +47,11 @@ impl<'a> Document<'a> {
 			ctx.add_value("after", self.current.doc.deref());
 			ctx.add_value("before", self.initial.doc.deref());
 			// Process conditional clause
-			let val = ev.when.compute(stk, &ctx, opt, txn, Some(doc)).await?;
+			let val = ev.when.compute(stk, &ctx, opt, Some(doc)).await?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(stk, &ctx, opt, txn, Some(doc)).await?;
+					v.compute(stk, &ctx, opt, Some(doc)).await?;
 				}
 			}
 		}

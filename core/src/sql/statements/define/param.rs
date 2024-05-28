@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -32,13 +32,12 @@ impl DefineParamStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if param already exists
@@ -55,7 +54,7 @@ impl DefineParamStatement {
 			key,
 			DefineParamStatement {
 				// Compute the param
-				value: self.value.compute(stk, ctx, opt, txn, doc).await?,
+				value: self.value.compute(stk, ctx, opt, doc).await?,
 				// Don't persist the "IF NOT EXISTS" clause to schema
 				if_not_exists: false,
 				..self.clone()

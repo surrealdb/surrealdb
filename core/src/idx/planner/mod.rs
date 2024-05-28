@@ -7,7 +7,7 @@ pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
 use crate::ctx::Context;
-use crate::dbs::{Iterable, Iterator, Options, Transaction};
+use crate::dbs::{Iterable, Iterator, Options};
 use crate::err::Error;
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
@@ -50,20 +50,18 @@ impl<'a> QueryPlanner<'a> {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context<'_>,
-		txn: &Transaction,
 		t: Table,
 		it: &mut Iterator,
 	) -> Result<(), Error> {
 		let mut is_table_iterator = false;
 		let mut is_knn = false;
-		match Tree::build(stk, ctx, self.opt, txn, &t, self.cond, self.with).await? {
+		match Tree::build(stk, ctx, self.opt, &t, self.cond, self.with).await? {
 			Some(tree) => {
 				is_knn = is_knn || !tree.knn_expressions.is_empty();
 				let mut exe = InnerQueryExecutor::new(
 					stk,
 					ctx,
 					self.opt,
-					txn,
 					&t,
 					tree.index_map,
 					tree.knn_expressions,

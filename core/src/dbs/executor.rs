@@ -311,10 +311,10 @@ impl<'a> Executor<'a> {
 						true => Err(Error::TxFailure),
 						// The transaction began successfully
 						false => {
+							ctx.set_transaction_mut(self.txn());
 							// Check the statement
-							let txn = self.txn();
 							match stack
-								.enter(|stk| stm.compute(stk, &ctx, &opt, &txn, None))
+								.enter(|stk| stm.compute(stk, &ctx, &opt, None))
 								.finish()
 								.await
 							{
@@ -384,12 +384,10 @@ impl<'a> Executor<'a> {
 										if let Err(err) = ctx.add_timeout(timeout) {
 											Err(err)
 										} else {
-											let txn = self.txn();
+											ctx.set_transaction_mut(self.txn());
 											// Process the statement
 											let res = stack
-												.enter(|stk| {
-													stm.compute(stk, &ctx, &opt, &txn, None)
-												})
+												.enter(|stk| stm.compute(stk, &ctx, &opt, None))
 												.finish()
 												.await;
 											// Catch statement timeout
@@ -401,9 +399,9 @@ impl<'a> Executor<'a> {
 									}
 									// There is no timeout clause
 									None => {
-										let txn = self.txn();
+										ctx.set_transaction_mut(self.txn());
 										stack
-											.enter(|stk| stm.compute(stk, &ctx, &opt, &txn, None))
+											.enter(|stk| stm.compute(stk, &ctx, &opt, None))
 											.finish()
 											.await
 									}

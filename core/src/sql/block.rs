@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
@@ -51,7 +51,6 @@ impl Block {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Duplicate context
@@ -60,65 +59,65 @@ impl Block {
 		for (i, v) in self.iter().enumerate() {
 			match v {
 				Entry::Set(v) => {
-					let val = v.compute(stk, &ctx, opt, txn, doc).await?;
+					let val = v.compute(stk, &ctx, opt, doc).await?;
 					ctx.add_value(v.name.to_owned(), val);
 				}
 				Entry::Throw(v) => {
 					// Always errors immediately
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Break(v) => {
 					// Always errors immediately
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt, doc).await?;
 				}
 				Entry::Continue(v) => {
 					// Always errors immediately
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt, doc).await?;
 				}
 				Entry::Foreach(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Ifelse(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Select(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Create(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Update(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Delete(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Relate(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Insert(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Define(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Rebuild(v) => {
-					v.compute(stk, &ctx, opt, txn, doc).await?;
+					v.compute(stk, &ctx, opt, doc).await?;
 				}
 				Entry::Remove(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt, doc).await?;
 				}
 				Entry::Output(v) => {
 					// Return the RETURN value
-					return v.compute(stk, &ctx, opt, txn, doc).await;
+					return v.compute(stk, &ctx, opt, doc).await;
 				}
 				Entry::Value(v) => {
 					if i == self.len() - 1 {
 						// If the last entry then return the value
-						return v.compute(stk, &ctx, opt, txn, doc).await;
+						return v.compute(stk, &ctx, opt, doc).await;
 					} else {
 						// Otherwise just process the value
-						v.compute(stk, &ctx, opt, txn, doc).await?;
+						v.compute(stk, &ctx, opt, doc).await?;
 					}
 				}
 			}

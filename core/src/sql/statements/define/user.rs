@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -80,9 +80,8 @@ impl DefineUserStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -91,7 +90,7 @@ impl DefineUserStatement {
 		match self.base {
 			Base::Root => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
@@ -116,7 +115,7 @@ impl DefineUserStatement {
 			}
 			Base::Ns => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
@@ -143,7 +142,7 @@ impl DefineUserStatement {
 			}
 			Base::Db => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
