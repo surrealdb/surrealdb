@@ -143,7 +143,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 	match relation {
 		false => Ok(Iterable::Mergeable(id, v)),
 		true => {
-			let r#in = match v.pick(&*IN) {
+			let _in = match v.pick(&*IN) {
 				Value::Thing(v) => v,
 				v => {
 					return Err(Error::InsertStatementIn {
@@ -159,7 +159,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 					})
 				}
 			};
-			Ok(Iterable::Relatable(r#in, id, out, Some(v)))
+			Ok(Iterable::Relatable(_in, id, out, Some(v)))
 		}
 	}
 }
