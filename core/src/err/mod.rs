@@ -1000,6 +1000,12 @@ pub enum Error {
 
 	#[error("This record access method does not allow signin")]
 	AccessRecordNoSignin,
+
+	#[error("Cannot construct a Record ID with table: {0}")]
+	InvalidThingTb(String),
+
+	#[error("Cannot construct a Record ID with id: {0}")]
+	InvalidThingId(String),
 }
 
 impl From<Error> for String {

@@ -95,8 +95,17 @@ pub fn table((val,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
-	Ok(if let Some(arg2) = arg2 {
-		Value::Thing(Thing {
+	match (arg1, arg2) {
+		// Empty table name
+		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::InvalidThingTb(arg1.to_string())),
+
+		// Empty ID part
+		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => {
+			Err(Error::InvalidThingId(arg2.to_string()))
+		}
+
+		// Handle second argument
+		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
 			tb: arg1.as_string(),
 			id: match arg2 {
 				Value::Thing(v) => v.id,
@@ -105,9 +114,10 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Number(v) => v.into(),
 				v => v.as_string().into(),
 			},
-		})
-	} else {
-		match arg1 {
+		})),
+
+		// No second argument passed
+		(arg1, _) => Ok(match arg1 {
 			Value::Thing(v) => Ok(v),
 			Value::Strand(v) => Thing::try_from(v.as_str()).map_err(move |_| Error::ConvertTo {
 				from: Value::Strand(v),
@@ -118,8 +128,8 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				into: "record".into(),
 			}),
 		}?
-		.into()
-	})
+		.into()),
+	}
 }
 
 pub fn range(args: Vec<Value>) -> Result<Value, Error> {
@@ -313,6 +323,7 @@ pub mod is {
 
 #[cfg(test)]
 mod tests {
+	use crate::err::Error;
 	use crate::sql::value::Value;
 
 	#[test]
@@ -322,5 +333,20 @@ mod tests {
 
 		let value = super::is::array(("test".into(),)).unwrap();
 		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn no_empty_thing() {
+		let value = super::thing(("".into(), None));
+		let _expected = Error::InvalidThingTb("".into());
+		if !matches!(value, Err(_expected)) {
+			panic!("An empty thing tb part should result in an error");
+		}
+
+		let value = super::thing(("table".into(), Some("".into())));
+		let _expected = Error::InvalidThingId("".into());
+		if !matches!(value, Err(_expected)) {
+			panic!("An empty thing id part should result in an error");
+		}
 	}
 }
