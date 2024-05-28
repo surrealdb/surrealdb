@@ -75,6 +75,9 @@ impl<'a> Document<'a> {
 					if let Workable::Insert(value) = &self.extras {
 						ctx.add_value("input", value);
 					}
+					if let Workable::Relate(_, _, Some(value)) = &self.extras {
+						ctx.add_value("input", value);
+					}
 					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
 						let v = x.2.compute(stk, &ctx, opt, Some(&self.current)).await?;
