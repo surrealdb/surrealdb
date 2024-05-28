@@ -645,15 +645,16 @@ async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
 		DEFINE INDEX idxPersonName ON TABLE person COLUMNS name SEARCH ANALYZER edgeNgram BM25;
 		DEFINE INDEX idxSecurityNumber ON TABLE person COLUMNS securityNumber UNIQUE;
 		CREATE person:1 content {name: 'Tobie', securityNumber: '123456'};
+		CREATE person:2 content {name: 'Jaime', securityNumber: 'ABCDEF'};
 		SELECT * FROM person WHERE name @@ 'Tobie' || securityNumber == '123456' EXPLAIN;
 		SELECT * FROM person WHERE name @@ 'Tobie' || securityNumber == '123456';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 7);
 	//
-	skip_ok(res, 4)?;
+	skip_ok(res, 5)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
