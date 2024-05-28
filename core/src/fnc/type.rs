@@ -97,12 +97,14 @@ pub fn table((val,): (Value,)) -> Result<Value, Error> {
 pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 	match (arg1, arg2) {
 		// Empty table name
-		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::InvalidThingTb(arg1.to_string())),
+		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
+			value: arg1.to_string(),
+		}),
 
 		// Empty ID part
-		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => {
-			Err(Error::InvalidThingId(arg2.to_string()))
-		}
+		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
+			value: arg2.to_string(),
+		}),
 
 		// Handle second argument
 		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
@@ -338,13 +340,17 @@ mod tests {
 	#[test]
 	fn no_empty_thing() {
 		let value = super::thing(("".into(), None));
-		let _expected = Error::InvalidThingTb("".into());
+		let _expected = Error::TbInvalid {
+			value: "".into(),
+		};
 		if !matches!(value, Err(_expected)) {
 			panic!("An empty thing tb part should result in an error");
 		}
 
 		let value = super::thing(("table".into(), Some("".into())));
-		let _expected = Error::InvalidThingId("".into());
+		let _expected = Error::IdInvalid {
+			value: "".into(),
+		};
 		if !matches!(value, Err(_expected)) {
 			panic!("An empty thing id part should result in an error");
 		}
