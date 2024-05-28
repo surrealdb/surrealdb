@@ -450,9 +450,16 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
-			IndexOperator::Equality(value) => Some(ThingIterator::UniqueEqual(
-				UniqueEqualThingIterator::new(irf, opt.ns(), opt.db(), &ix.what, &ix.name, value),
-			)),
+			IndexOperator::Equality(value) | IndexOperator::Exactness(value) => {
+				Some(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(
+					irf,
+					opt.ns(),
+					opt.db(),
+					&ix.what,
+					&ix.name,
+					value,
+				)))
+			}
 			IndexOperator::Union(value) => {
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(irf, opt, ix, value)))
 			}

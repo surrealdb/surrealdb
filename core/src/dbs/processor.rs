@@ -578,7 +578,7 @@ impl<'a> Processor<'a> {
 				return Ok(());
 			} else {
 				return Err(Error::QueryNotExecutedDetail {
-					message: "No Iterator has been found.".to_string(),
+					message: "No iterator has been found.".to_string(),
 				});
 			}
 		}
