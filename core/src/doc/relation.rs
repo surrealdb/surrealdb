@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::dbs::{Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
