@@ -92,7 +92,7 @@ pub mod url {
 	pub fn port((string,): (String,)) -> Result<Value, Error> {
 		// Parse the URL
 		match Url::parse(&string) {
-			Ok(v) => match v.port() {
+			Ok(v) => match v.port_or_known_default() {
 				Some(v) => Ok(v.into()),
 				None => Ok(Value::None),
 			},
@@ -116,6 +116,35 @@ pub mod url {
 		match Url::parse(&string) {
 			Ok(v) => Ok(v.scheme().into()),
 			Err(_) => Ok(Value::None),
+		}
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use crate::sql::value::Value;
+
+		#[test]
+		fn port_default_port_specified() {
+			let value = super::port(("http://www.google.com:80".to_string(),)).unwrap();
+			assert_eq!(value, 80.into());
+		}
+
+		#[test]
+		fn port_nondefault_port_specified() {
+			let value = super::port(("http://www.google.com:8080".to_string(),)).unwrap();
+			assert_eq!(value, 8080.into());
+		}
+
+		#[test]
+		fn port_no_port_specified() {
+			let value = super::port(("http://www.google.com".to_string(),)).unwrap();
+			assert_eq!(value, 80.into());
+		}
+
+		#[test]
+		fn port_no_scheme_no_port_specified() {
+			let value = super::port(("www.google.com".to_string(),)).unwrap();
+			assert_eq!(value, Value::None);
 		}
 	}
 }
