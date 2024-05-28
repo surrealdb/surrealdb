@@ -21,7 +21,7 @@ impl<'a> Document<'a> {
 		// Set default field values
 		self.current.doc.to_mut().def(rid);
 		// This is a RELATE statement, so reset fields
-		if let Workable::Relate(l, r) = &self.extras {
+		if let Workable::Relate(l, r, _) = &self.extras {
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.doc.to_mut().put(&*IN, l.clone().into());
 			self.current.doc.to_mut().put(&*OUT, r.clone().into());

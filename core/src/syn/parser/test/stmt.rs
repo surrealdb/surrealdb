@@ -1571,7 +1571,7 @@ fn parse_insert() {
 	assert_eq!(
 		res,
 		Statement::Insert(InsertStatement {
-			into: Value::Param(Param(Ident("foo".to_owned()))),
+			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
 			data: Data::ValuesExpression(vec![
 				vec![
 					(
@@ -1624,6 +1624,7 @@ fn parse_insert() {
 			output: Some(Output::After),
 			timeout: None,
 			parallel: false,
+			relation: false,
 		}),
 	)
 }

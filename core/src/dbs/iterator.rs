@@ -28,7 +28,7 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Defer(Thing),
 	Mergeable(Thing, Value),
-	Relatable(Thing, Thing, Thing),
+	Relatable(Thing, Thing, Thing, Option<Value>),
 	Index(Table, IteratorRef),
 }
 
@@ -41,13 +41,13 @@ pub(crate) struct Processed {
 pub(crate) enum Operable {
 	Value(Value),
 	Mergeable(Value, Value),
-	Relatable(Thing, Value, Thing),
+	Relatable(Thing, Value, Thing, Option<Value>),
 }
 
 pub(crate) enum Workable {
 	Normal,
 	Insert(Value),
-	Relate(Thing, Thing),
+	Relate(Thing, Thing, Option<Value>),
 }
 
 #[derive(Default)]

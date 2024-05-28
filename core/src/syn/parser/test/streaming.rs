@@ -522,7 +522,7 @@ fn statements() -> Vec<Statement> {
 			error: Value::Duration(Duration(std::time::Duration::from_secs(1))),
 		}),
 		Statement::Insert(InsertStatement {
-			into: Value::Param(Param(Ident("foo".to_owned()))),
+			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
 			data: Data::ValuesExpression(vec![
 				vec![
 					(
@@ -575,6 +575,7 @@ fn statements() -> Vec<Statement> {
 			output: Some(Output::After),
 			timeout: None,
 			parallel: false,
+			relation: false,
 		}),
 		Statement::Kill(KillStatement {
 			id: Value::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),
