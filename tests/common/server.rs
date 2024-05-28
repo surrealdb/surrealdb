@@ -150,7 +150,6 @@ pub struct StartServerArguments {
 	pub auth: bool,
 	pub tls: bool,
 	pub wait_is_ready: bool,
-	pub enable_auth_level: bool,
 	pub tick_interval: time::Duration,
 	pub temporary_directory: Option<String>,
 	pub args: String,
@@ -163,7 +162,6 @@ impl Default for StartServerArguments {
 			auth: true,
 			tls: false,
 			wait_is_ready: true,
-			enable_auth_level: false,
 			tick_interval: time::Duration::new(1, 0),
 			temporary_directory: None,
 			args: "--allow-all".to_string(),
@@ -174,14 +172,6 @@ impl Default for StartServerArguments {
 pub async fn start_server_without_auth() -> Result<(String, Child), Box<dyn Error>> {
 	start_server(StartServerArguments {
 		auth: false,
-		..Default::default()
-	})
-	.await
-}
-
-pub async fn start_server_with_auth_level() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		enable_auth_level: true,
 		..Default::default()
 	})
 	.await
@@ -207,7 +197,6 @@ pub async fn start_server(
 		auth,
 		tls,
 		wait_is_ready,
-		enable_auth_level,
 		tick_interval,
 		temporary_directory,
 		args,
@@ -232,10 +221,6 @@ pub async fn start_server(
 
 	if !auth {
 		extra_args.push_str(" --unauthenticated");
-	}
-
-	if enable_auth_level {
-		extra_args.push_str(" --auth-level-enabled");
 	}
 
 	if !tick_interval.is_zero() {

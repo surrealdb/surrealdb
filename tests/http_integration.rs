@@ -15,15 +15,15 @@ mod http_integration {
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -210,295 +210,6 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
-	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
-	async fn basic_auth_legacy() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let url = &format!("http://{addr}/sql");
-
-		// Prepare HTTP client
-		let mut headers = reqwest::header::HeaderMap::new();
-		let ns = Ulid::new().to_string();
-		let db = Ulid::new().to_string();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
-		headers.insert(header::ACCEPT, "application/json".parse()?);
-		let client = reqwest::Client::builder()
-			.connect_timeout(Duration::from_millis(10))
-			.default_headers(headers)
-			.build()?;
-
-		// Request without credentials, gives an anonymous session
-		{
-			let res = client.post(url).body("CREATE foo").send().await?;
-			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains("Not enough permissions"), "body: {}", body);
-		}
-
-		// Request with invalid credentials, returns 401
-		{
-			let res =
-				client.post(url).basic_auth("user", Some("pass")).body("CREATE foo").send().await?;
-			assert_eq!(res.status(), 401);
-		}
-
-		// Request with valid root credentials, gives a ROOT session
-		{
-			let res =
-				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
-			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {}", body);
-		}
-
-		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE levels
-		{
-			let res =
-				client.post(url).basic_auth(USER, Some(PASS))
-                                .body(format!("DEFINE USER {USER}_root ON ROOT PASSWORD '{PASS}' ROLES OWNER;
-                                                DEFINE USER {USER}_root ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
-                                                DEFINE USER {USER}_root ON DATABASE PASSWORD '{PASS}' ROLES OWNER",
-                                )).send().await?;
-			assert_eq!(res.status(), 200);
-		}
-
-		// Prepare users with identical credentials on NAMESPACE and DATABASE levels
-		{
-			let res =
-				client.post(url).basic_auth(USER, Some(PASS))
-                                .body(format!("DEFINE USER {USER}_ns ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
-                                                DEFINE USER {USER}_ns ON DATABASE PASSWORD '{PASS}' ROLES OWNER",
-                                )).send().await?;
-			assert_eq!(res.status(), 200);
-		}
-
-		// Prepare users with on DATABASE level
-		{
-			let res = client
-				.post(url)
-				.basic_auth(USER, Some(PASS))
-				.body(format!("DEFINE USER {USER}_db ON DATABASE PASSWORD '{PASS}' ROLES OWNER",))
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-		}
-
-		// Request with ROOT level shared credentials to access ROOT, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "root"), Some(PASS))
-				.body("INFO FOR ROOT")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Request with ROOT level shared credentials to access NS, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "root"), Some(PASS))
-				.body("INFO FOR NS")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Request with ROOT level shared credentials to access NS, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "root"), Some(PASS))
-				.body("INFO FOR DB")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Request with NS level shared credentials to access ROOT, returns 200 but fails
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "ns"), Some(PASS))
-				.body("INFO FOR ROOT")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
-			assert_eq!(
-				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
-			);
-		}
-
-		// Request with NS level shared credentials to access NS, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "ns"), Some(PASS))
-				.body("INFO FOR NS")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Request with NS level shared credentials to access DB, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "ns"), Some(PASS))
-				.body("INFO FOR DB")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Request with DB level shared credentials to access ROOT, returns 200 but fails
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "db"), Some(PASS))
-				.body("INFO FOR ROOT")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
-			assert_eq!(
-				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
-			);
-		}
-
-		// Request with DB level shared credentials to access NS, returns 200 but fails
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "db"), Some(PASS))
-				.body("INFO FOR NS")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
-			assert_eq!(
-				body[0]["result"], "IAM error: Not enough permissions to perform this action",
-				"body: {}",
-				body
-			);
-		}
-
-		// Request with DB level shared credentials to access DB, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(format!("{}_{}", USER, "db"), Some(PASS))
-				.body("INFO FOR DB")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Prepare users with identical name but different password on ROOT, NAMESPACE and DATABASE levels
-		let shared_user_name = format!("{}_{}", USER, "all");
-		let shared_user_pass_root = format!("{}_{}", PASS, "root");
-		let shared_user_pass_ns = format!("{}_{}", PASS, "ns");
-		let shared_user_pass_db = format!("{}_{}", PASS, "db");
-		{
-			let res =
-				client.post(url).basic_auth(USER, Some(PASS))
-                                .body(format!("DEFINE USER {shared_user_name} ON ROOT PASSWORD '{shared_user_pass_root}' ROLES OWNER;
-                                                DEFINE USER {shared_user_name} ON NAMESPACE PASSWORD '{shared_user_pass_ns}' ROLES OWNER;
-                                                DEFINE USER {shared_user_name} ON DATABASE PASSWORD '{shared_user_pass_db}' ROLES OWNER",
-                                )).send().await?;
-			assert_eq!(res.status(), 200);
-		}
-
-		// Request with shared user with password for ROOT to access ROOT, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(&shared_user_name, Some(&shared_user_pass_root))
-				.body("INFO FOR ROOT")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Request with shared user with password for NS to access ROOT, returns 200 but fails
-		{
-			let res = client
-				.post(url)
-				.basic_auth(&shared_user_name, Some(&shared_user_pass_ns))
-				.body("INFO FOR ROOT")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
-		}
-
-		// Request with shared user with password for NS to access NS, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(&shared_user_name, Some(&shared_user_pass_ns))
-				.body("INFO FOR NS")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		// Request with shared user with password for DB to access NS, returns 200 but fails
-		{
-			let res = client
-				.post(url)
-				.basic_auth(&shared_user_name, Some(&shared_user_pass_db))
-				.body("INFO FOR NS")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "ERR", "body: {}", body);
-		}
-
-		// Request with shared user with password for DB to access DB, returns 200 and succeeds
-		{
-			let res = client
-				.post(url)
-				.basic_auth(&shared_user_name, Some(&shared_user_pass_db))
-				.body("INFO FOR DB")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["status"], "OK", "body: {}", body);
-		}
-
-		Ok(())
-	}
-
-	#[test(tokio::test)]
 	async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
@@ -508,8 +219,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -594,8 +305,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -648,8 +359,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -720,8 +431,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -748,7 +459,7 @@ mod http_integration {
 
 	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_with_auth_level().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/signin");
 
 		let ns = Ulid::new().to_string();
@@ -756,8 +467,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -971,178 +682,6 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
-	// TODO(gguillemas): Remove this test once the legacy authentication is deprecated in v2.0.0
-	async fn signin_endpoint_legacy() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let url = &format!("http://{addr}/signin");
-
-		let ns = Ulid::new().to_string();
-		let db = Ulid::new().to_string();
-
-		// Prepare HTTP client
-		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
-		headers.insert(header::ACCEPT, "application/json".parse()?);
-		let client = reqwest::Client::builder()
-			.connect_timeout(Duration::from_millis(10))
-			.default_headers(headers)
-			.build()?;
-
-		// Create a DB user
-		{
-			let res = client
-				.post(format!("http://{addr}/sql"))
-				.basic_auth(USER, Some(PASS))
-				.body(r#"DEFINE USER user_db ON DB PASSWORD 'pass_db'"#)
-				.send()
-				.await?;
-			assert!(res.status().is_success(), "body: {}", res.text().await?);
-		}
-
-		// Signin with valid DB credentials and get the token
-		{
-			let req_body = serde_json::to_string(
-				json!({
-					"ns": ns,
-					"db": db,
-					"user": "user_db",
-					"pass": "pass_db",
-				})
-				.as_object()
-				.unwrap(),
-			)
-			.unwrap();
-
-			let res = client.post(url).body(req_body).send().await?;
-			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
-		}
-
-		// Signin with invalid DB credentials returns 401
-		{
-			let req_body = serde_json::to_string(
-				json!({
-					"ns": ns,
-					"db": db,
-					"user": "user_db",
-					"pass": "invalid_pass",
-				})
-				.as_object()
-				.unwrap(),
-			)
-			.unwrap();
-
-			let res = client.post(url).body(req_body).send().await?;
-			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
-		}
-
-		// Create a NS user
-		{
-			let res = client
-				.post(format!("http://{addr}/sql"))
-				.basic_auth(USER, Some(PASS))
-				.body(r#"DEFINE USER user_ns ON ROOT PASSWORD 'pass_ns'"#)
-				.send()
-				.await?;
-			assert!(res.status().is_success(), "body: {}", res.text().await?);
-		}
-
-		// Signin with valid NS credentials specifying NS and DB and get the token
-		{
-			let req_body = serde_json::to_string(
-				json!({
-					"ns": ns,
-					"db": db,
-					"user": "user_ns",
-					"pass": "pass_ns",
-				})
-				.as_object()
-				.unwrap(),
-			)
-			.unwrap();
-
-			let res = client.post(url).body(req_body).send().await?;
-			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
-		}
-
-		// Signin with invalid NS credentials returns 401
-		{
-			let req_body = serde_json::to_string(
-				json!({
-					"ns": ns,
-					"db": db,
-					"user": "user_ns",
-					"pass": "invalid_pass",
-				})
-				.as_object()
-				.unwrap(),
-			)
-			.unwrap();
-
-			let res = client.post(url).body(req_body).send().await?;
-			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
-		}
-
-		// Create a ROOT user
-		{
-			let res = client
-				.post(format!("http://{addr}/sql"))
-				.basic_auth(USER, Some(PASS))
-				.body(r#"DEFINE USER user_root ON ROOT PASSWORD 'pass_root'"#)
-				.send()
-				.await?;
-			assert!(res.status().is_success(), "body: {}", res.text().await?);
-		}
-
-		// Signin with valid ROOT credentials specifying NS and DB and get the token
-		{
-			let req_body = serde_json::to_string(
-				json!({
-					"ns": ns,
-					"db": db,
-					"user": "user_root",
-					"pass": "pass_root",
-				})
-				.as_object()
-				.unwrap(),
-			)
-			.unwrap();
-
-			let res = client.post(url).body(req_body).send().await?;
-			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-
-			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert!(!body["token"].as_str().unwrap().to_string().is_empty(), "body: {}", body);
-		}
-
-		// Signin with invalid ROOT credentials returns 401
-		{
-			let req_body = serde_json::to_string(
-				json!({
-					"ns": ns,
-					"db": db,
-					"user": "user_root",
-					"pass": "invalid_pass",
-				})
-				.as_object()
-				.unwrap(),
-			)
-			.unwrap();
-
-			let res = client.post(url).body(req_body).send().await?;
-			assert_eq!(res.status(), 401, "body: {}", res.text().await?);
-		}
-
-		Ok(())
-	}
-
-	#[test(tokio::test)]
 	async fn signup_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/signup");
@@ -1152,8 +691,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", ns.parse()?);
-		headers.insert("DB", db.parse()?);
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1214,8 +753,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 
 		let client = reqwest::Client::builder()
@@ -1328,8 +867,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		headers.insert(header::ACCEPT_ENCODING, "gzip".parse()?);
 
@@ -1361,8 +900,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1437,8 +976,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1525,8 +1064,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1590,8 +1129,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1659,8 +1198,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1728,8 +1267,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1780,8 +1319,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1819,8 +1358,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1916,8 +1455,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -1992,8 +1531,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
@@ -2069,8 +1608,8 @@ mod http_integration {
 
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
-		headers.insert("NS", Ulid::new().to_string().parse()?);
-		headers.insert("DB", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-ns", Ulid::new().to_string().parse()?);
+		headers.insert("surreal-db", Ulid::new().to_string().parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))

@@ -28,8 +28,8 @@ use crate::api::Surreal;
 use crate::dbs::Status;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
-use crate::headers::DB_LEGACY;
-use crate::headers::NS_LEGACY;
+use crate::headers::DB;
+use crate::headers::NS;
 use crate::method::Stats;
 use crate::opt::IntoEndpoint;
 use crate::sql::from_value;
@@ -369,7 +369,7 @@ async fn router(
 			let ns = match ns {
 				Some(ns) => match HeaderValue::try_from(&ns) {
 					Ok(ns) => {
-						request = request.header(&NS_LEGACY, &ns);
+						request = request.header(&NS, &ns);
 						Some(ns)
 					}
 					Err(_) => {
@@ -381,7 +381,7 @@ async fn router(
 			let db = match db {
 				Some(db) => match HeaderValue::try_from(&db) {
 					Ok(db) => {
-						request = request.header(&DB_LEGACY, &db);
+						request = request.header(&DB, &db);
 						Some(db)
 					}
 					Err(_) => {
@@ -393,10 +393,10 @@ async fn router(
 			request = request.auth(auth).body("RETURN true");
 			take(true, request).await?;
 			if let Some(ns) = ns {
-				headers.insert(&NS_LEGACY, ns);
+				headers.insert(&NS, ns);
 			}
 			if let Some(db) = db {
-				headers.insert(&DB_LEGACY, db);
+				headers.insert(&DB, db);
 			}
 			Ok(DbResponse::Other(Value::None))
 		}

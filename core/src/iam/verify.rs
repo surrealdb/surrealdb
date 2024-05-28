@@ -131,43 +131,6 @@ pub async fn basic(
 	}
 }
 
-// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-pub async fn basic_legacy(
-	kvs: &Datastore,
-	session: &mut Session,
-	user: &str,
-	pass: &str,
-) -> Result<(), Error> {
-	// Log the authentication type
-	trace!("Attempting legacy basic authentication");
-
-	match verify_creds_legacy(kvs, session.ns.as_ref(), session.db.as_ref(), user, pass).await {
-		Ok((au, _)) if au.is_root() => {
-			debug!("Authenticated as root user '{}'", user);
-			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
-			session.exp = None;
-			session.au = Arc::new(au);
-			Ok(())
-		}
-		Ok((au, _)) if au.is_ns() => {
-			debug!("Authenticated as namespace user '{}'", user);
-			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
-			session.exp = None;
-			session.au = Arc::new(au);
-			Ok(())
-		}
-		Ok((au, _)) if au.is_db() => {
-			debug!("Authenticated as database user '{}'", user);
-			// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
-			session.exp = None;
-			session.au = Arc::new(au);
-			Ok(())
-		}
-		Ok(_) => Err(Error::InvalidAuth),
-		Err(e) => Err(e),
-	}
-}
-
 pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<(), Error> {
 	// Log the authentication type
 	trace!("Attempting token authentication");
@@ -517,48 +480,6 @@ fn verify_pass(pass: &str, hash: &str) -> Result<(), Error> {
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
 		_ => Err(Error::InvalidPass),
-	}
-}
-
-// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-pub async fn verify_creds_legacy(
-	ds: &Datastore,
-	ns: Option<&String>,
-	db: Option<&String>,
-	user: &str,
-	pass: &str,
-) -> Result<(Auth, DefineUserStatement), Error> {
-	if user.is_empty() || pass.is_empty() {
-		return Err(Error::InvalidAuth);
-	}
-
-	// Try to authenticate as a ROOT user
-	match verify_root_creds(ds, user, pass).await {
-		Ok(u) => Ok(((&u, Level::Root).into(), u)),
-		Err(_) => {
-			// Try to authenticate as a NS user
-			match ns {
-				Some(ns) => {
-					match verify_ns_creds(ds, ns, user, pass).await {
-						Ok(u) => Ok(((&u, Level::Namespace(ns.to_owned())).into(), u)),
-						Err(_) => {
-							// Try to authenticate as a DB user
-							match db {
-								Some(db) => match verify_db_creds(ds, ns, db, user, pass).await {
-									Ok(u) => Ok((
-										(&u, Level::Database(ns.to_owned(), db.to_owned())).into(),
-										u,
-									)),
-									Err(_) => Err(Error::InvalidAuth),
-								},
-								None => Err(Error::InvalidAuth),
-							}
-						}
-					}
-				}
-				None => Err(Error::InvalidAuth),
-			}
-		}
 	}
 }
 
