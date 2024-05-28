@@ -18,5 +18,5 @@ pub struct Config {
 	pub key: Option<PathBuf>,
 	pub tick_interval: Duration,
 	pub engine: Option<EngineOptions>,
-	pub hide_server_id_headers: bool,
+	pub no_identification_headers: bool,
 }

@@ -99,7 +99,7 @@ pub struct StartCommandArguments {
 	#[arg(help = "Whether to suppress the server name and version header")]
 	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
 	#[arg(default_value_t = false)]
-	hide_server_id_headers: bool,
+	no_identification_headers: bool,
 	//
 	// Database options
 	//
@@ -145,7 +145,7 @@ pub async fn init(
 		log,
 		tick_interval,
 		no_banner,
-		hide_server_id_headers,
+		no_identification_headers,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
@@ -175,7 +175,7 @@ pub async fn init(
 		user,
 		pass,
 		tick_interval,
-		hide_server_id_headers,
+		no_identification_headers,
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 		engine: None,
