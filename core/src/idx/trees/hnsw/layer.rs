@@ -1,10 +1,14 @@
+use crate::err::Error;
+use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
+use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
 use hashbrown::HashSet;
+use reblessive::tree::Stk;
 
 #[derive(Debug)]
 pub(super) struct HnswLayer<S>
@@ -40,7 +44,7 @@ where
 	pub(super) fn search_single(
 		&self,
 		elements: &HnswElements,
-		q: &SharedVector,
+		pt: &SharedVector,
 		ep_dist: f64,
 		ep_id: ElementId,
 		ef: usize,
@@ -48,51 +52,67 @@ where
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
-		self.search(elements, q, candidates, visited, w, ef)
+		self.search(elements, pt, candidates, visited, w, ef)
+	}
+
+	pub(super) async fn search_single_checked(
+		&self,
+		search: &HnswCheckedSearchContext<'_>,
+		ep_pt: &SharedVector,
+		ep_dist: f64,
+		ep_id: ElementId,
+		stk: &mut Stk,
+		chk: &mut HnswConditionChecker<'_>,
+	) -> Result<DoublePriorityQueue, Error> {
+		let visited = HashSet::from([ep_id]);
+		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
+		let mut w = DoublePriorityQueue::default();
+		Self::add_if_truthy(search, &mut w, ep_pt, ep_dist, ep_id, stk, chk).await?;
+		self.search_checked(search, candidates, visited, w, stk, chk).await
 	}
 
 	pub(super) fn search_multi(
 		&self,
 		elements: &HnswElements,
-		q: &SharedVector,
+		pt: &SharedVector,
 		candidates: DoublePriorityQueue,
 		ef: usize,
 	) -> DoublePriorityQueue {
 		let w = candidates.clone();
 		let visited = w.to_set();
-		self.search(elements, q, candidates, visited, w, ef)
+		self.search(elements, pt, candidates, visited, w, ef)
 	}
 
 	pub(super) fn search_single_ignore_ep(
 		&self,
 		elements: &HnswElements,
-		q: &SharedVector,
+		pt: &SharedVector,
 		ep_id: ElementId,
 	) -> Option<(f64, ElementId)> {
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = candidates.clone();
-		let q = self.search(elements, q, candidates, visited, w, 1);
+		let q = self.search(elements, pt, candidates, visited, w, 1);
 		q.peek_first()
 	}
 
 	pub(super) fn search_multi_ignore_ep(
 		&self,
 		elements: &HnswElements,
-		q: &SharedVector,
+		pt: &SharedVector,
 		ep_id: ElementId,
-		ef: usize,
+		efc: usize,
 	) -> DoublePriorityQueue {
 		let visited = HashSet::from([ep_id]);
 		let candidates = DoublePriorityQueue::from(0.0, ep_id);
 		let w = DoublePriorityQueue::default();
-		self.search(elements, q, candidates, visited, w, ef)
+		self.search(elements, pt, candidates, visited, w, efc)
 	}
 
 	pub(super) fn search(
 		&self,
 		elements: &HnswElements,
-		q: &SharedVector,
+		pt: &SharedVector,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
@@ -109,15 +129,59 @@ where
 			}
 			if let Some(neighbourhood) = self.graph.get_edges(&doc) {
 				for &e_id in neighbourhood.iter() {
-					if visited.insert(e_id) {
-						if let Some(e_pt) = elements.get_vector(&e_id) {
-							let e_dist = elements.distance(e_pt, q);
-							if e_dist < f_dist || w.len() < ef {
-								candidates.push(e_dist, e_id);
-								w.push(e_dist, e_id);
-								if w.len() > ef {
-									w.pop_last();
-								}
+					// Did we already visit it?
+					if !visited.insert(e_id) {
+						continue;
+					}
+					if let Some(e_pt) = elements.get_vector(&e_id) {
+						let e_dist = elements.distance(e_pt, pt);
+						if e_dist < f_dist || w.len() < ef {
+							candidates.push(e_dist, e_id);
+							w.push(e_dist, e_id);
+							if w.len() > ef {
+								w.pop_last();
+							}
+							f_dist = w.peek_last_dist().unwrap(); // w can't be empty
+						}
+					}
+				}
+			}
+		}
+		w
+	}
+
+	pub(super) async fn search_checked(
+		&self,
+		search: &HnswCheckedSearchContext<'_>,
+		mut candidates: DoublePriorityQueue,
+		mut visited: HashSet<ElementId>,
+		mut w: DoublePriorityQueue,
+		stk: &mut Stk,
+		chk: &mut HnswConditionChecker<'_>,
+	) -> Result<DoublePriorityQueue, Error> {
+		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
+
+		let ef = search.ef();
+		let pt = search.pt();
+		let elements = search.elements();
+
+		while let Some((dist, doc)) = candidates.pop_first() {
+			if dist > f_dist {
+				break;
+			}
+			if let Some(neighbourhood) = self.graph.get_edges(&doc) {
+				for &e_id in neighbourhood.iter() {
+					// Did we already visit it?
+					if !visited.insert(e_id) {
+						continue;
+					}
+					if let Some(e_pt) = elements.get_vector(&e_id) {
+						let e_dist = elements.distance(e_pt, pt);
+						if e_dist < f_dist || w.len() < ef {
+							candidates.push(e_dist, e_id);
+							if Self::add_if_truthy(search, &mut w, e_pt, e_dist, e_id, stk, chk)
+								.await?
+							{
 								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
 							}
 						}
@@ -125,7 +189,30 @@ where
 				}
 			}
 		}
-		w
+		Ok(w)
+	}
+
+	pub(super) async fn add_if_truthy(
+		search: &HnswCheckedSearchContext<'_>,
+		w: &mut DoublePriorityQueue,
+		e_pt: &SharedVector,
+		e_dist: f64,
+		e_id: ElementId,
+		stk: &mut Stk,
+		chk: &mut HnswConditionChecker<'_>,
+	) -> Result<bool, Error> {
+		if let Some(docs) = search.get_docs(e_pt) {
+			if chk.check_truthy(stk, search.docs(), docs).await? {
+				w.push(e_dist, e_id);
+				if w.len() > search.ef() {
+					if let Some((_, id)) = w.pop_last() {
+						chk.expire(id);
+					}
+				}
+				return Ok(true);
+			}
+		}
+		Ok(false)
 	}
 
 	pub(super) fn insert(
@@ -223,12 +310,7 @@ where
 	S: DynamicSet<ElementId>,
 {
 	pub(in crate::idx::trees::hnsw) fn check_props(&self, elements: &HnswElements) {
-		assert!(
-			self.graph.len() <= elements.elements.len(),
-			"{} - {}",
-			self.graph.len(),
-			elements.elements.len()
-		);
+		assert!(self.graph.len() <= elements.len(), "{} - {}", self.graph.len(), elements.len());
 		for (e_id, f_ids) in self.graph.nodes() {
 			assert!(
 				f_ids.len() <= self.m_max,
@@ -238,7 +320,7 @@ where
 			);
 			assert!(!f_ids.contains(e_id), "!f_ids.contains(e_id) - el: {e_id} - f_ids: {f_ids:?}");
 			assert!(
-				elements.elements.contains_key(e_id),
+				elements.contains(e_id),
 				"h.elements.contains_key(e_id) - el: {e_id} - f_ids: {f_ids:?}"
 			);
 		}

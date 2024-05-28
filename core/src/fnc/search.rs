@@ -2,29 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
-use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::{Thing, Value};
+use crate::sql::Value;
 use reblessive::tree::Stk;
-
-fn get_execution_context<'a>(
-	ctx: &'a Context<'_>,
-	txn: Option<&'a Transaction>,
-	doc: Option<&'a CursorDoc<'_>>,
-) -> Option<(&'a Transaction, &'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
-	if let Some(txn) = txn {
-		if let Some(doc) = doc {
-			if let Some(thg) = doc.rid {
-				if let Some(pla) = ctx.get_query_planner() {
-					if let Some(exe) = pla.get_query_executor(&thg.tb) {
-						return Some((txn, exe, doc, thg));
-					}
-				}
-			}
-		}
-	}
-	None
-}
 
 pub async fn analyze(
 	(stk, ctx, txn, opt): (&mut Stk, &Context<'_>, Option<&Transaction>, Option<&Options>),
@@ -43,33 +24,38 @@ pub async fn score(
 	(ctx, txn, doc): (&Context<'_>, Option<&Transaction>, Option<&CursorDoc<'_>>),
 	(match_ref,): (Value,),
 ) -> Result<Value, Error> {
-	if let Some((txn, exe, doc, thg)) = get_execution_context(ctx, txn, doc) {
-		exe.score(txn, &match_ref, thg, doc.doc_id).await
-	} else {
-		Ok(Value::None)
+	if let Some(txn) = txn {
+		if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
+			return exe.score(txn, &match_ref, thg, doc.ir).await;
+		}
 	}
+	Ok(Value::None)
 }
 
 pub async fn highlight(
 	(ctx, txn, doc): (&Context<'_>, Option<&Transaction>, Option<&CursorDoc<'_>>),
 	(prefix, suffix, match_ref, partial): (Value, Value, Value, Option<Value>),
 ) -> Result<Value, Error> {
-	if let Some((txn, exe, doc, thg)) = get_execution_context(ctx, txn, doc) {
-		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
-		exe.highlight(txn, thg, prefix, suffix, match_ref, partial, doc.doc.as_ref()).await
-	} else {
-		Ok(Value::None)
+	if let Some(txn) = txn {
+		if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
+			let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
+			return exe
+				.highlight(txn, thg, prefix, suffix, match_ref, partial, doc.doc.as_ref())
+				.await;
+		}
 	}
+	Ok(Value::None)
 }
 
 pub async fn offsets(
 	(ctx, txn, doc): (&Context<'_>, Option<&Transaction>, Option<&CursorDoc<'_>>),
 	(match_ref, partial): (Value, Option<Value>),
 ) -> Result<Value, Error> {
-	if let Some((txn, exe, _, thg)) = get_execution_context(ctx, txn, doc) {
-		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
-		exe.offsets(txn, thg, match_ref, partial).await
-	} else {
-		Ok(Value::None)
+	if let Some(txn) = txn {
+		if let Some((exe, _, thg)) = get_execution_context(ctx, doc) {
+			let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
+			return exe.offsets(txn, thg, match_ref, partial).await;
+		}
 	}
+	Ok(Value::None)
 }

@@ -71,9 +71,6 @@ pub struct Datastore {
 	strict: bool,
 	// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
-	// Whether authentication level is enabled on this datastore.
-	// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-	auth_level_enabled: bool,
 	// The maximum duration timeout for running multiple statements in a query
 	query_timeout: Option<Duration>,
 	// The maximum duration timeout for running multiple statements in a transaction
@@ -365,8 +362,6 @@ impl Datastore {
 			inner,
 			strict: false,
 			auth_enabled: false,
-			// TODO(gguillemas): Remove this field once the legacy authentication is deprecated in v2.0.0
-			auth_level_enabled: false,
 			query_timeout: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -427,13 +422,6 @@ impl Datastore {
 		self
 	}
 
-	/// Set whether authentication levels are enabled for this Datastore
-	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-	pub fn with_auth_level_enabled(mut self, enabled: bool) -> Self {
-		self.auth_level_enabled = enabled;
-		self
-	}
-
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = caps;
@@ -467,12 +455,6 @@ impl Datastore {
 	/// Is authentication enabled for this Datastore?
 	pub fn is_auth_enabled(&self) -> bool {
 		self.auth_enabled
-	}
-
-	/// Is authentication level enabled for this Datastore?
-	/// TODO(gguillemas): Remove this method once the legacy authentication is deprecated in v2.0.0
-	pub fn is_auth_level_enabled(&self) -> bool {
-		self.auth_level_enabled
 	}
 
 	/// Does the datastore allow connections to a network target?
@@ -1021,22 +1003,25 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
-		#![allow(unused_variables)]
+		#[allow(unused_variables)]
 		let write = match write {
 			Read => false,
 			Write => true,
 		};
 
+		#[allow(unused_variables)]
 		let lock = match lock {
 			Pessimistic => true,
 			Optimistic => false,
 		};
 
+		#[allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
@@ -1080,7 +1065,6 @@ impl Datastore {
 		let (send, recv): (Sender<TrackedResult>, Receiver<TrackedResult>) =
 			channel::bounded(LQ_CHANNEL_SIZE);
 
-		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),

@@ -1,23 +1,24 @@
+pub mod checker;
 pub(crate) mod executor;
 pub(crate) mod iterators;
 pub(in crate::idx) mod knn;
 pub(crate) mod plan;
-mod tree;
+pub(in crate::idx) mod rewriter;
+pub(in crate::idx) mod tree;
 
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::executor::{
-	InnerQueryExecutor, IteratorEntry, IteratorRef, QueryExecutor,
-};
+use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
+use crate::idx::planner::iterators::IteratorRef;
+use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
-use crate::sql::{Cond, Expression, Table, Thing};
+use crate::sql::{Cond, Table};
 use reblessive::tree::Stk;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
 
 pub(crate) struct QueryPlanner<'a> {
 	opt: &'a Options,
@@ -66,6 +67,8 @@ impl<'a> QueryPlanner<'a> {
 					&t,
 					tree.index_map,
 					tree.knn_expressions,
+					tree.knn_brute_force_expressions,
+					tree.knn_condition,
 				)
 				.await?;
 				match PlanBuilder::build(tree.root, self.with, tree.with_indexes)? {
@@ -149,27 +152,24 @@ impl<'a> QueryPlanner<'a> {
 		let pos = self.iteration_index.fetch_add(1, Ordering::Relaxed);
 		match self.iteration_workflow.get(pos as usize) {
 			Some(IterationStage::BuildKnn) => {
-				Some(IterationStage::Iterate(Some(self.build_knn_sets().await)))
+				Some(IterationStage::Iterate(Some(self.build_bruteforce_knn_results().await)))
 			}
 			is => is.cloned(),
 		}
 	}
 
-	async fn build_knn_sets(&self) -> KnnSets {
+	async fn build_bruteforce_knn_results(&self) -> KnnBruteForceResults {
 		let mut results = HashMap::with_capacity(self.executors.len());
 		for (tb, exe) in &self.executors {
-			results.insert(tb.clone(), exe.build_knn_set().await);
+			results.insert(tb.clone(), exe.build_bruteforce_knn_result().await);
 		}
-		Arc::new(results)
+		results.into()
 	}
 }
 
-pub(crate) type KnnSet = HashMap<Arc<Expression>, HashSet<Arc<Thing>>>;
-pub(crate) type KnnSets = Arc<HashMap<String, KnnSet>>;
-
 #[derive(Clone)]
 pub(crate) enum IterationStage {
-	Iterate(Option<KnnSets>),
+	Iterate(Option<KnnBruteForceResults>),
 	CollectKnn,
 	BuildKnn,
 }
