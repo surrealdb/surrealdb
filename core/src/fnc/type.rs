@@ -98,12 +98,12 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::Strand(arg1), _) if arg1.is_empty() => Err(Error::TbInvalid {
-			value: arg1.to_string(),
+			value: arg1.as_string(),
 		}),
 
 		// Empty ID part
 		(_, Some(Value::Strand(arg2))) if arg2.is_empty() => Err(Error::IdInvalid {
-			value: arg2.to_string(),
+			value: arg2.as_string(),
 		}),
 
 		// Handle second argument
