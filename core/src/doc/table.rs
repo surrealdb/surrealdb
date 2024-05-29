@@ -117,44 +117,40 @@ impl<'a> Document<'a> {
 						Some(cond) => {
 							println!("COND: {cond}");
 							// What do we do with the initial value?
-							if !targeted_force && act != Action::Create {
-								if cond
-									.compute(stk, ctx, opt, Some(&self.initial))
-									.await?
-									.is_truthy()
-								{
-									// Delete the old value in the table
-									let stm = UpdateStatement {
-										what: Values(vec![Value::from(old)]),
-										data: Some(
-											self.data(stk, ctx, opt, Action::Delete, &tb.expr)
-												.await?,
-										),
-										..UpdateStatement::default()
-									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
-								}
+							if !targeted_force
+								&& act != Action::Create && cond
+								.compute(stk, ctx, opt, Some(&self.initial))
+								.await?
+								.is_truthy()
+							{
+								// Delete the old value in the table
+								let stm = UpdateStatement {
+									what: Values(vec![Value::from(old)]),
+									data: Some(
+										self.data(stk, ctx, opt, Action::Delete, &tb.expr).await?,
+									),
+									..UpdateStatement::default()
+								};
+								// Execute the statement
+								stm.compute(stk, ctx, opt, None).await?;
 							}
 							// What do we do with the current value?
-							if act != Action::Delete {
-								if cond
+							if act != Action::Delete
+								&& cond
 									.compute(stk, ctx, opt, Some(&self.current))
 									.await?
 									.is_truthy()
-								{
-									// Update the new value in the table
-									let stm = UpdateStatement {
-										what: Values(vec![Value::from(rid)]),
-										data: Some(
-											self.data(stk, ctx, opt, Action::Update, &tb.expr)
-												.await?,
-										),
-										..UpdateStatement::default()
-									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
-								}
+							{
+								// Update the new value in the table
+								let stm = UpdateStatement {
+									what: Values(vec![Value::from(rid)]),
+									data: Some(
+										self.data(stk, ctx, opt, Action::Update, &tb.expr).await?,
+									),
+									..UpdateStatement::default()
+								};
+								// Execute the statement
+								stm.compute(stk, ctx, opt, None).await?;
 							}
 						}
 						// No WHERE clause is specified
@@ -274,6 +270,7 @@ impl<'a> Document<'a> {
 		act: Action,
 		exp: &Fields,
 	) -> Result<Data, Error> {
+		println!("DATA {act:?}");
 		//
 		let mut ops: Ops = vec![];
 		// Create a new context with the initial or the current doc
@@ -296,6 +293,7 @@ impl<'a> Document<'a> {
 				if idiom.is_id() {
 					continue;
 				}
+				println!("Expr: {expr}");
 				// Process the field projection
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
@@ -317,6 +315,7 @@ impl<'a> Document<'a> {
 						}
 						Some("math::mean") => {
 							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
+							println!("val: {val}");
 							self.mean(&mut ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
