@@ -170,9 +170,17 @@ async fn define_foreign_table_with_delete() -> Result<(), Error> {
 	// From https://github.com/surrealdb/surrealdb/issues/3968
 	let sql = "
 		UPDATE wallet:1 CONTENT { value: 10, day: 1 };
+		UPDATE wallet:4 CONTENT {
+    		day: 1,
+		};
+		UPDATE wallet:5 CONTENT { value: 30, day: 1 };
 		DEFINE TABLE IF NOT EXISTS wallet_mean AS
-				SELECT math::mean(value) as mean, day FROM wallet WHERE value IS NOT NULL GROUP BY day;
+				SELECT math::mean(value) as mean, day FROM wallet WHERE value IS NOT NONE GROUP BY day;
 		UPDATE wallet:10 CONTENT { value: 20, day: 1 };
+		SELECT * FROM wallet_mean;
+		UPDATE wallet:5 CONTENT {
+    		day: 1,
+		};
 		SELECT * FROM wallet_mean;
 		DELETE wallet:10;
 		SELECT * FROM wallet_mean;
@@ -180,9 +188,25 @@ async fn define_foreign_table_with_delete() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 10);
 	//
-	skip_ok(res, 3)?;
+	skip_ok(res, 5)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					day: 1,
+					id: wallet_mean:[
+						1
+					],
+					mean: 20
+				}
+			]",
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	//
+	skip_ok(res, 1)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
