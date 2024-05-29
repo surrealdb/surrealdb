@@ -175,7 +175,7 @@ async fn define_foreign_table_with_non_truthy_condition() -> Result<(), Error> {
     		day: 1,
 		};
 		UPDATE wallet:5 CONTENT { value: 30, day: 1 };
-		DEFINE TABLE IF NOT EXISTS wallet_mean AS
+		DEFINE TABLE wallet_mean AS
 				SELECT math::mean(value) as mean, day FROM wallet WHERE value IS NOT NONE GROUP BY day;
 		UPDATE wallet:10 CONTENT { value: 20, day: 1 };
 		SELECT * FROM wallet_mean;
@@ -238,5 +238,66 @@ async fn define_foreign_table_with_non_truthy_condition() -> Result<(), Error> {
 			]",
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_non_truthy_multi_groups() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE wallet_mean AS
+			SELECT math::mean(value) as mean, day FROM wallet
+				WHERE value >= 5
+				GROUP BY day;
+
+		UPDATE wallet:1 CONTENT { value: 10.0, day: 1 } RETURN NONE;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+
+		UPDATE wallet:2 CONTENT { value: 15.0, day: 1 } RETURN NONE;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+
+		UPDATE wallet:3 CONTENT { value: 10.0, day: 2 } RETURN NONE;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+
+		UPDATE wallet:4 CONTENT { value: 5.0, day: 2 } RETURN NONE;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+
+		UPDATE wallet:2 SET value = 3.0 RETURN NONE;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+
+		UPDATE wallet:4 SET day = 3.0 RETURN NONE;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+
+		DELETE wallet:2;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+
+		DELETE wallet:3;
+		SELECT math::mean(value) as mean, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT mean, day FROM wallet_mean;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 25);
+	//
+	skip_ok(res, 1)?;
+	//
+	for i in 0..8 {
+		// Skip the UPDATE or DELETE statement
+		skip_ok(res, 1)?;
+		// Get the computed result
+		let comp = res.remove(0).result?;
+		// Get the projected result
+		let proj = res.remove(0).result?;
+		// Check they are similar
+		assert_eq!(format!("{proj:#}"), format!("{comp:#}"), "#{i}");
+	}
+	//
 	Ok(())
 }

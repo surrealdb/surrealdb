@@ -110,12 +110,19 @@ impl<'a> Document<'a> {
 						tb: ft.name.to_raw(),
 						id,
 					};
+					println!("OLD: {old} - RID: {rid}");
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							if cond.compute(stk, ctx, opt, Some(&self.current)).await?.is_truthy() {
-								if !targeted_force && act != Action::Create {
+							println!("COND: {cond}");
+							// What do we do with the initial value?
+							if !targeted_force && act != Action::Create {
+								if cond
+									.compute(stk, ctx, opt, Some(&self.initial))
+									.await?
+									.is_truthy()
+								{
 									// Delete the old value in the table
 									let stm = UpdateStatement {
 										what: Values(vec![Value::from(old)]),
@@ -128,27 +135,19 @@ impl<'a> Document<'a> {
 									// Execute the statement
 									stm.compute(stk, ctx, opt, None).await?;
 								}
-								if act != Action::Delete {
+							}
+							// What do we do with the current value?
+							if act != Action::Delete {
+								if cond
+									.compute(stk, ctx, opt, Some(&self.current))
+									.await?
+									.is_truthy()
+								{
 									// Update the new value in the table
 									let stm = UpdateStatement {
 										what: Values(vec![Value::from(rid)]),
 										data: Some(
 											self.data(stk, ctx, opt, Action::Update, &tb.expr)
-												.await?,
-										),
-										..UpdateStatement::default()
-									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
-								}
-							} else {
-								// Not truthy
-								if !targeted_force && act != Action::Create {
-									// Delete the old value in the table
-									let stm = UpdateStatement {
-										what: Values(vec![Value::from(old)]),
-										data: Some(
-											self.data(stk, ctx, opt, Action::Delete, &tb.expr)
 												.await?,
 										),
 										..UpdateStatement::default()
