@@ -114,76 +114,71 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(stk, ctx, opt, Some(&self.current)).await? {
-								v if v.is_truthy() => {
-									if !targeted_force && act != Action::Create {
-										// Delete the old value
-										let act = Action::Delete;
-										// Modify the value in the table
-										let stm = UpdateStatement {
-											what: Values(vec![Value::from(old)]),
-											data: Some(
-												self.data(stk, ctx, opt, act, &tb.expr).await?,
-											),
-											..UpdateStatement::default()
-										};
-										// Execute the statement
-										stm.compute(stk, ctx, opt, None).await?;
-									}
-									if act != Action::Delete {
-										// Update the new value
-										let act = Action::Update;
-										// Modify the value in the table
-										let stm = UpdateStatement {
-											what: Values(vec![Value::from(rid)]),
-											data: Some(
-												self.data(stk, ctx, opt, act, &tb.expr).await?,
-											),
-											..UpdateStatement::default()
-										};
-										// Execute the statement
-										stm.compute(stk, ctx, opt, None).await?;
-									}
+							if cond.compute(stk, ctx, opt, Some(&self.current)).await?.is_truthy() {
+								if !targeted_force && act != Action::Create {
+									// Delete the old value in the table
+									let stm = UpdateStatement {
+										what: Values(vec![Value::from(old)]),
+										data: Some(
+											self.data(stk, ctx, opt, Action::Delete, &tb.expr)
+												.await?,
+										),
+										..UpdateStatement::default()
+									};
+									// Execute the statement
+									stm.compute(stk, ctx, opt, None).await?;
 								}
-								_ => {
-									if !targeted_force && act != Action::Create {
-										// Update the new value
-										let act = Action::Update;
-										// Modify the value in the table
-										let stm = UpdateStatement {
-											what: Values(vec![Value::from(old)]),
-											data: Some(
-												self.data(stk, ctx, opt, act, &tb.expr).await?,
-											),
-											..UpdateStatement::default()
-										};
-										// Execute the statement
-										stm.compute(stk, ctx, opt, None).await?;
-									}
+								if act != Action::Delete {
+									// Update the new value in the table
+									let stm = UpdateStatement {
+										what: Values(vec![Value::from(rid)]),
+										data: Some(
+											self.data(stk, ctx, opt, Action::Update, &tb.expr)
+												.await?,
+										),
+										..UpdateStatement::default()
+									};
+									// Execute the statement
+									stm.compute(stk, ctx, opt, None).await?;
+								}
+							} else {
+								// Not truthy
+								if !targeted_force && act != Action::Create {
+									// Delete the old value in the table
+									let stm = UpdateStatement {
+										what: Values(vec![Value::from(old)]),
+										data: Some(
+											self.data(stk, ctx, opt, Action::Delete, &tb.expr)
+												.await?,
+										),
+										..UpdateStatement::default()
+									};
+									// Execute the statement
+									stm.compute(stk, ctx, opt, None).await?;
 								}
 							}
 						}
 						// No WHERE clause is specified
 						None => {
 							if !targeted_force && act != Action::Create {
-								// Delete the old value
-								let act = Action::Delete;
-								// Modify the value in the table
+								// Delete the old value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(old)]),
-									data: Some(self.data(stk, ctx, opt, act, &tb.expr).await?),
+									data: Some(
+										self.data(stk, ctx, opt, Action::Delete, &tb.expr).await?,
+									),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
 								stm.compute(stk, ctx, opt, None).await?;
 							}
 							if act != Action::Delete {
-								// Update the new value
-								let act = Action::Update;
-								// Modify the value in the table
+								// Update the new value in the table
 								let stm = UpdateStatement {
 									what: Values(vec![Value::from(rid)]),
-									data: Some(self.data(stk, ctx, opt, act, &tb.expr).await?),
+									data: Some(
+										self.data(stk, ctx, opt, Action::Update, &tb.expr).await?,
+									),
 									..UpdateStatement::default()
 								};
 								// Execute the statement
