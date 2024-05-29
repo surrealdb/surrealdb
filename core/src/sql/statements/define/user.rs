@@ -32,8 +32,8 @@ pub struct DefineUserStatement {
 	pub if_not_exists: bool,
 }
 
-impl From<(Base, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass): (Base, &str, &str)) -> Self {
+impl From<(Base, &str, &str, &str)> for DefineUserStatement {
+	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
 		DefineUserStatement {
 			base,
 			name: user.into(),
@@ -46,7 +46,7 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec!["owner".into()],
+			roles: vec![role.into()],
 			session: None,
 			comment: None,
 			if_not_exists: false,

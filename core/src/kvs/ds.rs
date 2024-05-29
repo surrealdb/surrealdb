@@ -483,7 +483,7 @@ impl Datastore {
 				// Display information in the logs
 				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
 				// Create and save a new root users
-				let stm = DefineUserStatement::from((Base::Root, username, password));
+				let stm = DefineUserStatement::from((Base::Root, username, password, "owner"));
 				let ctx = Context::default().set_transaction(txn.clone());
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 				let _ = stm.compute(&ctx, &opt, None).await?;
