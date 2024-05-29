@@ -175,6 +175,7 @@ pub mod is {
 	use regex::Regex;
 	use semver::Version;
 	use std::char;
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 	use url::Url;
 	use uuid::Uuid;
 
@@ -207,6 +208,18 @@ pub mod is {
 
 	pub fn hexadecimal((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(|x| char::is_ascii_hexdigit(&x)).into())
+	}
+
+	pub fn ip((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<IpAddr>().is_ok().into())
+	}
+
+	pub fn ipv4((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<Ipv4Addr>().is_ok().into())
+	}
+
+	pub fn ipv6((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<Ipv6Addr>().is_ok().into())
 	}
 
 	pub fn latitude((arg,): (String,)) -> Result<Value, Error> {
