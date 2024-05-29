@@ -172,14 +172,46 @@ async fn define_foreign_table_with_delete() -> Result<(), Error> {
 		UPDATE wallet:1 CONTENT { value: 10, day: 1 };
 		DEFINE TABLE IF NOT EXISTS wallet_mean AS
 				SELECT math::mean(value) as mean, day FROM wallet WHERE value IS NOT NULL GROUP BY day;
-		UPDATE wallet:10 CONTENT { value: 10, day: 1 };
+		UPDATE wallet:10 CONTENT { value: 20, day: 1 };
+		SELECT * FROM wallet_mean;
 		DELETE wallet:10;
+		SELECT * FROM wallet_mean;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 6);
 	//
-	skip_ok(res, 4)?;
+	skip_ok(res, 3)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					day: 1,
+					id: wallet_mean:[
+						1
+					],
+					mean: 15
+				}
+			]",
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	//
+	skip_ok(res, 1)?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+				{
+					day: 1,
+					id: wallet_mean:[
+						1
+					],
+					mean: 10
+				}
+			]",
+	);
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	Ok(())
 }
