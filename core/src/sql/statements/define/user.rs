@@ -15,7 +15,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,7 +25,7 @@ pub struct DefineUserStatement {
 	pub hash: String,
 	pub code: String,
 	pub roles: Vec<Ident>,
-	#[revision(start = 2)]
+	#[revision(start = 3)]
 	pub session: Option<Duration>,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
