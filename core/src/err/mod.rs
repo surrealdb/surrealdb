@@ -1000,6 +1000,12 @@ pub enum Error {
 
 	#[error("This record access method does not allow signin")]
 	AccessRecordNoSignin,
+
+	/// Found a table name for the record but this is not a valid table
+	#[error("Found {value} for the Record ID but this is not a valid table name")]
+	TbInvalid {
+		value: String,
+	},
 }
 
 impl From<Error> for String {
