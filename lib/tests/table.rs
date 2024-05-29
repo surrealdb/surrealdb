@@ -166,8 +166,9 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_delete() -> Result<(), Error> {
+async fn define_foreign_table_with_non_truthy_condition() -> Result<(), Error> {
 	// From https://github.com/surrealdb/surrealdb/issues/3968
+	// From https://github.com/surrealdb/surrealdb/issues/3966
 	let sql = "
 		UPDATE wallet:1 CONTENT { value: 10, day: 1 };
 		UPDATE wallet:4 CONTENT {
