@@ -523,6 +523,33 @@ mod tests {
 	}
 
 	#[test]
+	fn is_ip() {
+		let value = super::is::ip((String::from("127.0.0.1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ip((String::from("127.0.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ipv4() {
+		let value = super::is::ipv4((String::from("127.0.0.1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ipv4((String::from("127.0.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ipv6() {
+		let value = super::is::ipv6((String::from("::1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ipv6((String::from("200t:db8::"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
 	fn is_latitude() {
 		let value = super::is::latitude((String::from("-0.118092"),)).unwrap();
 		assert_eq!(value, Value::Bool(true));
