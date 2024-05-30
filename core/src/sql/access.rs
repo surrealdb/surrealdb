@@ -24,12 +24,12 @@ pub struct AccessDuration {
 impl Default for AccessDuration {
 	fn default() -> Self {
 		Self {
-			// By default, access grants expire after a quarter
-			grant: Some(Duration::from_days(90)),
+			// By default, access grants do not expire
+			grant: None,
 			// By default, tokens expire after one hour
 			token: Some(Duration::from_hours(1)),
 			// By default, sessions expire after one day
-			session: Some(Duration::from_hours(24)),
+			session: Some(Duration::from_days(1)),
 		}
 	}
 }
