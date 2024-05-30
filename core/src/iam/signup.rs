@@ -154,7 +154,7 @@ mod tests {
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE ACCESS user ON DATABASE DURATION FOR SESSION 2h TYPE RECORD
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -163,7 +163,9 @@ mod tests {
 							name: $user,
 							pass: crypto::argon2::generate($pass)
 						}
-					);
+					)
+					DURATION FOR SESSION 2h
+				;
 				"#,
 				&sess,
 				None,
@@ -218,7 +220,7 @@ mod tests {
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE ACCESS user ON DATABASE DURATION FOR SESSION 2h TYPE RECORD
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -227,7 +229,9 @@ mod tests {
 							name: $user,
 							pass: crypto::argon2::generate($pass)
 						}
-					);
+					)
+					DURATION FOR SESSION 2h
+				;
 				"#,
 				&sess,
 				None,
@@ -305,8 +309,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			ds.execute(
 				&format!(
 					r#"
-				DEFINE ACCESS user ON DATABASE
-					DURATION FOR SESSION 2h, FOR TOKEN 15m TYPE RECORD
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -318,6 +321,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					)
 				    WITH JWT ALGORITHM RS256 KEY '{public_key}'
 				        WITH ISSUER KEY '{private_key}'
+					DURATION FOR SESSION 2h, FOR TOKEN 15m
 				;
 
 				CREATE user:test CONTENT {{

@@ -526,7 +526,7 @@ fn parse_define_access_jwt_key() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DATABASE TYPE JWT DURATION FOR TOKEN 10s ALGORITHM HS256 KEY "foo""#
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" DURATION FOR TOKEN 10s"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -590,7 +590,7 @@ fn parse_define_access_jwt_key() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 KEY "bar" DURATION 10s"#
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 KEY "bar" DURATION FOR TOKEN 10s"#
 		);
 		assert!(
 			res.is_err(),
@@ -602,7 +602,7 @@ fn parse_define_access_jwt_key() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER KEY "bar" DURATION 10s"#
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR TOKEN 10s"#
 		);
 		assert!(
 			res.is_err(),
@@ -614,7 +614,7 @@ fn parse_define_access_jwt_key() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 DURATION 10s"#
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 DURATION FOR TOKEN 10s"#
 		);
 		assert!(
 			res.is_err(),
@@ -692,7 +692,7 @@ fn parse_define_access_jwt_jwks() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo" DURATION 10s"#
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo" DURATION FOR TOKEN 10s"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -755,7 +755,7 @@ fn parse_define_access_jwt_jwks() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo" DURATION 10s"#
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo" DURATION FOR TOKEN 10s"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -834,7 +834,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION FOR SESSION 7d SIGNUP true SIGNIN false"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD SIGNUP true SIGNIN false DURATION FOR SESSION 7d"#
 		)
 		.unwrap();
 
@@ -880,7 +880,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION FOR TOKEN 10s, FOR SESSION 15m WITH JWT ALGORITHM HS384 KEY "foo""#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR TOKEN 10s, FOR SESSION 15m"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -917,7 +917,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION FOR SESSION 10s, FOR TOKEN 15m WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar""#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR SESSION 10s, FOR TOKEN 15m"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -953,7 +953,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION FOR SESSION 10s, FOR TOKEN 15m WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION 1m"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION FOR SESSION 10s, FOR TOKEN 15m"#
 		)
 		.unwrap();
 		assert_eq!(
