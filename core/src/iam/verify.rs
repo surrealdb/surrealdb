@@ -2,7 +2,7 @@ use crate::dbs::Session;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
-use crate::iam::{token::Claims, Actor, Auth, Level, Role};
+use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::access_type::{AccessType, JwtAccessVerify};
 use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
@@ -197,7 +197,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.rd = Some(Value::from(id.to_owned()));
-			session.exp = token_data.claims.exp;
+			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				Default::default(),
@@ -256,7 +256,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.exp = token_data.claims.exp;
+			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				roles,
@@ -346,7 +346,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.exp = token_data.claims.exp;
+			session.exp = expiration(de.duration.session)?;
 			session.au =
 				Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Namespace(ns))));
 			Ok(())
