@@ -111,6 +111,7 @@ impl<'a> Document<'a> {
 						id,
 					};
 					println!("OLD: {old} - RID: {rid}");
+					let mut group_value = Value::None;
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
@@ -132,7 +133,8 @@ impl<'a> Document<'a> {
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(stk, ctx, opt, None).await?;
+								println!("STM: {stm}");
+								group_value = stm.compute(stk, ctx, opt, None).await?;
 							}
 							// What do we do with the current value?
 							if act != Action::Delete
@@ -150,7 +152,8 @@ impl<'a> Document<'a> {
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(stk, ctx, opt, None).await?;
+								println!("STM: {stm}");
+								group_value = stm.compute(stk, ctx, opt, None).await?;
 							}
 						}
 						// No WHERE clause is specified
@@ -165,7 +168,8 @@ impl<'a> Document<'a> {
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(stk, ctx, opt, None).await?;
+								println!("STM: {stm}");
+								group_value = stm.compute(stk, ctx, opt, None).await?;
 							}
 							if act != Action::Delete {
 								// Update the new value in the table
@@ -177,10 +181,12 @@ impl<'a> Document<'a> {
 									..UpdateStatement::default()
 								};
 								// Execute the statement
-								stm.compute(stk, ctx, opt, None).await?;
+								println!("STM: {stm}");
+								group_value = stm.compute(stk, ctx, opt, None).await?;
 							}
 						}
 					}
+					println!("GROUP VALUE: {group_value}");
 				}
 				// No GROUP BY clause is specified
 				None => {
@@ -272,13 +278,18 @@ impl<'a> Document<'a> {
 	) -> Result<Data, Error> {
 		println!("DATA {act:?}");
 		//
-		let mut ops: Ops = vec![];
+		let mut set_ops: Ops = vec![];
+		let mut del_ops: Ops = vec![];
 		// Create a new context with the initial or the current doc
 		let doc = match act {
 			Action::Delete => Some(&self.initial),
 			Action::Update => Some(&self.current),
 			_ => unreachable!(),
 		};
+		if let Some(doc) = doc {
+			println!("Doc: {:?}", doc.rid);
+		}
+
 		//
 		for field in exp.other() {
 			// Process the field
@@ -299,36 +310,35 @@ impl<'a> Document<'a> {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						Some("count") => {
 							let val = f.compute(stk, ctx, opt, doc).await?;
-							self.chg(&mut ops, &act, idiom, val);
+							self.chg(&mut set_ops, &act, idiom, val);
 						}
 						Some("math::sum") => {
 							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.chg(&mut ops, &act, idiom, val);
+							self.chg(&mut set_ops, &act, idiom, val);
 						}
 						Some("math::min") | Some("time::min") => {
 							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.min(&mut ops, &act, idiom, val);
+							self.min(&mut set_ops, &act, idiom, val);
 						}
 						Some("math::max") | Some("time::max") => {
 							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.max(&mut ops, &act, idiom, val);
+							self.max(&mut set_ops, &act, idiom, val);
 						}
 						Some("math::mean") => {
 							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							println!("val: {val}");
-							self.mean(&mut ops, &act, idiom, val);
+							self.mean(&mut set_ops, &mut del_ops, &act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
 						let val = expr.compute(stk, ctx, opt, doc).await?;
-						self.set(&mut ops, idiom, val);
+						self.set(&mut set_ops, idiom, val);
 					}
 				}
 			}
 		}
 		//
-		Ok(Data::SetExpression(ops))
+		Ok(Data::SetExpression(set_ops))
 	}
 	/// Set the field in the foreign table
 	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) {
@@ -387,13 +397,13 @@ impl<'a> Document<'a> {
 		}
 	}
 	/// Set the new average value for the field in the foreign table
-	fn mean(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
+	fn mean(&self, set_ops: &mut Ops, del_ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
 		//
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
 		key_c.0.push(Part::from("c"));
 		//
-		ops.push((
+		set_ops.push((
 			key.clone(),
 			Operator::Equal,
 			Value::Expression(Box::new(Expression::Binary {
@@ -446,15 +456,16 @@ impl<'a> Document<'a> {
 				))))),
 			})),
 		));
-		//
-		ops.push((
-			key_c.clone(),
-			match act {
-				Action::Delete => Operator::Dec,
-				Action::Update => Operator::Inc,
-				_ => unreachable!(),
-			},
-			Value::from(1),
-		));
+		// Count the number of values
+		let one = Value::from(1);
+		match act {
+			Action::Update => set_ops.push((key_c.clone(), Operator::Inc, one)),
+			Action::Delete => {
+				set_ops.push((key_c.clone(), Operator::Dec, one));
+				// Add a purge condition (if the number of values is 0)
+				del_ops.push((key_c.clone(), Operator::Equal, Value::from(0)));
+			}
+			_ => unreachable!(),
+		}
 	}
 }
