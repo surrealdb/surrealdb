@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{AccessDuration, AccessType, Base, Duration, Ident, Object, Strand, Value};
+use crate::sql::{AccessDuration, AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -141,9 +141,9 @@ impl Display for DefineAccessStatement {
 				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
-		if (self.duration.grant.is_some()
+		if self.duration.grant.is_some()
 			|| self.duration.token.is_some()
-			|| self.duration.session.is_some())
+			|| self.duration.session.is_some()
 		{
 			write!(f, " DURATION")?;
 			if let Some(access) = self.duration.grant {
