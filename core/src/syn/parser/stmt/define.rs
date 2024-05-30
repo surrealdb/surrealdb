@@ -251,6 +251,7 @@ impl Parser<'_> {
 						t!("JWT") => {
 							self.pop_peek();
 							res.kind = AccessType::Jwt(self.parse_jwt(None)?);
+							// TODO(PR): Set token duration to none if there is no issuer.
 						}
 						t!("RECORD") => {
 							self.pop_peek();
@@ -281,12 +282,15 @@ impl Parser<'_> {
 						_ => break,
 					}
 				}
-				t! {"DURATION"} => {
+				// TODO(PR): Support setting duration inside of kind parsing.
+				t!("DURATION") => {
+					self.pop_peek();
 					while self.eat(t!("FOR")) {
+						self.eat(t!(","));
 						match self.peek_kind() {
-							t!("ACCESS") => {
+							t!("GRANT") => {
 								self.pop_peek();
-								res.duration.access = Some(self.next_token_value()?);
+								res.duration.grant = Some(self.next_token_value()?);
 							}
 							t!("TOKEN") => {
 								self.pop_peek();
