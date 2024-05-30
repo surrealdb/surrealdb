@@ -1,9 +1,38 @@
-use crate::sql::{escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Id, Ident, Thing};
+use crate::sql::{
+	escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct AccessDuration {
+	// Duration after which the grants generated with the access method expire
+	// For access methods whose grants are tokens, this value is irrelevant
+	pub grant: Option<Duration>,
+	// Duration after which the tokens obtained with the access method expire
+	// For access methods that cannot issue tokens, this value is irrelevant
+	pub token: Option<Duration>,
+	// Duration after which the session authenticated with the access method expires
+	pub session: Option<Duration>,
+}
+
+impl Default for AccessDuration {
+	fn default() -> Self {
+		Self {
+			// By default, access grants expire after a quarter
+			grant: Some(Duration::from_days(90)),
+			// By default, tokens expire after one hour
+			token: Some(Duration::from_hours(1)),
+			// By default, sessions expire after one day
+			session: Some(Duration::from_hours(24)),
+		}
+	}
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

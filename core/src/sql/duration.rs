@@ -3,7 +3,7 @@ use crate::sql::strand::Strand;
 use crate::syn;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::iter::Sum;
 use std::ops;
 use std::ops::Deref;

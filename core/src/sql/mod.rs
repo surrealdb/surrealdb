@@ -77,6 +77,7 @@ pub mod serde;
 pub mod statements;
 
 pub use self::access::Access;
+pub use self::access::AccessDuration;
 pub use self::access::Accesses;
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;

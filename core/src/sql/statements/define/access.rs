@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{AccessType, Base, Ident, Object, Strand, Value};
+use crate::sql::{AccessDuration, AccessType, Base, Duration, Ident, Object, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -12,7 +12,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -20,8 +20,8 @@ pub struct DefineAccessStatement {
 	pub name: Ident,
 	pub base: Base,
 	pub kind: AccessType,
+	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
 	pub if_not_exists: bool,
 }
 
@@ -132,9 +132,6 @@ impl Display for DefineAccessStatement {
 			}
 			AccessType::Record(ac) => {
 				write!(f, " TYPE RECORD")?;
-				if let Some(ref v) = ac.duration {
-					write!(f, " DURATION {v}")?
-				}
 				if let Some(ref v) = ac.signup {
 					write!(f, " SIGNUP {v}")?
 				}
@@ -142,6 +139,21 @@ impl Display for DefineAccessStatement {
 					write!(f, " SIGNIN {v}")?
 				}
 				write!(f, " WITH JWT {}", ac.jwt)?;
+			}
+		}
+		if (self.duration.grant.is_some()
+			|| self.duration.token.is_some()
+			|| self.duration.session.is_some())
+		{
+			write!(f, " DURATION")?;
+			if let Some(access) = self.duration.grant {
+				write!(f, " FOR GRANT {}", access)?;
+			}
+			if let Some(token) = self.duration.token {
+				write!(f, " FOR TOKEN {}", token)?;
+			}
+			if let Some(session) = self.duration.session {
+				write!(f, " FOR SESSION {}", session)?;
 			}
 		}
 		if let Some(ref v) = self.comment {
@@ -167,6 +179,12 @@ impl InfoStructure for DefineAccessStatement {
 		acc.insert("base".to_string(), base.structure());
 
 		acc.insert("kind".to_string(), kind.structure());
+
+		let mut dur = Object::default();
+		dur.insert("grant".to_string(), self.duration.grant.into());
+		dur.insert("token".to_string(), self.duration.token.into());
+		dur.insert("session".to_string(), self.duration.session.into());
+		acc.insert("duration".to_string(), dur.to_string().into());
 
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());

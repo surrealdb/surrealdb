@@ -1,6 +1,6 @@
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
-use crate::sql::{escape::quote_str, Algorithm, Duration};
+use crate::sql::{escape::quote_str, Algorithm};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -52,8 +52,6 @@ impl Default for JwtAccess {
 			issue: Some(JwtAccessIssue {
 				alg,
 				key,
-				// Defaults to tokens lasting for one hour
-				duration: Some(Duration::from_hours(1)),
 			}),
 		}
 	}
@@ -90,7 +88,6 @@ impl JwtAccess {
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
 	pub key: String,
-	pub duration: Option<Duration>,
 }
 
 impl Default for JwtAccessIssue {
@@ -100,8 +97,6 @@ impl Default for JwtAccessIssue {
 			alg: Algorithm::Hs512,
 			// Avoid defaulting to empty key
 			key: DefineAccessStatement::random_key(),
-			// Defaults to tokens lasting for one hour
-			duration: Some(Duration::from_hours(1)),
 		}
 	}
 }
@@ -153,7 +148,6 @@ pub struct JwtAccessVerifyJwks {
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
-	pub duration: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
@@ -162,8 +156,6 @@ pub struct RecordAccess {
 impl Default for RecordAccess {
 	fn default() -> Self {
 		Self {
-			// Defaults to sessions lasting one hour
-			duration: Some(Duration::from_hours(1)),
 			signup: None,
 			signin: None,
 			jwt: JwtAccess {
@@ -187,9 +179,6 @@ impl Display for AccessType {
 			}
 			AccessType::Record(ac) => {
 				f.write_str(" RECORD")?;
-				if let Some(ref v) = ac.duration {
-					write!(f, " DURATION {v}")?
-				}
 				if let Some(ref v) = ac.signup {
 					write!(f, " SIGNUP {v}")?
 				}
@@ -219,9 +208,6 @@ impl InfoStructure for AccessType {
 				if let Some(signin) = ac.signin {
 					acc.insert("signin".to_string(), signin.structure());
 				}
-				if let Some(duration) = ac.duration {
-					acc.insert("duration".to_string(), duration.into());
-				}
 				acc.insert("jwt".to_string(), ac.jwt.structure());
 			}
 		};
@@ -242,9 +228,6 @@ impl Display for JwtAccess {
 		}
 		if let Some(iss) = &self.issue {
 			write!(f, " WITH ISSUER KEY {}", quote_str(&iss.key))?;
-			if let Some(ref v) = iss.duration {
-				write!(f, " DURATION {v}")?
-			}
 		}
 		Ok(())
 	}
@@ -266,9 +249,6 @@ impl InfoStructure for JwtAccess {
 			let mut iss = Object::default();
 			iss.insert("alg".to_string(), v.alg.structure());
 			iss.insert("key".to_string(), v.key.into());
-			if let Some(t) = v.duration {
-				iss.insert("duration".to_string(), t.into());
-			}
 			acc.insert("issuer".to_string(), iss.to_string().into());
 		}
 		Value::Object(acc)

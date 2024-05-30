@@ -148,8 +148,7 @@ pub async fn db_access(
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
-												// Token expiration is derived from issuer duration
-												exp: expiration(iss.duration)?,
+												exp: expiration(av.duration.token)?,
 												jti: Some(Uuid::new_v4().to_string()),
 												ns: Some(ns.to_owned()),
 												db: Some(db.to_owned()),
@@ -168,8 +167,7 @@ pub async fn db_access(
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
 											session.rd = Some(Value::from(rid.to_owned()));
-											// Session expiration is derived from record access duration
-											session.exp = expiration(at.duration)?;
+											session.exp = expiration(av.duration.session)?;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),
 												Default::default(),

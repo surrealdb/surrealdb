@@ -259,15 +259,6 @@ impl Parser<'_> {
 							};
 							loop {
 								match self.peek_kind() {
-									t!("DURATION") => {
-										self.pop_peek();
-										ac.duration = Some(self.next_token_value()?);
-										// By default, token duration matches session duration
-										// The token duration can be modified in the WITH JWT clause
-										if let Some(ref mut iss) = ac.jwt.issue {
-											iss.duration = ac.duration;
-										}
-									}
 									t!("SIGNUP") => {
 										self.pop_peek();
 										ac.signup =
@@ -288,6 +279,26 @@ impl Parser<'_> {
 							res.kind = AccessType::Record(ac);
 						}
 						_ => break,
+					}
+				}
+				t! {"DURATION"} => {
+					while self.eat(t!("FOR")) {
+						match self.peek_kind() {
+							t!("ACCESS") => {
+								self.pop_peek();
+								res.duration.access = Some(self.next_token_value()?);
+							}
+							t!("TOKEN") => {
+								self.pop_peek();
+								res.duration.token = Some(self.next_token_value()?);
+							}
+							t!("SESSION") => {
+								self.pop_peek();
+								res.duration.session = Some(self.next_token_value()?);
+							}
+							_ => break,
+						}
+						self.eat(t!(","));
 					}
 				}
 				_ => break,
@@ -439,11 +450,9 @@ impl Parser<'_> {
 				}
 				t!("SESSION") => {
 					self.pop_peek();
-					ac.duration = Some(self.next_token_value()?);
+					res.duration.session = Some(self.next_token_value()?);
 					// By default, token duration matches session duration.
-					if let Some(ref mut iss) = ac.jwt.issue {
-						iss.duration = ac.duration;
-					}
+					res.duration.token = res.duration.session;
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();
@@ -1089,13 +1098,6 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		// If an access method was passed, inherit any relevant defaults.
-		// This will become a match statement whenever more access methods are available.
-		if let Some(AccessType::Record(ac)) = ac {
-			// By default, token duration is inherited from session duration in record access.
-			iss.duration = ac.duration;
-		}
-
 		match self.peek_kind() {
 			t!("ALGORITHM") => {
 				self.pop_peek();
@@ -1170,10 +1172,6 @@ impl Parser<'_> {
 							}
 						}
 						iss.key = key;
-					}
-					t!("DURATION") => {
-						self.pop_peek();
-						iss.duration = Some(self.next_token_value()?);
 					}
 					_ => break,
 				}
