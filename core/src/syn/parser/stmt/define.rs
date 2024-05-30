@@ -250,7 +250,7 @@ impl Parser<'_> {
 					match self.peek_kind() {
 						t!("JWT") => {
 							self.pop_peek();
-							res.kind = AccessType::Jwt(self.parse_jwt(None)?);
+							res.kind = AccessType::Jwt(self.parse_jwt()?);
 							// TODO(PR): Set token duration to none if there is no issuer.
 						}
 						t!("RECORD") => {
@@ -275,7 +275,7 @@ impl Parser<'_> {
 							}
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
-								ac.jwt = self.parse_jwt(Some(AccessType::Record(ac.clone())))?;
+								ac.jwt = self.parse_jwt()?;
 							}
 							res.kind = AccessType::Record(ac);
 						}
@@ -1091,7 +1091,7 @@ impl Parser<'_> {
 		Ok(Kind::Record(names))
 	}
 
-	pub fn parse_jwt(&mut self, ac: Option<AccessType>) -> ParseResult<access_type::JwtAccess> {
+	pub fn parse_jwt(&mut self) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,
