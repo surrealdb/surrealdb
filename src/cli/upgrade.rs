@@ -111,12 +111,14 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 	let new_version = args.version().await?;
 
 	// Parsed version numbers follow semver format (major.minor.patch)
-	let old_version_parsed = parse_version(&old_version)?;
-	let new_version_parsed = parse_version(&new_version)?;
+	if new_version != NIGHTLY && new_version != BETA {
+		let old_version_parsed = parse_version(&old_version)?;
+		let new_version_parsed = parse_version(&new_version)?;
 
-	if old_version_parsed == new_version_parsed {
-		println!("{old_version} is already installed");
-		return Ok(());
+		if old_version_parsed == new_version_parsed {
+			println!("{old_version} is already installed");
+			return Ok(());
+		}
 	}
 
 	let arch = arch();
