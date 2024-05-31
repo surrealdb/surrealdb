@@ -480,11 +480,12 @@ impl<'a> Document<'a> {
 				))))),
 			})),
 		));
-		// Count the number of values
 		let one = Value::from(1);
 		match act {
+			//  Increment the number of values
 			Action::Update => set_ops.push((key_c, Operator::Inc, one)),
 			Action::Delete => {
+				//  Decrement the number of values
 				set_ops.push((key_c.clone(), Operator::Dec, one));
 				// Add a purge condition (delete record if the number of values is 0)
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));

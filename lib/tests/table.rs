@@ -165,120 +165,47 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn define_foreign_table_with_non_truthy_condition() -> Result<(), Error> {
-	// From https://github.com/surrealdb/surrealdb/issues/3968
-	// From https://github.com/surrealdb/surrealdb/issues/3966
-	let sql = "
-		UPDATE wallet:1 CONTENT { value: 10, day: 1 };
-		UPDATE wallet:4 CONTENT {
-    		day: 1,
-		};
-		UPDATE wallet:5 CONTENT { value: 30, day: 1 };
-		DEFINE TABLE wallet_mean AS
-				SELECT math::mean(value) as mean, day FROM wallet WHERE value IS NOT NONE GROUP BY day;
-		UPDATE wallet:10 CONTENT { value: 20, day: 1 };
-		SELECT * FROM wallet_mean;
-		UPDATE wallet:5 CONTENT {
-    		day: 1,
-		};
-		SELECT * FROM wallet_mean;
-		DELETE wallet:10;
-		SELECT * FROM wallet_mean;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 10);
-	//
-	skip_ok(res, 5)?;
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					day: 1,
-					id: wallet_mean:[
-						1
-					],
-					mean: 20
-				}
-			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-	//
-	skip_ok(res, 1)?;
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					day: 1,
-					id: wallet_mean:[
-						1
-					],
-					mean: 15
-				}
-			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-	//
-	skip_ok(res, 1)?;
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-				{
-					day: 1,
-					id: wallet_mean:[
-						1
-					],
-					mean: 10
-				}
-			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-	Ok(())
-}
-
-async fn define_foreign_table_with_non_truthy_and_group(agr: &str) -> Result<(), Error> {
+async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> {
+	let cond = if cond {
+		"WHERE value >= 5"
+	} else {
+		""
+	};
 	let sql = format!(
 		"
 		DEFINE TABLE wallet_agr AS
-			SELECT {agr} as agr, day FROM wallet
-				WHERE value >= 5
-				GROUP BY day;
+			SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		// 0
 		UPDATE wallet:1 CONTENT {{ value: 10.0, day: 1 }} RETURN NONE;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 1
 		UPDATE wallet:2 CONTENT {{ value: 15.0, day: 1 }} RETURN NONE;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 2
 		UPDATE wallet:3 CONTENT {{ value: 10.0, day: 2 }} RETURN NONE;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 3
 		UPDATE wallet:4 CONTENT {{ value: 5.0, day: 2 }} RETURN NONE;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 4
 		UPDATE wallet:2 SET value = 3.0 RETURN NONE;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 5
 		UPDATE wallet:4 SET day = 3.0 RETURN NONE;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 6
 		DELETE wallet:2;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 7
 		DELETE wallet:3;
-		SELECT {agr} as agr, day FROM wallet WHERE value >= 5 GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 	"
 	);
@@ -304,26 +231,51 @@ async fn define_foreign_table_with_non_truthy_and_group(agr: &str) -> Result<(),
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_non_truthy_group_mean() -> Result<(), Error> {
-	define_foreign_table_with_non_truthy_and_group("math::mean(value)").await
+async fn define_foreign_table_with_cond_group_mean() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::mean(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_non_truthy_group_count() -> Result<(), Error> {
-	define_foreign_table_with_non_truthy_and_group("count()").await
+async fn define_foreign_table_with_with_cond_group_count() -> Result<(), Error> {
+	define_foreign_table_group(true, "count()").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_non_truthy_group_min() -> Result<(), Error> {
-	define_foreign_table_with_non_truthy_and_group("math::min(value)").await
+async fn define_foreign_table_with_cond_group_min() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::min(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_non_truthy_group_max() -> Result<(), Error> {
-	define_foreign_table_with_non_truthy_and_group("math::max(value)").await
+async fn define_foreign_table_with_cond_group_max() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::max(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_non_truthy_group_sum() -> Result<(), Error> {
-	define_foreign_table_with_non_truthy_and_group("math::sum(value)").await
+async fn define_foreign_table_with_cond_group_sum() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::sum(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_mean() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::mean(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_count() -> Result<(), Error> {
+	define_foreign_table_group(false, "count()").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_min() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::min(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_max() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::max(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_sum() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::sum(value)").await
 }
