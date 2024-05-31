@@ -277,7 +277,7 @@ impl<'a> Document<'a> {
 					o,
 					r: v,
 				}));
-				while let Some((i, o, v)) = iter.next() {
+				for (i, o, v) in iter {
 					let exp = Value::Expression(Box::new(Expression::Binary {
 						l: Value::Idiom(i),
 						o,
