@@ -331,11 +331,11 @@ impl<'a> Document<'a> {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						Some("count") => {
 							let val = f.compute(stk, ctx, opt, doc).await?;
-							self.chg(&mut set_ops, &act, idiom, val);
+							self.chg(&mut set_ops, &mut del_ops, &act, idiom, val);
 						}
 						Some("math::sum") => {
 							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.chg(&mut set_ops, &act, idiom, val);
+							self.chg(&mut set_ops, &mut del_ops, &act, idiom, val);
 						}
 						Some("math::min") | Some("time::min") => {
 							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
@@ -366,17 +366,20 @@ impl<'a> Document<'a> {
 		ops.push((key, Operator::Equal, val));
 	}
 	/// Increment or decrement the field in the foreign table
-	fn chg(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
-		ops.push((
-			key,
-			match act {
-				Action::Delete => Operator::Dec,
-				Action::Update => Operator::Inc,
-				_ => unreachable!(),
-			},
-			val,
-		));
+	fn chg(&self, set_ops: &mut Ops, del_ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
+		match act {
+			Action::Update => {
+				set_ops.push((key.clone(), Operator::Inc, val));
+			}
+			Action::Delete => {
+				set_ops.push((key.clone(), Operator::Dec, val));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key, Operator::Equal, Value::from(0)));
+			}
+			_ => unreachable!(),
+		}
 	}
+
 	/// Set the new minimum value for the field in the foreign table
 	fn min(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
 		if act == &Action::Update {
@@ -480,11 +483,11 @@ impl<'a> Document<'a> {
 		// Count the number of values
 		let one = Value::from(1);
 		match act {
-			Action::Update => set_ops.push((key_c.clone(), Operator::Inc, one)),
+			Action::Update => set_ops.push((key_c, Operator::Inc, one)),
 			Action::Delete => {
 				set_ops.push((key_c.clone(), Operator::Dec, one));
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c.clone(), Operator::Equal, Value::from(0)));
+				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 			_ => unreachable!(),
 		}
