@@ -182,6 +182,7 @@ impl Parser<'_> {
 			name,
 			base,
 			vec!["Viewer".into()], // New users get the viewer role by default
+			None,                  // Sessions for system users do not expire by default
 		);
 
 		if if_not_exists {
@@ -208,6 +209,10 @@ impl Parser<'_> {
 					while self.eat(t!(",")) {
 						res.roles.push(self.next_token_value()?);
 					}
+				}
+				t!("SESSION") => {
+					self.pop_peek();
+					res.set_session(Some(self.next_token_value()?));
 				}
 				_ => break,
 			}
