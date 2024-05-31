@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{AccessDuration, AccessType, Base, Ident, Object, Strand, Value};
+use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -186,6 +186,7 @@ impl InfoStructure for DefineAccessStatement {
 			name,
 			base,
 			kind,
+			duration,
 			comment,
 			..
 		} = self;
@@ -195,17 +196,17 @@ impl InfoStructure for DefineAccessStatement {
 
 		acc.insert("base".to_string(), base.structure());
 
-		acc.insert("kind".to_string(), kind.structure());
-
 		let mut dur = Object::default();
-		if self.kind.can_issue_grants() {
-			dur.insert("grant".to_string(), self.duration.grant.into());
+		if kind.can_issue_grants() {
+			dur.insert("grant".to_string(), duration.grant.into());
 		}
-		if self.kind.can_issue_tokens() {
-			dur.insert("token".to_string(), self.duration.token.into());
+		if kind.can_issue_tokens() {
+			dur.insert("token".to_string(), duration.token.into());
 		}
-		dur.insert("session".to_string(), self.duration.session.into());
+		dur.insert("session".to_string(), duration.session.into());
 		acc.insert("duration".to_string(), dur.to_string().into());
+
+		acc.insert("kind".to_string(), kind.structure());
 
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());

@@ -16,8 +16,8 @@ use crate::{
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
-		Values,
+		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand,
+		TableType, Values,
 	},
 	syn::{
 		parser::{
@@ -182,7 +182,7 @@ impl Parser<'_> {
 			name,
 			base,
 			vec!["Viewer".into()], // New users get the viewer role by default
-			None,                  // Sessions for system users do not expire by default
+			user::UserDuration::default(),
 		);
 
 		if if_not_exists {
@@ -210,9 +210,23 @@ impl Parser<'_> {
 						res.roles.push(self.next_token_value()?);
 					}
 				}
-				t!("SESSION") => {
+				t!("DURATION") => {
 					self.pop_peek();
-					res.set_session(Some(self.next_token_value()?));
+					while self.eat(t!("FOR")) {
+						self.eat(t!(","));
+						match self.peek_kind() {
+							t!("TOKEN") => {
+								self.pop_peek();
+								res.set_token_dur(Some(self.next_token_value()?));
+							}
+							t!("SESSION") => {
+								self.pop_peek();
+								res.set_session_dur(Some(self.next_token_value()?));
+							}
+							_ => break,
+						}
+						self.eat(t!(","));
+					}
 				}
 				_ => break,
 			}
@@ -256,7 +270,6 @@ impl Parser<'_> {
 						t!("JWT") => {
 							self.pop_peek();
 							res.kind = AccessType::Jwt(self.parse_jwt()?);
-							// TODO(PR): Set token duration to none if there is no issuer.
 						}
 						t!("RECORD") => {
 							self.pop_peek();
@@ -287,7 +300,6 @@ impl Parser<'_> {
 						_ => break,
 					}
 				}
-				// TODO(PR): Support setting duration inside of kind parsing.
 				t!("DURATION") => {
 					self.pop_peek();
 					while self.eat(t!("FOR")) {

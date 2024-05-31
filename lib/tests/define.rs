@@ -1782,13 +1782,13 @@ async fn permissions_checks_define_access_db() {
 async fn permissions_checks_define_user_root() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER SESSION 1d"),
+		("test", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
 		("check", "INFO FOR ROOT"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER SESSION 1d\" } }"],
+        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
 		vec!["{ namespaces: {  }, users: {  } }"]
     ];
 
@@ -1824,13 +1824,13 @@ async fn permissions_checks_define_user_root() {
 async fn permissions_checks_define_user_ns() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER SESSION 1d"),
+		("test", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
 		("check", "INFO FOR NS"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER SESSION 1d\" } }"],
+        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"]
     ];
 
@@ -1866,13 +1866,13 @@ async fn permissions_checks_define_user_ns() {
 async fn permissions_checks_define_user_db() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER SESSION 1d"),
+		("test", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER SESSION 1d\" } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
@@ -2601,8 +2601,8 @@ async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(
 #[tokio::test]
 async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2621,8 +2621,8 @@ async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 #[tokio::test]
 async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

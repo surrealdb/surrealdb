@@ -98,7 +98,7 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
-				session.exp = expiration(u.session)?;
+				session.exp = expiration(u.duration.session)?;
 				session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 				Ok(())
 			}
@@ -108,7 +108,7 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
-				session.exp = expiration(u.session)?;
+				session.exp = expiration(u.duration.session)?;
 				session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 				Ok(())
 			}
@@ -118,7 +118,7 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
-				session.exp = expiration(u.session)?;
+				session.exp = expiration(u.duration.session)?;
 				session.au = Arc::new((&u, Level::Root).into());
 				Ok(())
 			}
@@ -286,7 +286,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = token_data.claims.exp;
+			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
@@ -371,7 +371,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Set the session
 			session.tk = Some(value);
 			session.ns = Some(ns.to_owned());
-			session.exp = token_data.claims.exp;
+			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
@@ -400,7 +400,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticated to root level with user `{}`", id);
 			// Set the session
 			session.tk = Some(value);
-			session.exp = token_data.claims.exp;
+			session.exp = expiration(de.duration.session)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
 				de.roles.iter().map(|r| r.into()).collect(),
@@ -523,7 +523,7 @@ mod tests {
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
-				"DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER SESSION 1d",
+				"DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR SESSION 1d",
 				&sess,
 				None,
 			)
@@ -545,7 +545,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			// Expiration has been set explicitly
+			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
 			let min_exp = (Utc::now() + Duration::days(1) - Duration::seconds(10)).timestamp();
@@ -607,7 +607,7 @@ mod tests {
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
-				"DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER SESSION 1d",
+				"DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR SESSION 1d",
 				&sess,
 				None,
 			)
@@ -693,7 +693,7 @@ mod tests {
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
-				"DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER SESSION 1d",
+				"DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR SESSION 1d",
 				&sess,
 				None,
 			)

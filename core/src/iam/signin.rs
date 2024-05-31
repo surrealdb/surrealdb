@@ -213,12 +213,11 @@ pub async fn db_user(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
-			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp,
+				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.to_owned()),
 				db: Some(db.to_owned()),
@@ -233,7 +232,7 @@ pub async fn db_user(
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = expiration(u.session)?;
+			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 			// Check the authentication token
 			match enc {
@@ -258,12 +257,11 @@ pub async fn ns_user(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
-			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp,
+				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.to_owned()),
 				id: Some(user),
@@ -276,7 +274,7 @@ pub async fn ns_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
-			session.exp = expiration(u.session)?;
+			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 			// Check the authentication token
 			match enc {
@@ -301,12 +299,11 @@ pub async fn root_user(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
-			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp,
+				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				id: Some(user),
 				..Claims::default()
@@ -317,7 +314,7 @@ pub async fn root_user(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into());
-			session.exp = expiration(u.session)?;
+			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Root).into());
 			// Check the authentication token
 			match enc {
@@ -621,7 +618,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_db_user() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -658,12 +655,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test with roles defined
+		// Test with roles and expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h", &sess, None)
 				.await
 				.unwrap();
 
@@ -693,7 +690,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(6) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(6) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		// Test invalid password
@@ -722,7 +727,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_ns_user() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -750,12 +755,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test with roles defined
+		// Test with roles and expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test");
-			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h", &sess, None)
 				.await
 				.unwrap();
 
@@ -776,7 +781,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(6) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(6) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		// Test invalid password
@@ -804,7 +817,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_root_user() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -827,12 +840,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test with roles defined
+		// Test with roles and expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner();
-			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h", &sess, None)
 				.await
 				.unwrap();
 
@@ -848,7 +861,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(6) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(6) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		// Test invalid password
