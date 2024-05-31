@@ -333,7 +333,8 @@ mod tests {
 	use super::*;
 	use crate::iam::Role;
 	use chrono::Duration;
-	use std::collections::HashMap;
+	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+	use std::collections::{HashMap, HashSet};
 
 	#[tokio::test]
 	async fn test_signin_record() {
@@ -464,7 +465,6 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_signin_record_with_jwt_issuer() {
-		use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 		// Test with correct credentials
 		{
 			let public_key = r#"-----BEGIN PUBLIC KEY-----
@@ -656,6 +656,72 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
+		// Test without roles and expiration disabled
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				"DEFINE USER user ON DB PASSWORD 'pass' DURATION FOR TOKEN NONE, FOR SESSION NONE",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				db: Some("test".to_string()),
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = db_user(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					// By default, tokens without expiration are not accepted
+					// TODO(gguillemas): Consider whether or not we want to
+					validation.required_spec_claims = HashSet::new();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				assert_eq!(token_data.claims.exp, None);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, Some("test".to_string()));
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
+		}
+
+		//
 		// Test with roles and expiration defined
 		//
 		{
@@ -700,6 +766,38 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				exp > min_exp && exp < max_exp,
 				"Session expiration is expected to match the defined duration"
 			);
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::minutes(15) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, Some("test".to_string()));
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
 		}
 
 		// Test invalid password
@@ -756,6 +854,63 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
+		// Test without roles and expiration disabled
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute(
+				"DEFINE USER user ON NS PASSWORD 'pass' DURATION FOR TOKEN NONE, FOR SESSION NONE",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res =
+				ns_user(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
+					.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					// By default, tokens without expiration are not accepted
+					// TODO(gguillemas): Consider whether or not we want to
+					validation.required_spec_claims = HashSet::new();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				assert_eq!(token_data.claims.exp, None);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
+		}
+
+		//
 		// Test with roles and expiration defined
 		//
 		{
@@ -791,6 +946,38 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				exp > min_exp && exp < max_exp,
 				"Session expiration is expected to match the defined duration"
 			);
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::minutes(15) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
 		}
 
 		// Test invalid password
@@ -841,6 +1028,52 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
+		// Test without roles and expiration disabled
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' DURATION FOR TOKEN NONE, FOR SESSION NONE", &sess, None).await.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = root_user(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_root());
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					// By default, tokens without expiration are not accepted
+					// TODO(gguillemas): Consider whether or not we want to
+					validation.required_spec_claims = HashSet::new();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				assert_eq!(token_data.claims.exp, None);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, None);
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
+		}
+
+		//
 		// Test with roles and expiration defined
 		//
 		{
@@ -871,6 +1104,38 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				exp > min_exp && exp < max_exp,
 				"Session expiration is expected to match the defined duration"
 			);
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::minutes(15) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, None);
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
 		}
 
 		// Test invalid password

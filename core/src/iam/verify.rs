@@ -760,7 +760,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE ACCESS token ON NS TYPE JWT ALGORITHM HS512 KEY '{secret}'").as_str(),
+			format!("DEFINE ACCESS token ON NS TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d").as_str(),
 			&sess,
 			None,
 		)
@@ -789,7 +789,15 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		//
@@ -814,7 +822,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		//
@@ -868,7 +884,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
-			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}'")
+			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d")
 				.as_str(),
 			&sess,
 			None,
@@ -899,7 +915,15 @@ mod tests {
 			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		//
@@ -925,7 +949,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		//
@@ -983,7 +1015,8 @@ mod tests {
 			format!(
 				r#"
 			DEFINE ACCESS token ON DATABASE TYPE RECORD
-				WITH JWT ALGORITHM HS512 KEY '{secret}';
+				WITH JWT ALGORITHM HS512 KEY '{secret}'
+				DURATION FOR SESSION 30d;
 
 			CREATE user:test;
 			"#
@@ -1020,7 +1053,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		//
@@ -1048,7 +1089,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		//
@@ -1245,7 +1294,8 @@ mod tests {
 			format!(
 				r#"
 			DEFINE ACCESS token ON DATABASE TYPE RECORD
-				WITH JWT ALGORITHM HS512 KEY '{secret}';
+				WITH JWT ALGORITHM HS512 KEY '{secret}'
+				DURATION FOR SESSION 30d;
 
 			CREATE user:test;
 			"#
@@ -1314,7 +1364,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			// Session expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 			let tk = match sess.tk {
 				Some(Value::Object(tk)) => tk,
 				_ => panic!("Session token is not an object"),

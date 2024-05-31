@@ -610,7 +610,7 @@ async fn access_info_redacted_structure() {
 	// Record
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON NS TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h';
+			DEFINE ACCESS access ON NS TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
 			INFO FOR NS STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap();
