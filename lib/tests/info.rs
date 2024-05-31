@@ -412,8 +412,8 @@ async fn permissions_checks_info_user_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6d\""],
-		vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6d\""],
+		vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
+		vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
 	];
 
 	let test_cases = [
@@ -577,7 +577,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'NAMESPACE', duration: '{ session: 6h, token: 15m }', kind: { jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'JWT'}, name: 'access' }], databases: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'NAMESPACE', duration: '{ session: 6h, token: 15m }', kind: { jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
