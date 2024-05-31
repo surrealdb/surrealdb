@@ -217,11 +217,23 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("TOKEN") => {
 								self.pop_peek();
-								res.set_token_dur(Some(self.next_token_value()?));
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.set_token_dur(None)
+									}
+									_ => res.set_token_dur(Some(self.next_token_value()?)),
+								}
 							}
 							t!("SESSION") => {
 								self.pop_peek();
-								res.set_session_dur(Some(self.next_token_value()?));
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.set_session_dur(None)
+									}
+									_ => res.set_session_dur(Some(self.next_token_value()?)),
+								}
 							}
 							_ => break,
 						}
@@ -307,15 +319,33 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("GRANT") => {
 								self.pop_peek();
-								res.duration.grant = Some(self.next_token_value()?);
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.duration.grant = None
+									}
+									_ => res.duration.grant = Some(self.next_token_value()?),
+								}
 							}
 							t!("TOKEN") => {
 								self.pop_peek();
-								res.duration.token = Some(self.next_token_value()?);
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.duration.token = None
+									}
+									_ => res.duration.token = Some(self.next_token_value()?),
+								}
 							}
 							t!("SESSION") => {
 								self.pop_peek();
-								res.duration.session = Some(self.next_token_value()?);
+								match self.peek_kind() {
+									t!("NONE") => {
+										self.pop_peek();
+										res.duration.session = None
+									}
+									_ => res.duration.session = Some(self.next_token_value()?),
+								}
 							}
 							_ => break,
 						}
