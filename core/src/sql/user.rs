@@ -1,8 +1,6 @@
 use crate::sql::Duration;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
 use std::str;
 
 #[revisioned(revision = 1)]

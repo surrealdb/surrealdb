@@ -10,7 +10,7 @@ use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::AccessType;
 use crate::sql::Object;
 use crate::sql::Value;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use std::sync::Arc;
 use uuid::Uuid;
