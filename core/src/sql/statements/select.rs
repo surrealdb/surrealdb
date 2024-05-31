@@ -65,6 +65,7 @@ impl SelectStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		println!("EXE {self}");
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
@@ -150,7 +151,7 @@ impl SelectStatement {
 			ctx.set_query_planner(&planner);
 		}
 		// Output the results
-		match i.output(stk, &ctx, opt, &stm).await? {
+		let res = match i.output(stk, &ctx, opt, &stm).await? {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There were no results
@@ -162,7 +163,9 @@ impl SelectStatement {
 			},
 			// This is standard query result
 			v => Ok(v),
-		}
+		}?;
+		println!("RES: {res} => {self}");
+		Ok(res)
 	}
 }
 

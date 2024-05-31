@@ -18,7 +18,7 @@ use crate::sql::statements::{DefineTableStatement, SelectStatement};
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
-use crate::sql::{Cond, Groups, View};
+use crate::sql::{Cond, Function, Groups, View};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
@@ -330,7 +330,6 @@ impl<'a> Document<'a> {
 			data: Some(Data::SetExpression(set_ops)),
 			..UpdateStatement::default()
 		};
-		println!("{stm}");
 		stm.compute(stk, ctx, opt, None).await?;
 
 		if !del_ops.is_empty() {
@@ -359,7 +358,9 @@ impl<'a> Document<'a> {
 					cond: Some(Cond(root)),
 					..DeleteStatement::default()
 				};
-				stm.compute(stk, ctx, opt, None).await?;
+				println!("{stm}");
+				let res = stm.compute(stk, ctx, opt, None).await?;
+				println!("{res}");
 			}
 		}
 		Ok(())
@@ -444,34 +445,7 @@ impl<'a> Document<'a> {
 	/// Set the new minimum value for the field in the foreign table
 	fn min(
 		&self,
-		ops: &mut Ops,
-		fdc: &FieldDataContext<'_>,
-		_field: &Field,
-		key: Idiom,
-		val: Value,
-	) {
-		if fdc.act == FieldAction::Add {
-			ops.push((
-				key.clone(),
-				Operator::Equal,
-				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
-					exprs: vec![(
-						Value::Expression(Box::new(Expression::Binary {
-							l: Value::Idiom(key.clone()),
-							o: Operator::MoreThan,
-							r: val.clone(),
-						})),
-						val,
-					)],
-					close: Some(Value::Idiom(key)),
-				}))),
-			));
-		}
-	}
-	/// Set the new maximum value for the field in the foreign table
-	fn max(
-		&self,
-		ops: &mut Ops,
+		set_ops: &mut Ops,
 		fdc: &FieldDataContext<'_>,
 		field: &Field,
 		key: Idiom,
@@ -479,7 +453,43 @@ impl<'a> Document<'a> {
 	) {
 		match fdc.act {
 			FieldAction::Add => {
-				ops.push((
+				set_ops.push((
+					key.clone(),
+					Operator::Equal,
+					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+						exprs: vec![(
+							Value::Expression(Box::new(Expression::Binary {
+								l: Value::Idiom(key.clone()),
+								o: Operator::MoreThan,
+								r: val.clone(),
+							})),
+							val,
+						)],
+						close: Some(Value::Idiom(key)),
+					}))),
+				));
+			}
+			FieldAction::Sub => {
+				// If it is equal to the previous MIN value,
+				// as we can't know what was the previous MIN value,
+				// we have to recompute it
+				let subquery = Self::one_group_query(fdc, field, &key, val);
+				set_ops.push((key.clone(), Operator::Equal, subquery));
+			}
+		}
+	}
+	/// Set the new maximum value for the field in the foreign table
+	fn max(
+		&self,
+		set_ops: &mut Ops,
+		fdc: &FieldDataContext<'_>,
+		field: &Field,
+		key: Idiom,
+		val: Value,
+	) {
+		match fdc.act {
+			FieldAction::Add => {
+				set_ops.push((
 					key.clone(),
 					Operator::Equal,
 					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
@@ -496,31 +506,89 @@ impl<'a> Document<'a> {
 				));
 			}
 			FieldAction::Sub => {
-				println!("{key}");
 				// If it is equal to the previous MAX value,
-				// as we can know what was the previous MAX value was,
+				// as we can't know what was the previous MAX value,
 				// we have to recompute the MAX
-				let compute_query = Value::Subquery(Box::new(Subquery::Select(SelectStatement {
-					expr: Fields(vec![field.clone()], false),
-					what: (&fdc.view.what).into(),
-					..SelectStatement::default()
-				})));
-				let subquery = Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
-					exprs: vec![(
-						Value::Expression(Box::new(Expression::Binary {
-							l: Value::Idiom(key.clone()),
-							o: Operator::Equal,
-							r: val.clone(),
-						})),
-						compute_query,
-					)],
-					close: Some(Value::Idiom(key.clone())),
-				})));
-				println!("subquery: {subquery}");
-				ops.push((key, Operator::Equal, subquery));
+				let subquery = Self::one_group_query(fdc, field, &key, val);
+				set_ops.push((key.clone(), Operator::Equal, subquery));
 			}
 		}
 	}
+
+	/// Recomputes the value for one group
+	fn one_group_query(
+		fdc: &FieldDataContext<'_>,
+		field: &Field,
+		key: &Idiom,
+		val: Value,
+	) -> Value {
+		// Build the condition merging the optional user provided condition and the group
+		let mut iter = fdc.groups.0.iter().enumerate();
+		let cond = if let Some((i, g)) = iter.next() {
+			let mut root = Value::Expression(Box::new(Expression::Binary {
+				l: Value::Idiom(g.0.clone()),
+				o: Operator::Equal,
+				r: fdc.group_ids[i].clone(),
+			}));
+			for (i, g) in iter {
+				let exp = Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(g.0.clone()),
+					o: Operator::Equal,
+					r: fdc.group_ids[i].clone(),
+				}));
+				root = Value::Expression(Box::new(Expression::Binary {
+					l: root,
+					o: Operator::And,
+					r: exp,
+				}));
+			}
+			if let Some(c) = &fdc.view.cond {
+				root = Value::Expression(Box::new(Expression::Binary {
+					l: root,
+					o: Operator::And,
+					r: c.0.clone(),
+				}));
+			}
+			Some(Cond(root))
+		} else {
+			fdc.view.cond.clone()
+		};
+
+		let group_select = Value::Subquery(Box::new(Subquery::Select(SelectStatement {
+			expr: Fields(vec![field.clone()], false),
+			cond,
+			what: (&fdc.view.what).into(),
+			group: Some(fdc.groups.clone()),
+			..SelectStatement::default()
+		})));
+		let array_first = Value::Function(Box::new(Function::Normal(
+			"array::first".to_string(),
+			vec![group_select],
+		)));
+		let ident = match field {
+			Field::Single {
+				alias: Some(alias),
+				..
+			} => match alias.0.first() {
+				Some(Part::Field(ident)) => ident.clone(),
+				_ => unreachable!(),
+			},
+			_ => unreachable!(),
+		};
+		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
+		Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+			exprs: vec![(
+				Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(key.clone()),
+					o: Operator::Equal,
+					r: val.clone(),
+				})),
+				compute_query,
+			)],
+			close: Some(Value::Idiom(key.clone())),
+		})))
+	}
+
 	/// Set the new average value for the field in the foreign table
 	fn mean(
 		&self,
