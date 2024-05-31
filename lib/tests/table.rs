@@ -173,37 +173,41 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> 
 	};
 	let sql = format!(
 		"
-		DEFINE TABLE wallet_agr AS
-			SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		UPDATE wallet:1 CONTENT {{ value: 20.0, day: 1 }} RETURN NONE;
+		UPDATE wallet:2 CONTENT {{ value: 5.0, day: 1 }} RETURN NONE;
 		// 0
-		UPDATE wallet:1 CONTENT {{ value: 10.0, day: 1 }} RETURN NONE;
+		DEFINE TABLE wallet_agr AS SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 1
-		UPDATE wallet:2 CONTENT {{ value: 15.0, day: 1 }} RETURN NONE;
+		UPDATE wallet:1 CONTENT {{ value: 10.0, day: 1 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 2
-		UPDATE wallet:3 CONTENT {{ value: 10.0, day: 2 }} RETURN NONE;
+		UPDATE wallet:2 CONTENT {{ value: 15.0, day: 1 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 3
-		UPDATE wallet:4 CONTENT {{ value: 5.0, day: 2 }} RETURN NONE;
+		UPDATE wallet:3 CONTENT {{ value: 10.0, day: 2 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 4
-		UPDATE wallet:2 SET value = 3.0 RETURN NONE;
+		UPDATE wallet:4 CONTENT {{ value: 5.0, day: 2 }} RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 5
-		UPDATE wallet:4 SET day = 3.0 RETURN NONE;
+		UPDATE wallet:2 SET value = 3.0 RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 6
-		DELETE wallet:2;
+		UPDATE wallet:4 SET day = 3.0 RETURN NONE;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
 		// 7
+		DELETE wallet:2;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 8
 		DELETE wallet:3;
 		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
 		SELECT agr, day FROM wallet_agr;
@@ -212,11 +216,11 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
-	assert_eq!(res.len(), 25);
+	assert_eq!(res.len(), 29);
 	//
-	skip_ok(res, 1)?;
+	skip_ok(res, 2)?;
 	//
-	for i in 0..8 {
+	for i in 0..9 {
 		// Skip the UPDATE or DELETE statement
 		skip_ok(res, 1)?;
 		// Get the computed result

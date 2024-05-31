@@ -37,6 +37,7 @@ impl UpdateStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
+		println!("{self}");
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
