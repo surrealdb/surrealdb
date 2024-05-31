@@ -198,8 +198,12 @@ impl InfoStructure for DefineAccessStatement {
 		acc.insert("kind".to_string(), kind.structure());
 
 		let mut dur = Object::default();
-		dur.insert("grant".to_string(), self.duration.grant.into());
-		dur.insert("token".to_string(), self.duration.token.into());
+		if self.kind.can_issue_grants() {
+			dur.insert("grant".to_string(), self.duration.grant.into());
+		}
+		if self.kind.can_issue_tokens() {
+			dur.insert("token".to_string(), self.duration.token.into());
+		}
 		dur.insert("session".to_string(), self.duration.session.into());
 		acc.insert("duration".to_string(), dur.to_string().into());
 
