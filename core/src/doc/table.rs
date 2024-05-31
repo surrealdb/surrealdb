@@ -119,8 +119,7 @@ impl<'a> Document<'a> {
 										group,
 										&self.initial,
 									)
-									.await?
-									.into(),
+									.await?,
 									doc: &self.initial,
 								};
 								self.data(stk, ctx, opt, fdc).await?;
@@ -145,8 +144,7 @@ impl<'a> Document<'a> {
 										group,
 										&self.current,
 									)
-									.await?
-									.into(),
+									.await?,
 									doc: &self.current,
 								};
 								self.data(stk, ctx, opt, fdc).await?;
@@ -168,8 +166,7 @@ impl<'a> Document<'a> {
 										group,
 										&self.initial,
 									)
-									.await?
-									.into(),
+									.await?,
 									doc: &self.initial,
 								};
 								self.data(stk, ctx, opt, fdc).await?;
@@ -188,8 +185,7 @@ impl<'a> Document<'a> {
 										group,
 										&self.current,
 									)
-									.await?
-									.into(),
+									.await?,
 									doc: &self.current,
 								};
 								self.data(stk, ctx, opt, fdc).await?;
@@ -358,9 +354,7 @@ impl<'a> Document<'a> {
 					cond: Some(Cond(root)),
 					..DeleteStatement::default()
 				};
-				println!("{stm}");
-				let res = stm.compute(stk, ctx, opt, None).await?;
-				println!("{res}");
+				stm.compute(stk, ctx, opt, None).await?;
 			}
 		}
 		Ok(())
@@ -402,11 +396,11 @@ impl<'a> Document<'a> {
 						}
 						Some("math::min") | Some("time::min") => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.min(&mut set_ops, fdc, field, idiom, val);
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
 						Some("math::max") | Some("time::max") => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
-							self.max(&mut set_ops, fdc, field, idiom, val);
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
 						Some("math::mean") => {
 							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
@@ -446,11 +440,16 @@ impl<'a> Document<'a> {
 	fn min(
 		&self,
 		set_ops: &mut Ops,
+		del_ops: &mut Ops,
 		fdc: &FieldDataContext<'_>,
 		field: &Field,
 		key: Idiom,
 		val: Value,
 	) {
+		// Key for the value count
+		let mut key_c = Idiom::from(vec![Part::from("__")]);
+		key_c.0.push(Part::from(key.to_hash()));
+		key_c.0.push(Part::from("c"));
 		match fdc.act {
 			FieldAction::Add => {
 				set_ops.push((
@@ -468,6 +467,7 @@ impl<'a> Document<'a> {
 						close: Some(Value::Idiom(key)),
 					}))),
 				));
+				set_ops.push((key_c, Operator::Inc, Value::from(1)))
 			}
 			FieldAction::Sub => {
 				// If it is equal to the previous MIN value,
@@ -475,6 +475,10 @@ impl<'a> Document<'a> {
 				// we have to recompute it
 				let subquery = Self::one_group_query(fdc, field, &key, val);
 				set_ops.push((key.clone(), Operator::Equal, subquery));
+				//  Decrement the number of values
+				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
 	}
@@ -482,11 +486,17 @@ impl<'a> Document<'a> {
 	fn max(
 		&self,
 		set_ops: &mut Ops,
+		del_ops: &mut Ops,
 		fdc: &FieldDataContext<'_>,
 		field: &Field,
 		key: Idiom,
 		val: Value,
 	) {
+		// Key for the value count
+		let mut key_c = Idiom::from(vec![Part::from("__")]);
+		key_c.0.push(Part::from(key.to_hash()));
+		key_c.0.push(Part::from("c"));
+		//
 		match fdc.act {
 			FieldAction::Add => {
 				set_ops.push((
@@ -504,6 +514,7 @@ impl<'a> Document<'a> {
 						close: Some(Value::Idiom(key)),
 					}))),
 				));
+				set_ops.push((key_c, Operator::Inc, Value::from(1)))
 			}
 			FieldAction::Sub => {
 				// If it is equal to the previous MAX value,
@@ -511,6 +522,10 @@ impl<'a> Document<'a> {
 				// we have to recompute the MAX
 				let subquery = Self::one_group_query(fdc, field, &key, val);
 				set_ops.push((key.clone(), Operator::Equal, subquery));
+				//  Decrement the number of values
+				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}
 		}
 	}
@@ -654,13 +669,12 @@ impl<'a> Document<'a> {
 				))))),
 			})),
 		));
-		let one = Value::from(1);
 		match act {
 			//  Increment the number of values
-			FieldAction::Add => set_ops.push((key_c, Operator::Inc, one)),
+			FieldAction::Add => set_ops.push((key_c, Operator::Inc, Value::from(1))),
 			FieldAction::Sub => {
 				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, one));
+				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
 				// Add a purge condition (delete record if the number of values is 0)
 				del_ops.push((key_c, Operator::Equal, Value::from(0)));
 			}

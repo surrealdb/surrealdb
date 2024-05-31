@@ -166,8 +166,6 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 }
 
 async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> {
-	let s = Value::parse("(array::first(SELECT math::max(`value`) AS agr, day FROM wallet WHERE day=1 GROUP BY day)).agr");
-	println!("{s:?}");
 	let cond = if cond {
 		"WHERE value >= 5"
 	} else {
