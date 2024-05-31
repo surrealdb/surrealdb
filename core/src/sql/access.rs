@@ -1,7 +1,6 @@
 use crate::sql::{
 	escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing,
 };
-use once_cell::sync::Lazy;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
