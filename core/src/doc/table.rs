@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
-use crate::doc::Document;
+use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::sql::data::Data;
 use crate::sql::expression::Expression;
@@ -11,13 +11,13 @@ use crate::sql::number::Number;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
-use crate::sql::statement::Statement as Query;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::ifelse::IfelseStatement;
 use crate::sql::statements::update::UpdateStatement;
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
+use crate::sql::Cond;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
@@ -110,13 +110,10 @@ impl<'a> Document<'a> {
 						tb: ft.name.to_raw(),
 						id,
 					};
-					println!("OLD: {old} - RID: {rid}");
-					let mut group_value = Value::None;
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							println!("COND: {cond}");
 							// What do we do with the initial value?
 							if !targeted_force
 								&& act != Action::Create && cond
@@ -125,16 +122,7 @@ impl<'a> Document<'a> {
 								.is_truthy()
 							{
 								// Delete the old value in the table
-								let stm = UpdateStatement {
-									what: Values(vec![Value::from(old)]),
-									data: Some(
-										self.data(stk, ctx, opt, Action::Delete, &tb.expr).await?,
-									),
-									..UpdateStatement::default()
-								};
-								// Execute the statement
-								println!("STM: {stm}");
-								group_value = stm.compute(stk, ctx, opt, None).await?;
+								self.data(stk, ctx, opt, Action::Delete, old, &tb.expr).await?;
 							}
 							// What do we do with the current value?
 							if act != Action::Delete
@@ -144,49 +132,21 @@ impl<'a> Document<'a> {
 									.is_truthy()
 							{
 								// Update the new value in the table
-								let stm = UpdateStatement {
-									what: Values(vec![Value::from(rid)]),
-									data: Some(
-										self.data(stk, ctx, opt, Action::Update, &tb.expr).await?,
-									),
-									..UpdateStatement::default()
-								};
-								// Execute the statement
-								println!("STM: {stm}");
-								group_value = stm.compute(stk, ctx, opt, None).await?;
+								self.data(stk, ctx, opt, Action::Update, rid, &tb.expr).await?;
 							}
 						}
 						// No WHERE clause is specified
 						None => {
 							if !targeted_force && act != Action::Create {
 								// Delete the old value in the table
-								let stm = UpdateStatement {
-									what: Values(vec![Value::from(old)]),
-									data: Some(
-										self.data(stk, ctx, opt, Action::Delete, &tb.expr).await?,
-									),
-									..UpdateStatement::default()
-								};
-								// Execute the statement
-								println!("STM: {stm}");
-								group_value = stm.compute(stk, ctx, opt, None).await?;
+								self.data(stk, ctx, opt, Action::Delete, old, &tb.expr).await?;
 							}
 							if act != Action::Delete {
 								// Update the new value in the table
-								let stm = UpdateStatement {
-									what: Values(vec![Value::from(rid)]),
-									data: Some(
-										self.data(stk, ctx, opt, Action::Update, &tb.expr).await?,
-									),
-									..UpdateStatement::default()
-								};
-								// Execute the statement
-								println!("STM: {stm}");
-								group_value = stm.compute(stk, ctx, opt, None).await?;
+								self.data(stk, ctx, opt, Action::Update, rid, &tb.expr).await?;
 							}
 						}
 					}
-					println!("GROUP VALUE: {group_value}");
 				}
 				// No GROUP BY clause is specified
 				None => {
@@ -202,21 +162,29 @@ impl<'a> Document<'a> {
 							match cond.compute(stk, ctx, opt, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
-									let stm = match act {
+									match act {
 										// Delete the value in the table
-										Action::Delete => Query::Delete(DeleteStatement {
-											what: Values(vec![Value::from(rid)]),
-											..DeleteStatement::default()
-										}),
+										Action::Delete => {
+											let stm = DeleteStatement {
+												what: Values(vec![Value::from(rid)]),
+												..DeleteStatement::default()
+											};
+											// Execute the statement
+											stm.compute(stk, ctx, opt, None).await?;
+										}
 										// Update the value in the table
-										_ => Query::Update(UpdateStatement {
-											what: Values(vec![Value::from(rid)]),
-											data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
-											..UpdateStatement::default()
-										}),
+										_ => {
+											let stm = UpdateStatement {
+												what: Values(vec![Value::from(rid)]),
+												data: Some(
+													self.full(stk, ctx, opt, &tb.expr).await?,
+												),
+												..UpdateStatement::default()
+											};
+											// Execute the statement
+											stm.compute(stk, ctx, opt, None).await?;
+										}
 									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
 								}
 								_ => {
 									// Delete the value in the table
@@ -232,26 +200,33 @@ impl<'a> Document<'a> {
 						// No WHERE clause is specified
 						None => {
 							// Define the statement
-							let stm = match act {
+							match act {
 								// Delete the value in the table
-								Action::Delete => Query::Delete(DeleteStatement {
-									what: Values(vec![Value::from(rid)]),
-									..DeleteStatement::default()
-								}),
+								Action::Delete => {
+									let stm = DeleteStatement {
+										what: Values(vec![Value::from(rid)]),
+										..DeleteStatement::default()
+									};
+									// Execute the statement
+									stm.compute(stk, ctx, opt, None).await?;
+								}
 								// Update the value in the table
-								_ => Query::Update(UpdateStatement {
-									what: Values(vec![Value::from(rid)]),
-									data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
-									..UpdateStatement::default()
-								}),
+								_ => {
+									let stm = UpdateStatement {
+										what: Values(vec![Value::from(rid)]),
+										data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
+										..UpdateStatement::default()
+									};
+									// Execute the statement
+									stm.compute(stk, ctx, opt, None).await?;
+								}
 							};
-							// Execute the statement
-							stm.compute(stk, ctx, opt, None).await?;
 						}
 					}
 				}
 			}
 		}
+
 		// Carry on
 		Ok(())
 	}
@@ -274,22 +249,69 @@ impl<'a> Document<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		act: Action,
+		thg: Thing,
 		exp: &Fields,
-	) -> Result<Data, Error> {
-		println!("DATA {act:?}");
-		//
-		let mut set_ops: Ops = vec![];
-		let mut del_ops: Ops = vec![];
+	) -> Result<(), Error> {
 		// Create a new context with the initial or the current doc
 		let doc = match act {
 			Action::Delete => Some(&self.initial),
 			Action::Update => Some(&self.current),
 			_ => unreachable!(),
 		};
-		if let Some(doc) = doc {
-			println!("Doc: {:?}", doc.rid);
-		}
+		//
+		let (set_ops, del_ops) = self.fields(stk, ctx, opt, act, doc, exp).await?;
+		//
+		let what = Values(vec![Value::from(thg.clone())]);
+		let stm = UpdateStatement {
+			what,
+			data: Some(Data::SetExpression(set_ops)),
+			..UpdateStatement::default()
+		};
+		stm.compute(stk, ctx, opt, None).await?;
 
+		if !del_ops.is_empty() {
+			let mut iter = del_ops.into_iter();
+			if let Some((i, o, v)) = iter.next() {
+				let mut root = Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(i),
+					o,
+					r: v,
+				}));
+				while let Some((i, o, v)) = iter.next() {
+					let exp = Value::Expression(Box::new(Expression::Binary {
+						l: Value::Idiom(i),
+						o,
+						r: v,
+					}));
+					root = Value::Expression(Box::new(Expression::Binary {
+						l: root,
+						o: Operator::Or,
+						r: exp,
+					}));
+				}
+				let what = Values(vec![Value::from(thg)]);
+				let stm = DeleteStatement {
+					what,
+					cond: Some(Cond(root)),
+					..DeleteStatement::default()
+				};
+				stm.compute(stk, ctx, opt, None).await?;
+			}
+		}
+		Ok(())
+	}
+
+	async fn fields(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		act: Action,
+		doc: Option<&CursorDoc<'_>>,
+		exp: &Fields,
+	) -> Result<(Ops, Ops), Error> {
+		let mut set_ops: Ops = vec![];
+		let mut del_ops: Ops = vec![];
 		//
 		for field in exp.other() {
 			// Process the field
@@ -304,7 +326,6 @@ impl<'a> Document<'a> {
 				if idiom.is_id() {
 					continue;
 				}
-				println!("Expr: {expr}");
 				// Process the field projection
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
@@ -337,9 +358,9 @@ impl<'a> Document<'a> {
 				}
 			}
 		}
-		//
-		Ok(Data::SetExpression(set_ops))
+		Ok((set_ops, del_ops))
 	}
+
 	/// Set the field in the foreign table
 	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) {
 		ops.push((key, Operator::Equal, val));
@@ -462,7 +483,7 @@ impl<'a> Document<'a> {
 			Action::Update => set_ops.push((key_c.clone(), Operator::Inc, one)),
 			Action::Delete => {
 				set_ops.push((key_c.clone(), Operator::Dec, one));
-				// Add a purge condition (if the number of values is 0)
+				// Add a purge condition (delete record if the number of values is 0)
 				del_ops.push((key_c.clone(), Operator::Equal, Value::from(0)));
 			}
 			_ => unreachable!(),
