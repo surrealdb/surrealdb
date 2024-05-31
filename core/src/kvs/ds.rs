@@ -59,6 +59,9 @@ const LQ_CHANNEL_SIZE: usize = 100;
 // The batch size used for non-paged operations (i.e. if there are more results, they are ignored)
 const NON_PAGED_BATCH_SIZE: u32 = 100_000;
 
+// The role assigned to the initial user created when starting the server with credentials for the first time
+const INITIAL_USER_ROLE: &str = "owner";
+
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 #[non_exhaustive]
@@ -482,8 +485,9 @@ impl Datastore {
 			Ok(v) if v.is_empty() => {
 				// Display information in the logs
 				info!("Credentials were provided, and no root users were found. The root user '{}' will be created", username);
-				// Create and save a new root users
-				let stm = DefineUserStatement::from((Base::Root, username, password));
+				// Create and save a new root user
+				let stm =
+					DefineUserStatement::from((Base::Root, username, password, INITIAL_USER_ROLE));
 				let ctx = Context::default().set_transaction(txn.clone());
 				let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 				let _ = stm.compute(&ctx, &opt, None).await?;

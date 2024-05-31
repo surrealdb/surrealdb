@@ -1,5 +1,6 @@
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::{token::Claims, Actor, Auth, Level, Role};
@@ -98,8 +99,7 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
-				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
-				session.exp = None;
+				session.exp = expiration(u.session)?;
 				session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 				Ok(())
 			}
@@ -109,8 +109,7 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
-				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
-				session.exp = None;
+				session.exp = expiration(u.session)?;
 				session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 				Ok(())
 			}
@@ -120,8 +119,7 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
-				// TODO(gguillemas): Enforce expiration once session lifetime can be customized.
-				session.exp = None;
+				session.exp = expiration(u.session)?;
 				session.au = Arc::new((&u, Level::Root).into());
 				Ok(())
 			}
@@ -494,7 +492,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_root() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -520,14 +518,18 @@ mod tests {
 		}
 
 		//
-		// Test with roles defined
+		// Test with roles and expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
-				.await
-				.unwrap();
+			ds.execute(
+				"DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER SESSION 1d",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
 
 			let mut sess = Session {
 				..Default::default()
@@ -544,7 +546,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(1) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		// Test invalid password
@@ -565,7 +575,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_ns() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -592,14 +602,18 @@ mod tests {
 		}
 
 		//
-		// Test with roles defined
+		// Test with roles and expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
-				.await
-				.unwrap();
+			ds.execute(
+				"DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER SESSION 1d",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
 
 			let mut sess = Session {
 				ns: Some("test".to_string()),
@@ -617,7 +631,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(1) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		// Test invalid password
@@ -638,7 +660,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_db() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -666,14 +688,18 @@ mod tests {
 		}
 
 		//
-		// Test with roles defined
+		// Test with roles and expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
-				.await
-				.unwrap();
+			ds.execute(
+				"DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER SESSION 1d",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
 
 			let mut sess = Session {
 				ns: Some("test".to_string()),
@@ -692,7 +718,15 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::days(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(1) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 
 		// Test invalid password
