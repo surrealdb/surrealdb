@@ -24,22 +24,15 @@ pub struct AccessDuration {
 	pub session: Option<Duration>,
 }
 
-// Public statics to be referenced elsewhere to prevent inconsistencies
-// By default, access grants do not expire
-pub static DEFAULT_GRANT_DURATION: Lazy<Option<Duration>> = Lazy::new(|| None);
-// By default, tokens expire after one hour
-pub static DEFAULT_TOKEN_DURATION: Lazy<Option<Duration>> =
-	Lazy::new(|| Some(Duration::from_hours(1)));
-// By default, sessions expire after one hour
-pub static DEFAULT_SESSION_DURATION: Lazy<Option<Duration>> =
-	Lazy::new(|| Some(Duration::from_hours(1)));
-
 impl Default for AccessDuration {
 	fn default() -> Self {
 		Self {
-			grant: *DEFAULT_GRANT_DURATION,
-			token: *DEFAULT_TOKEN_DURATION,
-			session: *DEFAULT_SESSION_DURATION,
+			// By default, access grants do not expire
+			grant: None,
+			// By default, tokens expire after one hour
+			token: Some(Duration::from_hours(1)),
+			// By default, sessions expire after one hour
+			session: Some(Duration::from_hours(1)),
 		}
 	}
 }
