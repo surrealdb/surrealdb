@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.0.0-1.5.0"
+version = "2.0.0-1.6.0"
 rust-version = "1.77.0"
 readme = "../lib/CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -145,7 +145,7 @@ snap = "1.1.0"
 speedb = { version = "0.0.4", features = ["lz4", "snappy"], optional = true }
 storekey = "0.5.0"
 surrealml-core1 = { version = "0.1.1", optional = true, package = "surrealml-core" }
-surrealkv = { version = "0.1.3", optional = true }
+surrealkv = { version = "0.1.5", optional = true }
 tempfile = { version = "3.10.1", optional = true }
 thiserror = "1.0.50"
 tikv = { version = "0.2.0-surreal.2", default-features = false, package = "surrealdb-tikv-client", optional = true }

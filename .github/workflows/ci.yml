@@ -278,7 +278,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ["self-hosted", "arm64", "builder"]
+    runs-on: [ "self-hosted", "arm64", "builder" ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -317,7 +317,7 @@ jobs:
 
   test-parser:
     name: Test workspace with experimental parser
-    runs-on: ["self-hosted", "arm64", "builder"]
+    runs-on: [ "self-hosted", "arm64", "builder" ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -354,6 +354,35 @@ jobs:
         env:
           RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo make test-experimental-parser
+
+  test-sdk-build:
+    name: Test SDK build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+
+      - name: Build sql1
+        working-directory: tests/sdk/sql1
+        run: cargo build
+
+      - name: Build sql2
+        working-directory: tests/sdk/sql2
+        run: cargo build
 
   ws-engine:
     name: WebSocket engine
