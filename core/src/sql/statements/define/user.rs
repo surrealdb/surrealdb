@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{escape::quote_str, fmt::Fmt, Base, Ident, Object, Strand, Value};
+use crate::sql::{escape::quote_str, fmt::Fmt, Base, Duration, Ident, Object, Strand, Value};
 use argon2::{
 	password_hash::{PasswordHasher, SaltString},
 	Argon2,
@@ -15,7 +15,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,13 +25,15 @@ pub struct DefineUserStatement {
 	pub hash: String,
 	pub code: String,
 	pub roles: Vec<Ident>,
+	#[revision(start = 3)]
+	pub session: Option<Duration>,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
 }
 
-impl From<(Base, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass): (Base, &str, &str)) -> Self {
+impl From<(Base, &str, &str, &str)> for DefineUserStatement {
+	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
 		DefineUserStatement {
 			base,
 			name: user.into(),
@@ -44,7 +46,8 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec!["owner".into()],
+			roles: vec![role.into()],
+			session: None,
 			comment: None,
 			if_not_exists: false,
 		}
@@ -52,11 +55,17 @@ impl From<(Base, &str, &str)> for DefineUserStatement {
 }
 
 impl DefineUserStatement {
-	pub(crate) fn from_parsed_values(name: Ident, base: Base, roles: Vec<Ident>) -> Self {
+	pub(crate) fn from_parsed_values(
+		name: Ident,
+		base: Base,
+		roles: Vec<Ident>,
+		session: Option<Duration>,
+	) -> Self {
 		DefineUserStatement {
 			name,
 			base,
-			roles, // New users get the viewer role by default
+			roles,   // New users get the viewer role by default
+			session, // Sessions for system users do not expire by default
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)
 				.take(128)
@@ -75,6 +84,10 @@ impl DefineUserStatement {
 
 	pub(crate) fn set_passhash(&mut self, passhash: String) {
 		self.hash = passhash;
+	}
+
+	pub(crate) fn set_session(&mut self, session: Option<Duration>) {
+		self.session = session;
 	}
 
 	/// Process this type returning a computed simple Value
@@ -191,8 +204,11 @@ impl Display for DefineUserStatement {
 			quote_str(&self.hash),
 			Fmt::comma_separated(
 				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
-			)
+			),
 		)?;
+		if let Some(ref v) = self.session {
+			write!(f, " SESSION {v}")?
+		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -207,6 +223,7 @@ impl InfoStructure for DefineUserStatement {
 			base,
 			hash,
 			roles,
+			session,
 			comment,
 			..
 		} = self;
@@ -222,6 +239,10 @@ impl InfoStructure for DefineUserStatement {
 			"roles".to_string(),
 			Value::Array(roles.into_iter().map(|r| r.structure()).collect()),
 		);
+
+		if let Some(session) = session {
+			acc.insert("session".to_string(), session.into());
+		}
 
 		if let Some(comment) = comment {
 			acc.insert("comment".to_string(), comment.into());

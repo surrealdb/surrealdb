@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::statements::DefineUserStatement;
 use crate::sql::value::serde::ser;
 use crate::sql::Base;
+use crate::sql::Duration;
 use crate::sql::Ident;
 use crate::sql::Strand;
 use ser::Serializer as _;
@@ -44,6 +45,7 @@ pub struct SerializeDefineUserStatement {
 	hash: String,
 	code: String,
 	roles: Vec<Ident>,
+	session: Option<Duration>,
 	comment: Option<Strand>,
 	if_not_exists: bool,
 }
@@ -72,6 +74,10 @@ impl serde::ser::SerializeStruct for SerializeDefineUserStatement {
 			"roles" => {
 				self.roles = value.serialize(ser::ident::vec::Serializer.wrap())?;
 			}
+			"session" => {
+				self.session =
+					value.serialize(ser::duration::opt::Serializer.wrap())?.map(Into::into);
+			}
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
 			}
@@ -94,6 +100,7 @@ impl serde::ser::SerializeStruct for SerializeDefineUserStatement {
 			hash: self.hash,
 			code: self.code,
 			roles: self.roles,
+			session: self.session,
 			comment: self.comment,
 			if_not_exists: self.if_not_exists,
 		})
