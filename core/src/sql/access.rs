@@ -1,6 +1,7 @@
 use crate::sql::{
 	escape::escape_ident, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing,
 };
+use once_cell::sync::Lazy;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -10,6 +11,8 @@ use std::str;
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+// Durations representing the expiration of different elements of the access method
+// In this context, the None variant represents that the element does not expire
 pub struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant
@@ -21,15 +24,22 @@ pub struct AccessDuration {
 	pub session: Option<Duration>,
 }
 
+// Public statics to be referenced elsewhere to prevent inconsistencies
+// By default, access grants do not expire
+pub static DEFAULT_GRANT_DURATION: Lazy<Option<Duration>> = Lazy::new(|| None);
+// By default, tokens expire after one hour
+pub static DEFAULT_TOKEN_DURATION: Lazy<Option<Duration>> =
+	Lazy::new(|| Some(Duration::from_hours(1)));
+// By default, sessions expire after one hour
+pub static DEFAULT_SESSION_DURATION: Lazy<Option<Duration>> =
+	Lazy::new(|| Some(Duration::from_hours(1)));
+
 impl Default for AccessDuration {
 	fn default() -> Self {
 		Self {
-			// By default, access grants do not expire
-			grant: None,
-			// By default, tokens expire after one hour
-			token: Some(Duration::from_hours(1)),
-			// By default, sessions expire after one hour
-			session: Some(Duration::from_hours(1)),
+			grant: *DEFAULT_GRANT_DURATION,
+			token: *DEFAULT_TOKEN_DURATION,
+			session: *DEFAULT_SESSION_DURATION,
 		}
 	}
 }

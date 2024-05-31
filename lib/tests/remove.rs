@@ -662,7 +662,7 @@ async fn permissions_checks_remove_ns_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h\" }, databases: {  }, users: {  } }"],
     ];
 
 	let test_cases = [
@@ -704,7 +704,7 @@ async fn permissions_checks_remove_db_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
     ];
 
 	let test_cases = [

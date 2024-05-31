@@ -1704,7 +1704,7 @@ async fn permissions_checks_define_access_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, databases: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h\" }, databases: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"]
     ];
 
@@ -1746,7 +1746,7 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
@@ -1908,13 +1908,13 @@ async fn permissions_checks_define_user_db() {
 async fn permissions_checks_define_access_record() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY 'secret'"),
+		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 12h"),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
 		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 

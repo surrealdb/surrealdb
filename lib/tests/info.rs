@@ -69,7 +69,7 @@ async fn info_for_db() {
 	let sql = r#"
         DEFINE TABLE TB;
         DEFINE ACCESS jwt ON DB TYPE JWT ALGORITHM HS512 KEY 'secret';
-        DEFINE ACCESS record ON DB TYPE RECORD DURATION 24h;
+        DEFINE ACCESS record ON DB TYPE RECORD DURATION FOR TOKEN 30m, FOR SESSION 12h;
         DEFINE USER user ON DB PASSWORD 'pass';
         DEFINE FUNCTION fn::greet() {RETURN "Hello";};
         DEFINE PARAM $param VALUE "foo";
@@ -504,7 +504,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h" }, databases: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h" }, databases: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -527,7 +527,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION 1h" }, databases: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h" }, databases: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -550,7 +550,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h" }, databases: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h" }, databases: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -564,7 +564,7 @@ async fn access_info_redacted_structure() {
 	// Symmetric
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret';
+			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
 			INFO FOR NS STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap();
@@ -577,7 +577,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'NAMESPACE', kind: { jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', duration: 1h, key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'NAMESPACE', kind: { jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'JWT'}, name: 'access' }], databases: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -587,7 +587,7 @@ async fn access_info_redacted_structure() {
 	// Asymmetric
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private';
+			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private' DURATION FOR TOKEN 15m, FOR SESSION 6h;
 			INFO FOR NS STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap();
@@ -600,7 +600,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'NAMESPACE', kind: { jwt: { alg: 'PS512', issuer: "{ alg: 'PS512', duration: 1h, key: '[REDACTED]' }", key: 'public' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'NAMESPACE', kind: { jwt: { alg: 'PS512', issuer: "{ alg: 'PS512', key: '[REDACTED]' }", key: 'public' }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -610,7 +610,7 @@ async fn access_info_redacted_structure() {
 	// Record
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON NS TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret';
+			DEFINE ACCESS access ON NS TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret DURATION FOR TOKEN 15m, FOR SESSION 6h';
 			INFO FOR NS STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap();
@@ -623,7 +623,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'NAMESPACE', kind: { duration: 1h, jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', duration: 1h, key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'RECORD' }, name: 'access' }], databases: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'NAMESPACE', kind: { duration: 1h, jwt: { alg: 'HS512', issuer: "{ alg: 'HS512', key: '[REDACTED]' }", key: '[REDACTED]' }, kind: 'RECORD' }, name: 'access' }], databases: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,

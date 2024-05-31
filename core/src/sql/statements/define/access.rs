@@ -141,21 +141,38 @@ impl Display for DefineAccessStatement {
 				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
-		if self.duration.grant.is_some()
-			|| self.duration.token.is_some()
-			|| self.duration.session.is_some()
-		{
-			write!(f, " DURATION")?;
-			if let Some(access) = self.duration.grant {
-				write!(f, " FOR GRANT {}", access)?;
-			}
-			if let Some(token) = self.duration.token {
-				write!(f, " FOR TOKEN {}", token)?;
-			}
-			if let Some(session) = self.duration.session {
-				write!(f, " FOR SESSION {}", session)?;
-			}
+		// Always print relevant durations so defaults can be changed in the future
+		// If default values were not printed, exports would not be forward compatible
+		// None values need to be printed, as they are different from the default values
+		write!(f, " DURATION")?;
+		if self.kind.can_issue_grants() {
+			write!(
+				f,
+				" FOR GRANT {},",
+				match self.duration.grant {
+					Some(dur) => format!("{}", dur),
+					None => "NONE".to_string(),
+				}
+			)?;
 		}
+		if self.kind.can_issue_tokens() {
+			write!(
+				f,
+				" FOR TOKEN {},",
+				match self.duration.token {
+					Some(dur) => format!("{}", dur),
+					None => "NONE".to_string(),
+				}
+			)?;
+		}
+		write!(
+			f,
+			" FOR SESSION {}",
+			match self.duration.session {
+				Some(dur) => format!("{}", dur),
+				None => "NONE".to_string(),
+			}
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}

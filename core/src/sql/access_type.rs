@@ -27,6 +27,29 @@ impl Default for AccessType {
 	}
 }
 
+impl AccessType {
+	// Returns whether or not the access method can issue non-token grants
+	// In this context, token refers exclusively to JWT
+	#[allow(unreachable_patterns)]
+	pub fn can_issue_grants(&self) -> bool {
+		match self {
+			// The grants for JWT and record access methods are JWT
+			AccessType::Jwt(_) | AccessType::Record(_) => false,
+			// TODO(gguillemas): This arm should be reachable by the bearer access method
+			_ => unreachable!(),
+		}
+	}
+	// Returns whether or not the access method can issue tokens
+	// In this context, tokens refers exclusively to JWT
+	pub fn can_issue_tokens(&self) -> bool {
+		match self {
+			// The JWT access method can only issue tokens if an issuer is set
+			AccessType::Jwt(jwt) => jwt.issue.is_some(),
+			_ => true,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
