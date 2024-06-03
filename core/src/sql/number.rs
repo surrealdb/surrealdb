@@ -7,6 +7,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::f64::consts::PI;
 use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
@@ -391,6 +392,18 @@ impl Number {
 		self.to_float().acos().into()
 	}
 
+	pub fn asin(self) -> Self {
+		self.to_float().asin().into()
+	}
+
+	pub fn atan(self) -> Self {
+		self.to_float().atan().into()
+	}
+
+	pub fn acot(self) -> Self {
+		(PI / 2.0 - self.atan().to_float()).into()
+	}
+
 	pub fn ceil(self) -> Self {
 		match self {
 			Number::Int(v) => v.into(),
@@ -399,12 +412,57 @@ impl Number {
 		}
 	}
 
+	pub fn clamp(self, min: Self, max: Self) -> Self {
+		self.to_float().clamp(min.to_float(), max.to_float()).into()
+	}
+
+	pub fn cos(self) -> Self {
+		self.to_float().cos().into()
+	}
+
+	pub fn cot(self) -> Self {
+		(1.0 / self.to_float().tan()).into()
+	}
+
+	pub fn deg2rad(self) -> Self {
+		self.to_float().to_degrees().into()
+	}
+
 	pub fn floor(self) -> Self {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.floor().into(),
 			Number::Decimal(v) => v.floor().into(),
 		}
+	}
+
+	pub fn ln(self) -> Self {
+		self.to_float().ln().into()
+	}
+
+	pub fn log(self, base: Self) -> Self {
+		self.to_float().log(base.to_float()).into()
+	}
+
+	pub fn log2(self) -> Self {
+		self.to_float().log2().into()
+	}
+
+	pub fn log10(self) -> Self {
+		self.to_float().log10().into()
+	}
+
+	pub fn modulo(self, divider: Self) -> Self {
+		match (self, divider) {
+			(Number::Int(n), Number::Int(d)) => n.rem_euclid(d).into(),
+			(Number::Float(n), d) => n.rem_euclid(d.to_float()).into(),
+			(Number::Decimal(n), d) => (n % d.to_decimal()).into(),
+			(n, d) => n.to_float().rem_euclid(d.to_float()).into(),
+		}
+	}
+
+	pub fn rad2deg(self) -> Self {
+		self.to_float().to_radians().into()
 	}
 
 	pub fn round(self) -> Self {
@@ -421,6 +479,22 @@ impl Number {
 			Number::Float(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
 			Number::Decimal(v) => v.round_dp(precision as u32).into(),
 		}
+	}
+
+	pub fn sign(self) -> Self {
+		match self {
+			Number::Int(n) => n.signum().into(),
+			Number::Float(n) => n.signum().into(),
+			Number::Decimal(n) => n.signum().into(),
+		}
+	}
+
+	pub fn sin(self) -> Self {
+		self.to_float().sin().into()
+	}
+
+	pub fn tan(self) -> Self {
+		self.to_float().tan().into()
 	}
 
 	pub fn sqrt(self) -> Self {
