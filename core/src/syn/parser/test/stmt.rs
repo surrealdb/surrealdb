@@ -531,7 +531,6 @@ fn parse_define_access_jwt_key() {
 		.unwrap();
 		assert_eq!(
 			res,
-			assert_eq!(sess.exp, Duration::from_days(30), "Session expiration is expected to match defined duration");
 			Statement::Define(DefineStatement::Access(DefineAccessStatement {
 				name: Ident("a".to_string()),
 				base: Base::Db,
