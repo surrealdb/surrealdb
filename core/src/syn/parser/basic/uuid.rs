@@ -1,3 +1,5 @@
+use nom::AsBytes;
+
 use crate::{
 	sql::Uuid,
 	syn::{
@@ -80,22 +82,23 @@ impl Parser<'_> {
 		let start_token = self.peek_whitespace();
 		let mut cur = start_token;
 		loop {
-			match cur.kind {
+			let next = self.peek_whitespace();
+			match next.kind {
 				TokenKind::Identifier => {
-					self.pop_peek();
+					cur = self.pop_peek();
 					break;
 				}
 				TokenKind::Exponent | TokenKind::Digits => {
-					self.pop_peek();
-					cur = self.peek_whitespace();
+					cur = self.pop_peek();
 				}
-				_ => unexpected!(self, TokenKind::Identifier, "UUID hex digits"),
+				t!("-") | t!("\"") | t!("'") => break,
+				_ => unexpected!(self, next.kind, "UUID hex digits"),
 			}
 		}
 
 		// Get the span that covered all eaten tokens.
 		let digits_span = start_token.span.covers(cur.span);
-		let digits_bytes = self.span_bytes(digits_span);
+		let digits_bytes = self.span_str(digits_span).as_bytes();
 
 		// for error handling, the incorrect hex character should be returned first, before
 		// returning the not correct length for segment error even if both are valid.

@@ -38,23 +38,23 @@ fn operators() {
 
            ^
     "# => [
-			t!("-"), t!("+"), t!("/"), t!("*"), t!("!"), t!("**"),
+			t!("-"), t!(" "), t!("+"),t!(" "),  t!("/"),t!(" "),  t!("*"),t!(" "),  t!("!"),t!(" "),  t!("**"), t!(" "),
 
-			t!("<"), t!(">"), t!("<="), t!(">="), t!("<-"), t!("<->"), t!("->"),
+			t!("<"), t!(" "), t!(">"), t!(" "), t!("<="), t!(" "), t!(">="), t!(" "), t!("<-"), t!(" "), t!("<->"), t!(" "), t!("->"), t!(" "),
 
-			t!("="), t!("=="), t!("-="), t!("+="), t!("!="), t!("+?="),
+			t!("="), t!(" "), t!("=="), t!(" "), t!("-="), t!(" "), t!("+="), t!(" "), t!("!="), t!(" "), t!("+?="), t!(" "),
 
-			t!("?"), t!("??"), t!("?:"), t!("?~"), t!("?="),
+			t!("?"), t!(" "), t!("??"), t!(" "), t!("?:"), t!(" "), t!("?~"), t!(" "), t!("?="), t!(" "),
 
-			t!("{"), t!("}"), t!("["), t!("]"), t!("("), t!(")"),
+			t!("{"), t!(" "), t!("}"), t!(" "), t!("["), t!(" "), t!("]"), t!(" "), t!("("), t!(" "), t!(")"), t!(" "),
 
-			t!(";"), t!(","), t!("|"), t!("||"), TokenKind::Invalid, t!("&&"),
+			t!(";"), t!(" "), t!(","), t!(" "), t!("|"), t!(" "), t!("||"), t!(" "), TokenKind::Invalid, t!(" "), t!("&&"), t!(" "),
 
-			t!("$"),
+			t!("$"), t!(" "),
 
-			t!("."), t!(".."), t!("..."),
+			t!("."), t!(" "), t!(".."), t!(" "), t!("..."), t!(" "),
 
-			TokenKind::Invalid
+			TokenKind::Invalid, t!(" ")
 		]
 	}
 }
@@ -68,10 +68,10 @@ fn comments() {
 			+ -- a third comment
 			-
 		" => [
-			t!("+"),
-			t!("-"),
-			t!("+"),
-			t!("-"),
+			t!(" "), t!("+"), t!(" "), t!(" "), t!(" "),
+			t!("-"), t!(" "), t!(" "), t!(" "),
+			t!("+"), t!(" "), t!(" "), t!(" "),
+			t!("-"), t!(" ")
 		]
 	}
 }
@@ -80,7 +80,7 @@ fn comments() {
 fn whitespace() {
 	test_case! {
 		"+= \t\n\r -=" => [
-			t!("+="),
+			t!("+="), t!(" "),
 			t!("-="),
 		]
 	}
@@ -90,13 +90,10 @@ fn whitespace() {
 fn identifiers() {
 	test_case! {
 		r#"
-			123123adwad +
-			akdwkj +
-			akdwkj1231312313123 +
-			_a_k_d_wkj1231312313123 +
-			____wdw____ +
+			123123adwad+akdwkj+akdwkj1231312313123+_a_k_d_wkj1231312313123+____wdw____+
 		"#
 			=> [
+			t!(" "),
 			TokenKind::Digits, // 123123
 			TokenKind::Identifier, // adwad
 			t!("+"),
@@ -108,6 +105,7 @@ fn identifiers() {
 			t!("+"),
 			TokenKind::Identifier, // ____wdw____
 			t!("+"),
+			t!(" "),
 		]
 	}
 }
@@ -115,10 +113,7 @@ fn identifiers() {
 #[test]
 fn numbers() {
 	test_case! {
-		r#"
-			123123+32010230.123012031+33043030dec+33043030f+303e10dec+
-
-		"#
+		r#"123123+32010230.123012031+33043030dec+33043030f+303e10dec+"#
 			=> [
 			TokenKind::Digits, // 123123
 			t!("+"),
@@ -133,7 +128,8 @@ fn numbers() {
 			t!("f"),
 			t!("+"),
 			TokenKind::Digits, // 303
-			TokenKind::Exponent , // e10
+			TokenKind::Exponent , // e
+			TokenKind::Digits, // 10
 			t!("dec"),
 			t!("+"),
 		]
@@ -199,6 +195,7 @@ fn duration() {
 			1nsa+1ans+1aus+1usa+1ams+1msa+1am+1ma+1ah+1ha+1aw+1wa+1ay+1ya+1µsa
 		"#
 			=> [
+			t!(" "),
 			TokenKind::Digits,
 			TokenKind::DurationSuffix(DurationSuffix::Nano),
 			t!("+"),
@@ -225,6 +222,8 @@ fn duration() {
 			t!("+"),
 			TokenKind::Digits,
 			TokenKind::DurationSuffix(DurationSuffix::Year),
+
+			t!(" "),
 
 			TokenKind::Digits,
 			TokenKind::Identifier,
@@ -271,6 +270,7 @@ fn duration() {
 			TokenKind::Digits,
 			TokenKind::Invalid,
 			TokenKind::Identifier,
+			t!(" "),
 		]
 	}
 }
@@ -279,8 +279,8 @@ fn duration() {
 fn keyword() {
 	test_case! {
 		r#"select SELECT sElEcT"# => [
-			t!("SELECT"),
-			t!("SELECT"),
+			t!("SELECT"),t!(" "),
+			t!("SELECT"),t!(" "),
 			t!("SELECT"),
 		]
 	}

@@ -124,7 +124,8 @@ impl TokenValue for Regex {
 				span.offset += 1;
 				span.len -= 2;
 
-				let regex = dbg!(parser.span_str(span))
+				let regex = parser
+					.span_str(span)
 					.parse()
 					.map_err(|e| ParseError::new(ParseErrorKind::InvalidRegex(e), token.span))?;
 				return Ok(regex);

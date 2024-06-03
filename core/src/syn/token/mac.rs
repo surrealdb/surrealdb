@@ -1,5 +1,8 @@
 /// A shorthand for token kinds.
 macro_rules! t {
+	(" ") => {
+		$crate::syn::token::TokenKind::WhiteSpace
+	};
 	("invalid") => {
 		$crate::syn::token::TokenKind::Invalid
 	};
