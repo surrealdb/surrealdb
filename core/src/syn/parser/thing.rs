@@ -563,5 +563,18 @@ mod tests {
 		assert_ident_parses_correctly("1ns1h");
 		assert_ident_parses_correctly("000e8");
 		assert_ident_parses_correctly("000e8bla");
+
+		assert_ident_parses_correctly("y123");
+		assert_ident_parses_correctly("w123");
+		assert_ident_parses_correctly("d123");
+		assert_ident_parses_correctly("h123");
+		assert_ident_parses_correctly("m123");
+		assert_ident_parses_correctly("s123");
+		assert_ident_parses_correctly("ms123");
+		assert_ident_parses_correctly("us123");
+		assert_ident_parses_correctly("ns123");
+		assert_ident_parses_correctly("dec123");
+		assert_ident_parses_correctly("f123");
+		assert_ident_parses_correctly("e123");
 	}
 }

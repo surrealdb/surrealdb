@@ -32,7 +32,7 @@ impl Parser<'_> {
 						| DurationSuffix::Micro | DurationSuffix::Milli
 						| DurationSuffix::Second | DurationSuffix::Minute
 						| DurationSuffix::Hour | DurationSuffix::Day
-						| DurationSuffix::Week
+						| DurationSuffix::Week | DurationSuffix::Year
 				)
 		)
 	}

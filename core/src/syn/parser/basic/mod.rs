@@ -141,3 +141,48 @@ impl Parser<'_> {
 		V::from_token(self)
 	}
 }
+
+#[cfg(test)]
+mod test {
+
+	#[test]
+	fn identifiers() {
+		use crate::sql;
+
+		fn assert_ident_parses_correctly(ident: &str) {
+			use crate::syn::Parser;
+			use reblessive::Stack;
+
+			let mut parser = Parser::new(ident.as_bytes());
+			let mut stack = Stack::new();
+			let r = stack
+				.enter(|ctx| async move { parser.parse_query(ctx).await })
+				.finish()
+				.expect(&format!("failed on {}", ident));
+
+			assert_eq!(
+				r,
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
+					sql::Idiom(vec![sql::Part::Field(sql::Ident(ident.to_string()))])
+				))]))
+			)
+		}
+
+		assert_ident_parses_correctly("select123");
+
+		assert_ident_parses_correctly("e123");
+
+		assert_ident_parses_correctly("dec123");
+		assert_ident_parses_correctly("f123");
+
+		assert_ident_parses_correctly("y123");
+		assert_ident_parses_correctly("w123");
+		assert_ident_parses_correctly("d123");
+		assert_ident_parses_correctly("h123");
+		assert_ident_parses_correctly("m123");
+		assert_ident_parses_correctly("s123");
+		assert_ident_parses_correctly("ms123");
+		assert_ident_parses_correctly("us123");
+		assert_ident_parses_correctly("ns123");
+	}
+}
