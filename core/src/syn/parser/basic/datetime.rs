@@ -49,13 +49,19 @@ impl Parser<'_> {
 			.ok_or_else(|| ParseError::new(ParseErrorKind::InvalidDatetimeDate, date_span))?;
 
 		if !self.eat(TokenKind::DatetimeChars(DatetimeChars::T)) {
-			return Err(ParseError::new(
-				ParseErrorKind::Unexpected {
-					found: TokenKind::Identifier,
-					expected: "the charater `T`",
-				},
-				self.recent_span(),
-			));
+			if double {
+				expected_whitespace!(self, t!("\""));
+			} else {
+				expected_whitespace!(self, t!("'"));
+			}
+
+			let time = NaiveTime::default();
+			let date_time = NaiveDateTime::new(date, time);
+
+			let datetime =
+				Utc.fix().from_local_datetime(&date_time).earliest().unwrap().with_timezone(&Utc);
+
+			return Ok(Datetime(Datetime));
 		}
 
 		let start_time = self.peek_whitespace().span;
