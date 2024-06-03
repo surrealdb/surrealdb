@@ -334,7 +334,7 @@ mod tests {
 	use crate::iam::Role;
 	use chrono::Duration;
 	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
-	use std::collections::{HashMap, HashSet};
+	use std::collections::HashMap;
 
 	#[tokio::test]
 	async fn test_signin_record() {
@@ -656,13 +656,13 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test without roles and expiration disabled
+		// Test without roles and session expiration disabled
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
-				"DEFINE USER user ON DB PASSWORD 'pass' DURATION FOR TOKEN NONE, FOR SESSION NONE",
+				"DEFINE USER user ON DB PASSWORD 'pass' DURATION FOR TOKEN 365d, FOR SESSION NONE",
 				&sess,
 				None,
 			)
@@ -702,16 +702,25 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 					validation.insecure_disable_signature_validation();
-					// By default, tokens without expiration are not accepted
-					// TODO(gguillemas): Consider whether or not we want to
-					validation.required_spec_claims = HashSet::new();
 					validation.validate_nbf = false;
 					validation.validate_exp = false;
 					validation
 				})
 				.unwrap();
 				// Check that token expiration matches the defined duration
-				assert_eq!(token_data.claims.exp, None);
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::days(365) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::days(365) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
 				// Check required token claims
 				assert_eq!(token_data.claims.ns, Some("test".to_string()));
 				assert_eq!(token_data.claims.db, Some("test".to_string()));
@@ -860,7 +869,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test");
 			ds.execute(
-				"DEFINE USER user ON NS PASSWORD 'pass' DURATION FOR TOKEN NONE, FOR SESSION NONE",
+				"DEFINE USER user ON NS PASSWORD 'pass' DURATION FOR TOKEN 365d, FOR SESSION NONE",
 				&sess,
 				None,
 			)
@@ -891,16 +900,25 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 					validation.insecure_disable_signature_validation();
-					// By default, tokens without expiration are not accepted
-					// TODO(gguillemas): Consider whether or not we want to
-					validation.required_spec_claims = HashSet::new();
 					validation.validate_nbf = false;
 					validation.validate_exp = false;
 					validation
 				})
 				.unwrap();
 				// Check that token expiration matches the defined duration
-				assert_eq!(token_data.claims.exp, None);
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::days(365) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::days(365) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
 				// Check required token claims
 				assert_eq!(token_data.claims.ns, Some("test".to_string()));
 				assert_eq!(token_data.claims.db, None);
@@ -1028,12 +1046,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test without roles and expiration disabled
+		// Test without roles and session expiration disabled
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test");
-			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' DURATION FOR TOKEN NONE, FOR SESSION NONE", &sess, None).await.unwrap();
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' DURATION FOR TOKEN 365d, FOR SESSION NONE", &sess, None).await.unwrap();
 
 			// Signin with the user
 			let mut sess = Session {
@@ -1054,16 +1072,25 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
 					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 					validation.insecure_disable_signature_validation();
-					// By default, tokens without expiration are not accepted
-					// TODO(gguillemas): Consider whether or not we want to
-					validation.required_spec_claims = HashSet::new();
 					validation.validate_nbf = false;
 					validation.validate_exp = false;
 					validation
 				})
 				.unwrap();
 				// Check that token expiration matches the defined duration
-				assert_eq!(token_data.claims.exp, None);
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::days(365) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::days(365) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
 				// Check required token claims
 				assert_eq!(token_data.claims.ns, None);
 				assert_eq!(token_data.claims.db, None);

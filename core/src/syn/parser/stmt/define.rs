@@ -219,8 +219,9 @@ impl Parser<'_> {
 								self.pop_peek();
 								match self.peek_kind() {
 									t!("NONE") => {
-										self.pop_peek();
-										res.set_token_dur(None)
+										// Currently, SurrealDB does not accept tokens without expiration.
+										// For this reason, some token duration must be set.
+										unexpected!(self, t!("NONE"), "a token duration");
 									}
 									_ => res.set_token_dur(Some(self.next_token_value()?)),
 								}
@@ -331,8 +332,11 @@ impl Parser<'_> {
 								self.pop_peek();
 								match self.peek_kind() {
 									t!("NONE") => {
-										self.pop_peek();
-										res.duration.token = None
+										// Currently, SurrealDB does not accept tokens without expiration.
+										// For this reason, some token duration must be set.
+										// In the future, allowing issuing tokens without expiration may be useful.
+										// Tokens issued by access methods can be consumed by third parties that support it.
+										unexpected!(self, t!("NONE"), "a token duration");
 									}
 									_ => res.duration.token = Some(self.next_token_value()?),
 								}
