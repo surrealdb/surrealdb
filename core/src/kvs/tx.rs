@@ -24,6 +24,7 @@ use sql::statements::DefineUserStatement;
 use sql::statements::LiveStatement;
 
 use crate::cf;
+use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::dbs::node::ClusterMembership;
 use crate::dbs::node::Timestamp;
 use crate::err::Error;
@@ -2543,6 +2544,11 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 				chn.send(bytes!("BEGIN TRANSACTION;")).await?;
 				chn.send(bytes!("")).await?;
+				// Records to be exported, categorised by the type of INSERT statement
+				let mut exported_normal: Vec<String> =
+					Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
+				let mut exported_relation: Vec<String> =
+					Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 				// Output TABLE data
 				for tb in tbs.iter() {
 					// Start records
@@ -2555,15 +2561,12 @@ impl Transaction {
 					let end = crate::key::thing::suffix(ns, db, &tb.name);
 					let mut nxt: Option<ScanPage<Vec<u8>>> = Some(ScanPage::from(beg..end));
 					while nxt.is_some() {
-						let res = self.scan_paged(nxt.unwrap(), 1000).await?;
+						let res = self.scan_paged(nxt.unwrap(), *EXPORT_BATCH_SIZE).await?;
 						nxt = res.next_page;
 						let res = res.values;
 						if res.is_empty() {
 							break;
 						}
-
-						let mut normal: Vec<String> = vec![];
-						let mut relation: Vec<String> = vec![];
 
 						// Categorize results
 						for (_, v) in res.into_iter() {
@@ -2573,29 +2576,31 @@ impl Transaction {
 							match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 								// This is a graph edge record
 								(Value::Bool(true), Value::Thing(_), Value::Thing(_)) => {
-									relation.push(v.to_string());
+									exported_relation.push(v.to_string());
 								}
 								// This is a normal record
 								_ => {
-									normal.push(v.to_string());
+									exported_normal.push(v.to_string());
 								}
 							}
 						}
 
 						// Add batches of INSERT statements
 						// No need to chunk here, the scan it limited to 1000
-						{
-							let values = normal.join(", ");
+						if !exported_normal.is_empty() {
+							let values = exported_normal.join(", ");
 							let sql = format!("INSERT [ {values} ];");
 							chn.send(bytes!(sql)).await?;
+							exported_normal.clear();
 						}
 
 						// Add batches of INSERT RELATION statements
 						// No need to chunk here, the scan it limited to 1000
-						{
-							let values = relation.join(", ");
+						if !exported_relation.is_empty() {
+							let values = exported_relation.join(", ");
 							let sql = format!("INSERT RELATION [ {values} ];");
 							chn.send(bytes!(sql)).await?;
+							exported_relation.clear()
 						}
 
 						continue;
