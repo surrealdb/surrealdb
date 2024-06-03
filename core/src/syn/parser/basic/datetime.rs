@@ -3,7 +3,6 @@ use std::ops::RangeInclusive;
 use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 
 use crate::{
-	fnc::array::min,
 	sql::Datetime,
 	syn::{
 		parser::{

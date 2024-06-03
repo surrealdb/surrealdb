@@ -2,7 +2,6 @@ use crate::sql::{escape::quote_str, strand::Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::fs::write;
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
