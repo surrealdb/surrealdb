@@ -5,7 +5,7 @@ use crate::{
 			mac::{expected_whitespace, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, TokenKind},
+		token::{t, DurationSuffix, TokenKind},
 	},
 };
 
@@ -86,7 +86,9 @@ impl Parser<'_> {
 					cur = self.pop_peek();
 					break;
 				}
-				TokenKind::Exponent | TokenKind::Digits => {
+				TokenKind::Exponent
+				| TokenKind::Digits
+				| TokenKind::DurationSuffix(DurationSuffix::Day) => {
 					cur = self.pop_peek();
 				}
 				t!("-") | t!("\"") | t!("'") => break,
