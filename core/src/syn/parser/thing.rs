@@ -8,7 +8,7 @@ use crate::{
 			mac::{expected, expected_whitespace, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, TokenKind},
+		token::{t, NumberKind, TokenKind},
 	},
 };
 use std::{cmp::Ordering, ops::Bound};

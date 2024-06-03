@@ -52,7 +52,7 @@ keyword! {
 	Content => "CONTENT",
 	Continue => "CONTINUE",
 	Create => "CREATE",
-	Database => "DATABASE",
+	Database => "DATABASE"
 	Default => "DEFAULT",
 	Define => "DEFINE",
 	Delete => "DELETE",
