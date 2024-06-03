@@ -198,6 +198,9 @@ pub fn with_enough_stack(
 #[allow(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 	for i in 0..skip {
+		if res.is_empty() {
+			panic!("No more result #{i}");
+		}
 		let r = res.remove(0).result;
 		let _ = r.is_err_and(|e| {
 			panic!("Statement #{i} fails with: {e}");

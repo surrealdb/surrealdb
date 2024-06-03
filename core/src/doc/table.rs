@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
-use crate::doc::Document;
+use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::sql::data::Data;
 use crate::sql::expression::Expression;
@@ -11,13 +11,14 @@ use crate::sql::number::Number;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
-use crate::sql::statement::Statement as Query;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::ifelse::IfelseStatement;
 use crate::sql::statements::update::UpdateStatement;
+use crate::sql::statements::{DefineTableStatement, SelectStatement};
 use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
+use crate::sql::{Cond, Function, Groups, View};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
@@ -28,6 +29,21 @@ enum Action {
 	Create,
 	Update,
 	Delete,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum FieldAction {
+	Add,
+	Sub,
+}
+
+struct FieldDataContext<'a> {
+	ft: &'a DefineTableStatement,
+	act: FieldAction,
+	view: &'a View,
+	groups: &'a Groups,
+	group_ids: Vec<Value>,
+	doc: &'a CursorDoc<'a>,
 }
 
 impl<'a> Document<'a> {
@@ -79,115 +95,100 @@ impl<'a> Document<'a> {
 			match &tb.group {
 				// There is a GROUP BY clause specified
 				Some(group) => {
-					let id = stk
-						.scope(|scope| {
-							try_join_all(group.iter().map(|v| {
-								scope.run(|stk| v.compute(stk, ctx, opt, Some(&self.initial)))
-							}))
-						})
-						.await?
-						.into_iter()
-						.collect::<Vec<_>>()
-						.into();
-					// Set the previous record id
-					let old = Thing {
-						tb: ft.name.to_raw(),
-						id,
-					};
-
-					let id = stk
-						.scope(|scope| {
-							try_join_all(group.iter().map(|v| {
-								scope.run(|stk| v.compute(stk, ctx, opt, Some(&self.current)))
-							}))
-						})
-						.await?
-						.into_iter()
-						.collect::<Vec<_>>()
-						.into();
-					// Set the current record id
-					let rid = Thing {
-						tb: ft.name.to_raw(),
-						id,
-					};
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(stk, ctx, opt, Some(&self.current)).await? {
-								v if v.is_truthy() => {
-									if !targeted_force && act != Action::Create {
-										// Delete the old value
-										let act = Action::Delete;
-										// Modify the value in the table
-										let stm = UpdateStatement {
-											what: Values(vec![Value::from(old)]),
-											data: Some(
-												self.data(stk, ctx, opt, act, &tb.expr).await?,
-											),
-											..UpdateStatement::default()
-										};
-										// Execute the statement
-										stm.compute(stk, ctx, opt, None).await?;
-									}
-									if act != Action::Delete {
-										// Update the new value
-										let act = Action::Update;
-										// Modify the value in the table
-										let stm = UpdateStatement {
-											what: Values(vec![Value::from(rid)]),
-											data: Some(
-												self.data(stk, ctx, opt, act, &tb.expr).await?,
-											),
-											..UpdateStatement::default()
-										};
-										// Execute the statement
-										stm.compute(stk, ctx, opt, None).await?;
-									}
-								}
-								_ => {
-									if !targeted_force && act != Action::Create {
-										// Update the new value
-										let act = Action::Update;
-										// Modify the value in the table
-										let stm = UpdateStatement {
-											what: Values(vec![Value::from(old)]),
-											data: Some(
-												self.data(stk, ctx, opt, act, &tb.expr).await?,
-											),
-											..UpdateStatement::default()
-										};
-										// Execute the statement
-										stm.compute(stk, ctx, opt, None).await?;
-									}
-								}
+							// What do we do with the initial value on UPDATE and DELETE?
+							if !targeted_force
+								&& act != Action::Create && cond
+								.compute(stk, ctx, opt, Some(&self.initial))
+								.await?
+								.is_truthy()
+							{
+								// Delete the old value in the table
+								let fdc = FieldDataContext {
+									ft,
+									act: FieldAction::Sub,
+									view: tb,
+									groups: group,
+									group_ids: Self::get_group_ids(
+										stk,
+										ctx,
+										opt,
+										group,
+										&self.initial,
+									)
+									.await?,
+									doc: &self.initial,
+								};
+								self.data(stk, ctx, opt, fdc).await?;
+							}
+							// What do we do with the current value on CREATE and UPDATE?
+							if act != Action::Delete
+								&& cond
+									.compute(stk, ctx, opt, Some(&self.current))
+									.await?
+									.is_truthy()
+							{
+								// Update the new value in the table
+								let fdc = FieldDataContext {
+									ft,
+									act: FieldAction::Add,
+									view: tb,
+									groups: group,
+									group_ids: Self::get_group_ids(
+										stk,
+										ctx,
+										opt,
+										group,
+										&self.current,
+									)
+									.await?,
+									doc: &self.current,
+								};
+								self.data(stk, ctx, opt, fdc).await?;
 							}
 						}
 						// No WHERE clause is specified
 						None => {
 							if !targeted_force && act != Action::Create {
-								// Delete the old value
-								let act = Action::Delete;
-								// Modify the value in the table
-								let stm = UpdateStatement {
-									what: Values(vec![Value::from(old)]),
-									data: Some(self.data(stk, ctx, opt, act, &tb.expr).await?),
-									..UpdateStatement::default()
+								// Delete the old value in the table
+								let fdc = FieldDataContext {
+									ft,
+									act: FieldAction::Sub,
+									view: tb,
+									groups: group,
+									group_ids: Self::get_group_ids(
+										stk,
+										ctx,
+										opt,
+										group,
+										&self.initial,
+									)
+									.await?,
+									doc: &self.initial,
 								};
-								// Execute the statement
-								stm.compute(stk, ctx, opt, None).await?;
+								self.data(stk, ctx, opt, fdc).await?;
 							}
 							if act != Action::Delete {
-								// Update the new value
-								let act = Action::Update;
-								// Modify the value in the table
-								let stm = UpdateStatement {
-									what: Values(vec![Value::from(rid)]),
-									data: Some(self.data(stk, ctx, opt, act, &tb.expr).await?),
-									..UpdateStatement::default()
+								// Update the new value in the table
+								let fdc = FieldDataContext {
+									ft,
+									act: FieldAction::Add,
+									view: tb,
+									groups: group,
+									group_ids: Self::get_group_ids(
+										stk,
+										ctx,
+										opt,
+										group,
+										&self.current,
+									)
+									.await?,
+									doc: &self.current,
 								};
-								// Execute the statement
-								stm.compute(stk, ctx, opt, None).await?;
+								self.data(stk, ctx, opt, fdc).await?;
 							}
 						}
 					}
@@ -206,21 +207,29 @@ impl<'a> Document<'a> {
 							match cond.compute(stk, ctx, opt, Some(&self.current)).await? {
 								v if v.is_truthy() => {
 									// Define the statement
-									let stm = match act {
+									match act {
 										// Delete the value in the table
-										Action::Delete => Query::Delete(DeleteStatement {
-											what: Values(vec![Value::from(rid)]),
-											..DeleteStatement::default()
-										}),
+										Action::Delete => {
+											let stm = DeleteStatement {
+												what: Values(vec![Value::from(rid)]),
+												..DeleteStatement::default()
+											};
+											// Execute the statement
+											stm.compute(stk, ctx, opt, None).await?;
+										}
 										// Update the value in the table
-										_ => Query::Update(UpdateStatement {
-											what: Values(vec![Value::from(rid)]),
-											data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
-											..UpdateStatement::default()
-										}),
+										_ => {
+											let stm = UpdateStatement {
+												what: Values(vec![Value::from(rid)]),
+												data: Some(
+													self.full(stk, ctx, opt, &tb.expr).await?,
+												),
+												..UpdateStatement::default()
+											};
+											// Execute the statement
+											stm.compute(stk, ctx, opt, None).await?;
+										}
 									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
 								}
 								_ => {
 									// Delete the value in the table
@@ -236,21 +245,27 @@ impl<'a> Document<'a> {
 						// No WHERE clause is specified
 						None => {
 							// Define the statement
-							let stm = match act {
+							match act {
 								// Delete the value in the table
-								Action::Delete => Query::Delete(DeleteStatement {
-									what: Values(vec![Value::from(rid)]),
-									..DeleteStatement::default()
-								}),
+								Action::Delete => {
+									let stm = DeleteStatement {
+										what: Values(vec![Value::from(rid)]),
+										..DeleteStatement::default()
+									};
+									// Execute the statement
+									stm.compute(stk, ctx, opt, None).await?;
+								}
 								// Update the value in the table
-								_ => Query::Update(UpdateStatement {
-									what: Values(vec![Value::from(rid)]),
-									data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
-									..UpdateStatement::default()
-								}),
+								_ => {
+									let stm = UpdateStatement {
+										what: Values(vec![Value::from(rid)]),
+										data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
+										..UpdateStatement::default()
+									};
+									// Execute the statement
+									stm.compute(stk, ctx, opt, None).await?;
+								}
 							};
-							// Execute the statement
-							stm.compute(stk, ctx, opt, None).await?;
 						}
 					}
 				}
@@ -259,6 +274,25 @@ impl<'a> Document<'a> {
 		// Carry on
 		Ok(())
 	}
+
+	async fn get_group_ids(
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		group: &Groups,
+		doc: &CursorDoc<'_>,
+	) -> Result<Vec<Value>, Error> {
+		Ok(stk
+			.scope(|scope| {
+				try_join_all(
+					group.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, Some(doc)))),
+				)
+			})
+			.await?
+			.into_iter()
+			.collect::<Vec<_>>())
+	}
+
 	//
 	async fn full(
 		&self,
@@ -277,19 +311,66 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		act: Action,
-		exp: &Fields,
-	) -> Result<Data, Error> {
+		fdc: FieldDataContext<'_>,
+	) -> Result<(), Error> {
 		//
-		let mut ops: Ops = vec![];
-		// Create a new context with the initial or the current doc
-		let doc = match act {
-			Action::Delete => Some(&self.initial),
-			Action::Update => Some(&self.current),
-			_ => unreachable!(),
+		let (set_ops, del_ops) = self.fields(stk, ctx, opt, &fdc).await?;
+		//
+		let thg = Thing {
+			tb: fdc.ft.name.to_raw(),
+			id: fdc.group_ids.into(),
 		};
+		let what = Values(vec![Value::from(thg.clone())]);
+		let stm = UpdateStatement {
+			what,
+			data: Some(Data::SetExpression(set_ops)),
+			..UpdateStatement::default()
+		};
+		stm.compute(stk, ctx, opt, None).await?;
+
+		if !del_ops.is_empty() {
+			let mut iter = del_ops.into_iter();
+			if let Some((i, o, v)) = iter.next() {
+				let mut root = Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(i),
+					o,
+					r: v,
+				}));
+				for (i, o, v) in iter {
+					let exp = Value::Expression(Box::new(Expression::Binary {
+						l: Value::Idiom(i),
+						o,
+						r: v,
+					}));
+					root = Value::Expression(Box::new(Expression::Binary {
+						l: root,
+						o: Operator::Or,
+						r: exp,
+					}));
+				}
+				let what = Values(vec![Value::from(thg)]);
+				let stm = DeleteStatement {
+					what,
+					cond: Some(Cond(root)),
+					..DeleteStatement::default()
+				};
+				stm.compute(stk, ctx, opt, None).await?;
+			}
+		}
+		Ok(())
+	}
+
+	async fn fields(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context<'_>,
+		opt: &Options,
+		fdc: &FieldDataContext<'_>,
+	) -> Result<(Ops, Ops), Error> {
+		let mut set_ops: Ops = vec![];
+		let mut del_ops: Ops = vec![];
 		//
-		for field in exp.other() {
+		for field in fdc.view.expr.other() {
 			// Process the field
 			if let Field::Single {
 				expr,
@@ -306,101 +387,238 @@ impl<'a> Document<'a> {
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
 						Some("count") => {
-							let val = f.compute(stk, ctx, opt, doc).await?;
-							self.chg(&mut ops, &act, idiom, val);
+							let val = f.compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
 						}
 						Some("math::sum") => {
-							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.chg(&mut ops, &act, idiom, val);
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
 						}
 						Some("math::min") | Some("time::min") => {
-							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.min(&mut ops, &act, idiom, val);
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
 						Some("math::max") | Some("time::max") => {
-							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.max(&mut ops, &act, idiom, val);
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val);
 						}
 						Some("math::mean") => {
-							let val = f.args()[0].compute(stk, ctx, opt, doc).await?;
-							self.mean(&mut ops, &act, idiom, val);
+							let val = f.args()[0].compute(stk, ctx, opt, Some(fdc.doc)).await?;
+							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = expr.compute(stk, ctx, opt, doc).await?;
-						self.set(&mut ops, idiom, val);
+						let val = expr.compute(stk, ctx, opt, Some(fdc.doc)).await?;
+						self.set(&mut set_ops, idiom, val);
 					}
 				}
 			}
 		}
-		//
-		Ok(Data::SetExpression(ops))
+		Ok((set_ops, del_ops))
 	}
+
 	/// Set the field in the foreign table
 	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) {
 		ops.push((key, Operator::Equal, val));
 	}
 	/// Increment or decrement the field in the foreign table
-	fn chg(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
-		ops.push((
-			key,
-			match act {
-				Action::Delete => Operator::Dec,
-				Action::Update => Operator::Inc,
-				_ => unreachable!(),
-			},
-			val,
-		));
+	fn chg(&self, set_ops: &mut Ops, del_ops: &mut Ops, act: &FieldAction, key: Idiom, val: Value) {
+		match act {
+			FieldAction::Add => {
+				set_ops.push((key.clone(), Operator::Inc, val));
+			}
+			FieldAction::Sub => {
+				set_ops.push((key.clone(), Operator::Dec, val));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key, Operator::Equal, Value::from(0)));
+			}
+		}
 	}
+
 	/// Set the new minimum value for the field in the foreign table
-	fn min(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
-		if act == &Action::Update {
-			ops.push((
-				key.clone(),
-				Operator::Equal,
-				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
-					exprs: vec![(
-						Value::Expression(Box::new(Expression::Binary {
-							l: Value::Idiom(key.clone()),
-							o: Operator::MoreThan,
-							r: val.clone(),
-						})),
-						val,
-					)],
-					close: Some(Value::Idiom(key)),
-				}))),
-			));
+	fn min(
+		&self,
+		set_ops: &mut Ops,
+		del_ops: &mut Ops,
+		fdc: &FieldDataContext<'_>,
+		field: &Field,
+		key: Idiom,
+		val: Value,
+	) {
+		// Key for the value count
+		let mut key_c = Idiom::from(vec![Part::from("__")]);
+		key_c.0.push(Part::from(key.to_hash()));
+		key_c.0.push(Part::from("c"));
+		match fdc.act {
+			FieldAction::Add => {
+				set_ops.push((
+					key.clone(),
+					Operator::Equal,
+					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+						exprs: vec![(
+							Value::Expression(Box::new(Expression::Binary {
+								l: Value::Idiom(key.clone()),
+								o: Operator::MoreThan,
+								r: val.clone(),
+							})),
+							val,
+						)],
+						close: Some(Value::Idiom(key)),
+					}))),
+				));
+				set_ops.push((key_c, Operator::Inc, Value::from(1)))
+			}
+			FieldAction::Sub => {
+				// If it is equal to the previous MIN value,
+				// as we can't know what was the previous MIN value,
+				// we have to recompute it
+				let subquery = Self::one_group_query(fdc, field, &key, val);
+				set_ops.push((key.clone(), Operator::Equal, subquery));
+				//  Decrement the number of values
+				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+			}
 		}
 	}
 	/// Set the new maximum value for the field in the foreign table
-	fn max(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
-		if act == &Action::Update {
-			ops.push((
-				key.clone(),
-				Operator::Equal,
-				Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
-					exprs: vec![(
-						Value::Expression(Box::new(Expression::Binary {
-							l: Value::Idiom(key.clone()),
-							o: Operator::LessThan,
-							r: val.clone(),
-						})),
-						val,
-					)],
-					close: Some(Value::Idiom(key)),
-				}))),
-			));
-		}
-	}
-	/// Set the new average value for the field in the foreign table
-	fn mean(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
-		//
+	fn max(
+		&self,
+		set_ops: &mut Ops,
+		del_ops: &mut Ops,
+		fdc: &FieldDataContext<'_>,
+		field: &Field,
+		key: Idiom,
+		val: Value,
+	) {
+		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
 		key_c.0.push(Part::from("c"));
 		//
-		ops.push((
+		match fdc.act {
+			FieldAction::Add => {
+				set_ops.push((
+					key.clone(),
+					Operator::Equal,
+					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+						exprs: vec![(
+							Value::Expression(Box::new(Expression::Binary {
+								l: Value::Idiom(key.clone()),
+								o: Operator::LessThan,
+								r: val.clone(),
+							})),
+							val,
+						)],
+						close: Some(Value::Idiom(key)),
+					}))),
+				));
+				set_ops.push((key_c, Operator::Inc, Value::from(1)))
+			}
+			FieldAction::Sub => {
+				// If it is equal to the previous MAX value,
+				// as we can't know what was the previous MAX value,
+				// we have to recompute the MAX
+				let subquery = Self::one_group_query(fdc, field, &key, val);
+				set_ops.push((key.clone(), Operator::Equal, subquery));
+				//  Decrement the number of values
+				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+			}
+		}
+	}
+
+	/// Recomputes the value for one group
+	fn one_group_query(
+		fdc: &FieldDataContext<'_>,
+		field: &Field,
+		key: &Idiom,
+		val: Value,
+	) -> Value {
+		// Build the condition merging the optional user provided condition and the group
+		let mut iter = fdc.groups.0.iter().enumerate();
+		let cond = if let Some((i, g)) = iter.next() {
+			let mut root = Value::Expression(Box::new(Expression::Binary {
+				l: Value::Idiom(g.0.clone()),
+				o: Operator::Equal,
+				r: fdc.group_ids[i].clone(),
+			}));
+			for (i, g) in iter {
+				let exp = Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(g.0.clone()),
+					o: Operator::Equal,
+					r: fdc.group_ids[i].clone(),
+				}));
+				root = Value::Expression(Box::new(Expression::Binary {
+					l: root,
+					o: Operator::And,
+					r: exp,
+				}));
+			}
+			if let Some(c) = &fdc.view.cond {
+				root = Value::Expression(Box::new(Expression::Binary {
+					l: root,
+					o: Operator::And,
+					r: c.0.clone(),
+				}));
+			}
+			Some(Cond(root))
+		} else {
+			fdc.view.cond.clone()
+		};
+
+		let group_select = Value::Subquery(Box::new(Subquery::Select(SelectStatement {
+			expr: Fields(vec![field.clone()], false),
+			cond,
+			what: (&fdc.view.what).into(),
+			group: Some(fdc.groups.clone()),
+			..SelectStatement::default()
+		})));
+		let array_first = Value::Function(Box::new(Function::Normal(
+			"array::first".to_string(),
+			vec![group_select],
+		)));
+		let ident = match field {
+			Field::Single {
+				alias: Some(alias),
+				..
+			} => match alias.0.first() {
+				Some(Part::Field(ident)) => ident.clone(),
+				_ => unreachable!(),
+			},
+			_ => unreachable!(),
+		};
+		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
+		Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+			exprs: vec![(
+				Value::Expression(Box::new(Expression::Binary {
+					l: Value::Idiom(key.clone()),
+					o: Operator::Equal,
+					r: val.clone(),
+				})),
+				compute_query,
+			)],
+			close: Some(Value::Idiom(key.clone())),
+		})))
+	}
+
+	/// Set the new average value for the field in the foreign table
+	fn mean(
+		&self,
+		set_ops: &mut Ops,
+		del_ops: &mut Ops,
+		act: &FieldAction,
+		key: Idiom,
+		val: Value,
+	) {
+		// Key for the value count
+		let mut key_c = Idiom::from(vec![Part::from("__")]);
+		key_c.0.push(Part::from(key.to_hash()));
+		key_c.0.push(Part::from("c"));
+		//
+		set_ops.push((
 			key.clone(),
 			Operator::Equal,
 			Value::Expression(Box::new(Expression::Binary {
@@ -426,9 +644,8 @@ impl<'a> Document<'a> {
 							},
 						))))),
 						o: match act {
-							Action::Delete => Operator::Sub,
-							Action::Update => Operator::Add,
-							_ => unreachable!(),
+							FieldAction::Sub => Operator::Sub,
+							FieldAction::Add => Operator::Add,
 						},
 						r: val,
 					},
@@ -444,24 +661,23 @@ impl<'a> Document<'a> {
 							},
 						))))),
 						o: match act {
-							Action::Delete => Operator::Sub,
-							Action::Update => Operator::Add,
-							_ => unreachable!(),
+							FieldAction::Sub => Operator::Sub,
+							FieldAction::Add => Operator::Add,
 						},
 						r: Value::from(1),
 					},
 				))))),
 			})),
 		));
-		//
-		ops.push((
-			key_c.clone(),
-			match act {
-				Action::Delete => Operator::Dec,
-				Action::Update => Operator::Inc,
-				_ => unreachable!(),
-			},
-			Value::from(1),
-		));
+		match act {
+			//  Increment the number of values
+			FieldAction::Add => set_ops.push((key_c, Operator::Inc, Value::from(1))),
+			FieldAction::Sub => {
+				//  Decrement the number of values
+				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				// Add a purge condition (delete record if the number of values is 0)
+				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+			}
+		}
 	}
 }
