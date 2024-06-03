@@ -217,6 +217,7 @@ impl Datastore {
 
 		// Initiate the desired datastore
 		let (inner, clock): (Result<Inner, Error>, Arc<SizedClock>) = match path {
+			// Initiate an in-memory datastore
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
@@ -230,7 +231,7 @@ impl Datastore {
 				#[cfg(not(feature = "kv-mem"))]
                 return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate an File database
+			// Parse and initiate a File datastore
 			s if s.starts_with("file:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
@@ -246,7 +247,7 @@ impl Datastore {
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate an RocksDB database
+			// Parse and initiate a RocksDB datastore
 			s if s.starts_with("rocksdb:") => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
@@ -278,7 +279,7 @@ impl Datastore {
 				#[cfg(not(feature = "kv-indxdb"))]
                 return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a TiKV database
+			// Parse and initiate a TiKV datastore
 			s if s.starts_with("tikv:") => {
 				#[cfg(feature = "kv-tikv")]
 				{
@@ -294,7 +295,7 @@ impl Datastore {
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a FoundationDB database
+			// Parse and initiate a FoundationDB datastore
 			s if s.starts_with("fdb:") => {
 				#[cfg(feature = "kv-fdb")]
 				{
@@ -310,7 +311,7 @@ impl Datastore {
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Parse and initiate a SurrealKV database
+			// Parse and initiate a SurrealKV datastore
 			s if s.starts_with("surrealkv:") => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
@@ -984,18 +985,19 @@ impl Datastore {
 		write: TransactionType,
 		lock: LockType,
 	) -> Result<Transaction, Error> {
+		// Specify if the transaction is writeable
 		#[allow(unused_variables)]
 		let write = match write {
 			Read => false,
 			Write => true,
 		};
-
+		// Specify if the transaction is lockable
 		#[allow(unused_variables)]
 		let lock = match lock {
 			Pessimistic => true,
 			Optimistic => false,
 		};
-
+		// Create a new transaction on the datastore
 		#[allow(unused_variables)]
 		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
