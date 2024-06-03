@@ -57,7 +57,7 @@ impl Parser<'_> {
 	fn eat_uuid_hex(&mut self, buffer: &mut [u8]) -> ParseResult<()> {
 		// A function to covert a hex digit to its number representation.
 		fn ascii_to_hex(b: u8) -> Option<u8> {
-			if (b'0'..=b'9').contains(&b) {
+			if b.is_ascii_digit() {
 				return Some(b - b'0');
 			}
 
@@ -100,7 +100,7 @@ impl Parser<'_> {
 
 		// for error handling, the incorrect hex character should be returned first, before
 		// returning the not correct length for segment error even if both are valid.
-		if !digits_bytes.into_iter().all(|x| matches!(x,b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')) {
+		if !digits_bytes.iter().all(|x| x.is_ascii_hexdigit()) {
 			return Err(ParseError::new(
 				ParseErrorKind::Unexpected {
 					found: TokenKind::Strand,

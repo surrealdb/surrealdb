@@ -368,25 +368,23 @@ impl Parser<'_> {
 		let type_value = self.next_token_value::<Strand>()?.0;
 		let ate_comma = self.eat(t!(","));
 
-		if type_value == "GeometryCollection" {
-			if self.eat(t!("}")) {
-				if let Value::Array(ref x) = value {
-					if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
-						let Value::Array(x) = value else {
-							unreachable!()
-						};
-						let geometries = x
-							.into_iter()
-							.map(|x| {
-								if let Value::Geometry(x) = x {
-									x
-								} else {
-									unreachable!()
-								}
-							})
-							.collect();
-						return Ok(Value::Geometry(Geometry::Collection(geometries)));
-					}
+		if type_value == "GeometryCollection" && self.eat(t!("}")) {
+			if let Value::Array(ref x) = value {
+				if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
+					let Value::Array(x) = value else {
+						unreachable!()
+					};
+					let geometries = x
+						.into_iter()
+						.map(|x| {
+							if let Value::Geometry(x) = x {
+								x
+							} else {
+								unreachable!()
+							}
+						})
+						.collect();
+					return Ok(Value::Geometry(Geometry::Collection(geometries)));
 				}
 			}
 		}
@@ -423,15 +421,9 @@ impl Parser<'_> {
 		// "collections": could be a geometry collection.
 		// "geometry": could be the values of geometry.
 		match key.as_str() {
-			"type" => {
-				return self.parse_object_or_geometry_after_type(ctx, start, key).await;
-			}
-			"coordinates" => {
-				return self.parse_object_or_geometry_after_coordinates(ctx, start, key).await;
-			}
-			"geometries" => {
-				return self.parse_object_or_geometry_after_geometries(ctx, start, key).await;
-			}
+			"type" => self.parse_object_or_geometry_after_type(ctx, start, key).await,
+			"coordinates" => self.parse_object_or_geometry_after_coordinates(ctx, start, key).await,
+			"geometries" => self.parse_object_or_geometry_after_geometries(ctx, start, key).await,
 			_ => {
 				expected!(self, t!(":"));
 				self.parse_object_from_key(ctx, key, BTreeMap::new(), start)

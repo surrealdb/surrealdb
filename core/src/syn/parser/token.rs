@@ -192,7 +192,7 @@ impl Parser<'_> {
 		self.lexer.string = Some(token_buffer);
 		self.prepend_token(token);
 
-		return Ok(token);
+		Ok(token)
 	}
 
 	pub fn glue_numeric(&mut self) -> ParseResult<Token> {
@@ -306,7 +306,7 @@ impl Parser<'_> {
 
 		self.prepend_token(token);
 
-		return Ok(token);
+		Ok(token)
 	}
 
 	pub fn glue_duration(&mut self) -> ParseResult<Token> {

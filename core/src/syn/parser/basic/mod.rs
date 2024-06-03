@@ -75,7 +75,7 @@ impl TokenValue for Duration {
 		match parser.glue_duration()?.kind {
 			TokenKind::Duration => {
 				parser.pop_peek();
-				return Ok(Duration(parser.lexer.duration.unwrap()));
+				Ok(Duration(parser.lexer.duration.unwrap()))
 			}
 			x => unexpected!(parser, x, "a duration"),
 		}
@@ -98,7 +98,7 @@ impl TokenValue for Strand {
 				let TokenKind::Strand = t.kind else {
 					unexpected!(parser, t.kind, "a strand")
 				};
-				return Ok(Strand(parser.lexer.string.take().unwrap()));
+				Ok(Strand(parser.lexer.string.take().unwrap()))
 			}
 			x => unexpected!(parser, x, "a strand"),
 		}
@@ -128,7 +128,7 @@ impl TokenValue for Regex {
 					.span_str(span)
 					.parse()
 					.map_err(|e| ParseError::new(ParseErrorKind::InvalidRegex(e), token.span))?;
-				return Ok(regex);
+				Ok(regex)
 			}
 			x => unexpected!(parser, x, "a regex"),
 		}
