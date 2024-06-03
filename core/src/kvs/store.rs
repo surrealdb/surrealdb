@@ -21,6 +21,7 @@ use crate::sql::statements::LiveStatement;
 use crate::sql::Id;
 use crate::sql::Value;
 use futures::lock::Mutex;
+use futures::lock::MutexGuard;
 use futures::stream::Stream;
 use futures::Future;
 use quick_cache::sync::Cache;
@@ -377,21 +378,21 @@ pub struct Store {
 	/// The query cache for this store
 	qc: Cache<Key, Entry, EntryWeighter>,
 	/// The underlying transactions for this store
-	tx: Arc<Mutex<Transaction>>,
+	tx: Mutex<Transaction>,
 }
 
 impl Store {
 	/// Create a new query store
 	pub async fn new(tx: Transaction) -> Store {
 		Store {
-			tx: tx.enclose(),
+			tx: Mutex::new(tx),
 			qc: Cache::with_weighter(10_000, 10_000, EntryWeighter),
 		}
 	}
 
 	/// Retrieve the underlying transaction
-	pub async fn tx(&self) -> Arc<Mutex<Transaction>> {
-		self.tx.clone()
+	pub async fn tx(&self) -> MutexGuard<'_, Transaction> {
+		self.tx.lock().await
 	}
 
 	/// Check if transaction is finished.
