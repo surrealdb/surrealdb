@@ -8,7 +8,7 @@ use crate::{
 			mac::{expected, expected_whitespace, unexpected},
 			ParseError, ParseErrorKind,
 		},
-		token::{t, NumberKind, TokenKind},
+		token::{t, TokenKind},
 	},
 };
 use std::{cmp::Ordering, ops::Bound};
@@ -285,35 +285,6 @@ impl Parser<'_> {
 				} else {
 					Ok(Id::String(digits_str.to_owned()))
 				}
-			}
-			TokenKind::Number(NumberKind::Exponent) if self.flexible_record_id => {
-				let text = self.lexer.string.take().unwrap();
-				if text.bytes().any(|x| !x.is_ascii_alphanumeric()) {
-					unexpected!(self, token.kind, "a identifier");
-				}
-				Ok(Id::String(text))
-			}
-			TokenKind::Number(NumberKind::Decimal) if self.flexible_record_id => {
-				let mut text = self.lexer.string.take().unwrap();
-				text.push('d');
-				text.push('e');
-				text.push('c');
-				Ok(Id::String(text))
-			}
-			TokenKind::Number(NumberKind::DecimalExponent) if self.flexible_record_id => {
-				let mut text = self.lexer.string.take().unwrap();
-				if text.bytes().any(|x| !x.is_ascii_alphanumeric()) {
-					unexpected!(self, token.kind, "a identifier");
-				}
-				text.push('d');
-				text.push('e');
-				text.push('c');
-				Ok(Id::String(text))
-			}
-			TokenKind::Number(NumberKind::Float) if self.flexible_record_id => {
-				let mut text = self.lexer.string.take().unwrap();
-				text.push('f');
-				Ok(Id::String(text))
 			}
 			TokenKind::Duration if self.flexible_record_id => {
 				self.lexer.duration = None;
