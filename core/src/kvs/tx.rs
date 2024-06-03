@@ -2584,19 +2584,20 @@ impl Transaction {
 
 						// Add batches of INSERT statements
 						// No need to chunk here, the scan it limited to 1000
-						for records in normal.into_iter() {
-							let values = records.join(", ");
+						{
+							let values = normal.join(", ");
 							let sql = format!("INSERT [ {values} ];");
 							chn.send(bytes!(sql)).await?;
 						}
 
 						// Add batches of INSERT RELATION statements
 						// No need to chunk here, the scan it limited to 1000
-						for records in relation.into_iter() {
-							let values = records.join(", ");
+						{
+							let values = relation.join(", ");
 							let sql = format!("INSERT RELATION [ {values} ];");
 							chn.send(bytes!(sql)).await?;
 						}
+
 						continue;
 					}
 					chn.send(bytes!("")).await?;
