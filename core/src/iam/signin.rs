@@ -863,7 +863,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test without roles and expiration disabled
+		// Test without roles and session expiration disabled
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();

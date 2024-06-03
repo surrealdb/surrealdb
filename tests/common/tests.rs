@@ -993,7 +993,7 @@ async fn session_expiration() {
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
-	// Authenticate using the token which expires in a day
+	// Authenticate using the token, which expires in a day
 	socket.send_request("authenticate", json!([res,])).await.unwrap();
 	// Check if the session is now authenticated
 	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
