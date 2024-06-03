@@ -664,7 +664,7 @@ impl Parser<'_> {
 
 	/// Parses the key of an object, i.e. `field` in the object `{ field: 1 }`.
 	pub fn parse_object_key(&mut self) -> ParseResult<String> {
-		let token = self.peek();
+		let token = self.glue()?;
 		match token.kind {
 			TokenKind::Keyword(_)
 			| TokenKind::Language(_)
