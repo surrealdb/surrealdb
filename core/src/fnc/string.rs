@@ -175,6 +175,7 @@ pub mod is {
 	use regex::Regex;
 	use semver::Version;
 	use std::char;
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 	use url::Url;
 	use uuid::Uuid;
 
@@ -207,6 +208,18 @@ pub mod is {
 
 	pub fn hexadecimal((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.chars().all(|x| char::is_ascii_hexdigit(&x)).into())
+	}
+
+	pub fn ip((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<IpAddr>().is_ok().into())
+	}
+
+	pub fn ipv4((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<Ipv4Addr>().is_ok().into())
+	}
+
+	pub fn ipv6((arg,): (String,)) -> Result<Value, Error> {
+		Ok(arg.parse::<Ipv6Addr>().is_ok().into())
 	}
 
 	pub fn latitude((arg,): (String,)) -> Result<Value, Error> {
@@ -506,6 +519,33 @@ mod tests {
 		assert_eq!(value, Value::Bool(true));
 
 		let value = super::is::hexadecimal((String::from("SurrealDB"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ip() {
+		let value = super::is::ip((String::from("127.0.0.1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ip((String::from("127.0.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ipv4() {
+		let value = super::is::ipv4((String::from("127.0.0.1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ipv4((String::from("127.0.0"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_ipv6() {
+		let value = super::is::ipv6((String::from("::1"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::ipv6((String::from("200t:db8::"),)).unwrap();
 		assert_eq!(value, Value::Bool(false));
 	}
 

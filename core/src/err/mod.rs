@@ -12,6 +12,7 @@ use crate::vs::Error as VersionstampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
@@ -298,9 +299,9 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested namespace token does not exist
-	#[error("The namespace token '{value}' does not exist")]
-	NtNotFound {
+	/// The requested namespace access method does not exist
+	#[error("The namespace access method '{value}' does not exist")]
+	NaNotFound {
 		value: String,
 	},
 
@@ -316,9 +317,9 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested database token does not exist
-	#[error("The database token '{value}' does not exist")]
-	DtNotFound {
+	/// The requested database access method does not exist
+	#[error("The database access method '{value}' does not exist")]
+	DaNotFound {
 		value: String,
 	},
 
@@ -352,12 +353,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested scope does not exist
-	#[error("The scope '{value}' does not exist")]
-	ScNotFound {
-		value: String,
-	},
-
 	// The cluster node already exists
 	#[error("The node '{value}' already exists")]
 	ClAlreadyExists {
@@ -367,12 +362,6 @@ pub enum Error {
 	// The cluster node does not exist
 	#[error("The node '{value}' does not exist")]
 	NdNotFound {
-		value: String,
-	},
-
-	/// The requested scope token does not exist
-	#[error("The scope token '{value}' does not exist")]
-	StNotFound {
 		value: String,
 	},
 
@@ -468,6 +457,24 @@ pub enum Error {
 		value: String,
 	},
 
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'in' is '{value}'")]
+	RelateStatementIn {
+		value: String,
+	},
+
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'id' is '{value}'")]
+	RelateStatementId {
+		value: String,
+	},
+
+	/// Can not execute RELATE statement using the specified value
+	#[error("Can not execute RELATE statement where property 'out' is '{value}'")]
+	RelateStatementOut {
+		value: String,
+	},
+
 	/// Can not execute DELETE statement using the specified value
 	#[error("Can not execute DELETE statement using value '{value}'")]
 	DeleteStatement {
@@ -477,6 +484,24 @@ pub enum Error {
 	/// Can not execute INSERT statement using the specified value
 	#[error("Can not execute INSERT statement using value '{value}'")]
 	InsertStatement {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'in' is '{value}'")]
+	InsertStatementIn {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'id' is '{value}'")]
+	InsertStatementId {
+		value: String,
+	},
+
+	/// Can not execute INSERT statement using the specified value
+	#[error("Can not execute INSERT statement where property 'out' is '{value}'")]
+	InsertStatementOut {
 		value: String,
 	},
 
@@ -763,15 +788,6 @@ pub enum Error {
 	#[error("The signin query failed")]
 	SigninQueryFailed,
 
-	#[error("This scope does not allow signup")]
-	ScopeNoSignup,
-
-	#[error("This scope does not allow signin")]
-	ScopeNoSignin,
-
-	#[error("The scope does not exist")]
-	NoScopeFound,
-
 	#[error("Username or Password was not provided")]
 	MissingUserOrPass,
 
@@ -863,12 +879,6 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested scope already exists
-	#[error("The scope '{value}' already exists")]
-	ScAlreadyExists {
-		value: String,
-	},
-
 	/// The requested table already exists
 	#[error("The table '{value}' already exists")]
 	TbAlreadyExists {
@@ -884,12 +894,6 @@ pub enum Error {
 	/// The requested database token already exists
 	#[error("The database token '{value}' already exists")]
 	DtAlreadyExists {
-		value: String,
-	},
-
-	/// The requested scope token already exists
-	#[error("The scope token '{value}' already exists")]
-	StAlreadyExists {
 		value: String,
 	},
 
@@ -920,14 +924,6 @@ pub enum Error {
 	#[error("The session has expired")]
 	ExpiredSession,
 
-	/// The session has an invalid duration
-	#[error("The session has an invalid duration")]
-	InvalidSessionDuration,
-
-	/// The session has an invalid expiration
-	#[error("The session has an invalid expiration")]
-	InvalidSessionExpiration,
-
 	/// A node task has failed
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
@@ -939,6 +935,76 @@ pub enum Error {
 	/// The supplied type could not be serialiazed into `sql::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
+
+	/// The requested root access method already exists
+	#[error("The root access method '{value}' already exists")]
+	AccessRootAlreadyExists {
+		value: String,
+	},
+
+	/// The requested namespace access method already exists
+	#[error("The namespace access method '{value}' already exists")]
+	AccessNsAlreadyExists {
+		value: String,
+	},
+
+	/// The requested database access method already exists
+	#[error("The database access method '{value}' already exists")]
+	AccessDbAlreadyExists {
+		value: String,
+	},
+
+	/// The requested root access method does not exist
+	#[error("The root access method '{value}' does not exist")]
+	AccessRootNotFound {
+		value: String,
+	},
+
+	/// The requested namespace access method does not exist
+	#[error("The namespace access method '{value}' does not exist")]
+	AccessNsNotFound {
+		value: String,
+	},
+
+	/// The requested database access method does not exist
+	#[error("The database access method '{value}' does not exist")]
+	AccessDbNotFound {
+		value: String,
+	},
+
+	/// The access method cannot be defined on the requested level
+	#[error("The access method cannot be defined on the requested level")]
+	AccessLevelMismatch,
+
+	#[error("The access method cannot be used in the requested operation")]
+	AccessMethodMismatch,
+
+	#[error("The access method does not exist")]
+	AccessNotFound,
+
+	#[error("This access method has an invalid duration")]
+	AccessInvalidDuration,
+
+	#[error("This access method results in an invalid expiration")]
+	AccessInvalidExpiration,
+
+	#[error("The record access signup query failed")]
+	AccessRecordSignupQueryFailed,
+
+	#[error("The record access signin query failed")]
+	AccessRecordSigninQueryFailed,
+
+	#[error("This record access method does not allow signup")]
+	AccessRecordNoSignup,
+
+	#[error("This record access method does not allow signin")]
+	AccessRecordNoSignin,
+
+	/// Found a table name for the record but this is not a valid table
+	#[error("Found {value} for the Record ID but this is not a valid table name")]
+	TbInvalid {
+		value: String,
+	},
 }
 
 impl From<Error> for String {
@@ -1046,6 +1112,7 @@ impl From<reqwest::Error> for Error {
 }
 
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",

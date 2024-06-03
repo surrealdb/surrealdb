@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::rebuild::RebuildStatement;
@@ -69,7 +69,6 @@ impl Subquery {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Duplicate context
@@ -80,18 +79,18 @@ impl Subquery {
 		}
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Ifelse(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Output(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Define(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Rebuild(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Remove(ref v) => v.compute(&ctx, opt, txn, doc).await,
-			Self::Select(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Create(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Update(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Delete(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Relate(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
-			Self::Insert(ref v) => v.compute(stk, &ctx, opt, txn, doc).await,
+			Self::Value(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Ifelse(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Output(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Define(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Rebuild(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Remove(ref v) => v.compute(&ctx, opt, doc).await,
+			Self::Select(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Create(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Update(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Delete(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Relate(ref v) => v.compute(stk, &ctx, opt, doc).await,
+			Self::Insert(ref v) => v.compute(stk, &ctx, opt, doc).await,
 		}
 	}
 }

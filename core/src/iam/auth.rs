@@ -1,4 +1,4 @@
-use crate::sql::statements::{DefineTokenStatement, DefineUserStatement};
+use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -49,9 +49,9 @@ impl Auth {
 		matches!(self.level(), Level::Database(_, _))
 	}
 
-	/// Check if the current level is Scope
-	pub fn is_scope(&self) -> bool {
-		matches!(self.level(), Level::Scope(_, _, _))
+	/// Check if the current level is Record
+	pub fn is_record(&self) -> bool {
+		matches!(self.level(), Level::Record(_, _, _))
 	}
 
 	/// System Auth helpers
@@ -70,8 +70,8 @@ impl Auth {
 		Self::new(Actor::new("system_auth".into(), vec![role], (ns, db).into()))
 	}
 
-	pub fn for_sc(rid: String, ns: &str, db: &str, sc: &str) -> Self {
-		Self::new(Actor::new(rid, vec![], (ns, db, sc).into()))
+	pub fn for_record(rid: String, ns: &str, db: &str, ac: &str) -> Self {
+		Self::new(Actor::new(rid.to_string(), vec![], (ns, db, ac).into()))
 	}
 
 	//
@@ -95,8 +95,8 @@ impl std::convert::From<(&DefineUserStatement, Level)> for Auth {
 	}
 }
 
-impl std::convert::From<(&DefineTokenStatement, Level)> for Auth {
-	fn from(val: (&DefineTokenStatement, Level)) -> Self {
+impl std::convert::From<(&DefineAccessStatement, Level)> for Auth {
+	fn from(val: (&DefineAccessStatement, Level)) -> Self {
 		Self::new((val.0, val.1).into())
 	}
 }

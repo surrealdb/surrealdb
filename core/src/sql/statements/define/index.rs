@@ -1,11 +1,11 @@
 use crate::ctx::Context;
-use crate::dbs::{Force, Options, Transaction};
+use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	statements::UpdateStatement, Base, Ident, Idioms, Index, Object, Strand, Value, Values,
+	statements::UpdateStatement, Base, Ident, Idioms, Index, Object, Part, Strand, Value, Values,
 };
 use derive::Store;
 use reblessive::tree::Stk;
@@ -35,13 +35,12 @@ impl DefineIndexStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Claim transaction
-		let mut run = txn.lock().await;
+		let mut run = ctx.tx_lock().await;
 		// Clear the cache
 		run.clear_cache();
 		// Check if index already exists
@@ -52,6 +51,29 @@ impl DefineIndexStatement {
 				value: self.name.to_string(),
 			});
 		}
+		// If we are strict, check that the table exists
+		run.check_ns_db_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
+		// Does the table exists?
+		match run.get_and_cache_tb(opt.ns(), opt.db(), &self.what).await {
+			Ok(db) => {
+				// Are we SchemaFull?
+				if db.full {
+					// Check that the fields exists
+					for idiom in self.cols.iter() {
+						if let Some(Part::Field(id)) = idiom.first() {
+							run.get_tb_field(opt.ns(), opt.db(), &self.what, id).await?;
+						}
+					}
+				}
+			}
+			// If the TB was not found, we're fine
+			Err(Error::TbNotFound {
+				..
+			}) => {}
+			// Any other error should be returned
+			Err(e) => return Err(e),
+		}
+
 		// Process the statement
 		let key = crate::key::table::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.add_ns(opt.ns(), opt.strict).await?;
@@ -81,7 +103,7 @@ impl DefineIndexStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
 			..UpdateStatement::default()
 		};
-		stm.compute(stk, ctx, opt, txn, doc).await?;
+		stm.compute(stk, ctx, opt, doc).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

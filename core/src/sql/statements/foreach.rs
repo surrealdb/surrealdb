@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{block::Entry, Block, Param, Value};
@@ -32,11 +32,10 @@ impl ForeachStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Check the loop data
-		match &self.range.compute(stk, ctx, opt, txn, doc).await? {
+		match &self.range.compute(stk, ctx, opt, doc).await? {
 			Value::Array(arr) => {
 				// Loop over the values
 				'foreach: for v in arr.iter() {
@@ -44,55 +43,38 @@ impl ForeachStatement {
 					let mut ctx = Context::new(ctx);
 					// Set the current parameter
 					let key = self.param.0.to_raw();
-					let val = stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await?;
+					let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
 					ctx.add_value(key, val);
 					// Loop over the code block statements
 					for v in self.block.iter() {
 						// Compute each block entry
 						let res = match v {
 							Entry::Set(v) => {
-								let val =
-									stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await?;
+								let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
 								ctx.add_value(v.name.to_owned(), val);
 								Ok(Value::None)
 							}
-							Entry::Value(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Break(v) => v.compute(&ctx, opt, txn, doc).await,
-							Entry::Continue(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Value(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Break(v) => v.compute(&ctx, opt, doc).await,
+							Entry::Continue(v) => v.compute(&ctx, opt, doc).await,
 							Entry::Foreach(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
+								stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await
 							}
-							Entry::Ifelse(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Select(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Create(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Update(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Delete(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Relate(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Insert(v) => {
-								stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await
-							}
-							Entry::Define(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Rebuild(v) => v.compute(stk, &ctx, opt, txn, doc).await,
-							Entry::Remove(v) => v.compute(&ctx, opt, txn, doc).await,
+							Entry::Ifelse(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Select(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Create(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Update(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Delete(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Relate(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Insert(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
+							Entry::Define(v) => v.compute(stk, &ctx, opt, doc).await,
+							Entry::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await,
+							Entry::Remove(v) => v.compute(&ctx, opt, doc).await,
 							Entry::Output(v) => {
-								return stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await;
+								return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 							}
 							Entry::Throw(v) => {
-								return stk.run(|stk| v.compute(stk, &ctx, opt, txn, doc)).await;
+								return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 							}
 						};
 						// Catch any special errors

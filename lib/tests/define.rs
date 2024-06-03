@@ -55,8 +55,8 @@ async fn define_statement_database() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
-			tokens: {},
 			users: {},
 		}",
 	);
@@ -84,12 +84,11 @@ async fn define_statement_function() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; } PERMISSIONS FULL' },
 			models: {},
 			params: {},
-			scopes: {},
 			tables: {},
 			users: {},
 		}",
@@ -116,12 +115,11 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY DROP SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
@@ -148,12 +146,11 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
@@ -184,12 +181,11 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
@@ -216,12 +212,11 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
@@ -256,12 +251,11 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: {
 				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
 				view: 'DEFINE TABLE view TYPE ANY SCHEMALESS AS SELECT count() FROM test GROUP ALL PERMISSIONS NONE',
@@ -289,12 +283,11 @@ async fn define_statement_table_foreigntable() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: {
 				test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE',
 			},
@@ -861,11 +854,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	skip_ok(res, 2)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -1244,6 +1233,39 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 }
 
 #[tokio::test]
+async fn define_statement_index_on_schemafull_without_permission() -> Result<(), Error> {
+	let sql = "
+		DEFINE TABLE test SCHEMAFULL PERMISSIONS NONE;
+		DEFINE INDEX idx ON test FIELDS foo;
+	";
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	skip_ok(&mut res, 1)?;
+	//
+	let tmp = res.remove(0).result;
+	let s = format!("{:?}", tmp);
+	assert!(
+		tmp.is_err_and(|e| {
+			if let Error::FdNotFound {
+				value,
+			} = e
+			{
+				assert_eq!(value, "foo", "Wrong field: {value}");
+				true
+			} else {
+				false
+			}
+		}),
+		"Expected error, but got: {:?}",
+		s
+	);
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_analyzer() -> Result<(), Error> {
 	let sql = r#"
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
@@ -1267,18 +1289,17 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"{
+			accesses: {},
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
 				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
-			tokens: {},
 			functions: {
 				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); } PERMISSIONS FULL"
 			},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: {},
 			users: {},
 		}"#,
@@ -1557,8 +1578,8 @@ async fn permissions_checks_define_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ databases: { DB: 'DEFINE DATABASE DB' }, tokens: {  }, users: {  } }"],
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: { DB: 'DEFINE DATABASE DB' }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
 	];
 
 	let test_cases = [
@@ -1599,8 +1620,8 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1641,8 +1662,8 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1674,17 +1695,17 @@ async fn permissions_checks_define_analyzer() {
 }
 
 #[tokio::test]
-async fn permissions_checks_define_token_ns() {
+async fn permissions_checks_define_access_ns() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE TOKEN token ON NS TYPE HS512 VALUE 'secret'"),
+		("test", "DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret'"),
 		("check", "INFO FOR NS"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ databases: {  }, tokens: { token: \"DEFINE TOKEN token ON NAMESPACE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, databases: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1716,17 +1737,17 @@ async fn permissions_checks_define_token_ns() {
 }
 
 #[tokio::test]
-async fn permissions_checks_define_token_db() {
+async fn permissions_checks_define_access_db() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE TOKEN token ON DB TYPE HS512 VALUE 'secret'"),
+		("test", "DEFINE ACCESS access ON DB TYPE JWT ALGORITHM HS512 KEY 'secret'"),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: { token: \"DEFINE TOKEN token ON DATABASE TYPE HS512 VALUE 'secret'\" }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1761,13 +1782,13 @@ async fn permissions_checks_define_token_db() {
 async fn permissions_checks_define_user_root() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER"),
+		("test", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER SESSION 1d"),
 		("check", "INFO FOR ROOT"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER\" } }"],
+        vec!["{ namespaces: {  }, users: { user: \"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER SESSION 1d\" } }"],
 		vec!["{ namespaces: {  }, users: {  } }"]
     ];
 
@@ -1803,14 +1824,14 @@ async fn permissions_checks_define_user_root() {
 async fn permissions_checks_define_user_ns() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER"),
+		("test", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER SESSION 1d"),
 		("check", "INFO FOR NS"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ databases: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER\" } }"],
-		vec!["{ databases: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER SESSION 1d\" } }"],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1845,14 +1866,14 @@ async fn permissions_checks_define_user_ns() {
 async fn permissions_checks_define_user_db() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER"),
+		("test", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER SESSION 1d"),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER\" } }"],
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER SESSION 1d\" } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1884,28 +1905,28 @@ async fn permissions_checks_define_user_db() {
 }
 
 #[tokio::test]
-async fn permissions_checks_define_scope() {
+async fn permissions_checks_define_access_record() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE SCOPE account SESSION 1h;"),
+		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY 'secret'"),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: { account: 'DEFINE SCOPE account SESSION 1h' }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD DURATION 1h WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION 1h\" }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
 		// Root level
 		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
+		((().into(), Role::Editor), ("NS", "DB"), false),
 		((().into(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
 		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
 		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
+		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
 		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
 		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
 		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
@@ -1913,7 +1934,7 @@ async fn permissions_checks_define_scope() {
 		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
 		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
 		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
+		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
 		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
 		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
 		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
@@ -1935,8 +1956,8 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, tables: {  }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -1974,8 +1995,8 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, tokens: {  }, users: {  } }"],
-		vec!["{ analyzers: {  }, functions: {  }, models: {  }, params: {  }, scopes: {  }, tables: {  }, tokens: {  }, users: {  } }"]
+        vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
+		vec!["{ accesses: {  }, analyzers: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
 	let test_cases = [
@@ -2159,17 +2180,16 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: {
 					default: 'DEFINE TABLE default TYPE ANY SCHEMALESS PERMISSIONS NONE',
 					full: 'DEFINE TABLE full TYPE ANY SCHEMALESS PERMISSIONS FULL',
 					select_full: 'DEFINE TABLE select_full TYPE ANY SCHEMALESS PERMISSIONS FOR select FULL, FOR create, update, delete NONE'
 			},
-			tokens: {},
 			users: {}
 		}",
 	);
@@ -2499,10 +2519,10 @@ async fn redefining_existing_param_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
-async fn redefining_existing_scope_should_not_error() -> Result<(), Error> {
+async fn redefining_existing_access_should_not_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE SCOPE example;
-		DEFINE SCOPE example;
+		DEFINE ACCESS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
+		DEFINE ACCESS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2519,10 +2539,10 @@ async fn redefining_existing_scope_should_not_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn redefining_existing_scope_with_if_not_exists_should_error() -> Result<(), Error> {
+async fn redefining_existing_access_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE SCOPE IF NOT EXISTS example;
-		DEFINE SCOPE IF NOT EXISTS example;
+		DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
+		DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2533,7 +2553,7 @@ async fn redefining_existing_scope_with_if_not_exists_should_error() -> Result<(
 	assert_eq!(tmp, Value::None);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::ScAlreadyExists { .. }),);
+	assert!(matches!(tmp, Error::AccessDbAlreadyExists { .. }),);
 	//
 	Ok(())
 }
@@ -2579,50 +2599,10 @@ async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(
 }
 
 #[tokio::test]
-async fn redefining_existing_token_should_not_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\";
-		DEFINE TOKEN example ON SCOPE example TYPE HS512 VALUE \"example\";
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_token_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE \"example\";
-		DEFINE TOKEN IF NOT EXISTS example ON SCOPE example TYPE HS512 VALUE \"example\";
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::StAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
 async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER;
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2641,8 +2621,8 @@ async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
 #[tokio::test]
 async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
 	let sql = "
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER;
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER SESSION 1d;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -2831,12 +2811,11 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
@@ -2861,12 +2840,11 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
@@ -2891,12 +2869,11 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			accesses: {},
 			analyzers: {},
-			tokens: {},
 			functions: {},
 			models: {},
 			params: {},
-			scopes: {},
 			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing | other SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",

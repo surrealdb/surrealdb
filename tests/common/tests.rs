@@ -1,4 +1,5 @@
 use super::common::{self, Format, Socket, DB, NS, PASS, USER};
+use assert_fs::TempDir;
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
@@ -35,11 +36,11 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_use(Some(NS), Some(DB)).await?;
 	// Define a user table
 	socket.send_message_query("DEFINE TABLE user PERMISSIONS FULL").await?;
-	// Define a user scope
+	// Define a user record access method
 	socket
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 24h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
 				SIGNUP ( CREATE user SET user = $user, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE user = $user AND crypto::argon2::compare(pass, $pass) )
 			;
@@ -57,8 +58,8 @@ async fn info() -> Result<(), Box<dyn std::error::Error>> {
 			"#,
 		)
 		.await?;
-	// Sign in as scope user
-	socket.send_message_signin("user", "pass", Some(NS), Some(DB), Some("scope")).await?;
+	// Sign in as record user
+	socket.send_message_signin("user", "pass", Some(NS), Some(DB), Some("user")).await?;
 	// Send INFO command
 	let res = socket.send_request("info", json!([])).await?;
 	assert!(res["result"].is_object(), "result: {:?}", res);
@@ -79,11 +80,11 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await?;
-	// Setup the scope
+	// Define a user record access method
 	socket
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 24h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
@@ -96,7 +97,7 @@ async fn signup() -> Result<(), Box<dyn std::error::Error>> {
 			json!([{
 				"ns": NS,
 				"db": DB,
-				"sc": "scope",
+				"ac": "user",
 				"email": "email@email.com",
 				"pass": "pass",
 			}]),
@@ -127,11 +128,11 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 	socket.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await?;
-	// Setup the scope
+	// Define a user record access method
 	socket
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 24h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 24h
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
@@ -145,7 +146,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 				[{
 					"ns": NS,
 					"db": DB,
-					"sc": "scope",
+					"ac": "user",
 					"email": "email@email.com",
 					"pass": "pass",
 				}]
@@ -170,7 +171,7 @@ async fn signin() -> Result<(), Box<dyn std::error::Error>> {
 			[{
 				"ns": NS,
 				"db": DB,
-				"sc": "scope",
+				"ac": "user",
 				"email": "email@email.com",
 				"pass": "pass",
 			}]),
@@ -868,11 +869,11 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 	socket_permanent.send_message_signin(USER, PASS, None, None, None).await?;
 	// Specify a namespace and database
 	socket_permanent.send_message_use(Some(NS), Some(DB)).await?;
-	// Setup the scope
+	// Define a user record access method
 	socket_permanent
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
@@ -887,7 +888,7 @@ async fn variable_auth_live_query() -> Result<(), Box<dyn std::error::Error>> {
 			json!([{
 				"ns": NS,
 				"db": DB,
-				"sc": "scope",
+				"ac": "user",
 				"email": "email@email.com",
 				"pass": "pass",
 			}]),
@@ -933,23 +934,23 @@ async fn session_expiration() {
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
-	// Setup the scope
+	// Define a user record access method
 	socket
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
 		.await
 		.unwrap();
-	// Create resource that requires a scope session to query
+	// Create resource that requires a session with the access method to query
 	socket
 		.send_message_query(
 			r#"
 			DEFINE TABLE test SCHEMALESS
-				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+				PERMISSIONS FOR select, create, update, delete WHERE $access = "user"
 			;"#,
 		)
 		.await
@@ -970,7 +971,7 @@ async fn session_expiration() {
 				[{
 					"ns": NS,
 					"db": DB,
-					"sc": "scope",
+					"ac": "user",
 					"email": "email@email.com",
 					"pass": "pass",
 				}]
@@ -1012,7 +1013,7 @@ async fn session_expiration() {
 				[{
 					"ns": NS,
 					"db": DB,
-					"sc": "scope",
+					"ac": "user",
 					"email": "email@email.com",
 					"pass": "pass",
 				}]
@@ -1043,23 +1044,23 @@ async fn session_expiration_operations() {
 	let root_token = socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
-	// Setup the scope
+	// Define a user record access method
 	socket
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
 		.await
 		.unwrap();
-	// Create resource that requires a scope session to query
+	// Create resource that requires a session with the access method to query
 	socket
 		.send_message_query(
 			r#"
 			DEFINE TABLE test SCHEMALESS
-				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+				PERMISSIONS FOR select, create, update, delete WHERE $access = "user"
 			;"#,
 		)
 		.await
@@ -1080,7 +1081,7 @@ async fn session_expiration_operations() {
 				[{
 					"ns": NS,
 					"db": DB,
-					"sc": "scope",
+					"ac": "user",
 					"email": "email@email.com",
 					"pass": "pass",
 				}]
@@ -1217,7 +1218,7 @@ async fn session_expiration_operations() {
 			json!([{
 				"ns": NS,
 				"db": DB,
-				"sc": "scope",
+				"ac": "user",
 				"email": "another@email.com",
 				"pass": "pass",
 			}]),
@@ -1248,7 +1249,7 @@ async fn session_expiration_operations() {
 				[{
 					"ns": NS,
 					"db": DB,
-					"sc": "scope",
+					"ac": "user",
 					"email": "another@email.com",
 					"pass": "pass",
 				}]
@@ -1299,23 +1300,23 @@ async fn session_reauthentication() {
 	socket.send_message_query("INFO FOR ROOT").await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
-	// Setup the scope
+	// Define a user record access method
 	socket
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 1h
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
 		.await
 		.unwrap();
-	// Create resource that requires a scope session to query
+	// Create resource that requires a session with the access method to query
 	socket
 		.send_message_query(
 			r#"
 			DEFINE TABLE test SCHEMALESS
-				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+				PERMISSIONS FOR select, create, update, delete WHERE $access = "user"
 			;"#,
 		)
 		.await
@@ -1336,7 +1337,7 @@ async fn session_reauthentication() {
 				[{
 					"ns": NS,
 					"db": DB,
-					"sc": "scope",
+					"ac": "user",
 					"email": "email@email.com",
 					"pass": "pass",
 				}]
@@ -1353,7 +1354,7 @@ async fn session_reauthentication() {
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
-	// Authenticate using the scope token
+	// Authenticate using the token
 	socket.send_request("authenticate", json!([res,])).await.unwrap();
 	// Check that we do not have root access
 	let res = socket.send_message_query("INFO FOR ROOT").await.unwrap();
@@ -1363,7 +1364,7 @@ async fn session_reauthentication() {
 		"result: {:?}",
 		res
 	);
-	// Check if the session is authenticated for the scope
+	// Check if the session is authenticated
 	let res = socket.send_message_query("SELECT VALUE working FROM test:1").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["yes"]), "result: {:?}", res);
 	// Authenticate using the root token
@@ -1387,23 +1388,23 @@ async fn session_reauthentication_expired() {
 	socket.send_message_query("INFO FOR ROOT").await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
-	// Setup the scope
+	// Define a user record access method
 	socket
 		.send_message_query(
 			r#"
-			DEFINE SCOPE scope SESSION 1s
+			DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1s
 				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
 				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
 			;"#,
 		)
 		.await
 		.unwrap();
-	// Create resource that requires a scope session to query
+	// Create resource that requires a session with the access method to query
 	socket
 		.send_message_query(
 			r#"
 			DEFINE TABLE test SCHEMALESS
-				PERMISSIONS FOR select, create, update, delete WHERE $scope = "scope"
+				PERMISSIONS FOR select, create, update, delete WHERE $access = "user"
 			;"#,
 		)
 		.await
@@ -1424,7 +1425,7 @@ async fn session_reauthentication_expired() {
 				[{
 					"ns": NS,
 					"db": DB,
-					"sc": "scope",
+					"ac": "user",
 					"email": "email@email.com",
 					"pass": "pass",
 				}]
@@ -1441,7 +1442,7 @@ async fn session_reauthentication_expired() {
 	assert!(res["result"].is_string(), "result: {:?}", res);
 	let res = res["result"].as_str().unwrap();
 	assert!(res.starts_with("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9"), "result: {}", res);
-	// Authenticate using the scope token, which will expire soon
+	// Authenticate using the token, which will expire soon
 	socket.send_request("authenticate", json!([res,])).await.unwrap();
 	// Wait two seconds for token to expire
 	tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -1538,4 +1539,47 @@ async fn relate_rpc() {
 
 	// Test passed
 	server.finish().unwrap();
+}
+
+#[test(tokio::test)]
+async fn temporary_directory() {
+	// Setup database server
+	let temp_dir = TempDir::new().unwrap();
+	let (addr, mut server) =
+		common::start_server_with_temporary_directory(temp_dir.to_string_lossy().as_ref())
+			.await
+			.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, SERVER, FORMAT).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// create records
+	socket.send_message_query("CREATE test:a, test:b").await.unwrap();
+	// These selects use the memory collector
+	let mut res =
+		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
+	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "Memory" }, "operation": "Collector" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// And return the correct result
+	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
+	let expected = json!([{"id": "test:b" }, { "id": "test:a" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// This one should the file collector
+	let mut res = socket
+		.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES EXPLAIN")
+		.await
+		.unwrap();
+	let expected = json!([{"detail": { "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "TempFiles" }, "operation": "Collector" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// And return the correct result
+	let mut res =
+		socket.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES").await.unwrap();
+	let expected = json!([{"id": "test:b" }, { "id": "test:a" }]);
+	assert_eq!(res.remove(0)["result"], expected);
+	// Test passed
+	server.finish().unwrap();
+	// Cleanup
+	temp_dir.close().unwrap();
 }

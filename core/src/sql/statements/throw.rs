@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::Value;
@@ -28,10 +28,9 @@ impl ThrowStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
-		Err(Error::Thrown(self.error.compute(stk, ctx, opt, txn, doc).await?.to_raw_string()))
+		Err(Error::Thrown(self.error.compute(stk, ctx, opt, doc).await?.to_raw_string()))
 	}
 }
 

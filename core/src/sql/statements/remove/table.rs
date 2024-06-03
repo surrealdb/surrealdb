@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -21,17 +20,12 @@ pub struct RemoveTableStatement {
 
 impl RemoveTableStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 			// Claim transaction
-			let mut run = txn.lock().await;
+			let mut run = ctx.tx_lock().await;
 			// Remove the index stores
 			ctx.get_index_stores().table_removed(opt, &mut run, &self.name).await?;
 			// Clear the cache

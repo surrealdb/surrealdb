@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -12,21 +12,16 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct RemoveTokenStatement {
+pub struct RemoveAccessStatement {
 	pub name: Ident,
 	pub base: Base,
 	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
-impl RemoveTokenStatement {
+impl RemoveAccessStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
@@ -34,39 +29,26 @@ impl RemoveTokenStatement {
 			match &self.base {
 				Base::Ns => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
-					let tk = run.get_ns_token(opt.ns(), &self.name).await?;
+					let ac = run.get_ns_access(opt.ns(), &self.name).await?;
 					// Delete the definition
-					let key = crate::key::namespace::tk::new(opt.ns(), &tk.name);
+					let key = crate::key::namespace::ac::new(opt.ns(), &ac.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
 				}
 				Base::Db => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
-					let tk = run.get_db_token(opt.ns(), opt.db(), &self.name).await?;
+					let ac = run.get_db_access(opt.ns(), opt.db(), &self.name).await?;
 					// Delete the definition
-					let key = crate::key::database::tk::new(opt.ns(), opt.db(), &tk.name);
-					run.del(key).await?;
-					// Ok all good
-					Ok(Value::None)
-				}
-				Base::Sc(sc) => {
-					// Claim transaction
-					let mut run = txn.lock().await;
-					// Clear the cache
-					run.clear_cache();
-					// Get the definition
-					let tk = run.get_sc_token(opt.ns(), opt.db(), sc, &self.name).await?;
-					// Delete the definition
-					let key = crate::key::scope::tk::new(opt.ns(), opt.db(), sc, &tk.name);
+					let key = crate::key::database::ac::new(opt.ns(), opt.db(), &ac.name);
 					run.del(key).await?;
 					// Ok all good
 					Ok(Value::None)
@@ -77,13 +59,10 @@ impl RemoveTokenStatement {
 		.await;
 		match future {
 			Err(e) if self.if_exists => match e {
-				Error::NtNotFound {
+				Error::NaNotFound {
 					..
 				} => Ok(Value::None),
-				Error::DtNotFound {
-					..
-				} => Ok(Value::None),
-				Error::StNotFound {
+				Error::DaNotFound {
 					..
 				} => Ok(Value::None),
 				e => Err(e),
@@ -93,9 +72,9 @@ impl RemoveTokenStatement {
 	}
 }
 
-impl Display for RemoveTokenStatement {
+impl Display for RemoveAccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE TOKEN")?;
+		write!(f, "REMOVE ACCESS")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}

@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, Ident, Value};
@@ -21,12 +21,7 @@ pub struct RemoveUserStatement {
 
 impl RemoveUserStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-	) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context<'_>, opt: &Options) -> Result<Value, Error> {
 		let future = async {
 			// Allowed to run?
 			opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
@@ -34,7 +29,7 @@ impl RemoveUserStatement {
 			match self.base {
 				Base::Root => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
@@ -47,7 +42,7 @@ impl RemoveUserStatement {
 				}
 				Base::Ns => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition
@@ -60,7 +55,7 @@ impl RemoveUserStatement {
 				}
 				Base::Db => {
 					// Claim transaction
-					let mut run = txn.lock().await;
+					let mut run = ctx.tx_lock().await;
 					// Clear the cache
 					run.clear_cache();
 					// Get the definition

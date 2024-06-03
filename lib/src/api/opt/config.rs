@@ -1,5 +1,6 @@
 use crate::{dbs::Capabilities, iam::Level};
 #[cfg(any(
+	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
@@ -26,6 +27,7 @@ pub struct Config {
 	pub(crate) tick_interval: Option<Duration>,
 	pub(crate) capabilities: Capabilities,
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
@@ -120,7 +122,9 @@ impl Config {
 		self.capabilities = capabilities;
 		self
 	}
+
 	#[cfg(any(
+		feature = "kv-mem",
 		feature = "kv-surrealkv",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",

@@ -3706,6 +3706,72 @@ async fn function_parse_is_hexadecimal() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_parse_is_ip() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::ip("127.0.0.1");
+		RETURN string::is::ip("127.0.0");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_ipv4() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::ipv4("127.0.0.1");
+		RETURN string::is::ipv4("127.0.0");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_ipv6() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::is::ipv6("::1");
+		RETURN string::is::ipv6("200t:db8::");
+	"#;
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_parse_is_latitude() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::latitude("51.509865");

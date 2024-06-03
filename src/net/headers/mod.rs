@@ -23,9 +23,9 @@ pub use accept::Accept;
 pub use auth_db::SurrealAuthDatabase;
 pub use auth_ns::SurrealAuthNamespace;
 pub use content_type::ContentType;
-pub use db::{SurrealDatabase, SurrealDatabaseLegacy};
-pub use id::{SurrealId, SurrealIdLegacy};
-pub use ns::{SurrealNamespace, SurrealNamespaceLegacy};
+pub use db::SurrealDatabase;
+pub use id::SurrealId;
+pub use ns::SurrealNamespace;
 
 pub fn add_version_header() -> SetResponseHeaderLayer<HeaderValue> {
 	let val = format!("{PKG_NAME}-{}", *PKG_VERSION);

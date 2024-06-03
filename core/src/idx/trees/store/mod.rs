@@ -3,6 +3,7 @@ pub(crate) mod hnsw;
 mod lru;
 pub(crate) mod tree;
 
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
@@ -63,6 +64,22 @@ where
 		match self {
 			Self::Read(r) => r.get_node(tx, node_id).await,
 			_ => Err(Error::Unreachable("TreeStore::get_node")),
+		}
+	}
+
+	pub(in crate::idx) async fn get_node_txn(
+		&self,
+		ctx: &Context<'_>,
+		node_id: NodeId,
+	) -> Result<Arc<StoredNode<N>>, Error> {
+		match self {
+			Self::Read(r) => {
+				let mut tx = ctx.tx_lock().await;
+				let n = r.get_node(&mut tx, node_id).await;
+				drop(tx);
+				n
+			}
+			_ => Err(Error::Unreachable("TreeStore::get_node_txn")),
 		}
 	}
 

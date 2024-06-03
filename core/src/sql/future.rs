@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::Block;
@@ -31,12 +31,11 @@ impl Future {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Process the future if enabled
 		match opt.futures {
-			true => stk.run(|stk| self.0.compute(stk, ctx, opt, txn, doc)).await?.ok(),
+			true => stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await?.ok(),
 			false => Ok(self.clone().into()),
 		}
 	}

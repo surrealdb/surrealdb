@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
-use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
@@ -15,7 +14,6 @@ impl<'a> Document<'a> {
 		&mut self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
-		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Get the record id
@@ -23,7 +21,7 @@ impl<'a> Document<'a> {
 		// Set default field values
 		self.current.doc.to_mut().def(rid);
 		// This is a RELATE statement, so reset fields
-		if let Workable::Relate(l, r) = &self.extras {
+		if let Workable::Relate(l, r, _) = &self.extras {
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.doc.to_mut().put(&*IN, l.clone().into());
 			self.current.doc.to_mut().put(&*OUT, r.clone().into());

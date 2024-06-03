@@ -286,6 +286,45 @@ impl Parser<'_> {
 					Ok(Id::String(digits_str.to_owned()))
 				}
 			}
+			TokenKind::Number(NumberKind::Exponent) if self.flexible_record_id => {
+				let text = self.lexer.string.take().unwrap();
+				if text.bytes().any(|x| !x.is_ascii_alphanumeric()) {
+					unexpected!(self, token.kind, "a identifier");
+				}
+				Ok(Id::String(text))
+			}
+			TokenKind::Number(NumberKind::Decimal) if self.flexible_record_id => {
+				let mut text = self.lexer.string.take().unwrap();
+				text.push('d');
+				text.push('e');
+				text.push('c');
+				Ok(Id::String(text))
+			}
+			TokenKind::Number(NumberKind::DecimalExponent) if self.flexible_record_id => {
+				let mut text = self.lexer.string.take().unwrap();
+				if text.bytes().any(|x| !x.is_ascii_alphanumeric()) {
+					unexpected!(self, token.kind, "a identifier");
+				}
+				text.push('d');
+				text.push('e');
+				text.push('c');
+				Ok(Id::String(text))
+			}
+			TokenKind::Number(NumberKind::Float) if self.flexible_record_id => {
+				let mut text = self.lexer.string.take().unwrap();
+				text.push('f');
+				Ok(Id::String(text))
+			}
+			TokenKind::Duration if self.flexible_record_id => {
+				self.lexer.duration = None;
+				let slice = self.lexer.reader.span(token.span);
+				if slice.iter().any(|x| *x > 0b0111_1111) {
+					unexpected!(self, token.kind, "a identifier");
+				}
+				// Should be valid utf-8 as it was already parsed by the lexer
+				let text = String::from_utf8(slice.to_vec()).unwrap();
+				Ok(Id::String(text))
+			}
 			t!("ULID") => {
 				// TODO: error message about how to use `ulid` as an identifier.
 				expected!(self, t!("("));
@@ -551,5 +590,7 @@ mod tests {
 		assert_ident_parses_correctly("1ns");
 		assert_ident_parses_correctly("1ns1");
 		assert_ident_parses_correctly("1ns1h");
+		assert_ident_parses_correctly("000e8");
+		assert_ident_parses_correctly("000e8bla");
 	}
 }

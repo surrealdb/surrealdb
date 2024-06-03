@@ -1,10 +1,11 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::Value;
+use crate::sql::Thing;
 use reblessive::tree::Stk;
 
 pub mod args;
@@ -38,7 +39,6 @@ pub async fn run(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: &Options,
-	txn: &Transaction,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
@@ -53,9 +53,9 @@ pub async fn run(
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
 	{
-		stk.run(|stk| asynchronous(stk, ctx, Some(opt), Some(txn), doc, name, args)).await
+		stk.run(|stk| asynchronous(stk, ctx, Some(opt), doc, name, args)).await
 	} else {
-		synchronous(ctx, name, args)
+		synchronous(ctx, doc, name, args)
 	}
 }
 
@@ -85,7 +85,12 @@ macro_rules! dispatch {
 }
 
 /// Attempts to run any synchronous function.
-pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub fn synchronous(
+	ctx: &Context<'_>,
+	doc: Option<&CursorDoc<'_>>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
 	dispatch!(
 		name,
 		args,
@@ -230,13 +235,13 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
 		//
+		"session::ac" => session::ac(ctx),
 		"session::db" => session::db(ctx),
 		"session::id" => session::id(ctx),
 		"session::ip" => session::ip(ctx),
 		"session::ns" => session::ns(ctx),
 		"session::origin" => session::origin(ctx),
-		"session::sc" => session::sc(ctx),
-		"session::sd" => session::sd(ctx),
+		"session::rd" => session::rd(ctx),
 		"session::token" => session::token(ctx),
 		//
 		"string::concat" => string::concat,
@@ -265,6 +270,9 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::is::domain" => string::is::domain,
 		"string::is::email" => string::is::email,
 		"string::is::hexadecimal" => string::is::hexadecimal,
+		"string::is::ip" => string::is::ip,
+		"string::is::ipv4" => string::is::ipv4,
+		"string::is::ipv6" => string::is::ipv6,
 		"string::is::latitude" => string::is::latitude,
 		"string::is::longitude" => string::is::longitude,
 		"string::is::numeric" => string::is::numeric,
@@ -362,6 +370,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"vector::distance::chebyshev" => vector::distance::chebyshev,
 		"vector::distance::euclidean" => vector::distance::euclidean,
 		"vector::distance::hamming" => vector::distance::hamming,
+		"vector::distance::knn" => vector::distance::knn((ctx, doc)),
 		"vector::distance::mahalanobis" => vector::distance::mahalanobis,
 		"vector::distance::manhattan" => vector::distance::manhattan,
 		"vector::distance::minkowski" => vector::distance::minkowski,
@@ -377,7 +386,6 @@ pub async fn asynchronous(
 	stk: &mut Stk,
 	ctx: &Context<'_>,
 	opt: Option<&Options>,
-	txn: Option<&Transaction>,
 	doc: Option<&CursorDoc<'_>>,
 	name: &str,
 	args: Vec<Value>,
@@ -417,15 +425,15 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"search::analyze" => search::analyze((stk,ctx, txn, opt)).await,
-		"search::score" => search::score((ctx, txn, doc)).await,
-		"search::highlight" => search::highlight((ctx,txn, doc)).await,
-		"search::offsets" => search::offsets((ctx, txn, doc)).await,
+		"search::analyze" => search::analyze((stk,ctx, opt)).await,
+		"search::score" => search::score((ctx, doc)).await,
+		"search::highlight" => search::highlight((ctx, doc)).await,
+		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
-		"type::field" => r#type::field((stk,ctx, opt, txn, doc)).await,
-		"type::fields" => r#type::fields((stk,ctx, opt, txn, doc)).await,
+		"type::field" => r#type::field((stk,ctx, opt, doc)).await,
+		"type::fields" => r#type::fields((stk,ctx, opt, doc)).await,
 	)
 }
 
@@ -508,4 +516,20 @@ mod tests {
 			panic!("ensure functions can be parsed in lib/src/sql/function.rs and are exported to JS in lib/src/fnc/script/modules/surrealdb");
 		}
 	}
+}
+
+fn get_execution_context<'a>(
+	ctx: &'a Context<'_>,
+	doc: Option<&'a CursorDoc<'_>>,
+) -> Option<(&'a QueryExecutor, &'a CursorDoc<'a>, &'a Thing)> {
+	if let Some(doc) = doc {
+		if let Some(thg) = doc.rid {
+			if let Some(pla) = ctx.get_query_planner() {
+				if let Some(exe) = pla.get_query_executor(&thg.tb) {
+					return Some((exe, doc, thg));
+				}
+			}
+		}
+	}
+	None
 }

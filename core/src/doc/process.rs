@@ -1,7 +1,7 @@
 use crate::ctx::Context;
+use crate::dbs::Operable;
 use crate::dbs::Statement;
 use crate::dbs::Workable;
-use crate::dbs::{Operable, Transaction};
 use crate::dbs::{Options, Processed};
 use crate::doc::Document;
 use crate::err::Error;
@@ -14,7 +14,6 @@ impl<'a> Document<'a> {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		stm: &Statement<'_>,
 		mut pro: Processed,
 	) -> Result<Value, Error> {
@@ -24,18 +23,18 @@ impl<'a> Document<'a> {
 			let ins = match pro.val {
 				Operable::Value(v) => (v, Workable::Normal),
 				Operable::Mergeable(v, o) => (v, Workable::Insert(o)),
-				Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
+				Operable::Relatable(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			};
 			// Setup a new document
-			let mut doc = Document::new(pro.ir, pro.rid.as_ref(), pro.doc_id, &ins.0, ins.1);
+			let mut doc = Document::new(pro.rid.as_ref(), pro.ir.as_ref(), &ins.0, ins.1);
 			// Process the statement
 			let res = match stm {
-				Statement::Select(_) => doc.select(stk, ctx, opt, txn, stm).await,
-				Statement::Update(_) => doc.update(stk, ctx, opt, txn, stm).await,
-				Statement::Create(_) => doc.create(stk, ctx, opt, txn, stm).await,
-				Statement::Relate(_) => doc.relate(stk, ctx, opt, txn, stm).await,
-				Statement::Delete(_) => doc.delete(stk, ctx, opt, txn, stm).await,
-				Statement::Insert(_) => doc.insert(stk, ctx, opt, txn, stm).await,
+				Statement::Select(_) => doc.select(stk, ctx, opt, stm).await,
+				Statement::Update(_) => doc.update(stk, ctx, opt, stm).await,
+				Statement::Create(_) => doc.create(stk, ctx, opt, stm).await,
+				Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
+				Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
+				Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
 				_ => unreachable!(),
 			};
 			// Check the result
@@ -46,20 +45,19 @@ impl<'a> Document<'a> {
 				Err(Error::RetryWithId(v)) => {
 					// Fetch the data from the store
 					let key = crate::key::thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
-					let val = txn.clone().lock().await.get(key).await?;
+					let val = ctx.tx_lock().await.get(key).await?;
 					// Parse the data from the store
 					let val = match val {
 						Some(v) => Value::from(v),
 						None => Value::None,
 					};
 					pro = Processed {
-						ir: None,
-						doc_id: None,
 						rid: Some(v),
+						ir: None,
 						val: match doc.extras {
 							Workable::Normal => Operable::Value(val),
 							Workable::Insert(o) => Operable::Mergeable(val, o),
-							Workable::Relate(f, w) => Operable::Relatable(f, val, w),
+							Workable::Relate(f, w, o) => Operable::Relatable(f, val, w, o),
 						},
 					};
 					// Go to top of loop

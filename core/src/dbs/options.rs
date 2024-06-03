@@ -1,4 +1,3 @@
-use super::capabilities::Capabilities;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
@@ -47,8 +46,6 @@ pub struct Options {
 	pub projections: bool,
 	/// The channel over which we send notifications
 	pub sender: Option<Sender<Notification>>,
-	/// Datastore capabilities
-	pub capabilities: Arc<Capabilities>,
 }
 
 #[derive(Clone, Debug)]
@@ -94,7 +91,6 @@ impl Options {
 			auth_enabled: true,
 			sender: None,
 			auth: Arc::new(Auth::default()),
-			capabilities: Arc::new(Capabilities::default()),
 		}
 	}
 
@@ -119,7 +115,7 @@ impl Options {
 	/// instances when there is doubt.
 	pub fn with_required(
 		mut self,
-		node_id: uuid::Uuid,
+		node_id: Uuid,
 		ns: Option<Arc<str>>,
 		db: Option<Arc<str>>,
 		auth: Arc<Auth>,
@@ -215,12 +211,6 @@ impl Options {
 		self
 	}
 
-	/// Create a new Options object with the given Capabilities
-	pub fn with_capabilities(mut self, capabilities: Arc<Capabilities>) -> Self {
-		self.capabilities = capabilities;
-		self
-	}
-
 	// --------------------------------------------------
 
 	/// Create a new Options object for a subquery
@@ -228,7 +218,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -242,7 +231,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force,
@@ -255,7 +243,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -269,7 +256,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -283,7 +269,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -297,7 +282,6 @@ impl Options {
 		Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -310,7 +294,6 @@ impl Options {
 	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
 		Self {
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -340,7 +323,6 @@ impl Options {
 		Ok(Self {
 			sender: self.sender.clone(),
 			auth: self.auth.clone(),
-			capabilities: self.capabilities.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
@@ -405,9 +387,10 @@ impl Options {
 				self.valid_for_db()?;
 				res.on_db(self.ns(), self.db())
 			}
-			Base::Sc(sc) => {
-				self.valid_for_db()?;
-				res.on_scope(self.ns(), self.db(), sc)
+			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
+			Base::Sc(_) => {
+				// We should not get here, the scope base is only used in parsing for backward compatibility.
+				return Err(Error::InvalidAuth);
 			}
 		};
 

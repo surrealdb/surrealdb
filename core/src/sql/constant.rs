@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -81,7 +81,6 @@ impl Constant {
 		&self,
 		_ctx: &Context<'_>,
 		_opt: &Options,
-		_txn: &Transaction,
 		_doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		Ok(match self.value() {

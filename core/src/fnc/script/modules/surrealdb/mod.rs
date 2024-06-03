@@ -19,7 +19,7 @@ async fn value(ctx: Ctx<'_>, value: Coerced<String>) -> Result<SurValue> {
 	let this = ctx.globals().get::<_, OwnedBorrow<QueryContext>>(QUERY_DATA_PROP_NAME)?;
 	let value = Stk::enter_run(|stk| async {
 		value
-			.compute(stk, this.context, this.opt, this.txn, this.doc)
+			.compute(stk, this.context, this.opt, this.doc)
 			.await
 			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
 	})

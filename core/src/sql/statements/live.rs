@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::{Error, LiveQueryCause};
 use crate::fflags::FFLAGS;
@@ -82,7 +82,6 @@ impl LiveStatement {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 	) -> Result<Value, Error> {
 		// Is realtime enabled?
@@ -106,8 +105,8 @@ impl LiveStatement {
 		let id = stm.id.0;
 		match FFLAGS.change_feed_live_queries.enabled() {
 			true => {
-				let mut run = txn.lock().await;
-				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
+				let mut run = ctx.tx_lock().await;
+				match stm.what.compute(stk, ctx, opt, doc).await? {
 					Value::Table(tb) => {
 						// We modify the table as it can be a $PARAM and the compute evaluates that
 						let mut stm = stm;
@@ -134,9 +133,9 @@ impl LiveStatement {
 			}
 			false => {
 				// Claim transaction
-				let mut run = txn.lock().await;
+				let mut run = ctx.tx_lock().await;
 				// Process the live query table
-				match stm.what.compute(stk, ctx, opt, txn, doc).await? {
+				match stm.what.compute(stk, ctx, opt, doc).await? {
 					Value::Table(tb) => {
 						// Store the current Node ID
 						stm.node = nid.into();

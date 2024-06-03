@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
@@ -79,15 +79,14 @@ impl Fields {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: Option<&CursorDoc<'_>>,
 		group: bool,
 	) -> Result<Value, Error> {
 		if let Some(doc) = doc {
-			self.compute_value(stk, ctx, opt, txn, doc, group).await
+			self.compute_value(stk, ctx, opt, doc, group).await
 		} else {
 			let doc = (&Value::None).into();
-			self.compute_value(stk, ctx, opt, txn, &doc, group).await
+			self.compute_value(stk, ctx, opt, &doc, group).await
 		}
 	}
 
@@ -96,7 +95,6 @@ impl Fields {
 		stk: &mut Stk,
 		ctx: &Context<'_>,
 		opt: &Options,
-		txn: &Transaction,
 		doc: &CursorDoc<'_>,
 		group: bool,
 	) -> Result<Value, Error> {
@@ -104,7 +102,7 @@ impl Fields {
 		let opt = &opt.new_with_futures(true);
 		// Process the desired output
 		let mut out = match self.is_all() {
-			true => doc.doc.compute(stk, ctx, opt, txn, Some(doc)).await?,
+			true => doc.doc.compute(stk, ctx, opt, Some(doc)).await?,
 			false => Value::base(),
 		};
 		for v in self.other() {
@@ -123,13 +121,13 @@ impl Fields {
 						Value::Function(f) if group && f.is_aggregate() => {
 							let x = match f.args().len() {
 								// If no function arguments, then compute the result
-								0 => f.compute(stk, ctx, opt, txn, Some(doc)).await?,
+								0 => f.compute(stk, ctx, opt, Some(doc)).await?,
 								// If arguments, then pass the first value through
-								_ => f.args()[0].compute(stk, ctx, opt, txn, Some(doc)).await?,
+								_ => f.args()[0].compute(stk, ctx, opt, Some(doc)).await?,
 							};
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
-								false => out.set(stk, ctx, opt, txn, name.as_ref(), x).await?,
+								false => out.set(stk, ctx, opt, name.as_ref(), x).await?,
 								true => out = x,
 							}
 						}
@@ -146,9 +144,9 @@ impl Fields {
 								};
 								// Continue fetching the next idiom part
 								let x = x
-									.get(stk, ctx, opt, txn, Some(doc), v)
+									.get(stk, ctx, opt, Some(doc), v)
 									.await?
-									.compute(stk, ctx, opt, txn, Some(doc))
+									.compute(stk, ctx, opt, Some(doc))
 									.await?
 									.flatten();
 								// Add the result to the temporary store
@@ -160,13 +158,13 @@ impl Fields {
 									// This is an alias expression part
 									Some(a) => {
 										if let Some(i) = alias {
-											out.set(stk, ctx, opt, txn, i, x.clone()).await?;
+											out.set(stk, ctx, opt, i, x.clone()).await?;
 										}
-										out.set(stk, ctx, opt, txn, a, x).await?;
+										out.set(stk, ctx, opt, a, x).await?;
 									}
 									// This is the end of the expression
 									None => {
-										out.set(stk, ctx, opt, txn, alias.as_ref().unwrap_or(v), x)
+										out.set(stk, ctx, opt, alias.as_ref().unwrap_or(v), x)
 											.await?
 									}
 								}
@@ -175,14 +173,14 @@ impl Fields {
 						// This expression is a variable fields expression
 						Value::Function(f) if f.name() == Some("type::fields") => {
 							// Process the function using variable field projections
-							let expr = expr.compute(stk, ctx, opt, txn, Some(doc)).await?;
+							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
 								false => {
 									// Get the first argument which is guaranteed to exist
 									let args = match f.args().first().unwrap() {
 										Value::Param(v) => {
-											v.compute(stk, ctx, opt, txn, Some(doc)).await?
+											v.compute(stk, ctx, opt, Some(doc)).await?
 										}
 										v => v.to_owned(),
 									};
@@ -195,7 +193,7 @@ impl Fields {
 										// This value is always a string, so we can convert it
 										let name = syn::idiom(&name.to_raw_string())?;
 										// Check if this is a single VALUE field expression
-										out.set(stk, ctx, opt, txn, name.as_ref(), expr).await?
+										out.set(stk, ctx, opt, name.as_ref(), expr).await?
 									}
 								}
 								true => out = expr,
@@ -204,14 +202,14 @@ impl Fields {
 						// This expression is a variable field expression
 						Value::Function(f) if f.name() == Some("type::field") => {
 							// Process the function using variable field projections
-							let expr = expr.compute(stk, ctx, opt, txn, Some(doc)).await?;
+							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
 								false => {
 									// Get the first argument which is guaranteed to exist
 									let name = match f.args().first().unwrap() {
 										Value::Param(v) => {
-											v.compute(stk, ctx, opt, txn, Some(doc)).await?
+											v.compute(stk, ctx, opt, Some(doc)).await?
 										}
 										v => v.to_owned(),
 									};
@@ -223,17 +221,17 @@ impl Fields {
 										Cow::Owned(syn::idiom(&name.to_raw_string())?)
 									};
 									// Add the projected field to the output document
-									out.set(stk, ctx, opt, txn, name.as_ref(), expr).await?
+									out.set(stk, ctx, opt, name.as_ref(), expr).await?
 								}
 								true => out = expr,
 							}
 						}
 						// This expression is a normal field expression
 						_ => {
-							let expr = expr.compute(stk, ctx, opt, txn, Some(doc)).await?;
+							let expr = expr.compute(stk, ctx, opt, Some(doc)).await?;
 							// Check if this is a single VALUE field expression
 							match self.single().is_some() {
-								false => out.set(stk, ctx, opt, txn, name.as_ref(), expr).await?,
+								false => out.set(stk, ctx, opt, name.as_ref(), expr).await?,
 								true => out = expr,
 							}
 						}
