@@ -522,7 +522,7 @@ fn parse_define_access_jwt_key() {
 			})),
 		)
 	}
-	// Symmetric verify and explicit issue.
+	// Symmetric verify and explicit duration.
 	{
 		let res = test_parse!(
 			parse_stmt,
@@ -531,6 +531,7 @@ fn parse_define_access_jwt_key() {
 		.unwrap();
 		assert_eq!(
 			res,
+			assert_eq!(sess.exp, Duration::from_days(30), "Session expiration is expected to match defined duration");
 			Statement::Define(DefineStatement::Access(DefineAccessStatement {
 				name: Ident("a".to_string()),
 				base: Base::Db,
@@ -578,7 +579,7 @@ fn parse_define_access_jwt_key() {
 				}),
 				duration: AccessDuration {
 					grant: None,
-					token: Some(Duration::from_secs(10)),
+					token: Some(Duration::from_hours(1)),
 					session: Some(Duration::from_hours(1)),
 				},
 				comment: None,
@@ -917,7 +918,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR SESSION 10s, FOR TOKEN 15m"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR TOKEN 10s, FOR SESSION 15m"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -953,7 +954,7 @@ fn parse_define_access_record() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION FOR SESSION 10s, FOR TOKEN 15m"#
+			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION FOR TOKEN 10s, FOR SESSION 15m"#
 		)
 		.unwrap();
 		assert_eq!(
