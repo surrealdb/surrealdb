@@ -178,6 +178,11 @@ impl Parser<'_> {
 			}
 			t!("'") | t!("\"") | TokenKind::Strand => {
 				let s = self.next_token_value::<Strand>()?;
+				if self.legacy_strands {
+					if let Some(x) = self.reparse_legacy_strand(ctx, &s.0).await {
+						return Ok(x);
+					}
+				}
 				Value::Strand(s)
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {

@@ -61,7 +61,7 @@ impl Parser<'_> {
 			let datetime =
 				Utc.fix().from_local_datetime(&date_time).earliest().unwrap().with_timezone(&Utc);
 
-			return Ok(Datetime(Datetime));
+			return Ok(Datetime(datetime));
 		}
 
 		let start_time = self.peek_whitespace().span;
