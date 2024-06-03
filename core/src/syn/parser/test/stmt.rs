@@ -11,7 +11,9 @@ use crate::{
 		index::{Distance, HnswParams, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		statements::{
-			analyze::AnalyzeStatement, show::ShowSince, show::ShowStatement, sleep::SleepStatement,
+			analyze::AnalyzeStatement,
+			show::{ShowSince, ShowStatement},
+			sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
@@ -26,6 +28,7 @@ use crate::{
 			UseStatement,
 		},
 		tokenizer::Tokenizer,
+		user::UserDuration,
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Orders, Output, Param, Part,
@@ -207,21 +210,140 @@ fn parse_define_function() {
 
 #[test]
 fn parse_define_user() {
-	let res = test_parse!(
-		parse_stmt,
-		r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo, bar COMMENT "*******""#
-	)
-	.unwrap();
+	// Password.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSWORD 'hunter2' COMMENT "*******""#
+		)
+		.unwrap();
 
-	let Statement::Define(DefineStatement::User(stmt)) = res else {
-		panic!()
-	};
+		let Statement::Define(DefineStatement::User(stmt)) = res else {
+			panic!()
+		};
 
-	assert_eq!(stmt.name, Ident("user".to_string()));
-	assert_eq!(stmt.base, Base::Root);
-	assert_eq!(stmt.hash, "hunter2".to_owned());
-	assert_eq!(stmt.roles, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
-	assert_eq!(stmt.comment, Some(Strand("*******".to_string())))
+		assert_eq!(stmt.name, Ident("user".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert!(stmt.hash.starts_with("$argon2id$"));
+		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.comment, Some(Strand("*******".to_string())));
+		assert_eq!(
+			stmt.duration,
+			UserDuration {
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+	}
+	// Passhash.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' COMMENT "*******""#
+		)
+		.unwrap();
+
+		let Statement::Define(DefineStatement::User(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("user".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert_eq!(stmt.hash, "hunter2".to_owned());
+		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(stmt.comment, Some(Strand("*******".to_string())));
+		assert_eq!(
+			stmt.duration,
+			UserDuration {
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+	}
+	// With roles.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo, bar"#
+		)
+		.unwrap();
+
+		let Statement::Define(DefineStatement::User(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("user".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert_eq!(stmt.hash, "hunter2".to_owned());
+		assert_eq!(stmt.roles, vec![Ident("foo".to_string()), Ident("bar".to_string())]);
+		assert_eq!(
+			stmt.duration,
+			UserDuration {
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			}
+		);
+	}
+	// With session duration.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' DURATION FOR SESSION 6h"#
+		)
+		.unwrap();
+
+		let Statement::Define(DefineStatement::User(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("user".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert_eq!(stmt.hash, "hunter2".to_owned());
+		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(
+			stmt.duration,
+			UserDuration {
+				token: Some(Duration::from_hours(1)),
+				session: Some(Duration::from_hours(6)),
+			}
+		);
+	}
+	// With session and token duration.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' DURATION FOR TOKEN 15m, FOR SESSION 6h"#
+		)
+		.unwrap();
+
+		let Statement::Define(DefineStatement::User(stmt)) = res else {
+			panic!()
+		};
+
+		assert_eq!(stmt.name, Ident("user".to_string()));
+		assert_eq!(stmt.base, Base::Root);
+		assert_eq!(stmt.hash, "hunter2".to_owned());
+		assert_eq!(stmt.roles, vec![Ident("Viewer".to_string())]);
+		assert_eq!(
+			stmt.duration,
+			UserDuration {
+				token: Some(Duration::from_mins(15)),
+				session: Some(Duration::from_hours(6)),
+			}
+		);
+	}
+	// With none token duration.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' DURATION FOR TOKEN NONE"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of user with none token duration: {:?}",
+			res
+		);
+	}
 }
 
 // TODO(gguillemas): This test is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
@@ -622,6 +744,18 @@ fn parse_define_access_jwt_key() {
 			res
 		);
 	}
+	// Symmetric verify and token duration is none.
+	{
+		let res = test_parse!(
+			parse_stmt,
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" DURATION FOR TOKEN NONE"#
+		);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of JWT access with none token duration: {:?}",
+			res
+		);
+	}
 }
 
 #[test]
@@ -755,7 +889,7 @@ fn parse_define_access_jwt_jwks() {
 	{
 		let res = test_parse!(
 			parse_stmt,
-			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo" DURATION FOR TOKEN 10s"#
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo" DURATION FOR TOKEN 10s, FOR SESSION 2d"#
 		)
 		.unwrap();
 		assert_eq!(
@@ -775,7 +909,7 @@ fn parse_define_access_jwt_jwks() {
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
-					session: Some(Duration::from_hours(1)),
+					session: Some(Duration::from_days(2)),
 				},
 				comment: None,
 				if_not_exists: false,
@@ -983,6 +1117,16 @@ fn parse_define_access_record() {
 				comment: None,
 				if_not_exists: false,
 			})),
+		);
+	}
+	// Verification with JWT is explicitly defined only with symmetric key. Token duration is none.
+	{
+		let res =
+			test_parse!(parse_stmt, r#"DEFINE ACCESS a ON DB TYPE RECORD DURATION FOR TOKEN NONE"#);
+		assert!(
+			res.is_err(),
+			"Unexpected successful parsing of record access with none token duration: {:?}",
+			res
 		);
 	}
 }
