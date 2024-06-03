@@ -2583,14 +2583,14 @@ impl Transaction {
 						}
 
 						// Add batches of INSERT statements
-						for records in normal.chunks(1000).into_iter() {
+						for records in normal.chunks(1000) {
 							let values = records.join(", ");
 							let sql = format!("INSERT [ {values} ];");
 							chn.send(bytes!(sql)).await?;
 						}
 
 						// Add batches of INSERT RELATION statements
-						for records in relation.chunks(1000).into_iter() {
+						for records in relation.chunks(1000) {
 							let values = records.join(", ");
 							let sql = format!("INSERT RELATION [ {values} ];");
 							chn.send(bytes!(sql)).await?;
