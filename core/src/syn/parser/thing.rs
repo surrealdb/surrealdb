@@ -297,17 +297,20 @@ impl Parser<'_> {
 				Ok(Id::String(text))
 			}
 			t!("ULID") => {
+				self.pop_peek();
 				// TODO: error message about how to use `ulid` as an identifier.
 				expected!(self, t!("("));
 				expected!(self, t!(")"));
 				Ok(Id::Generate(Gen::Ulid))
 			}
 			t!("UUID") => {
+				self.pop_peek();
 				expected!(self, t!("("));
 				expected!(self, t!(")"));
 				Ok(Id::Generate(Gen::Uuid))
 			}
 			t!("RAND") => {
+				self.pop_peek();
 				expected!(self, t!("("));
 				expected!(self, t!(")"));
 				Ok(Id::Generate(Gen::Rand))
