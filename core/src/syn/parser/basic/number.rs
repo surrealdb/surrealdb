@@ -117,7 +117,7 @@ where
 	let span = parser.span_str(float_token.span);
 
 	// remove the possible "f" number suffix and any '_' characters
-	prepare_number_str(span.strip_suffix("f").unwrap_or(span))
+	prepare_number_str(span.strip_suffix('f').unwrap_or(span))
 		.parse()
 		.map_err(ParseErrorKind::InvalidFloat)
 		.map_err(|e| ParseError::new(e, float_token.span))
@@ -166,14 +166,14 @@ impl TokenValue for Number {
 				Ok(Number::Decimal(decimal))
 			}
 			NumberKind::Float => {
-				let float = prepare_number_str(span.strip_suffix("f").unwrap_or(span))
+				let float = prepare_number_str(span.strip_suffix('f').unwrap_or(span))
 					.parse()
 					.map_err(|e| ParseError::new(ParseErrorKind::InvalidFloat(e), number.span))?;
 
 				Ok(Number::Float(float))
 			}
 			NumberKind::Integer => {
-				let integer = prepare_number_str(span.strip_suffix("f").unwrap_or(span))
+				let integer = prepare_number_str(span.strip_suffix('f').unwrap_or(span))
 					.parse()
 					.map_err(|e| ParseError::new(ParseErrorKind::InvalidInteger(e), number.span))?;
 

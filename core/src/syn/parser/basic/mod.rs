@@ -92,12 +92,16 @@ impl TokenValue for Strand {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) | TokenKind::Strand => {
+			TokenKind::Qoute(QouteKind::Plain | QouteKind::PlainDouble) => {
 				parser.pop_peek();
 				let t = parser.lexer.relex_strand(token);
 				let TokenKind::Strand = t.kind else {
 					unexpected!(parser, t.kind, "a strand")
 				};
+				Ok(Strand(parser.lexer.string.take().unwrap()))
+			}
+			TokenKind::Strand => {
+				parser.pop_peek();
 				Ok(Strand(parser.lexer.string.take().unwrap()))
 			}
 			x => unexpected!(parser, x, "a strand"),

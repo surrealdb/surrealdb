@@ -89,6 +89,15 @@ impl Parser<'_> {
 			| TokenKind::DurationSuffix(_)
 			| TokenKind::DatetimeChars(_) => self.glue_ident(false),
 			TokenKind::Digits => self.glue_numeric(),
+			t!("\"") | t!("'") => {
+				self.pop_peek();
+				let t = self.lexer.relex_strand(token);
+				let TokenKind::Strand = t.kind else {
+					unexpected!(self, t.kind, "a strand")
+				};
+				self.prepend_token(t);
+				Ok(t)
+			}
 			t!("+") | t!("-") => {
 				if let TokenKind::Digits = self.peek_whitespace_token_at(1).kind {
 					self.glue_number()
