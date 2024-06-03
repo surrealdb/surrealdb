@@ -213,7 +213,6 @@ impl Parser<'_> {
 				t!("DURATION") => {
 					self.pop_peek();
 					while self.eat(t!("FOR")) {
-						self.eat(t!(","));
 						match self.peek_kind() {
 							t!("TOKEN") => {
 								self.pop_peek();
@@ -316,7 +315,6 @@ impl Parser<'_> {
 				t!("DURATION") => {
 					self.pop_peek();
 					while self.eat(t!("FOR")) {
-						self.eat(t!(","));
 						match self.peek_kind() {
 							t!("GRANT") => {
 								self.pop_peek();
