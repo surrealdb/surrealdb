@@ -9,6 +9,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -115,7 +116,8 @@ impl InfoStatement {
 				res.insert("users".to_owned(), tmp.into());
 				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_ns_accesses_redacted(opt.ns()?).await?.iter() {
+				for v in run.all_ns_accesses(opt.ns()?).await?.iter() {
+					let v = v.redacted();
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("accesses".to_owned(), tmp.into());
@@ -155,7 +157,8 @@ impl InfoStatement {
 				res.insert("params".to_owned(), tmp.into());
 				// Process the accesses
 				let mut tmp = Object::default();
-				for v in run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?.iter() {
+				for v in run.all_db_accesses(opt.ns()?, opt.db()?).await?.iter() {
+					let v = v.redacted();
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("accesses".to_owned(), tmp.into());
@@ -259,7 +262,13 @@ impl InfoStatement {
 				// Process the accesses
 				res.insert(
 					"accesses".to_owned(),
-					process_arr(run.all_ns_accesses_redacted(opt.ns()?).await?),
+					process_arr(
+						run.all_ns_accesses(opt.ns()?)
+							.await?
+							.iter()
+							.map(|v| v.redacted())
+							.collect(),
+					),
 				);
 				// Ok all good
 				Value::from(res).ok()
@@ -299,7 +308,13 @@ impl InfoStatement {
 				// Process the accesses
 				res.insert(
 					"accesses".to_owned(),
-					process_arr(run.all_db_accesses_redacted(opt.ns()?, opt.db()?).await?),
+					process_arr(
+						run.all_db_accesses(opt.ns()?, opt.db()?)
+							.await?
+							.iter()
+							.map(|v| v.redacted())
+							.collect(),
+					),
 				);
 				// Process the tables
 				res.insert(
@@ -392,8 +407,6 @@ impl fmt::Display for InfoStatement {
 		}
 	}
 }
-
-use std::sync::Arc;
 
 pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;

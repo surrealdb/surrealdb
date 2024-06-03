@@ -1395,16 +1395,6 @@ impl Transaction {
 		})
 	}
 
-	/// Retrieve all namespace access method definitions in redacted form.
-	pub async fn all_ns_accesses_redacted(
-		&mut self,
-		ns: &str,
-	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let accesses = self.all_ns_accesses(ns).await?;
-		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
-	}
-
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		let key = crate::key::namespace::db::prefix(ns);
@@ -1468,17 +1458,6 @@ impl Transaction {
 			self.cache.set(key, Entry::Das(Arc::clone(&val)));
 			val
 		})
-	}
-
-	/// Retrieve all database access method definitions in redacted form.
-	pub async fn all_db_accesses_redacted(
-		&mut self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineAccessStatement]>, Error> {
-		let accesses = self.all_db_accesses(ns, db).await?;
-		let redacted: Vec<_> = accesses.iter().map(|statement| statement.redacted()).collect();
-		Ok(Arc::from(redacted))
 	}
 
 	/// Retrieve all analyzer definitions for a specific database.
