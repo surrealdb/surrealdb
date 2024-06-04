@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::{skip_ok, with_enough_stack};
 use helpers::new_ds;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -8,7 +9,8 @@ use surrealdb::sql::Value;
 
 #[tokio::test]
 async fn define_foreign_table() -> Result<(), Error> {
-	let sql = "
+	with_enough_stack(async {
+		let sql = "
 		DEFINE TABLE person SCHEMALESS;
 		DEFINE TABLE person_by_age AS
 			SELECT
@@ -29,19 +31,20 @@ async fn define_foreign_table() -> Result<(), Error> {
 		UPDATE person:two SET age = 39, score = 90;
 		SELECT * FROM person_by_age;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+		let dbs = new_ds().await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 9);
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+		//
+		let tmp = res.remove(0).result?;
+		#[cfg(feature = "sql2")]
+			let val = Value::parse(
 		"{
 			events: {},
 			fields: {},
@@ -49,16 +52,26 @@ async fn define_foreign_table() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:one, age: 39, score: 70 }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		);
+		#[cfg(not(feature = "sql2"))]
+			let val = Value::parse(
+			"{
+			events: {},
+			fields: {},
+			tables: { person_by_age: 'DEFINE TABLE person_by_age SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average, math::max(score) AS max, math::min(score) AS min FROM person GROUP BY age PERMISSIONS NONE' },
+			indexes: {},
+			lives: {},
+		}",
+		);
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse("[{ id: person:one, age: 39, score: 70 }]");
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				age: 39,
 				average: 70,
@@ -69,16 +82,16 @@ async fn define_foreign_table() -> Result<(), Error> {
 				total: 39
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:two, age: 39, score: 80 }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		);
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse("[{ id: person:two, age: 39, score: 80 }]");
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				age: 39,
 				average: 75,
@@ -89,16 +102,16 @@ async fn define_foreign_table() -> Result<(), Error> {
 				total: 78
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:two, age: 39, score: 90 }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
+		);
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse("[{ id: person:two, age: 39, score: 90 }]");
+		assert_eq!(tmp, val);
+		//
+		let tmp = res.remove(0).result?;
+		let val = Value::parse(
+			"[
 			{
 				age: 39,
 				average: 80,
@@ -109,10 +122,11 @@ async fn define_foreign_table() -> Result<(), Error> {
 				total: 78
 			}
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	Ok(())
+		);
+		assert_eq!(tmp, val);
+		//
+		Ok(())
+	})
 }
 
 #[tokio::test]
@@ -132,20 +146,7 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	skip_ok(res, 5)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -175,4 +176,126 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	Ok(())
+}
+
+async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> {
+	let agr = agr.to_string();
+	with_enough_stack(async move {
+		let cond = if cond {
+			"WHERE value >= 5"
+		} else {
+			""
+		};
+		let sql = format!(
+			"
+		UPDATE wallet:1 CONTENT {{ value: 20.0, day: 1 }} RETURN NONE;
+		UPDATE wallet:2 CONTENT {{ value: 5.0, day: 1 }} RETURN NONE;
+		// 0
+		DEFINE TABLE wallet_agr AS SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 1
+		UPDATE wallet:1 CONTENT {{ value: 10.0, day: 1 }} RETURN NONE;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 2
+		UPDATE wallet:2 CONTENT {{ value: 15.0, day: 1 }} RETURN NONE;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 3
+		UPDATE wallet:3 CONTENT {{ value: 10.0, day: 2 }} RETURN NONE;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 4
+		UPDATE wallet:4 CONTENT {{ value: 5.0, day: 2 }} RETURN NONE;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 5
+		UPDATE wallet:2 SET value = 3.0 RETURN NONE;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 6
+		UPDATE wallet:4 SET day = 3 RETURN NONE;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 7
+		DELETE wallet:2;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+		// 8
+		DELETE wallet:3;
+		SELECT {agr} as agr, day FROM wallet {cond} GROUP BY day;
+		SELECT agr, day FROM wallet_agr;
+	"
+		);
+		let dbs = new_ds().await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let res = &mut dbs.execute(&sql, &ses, None).await?;
+		assert_eq!(res.len(), 29);
+		//
+		skip_ok(res, 2)?;
+		//
+		for i in 0..9 {
+			// Skip the UPDATE or DELETE statement
+			skip_ok(res, 1)?;
+			// Get the computed result
+			let comp = res.remove(0).result?;
+			// Get the projected result
+			let proj = res.remove(0).result?;
+			// Check they are similar
+			assert_eq!(format!("{proj:#}"), format!("{comp:#}"), "#{i}");
+		}
+		//
+		Ok(())
+	})
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_cond_group_mean() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::mean(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_with_cond_group_count() -> Result<(), Error> {
+	define_foreign_table_group(true, "count()").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_cond_group_min() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::min(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_cond_group_max() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::max(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_cond_group_sum() -> Result<(), Error> {
+	define_foreign_table_group(true, "math::sum(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_mean() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::mean(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_count() -> Result<(), Error> {
+	define_foreign_table_group(false, "count()").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_min() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::min(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_max() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::max(value)").await
+}
+
+#[tokio::test]
+async fn define_foreign_table_with_no_cond_and_group_sum() -> Result<(), Error> {
+	define_foreign_table_group(false, "math::sum(value)").await
 }
