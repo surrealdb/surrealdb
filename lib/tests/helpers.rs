@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
 
+use crate::parse::Parse;
 use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -197,7 +199,7 @@ pub fn with_enough_stack(
 }
 
 #[allow(dead_code)]
-pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
+pub fn skip_ok(res: &mut Vec<Response>, skip: usize) {
 	for i in 0..skip {
 		if res.is_empty() {
 			panic!("No more result #{i}");
@@ -207,42 +209,125 @@ pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 			panic!("Statement #{i} fails with: {e}");
 		});
 	}
-	Ok(())
 }
 
 #[allow(dead_code)]
-pub async fn dbs_test_execute(sql: &str) -> Result<(Datastore, Session, Vec<Response>), Error> {
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = dbs.execute(sql, &ses, None).await?;
-	Ok((dbs, ses, res))
+pub struct Test {
+	pub ds: Datastore,
+	pub session: Session,
+	pub responses: Vec<Response>,
+	pos: usize,
 }
 
-#[allow(dead_code)]
-pub fn expected_value<T: Into<Value>>(res: &mut Vec<Response>, val: T) -> Result<(), Error> {
-	let tmp = res.remove(0).result?;
-	let val = val.into();
-	// First check using JSON format (diff is easier to compare by humans!)
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
-	// Then check they are indeed the same values
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[allow(dead_code)]
-pub fn expected_values<T: Into<Value>>(
-	res: &mut Vec<Response>,
-	values: Vec<T>,
-) -> Result<(), Error> {
-	assert!(
-		res.len() >= values.len(),
-		"Expected at least {} values, but got: {}",
-		values.len(),
-		res.len()
-	);
-	for val in values {
-		expected_value(res, val)?;
+impl Debug for Test {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Responses left: {:?}.", self.responses)
 	}
-	Ok(())
+}
+
+impl Test {
+	#[allow(dead_code)]
+	pub async fn new(sql: &str) -> Self {
+		Self::try_new(sql).await.unwrap_or_else(|e| panic!("{e}"))
+	}
+
+	#[allow(dead_code)]
+	pub async fn try_new(sql: &str) -> Result<Self, Error> {
+		let ds = new_ds().await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let responses = ds.execute(sql, &session, None).await?;
+		Ok(Self {
+			ds,
+			session,
+			responses,
+			pos: 0,
+		})
+	}
+
+	#[allow(dead_code)]
+	pub fn size(&mut self, expected: usize) -> &mut Self {
+		assert_eq!(
+			self.responses.len(),
+			expected,
+			"Unexpected number of results: {} - Expected: {expected}",
+			self.responses.len()
+		);
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn next(&mut self) -> Response {
+		if self.responses.is_empty() {
+			panic!("No response left - last position: {}", self.pos);
+		}
+		self.pos += 1;
+		self.responses.remove(0)
+	}
+
+	#[allow(dead_code)]
+	pub fn skip_ok(&mut self, skip: usize) -> &mut Self {
+		skip_ok(&mut self.responses, skip);
+		self.pos += skip;
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_value(&mut self, val: Value) -> &mut Self {
+		let tmp = self
+			.next()
+			.result
+			.unwrap_or_else(|e| panic!("Unexpected error: {e} - Index: {}", self.pos));
+		// First check using JSON format (diff is easier to compare by humans!)
+		assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+		// Then check they are indeed the same values
+		if val.is_nan() {
+			assert!(tmp.is_nan(), "Expected NaN but got: {tmp}");
+		} else {
+			assert_eq!(tmp, val);
+		}
+		//
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_val(&mut self, val: &str) -> &mut Self {
+		self.expect_value(Value::parse(val))
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_vals(&mut self, vals: &[&str]) -> &mut Self {
+		for val in vals {
+			self.expect_val(val);
+		}
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_error(&mut self, error: &str) -> &mut Self {
+		let tmp = self.next().result;
+		assert!(
+			matches!(
+				&tmp,
+				Err(e) if e.to_string() == error
+			),
+			"{tmp:?} didn't match {error}"
+		);
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_errors(&mut self, errors: &[&str]) -> &mut Self {
+		for error in errors {
+			self.expect_error(error);
+		}
+		self
+	}
+}
+
+impl Drop for Test {
+	fn drop(&mut self) {
+		if !self.responses.is_empty() {
+			panic!("Not every response has been checked");
+		}
+	}
 }
