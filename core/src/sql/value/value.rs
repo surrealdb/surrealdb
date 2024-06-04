@@ -12,7 +12,7 @@ use crate::sql::{
 	model::Model,
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
 	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Thing, Uuid,
+	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
@@ -53,6 +53,12 @@ impl IntoIterator for Values {
 impl Display for Values {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
+	}
+}
+
+impl From<&Tables> for Values {
+	fn from(tables: &Tables) -> Self {
+		Self(tables.0.iter().map(|t| Value::Table(t.clone())).collect())
 	}
 }
 

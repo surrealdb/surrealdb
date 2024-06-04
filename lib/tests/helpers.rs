@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::thread::Builder;
 
 use surrealdb::dbs::capabilities::Capabilities;
+use surrealdb::dbs::Response;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
@@ -192,4 +193,15 @@ pub fn with_enough_stack(
 		.unwrap()
 		.join()
 		.unwrap()
+}
+
+#[allow(dead_code)]
+pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
+	for i in 0..skip {
+		if res.is_empty() {
+			panic!("No more result #{i}");
+		}
+		let _ = res.remove(0).result?;
+	}
+	Ok(())
 }
