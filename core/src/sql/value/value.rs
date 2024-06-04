@@ -2739,6 +2739,7 @@ impl TryDiv for Value {
 
 pub(crate) trait TryRem<Rhs = Self> {
 	type Output;
+	#[allow(dead_code)]
 	fn try_rem(self, v: Self) -> Result<Self::Output, Error>;
 }
 

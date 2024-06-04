@@ -119,8 +119,8 @@ pub async fn sc(
 					let vars = Some(vars.0);
 					// Setup the system session for finding the signin record
 					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-					sess.ip = session.ip.clone();
-					sess.or = session.or.clone();
+					sess.ip.clone_from(&session.ip);
+					sess.or.clone_from(&session.or);
 					// Compute the value with the params
 					match kvs.evaluate(val, &sess, vars).await {
 						// The signin value succeeded

@@ -72,8 +72,8 @@ impl Config {
 	/// Set the default user
 	pub fn user(mut self, user: crate::opt::auth::Root<'_>) -> Self {
 		self.auth = Level::Root;
-		self.username = user.username.to_owned();
-		self.password = user.password.to_owned();
+		user.username.clone_into(&mut self.username);
+		user.password.clone_into(&mut self.password);
 		self
 	}
 
