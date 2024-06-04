@@ -1,5 +1,5 @@
 use crate::{
-	sql::Uuid,
+	sql::{language::Language, Uuid},
 	syn::{
 		parser::{
 			mac::{expected_whitespace, unexpected},
@@ -92,8 +92,16 @@ impl Parser<'_> {
 				| TokenKind::NumberSuffix(NumberSuffix::Float) => {
 					cur = self.pop_peek();
 				}
+				TokenKind::Language(Language::German | Language::Danish) => {
+					// 'DE" and 'DA' can be hex like parts of the uuid.
+					if !self.span_bytes(next.span).iter().all(|x| x.is_ascii_hexdigit()) {
+						unexpected!(self, TokenKind::Identifier, "UUID hex digits");
+					}
+					cur = self.pop_peek();
+					break;
+				}
 				t!("-") | t!("\"") | t!("'") => break,
-				_ => unexpected!(self, next.kind, "UUID hex digits"),
+				_ => unexpected!(self, TokenKind::Identifier, "UUID hex digits"),
 			}
 		}
 
@@ -157,5 +165,30 @@ mod test {
 		assert_uuid_parses("d0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("e0531951-20ec-4575-bb68-3e6b49d813fa");
 		assert_uuid_parses("a0531951-20ec-4575-bb68-3e6b49d813fa");
+	}
+
+	#[test]
+	fn test_uuid_characters() {
+		let hex_characters =
+			[b'0', b'a', b'b', b'c', b'd', b'e', b'f', b'A', b'B', b'C', b'D', b'E', b'F'];
+
+		let mut uuid_string: Vec<u8> = "u'0531956f-20ec-4575-bb68-3e6b49d813fa'".to_string().into();
+
+		fn assert_uuid_parses(s: &[u8]) {
+			let mut parser = Parser::new(s);
+			parser.parse_uuid().unwrap();
+		}
+
+		for i in hex_characters.iter() {
+			for j in hex_characters.iter() {
+				for k in hex_characters.iter() {
+					uuid_string[3] = *i;
+					uuid_string[4] = *j;
+					uuid_string[5] = *k;
+
+					assert_uuid_parses(&uuid_string)
+				}
+			}
+		}
 	}
 }

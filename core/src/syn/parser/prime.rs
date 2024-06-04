@@ -22,11 +22,7 @@ impl Parser<'_> {
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
 	pub async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
-		// TODO(delskayn) DateTime|UUID
 		match self.peek_kind() {
-			TokenKind::Digits | TokenKind::Number(_) | TokenKind::Duration => {
-				self.parse_number_like_prime()
-			}
 			t!("r\"") => {
 				self.pop_peek();
 				let thing = self.parse_record_string(ctx, true).await?;
@@ -187,6 +183,10 @@ impl Parser<'_> {
 			}
 			t!("+") | t!("-") | TokenKind::Number(_) | TokenKind::Digits | TokenKind::Duration => {
 				self.parse_number_like_prime()?
+			}
+			TokenKind::NaN => {
+				self.pop_peek();
+				return Ok(Value::Number(Number::Float(f64::NAN)));
 			}
 			t!("$param") => {
 				let param = self.next_token_value()?;
