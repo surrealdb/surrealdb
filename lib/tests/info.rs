@@ -504,7 +504,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h" }, databases: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -527,7 +527,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h" }, databases: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -550,7 +550,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION 1h" }, databases: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,

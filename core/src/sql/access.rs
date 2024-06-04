@@ -30,8 +30,8 @@ impl Default for AccessDuration {
 			grant: None,
 			// By default, tokens expire after one hour
 			token: Some(Duration::from_hours(1)),
-			// By default, sessions expire after one hour
-			session: Some(Duration::from_hours(1)),
+			// By default, sessions do not expire
+			session: None,
 		}
 	}
 }

@@ -504,8 +504,6 @@ impl Parser<'_> {
 				t!("SESSION") => {
 					self.pop_peek();
 					res.duration.session = Some(self.next_token_value()?);
-					// By default, token duration matches session duration.
-					res.duration.token = res.duration.session;
 				}
 				t!("SIGNUP") => {
 					self.pop_peek();

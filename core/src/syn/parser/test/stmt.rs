@@ -370,7 +370,7 @@ fn parse_define_token() {
 			duration: AccessDuration {
 				grant: None,
 				token: Some(Duration::from_hours(1)),
-				session: Some(Duration::from_hours(1)),
+				session: None,
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
@@ -395,13 +395,13 @@ fn parse_define_token_on_scope() {
 
 	assert_eq!(stmt.name, Ident("a".to_string()));
 	assert_eq!(stmt.base, Base::Db); // Scope base is ignored.
-								 // Default durations.
 	assert_eq!(
 		stmt.duration,
+		// Default durations.
 		AccessDuration {
 			grant: None,
 			token: Some(Duration::from_hours(1)),
-			session: Some(Duration::from_hours(1)),
+			session: None,
 		}
 	);
 	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
@@ -445,7 +445,7 @@ fn parse_define_token_jwks() {
 			duration: AccessDuration {
 				grant: None,
 				token: Some(Duration::from_hours(1)),
-				session: Some(Duration::from_hours(1)),
+				session: None,
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
@@ -470,13 +470,13 @@ fn parse_define_token_jwks_on_scope() {
 
 	assert_eq!(stmt.name, Ident("a".to_string()));
 	assert_eq!(stmt.base, Base::Db); // Scope base is ignored.
-								 // Default durations.
 	assert_eq!(
 		stmt.duration,
+		// Default durations.
 		AccessDuration {
 			grant: None,
 			token: Some(Duration::from_hours(1)),
-			session: Some(Duration::from_hours(1)),
+			session: None,
 		}
 	);
 	assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
@@ -519,8 +519,7 @@ fn parse_define_scope() {
 		stmt.duration,
 		AccessDuration {
 			grant: None,
-			// By default, token duration matches session duration.
-			token: Some(Duration::from_secs(1)),
+			token: Some(Duration::from_hours(1)),
 			session: Some(Duration::from_secs(1)),
 		}
 	);
@@ -571,7 +570,7 @@ fn parse_define_access_jwt_key() {
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_hours(1)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
@@ -604,7 +603,7 @@ fn parse_define_access_jwt_key() {
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_hours(1)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: None,
 				if_not_exists: false,
@@ -637,7 +636,7 @@ fn parse_define_access_jwt_key() {
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_hours(1)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: None,
 				if_not_exists: false,
@@ -669,7 +668,7 @@ fn parse_define_access_jwt_key() {
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: None,
 				if_not_exists: false,
@@ -698,10 +697,11 @@ fn parse_define_access_jwt_key() {
 						key: "foo".to_string(),
 					}),
 				}),
+				// Default durations.
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_hours(1)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: None,
 				if_not_exists: false,
@@ -778,11 +778,11 @@ fn parse_define_access_jwt_jwks() {
 					}),
 					issue: None,
 				}),
-				// Default duration.
+				// Default durations.
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_hours(1)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: Some(Strand("bar".to_string())),
 				if_not_exists: false,
@@ -808,14 +808,13 @@ fn parse_define_access_jwt_jwks() {
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs384,
 						key: "foo".to_string(),
-						// Default duration.
 					}),
 				}),
-				// Default duration.
+				// Default durations.
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_hours(1)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: None,
 				if_not_exists: false,
@@ -846,7 +845,7 @@ fn parse_define_access_jwt_jwks() {
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_secs(10)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: None,
 				if_not_exists: false,
@@ -874,11 +873,11 @@ fn parse_define_access_jwt_jwks() {
 						key: "foo".to_string(),
 					}),
 				}),
-				// Default duration.
+				// Default durations.
 				duration: AccessDuration {
 					grant: None,
 					token: Some(Duration::from_hours(1)),
-					session: Some(Duration::from_hours(1)),
+					session: None,
 				},
 				comment: None,
 				if_not_exists: false,
@@ -933,13 +932,13 @@ fn parse_define_access_record() {
 
 		assert_eq!(stmt.name, Ident("a".to_string()));
 		assert_eq!(stmt.base, Base::Db);
-		// Default duration.
 		assert_eq!(
 			stmt.duration,
+			// Default durations.
 			AccessDuration {
 				grant: None,
 				token: Some(Duration::from_hours(1)),
-				session: Some(Duration::from_hours(1)),
+				session: None,
 			}
 		);
 		assert_eq!(stmt.comment, Some(Strand("bar".to_string())));
@@ -1153,11 +1152,11 @@ fn parse_define_access_record_with_jwt() {
 					issue: None,
 				}
 			}),
-			// Default duration.
+			// Default durations.
 			duration: AccessDuration {
 				grant: None,
 				token: Some(Duration::from_hours(1)),
-				session: Some(Duration::from_hours(1)),
+				session: None,
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,

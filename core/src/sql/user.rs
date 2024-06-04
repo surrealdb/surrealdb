@@ -18,9 +18,9 @@ pub struct UserDuration {
 impl Default for UserDuration {
 	fn default() -> Self {
 		Self {
-			// By default, tokens for system users expire after one hour
+			// By default, tokens expire after one hour
 			token: Some(Duration::from_hours(1)),
-			// By default, sessions for system users do not expire
+			// By default, sessions do not expire
 			session: None,
 		}
 	}
