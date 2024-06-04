@@ -1903,10 +1903,21 @@ async fn function_math_lerp() {
 		RETURN math::lerp(-10.0, 0.0, 0.5);
 		RETURN math::lerp(-20.0, -10.0, 0.5);
 		RETURN math::lerp(10.0, 20.0, 0.75);
+		RETURN math::lerp(0, 50, 0.5f);
 	"#;
 	Test::new(sql).await.expect_vals(&[
-		"5.0", "12.5", "0.0", "0.0", "10.0", "-5.0", "15.0", "-5.0", "-15.0", "17.5",
+		"5.0", "12.5", "0.0", "0.0", "10.0", "-5.0", "15.0", "-5.0", "-15.0", "17.5", "25",
 	]);
+}
+
+#[tokio::test]
+async fn function_math_lerp_angle() {
+	let sql = r#"
+		RETURN math::lerp::angle(90, 180, 0.5);
+		RETURN math::lerp::angle(-90, 90, 0.5);
+		RETURN math::lerp::angle(0, 180, 1.5);
+	"#;
+	Test::new(sql).await.expect_vals(&["135.0", "0.0", "270"]);
 }
 
 #[tokio::test]
@@ -5575,7 +5586,7 @@ pub async fn function_http_head() -> Result<(), Error> {
 		.mount(&server)
 		.await;
 
-	test_queries(&format!("RETURN http::head('{}/some/path')", server.uri()), &["NONE"]).await?;
+	test_queries(&format!("RETURN http::head('{}/some/path')", server.uri()), &["NONE"]).await;
 
 	server.verify().await;
 
@@ -5604,7 +5615,7 @@ pub async fn function_http_get() -> Result<(), Error> {
 		r#"RETURN http::get("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}})"#,
 		server.uri()
 	);
-	test_queries(&query, &["'some text result'"]).await?;
+	test_queries(&query, &["'some text result'"]).await;
 
 	server.verify().await;
 
@@ -5632,7 +5643,7 @@ pub async fn function_http_put() -> Result<(), Error> {
 
 	let query =
 		format!(r#"RETURN http::put("{}/some/path",{{ 'some-key': 'some-value' }})"#, server.uri());
-	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await?;
+	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await;
 
 	server.verify().await;
 
@@ -5662,7 +5673,7 @@ pub async fn function_http_post() -> Result<(), Error> {
 		r#"RETURN http::post("{}/some/path",{{ 'some-key': 'some-value' }})"#,
 		server.uri()
 	);
-	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await?;
+	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await;
 
 	server.verify().await;
 
@@ -5692,7 +5703,7 @@ pub async fn function_http_patch() -> Result<(), Error> {
 		r#"RETURN http::patch("{}/some/path",{{ 'some-key': 'some-value' }})"#,
 		server.uri()
 	);
-	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await?;
+	test_queries(&query, &[r#"{ "some-response": 'some-value' }"#]).await;
 
 	server.verify().await;
 
@@ -5721,7 +5732,7 @@ pub async fn function_http_delete() -> Result<(), Error> {
 		r#"RETURN http::delete("{}/some/path",{{ 'a-test-header': 'with-a-test-value'}})"#,
 		server.uri()
 	);
-	test_queries(&query, &["'some text result'"]).await?;
+	test_queries(&query, &["'some text result'"]).await;
 
 	server.verify().await;
 
@@ -5788,7 +5799,7 @@ pub async fn function_http_get_from_script() -> Result<(), Error> {
 		}}"#,
 		server.uri()
 	);
-	test_queries(&query, &["'some text result'"]).await?;
+	test_queries(&query, &["'some text result'"]).await;
 
 	server.verify().await;
 

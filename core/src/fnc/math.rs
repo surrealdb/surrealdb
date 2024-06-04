@@ -88,6 +88,10 @@ pub fn lerp((from, to, factor): (Number, Number, Number)) -> Result<Value, Error
 	Ok(factor.lerp(from, to).into())
 }
 
+pub fn lerp_angle((from, to, factor): (Number, Number, Number)) -> Result<Value, Error> {
+	Ok(factor.lerp_angle(from, to).into())
+}
+
 pub fn ln((arg,): (Number,)) -> Result<Value, Error> {
 	Ok(arg.ln().into())
 }
