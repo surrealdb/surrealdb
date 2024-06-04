@@ -206,11 +206,11 @@ fn statements() -> Vec<Statement> {
 					issue: None,
 				},
 			}),
-			// Default duration.
+			// Default durations.
 			duration: AccessDuration {
 				grant: None,
 				token: Some(Duration::from_hours(1)),
-				session: Some(Duration::from_hours(1)),
+				session: None,
 			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,

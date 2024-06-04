@@ -1522,7 +1522,7 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, claims.exp, "Session expiration is expected to match token");
+			assert_eq!(sess.exp, None, "Default session expiration is expected to be None");
 		}
 
 		//
