@@ -14,7 +14,7 @@ impl IntoEndpoint<Mem> for () {
 		let url = Url::parse(protocol)
 			.unwrap_or_else(|_| unreachable!("`{protocol}` should be static and valid"));
 		let mut endpoint = Endpoint::new(url);
-		endpoint.path = "memory".to_owned();
+		"memory".clone_into(&mut endpoint.path);
 		Ok(endpoint)
 	}
 }

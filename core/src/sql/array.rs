@@ -289,6 +289,7 @@ impl Complement<Array> for Array {
 
 // ------------------------------
 
+#[allow(dead_code)]
 pub(crate) trait Concat<T> {
 	fn concat(self, other: T) -> T;
 }

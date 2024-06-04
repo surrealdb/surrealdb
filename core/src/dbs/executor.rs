@@ -13,6 +13,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::ctx::Context;
 use crate::dbs::response::Response;
+use crate::dbs::Force;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
@@ -248,11 +249,12 @@ impl<'a> Executor<'a> {
 					stm.name.0.make_ascii_uppercase();
 					// Process the option
 					opt = match stm.name.0.as_str() {
-						"FIELDS" => opt.with_fields(stm.what),
-						"EVENTS" => opt.with_events(stm.what),
-						"TABLES" => opt.with_tables(stm.what),
 						"IMPORT" => opt.with_import(stm.what),
-						"FORCE" => opt.with_force(stm.what),
+						"FORCE" => opt.with_force(if stm.what {
+							Force::All
+						} else {
+							Force::None
+						}),
 						_ => break,
 					};
 					// Continue
@@ -492,7 +494,7 @@ mod tests {
 			(Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at database level should not be able to set options on another namespace even if the database name matches"),
 			(Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at database level should not be able to set options on its database"),
 		];
-		let statement = "OPTION FIELDS = false";
+		let statement = "OPTION IMPORT = false";
 
 		for test in tests.iter() {
 			let (session, should_succeed, msg) = test;

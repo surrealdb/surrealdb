@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, Transaction};
+use crate::dbs::{Force, Options, Transaction};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
@@ -13,6 +13,7 @@ use derive::Store;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
+use std::sync::Arc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
@@ -72,13 +73,7 @@ impl DefineTableStatement {
 			// Release the transaction
 			drop(run);
 			// Force queries to run
-			let opt = &opt.new_with_force(true);
-			// Don't process field queries
-			let opt = &opt.new_with_fields(false);
-			// Don't process event queries
-			let opt = &opt.new_with_events(false);
-			// Don't process index queries
-			let opt = &opt.new_with_indexes(false);
+			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Process the view data
