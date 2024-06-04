@@ -30,7 +30,6 @@ impl_module_def!(
 	"median" => run,
 	"midhinge" => run,
 	"min" => run,
-	"mod" => run,
 	"mode" => run,
 	"nearestrank" => run,
 	"percentile" => run,

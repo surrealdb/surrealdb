@@ -93,7 +93,7 @@ pub fn log((arg, base): (Number, Number)) -> Result<Value, Error> {
 }
 
 pub fn log10((arg,): (Number,)) -> Result<Value, Error> {
-	Ok(arg.log2().into())
+	Ok(arg.log10().into())
 }
 
 pub fn log2((arg,): (Number,)) -> Result<Value, Error> {
@@ -131,10 +131,6 @@ pub fn min((array,): (Vec<Number>,)) -> Result<Value, Error> {
 
 pub fn mode((array,): (Vec<Number>,)) -> Result<Value, Error> {
 	Ok(array.mode().into())
-}
-
-pub fn modulo((arg, divider): (Number, Number)) -> Result<Value, Error> {
-	Ok(arg.modulo(divider).into())
 }
 
 pub fn nearestrank((mut array, n): (Vec<Number>, Number)) -> Result<Value, Error> {

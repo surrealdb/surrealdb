@@ -12,7 +12,7 @@ use surrealdb::sql::Value;
 async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", ""), 12).await?;
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
 	// OR results
 	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
@@ -26,7 +26,7 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", "PARALLEL"), 12).await?;
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
 	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
@@ -45,7 +45,7 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), E
 		12,
 	)
 	.await?;
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }, { name: 'Lizzie' }]")?;
 	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
@@ -60,7 +60,7 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 	let dbs = new_ds().await?;
 	let mut res =
 		execute_test(&dbs, &three_multi_index_query("WITH INDEX ft_company", ""), 12).await?;
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
@@ -76,7 +76,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 	let dbs = new_ds().await?;
 	let mut res =
 		execute_test(&dbs, &three_multi_index_query("WITH INDEX uniq_name", ""), 12).await?;
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
@@ -91,7 +91,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 async fn select_where_iterate_two_multi_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("", ""), 9).await?;
-	skip_ok(&mut res, 5)?;
+	skip_ok(&mut res, 5);
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, TWO_MULTI_INDEX_EXPLAIN)?;
@@ -105,7 +105,7 @@ async fn select_where_iterate_two_multi_index() -> Result<(), Error> {
 async fn select_where_iterate_two_multi_index_with_one_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre", ""), 9).await?;
-	skip_ok(&mut res, 5)?;
+	skip_ok(&mut res, 5);
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, &table_explain(2))?;
@@ -120,7 +120,7 @@ async fn select_where_iterate_two_multi_index_with_two_index() -> Result<(), Err
 	let dbs = new_ds().await?;
 	let mut res =
 		execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre,uniq_name", ""), 9).await?;
-	skip_ok(&mut res, 5)?;
+	skip_ok(&mut res, 5);
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, TWO_MULTI_INDEX_EXPLAIN)?;
@@ -134,7 +134,7 @@ async fn select_where_iterate_two_multi_index_with_two_index() -> Result<(), Err
 async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("WITH NOINDEX", ""), 9).await?;
-	skip_ok(&mut res, 5)?;
+	skip_ok(&mut res, 5);
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, &table_explain_no_index(2))?;
@@ -547,7 +547,7 @@ async fn select_range(
 ) -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &range_test(unique, from_incl, to_incl), 8).await?;
-	skip_ok(&mut res, 6)?;
+	skip_ok(&mut res, 6);
 	{
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(explain);
@@ -790,7 +790,7 @@ async fn select_single_range_operator(
 ) -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &single_range_operator_test(unique, op), 6).await?;
-	skip_ok(&mut res, 4)?;
+	skip_ok(&mut res, 4);
 	{
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(explain);
@@ -990,7 +990,7 @@ async fn select_with_idiom_param_value() -> Result<(), Error> {
 		.to_owned();
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
-	skip_ok(&mut res, 5)?;
+	skip_ok(&mut res, 5);
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
@@ -1079,7 +1079,7 @@ async fn test_contains(
 		let val = Value::parse(result);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
-	skip_ok(&mut res, 1)?;
+	skip_ok(&mut res, 1);
 	{
 		let tmp = res.remove(0).result?;
 		let val = Value::parse(index_explain);
@@ -1097,7 +1097,7 @@ async fn test_contains(
 async fn select_contains() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
-	skip_ok(&mut res, 3)?;
+	skip_ok(&mut res, 3);
 
 	const SQL: &str = r#"
 		SELECT id FROM student WHERE marks.*.subject CONTAINS "english" EXPLAIN;
@@ -1142,7 +1142,7 @@ async fn select_contains() -> Result<(), Error> {
 async fn select_contains_all() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
-	skip_ok(&mut res, 3)?;
+	skip_ok(&mut res, 3);
 	const SQL: &str = r#"
 		SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"] EXPLAIN;
 		SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
@@ -1185,7 +1185,7 @@ async fn select_contains_all() -> Result<(), Error> {
 async fn select_contains_any() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
-	skip_ok(&mut res, 3)?;
+	skip_ok(&mut res, 3);
 	const SQL: &str = r#"
 		SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"] EXPLAIN;
 		SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];
@@ -1233,7 +1233,7 @@ const CONTAINS_UNIQUE_CONTENT: &str = r#"
 async fn select_unique_contains() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_UNIQUE_CONTENT, 3).await?;
-	skip_ok(&mut res, 3)?;
+	skip_ok(&mut res, 3);
 
 	const SQL: &str = r#"
 		SELECT id FROM student WHERE subject CONTAINS "english" EXPLAIN;
@@ -1291,7 +1291,7 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
-	skip_ok(&mut res, 4)?;
+	skip_ok(&mut res, 4);
 
 	for _ in 0..2 {
 		let tmp = res.remove(0).result?;
@@ -1354,7 +1354,7 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 7);
-	skip_ok(&mut res, 3)?;
+	skip_ok(&mut res, 3);
 
 	for _ in 0..2 {
 		let tmp = res.remove(0).result?;
@@ -1415,7 +1415,7 @@ async fn select_with_in_operator() -> Result<(), Error> {
 	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 7);
-	skip_ok(&mut res, 3)?;
+	skip_ok(&mut res, 3);
 
 	for _ in 0..2 {
 		let tmp = res.remove(0).result?;
@@ -1476,7 +1476,7 @@ async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
 	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
-	skip_ok(&mut res, 2)?;
+	skip_ok(&mut res, 2);
 
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(r#"[]"#);
@@ -1549,7 +1549,7 @@ async fn select_with_in_operator_multiple_indexes() -> Result<(), Error> {
 	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 17);
-	skip_ok(&mut res, 9)?;
+	skip_ok(&mut res, 9);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -1933,7 +1933,7 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 8);
-	skip_ok(&mut res, 6)?;
+	skip_ok(&mut res, 6);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -1992,7 +1992,7 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 	//
 	let expected = Value::parse(
 		r#"[
@@ -2057,7 +2057,7 @@ async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 	//
 	let expected = Value::parse(
 		r#"[
@@ -2121,7 +2121,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<(), Error> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
-	skip_ok(&mut res, 8)?;
+	skip_ok(&mut res, 8);
 	//
 	let expected = Value::parse(
 		r#"[
@@ -2188,7 +2188,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 9);
-	skip_ok(&mut res, 7)?;
+	skip_ok(&mut res, 7);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -2245,7 +2245,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
-	skip_ok(&mut res, 6)?;
+	skip_ok(&mut res, 6);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -2313,7 +2313,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	);
 	//
 	assert_eq!(res.len(), 15);
-	skip_ok(&mut res, 2)?;
+	skip_ok(&mut res, 2);
 	//
 	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
 		let tmp = res.remove(0).result?;
@@ -2345,7 +2345,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 	//
-	skip_ok(&mut res, 1)?;
+	skip_ok(&mut res, 1);
 	// CONTAINS
 	let tmp = res.remove(0).result?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
@@ -2450,7 +2450,7 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 8);
-	skip_ok(&mut res, 4)?;
+	skip_ok(&mut res, 4);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -2553,7 +2553,7 @@ async fn select_with_non_boolean_expression() -> Result<(), Error> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 15);
-	skip_ok(&mut res, 5)?;
+	skip_ok(&mut res, 5);
 	//
 	for i in 0..5 {
 		let tmp = res.remove(0).result?;

@@ -2647,7 +2647,7 @@ impl Value {
 			Value::Array(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Object(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Constant(v) => v.compute(ctx, opt, doc).await,
+			Value::Constant(v) => v.compute(),
 			Value::Function(v) => v.compute(stk, ctx, opt, doc).await,
 			Value::Model(v) => v.compute(stk, ctx, opt, doc).await,
 			Value::Subquery(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,

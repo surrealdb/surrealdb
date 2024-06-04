@@ -1772,6 +1772,18 @@ async fn function_math_ceil() {
 }
 
 #[tokio::test]
+async fn function_math_clamp() {
+	let sql = r#"
+		RETURN math::clamp(1, 2, 4);
+		RETURN math::clamp(1f, 2, 4);
+		RETURN math::clamp(5, 2, 4);
+		RETURN math::clamp(5.0, 2, 4);
+		RETURN math::clamp(1, 2f, 4);
+	"#;
+	Test::new(sql).await.expect_vals(&["2", "2f", "4", "4f", "2f"]);
+}
+
+#[tokio::test]
 async fn function_math_cos() {
 	let sql = r#"
 		RETURN math::cos(0.0);
@@ -1789,6 +1801,22 @@ async fn function_math_cot() {
 		RETURN math::cot(2);
 	"#;
 	Test::new(sql).await.expect_vals(&["1.830487721712452", "-0.45765755436028577"]);
+}
+
+#[tokio::test]
+async fn function_math_deg2rad() {
+	let sql = r#"
+		RETURN math::deg2rad(45);
+		RETURN math::deg2rad(-90.0);
+		RETURN math::deg2rad(360);
+		RETURN math::deg2rad(math::rad2deg(0.7853981633974483));
+	"#;
+	Test::new(sql).await.expect_vals(&[
+		"0.7853981633974483",
+		"-1.5707963267948966",
+		"6.283185307179586",
+		"0.7853981633974483",
+	]);
 }
 
 #[tokio::test]
@@ -1860,6 +1888,64 @@ async fn function_math_interquartile() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_ln() {
+	let sql = r#"
+		RETURN math::ln(1);
+		RETURN math::ln(20);
+		RETURN math::ln(2.5);
+	"#;
+	Test::new(sql).await.expect_vals(&["0.0", "2.995732273553991", "0.9162907318741551"]);
+}
+
+#[tokio::test]
+async fn function_math_log() {
+	let sql = r#"
+		RETURN math::log(2.7183, 10);
+		RETURN math::log(2, 10);
+		RETURN math::log(1, 10);
+		RETURN math::log(0, 10);
+		RETURN math::log(-1, 10);
+	"#;
+	Test::new(sql).await.expect_vals(&[
+		"0.43429738512450866",
+		"0.30102999566398114",
+		"0.0",
+		"Math::Neg_Inf",
+		"NaN",
+	]);
+}
+
+#[tokio::test]
+async fn function_math_log10() {
+	let sql = r#"
+		RETURN math::log10(2.7183);
+		RETURN math::log10(2);
+		RETURN math::log10(1);
+		RETURN math::log10(0);
+		RETURN math::log10(-1);
+		RETURN math::log10(0) == math::neg_inf;
+	"#;
+	Test::new(sql).await.expect_vals(&[
+		"0.43429738512450866",
+		"0.3010299956639812",
+		"0.0",
+		"math::neg_inf",
+		"NaN",
+		"true",
+	]);
+}
+
+#[tokio::test]
+async fn function_math_log2() {
+	let sql = r#"
+		RETURN math::log2(2.7183);
+		RETURN math::log2(2);
+		RETURN math::log2(1);
+	"#;
+	Test::new(sql).await.expect_vals(&["1.4427046851812222", "1.0", "0.0"]);
 }
 
 #[tokio::test]
@@ -2087,6 +2173,17 @@ async fn function_math_product() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_math_rad2deg() {
+	let sql = r#"
+		RETURN math::rad2deg(0.7853981633974483);
+		RETURN math::rad2deg(-1.5707963267948966);
+		RETURN math::rad2deg(6.283185307179586);
+		RETURN math::rad2deg(math::deg2rad(180));
+	"#;
+	Test::new(sql).await.expect_vals(&["45f", "-90.0f", "360f", "180f"]);
+}
+
+#[tokio::test]
 async fn function_math_round() -> Result<(), Error> {
 	let sql = r#"
 		RETURN math::round(101);
@@ -2103,6 +2200,19 @@ async fn function_math_round() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_sign() {
+	let sql = r#"
+		RETURN math::sign(2.7183);
+		RETURN math::sign(-5);
+		RETURN math::sign(0);
+		RETURN math::sign(-0);
+		RETURN math::sign(math::inf);
+		RETURN math::sign(math::neg_inf);
+	"#;
+	Test::new(sql).await.expect_vals(&["1", "-1", "0", "0", "1", "-1"]);
 }
 
 #[tokio::test]

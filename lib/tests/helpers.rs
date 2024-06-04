@@ -277,15 +277,28 @@ impl Test {
 			.next()
 			.result
 			.unwrap_or_else(|e| panic!("Unexpected error: {e} - Index: {}", self.pos));
-		// First check using JSON format (diff is easier to compare by humans!)
-		assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 		// Then check they are indeed the same values
+		//
+		// If it is a constant we need to transform it as a number
+		let val = if let Value::Constant(c) = val {
+			c.compute().unwrap_or_else(|e| panic!("Can't convert constant {c} - {e}"))
+		} else {
+			val
+		};
 		if val.is_nan() {
 			assert!(tmp.is_nan(), "Expected NaN but got: {tmp}");
 		} else {
-			assert_eq!(tmp, val);
+			assert_eq!(tmp, val, "{tmp:#}");
 		}
 		//
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_values(&mut self, values: &[Value]) -> &mut Self {
+		for value in values {
+			self.expect_value(value.clone());
+		}
 		self
 	}
 

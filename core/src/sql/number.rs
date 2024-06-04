@@ -413,7 +413,12 @@ impl Number {
 	}
 
 	pub fn clamp(self, min: Self, max: Self) -> Self {
-		self.to_float().clamp(min.to_float(), max.to_float()).into()
+		match (self, min, max) {
+			(Number::Int(n), Number::Int(min), Number::Int(max)) => n.clamp(min, max).into(),
+			(Number::Decimal(n), min, max) => n.clamp(min.to_decimal(), max.to_decimal()).into(),
+			(Number::Float(n), min, max) => n.clamp(min.to_float(), max.to_float()).into(),
+			(Number::Int(n), min, max) => n.to_float().clamp(min.to_float(), max.to_float()).into(),
+		}
 	}
 
 	pub fn cos(self) -> Self {
@@ -425,7 +430,7 @@ impl Number {
 	}
 
 	pub fn deg2rad(self) -> Self {
-		self.to_float().to_degrees().into()
+		self.to_float().to_radians().into()
 	}
 
 	pub fn floor(self) -> Self {
@@ -462,7 +467,7 @@ impl Number {
 	}
 
 	pub fn rad2deg(self) -> Self {
-		self.to_float().to_radians().into()
+		self.to_float().to_degrees().into()
 	}
 
 	pub fn round(self) -> Self {

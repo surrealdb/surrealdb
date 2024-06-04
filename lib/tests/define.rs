@@ -854,7 +854,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	skip_ok(res, 2)?;
+	skip_ok(res, 2);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -1243,7 +1243,7 @@ async fn define_statement_index_on_schemafull_without_permission() -> Result<(),
 	let mut res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	skip_ok(&mut res, 1)?;
+	skip_ok(&mut res, 1);
 	//
 	let tmp = res.remove(0).result;
 	let s = format!("{:?}", tmp);

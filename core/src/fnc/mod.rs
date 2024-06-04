@@ -198,7 +198,6 @@ pub fn synchronous(
 		"math::median" => math::median,
 		"math::midhinge" => math::midhinge,
 		"math::min" => math::min,
-		"math::mod" => math::modulo,
 		"math::mode" => math::mode,
 		"math::nearestrank" => math::nearestrank,
 		"math::percentile" => math::percentile,
