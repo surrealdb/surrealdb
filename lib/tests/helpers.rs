@@ -9,6 +9,7 @@ use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Response;
+use surrealdb_core::sql::Value;
 
 pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -205,6 +206,43 @@ pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
 		let _ = r.is_err_and(|e| {
 			panic!("Statement #{i} fails with: {e}");
 		});
+	}
+	Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn dbs_test_execute(sql: &str) -> Result<(Datastore, Session, Vec<Response>), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = dbs.execute(sql, &ses, None).await?;
+	Ok((dbs, ses, res))
+}
+
+#[allow(dead_code)]
+pub fn expected_value<T: Into<Value>>(res: &mut Vec<Response>, val: T) -> Result<(), Error> {
+	let tmp = res.remove(0).result?;
+	let val = val.into();
+	// First check using JSON format (diff is easier to compare by humans!)
+	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	// Then check they are indeed the same values
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[allow(dead_code)]
+pub fn expected_values<T: Into<Value>>(
+	res: &mut Vec<Response>,
+	values: Vec<T>,
+) -> Result<(), Error> {
+	assert!(
+		res.len() >= values.len(),
+		"Expected at least {} values, but got: {}",
+		values.len(),
+		res.len()
+	);
+	for val in values {
+		expected_value(res, val)?;
 	}
 	Ok(())
 }
