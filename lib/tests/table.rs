@@ -43,7 +43,8 @@ async fn define_foreign_table() -> Result<(), Error> {
 		assert!(tmp.is_ok());
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		#[cfg(feature = "sql2")]
+			let val = Value::parse(
 		"{
 			events: {},
 			fields: {},
@@ -51,7 +52,17 @@ async fn define_foreign_table() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+		);
+		#[cfg(not(feature = "sql2"))]
+			let val = Value::parse(
+			"{
+			events: {},
+			fields: {},
+			tables: { person_by_age: 'DEFINE TABLE person_by_age SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average, math::max(score) AS max, math::min(score) AS min FROM person GROUP BY age PERMISSIONS NONE' },
+			indexes: {},
+			lives: {},
+		}",
+		);
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
