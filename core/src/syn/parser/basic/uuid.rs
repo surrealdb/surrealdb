@@ -92,8 +92,9 @@ impl Parser<'_> {
 				| TokenKind::NumberSuffix(NumberSuffix::Float) => {
 					cur = self.pop_peek();
 				}
-				TokenKind::Language(Language::German | Language::Danish) => {
-					// 'DE" and 'DA' can be hex like parts of the uuid.
+				TokenKind::Language(_) | TokenKind::Keyword(_) => {
+					// there are some keywords and languages keywords which could be part of the
+					// hex section.
 					if !self.span_bytes(next.span).iter().all(|x| x.is_ascii_hexdigit()) {
 						unexpected!(self, TokenKind::Identifier, "UUID hex digits");
 					}

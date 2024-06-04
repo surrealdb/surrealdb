@@ -206,14 +206,16 @@ impl Parser<'_> {
 				]))))
 			}
 			// key was not one of the allowed keys so it is a normal object.
-			_ => self
-				.parse_object_from_map(
-					ctx,
-					BTreeMap::from([(key, Value::Strand(type_value.into()))]),
-					start,
-				)
-				.await
-				.map(Value::Object),
+			_ => {
+				let object = BTreeMap::from([(key, Value::Strand(type_value.into()))]);
+
+				if self.eat(t!(",")) {
+					self.parse_object_from_map(ctx, object, start).await.map(Value::Object)
+				} else {
+					self.expect_closing_delimiter(t!("}"), start)?;
+					Ok(Value::Object(Object(object)))
+				}
+			}
 		}
 	}
 
@@ -687,7 +689,6 @@ impl Parser<'_> {
 				Ok(str)
 			}
 			TokenKind::Digits | TokenKind::Number(_) => {
-				self.pop_peek();
 				let number = self.next_token_value::<Number>()?.to_string();
 				Ok(number)
 			}
