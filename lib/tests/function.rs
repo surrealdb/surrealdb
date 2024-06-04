@@ -5762,13 +5762,9 @@ pub async fn function_http_error() -> Result<(), Error> {
 		server.uri()
 	);
 
-	let res = test_queries(&query, &["NONE"]).await;
-	match res {
-		Err(Error::Http(text)) => {
-			assert_eq!(text, "Internal Server Error");
-		}
-		e => panic!("query didn't return correct response: {:?}", e),
-	}
+	Test::new(&query)
+		.await
+		.expect_error("There was an error processing a remote HTTP request: Internal Server Error");
 
 	server.verify().await;
 

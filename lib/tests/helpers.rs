@@ -4,14 +4,13 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
 
-use crate::parse::Parse;
 use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Response;
-use surrealdb_core::sql::Value;
+use surrealdb_core::sql::{value, Value};
 
 pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -304,7 +303,7 @@ impl Test {
 
 	#[allow(dead_code)]
 	pub fn expect_val(&mut self, val: &str) -> &mut Self {
-		self.expect_value(Value::parse(val))
+		self.expect_value(value(val).unwrap())
 	}
 
 	#[allow(dead_code)]
