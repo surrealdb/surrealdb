@@ -441,6 +441,21 @@ impl Number {
 		}
 	}
 
+	pub fn lerp(self, from: Self, to: Self) -> Self {
+		match (self, from, to) {
+			(Number::Decimal(val), from, to) => {
+				let from = from.to_decimal();
+				let to = to.to_decimal();
+				(from + val * (to - from)).into()
+			}
+			(val, from, to) => {
+				let val = val.to_float();
+				let from = from.to_float();
+				let to = to.to_float();
+				(from + val * (to - from)).into()
+			}
+		}
+	}
 	pub fn ln(self) -> Self {
 		self.to_float().ln().into()
 	}
@@ -455,15 +470,6 @@ impl Number {
 
 	pub fn log10(self) -> Self {
 		self.to_float().log10().into()
-	}
-
-	pub fn modulo(self, divider: Self) -> Self {
-		match (self, divider) {
-			(Number::Int(n), Number::Int(d)) => n.rem_euclid(d).into(),
-			(Number::Float(n), d) => n.rem_euclid(d.to_float()).into(),
-			(Number::Decimal(n), d) => (n % d.to_decimal()).into(),
-			(n, d) => n.to_float().rem_euclid(d.to_float()).into(),
-		}
 	}
 
 	pub fn rad2deg(self) -> Self {

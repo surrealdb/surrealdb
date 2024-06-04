@@ -21,6 +21,7 @@ impl_module_def!(
 	"fixed" => run,
 	"floor" => run,
 	"interquartile" => run,
+	"lerp" => run,
 	"ln" => run,
 	"log" => run,
 	"log2" => run,

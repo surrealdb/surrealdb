@@ -189,6 +189,7 @@ pub fn synchronous(
 		"math::fixed" => math::fixed,
 		"math::floor" => math::floor,
 		"math::interquartile" => math::interquartile,
+		"math::lerp" => math::lerp,
 		"math::ln" => math::ln,
 		"math::log" => math::log,
 		"math::log10" => math::log10,

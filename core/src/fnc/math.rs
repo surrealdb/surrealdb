@@ -84,6 +84,10 @@ pub fn interquartile((mut array,): (Vec<Number>,)) -> Result<Value, Error> {
 	Ok(array.sorted().interquartile().into())
 }
 
+pub fn lerp((from, to, factor): (Number, Number, Number)) -> Result<Value, Error> {
+	Ok(factor.lerp(from, to).into())
+}
+
 pub fn ln((arg,): (Number,)) -> Result<Value, Error> {
 	Ok(arg.ln().into())
 }

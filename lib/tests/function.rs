@@ -1891,6 +1891,25 @@ async fn function_math_interquartile() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_math_lerp() {
+	let sql = r#"
+		RETURN math::lerp(0.0, 10.0, 0.5);
+		RETURN math::lerp(10.0, 20.0, 0.25);
+		RETURN math::lerp(-10, 10.0, 0.5);
+		RETURN math::lerp(0.0, 10.0, 0.0);
+		RETURN math::lerp(0.0, 10.0, 1);
+		RETURN math::lerp(0.0, 10.0, -0.5);
+		RETURN math::lerp(0.0, 10, 1.5);
+		RETURN math::lerp(-10.0, 0.0, 0.5);
+		RETURN math::lerp(-20.0, -10.0, 0.5);
+		RETURN math::lerp(10.0, 20.0, 0.75);
+	"#;
+	Test::new(sql).await.expect_vals(&[
+		"5.0", "12.5", "0.0", "0.0", "10.0", "-5.0", "15.0", "-5.0", "-15.0", "17.5",
+	]);
+}
+
+#[tokio::test]
 async fn function_math_ln() {
 	let sql = r#"
 		RETURN math::ln(1);
