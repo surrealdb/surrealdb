@@ -101,7 +101,7 @@ mod cli_integration {
 			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} -");
 			let output = common::run(&args).output().expect("failed to run stdout export: {args}");
 			assert!(output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"));
-			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
+			assert!(output.contains("INSERT [ { id: thing:one } ];"));
 		}
 
 		info!("* Export to file");
