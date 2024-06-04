@@ -5,7 +5,7 @@ use crate::{
 			mac::{expected_whitespace, unexpected},
 			ParseError, ParseErrorKind, ParseResult, Parser,
 		},
-		token::{t, DurationSuffix, TokenKind},
+		token::{t, DurationSuffix, NumberSuffix, TokenKind},
 	},
 };
 
@@ -88,7 +88,8 @@ impl Parser<'_> {
 				}
 				TokenKind::Exponent
 				| TokenKind::Digits
-				| TokenKind::DurationSuffix(DurationSuffix::Day) => {
+				| TokenKind::DurationSuffix(DurationSuffix::Day)
+				| TokenKind::NumberSuffix(NumberSuffix::Float) => {
 					cur = self.pop_peek();
 				}
 				t!("-") | t!("\"") | t!("'") => break,
@@ -128,5 +129,32 @@ impl Parser<'_> {
 		}
 
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use crate::syn::parser::Parser;
+
+	fn uuid_parsing() {
+		fn assert_uuid_parses(s: &str) {
+			let uuid_str = format!("u'{s}'");
+			let mut parser = Parser::new(uuid_str.as_bytes());
+			let uuid = parser.parse_uuid().unwrap();
+			assert_eq!(uuid::Uuid::parse_str(s).unwrap(), *uuid);
+		}
+
+		assert_uuid_parses("0531956f-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("0531956d-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("0531956e-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("0531956a-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195f1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195d1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195e1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("053195a1-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("f0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("d0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("e0531951-20ec-4575-bb68-3e6b49d813fa");
+		assert_uuid_parses("a0531951-20ec-4575-bb68-3e6b49d813fa");
 	}
 }
