@@ -1,5 +1,5 @@
 use crate::{
-	sql::{language::Language, Uuid},
+	sql::Uuid,
 	syn::{
 		parser::{
 			mac::{expected_whitespace, unexpected},

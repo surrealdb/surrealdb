@@ -5,7 +5,6 @@ use crate::syn::{
 	token::{Span, TokenKind},
 };
 use std::{
-	backtrace::Backtrace,
 	fmt::Write,
 	num::{ParseFloatError, ParseIntError},
 	ops::RangeInclusive,
@@ -97,7 +96,6 @@ pub enum ParseErrorKind {
 pub struct ParseError {
 	pub kind: ParseErrorKind,
 	pub at: Span,
-	bt: Backtrace,
 }
 
 impl ParseError {
@@ -106,11 +104,9 @@ impl ParseError {
 		ParseError {
 			kind,
 			at,
-			bt: Backtrace::force_capture(),
 		}
 	}
 	pub fn render_on(&self, source: &str) -> RenderedError {
-		println!("bt: {}", self.bt);
 		Self::render_on_inner(source, &self.kind, self.at)
 	}
 
