@@ -132,10 +132,7 @@ pub fn idiom(input: &str) -> Result<Idiom, Error> {
 pub fn datetime_raw(input: &str) -> Result<Datetime, Error> {
 	debug!("parsing datetime, input = {input}");
 	let mut parser = Parser::new(input.as_bytes());
-	parser
-		.next_token_value::<Datetime>()
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
+	parser.parse_inner_datetime().map_err(|e| e.render_on(input)).map_err(Error::InvalidQuery)
 }
 
 /// Parse a duration from a string.

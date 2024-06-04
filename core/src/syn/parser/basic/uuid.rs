@@ -136,6 +136,7 @@ impl Parser<'_> {
 mod test {
 	use crate::syn::parser::Parser;
 
+	#[test]
 	fn uuid_parsing() {
 		fn assert_uuid_parses(s: &str) {
 			let uuid_str = format!("u'{s}'");

@@ -24,6 +24,19 @@ impl Parser<'_> {
 
 		self.pop_peek();
 
+		let datetime = self.parse_inner_datetime()?;
+
+		if double {
+			expected_whitespace!(self, t!("\""));
+		} else {
+			expected_whitespace!(self, t!("'"));
+		}
+
+		Ok(datetime)
+	}
+
+	/// Parses the datetimem without surrounding qoutes
+	pub fn parse_inner_datetime(&mut self) -> ParseResult<Datetime> {
 		let start_date = self.peek_whitespace().span;
 
 		let year_neg = self.eat_whitespace(t!("-"));
@@ -49,12 +62,6 @@ impl Parser<'_> {
 			.ok_or_else(|| ParseError::new(ParseErrorKind::InvalidDatetimeDate, date_span))?;
 
 		if !self.eat(TokenKind::DatetimeChars(DatetimeChars::T)) {
-			if double {
-				expected_whitespace!(self, t!("\""));
-			} else {
-				expected_whitespace!(self, t!("'"));
-			}
-
 			let time = NaiveTime::default();
 			let date_time = NaiveDateTime::new(date, time);
 
@@ -117,12 +124,6 @@ impl Parser<'_> {
 			}
 			x => unexpected!(self, x, "`Z` or a timezone"),
 		};
-
-		if double {
-			expected_whitespace!(self, t!("\""));
-		} else {
-			expected_whitespace!(self, t!("'"));
-		}
 
 		let date_time = NaiveDateTime::new(date, time);
 
