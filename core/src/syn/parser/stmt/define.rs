@@ -222,7 +222,7 @@ impl Parser<'_> {
 										// For this reason, some token duration must be set.
 										unexpected!(self, t!("NONE"), "a token duration");
 									}
-									_ => res.set_token_dur(Some(self.next_token_value()?)),
+									_ => res.set_token_duration(Some(self.next_token_value()?)),
 								}
 							}
 							t!("SESSION") => {
@@ -230,9 +230,9 @@ impl Parser<'_> {
 								match self.peek_kind() {
 									t!("NONE") => {
 										self.pop_peek();
-										res.set_session_dur(None)
+										res.set_session_duration(None)
 									}
-									_ => res.set_session_dur(Some(self.next_token_value()?)),
+									_ => res.set_session_duration(Some(self.next_token_value()?)),
 								}
 							}
 							_ => break,

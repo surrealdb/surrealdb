@@ -88,12 +88,12 @@ impl DefineUserStatement {
 		self.hash = passhash;
 	}
 
-	pub(crate) fn set_token_dur(&mut self, dur: Option<Duration>) {
-		self.duration.token = dur;
+	pub(crate) fn set_token_duration(&mut self, duration: Option<Duration>) {
+		self.duration.token = duration;
 	}
 
-	pub(crate) fn set_session_dur(&mut self, dur: Option<Duration>) {
-		self.duration.session = dur;
+	pub(crate) fn set_session_duration(&mut self, duration: Option<Duration>) {
+		self.duration.session = duration;
 	}
 
 	/// Process this type returning a computed simple Value
