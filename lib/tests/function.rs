@@ -1917,9 +1917,9 @@ async fn function_math_lerp() {
 #[tokio::test]
 async fn function_math_lerp_angle() {
 	let sql = r#"
-		RETURN math::lerp::angle(90, 180, 0.5);
-		RETURN math::lerp::angle(-90, 90, 0.5);
-		RETURN math::lerp::angle(0, 180, 1.5);
+		RETURN math::lerpangle(90, 180, 0.5);
+		RETURN math::lerpangle(-90, 90, 0.5);
+		RETURN math::lerpangle(0, 180, 1.5);
 	"#;
 	Test::new(sql).await.expect_vals(&["135.0", "0.0", "270"]);
 }

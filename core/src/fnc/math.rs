@@ -88,13 +88,8 @@ pub fn lerp((from, to, factor): (Number, Number, Number)) -> Result<Value, Error
 	Ok(factor.lerp(from, to).into())
 }
 
-pub mod lerp {
-	use crate::err::Error;
-	use crate::sql::{Number, Value};
-
-	pub fn angle((from, to, factor): (Number, Number, Number)) -> Result<Value, Error> {
-		Ok(factor.lerp_angle(from, to).into())
-	}
+pub fn lerpangle((from, to, factor): (Number, Number, Number)) -> Result<Value, Error> {
+	Ok(factor.lerp_angle(from, to).into())
 }
 
 pub fn ln((arg,): (Number,)) -> Result<Value, Error> {

@@ -190,7 +190,7 @@ pub fn synchronous(
 		"math::floor" => math::floor,
 		"math::interquartile" => math::interquartile,
 		"math::lerp" => math::lerp,
-		"math::lerp::angle" => math::lerp::angle,
+		"math::lerpangle" => math::lerpangle,
 		"math::ln" => math::ln,
 		"math::log" => math::log,
 		"math::log10" => math::log10,

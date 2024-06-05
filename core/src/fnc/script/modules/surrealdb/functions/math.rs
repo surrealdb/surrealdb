@@ -22,7 +22,7 @@ impl_module_def!(
 	"floor" => run,
 	"interquartile" => run,
 	"lerp" => run,
-	"lerp::angle" => run,
+	"lerpangle" => run,
 	"ln" => run,
 	"log" => run,
 	"log2" => run,
