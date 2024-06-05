@@ -43,26 +43,12 @@ pub mod byte {
 
 /// A trait extending u8 for adding some extra function.
 pub trait U8Ext {
-	///. Returns if the u8 is the start of an identifier.
-	fn is_identifier_start(&self) -> bool;
-
-	/// Returns if the u8 can start an identifier.
-	fn is_number_start(&self) -> bool;
-
 	/// Returns if the u8 can continue an identifier after the first character.
 	fn is_identifier_continue(&self) -> bool;
 }
 
 impl U8Ext for u8 {
-	fn is_identifier_start(&self) -> bool {
-		matches!(self, b'a'..=b'z' | b'A'..=b'Z' | b'_')
-	}
-
 	fn is_identifier_continue(&self) -> bool {
 		matches!(self, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-	}
-
-	fn is_number_start(&self) -> bool {
-		self.is_ascii_digit()
 	}
 }

@@ -636,7 +636,7 @@ impl Parser<'_> {
 
 					res.index = Index::Search(crate::sql::index::SearchParams {
 						az: analyzer.unwrap_or_else(|| Ident::from("like")),
-						sc: scoring.unwrap_or_else(|| Default::default()),
+						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 						doc_ids_order,
 						doc_lengths_order,
