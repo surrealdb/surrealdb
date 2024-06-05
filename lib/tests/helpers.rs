@@ -197,6 +197,8 @@ pub fn with_enough_stack(
 		.unwrap()
 }
 
+/// Skip the specified number of successful results from a vector of responses.
+/// This function will panic if there are not enough results in the vector or if an error occurs.
 #[allow(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) {
 	for i in 0..skip {
@@ -210,6 +212,13 @@ pub fn skip_ok(res: &mut Vec<Response>, skip: usize) {
 	}
 }
 
+/// Struct representing a test scenario.
+///
+/// # Fields
+/// - `ds`: The datastore for the test.
+/// - `session`: The session for the test.
+/// - `responses`: The list of responses for the test.
+/// - `pos`: The current position in the responses list.
 #[allow(dead_code)]
 pub struct Test {
 	pub ds: Datastore,
@@ -225,11 +234,16 @@ impl Debug for Test {
 }
 
 impl Test {
+	/// Creates a new instance of the `Self` struct with the given SQL query.
+	/// Arguments `sql` - A string slice representing the SQL query.
+	/// Panics if an error occurs.
 	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Self {
 		Self::try_new(sql).await.unwrap_or_else(|e| panic!("{e}"))
 	}
 
+	/// Create a new instance of the Test struct and execute the given SQL statement.
+	///
 	#[allow(dead_code)]
 	pub async fn try_new(sql: &str) -> Result<Self, Error> {
 		let ds = new_ds().await?;
@@ -243,6 +257,8 @@ impl Test {
 		})
 	}
 
+	/// Checks if the number of responses matches the expected size.
+	/// Panics if the number of responses does not match the expected size
 	#[allow(dead_code)]
 	pub fn size(&mut self, expected: usize) -> &mut Self {
 		assert_eq!(
@@ -254,6 +270,9 @@ impl Test {
 		self
 	}
 
+	/// Retrieves the next response from the responses list.
+	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
+	/// The panic message will include the last position in the responses list before it was emptied.
 	#[allow(dead_code)]
 	pub fn next(&mut self) -> Response {
 		if self.responses.is_empty() {
@@ -263,12 +282,17 @@ impl Test {
 		self.responses.remove(0)
 	}
 
+	/// Retrieves the next value from the responses list.
+	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
+	/// The panic message will include the last position in the responses list before it was emptied.
 	pub fn next_value(&mut self) -> Value {
 		self.next()
 			.result
-			.unwrap_or_else(|e| panic!("Unexpected error: {e} - at index: {}", self.pos))
+			.unwrap_or_else(|e| panic!("Unexpected error: {e} - last position: {}", self.pos))
 	}
 
+	/// Skips a specified number of elements from the beginning of the `responses` vector
+	/// and updates the position.
 	#[allow(dead_code)]
 	pub fn skip_ok(&mut self, skip: usize) -> &mut Self {
 		skip_ok(&mut self.responses, skip);
@@ -276,6 +300,9 @@ impl Test {
 		self
 	}
 
+	/// Expects the next value to be equal to the provided value.
+	/// Panics if the expected value is not equal to the actual value.
+	/// Compliant with NaN and Constants.
 	#[allow(dead_code)]
 	pub fn expect_value(&mut self, val: Value) -> &mut Self {
 		let tmp = self.next_value();
@@ -296,6 +323,7 @@ impl Test {
 		self
 	}
 
+	/// Expect values in the given slice to be present in the responses, following the same order.
 	#[allow(dead_code)]
 	pub fn expect_values(&mut self, values: &[Value]) -> &mut Self {
 		for value in values {
@@ -304,12 +332,14 @@ impl Test {
 		self
 	}
 
+	/// Expect the given value to be equals to the next response.
 	#[allow(dead_code)]
 	pub fn expect_val(&mut self, val: &str) -> &mut Self {
 		self.expect_value(value(val).unwrap())
 	}
 
 	#[allow(dead_code)]
+	/// Expect values in the given slice to be present in the responses, following the same order.
 	pub fn expect_vals(&mut self, vals: &[&str]) -> &mut Self {
 		for val in vals {
 			self.expect_val(val);
@@ -317,6 +347,9 @@ impl Test {
 		self
 	}
 
+	/// Expects the next result to be an error with the specified error message.
+	/// This function will panic if the next result is not an error or if the error
+	/// message does not match the specified error.
 	#[allow(dead_code)]
 	pub fn expect_error(&mut self, error: &str) -> &mut Self {
 		let tmp = self.next().result;
@@ -338,13 +371,24 @@ impl Test {
 		self
 	}
 
+	/// Expects the next value to be a floating-point number and compares it with the given value.
+	///
+	/// # Arguments
+	///
+	/// * `val` - The expected floating-point value
+	/// * `precision` - The allowed difference between the expected and actual value
+	///
+	/// # Panics
+	///
+	/// Panics if the next value is not a number or if the difference
+	/// between the expected and actual value exceeds the precision.
 	#[allow(dead_code)]
 	pub fn expect_float(&mut self, val: f64, precision: f64) -> &mut Self {
 		let tmp = self.next_value();
 		if let Value::Number(Number::Float(n)) = tmp {
 			let diff = (n - val).abs();
 			assert!(
-				diff < precision,
+				diff <= precision,
 				"{tmp} does not match expected: {val} - diff: {diff} - precision: {precision}"
 			);
 		} else {
@@ -363,6 +407,8 @@ impl Test {
 }
 
 impl Drop for Test {
+	/// Drops the instance of the struct
+	/// This method will panic if there are remaining responses that have not been checked.
 	fn drop(&mut self) {
 		if !self.responses.is_empty() {
 			panic!("Not every response has been checked");
