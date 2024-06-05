@@ -1614,4 +1614,43 @@ mod tests {
 			assert!(res.is_ok());
 		}
 	}
+
+	#[tokio::test]
+	async fn test_expired_token() {
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			// Token was issued two hours ago and expired one hour ago
+			iat: Some((Utc::now() - Duration::hours(2)).timestamp()),
+			nbf: Some((Utc::now() - Duration::hours(2)).timestamp()),
+			exp: Some((Utc::now() - Duration::hours(1)).timestamp()),
+			ac: Some("token".to_string()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Claims::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
+				.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Prepare the claims object
+		let mut claims = claims.clone();
+		claims.roles = None;
+		// Create the token
+		let enc = encode(&HEADER, &claims, &key).unwrap();
+		// Signin with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+
+		assert!(res.is_err(), "Unexpected success signing in with expired token: {:?}", res);
+	}
 }
