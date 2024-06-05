@@ -10,7 +10,7 @@ use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::AccessType;
 use crate::sql::Object;
 use crate::sql::Value;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -148,8 +148,7 @@ pub async fn db_access(
 												iss: Some(SERVER_NAME.to_owned()),
 												iat: Some(Utc::now().timestamp()),
 												nbf: Some(Utc::now().timestamp()),
-												// Token expiration is derived from issuer duration
-												exp: expiration(iss.duration)?,
+												exp: expiration(av.duration.token)?,
 												jti: Some(Uuid::new_v4().to_string()),
 												ns: Some(ns.to_owned()),
 												db: Some(db.to_owned()),
@@ -168,8 +167,7 @@ pub async fn db_access(
 											session.db = Some(db.to_owned());
 											session.ac = Some(ac.to_owned());
 											session.rd = Some(Value::from(rid.to_owned()));
-											// Session expiration is derived from record access duration
-											session.exp = expiration(at.duration)?;
+											session.exp = expiration(av.duration.session)?;
 											session.au = Arc::new(Auth::new(Actor::new(
 												rid.to_string(),
 												Default::default(),
@@ -215,12 +213,11 @@ pub async fn db_user(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
-			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp,
+				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.to_owned()),
 				db: Some(db.to_owned()),
@@ -235,7 +232,7 @@ pub async fn db_user(
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = expiration(u.session)?;
+			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Database(ns.to_owned(), db.to_owned())).into());
 			// Check the authentication token
 			match enc {
@@ -260,12 +257,11 @@ pub async fn ns_user(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
-			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp,
+				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				ns: Some(ns.to_owned()),
 				id: Some(user),
@@ -278,7 +274,7 @@ pub async fn ns_user(
 			// Set the authentication on the session
 			session.tk = Some(val.into());
 			session.ns = Some(ns.to_owned());
-			session.exp = expiration(u.session)?;
+			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Namespace(ns.to_owned())).into());
 			// Check the authentication token
 			match enc {
@@ -303,12 +299,11 @@ pub async fn root_user(
 			// Create the authentication key
 			let key = EncodingKey::from_secret(u.code.as_ref());
 			// Create the authentication claim
-			let exp = Some((Utc::now() + Duration::hours(1)).timestamp());
 			let val = Claims {
 				iss: Some(SERVER_NAME.to_owned()),
 				iat: Some(Utc::now().timestamp()),
 				nbf: Some(Utc::now().timestamp()),
-				exp,
+				exp: expiration(u.duration.token)?,
 				jti: Some(Uuid::new_v4().to_string()),
 				id: Some(user),
 				..Claims::default()
@@ -319,7 +314,7 @@ pub async fn root_user(
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
 			session.tk = Some(val.into());
-			session.exp = expiration(u.session)?;
+			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Root).into());
 			// Check the authentication token
 			match enc {
@@ -337,6 +332,8 @@ pub async fn root_user(
 mod tests {
 	use super::*;
 	use crate::iam::Role;
+	use chrono::Duration;
+	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 	use std::collections::HashMap;
 
 	#[tokio::test]
@@ -347,7 +344,7 @@ mod tests {
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -356,7 +353,9 @@ mod tests {
 							name: $user,
 							pass: crypto::argon2::generate($pass)
 						}
-					);
+					)
+					DURATION FOR SESSION 2h
+				;
 
 				CREATE user:test CONTENT {
 					name: 'user',
@@ -400,14 +399,14 @@ mod tests {
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Expiration should always be set for tokens issued by SurrealDB
+			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow access method duration"
+				"Session expiration is expected to follow the defined duration"
 			);
 		}
 
@@ -417,7 +416,7 @@ mod tests {
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
-				DEFINE ACCESS user ON DATABASE TYPE RECORD DURATION 1h
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -426,7 +425,9 @@ mod tests {
 							name: $user,
 							pass: crypto::argon2::generate($pass)
 						}
-					);
+					)
+					DURATION FOR SESSION 2h
+				;
 
 				CREATE user:test CONTENT {
 					name: 'user',
@@ -464,7 +465,6 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_signin_record_with_jwt_issuer() {
-		use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 		// Test with correct credentials
 		{
 			let public_key = r#"-----BEGIN PUBLIC KEY-----
@@ -510,7 +510,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				&format!(
 					r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
-					DURATION 1h
 					SIGNIN (
 						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
 					)
@@ -521,7 +520,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						}}
 					)
 				    WITH JWT ALGORITHM RS256 KEY '{public_key}'
-				        WITH ISSUER KEY '{private_key}' DURATION 15m
+				        WITH ISSUER KEY '{private_key}'
+					DURATION FOR SESSION 2h, FOR TOKEN 15m
 				;
 
 				CREATE user:test CONTENT {{
@@ -566,16 +566,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
-			// Session expiration should always be set for tokens issued by SurrealDB
+			// Session expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
 			let min_sess_exp =
-				(Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+				(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
 			let max_sess_exp =
-				(Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
+				(Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_sess_exp && exp < max_sess_exp,
-				"Session expiration is expected to follow access method duration"
+				"Session expiration is expected to follow the defined duration"
 			);
 
 			// Decode token and check that it has been issued as intended
@@ -603,7 +603,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
 				assert!(
 					exp > min_tk_exp && exp < max_tk_exp,
-					"Token expiration is expected to follow issuer duration"
+					"Token expiration is expected to follow the defined duration"
 				);
 				// Check required token claims
 				assert_eq!(token_data.claims.ns, Some("test".to_string()));
@@ -619,7 +619,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_db_user() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -656,12 +656,87 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test with roles defined
+		// Test without roles and session expiration disabled
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
-			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+			ds.execute(
+				"DEFINE USER user ON DB PASSWORD 'pass' DURATION FOR TOKEN 365d, FOR SESSION NONE",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				db: Some("test".to_string()),
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res = db_user(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				"pass".to_string(),
+			)
+			.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.db, Some("test".to_string()));
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_db());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert_eq!(sess.au.level().db(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::days(365) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::days(365) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, Some("test".to_string()));
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
+		}
+
+		//
+		// Test with roles and expiration defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute("DEFINE USER user ON DB PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h", &sess, None)
 				.await
 				.unwrap();
 
@@ -691,7 +766,47 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(6) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(6) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::minutes(15) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, Some("test".to_string()));
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
 		}
 
 		// Test invalid password
@@ -720,7 +835,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_ns_user() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -748,12 +863,78 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test with roles defined
+		// Test without roles and session expiration disabled
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test");
-			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+			ds.execute(
+				"DEFINE USER user ON NS PASSWORD 'pass' DURATION FOR TOKEN 365d, FOR SESSION NONE",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				..Default::default()
+			};
+			let res =
+				ns_user(&ds, &mut sess, "test".to_string(), "user".to_string(), "pass".to_string())
+					.await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.ns, Some("test".to_string()));
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_ns());
+			assert_eq!(sess.au.level().ns(), Some("test"));
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::days(365) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::days(365) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
+		}
+
+		//
+		// Test with roles and expiration defined
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute("DEFINE USER user ON NS PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h", &sess, None)
 				.await
 				.unwrap();
 
@@ -774,7 +955,47 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(6) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(6) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::minutes(15) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, Some("test".to_string()));
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
 		}
 
 		// Test invalid password
@@ -802,7 +1023,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_root_user() {
 		//
-		// Test without roles defined
+		// Test without roles or expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
@@ -825,12 +1046,67 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 
 		//
-		// Test with roles defined
+		// Test without roles and session expiration disabled
+		//
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' DURATION FOR TOKEN 365d, FOR SESSION NONE", &sess, None).await.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				..Default::default()
+			};
+			let res = root_user(&ds, &mut sess, "user".to_string(), "pass".to_string()).await;
+
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			assert_eq!(sess.au.id(), "user");
+			assert!(sess.au.is_root());
+			assert!(sess.au.has_role(&Role::Viewer), "Auth user expected to have Viewer role");
+			assert!(!sess.au.has_role(&Role::Editor), "Auth user expected to not have Editor role");
+			assert!(!sess.au.has_role(&Role::Owner), "Auth user expected to not have Owner role");
+			assert_eq!(sess.exp, None, "Session expiration is expected to match defined duration");
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::days(365) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::days(365) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, None);
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
+		}
+
+		//
+		// Test with roles and expiration defined
 		//
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner();
-			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER", &sess, None)
+			ds.execute("DEFINE USER user ON ROOT PASSWORD 'pass' ROLES EDITOR, OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h", &sess, None)
 				.await
 				.unwrap();
 
@@ -846,7 +1122,47 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(!sess.au.has_role(&Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(sess.au.has_role(&Role::Editor), "Auth user expected to have Editor role");
 			assert!(sess.au.has_role(&Role::Owner), "Auth user expected to have Owner role");
-			assert_eq!(sess.exp, None, "Default system user expiration is expected to be None");
+			// Expiration has been set explicitly
+			let exp = sess.exp.unwrap();
+			// Expiration should match the current time plus session duration with some margin
+			let min_exp = (Utc::now() + Duration::hours(6) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(6) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
+			// Decode token and check that it has been issued as intended
+			if let Ok(Some(tk)) = res {
+				// Decode token without validation
+				let token_data = decode::<Claims>(&tk, &DecodingKey::from_secret(&[]), &{
+					let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+					validation.insecure_disable_signature_validation();
+					validation.validate_nbf = false;
+					validation.validate_exp = false;
+					validation
+				})
+				.unwrap();
+				// Check that token expiration matches the defined duration
+				// Expiration should match the current time plus token duration with some margin
+				let exp = match token_data.claims.exp {
+					Some(exp) => exp,
+					_ => panic!("Token is missing expiration claim"),
+				};
+				let min_tk_exp =
+					(Utc::now() + Duration::minutes(15) - Duration::seconds(10)).timestamp();
+				let max_tk_exp =
+					(Utc::now() + Duration::minutes(15) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_tk_exp && exp < max_tk_exp,
+					"Token expiration is expected to follow the defined duration"
+				);
+				// Check required token claims
+				assert_eq!(token_data.claims.ns, None);
+				assert_eq!(token_data.claims.db, None);
+				assert_eq!(token_data.claims.id, Some("user".to_string()));
+			} else {
+				panic!("Token could not be extracted from result")
+			}
 		}
 
 		// Test invalid password

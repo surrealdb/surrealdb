@@ -5,7 +5,6 @@ use crate::sql::access_type::{
 };
 use crate::sql::value::serde::ser;
 use crate::sql::Algorithm;
-use crate::sql::Duration;
 use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
@@ -82,7 +81,6 @@ impl ser::Serializer for SerializerRecord {
 #[derive(Default)]
 #[non_exhaustive]
 pub struct SerializeRecord {
-	pub duration: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
 	pub jwt: JwtAccess,
@@ -97,10 +95,6 @@ impl serde::ser::SerializeStruct for SerializeRecord {
 		T: ?Sized + Serialize,
 	{
 		match key {
-			"duration" => {
-				self.duration =
-					value.serialize(ser::duration::opt::Serializer.wrap())?.map(Into::into);
-			}
 			"signup" => {
 				self.signup = value.serialize(ser::value::opt::Serializer.wrap())?;
 			}
@@ -119,7 +113,6 @@ impl serde::ser::SerializeStruct for SerializeRecord {
 
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(RecordAccess {
-			duration: self.duration,
 			signup: self.signup,
 			signin: self.signin,
 			jwt: self.jwt,
@@ -420,7 +413,6 @@ impl ser::Serializer for SerializerJwtIssue {
 pub struct SerializeJwtIssue {
 	pub alg: Algorithm,
 	pub key: String,
-	pub duration: Option<Duration>,
 }
 
 impl serde::ser::SerializeStruct for SerializeJwtIssue {
@@ -438,10 +430,6 @@ impl serde::ser::SerializeStruct for SerializeJwtIssue {
 			"key" => {
 				self.key = value.serialize(ser::string::Serializer.wrap())?;
 			}
-			"duration" => {
-				self.duration =
-					value.serialize(ser::duration::opt::Serializer.wrap())?.map(Into::into);
-			}
 			key => {
 				return Err(Error::custom(format!("unexpected field `JwtAccessIssue::{key}`")));
 			}
@@ -451,7 +439,6 @@ impl serde::ser::SerializeStruct for SerializeJwtIssue {
 
 	fn end(self) -> Result<Self::Ok, Error> {
 		Ok(JwtAccessIssue {
-			duration: self.duration,
 			alg: self.alg,
 			key: self.key,
 		})

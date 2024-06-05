@@ -1,5 +1,6 @@
 use crate::{
 	sql::{
+		access::AccessDuration,
 		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
 		changefeed::ChangeFeed,
@@ -195,7 +196,6 @@ fn statements() -> Vec<Statement> {
 			name: Ident("a".to_string()),
 			base: Base::Db,
 			kind: AccessType::Record(RecordAccess {
-				duration: Some(Duration::from_hours(1)),
 				signup: None,
 				signin: None,
 				jwt: JwtAccess {
@@ -206,6 +206,12 @@ fn statements() -> Vec<Statement> {
 					issue: None,
 				},
 			}),
+			// Default durations.
+			duration: AccessDuration {
+				grant: None,
+				token: Some(Duration::from_hours(1)),
+				session: None,
+			},
 			comment: Some(Strand("bar".to_string())),
 			if_not_exists: false,
 		})),

@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{AccessType, Base, Ident, Object, Strand, Value};
+use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Object, Strand, Value};
 use derive::Store;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -12,7 +12,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -20,8 +20,8 @@ pub struct DefineAccessStatement {
 	pub name: Ident,
 	pub base: Base,
 	pub kind: AccessType,
+	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
 	pub if_not_exists: bool,
 }
 
@@ -132,9 +132,6 @@ impl Display for DefineAccessStatement {
 			}
 			AccessType::Record(ac) => {
 				write!(f, " TYPE RECORD")?;
-				if let Some(ref v) = ac.duration {
-					write!(f, " DURATION {v}")?
-				}
 				if let Some(ref v) = ac.signup {
 					write!(f, " SIGNUP {v}")?
 				}
@@ -144,6 +141,38 @@ impl Display for DefineAccessStatement {
 				write!(f, " WITH JWT {}", ac.jwt)?;
 			}
 		}
+		// Always print relevant durations so defaults can be changed in the future
+		// If default values were not printed, exports would not be forward compatible
+		// None values need to be printed, as they are different from the default values
+		write!(f, " DURATION")?;
+		if self.kind.can_issue_grants() {
+			write!(
+				f,
+				" FOR GRANT {},",
+				match self.duration.grant {
+					Some(dur) => format!("{}", dur),
+					None => "NONE".to_string(),
+				}
+			)?;
+		}
+		if self.kind.can_issue_tokens() {
+			write!(
+				f,
+				" FOR TOKEN {},",
+				match self.duration.token {
+					Some(dur) => format!("{}", dur),
+					None => "NONE".to_string(),
+				}
+			)?;
+		}
+		write!(
+			f,
+			" FOR SESSION {}",
+			match self.duration.session {
+				Some(dur) => format!("{}", dur),
+				None => "NONE".to_string(),
+			}
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -157,6 +186,7 @@ impl InfoStructure for DefineAccessStatement {
 			name,
 			base,
 			kind,
+			duration,
 			comment,
 			..
 		} = self;
@@ -165,6 +195,16 @@ impl InfoStructure for DefineAccessStatement {
 		acc.insert("name".to_string(), name.structure());
 
 		acc.insert("base".to_string(), base.structure());
+
+		let mut dur = Object::default();
+		if kind.can_issue_grants() {
+			dur.insert("grant".to_string(), duration.grant.into());
+		}
+		if kind.can_issue_tokens() {
+			dur.insert("token".to_string(), duration.token.into());
+		}
+		dur.insert("session".to_string(), duration.session.into());
+		acc.insert("duration".to_string(), dur.to_string().into());
 
 		acc.insert("kind".to_string(), kind.structure());
 
