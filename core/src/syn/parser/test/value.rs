@@ -122,18 +122,36 @@ fn parse_i64() {
 fn constant_lowercase() {
 	let out = test_parse!(parse_value, r#" math::pi "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
+
+	let out = test_parse!(parse_value, r#" math::inf "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathInf));
+
+	let out = test_parse!(parse_value, r#" math::neg_inf "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathNegInf));
 }
 
 #[test]
 fn constant_uppercase() {
 	let out = test_parse!(parse_value, r#" MATH::PI "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
+
+	let out = test_parse!(parse_value, r#" MATH::INF "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathInf));
+
+	let out = test_parse!(parse_value, r#" MATH::NEG_INF "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathNegInf));
 }
 
 #[test]
 fn constant_mixedcase() {
 	let out = test_parse!(parse_value, r#" MaTh::Pi "#).unwrap();
 	assert_eq!(out, Value::Constant(Constant::MathPi));
+
+	let out = test_parse!(parse_value, r#" MaTh::Inf "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathInf));
+
+	let out = test_parse!(parse_value, r#" MaTh::Neg_Inf "#).unwrap();
+	assert_eq!(out, Value::Constant(Constant::MathNegInf));
 }
 
 #[test]
