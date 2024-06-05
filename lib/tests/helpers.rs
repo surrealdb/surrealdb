@@ -10,7 +10,7 @@ use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Response;
-use surrealdb_core::sql::{value, Value};
+use surrealdb_core::sql::{value, Number, Value};
 
 pub async fn new_ds() -> Result<Datastore, Error> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -263,6 +263,12 @@ impl Test {
 		self.responses.remove(0)
 	}
 
+	pub fn next_value(&mut self) -> Value {
+		self.next()
+			.result
+			.unwrap_or_else(|e| panic!("Unexpected error: {e} - at index: {}", self.pos))
+	}
+
 	#[allow(dead_code)]
 	pub fn skip_ok(&mut self, skip: usize) -> &mut Self {
 		skip_ok(&mut self.responses, skip);
@@ -272,10 +278,7 @@ impl Test {
 
 	#[allow(dead_code)]
 	pub fn expect_value(&mut self, val: Value) -> &mut Self {
-		let tmp = self
-			.next()
-			.result
-			.unwrap_or_else(|e| panic!("Unexpected error: {e} - Index: {}", self.pos));
+		let tmp = self.next_value();
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
@@ -331,6 +334,29 @@ impl Test {
 	pub fn expect_errors(&mut self, errors: &[&str]) -> &mut Self {
 		for error in errors {
 			self.expect_error(error);
+		}
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_float(&mut self, val: f64, precision: f64) -> &mut Self {
+		let tmp = self.next_value();
+		if let Value::Number(Number::Float(n)) = tmp {
+			let diff = (n - val).abs();
+			assert!(
+				diff < precision,
+				"{tmp} does not match expected: {val} - diff: {diff} - precision: {precision}"
+			);
+		} else {
+			panic!("At position {}: Value {tmp} is not a number", self.pos);
+		}
+		self
+	}
+
+	#[allow(dead_code)]
+	pub fn expect_floats(&mut self, vals: &[f64], precision: f64) -> &mut Self {
+		for val in vals {
+			self.expect_float(*val, precision);
 		}
 		self
 	}

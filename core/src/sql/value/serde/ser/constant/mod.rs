@@ -38,15 +38,18 @@ impl ser::Serializer for Serializer {
 			"MathFracPi4" => Ok(Constant::MathFracPi4),
 			"MathFracPi6" => Ok(Constant::MathFracPi6),
 			"MathFracPi8" => Ok(Constant::MathFracPi8),
+			"MathInf" => Ok(Constant::MathInf),
 			"MathLn10" => Ok(Constant::MathLn10),
 			"MathLn2" => Ok(Constant::MathLn2),
 			"MathLog102" => Ok(Constant::MathLog102),
 			"MathLog10E" => Ok(Constant::MathLog10E),
 			"MathLog210" => Ok(Constant::MathLog210),
 			"MathLog2E" => Ok(Constant::MathLog2E),
+			"MathNegInf" => Ok(Constant::MathNegInf),
 			"MathPi" => Ok(Constant::MathPi),
 			"MathSqrt2" => Ok(Constant::MathSqrt2),
 			"MathTau" => Ok(Constant::MathTau),
+			"TimeEpoch" => Ok(Constant::TimeEpoch),
 			variant => Err(Error::custom(format!("unknown variant `{name}::{variant}`"))),
 		}
 	}
@@ -129,6 +132,13 @@ mod tests {
 	}
 
 	#[test]
+	fn math_inf() {
+		let constant = Constant::MathInf;
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(constant, serialized);
+	}
+
+	#[test]
 	fn math_ln10() {
 		let constant = Constant::MathLn10;
 		let serialized = constant.serialize(Serializer.wrap()).unwrap();
@@ -171,6 +181,13 @@ mod tests {
 	}
 
 	#[test]
+	fn math_neg_inf() {
+		let constant = Constant::MathNegInf;
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(constant, serialized);
+	}
+
+	#[test]
 	fn math_pi() {
 		let constant = Constant::MathPi;
 		let serialized = constant.serialize(Serializer.wrap()).unwrap();
@@ -187,6 +204,13 @@ mod tests {
 	#[test]
 	fn math_tau() {
 		let constant = Constant::MathTau;
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(constant, serialized);
+	}
+
+	#[test]
+	fn time_epoch() {
+		let constant = Constant::TimeEpoch;
 		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}

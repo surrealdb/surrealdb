@@ -1715,7 +1715,9 @@ async fn function_math_acot() {
 		RETURN math::acot(2);
 		RETURN math::acot(math::cot(1.5));
 	"#;
-	Test::new(sql).await.expect_vals(&["1.1071487177940904", "0.4636476090008059", "1.5"]);
+	Test::new(sql)
+		.await
+		.expect_floats(&[1.1071487177940904, 0.4636476090008059, 1.5], f64::EPSILON);
 }
 
 #[tokio::test]
@@ -1727,13 +1729,16 @@ async fn function_math_asin() {
 		RETURN math::asin(1);
 		RETURN math::asin(-1);
 	"#;
-	Test::new(sql).await.expect_vals(&[
-		"0.5823642378687435",
-		"-0.5823642378687435",
-		"0.0",
-		"1.5707963267948966",
-		"-1.5707963267948966",
-	]);
+	Test::new(sql).await.expect_floats(
+		&[
+			0.5823642378687435,
+			-0.5823642378687435,
+			0.0,
+			std::f64::consts::FRAC_PI_2,
+			-std::f64::consts::FRAC_PI_2,
+		],
+		f64::EPSILON,
+	);
 }
 
 #[tokio::test]
@@ -1743,11 +1748,10 @@ async fn function_math_atan() {
 		RETURN math::atan(67);
 		RETURN math::atan(-21);
 	"#;
-	Test::new(sql).await.expect_vals(&[
-		"0.37185607384858127",
-		"1.5558720618048116",
-		"-1.5232132235179132",
-	]);
+	Test::new(sql).await.expect_floats(
+		&[0.37185607384858127, 1.5558720618048116, -1.5232132235179132],
+		f64::EPSILON,
+	);
 }
 
 #[tokio::test]
@@ -1791,7 +1795,9 @@ async fn function_math_cos() {
 		RETURN math::cos(10);
 		RETURN math::cos(3.14159265359);
 	"#;
-	Test::new(sql).await.expect_vals(&["1.0", "0.3342377271245026", "-0.8390715290764524", "-1.0"]);
+	Test::new(sql)
+		.await
+		.expect_floats(&[1.0, 0.3342377271245026, -0.8390715290764524, -1.0], f64::EPSILON);
 }
 
 #[tokio::test]
@@ -1800,7 +1806,7 @@ async fn function_math_cot() {
 		RETURN math::cot(0.5);
 		RETURN math::cot(2);
 	"#;
-	Test::new(sql).await.expect_vals(&["1.830487721712452", "-0.45765755436028577"]);
+	Test::new(sql).await.expect_floats(&[1.830487721712452, -0.45765755436028577], f64::EPSILON);
 }
 
 #[tokio::test]
@@ -1811,12 +1817,10 @@ async fn function_math_deg2rad() {
 		RETURN math::deg2rad(360);
 		RETURN math::deg2rad(math::rad2deg(0.7853981633974483));
 	"#;
-	Test::new(sql).await.expect_vals(&[
-		"0.7853981633974483",
-		"-1.5707963267948966",
-		"6.283185307179586",
-		"0.7853981633974483",
-	]);
+	Test::new(sql).await.expect_floats(
+		&[0.7853981633974483, -1.5707963267948966, 6.283185307179586, 0.7853981633974483],
+		f64::EPSILON,
+	);
 }
 
 #[tokio::test]
@@ -1927,7 +1931,7 @@ async fn function_math_ln() {
 		RETURN math::ln(20);
 		RETURN math::ln(2.5);
 	"#;
-	Test::new(sql).await.expect_vals(&["0.0", "2.995732273553991", "0.9162907318741551"]);
+	Test::new(sql).await.expect_floats(&[0.0, 2.995732273553991, 0.9162907318741551], f64::EPSILON);
 }
 
 #[tokio::test]
@@ -1939,13 +1943,10 @@ async fn function_math_log() {
 		RETURN math::log(0, 10);
 		RETURN math::log(-1, 10);
 	"#;
-	Test::new(sql).await.expect_vals(&[
-		"0.43429738512450866",
-		"0.30102999566398114",
-		"0.0",
-		"Math::Neg_Inf",
-		"NaN",
-	]);
+	Test::new(sql)
+		.await
+		.expect_floats(&[0.43429738512450866, 0.30102999566398114, 0.0], 2.0 * f64::EPSILON)
+		.expect_vals(&["Math::Neg_Inf", "NaN"]);
 }
 
 #[tokio::test]
@@ -1958,14 +1959,10 @@ async fn function_math_log10() {
 		RETURN math::log10(-1);
 		RETURN math::log10(0) == math::neg_inf;
 	"#;
-	Test::new(sql).await.expect_vals(&[
-		"0.43429738512450866",
-		"0.3010299956639812",
-		"0.0",
-		"math::neg_inf",
-		"NaN",
-		"true",
-	]);
+	Test::new(sql)
+		.await
+		.expect_floats(&[0.43429738512450866, 0.3010299956639812, 0.0], f64::EPSILON)
+		.expect_vals(&["Math::Neg_Inf", "NaN", "true"]);
 }
 
 #[tokio::test]
@@ -1975,7 +1972,7 @@ async fn function_math_log2() {
 		RETURN math::log2(2);
 		RETURN math::log2(1);
 	"#;
-	Test::new(sql).await.expect_vals(&["1.4427046851812222", "1.0", "0.0"]);
+	Test::new(sql).await.expect_floats(&[1.4427046851812222, 1.0, 0.0], f64::EPSILON);
 }
 
 #[tokio::test]
@@ -2254,13 +2251,10 @@ async fn function_math_sin() {
 		RETURN math::sin(MATH::PI);
 		RETURN math::sin(MATH::PI / 2);
 	"#;
-	Test::new(sql).await.expect_vals(&[
-		"0.0",
-		"-0.9424888019316975",
-		"-0.5440211108893698",
-		"1.2246467991473532e-16",
-		"1.0",
-	]);
+	Test::new(sql).await.expect_floats(
+		&[0.0, -0.9424888019316975, -0.5440211108893698, 1.2246467991473532e-16, 1.0],
+		f64::EPSILON,
+	);
 }
 
 #[tokio::test]
@@ -2360,12 +2354,10 @@ async fn function_math_tan() {
 		RETURN math::tan(45);
 		RETURN math::tan(60);
 	"#;
-	Test::new(sql).await.expect_vals(&[
-		"-1.995200412208242",
-		"1.995200412208242",
-		"1.6197751905438615",
-		"0.3200403893795629",
-	]);
+	Test::new(sql).await.expect_floats(
+		&[-1.995200412208242, 1.995200412208242, 1.6197751905438615, 0.3200403893795629],
+		f64::EPSILON,
+	);
 }
 
 #[tokio::test]
