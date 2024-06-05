@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::statements::DefineUserStatement;
+use crate::sql::user::UserDuration;
 use crate::sql::value::serde::ser;
 use crate::sql::Base;
 use crate::sql::Duration;
@@ -45,7 +46,7 @@ pub struct SerializeDefineUserStatement {
 	hash: String,
 	code: String,
 	roles: Vec<Ident>,
-	session: Option<Duration>,
+	duration: UserDuration,
 	comment: Option<Strand>,
 	if_not_exists: bool,
 }
@@ -74,9 +75,8 @@ impl serde::ser::SerializeStruct for SerializeDefineUserStatement {
 			"roles" => {
 				self.roles = value.serialize(ser::ident::vec::Serializer.wrap())?;
 			}
-			"session" => {
-				self.session =
-					value.serialize(ser::duration::opt::Serializer.wrap())?.map(Into::into);
+			"duration" => {
+				self.duration = value.serialize(SerializerDuration.wrap())?;
 			}
 			"comment" => {
 				self.comment = value.serialize(ser::strand::opt::Serializer.wrap())?;
@@ -100,9 +100,73 @@ impl serde::ser::SerializeStruct for SerializeDefineUserStatement {
 			hash: self.hash,
 			code: self.code,
 			roles: self.roles,
-			session: self.session,
+			duration: self.duration,
 			comment: self.comment,
 			if_not_exists: self.if_not_exists,
+		})
+	}
+}
+pub struct SerializerDuration;
+
+impl ser::Serializer for SerializerDuration {
+	type Ok = UserDuration;
+	type Error = Error;
+
+	type SerializeSeq = Impossible<UserDuration, Error>;
+	type SerializeTuple = Impossible<UserDuration, Error>;
+	type SerializeTupleStruct = Impossible<UserDuration, Error>;
+	type SerializeTupleVariant = Impossible<UserDuration, Error>;
+	type SerializeMap = Impossible<UserDuration, Error>;
+	type SerializeStruct = SerializeDuration;
+	type SerializeStructVariant = Impossible<UserDuration, Error>;
+
+	const EXPECTED: &'static str = "a struct `UserDuration`";
+
+	#[inline]
+	fn serialize_struct(
+		self,
+		_name: &'static str,
+		_len: usize,
+	) -> Result<Self::SerializeStruct, Error> {
+		Ok(SerializeDuration::default())
+	}
+}
+
+#[derive(Default)]
+#[non_exhaustive]
+pub struct SerializeDuration {
+	pub token: Option<Duration>,
+	pub session: Option<Duration>,
+}
+
+impl serde::ser::SerializeStruct for SerializeDuration {
+	type Ok = UserDuration;
+	type Error = Error;
+
+	fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Error>
+	where
+		T: ?Sized + Serialize,
+	{
+		match key {
+			"token" => {
+				self.token =
+					value.serialize(ser::duration::opt::Serializer.wrap())?.map(Into::into);
+			}
+			"session" => {
+				self.session =
+					value.serialize(ser::duration::opt::Serializer.wrap())?.map(Into::into);
+			}
+			key => {
+				return Err(Error::custom(format!("unexpected field `UserDuration::{key}`")));
+			}
+		}
+		Ok(())
+	}
+
+	fn end(self) -> Result<Self::Ok, Error> {
+		Ok(UserDuration {
+			token: self.token,
+			session: self.session,
 		})
 	}
 }
@@ -114,6 +178,19 @@ mod tests {
 	#[test]
 	fn default() {
 		let stmt = DefineUserStatement::default();
+		let value: DefineUserStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(value, stmt);
+	}
+
+	#[test]
+	fn with_durations() {
+		let stmt = DefineUserStatement {
+			duration: UserDuration {
+				token: Some(Duration::from_mins(15)),
+				session: Some(Duration::from_mins(90)),
+			},
+			..Default::default()
+		};
 		let value: DefineUserStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
