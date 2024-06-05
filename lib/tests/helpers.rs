@@ -260,7 +260,7 @@ impl Test {
 	/// Checks if the number of responses matches the expected size.
 	/// Panics if the number of responses does not match the expected size
 	#[allow(dead_code)]
-	pub fn size(&mut self, expected: usize) -> &mut Self {
+	pub fn expect_size(&mut self, expected: usize) -> &mut Self {
 		assert_eq!(
 			self.responses.len(),
 			expected,
