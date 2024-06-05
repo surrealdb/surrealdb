@@ -181,4 +181,17 @@ mod tests {
 		let value: DefineUserStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
+
+	#[test]
+	fn with_durations() {
+		let stmt = DefineUserStatement {
+			duration: UserDuration {
+				token: Some(Duration::from_mins(15)),
+				session: Some(Duration::from_mins(90)),
+			},
+			..Default::default()
+		};
+		let value: DefineUserStatement = stmt.serialize(Serializer.wrap()).unwrap();
+		assert_eq!(value, stmt);
+	}
 }
