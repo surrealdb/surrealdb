@@ -1,3 +1,5 @@
+#![cfg(feature = "sql2")]
+
 mod parse;
 use parse::Parse;
 

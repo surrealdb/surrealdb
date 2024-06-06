@@ -204,6 +204,7 @@ async fn strict_mode_all_ok() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn loose_mode_all_ok() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD extra ON test VALUE true;

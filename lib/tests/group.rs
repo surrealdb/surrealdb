@@ -8,6 +8,7 @@ use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn select_aggregate() -> Result<(), Error> {
 	let sql = "
 		CREATE temperature:1 SET country = 'GBP', time = d'2020-01-01T08:00:00Z';
@@ -286,6 +287,7 @@ async fn select_aggregate() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn select_multi_aggregate() -> Result<(), Error> {
 	let sql = "
 		CREATE test:1 SET group = 1, one = 1.7, two = 2.4;
@@ -432,6 +434,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn select_multi_aggregate_composed() -> Result<(), Error> {
 	let sql = "
 		CREATE test:1 SET group = 1, one = 1.7, two = 2.4;
@@ -623,6 +626,7 @@ async fn select_array_group_group_by() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 	let sql = r#"
 		CREATE table CONTENT { bar: "hello", foo: "Man"};

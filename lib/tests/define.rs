@@ -100,6 +100,7 @@ async fn define_statement_function() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_statement_table_drop() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE test DROP;
@@ -132,6 +133,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_statement_table_schemaless() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE test SCHEMALESS;
@@ -164,6 +166,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_statement_table_schemafull() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE test SCHEMAFUL;
@@ -200,6 +203,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_statement_table_schemaful() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE test SCHEMAFUL;
@@ -232,6 +236,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_statement_table_foreigntable() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE test SCHEMAFUL;
@@ -2002,6 +2007,7 @@ async fn permissions_checks_define_param() {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn permissions_checks_define_table() {
 	let scenario =
 		HashMap::from([("prepare", ""), ("test", "DEFINE TABLE TB"), ("check", "INFO FOR DB")]);
@@ -2167,6 +2173,7 @@ async fn permissions_checks_define_index() {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_statement_table_permissions() -> Result<(), Error> {
 	// Permissions for tables, unlike other resources, are restrictive (NONE) by default.
 	// This test ensures that behaviour
@@ -2754,6 +2761,7 @@ async fn define_statement_index_empty_array() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_table_relation_in_out() -> Result<(), Error> {
 	let sql = r"
 		DEFINE TABLE likes TYPE RELATION FROM person TO person | thing SCHEMAFUL;
@@ -2798,6 +2806,7 @@ async fn define_table_relation_in_out() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_table_relation_redefinition() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE likes TYPE RELATION IN person OUT person;
@@ -2843,6 +2852,7 @@ async fn define_table_relation_redefinition() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE likes TYPE RELATION IN person OUT person;
@@ -2954,6 +2964,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_table_type_normal() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE thing TYPE NORMAL;
@@ -2978,6 +2989,7 @@ async fn define_table_type_normal() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn define_table_type_any() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE thing TYPE ANY;

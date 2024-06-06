@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Data, Function, Ident, Model},
+	sql::{Function, Ident, Model},
 	syn::v2::{
 		parser::mac::{expected, unexpected},
 		token::{t, NumberKind, TokenKind},
@@ -102,7 +102,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use crate::sql::statements::RelateStatement;
-	use crate::sql::{Param, Statement, Statements};
+	use crate::sql::{Data, Param, Statement, Statements};
 	use crate::{
 		sql,
 		sql::{Script, Value},
