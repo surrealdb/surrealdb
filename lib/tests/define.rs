@@ -1081,29 +1081,14 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 		DEFINE INDEX test ON user COLUMNS account, email UNIQUE;
 		INFO FOR TABLE user;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	for _ in 0..4 {
-		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
-	}
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#
-	));
-
-	let tmp = res.remove(0).result?;
+	let mut t = Test::try_new(sql).await?;
+	t.skip_ok(4);
+	t.expect_error(
+		r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#,
+	);
+	t.expect_error(
+		r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#,
+	);
 	let val = Value::parse(
 		"{
 			events: {},
@@ -1113,8 +1098,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
+	t.expect_value(val);
 	Ok(())
 }
 
@@ -1229,6 +1213,31 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 		panic!("An error was expected.")
 	}
 	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_multiple_hnsw() -> Result<(), Error> {
+	let sql = "
+		CREATE pts:3 SET point = [8,9,10,11];
+		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
+		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
+		INFO FOR TABLE pts;
+	";
+	let mut t = Test::try_new(sql).await?;
+	t.skip_ok(3);
+	let val = Value::parse(
+		"{
+			events: {},
+			fields: {},
+			tables: {},
+			indexes: {
+				hnsw_pts: 'DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 M0 24 LM 0.40242960438184466f'
+			},
+			lives: {},
+		}",
+	);
+	t.expect_value(val);
 	Ok(())
 }
 

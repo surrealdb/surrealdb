@@ -44,9 +44,9 @@ impl DefineIndexStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if index already exists
-		if self.if_not_exists
-			&& run.get_tb_index(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok()
-		{
+		let index_exists =
+			run.get_tb_index(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok();
+		if self.if_not_exists && index_exists {
 			return Err(Error::IxAlreadyExists {
 				value: self.name.to_string(),
 			});
@@ -72,6 +72,11 @@ impl DefineIndexStatement {
 			}) => {}
 			// Any other error should be returned
 			Err(e) => return Err(e),
+		}
+
+		// Clear the index store cache
+		if index_exists {
+			ctx.get_index_stores().index_removed(opt, &mut run, &self.what, &self.name).await?;
 		}
 
 		// Process the statement
