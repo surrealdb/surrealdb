@@ -177,6 +177,14 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
+	pub(crate) fn new_surreal(router: Arc<OnceLock<Router>>, waiter: Arc<Waiter>) -> Self {
+		Surreal {
+			router,
+			waiter,
+			engine: PhantomData,
+		}
+	}
+
 	async fn check_server_version(&self, version: &Version) -> Result<()> {
 		let (versions, build_meta) = SUPPORTED_VERSIONS;
 		// invalid version requirements should be caught during development
