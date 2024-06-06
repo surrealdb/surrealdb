@@ -338,9 +338,10 @@ impl<'a> TreeBuilder<'a> {
 						local_irs,
 						remote_irs,
 					)?;
-				} else if let Some(id) = left.is_non_indexed_field() {
+				}
+				if let Some(id) = left.is_field() {
 					self.eval_bruteforce_knn(id, &right, &exp)?;
-				} else if let Some(id) = right.is_non_indexed_field() {
+				} else if let Some(id) = right.is_field() {
 					self.eval_bruteforce_knn(id, &left, &exp)?;
 				}
 				let re = ResolvedExpression {
@@ -591,11 +592,12 @@ impl Node {
 		}
 	}
 
-	pub(super) fn is_non_indexed_field(&self) -> Option<&Idiom> {
-		if let Node::NonIndexedField(id) = self {
-			Some(id)
-		} else {
-			None
+	pub(super) fn is_field(&self) -> Option<&Idiom> {
+		match self {
+			Node::IndexedField(id, _) => Some(id),
+			Node::RecordField(id, _) => Some(id),
+			Node::NonIndexedField(id) => Some(id),
+			_ => None,
 		}
 	}
 }
