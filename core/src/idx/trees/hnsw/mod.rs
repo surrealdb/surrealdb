@@ -121,39 +121,46 @@ where
 		mut ep_id: ElementId,
 		top_up_layers: usize,
 	) {
-		let mut ep_dist =
-			self.elements.get_distance(q_pt, &ep_id).unwrap_or_else(|| unreachable!());
-
-		if q_level < top_up_layers {
-			for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
-				(ep_dist, ep_id) = layer
-					.search_single(&self.elements, q_pt, ep_dist, ep_id, 1)
-					.peek_first()
-					.unwrap_or_else(|| unreachable!())
-			}
-		}
-
-		let mut eps = DoublePriorityQueue::from(ep_dist, ep_id);
-
-		let insert_to_up_layers = q_level.min(top_up_layers);
-		if insert_to_up_layers > 0 {
-			for layer in self.layers.iter_mut().take(insert_to_up_layers).rev() {
-				eps = layer.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
-			}
-		}
-
-		self.layer0.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
-
-		if top_up_layers < q_level {
-			for layer in self.layers[top_up_layers..q_level].iter_mut() {
-				if !layer.add_empty_node(q_id) {
-					unreachable!("Already there {}", q_id);
+		if let Some(mut ep_dist) = self.elements.get_distance(q_pt, &ep_id) {
+			if q_level < top_up_layers {
+				for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
+					if let Some(ep_dist_id) =
+						layer.search_single(&self.elements, q_pt, ep_dist, ep_id, 1).peek_first()
+					{
+						(ep_dist, ep_id) = ep_dist_id;
+					} else {
+						#[cfg(debug_assertions)]
+						unreachable!()
+					}
 				}
 			}
-		}
 
-		if q_level > top_up_layers {
-			self.enter_point = Some(q_id);
+			let mut eps = DoublePriorityQueue::from(ep_dist, ep_id);
+
+			let insert_to_up_layers = q_level.min(top_up_layers);
+			if insert_to_up_layers > 0 {
+				for layer in self.layers.iter_mut().take(insert_to_up_layers).rev() {
+					eps = layer.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
+				}
+			}
+
+			self.layer0.insert(&self.elements, &self.heuristic, self.efc, q_id, q_pt, eps);
+
+			if top_up_layers < q_level {
+				for layer in self.layers[top_up_layers..q_level].iter_mut() {
+					if !layer.add_empty_node(q_id) {
+						#[cfg(debug_assertions)]
+						unreachable!("Already there {}", q_id);
+					}
+				}
+			}
+
+			if q_level > top_up_layers {
+				self.enter_point = Some(q_id);
+			}
+		} else {
+			#[cfg(debug_assertions)]
+			unreachable!()
 		}
 	}
 
@@ -242,15 +249,22 @@ where
 
 	fn search_ep(&self, pt: &SharedVector) -> Option<(f64, ElementId)> {
 		if let Some(mut ep_id) = self.enter_point {
-			let mut ep_dist =
-				self.elements.get_distance(pt, &ep_id).unwrap_or_else(|| unreachable!());
-			for layer in self.layers.iter().rev() {
-				(ep_dist, ep_id) = layer
-					.search_single(&self.elements, pt, ep_dist, ep_id, 1)
-					.peek_first()
-					.unwrap_or_else(|| unreachable!());
+			if let Some(mut ep_dist) = self.elements.get_distance(pt, &ep_id) {
+				for layer in self.layers.iter().rev() {
+					if let Some(ep_dist_id) =
+						layer.search_single(&self.elements, pt, ep_dist, ep_id, 1).peek_first()
+					{
+						(ep_dist, ep_id) = ep_dist_id;
+					} else {
+						#[cfg(debug_assertions)]
+						unreachable!()
+					}
+				}
+				Some((ep_dist, ep_id))
+			} else {
+				#[cfg(debug_assertions)]
+				unreachable!()
 			}
-			Some((ep_dist, ep_id))
 		} else {
 			None
 		}

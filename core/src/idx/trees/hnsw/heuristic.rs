@@ -113,12 +113,17 @@ impl Heuristic {
 		let mut ex = c.to_set();
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
 		for (_, e_id) in c.to_vec().into_iter() {
-			for &e_adj in layer.get_edges(&e_id).unwrap_or_else(|| unreachable!()).iter() {
-				if e_adj != q_id && ex.insert(e_adj) {
-					if let Some(d) = elements.get_distance(q_pt, &e_adj) {
-						ext.push((d, e_adj));
+			if let Some(e_conn) = layer.get_edges(&e_id) {
+				for &e_adj in e_conn.iter() {
+					if e_adj != q_id && ex.insert(e_adj) {
+						if let Some(d) = elements.get_distance(q_pt, &e_adj) {
+							ext.push((d, e_adj));
+						}
 					}
 				}
+			} else {
+				#[cfg(debug_assertions)]
+				unreachable!()
 			}
 		}
 		for (e_dist, e_id) in ext {
