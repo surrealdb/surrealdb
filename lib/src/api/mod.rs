@@ -177,7 +177,10 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
-	pub(crate) fn new_surreal(router: Arc<OnceLock<Router>>, waiter: Arc<Waiter>) -> Self {
+	pub(crate) fn new_from_router_waiter(
+		router: Arc<OnceLock<Router>>,
+		waiter: Arc<Waiter>,
+	) -> Self {
 		Surreal {
 			router,
 			waiter,

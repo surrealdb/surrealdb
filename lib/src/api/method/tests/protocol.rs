@@ -79,11 +79,10 @@ impl Connection for Client {
 				last_id: AtomicI64::new(0),
 			};
 			server::mock(route_rx);
-			Ok(Surreal {
-				router: Arc::new(OnceLock::with_value(router)),
-				waiter: Arc::new(watch::channel(None)),
-				engine: PhantomData,
-			})
+			Ok(Surreal::new_from_router_waiter(
+				Arc::new(OnceLock::with_value(router)),
+				Arc::new(watch::channel(None)),
+			))
 		})
 	}
 

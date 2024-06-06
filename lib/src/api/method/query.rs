@@ -174,7 +174,10 @@ where
 
 				let res = live::register::<Client>(router, id.clone()).await.map(|rx| {
 					Stream::new(
-						Surreal::new_surreal(client.router.clone(), client.waiter.clone()),
+						Surreal::new_from_router_waiter(
+							client.router.clone(),
+							client.waiter.clone(),
+						),
 						id.clone(),
 						Some(rx),
 					)
@@ -183,7 +186,8 @@ where
 				response.live_queries.insert(idx, res);
 			}
 
-			response.client = Surreal::new_surreal(client.router.clone(), client.waiter.clone());
+			response.client =
+				Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone());
 			Ok(response)
 		})
 	}

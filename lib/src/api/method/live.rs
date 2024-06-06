@@ -101,17 +101,11 @@ macro_rules! into_future {
 				);
 				let id: Value = query.await?.take(0)?;
 				let rx = register::<Client>(router, id.clone()).await?;
-				Ok(Stream {
+				Ok(Stream::new(
+					Surreal::new_from_router_waiter(client.router.clone(), client.waiter.clone()),
 					id,
-					rx: Some(rx),
-					client: Surreal {
-						router: client.router.clone(),
-						waiter: client.waiter.clone(),
-						engine: PhantomData,
-					},
-					response_type: PhantomData,
-					engine: PhantomData,
-				})
+					Some(rx),
+				))
 			})
 		}
 	};
