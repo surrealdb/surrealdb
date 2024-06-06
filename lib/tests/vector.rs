@@ -1,3 +1,5 @@
+#![cfg(feature = "sql2")]
+
 mod helpers;
 mod parse;
 use crate::helpers::{new_ds, skip_ok};

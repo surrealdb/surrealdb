@@ -5,6 +5,7 @@ use helpers::new_ds;
 use helpers::with_enough_stack;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+#[cfg(feature = "sql2")]
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 
@@ -784,6 +785,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn field_definition_edge_permissions() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;

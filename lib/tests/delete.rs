@@ -3,7 +3,9 @@ use parse::Parse;
 
 mod helpers;
 use helpers::new_ds;
-use surrealdb::dbs::{Action, Notification, Session};
+use surrealdb::dbs::Session;
+#[cfg(feature = "sql2")]
+use surrealdb::dbs::{Action, Notification};
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::{Thing, Value};
@@ -374,6 +376,7 @@ async fn check_permissions_auth_disabled() {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn delete_filtered_live_notification() -> Result<(), Error> {
 	let dbs = new_ds().await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);

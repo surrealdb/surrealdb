@@ -3692,6 +3692,7 @@ async fn function_parse_is_latitude() -> Result<(), Error> {
 }
 
 #[tokio::test]
+#[cfg(feature = "sql2")]
 async fn function_parse_is_longitude() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::is::longitude("-90.136439");
