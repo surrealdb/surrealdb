@@ -260,14 +260,13 @@ where
 						unreachable!()
 					}
 				}
-				Some((ep_dist, ep_id))
+				return Some((ep_dist, ep_id));
 			} else {
 				#[cfg(debug_assertions)]
 				unreachable!()
 			}
-		} else {
-			None
 		}
+		None
 	}
 
 	fn get_vector(&self, e_id: &ElementId) -> Option<&SharedVector> {
