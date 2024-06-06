@@ -1,6 +1,7 @@
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::{collections::HashSet, sync::Arc};
 
 use ipnet::IpNet;
@@ -31,6 +32,21 @@ impl Target for FuncTarget {
 			}
 			Self(family, None) => family == &elem.0,
 		}
+	}
+}
+
+impl FuncTarget {
+	fn is_valid_built_in_function(&self) -> bool {
+		let fuzzer_src = include_str!("../../../lib/fuzz/fuzz_targets/fuzz_sql_parser.dict");
+		let mut built_in_targets = fuzzer_src
+			.lines()
+			.filter(|s| s.contains("::"))
+			.map(|s| s.trim().trim_matches('"'))
+			.map(|s| s.trim_matches('(').trim_matches(')'))
+			.map(FuncTarget::from_str)
+			.filter_map(|t| t.ok());
+
+		built_in_targets.any(|t| t.matches(self))
 	}
 }
 

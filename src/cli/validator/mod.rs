@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-use surrealdb::dbs::capabilities::{FuncTarget, NetTarget, Targets};
+use surrealdb::dbs::capabilities::{FuncTarget, NetTarget, Target, Targets};
 
 pub(crate) mod parser;
 
