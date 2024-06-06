@@ -210,8 +210,8 @@ async fn create_with_custom_function() -> Result<(), Error> {
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<(), Error> {
 	let sql = "
-		CREATE user:test;
 		DEFINE TABLE user SCHEMAFULL PERMISSIONS FULL;
+		CREATE user:test;
 		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create, update WHERE user = $auth.id;
 		DEFINE FIELD user ON TABLE demo VALUE $auth.id;
 	";

@@ -347,20 +347,27 @@ impl Test {
 		self
 	}
 
-	/// Expects the next result to be an error with the specified error message.
+	/// Expects the next result to be an error with the given check function returning true.
 	/// This function will panic if the next result is not an error or if the error
-	/// message does not match the specified error.
+	/// message does not pass the check.
 	#[allow(dead_code)]
-	pub fn expect_error(&mut self, error: &str) -> &mut Self {
+	pub fn expect_error_func<F: Fn(&Error) -> bool>(&mut self, check: F) -> &mut Self {
 		let tmp = self.next().result;
-		assert!(
-			matches!(
-				&tmp,
-				Err(e) if e.to_string() == error
-			),
-			"{tmp:?} didn't match {error}"
-		);
+		match &tmp {
+			Ok(val) => {
+				panic!("At position {} - Expect error, but got OK: {val}", self.pos);
+			}
+			Err(e) => {
+				assert!(check(e), "At position {} - Err didn't match: {e}", self.pos)
+			}
+		}
 		self
+	}
+
+	#[allow(dead_code)]
+	/// Expects the next result to be an error with the specified error message.
+	pub fn expect_error(&mut self, error: &str) -> &mut Self {
+		self.expect_error_func(|e| e.to_string() == error)
 	}
 
 	#[allow(dead_code)]

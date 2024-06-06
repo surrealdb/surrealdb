@@ -164,22 +164,13 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 async fn define_statement_table_schemafull() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE test SCHEMAFUL;
+		REMOVE TABLE test;
 		DEFINE TABLE test SCHEMAFULL;
 		INFO FOR DB;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -190,8 +181,6 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			users: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
 	Ok(())
 }
 
@@ -750,30 +739,15 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 		CREATE user:1 SET age = 23;
 		CREATE user:2 SET age = 10;
 		DEFINE INDEX test ON user FIELDS age;
+		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS age;
 		INFO FOR TABLE user;
 		UPDATE user:1 SET age = 24;
 		UPDATE user:2 SET age = 11;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.skip_ok(5);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -782,16 +756,7 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, age: 24 }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:2, age: 11 }]");
-	assert_eq!(tmp, val);
-	//
+	t.expect_vals(&["[{ id: user:1, age: 24 }]", "[{ id: user:2, age: 11 }]"]);
 	Ok(())
 }
 
@@ -799,24 +764,20 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 async fn define_statement_index_single() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS email;
+		DEFINE INDEX IF NOT EXISTS test ON user COLUMNS email;
+		DEFINE INDEX test ON user COLUMNS email;
+		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS email;
 		INFO FOR TABLE user;
 		CREATE user:1 SET email = 'test@surrealdb.com';
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The index 'test' already exists");
+	t.skip_ok(2);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -825,23 +786,20 @@ async fn define_statement_index_single() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:2, email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
+	t.expect_vals(&[
+		"[{ id: user:1, email: 'test@surrealdb.com' }]",
+		"[{ id: user:2, email: 'test@surrealdb.com' }]",
+	]);
 	Ok(())
 }
 
 #[tokio::test]
 async fn define_statement_index_multiple() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX test ON user FIELDS account, email;
+		DEFINE INDEX IF NOT EXISTS test ON user FIELDS account, email;
+		DEFINE INDEX test ON user COLUMNS account, email;
+		DEFINE INDEX IF NOT EXISTS test ON user COLUMNS account, email;
+		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS account, email;
 		INFO FOR TABLE user;
 		CREATE user:1 SET account = 'apple', email = 'test@surrealdb.com';
@@ -849,15 +807,12 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 		CREATE user:3 SET account = 'apple', email = 'test@surrealdb.com';
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	skip_ok(res, 2);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.expect_val("None");
+	t.expect_error("The index 'test' already exists");
+	t.expect_val("None");
+	t.skip_ok(2);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -866,24 +821,12 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, account: 'apple', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:2, account: 'tesla', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
+	t.expect_vals(&[
+		"[{ id: user:1, account: 'apple', email: 'test@surrealdb.com' }]",
+		"[{ id: user:2, account: 'tesla', email: 'test@surrealdb.com' }]",
+		"[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]",
+		"[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]",
+	]);
 	Ok(())
 }
 
@@ -891,6 +834,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 async fn define_statement_index_single_unique() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS email UNIQUE;
+		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS email UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET email = 'test@surrealdb.com';
@@ -898,19 +842,9 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 		DELETE user:1;
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -919,25 +853,12 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:1`"#
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:2, email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
+	t.expect_val("[{ id: user:1, email: 'test@surrealdb.com' }]");
+	t.expect_error(
+		r#"Database index `test` already contains 'test@surrealdb.com', with record `user:1`"#,
+	);
+	t.skip_ok(1);
+	t.expect_val("[{ id: user:2, email: 'test@surrealdb.com' }]");
 	Ok(())
 }
 
@@ -946,6 +867,9 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS account, email UNIQUE;
 		DEFINE INDEX test ON user COLUMNS account, email UNIQUE;
+		DEFINE INDEX IF NOT EXISTS test ON user COLUMNS account, email UNIQUE;
+		REMOVE INDEX test ON user;
+		DEFINE INDEX IF NOT EXISTS test ON user COLUMNS account, email UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET account = 'apple', email = 'test@surrealdb.com';
 		CREATE user:2 SET account = 'tesla', email = 'test@surrealdb.com';
@@ -957,19 +881,12 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 		DELETE user:2;
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 12);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_error("The index 'test' already exists");
+	t.expect_val("None");
+	t.skip_ok(2);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -978,48 +895,21 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, account: 'apple', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:2, account: 'tesla', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]");
-	assert_eq!(tmp, val);
-	//
+	t.expect_val("[{ id: user:1, account: 'apple', email: 'test@surrealdb.com' }]");
+	t.expect_val("[{ id: user:2, account: 'tesla', email: 'test@surrealdb.com' }]");
+	t.expect_error(
+		r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#,
+	);
+	t.expect_error(
+		r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#,
+	);
+	t.skip_ok(1);
+	t.expect_val("[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]");
+	t.expect_error(
+		r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#,
+	);
+	t.skip_ok(1);
+	t.expect_val("[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]");
 	Ok(())
 }
 
@@ -1106,24 +996,15 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS tags UNIQUE;
+		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS tags UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET tags = ['one', 'two'];
 		CREATE user:2 SET tags = ['two', 'three'];
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -1132,22 +1013,8 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, tags: ['one', 'two'] }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	if let Err(e) = tmp {
-		assert_eq!(
-			e.to_string(),
-			"Database index `test` already contains 'two', with record `user:1`"
-		);
-	} else {
-		panic!("An error was expected.")
-	}
-	//
+	t.expect_val("[{ id: user:1, tags: ['one', 'two'] }]");
+	t.expect_error("Database index `test` already contains 'two', with record `user:1`");
 	Ok(())
 }
 
@@ -1155,6 +1022,7 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS account, tags UNIQUE;
+		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS account, tags UNIQUE;
 		INFO FOR TABLE user;
 		CREATE user:1 SET account = 'apple', tags = ['one', 'two'];
@@ -1162,19 +1030,9 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 		CREATE user:3 SET account = 'apple', tags = ['two', 'three'];
 		CREATE user:4 SET account = 'tesla', tags = ['two', 'three'];
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::new(sql).await;
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -1183,36 +1041,10 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:1, account: 'apple', tags: ['one', 'two'] }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: user:2, account: 'tesla', tags: ['one', 'two'] }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	if let Err(e) = tmp {
-		assert_eq!(
-			e.to_string(),
-			"Database index `test` already contains ['apple', 'two'], with record `user:1`"
-		);
-	} else {
-		panic!("An error was expected.")
-	}
-	//
-	let tmp = res.remove(0).result;
-	if let Err(e) = tmp {
-		assert_eq!(
-			e.to_string(),
-			"Database index `test` already contains ['tesla', 'two'], with record `user:2`"
-		);
-	} else {
-		panic!("An error was expected.")
-	}
-	//
+	t.expect_val("[{ id: user:1, account: 'apple', tags: ['one', 'two'] }]");
+	t.expect_val("[{ id: user:2, account: 'tesla', tags: ['one', 'two'] }]");
+	t.expect_error("Database index `test` already contains ['apple', 'two'], with record `user:1`");
+	t.expect_error("Database index `test` already contains ['tesla', 'two'], with record `user:2`");
 	Ok(())
 }
 
@@ -1220,13 +1052,19 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 async fn define_statement_index_multiple_hnsw() -> Result<(), Error> {
 	let sql = "
 		CREATE pts:3 SET point = [8,9,10,11];
+		DEFINE INDEX IF NOT EXISTS hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
 		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
+		DEFINE INDEX IF NOT EXISTS hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
+		REMOVE INDEX hnsw_pts ON pts;
 		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
 		INFO FOR TABLE pts;
 	";
 	let mut t = Test::try_new(sql).await?;
-	t.skip_ok(3);
-	let val = Value::parse(
+	t.skip_ok(2);
+	t.expect_error("The index 'hnsw_pts' already exists");
+	t.expect_val("None");
+	t.skip_ok(2);
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -1237,7 +1075,6 @@ async fn define_statement_index_multiple_hnsw() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	t.expect_value(val);
 	Ok(())
 }
 
@@ -2408,42 +2245,22 @@ async fn redefining_existing_function_with_if_not_exists_should_error() -> Resul
 }
 
 #[tokio::test]
-async fn redefining_existing_index_should_not_error() -> Result<(), Error> {
+async fn remove_define_indexes() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX example ON example FIELDS example;
+		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
 		DEFINE INDEX example ON example FIELDS example;
+		REMOVE INDEX IF EXISTS example ON example;
+		REMOVE INDEX example ON example;
+		REMOVE INDEX IF EXISTS example ON example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_index_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
-		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::IxAlreadyExists { .. }),);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The index 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The index 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
@@ -2568,42 +2385,22 @@ async fn redefining_existing_access_with_if_not_exists_should_error() -> Result<
 }
 
 #[tokio::test]
-async fn redefining_existing_table_should_not_error() -> Result<(), Error> {
+async fn remove_define_tables() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE example;
+		DEFINE TABLE IF NOT EXISTS example;
 		DEFINE TABLE example;
+		REMOVE TABLE IF EXISTS example;
+		REMOVE TABLE example;
+		REMOVE TABLE IF EXISTS example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_table_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE TABLE IF NOT EXISTS example;
-		DEFINE TABLE IF NOT EXISTS example;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::TbAlreadyExists { .. }),);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The table 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The table 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
@@ -2747,40 +2544,19 @@ async fn define_table_relation_redefinition() -> Result<(), Error> {
 		LET $thing = CREATE thing;
 		LET $other = CREATE other;
 		RELATE $person->likes->$thing;
+		REMOVE TABLE likes;
 		DEFINE TABLE likes TYPE RELATION IN person OUT person | thing;
 		RELATE $person->likes->$thing;
 		RELATE $person->likes->$other;
 		DEFINE FIELD out ON TABLE likes TYPE record<person | thing | other>;
 		RELATE $person->likes->$other;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 10);
-	//
-	for _ in 0..4 {
-		let tmp = res.remove(0).result;
-		assert!(tmp.is_ok());
-	}
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
+	let mut t = Test::try_new(sql).await?;
+	t.skip_ok(4);
+	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }));
+	t.skip_ok(3);
+	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }));
+	t.skip_ok(2);
 	Ok(())
 }
 
@@ -2790,6 +2566,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		DEFINE TABLE likes TYPE RELATION IN person OUT person;
 		INFO FOR TABLE likes;
 		INFO FOR DB;
+		REMOVE TABLE likes;
 		DEFINE TABLE likes TYPE RELATION IN person OUT person | thing;
 		INFO FOR TABLE likes;
 		INFO FOR DB;
@@ -2797,17 +2574,9 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		INFO FOR TABLE likes;
 		INFO FOR DB;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
+	let mut t = Test::try_new(sql).await?;
+	t.skip_ok(1);
+	t.expect_val("{
 			events: {},
 			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person> PERMISSIONS FULL' },
 			tables: {},
@@ -2815,10 +2584,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -2829,13 +2595,8 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			users: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(2);
+	t.expect_val(
 		"{
 			events: {},
 			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person | thing> PERMISSIONS FULL' },
@@ -2844,10 +2605,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -2858,13 +2616,8 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			users: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(1);
+	t.expect_val(
 		"{
 			events: {},
 			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person | thing | other> PERMISSIONS FULL' },
@@ -2873,10 +2626,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.expect_val(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -2887,8 +2637,6 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			users: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
 	Ok(())
 }
 
