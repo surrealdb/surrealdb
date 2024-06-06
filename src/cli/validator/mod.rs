@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-use surrealdb::dbs::capabilities::{FuncTarget, NetTarget, Targets};
+use surrealdb::dbs::capabilities::{FuncTarget, NetTarget, Target, Targets};
 
 pub(crate) mod parser;
 
@@ -85,8 +85,13 @@ pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
 
 	let mut result = HashSet::new();
 
-	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(NetTarget::from_str(target)?);
+	for target_str in value.split(',').filter(|s| !s.is_empty()) {
+		let target = NetTarget::from_str(target_str)?;
+		if !target.is_valid() {
+			return Err(format!("Invalid net target: {}", target_str));
+		}
+
+		result.insert(target);
 	}
 
 	Ok(Targets::Some(result))
@@ -99,8 +104,13 @@ pub(crate) fn func_targets(value: &str) -> Result<Targets<FuncTarget>, String> {
 
 	let mut result = HashSet::new();
 
-	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(FuncTarget::from_str(target)?);
+	for target_str in value.split(',').filter(|s| !s.is_empty()) {
+		let target = FuncTarget::from_str(target_str)?;
+		if !target.is_valid() {
+			return Err(format!("Invalid function target: {}", target_str));
+		}
+
+		result.insert(target);
 	}
 
 	Ok(Targets::Some(result))
