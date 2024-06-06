@@ -38,8 +38,9 @@ impl OutputStatement {
 		let mut val = self.what.compute(stk, ctx, opt, doc).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
+			let fields = fetchs.fields();
 			for fetch in fetchs.iter() {
-				val.fetch(stk, ctx, opt, fetch).await?;
+				val.fetch(stk, ctx, opt, fetch, &fields).await?;
 			}
 		}
 		//

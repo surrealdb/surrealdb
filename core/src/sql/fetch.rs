@@ -7,11 +7,39 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use super::{Field, Part};
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Fetchs(pub Vec<Fetch>);
+
+impl Fetchs {
+	/// For `FETCH table.field1, table.field2` returns a vector of `filed1` and
+	/// `filed2`
+	pub fn fields(&self) -> Option<Vec<Field>> {
+		let mut fields = Vec::new();
+
+		for fetch in &self.0 {
+			if fetch.0.len() != 2 {
+				return None;
+			}
+			if fetch.0.iter().all(|f| matches!(f, Part::Field(_))) {
+				if let Some(last_field) = fetch.0.last() {
+					fields.push(Field::Single {
+						expr: Value::Idiom(Idiom(vec![last_field.clone()])),
+						alias: None,
+					});
+				}
+			} else {
+				return None;
+			}
+		}
+
+		Some(fields)
+	}
+}
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;

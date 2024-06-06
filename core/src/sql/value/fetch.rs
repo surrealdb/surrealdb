@@ -18,6 +18,7 @@ impl Value {
 		ctx: &Context<'_>,
 		opt: &Options,
 		path: &[Part],
+		fields: &Option<Vec<Field>>,
 	) -> Result<(), Error> {
 		match path.first() {
 			// Get the current path part
@@ -27,19 +28,21 @@ impl Value {
 					Part::Graph(_) => match v.rid() {
 						Some(v) => {
 							let mut v = Value::Thing(v);
-							stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await
+							stk.run(|stk| v.fetch(stk, ctx, opt, path.next(), fields)).await
 						}
 						None => Ok(()),
 					},
 					Part::Field(f) => match v.get_mut(f as &str) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next(), fields)).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next(), fields)).await,
 						None => Ok(()),
 					},
-					Part::All => stk.run(|stk| self.fetch(stk, ctx, opt, path.next())).await,
+					Part::All => {
+						stk.run(|stk| self.fetch(stk, ctx, opt, path.next(), fields)).await
+					}
 					_ => Ok(()),
 				},
 				// Current path part is an array
@@ -47,23 +50,24 @@ impl Value {
 					Part::All => {
 						let path = path.next();
 						stk.scope(|scope| {
-							let futs =
-								v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
+							let futs = v
+								.iter_mut()
+								.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path, fields)));
 							try_join_all(futs)
 						})
 						.await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next(), fields)).await,
 						None => Ok(()),
 					},
 					Part::Last => match v.last_mut() {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next(), fields)).await,
 						None => Ok(()),
 					},
 					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next())).await,
+						Some(v) => stk.run(|stk| v.fetch(stk, ctx, opt, path.next(), fields)).await,
 						None => Ok(()),
 					},
 					Part::Where(w) => {
@@ -71,15 +75,16 @@ impl Value {
 						for v in v.iter_mut() {
 							let cur = v.into();
 							if w.compute(stk, ctx, opt, Some(&cur)).await?.is_truthy() {
-								stk.run(|stk| v.fetch(stk, ctx, opt, path)).await?;
+								stk.run(|stk| v.fetch(stk, ctx, opt, path, fields)).await?;
 							}
 						}
 						Ok(())
 					}
 					_ => {
 						stk.scope(|scope| {
-							let futs =
-								v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
+							let futs = v
+								.iter_mut()
+								.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path, fields)));
 							try_join_all(futs)
 						})
 						.await?;
@@ -116,8 +121,13 @@ impl Value {
 						}
 						// This is a remote field expression
 						_ => {
+							let flds = if let Some(flds) = fields {
+								flds.clone()
+							} else {
+								vec![Field::All]
+							};
 							let stm = SelectStatement {
-								expr: Fields(vec![Field::All], false),
+								expr: Fields(flds, false),
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
@@ -134,8 +144,9 @@ impl Value {
 				// Current path part is an array
 				Value::Array(v) => {
 					stk.scope(|scope| {
-						let futs =
-							v.iter_mut().map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path)));
+						let futs = v
+							.iter_mut()
+							.map(|v| scope.run(|stk| v.fetch(stk, ctx, opt, path, fields)));
 						try_join_all(futs)
 					})
 					.await?;
