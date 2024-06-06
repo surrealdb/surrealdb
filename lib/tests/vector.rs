@@ -1,6 +1,6 @@
 mod helpers;
 mod parse;
-use crate::helpers::{new_ds, skip_ok};
+use crate::helpers::{new_ds, skip_ok, Test};
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
@@ -225,18 +225,14 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
 		LET $pt = [2,3,4,5];
 		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> $pt;
-		SELECT id FROM pts WHERE point <|2,100|> $pt EXPLAIN;
+		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> $pt EXPLAIN;
+		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
+		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
-	//
-	for _ in 0..5 {
-		let _ = res.remove(0).result?;
-	}
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let mut t = Test::try_new(sql).await?;
+	t.skip_ok(5);
+	// KNN result with HNSW index
+	t.expect_val(
 		"[
 			{
 				id: pts:1,
@@ -248,9 +244,8 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 			}
 		]",
 	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	// Explains KNN with HNSW index
+	t.expect_val(
 		"[
 					{
 						detail: {
@@ -271,7 +266,42 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 					}
 			]",
 	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	// KNN result with brute force
+	t.expect_val(
+		"[
+			{
+				id: pts:1,
+				dist: 2f
+			},
+			{
+				id: pts:2,
+				dist: 4f
+			}
+		]",
+	);
+	// Explain KNN with brute force
+	t.expect_val(
+		"[
+				{
+					detail: {
+						table: 'pts'
+					},
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						reason: 'NO INDEX FOUND'
+					},
+					operation: 'Fallback'
+				},
+				{
+					detail: {
+						type: 'Memory'
+					},
+					operation: 'Collector'
+				}
+			]",
+	);
 	Ok(())
 }
 
