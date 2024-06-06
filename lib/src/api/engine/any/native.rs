@@ -27,7 +27,6 @@ use flume::Receiver;
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;

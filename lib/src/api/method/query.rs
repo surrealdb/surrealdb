@@ -121,7 +121,7 @@ where
 			register_live_queries,
 		} = match self.inner {
 			Ok(x) => x,
-			Err(error) => return Box::pin(async move { return Err(error) }),
+			Err(error) => return Box::pin(async move { Err(error) }),
 		};
 
 		let query_statements = query;
@@ -169,19 +169,19 @@ where
 
 				// This is a live query. We are using this as a workaround to avoid
 				// creating another public error variant for this internal error.
-				let id =
-					result.as_ref().map_err(|_| crate::Error::from(Error::NotLiveQuery(idx)))?;
-
-				let res = live::register::<Client>(router, id.clone()).await.map(|rx| {
-					Stream::new(
-						Surreal::new_from_router_waiter(
-							client.router.clone(),
-							client.waiter.clone(),
-						),
-						id.clone(),
-						Some(rx),
-					)
-				});
+				let res = match result {
+					Ok(id) => live::register::<Client>(router, id.clone()).await.map(|rx| {
+						Stream::new(
+							Surreal::new_from_router_waiter(
+								client.router.clone(),
+								client.waiter.clone(),
+							),
+							id.clone(),
+							Some(rx),
+						)
+					}),
+					Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
+				};
 
 				response.live_queries.insert(idx, res);
 			}

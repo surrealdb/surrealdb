@@ -35,7 +35,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
