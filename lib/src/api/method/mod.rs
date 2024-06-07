@@ -264,7 +264,6 @@ where
 			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
-			client: PhantomData,
 			waiter: Arc::new(watch::channel(None)),
 			response_type: PhantomData,
 		}

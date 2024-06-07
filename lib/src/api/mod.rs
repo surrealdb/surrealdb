@@ -51,7 +51,6 @@ pub struct Connect<C: Connection, Response> {
 	engine: PhantomData<C>,
 	address: Result<Endpoint>,
 	capacity: usize,
-	client: PhantomData<C>,
 	waiter: Arc<Waiter>,
 	response_type: PhantomData<Response>,
 }

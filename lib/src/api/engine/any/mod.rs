@@ -240,7 +240,6 @@ impl Surreal<Any> {
 			engine: PhantomData,
 			address: address.into_endpoint(),
 			capacity: 0,
-			client: PhantomData,
 			waiter: self.waiter.clone(),
 			response_type: PhantomData,
 		}
@@ -297,7 +296,6 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 		engine: PhantomData,
 		address: address.into_endpoint(),
 		capacity: 0,
-		client: PhantomData,
 		waiter: Arc::new(watch::channel(None)),
 		response_type: PhantomData,
 	}
