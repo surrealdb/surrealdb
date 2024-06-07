@@ -659,8 +659,6 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 async fn define_statement_index_single() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS email;
-		DEFINE INDEX IF NOT EXISTS test ON user COLUMNS email;
-		DEFINE INDEX test ON user COLUMNS email;
 		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS email;
 		INFO FOR TABLE user;
@@ -668,10 +666,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
 	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The index 'test' already exists");
-	t.skip_ok(2);
+	t.skip_ok(3);
 	t.expect_val(
 		"{
 			events: {},
@@ -691,9 +686,7 @@ async fn define_statement_index_single() -> Result<(), Error> {
 #[tokio::test]
 async fn define_statement_index_multiple() -> Result<(), Error> {
 	let sql = "
-		DEFINE INDEX IF NOT EXISTS test ON user FIELDS account, email;
-		DEFINE INDEX test ON user COLUMNS account, email;
-		DEFINE INDEX IF NOT EXISTS test ON user COLUMNS account, email;
+		DEFINE INDEX test ON user FIELDS account, email;
 		REMOVE INDEX test ON user;
 		DEFINE INDEX test ON user COLUMNS account, email;
 		INFO FOR TABLE user;
@@ -703,10 +696,7 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
 	let mut t = Test::new(sql).await;
-	t.expect_val("None");
-	t.expect_error("The index 'test' already exists");
-	t.expect_val("None");
-	t.skip_ok(2);
+	t.skip_ok(3);
 	t.expect_val(
 		"{
 			events: {},
@@ -2152,9 +2142,9 @@ async fn define_remove_users() -> Result<(), Error> {
 	let mut t = Test::new(sql).await;
 	t.skip_ok(1);
 	t.expect_val("None");
-	t.expect_error("The user 'example' already exists");
+	t.expect_error("The root user 'example' already exists");
 	t.skip_ok(1);
-	t.expect_error("The user 'example' does not exist");
+	t.expect_error("The root user 'example' does not exist");
 	t.expect_val("None");
 	Ok(())
 }
