@@ -387,12 +387,7 @@ impl<'a> Context<'a> {
 
 	/// Check if a function is allowed
 	pub fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
-		let func_target = FuncTarget::from_str(target).map_err(|_| Error::InvalidFunction {
-			name: target.to_string(),
-			message: "Invalid function name".to_string(),
-		})?;
-
-		if !self.capabilities.allows_function(&func_target) {
+		if !self.capabilities.allows_function_name(target) {
 			return Err(Error::FunctionNotAllowed(target.to_string()));
 		}
 		Ok(())

@@ -122,11 +122,14 @@ pub async fn db_access(
 										_ => Err(Error::NoRecordFound),
 									}
 								}
-								Err(e) => match e {
-									Error::Thrown(_) => Err(e),
-									e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
-									_ => Err(Error::AccessRecordSignupQueryFailed),
-								},
+								Err(e) => {
+									dbg!(&e);
+									match e {
+										Error::Thrown(_) => Err(e),
+										e if *INSECURE_FORWARD_RECORD_ACCESS_ERRORS => Err(e),
+										_ => Err(Error::AccessRecordSignupQueryFailed),
+									}
+								}
 							}
 						}
 						_ => Err(Error::AccessRecordNoSignup),

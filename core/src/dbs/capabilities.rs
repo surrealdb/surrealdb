@@ -7,12 +7,29 @@ use ipnet::IpNet;
 use url::Url;
 
 pub trait Target {
-	fn matches(&self, elem: &Self) -> bool;
+	type Item: ?Sized;
+
+	fn matches(&self, elem: &Self::Item) -> bool;
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
+
+impl FuncTarget {
+	pub fn matches_func_name(&self, name: &str) -> bool {
+		if let Some(x) = self.1.as_ref() {
+			let Some((f, r)) = name.split_once("::") else {
+				return false;
+			};
+
+			f == self.0 && r == x
+		} else {
+			let f = name.split_once("::").map(|(f, _)| f).unwrap_or(name);
+			f == self.0
+		}
+	}
+}
 
 impl fmt::Display for FuncTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -24,12 +41,18 @@ impl fmt::Display for FuncTarget {
 }
 
 impl Target for FuncTarget {
-	fn matches(&self, elem: &Self) -> bool {
-		match self {
-			Self(family, Some(name)) => {
-				family == &elem.0 && (elem.1.as_ref().is_some_and(|n| n == name))
-			}
-			Self(family, None) => family == &elem.0,
+	type Item = str;
+
+	fn matches(&self, elem: &Self::Item) -> bool {
+		if let Some(x) = self.1.as_ref() {
+			let Some((f, r)) = elem.split_once("::") else {
+				return false;
+			};
+
+			f == self.0 && r == x
+		} else {
+			let f = elem.split_once("::").map(|(f, _)| f).unwrap_or(elem);
+			f == self.0
 		}
 	}
 }
@@ -60,13 +83,14 @@ impl std::str::FromStr for FuncTarget {
 	type Err = ParseFuncTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		dbg!(s);
 		let s = s.trim();
 
 		if s.is_empty() {
 			return Err(ParseFuncTargetError::InvalidName);
 		}
 
-		if s.bytes().any(|x| !(x.is_ascii_alphabetic() || x == b':')) {
+		if s.bytes().any(|x| !(x.is_ascii_alphanumeric() || x == b':')) {
 			return Err(ParseFuncTargetError::InvalidName);
 		}
 
@@ -106,6 +130,8 @@ impl fmt::Display for NetTarget {
 }
 
 impl Target for NetTarget {
+	type Item = Self;
+
 	fn matches(&self, elem: &Self) -> bool {
 		match self {
 			// If self contains a host and port, the elem must match both the host and port
@@ -172,7 +198,7 @@ pub enum Targets<T: Target + Hash + Eq + PartialEq> {
 }
 
 impl<T: Target + Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
-	fn matches(&self, elem: &T) -> bool {
+	fn matches(&self, elem: &T::Item) -> bool {
 		match self {
 			Self::None => false,
 			Self::All => true,
@@ -294,7 +320,19 @@ impl Capabilities {
 		self.live_query_notifications
 	}
 
+	// function is public API so we can't remove it, but you should prefer allows_function_name
 	pub fn allows_function(&self, target: &FuncTarget) -> bool {
+		if let Some(x) = target.1.as_ref() {
+			let target = format!("{}::{}", target.0, x);
+			self.allow_funcs.matches(&target) && !self.deny_funcs.matches(&target)
+		} else {
+			self.allow_funcs.matches(&target.0) && !self.deny_funcs.matches(&target.0)
+		}
+	}
+
+	// doc hidden so we don't extend api in the library.
+	#[doc(hidden)]
+	pub fn allows_function_name(&self, target: &str) -> bool {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
@@ -320,30 +358,16 @@ mod tests {
 
 	#[test]
 	fn test_func_target() {
-		assert!(FuncTarget::from_str("test")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test").unwrap()));
-		assert!(!FuncTarget::from_str("test")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test2").unwrap()));
+		assert!(FuncTarget::from_str("test").unwrap().matches("test"));
+		assert!(!FuncTarget::from_str("test").unwrap().matches("test2"));
 
-		assert!(!FuncTarget::from_str("test::")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test").unwrap()));
+		assert!(!FuncTarget::from_str("test::").unwrap().matches("test"));
 
-		assert!(FuncTarget::from_str("test::*")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test::name").unwrap()));
-		assert!(!FuncTarget::from_str("test::*")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test2::name").unwrap()));
+		assert!(FuncTarget::from_str("test::*").unwrap().matches("test::name"));
+		assert!(!FuncTarget::from_str("test::*").unwrap().matches("test2::name"));
 
-		assert!(FuncTarget::from_str("test::name")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test::name").unwrap()));
-		assert!(!FuncTarget::from_str("test::name")
-			.unwrap()
-			.matches(&FuncTarget::from_str("test::name2").unwrap()));
+		assert!(FuncTarget::from_str("test::name").unwrap().matches("test::name"));
+		assert!(!FuncTarget::from_str("test::name").unwrap().matches("test::name2"));
 	}
 
 	#[test]
@@ -495,17 +519,17 @@ mod tests {
 	#[test]
 	fn test_targets() {
 		assert!(Targets::<NetTarget>::All.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(Targets::<FuncTarget>::All.matches(&FuncTarget::from_str("http::get").unwrap()));
+		assert!(Targets::<FuncTarget>::All.matches("http::get"));
 		assert!(!Targets::<NetTarget>::None.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(!Targets::<FuncTarget>::None.matches(&FuncTarget::from_str("http::get").unwrap()));
+		assert!(!Targets::<FuncTarget>::None.matches("http::get"));
 		assert!(Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
 			.matches(&NetTarget::from_str("example.com").unwrap()));
 		assert!(!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
 			.matches(&NetTarget::from_str("www.example.com").unwrap()));
 		assert!(Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches(&FuncTarget::from_str("http::get").unwrap()));
+			.matches("http::get"));
 		assert!(!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches(&FuncTarget::from_str("http::post").unwrap()));
+			.matches("http::post"));
 	}
 
 	#[test]
