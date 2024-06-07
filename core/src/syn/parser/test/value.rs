@@ -167,3 +167,8 @@ fn scientific_number() {
 	assert!(matches!(res, Value::Number(Number::Float(_))));
 	assert_eq!(res.to_string(), "0.000097f")
 }
+
+#[test]
+fn empty_string() {
+	test_parse!(parse_value, "").unwrap_err();
+}
