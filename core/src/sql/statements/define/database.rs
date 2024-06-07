@@ -38,10 +38,14 @@ impl DefineDatabaseStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if database already exists
-		if self.if_not_exists && run.get_db(opt.ns(), &self.name).await.is_ok() {
-			return Err(Error::DbAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_db(opt.ns(), &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::DbAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
 		let key = crate::key::namespace::db::new(opt.ns(), &self.name);

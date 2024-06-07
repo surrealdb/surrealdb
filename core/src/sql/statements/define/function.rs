@@ -42,10 +42,14 @@ impl DefineFunctionStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if function already exists
-		if self.if_not_exists && run.get_db_function(opt.ns(), opt.db(), &self.name).await.is_ok() {
-			return Err(Error::FcAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_db_function(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::FcAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
 		let key = crate::key::database::fc::new(opt.ns(), opt.db(), &self.name);

@@ -306,6 +306,7 @@ async fn define_statement_event() -> Result<(), Error> {
 		DEFINE EVENT test ON user WHEN true THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
+		REMOVE EVENT test ON user;
 		DEFINE EVENT test ON TABLE user WHEN true THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
@@ -315,19 +316,10 @@ async fn define_statement_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
 			fields: {},
@@ -336,24 +328,12 @@ async fn define_statement_event() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"[{
 			count: 3
 		}]",
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -364,6 +344,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 		DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
+		REMOVE EVENT test ON user;
 		DEFINE EVENT test ON TABLE user WHEN $event = 'CREATE' THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
@@ -373,19 +354,10 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		r#"{
 			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)" },
 			fields: {},
@@ -394,24 +366,12 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 			lives: {},
 		}"#,
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"[{
 			count: 1
 		}]",
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -480,6 +440,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
+		REMOVE EVENT test ON user;
 		DEFINE EVENT test ON TABLE user WHEN $before.email != $after.email THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
 		);
@@ -489,19 +450,10 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 7);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
 			fields: {},
@@ -510,24 +462,12 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"[{
 			count: 2
 		}]",
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -536,22 +476,14 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 async fn define_statement_field() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD test ON user;
+		REMOVE FIELD test ON user;
 		DEFINE FIELD test ON TABLE user;
 		INFO FOR TABLE user;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: {},
 			fields: { test: 'DEFINE FIELD test ON user PERMISSIONS FULL' },
@@ -560,7 +492,6 @@ async fn define_statement_field() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -569,22 +500,14 @@ async fn define_statement_field() -> Result<(), Error> {
 async fn define_statement_field_type() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD test ON user TYPE string;
+		REMOVE FIELD test ON user;
 		DEFINE FIELD test ON TABLE user TYPE string;
 		INFO FOR TABLE user;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: {},
 			fields: { test: 'DEFINE FIELD test ON user TYPE string PERMISSIONS FULL' },
@@ -593,7 +516,6 @@ async fn define_statement_field_type() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -602,22 +524,14 @@ async fn define_statement_field_type() -> Result<(), Error> {
 async fn define_statement_field_value() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD test ON user VALUE $value OR 'GBR';
+		REMOVE FIELD test ON user;
 		DEFINE FIELD test ON TABLE user VALUE $value OR 'GBR';
 		INFO FOR TABLE user;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		r#"{
 			events: {},
 			fields: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR' PERMISSIONS FULL" },
@@ -626,7 +540,6 @@ async fn define_statement_field_value() -> Result<(), Error> {
 			lives: {},
 		}"#,
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -635,22 +548,14 @@ async fn define_statement_field_value() -> Result<(), Error> {
 async fn define_statement_field_assert() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/;
+		REMOVE FIELD test ON user;
 		DEFINE FIELD test ON TABLE user ASSERT $value != NONE AND $value = /[A-Z]{3}/;
 		INFO FOR TABLE user;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		"{
 			events: {},
 			fields: { test: 'DEFINE FIELD test ON user ASSERT $value != NONE AND $value = /[A-Z]{3}/ PERMISSIONS FULL' },
@@ -659,7 +564,6 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 			lives: {},
 		}",
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -668,22 +572,14 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/;
+		REMOVE FIELD test ON user;
 		DEFINE FIELD test ON TABLE user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/;
 		INFO FOR TABLE user;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	let mut t = Test::new(sql).await;
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	t.skip_ok(3);
+	t.expect_val(
 		r#"{
 			events: {},
 			fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/ PERMISSIONS FULL" },
@@ -692,7 +588,6 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 			lives: {},
 		}"#,
 	);
-	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -2045,207 +1940,107 @@ async fn define_statement_table_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn redefining_existing_analyzer_should_not_error() -> Result<(), Error> {
+async fn define_remove_analyzer() -> Result<(), Error> {
 	let sql = "
 		DEFINE ANALYZER example_blank TOKENIZERS blank;
+		DEFINE ANALYZER IF NOT EXISTS example_blank TOKENIZERS blank;
 		DEFINE ANALYZER example_blank TOKENIZERS blank;
+		REMOVE ANALYZER IF EXISTS example_blank;
+		REMOVE ANALYZER example_blank;
+		REMOVE ANALYZER IF EXISTS example_blank;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The analyzer 'example_blank' already exists");
+	t.skip_ok(1);
+	t.expect_error("The analyzer 'example_blank' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_analyzer_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE ANALYZER IF NOT EXISTS example TOKENIZERS blank;
-		DEFINE ANALYZER IF NOT EXISTS example TOKENIZERS blank;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::AzAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_database_should_not_error() -> Result<(), Error> {
+async fn define_remove_database() -> Result<(), Error> {
 	let sql = "
 		DEFINE DATABASE example;
+		DEFINE DATABASE IF NOT EXISTS example;
 		DEFINE DATABASE example;
+		REMOVE DATABASE IF EXISTS example;
+		REMOVE DATABASE example;
+		REMOVE DATABASE IF EXISTS example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The database 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The database 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_database_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE DATABASE IF NOT EXISTS example;
-		DEFINE DATABASE IF NOT EXISTS example;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::DbAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_event_should_not_error() -> Result<(), Error> {
+async fn define_remove_event() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT example ON example THEN {};
+		DEFINE EVENT IF NOT EXISTS example ON example THEN {};
 		DEFINE EVENT example ON example THEN {};
+		REMOVE EVENT IF EXISTS example ON example;
+		REMOVE EVENT example ON example;
+		REMOVE EVENT IF EXISTS example ON example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The event 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The event 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_event_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE EVENT IF NOT EXISTS example ON example THEN {};
-		DEFINE EVENT IF NOT EXISTS example ON example THEN {};
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::EvAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_field_should_not_error() -> Result<(), Error> {
+async fn define_remove_field() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD example ON example;
+		DEFINE FIELD IF NOT EXISTS example ON example;
 		DEFINE FIELD example ON example;
+		REMOVE FIELD IF EXISTS example ON example;
+		REMOVE FIELD example ON example;
+		REMOVE FIELD IF EXISTS example ON example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The field 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The field 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_field_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE FIELD IF NOT EXISTS example ON example;
-		DEFINE FIELD IF NOT EXISTS example ON example;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::FdAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_function_should_not_error() -> Result<(), Error> {
+async fn define_remove_function() -> Result<(), Error> {
 	let sql = "
 		DEFINE FUNCTION fn::example() {};
+		DEFINE FUNCTION IF NOT EXISTS fn::example() {};
 		DEFINE FUNCTION fn::example() {};
+		REMOVE FUNCTION IF EXISTS fn::example();
+		REMOVE FUNCTION fn::example();
+		REMOVE FUNCTION IF EXISTS fn::example();
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The function 'fn::example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The function 'fn::example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_function_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE FUNCTION IF NOT EXISTS fn::example() {};
-		DEFINE FUNCTION IF NOT EXISTS fn::example() {};
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::FcAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn remove_define_indexes() -> Result<(), Error> {
+async fn define_remove_indexes() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX example ON example FIELDS example;
 		DEFINE INDEX IF NOT EXISTS example ON example FIELDS example;
@@ -2265,127 +2060,67 @@ async fn remove_define_indexes() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn redefining_existing_namespace_should_not_error() -> Result<(), Error> {
+async fn define_remove_namespace() -> Result<(), Error> {
 	let sql = "
 		DEFINE NAMESPACE example;
+		DEFINE NAMESPACE IF NOT EXISTS example;
 		DEFINE NAMESPACE example;
+		REMOVE NAMESPACE IF EXISTS example;
+		REMOVE NAMESPACE example;
+		REMOVE NAMESPACE IF EXISTS example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The namespace 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The namespace 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_namespace_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE NAMESPACE IF NOT EXISTS example;
-		DEFINE NAMESPACE IF NOT EXISTS example;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::NsAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_param_should_not_error() -> Result<(), Error> {
+async fn define_remove_param() -> Result<(), Error> {
 	let sql = "
 		DEFINE PARAM $example VALUE 123;
+		DEFINE PARAM IF NOT EXISTS $example VALUE 123;
 		DEFINE PARAM $example VALUE 123;
+		REMOVE PARAM IF EXISTS $example;
+		REMOVE PARAM $example;
+		REMOVE PARAM IF EXISTS $example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The param '$example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The param '$example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_param_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE PARAM IF NOT EXISTS $example VALUE 123;
-		DEFINE PARAM IF NOT EXISTS $example VALUE 123;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::PaAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_access_should_not_error() -> Result<(), Error> {
+async fn define_remove_access() -> Result<(), Error> {
 	let sql = "
 		DEFINE ACCESS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
+		DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
 		DEFINE ACCESS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
+		REMOVE ACCESS IF EXISTS example ON DB;
+		REMOVE ACCESS example ON DB;
+		REMOVE ACCESS IF EXISTS example ON DB;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The database access method 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The database access method 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
 #[tokio::test]
-async fn redefining_existing_access_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
-		DEFINE ACCESS IF NOT EXISTS example ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'secret';
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::AccessDbAlreadyExists { .. }),);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn remove_define_tables() -> Result<(), Error> {
+async fn define_remove_tables() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE example;
 		DEFINE TABLE IF NOT EXISTS example;
@@ -2405,42 +2140,22 @@ async fn remove_define_tables() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn redefining_existing_user_should_not_error() -> Result<(), Error> {
+async fn define_remove_users() -> Result<(), Error> {
 	let sql = "
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
-		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;;
+		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;;
+		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;;
+		REMOVE USER IF EXISTS example;
+		REMOVE USER example;
+		REMOVE USER IF EXISTS example;
 	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn redefining_existing_user_with_if_not_exists_should_error() -> Result<(), Error> {
-	let sql = "
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
-		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
-	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::UserRootAlreadyExists { .. }),);
-	//
+	let mut t = Test::new(sql).await;
+	t.skip_ok(1);
+	t.expect_val("None");
+	t.expect_error("The user 'example' already exists");
+	t.skip_ok(1);
+	t.expect_error("The user 'example' does not exist");
+	t.expect_val("None");
 	Ok(())
 }
 
@@ -2548,6 +2263,7 @@ async fn define_table_relation_redefinition() -> Result<(), Error> {
 		DEFINE TABLE likes TYPE RELATION IN person OUT person | thing;
 		RELATE $person->likes->$thing;
 		RELATE $person->likes->$other;
+		REMOVE FIELD out ON TABLE likes;
 		DEFINE FIELD out ON TABLE likes TYPE record<person | thing | other>;
 		RELATE $person->likes->$other;
 	";
@@ -2556,7 +2272,7 @@ async fn define_table_relation_redefinition() -> Result<(), Error> {
 	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }));
 	t.skip_ok(3);
 	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }));
-	t.skip_ok(2);
+	t.skip_ok(3);
 	Ok(())
 }
 
@@ -2570,6 +2286,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		DEFINE TABLE likes TYPE RELATION IN person OUT person | thing;
 		INFO FOR TABLE likes;
 		INFO FOR DB;
+		REMOVE FIELD out ON TABLE likes;
 		DEFINE FIELD out ON TABLE likes TYPE record<person | thing | other>;
 		INFO FOR TABLE likes;
 		INFO FOR DB;
@@ -2616,7 +2333,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			users: {},
 		}",
 	);
-	t.skip_ok(1);
+	t.skip_ok(2);
 	t.expect_val(
 		"{
 			events: {},

@@ -197,18 +197,21 @@ pub fn with_enough_stack(
 		.unwrap()
 }
 
+#[allow(dead_code)]
+fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) {
+	assert!(!res.is_empty(), "At position {pos} - No more result!");
+	let r = res.remove(0).result;
+	let _ = r.is_err_and(|e| {
+		panic!("At position {pos} - Statement fails with: {e}");
+	});
+}
+
 /// Skip the specified number of successful results from a vector of responses.
 /// This function will panic if there are not enough results in the vector or if an error occurs.
 #[allow(dead_code)]
 pub fn skip_ok(res: &mut Vec<Response>, skip: usize) {
 	for i in 0..skip {
-		if res.is_empty() {
-			panic!("No more result #{i}");
-		}
-		let r = res.remove(0).result;
-		let _ = r.is_err_and(|e| {
-			panic!("Statement #{i} fails with: {e}");
-		});
+		skip_ok_pos(res, i);
 	}
 }
 
@@ -275,9 +278,7 @@ impl Test {
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[allow(dead_code)]
 	pub fn next(&mut self) -> Response {
-		if self.responses.is_empty() {
-			panic!("No response left - last position: {}", self.pos);
-		}
+		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
 		self.responses.remove(0)
 	}
@@ -295,8 +296,10 @@ impl Test {
 	/// and updates the position.
 	#[allow(dead_code)]
 	pub fn skip_ok(&mut self, skip: usize) -> &mut Self {
-		skip_ok(&mut self.responses, skip);
-		self.pos += skip;
+		for _ in 0..skip {
+			skip_ok_pos(&mut self.responses, self.pos);
+			self.pos += 1;
+		}
 		self
 	}
 
