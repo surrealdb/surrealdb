@@ -136,7 +136,7 @@ where
 					.iter()
 					// BEGIN, COMMIT, and CANCEL don't return a result.
 					.filter(|x| {
-						matches!(
+						!matches!(
 							x,
 							Statement::Begin(_) | Statement::Commit(_) | Statement::Cancel(_)
 						)
@@ -183,6 +183,7 @@ where
 					Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
 				};
 
+				dbg!(&response);
 				response.live_queries.insert(idx, res);
 			}
 
