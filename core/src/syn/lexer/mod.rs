@@ -213,8 +213,8 @@ impl<'a> Lexer<'a> {
 		Token {
 			kind: TokenKind::Eof,
 			span: Span {
-				offset: self.last_offset.saturating_sub(1),
-				len: 1,
+				offset: self.last_offset,
+				len: 0,
 			},
 		}
 	}

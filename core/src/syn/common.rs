@@ -88,6 +88,23 @@ impl Location {
 	}
 
 	pub fn range_of_span(source: &str, span: Span) -> Range<Self> {
+		if source.len() == span.offset as usize {
+			// EOF span
+			let (line_idx, column) = LineIterator::new(source)
+				.map(|(l, _)| l.len())
+				.enumerate()
+				.last()
+				.unwrap_or((0, 0));
+
+			return Self {
+				line: line_idx + 1,
+				column: column + 1,
+			}..Self {
+				line: line_idx + 1,
+				column: column + 2,
+			};
+		}
+
 		// Bytes of input before substr.
 		let offset = span.offset as usize;
 		let end = offset + span.len as usize;
