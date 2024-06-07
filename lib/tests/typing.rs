@@ -211,9 +211,9 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 		UPDATE person:test SET name = NULL;
 		UPDATE person:test SET name = NONE;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(2);
+	t.skip_ok(2)?;
 	t.expect_val(
 		"[
 			{
@@ -221,19 +221,19 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 				name: 'Tobie',
 			}
 		]",
-	);
+	)?;
 	t.expect_error(
 		"Found NULL for field `name`, with record `person:test`, but expected a option<string>",
-	);
+	)?;
 	t.expect_val(
 		"[
 			{
 				id: person:test,
 			}
 		]",
-	);
+	)?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		"[
 			{
@@ -241,7 +241,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 				name: 'Tobie',
 			}
 		]",
-	);
+	)?;
 	t.expect_val(
 		"[
 			{
@@ -249,16 +249,16 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 				name: NULL,
 			}
 		]",
-	);
+	)?;
 	t.expect_val(
 		"[
 			{
 				id: person:test,
 			}
 		]",
-	);
+	)?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		"[
 			{
@@ -266,7 +266,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 				name: 'Tobie',
 			}
 		]",
-	);
+	)?;
 	t.expect_val(
 		"[
 			{
@@ -274,10 +274,10 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 				name: NULL,
 			}
 		]",
-	);
+	)?;
 	t.expect_error(
 		"Found NONE for field `name`, with record `person:test`, but expected a string | null",
-	);
+	)?;
 	//
 	Ok(())
 }

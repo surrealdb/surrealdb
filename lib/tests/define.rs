@@ -168,8 +168,8 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		DEFINE TABLE test SCHEMAFULL;
 		INFO FOR DB;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(3);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			accesses: {},
@@ -180,7 +180,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' },
 			users: {},
 		}",
-	);
+	)?;
 	Ok(())
 }
 
@@ -316,9 +316,9 @@ async fn define_statement_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: { test: 'DEFINE EVENT test ON user WHEN true THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
@@ -327,13 +327,13 @@ async fn define_statement_event() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
-	t.skip_ok(3);
+	)?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"[{
 			count: 3
 		}]",
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -354,9 +354,9 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		r#"{
 			events: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)" },
@@ -365,13 +365,13 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}"#,
-	);
-	t.skip_ok(3);
+	)?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"[{
 			count: 1
 		}]",
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -450,9 +450,9 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
 		SELECT count() FROM activity GROUP ALL;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' },
@@ -461,13 +461,13 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
-	t.skip_ok(3);
+	)?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"[{
 			count: 2
 		}]",
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -480,9 +480,9 @@ async fn define_statement_field() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user;
 		INFO FOR TABLE user;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -491,7 +491,7 @@ async fn define_statement_field() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -504,9 +504,9 @@ async fn define_statement_field_type() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user TYPE string;
 		INFO FOR TABLE user;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -515,7 +515,7 @@ async fn define_statement_field_type() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -528,9 +528,9 @@ async fn define_statement_field_value() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user VALUE $value OR 'GBR';
 		INFO FOR TABLE user;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		r#"{
 			events: {},
@@ -539,7 +539,7 @@ async fn define_statement_field_value() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}"#,
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -552,9 +552,9 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user ASSERT $value != NONE AND $value = /[A-Z]{3}/;
 		INFO FOR TABLE user;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -563,7 +563,7 @@ async fn define_statement_field_assert() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -576,9 +576,9 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 		DEFINE FIELD test ON TABLE user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/;
 		INFO FOR TABLE user;
 	";
-	let mut t = Test::new(sql).await;
+	let mut t = Test::new(sql).await?;
 	//
-	t.skip_ok(3);
+	t.skip_ok(3)?;
 	t.expect_val(
 		r#"{
 			events: {},
@@ -587,7 +587,7 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}"#,
-	);
+	)?;
 	//
 	Ok(())
 }
@@ -640,8 +640,8 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 		UPDATE user:1 SET age = 24;
 		UPDATE user:2 SET age = 11;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(5);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(5)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -650,8 +650,8 @@ async fn define_statement_index_single_simple() -> Result<(), Error> {
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS age' },
 			lives: {},
 		}",
-	);
-	t.expect_vals(&["[{ id: user:1, age: 24 }]", "[{ id: user:2, age: 11 }]"]);
+	)?;
+	t.expect_vals(&["[{ id: user:1, age: 24 }]", "[{ id: user:2, age: 11 }]"])?;
 	Ok(())
 }
 
@@ -665,8 +665,8 @@ async fn define_statement_index_single() -> Result<(), Error> {
 		CREATE user:1 SET email = 'test@surrealdb.com';
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(3);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -675,11 +675,11 @@ async fn define_statement_index_single() -> Result<(), Error> {
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS email' },
 			lives: {},
 		}",
-	);
+	)?;
 	t.expect_vals(&[
 		"[{ id: user:1, email: 'test@surrealdb.com' }]",
 		"[{ id: user:2, email: 'test@surrealdb.com' }]",
-	]);
+	])?;
 	Ok(())
 }
 
@@ -695,8 +695,8 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 		CREATE user:3 SET account = 'apple', email = 'test@surrealdb.com';
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(3);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -705,13 +705,13 @@ async fn define_statement_index_multiple() -> Result<(), Error> {
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email' },
 			lives: {},
 		}",
-	);
+	)?;
 	t.expect_vals(&[
 		"[{ id: user:1, account: 'apple', email: 'test@surrealdb.com' }]",
 		"[{ id: user:2, account: 'tesla', email: 'test@surrealdb.com' }]",
 		"[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]",
 		"[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]",
-	]);
+	])?;
 	Ok(())
 }
 
@@ -727,8 +727,8 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 		DELETE user:1;
 		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(3);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -737,13 +737,13 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS email UNIQUE' },
 			lives: {},
 		}",
-	);
-	t.expect_val("[{ id: user:1, email: 'test@surrealdb.com' }]");
+	)?;
+	t.expect_val("[{ id: user:1, email: 'test@surrealdb.com' }]")?;
 	t.expect_error(
 		r#"Database index `test` already contains 'test@surrealdb.com', with record `user:1`"#,
-	);
-	t.skip_ok(1);
-	t.expect_val("[{ id: user:2, email: 'test@surrealdb.com' }]");
+	)?;
+	t.skip_ok(1)?;
+	t.expect_val("[{ id: user:2, email: 'test@surrealdb.com' }]")?;
 	Ok(())
 }
 
@@ -766,11 +766,11 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 		DELETE user:2;
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_error("The index 'test' already exists");
-	t.expect_val("None");
-	t.skip_ok(2);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_error("The index 'test' already exists")?;
+	t.expect_val("None")?;
+	t.skip_ok(2)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -779,22 +779,22 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' },
 			lives: {},
 		}",
-	);
-	t.expect_val("[{ id: user:1, account: 'apple', email: 'test@surrealdb.com' }]");
-	t.expect_val("[{ id: user:2, account: 'tesla', email: 'test@surrealdb.com' }]");
+	)?;
+	t.expect_val("[{ id: user:1, account: 'apple', email: 'test@surrealdb.com' }]")?;
+	t.expect_val("[{ id: user:2, account: 'tesla', email: 'test@surrealdb.com' }]")?;
 	t.expect_error(
 		r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#,
-	);
+	)?;
 	t.expect_error(
 		r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#,
-	);
-	t.skip_ok(1);
-	t.expect_val("[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]");
+	)?;
+	t.skip_ok(1)?;
+	t.expect_val("[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]")?;
 	t.expect_error(
 		r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:2`"#,
-	);
-	t.skip_ok(1);
-	t.expect_val("[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]");
+	)?;
+	t.skip_ok(1)?;
+	t.expect_val("[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]")?;
 	Ok(())
 }
 
@@ -856,15 +856,15 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 		DEFINE INDEX test ON user COLUMNS account, email UNIQUE;
 		INFO FOR TABLE user;
 	";
-	let mut t = Test::try_new(sql).await?;
-	t.skip_ok(4);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(4)?;
 	t.expect_error(
 		r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#,
-	);
+	)?;
 	t.expect_error(
 		r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"#,
-	);
-	let val = Value::parse(
+	)?;
+	t.expect_val(
 		"{
 			events: {},
 			fields: {},
@@ -872,8 +872,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 			indexes: {},
 			lives: {},
 		}",
-	);
-	t.expect_value(val);
+	)?;
 	Ok(())
 }
 
@@ -887,8 +886,8 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 		CREATE user:1 SET tags = ['one', 'two'];
 		CREATE user:2 SET tags = ['two', 'three'];
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(3);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -897,9 +896,9 @@ async fn define_statement_index_single_unique_embedded_multiple() -> Result<(), 
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS tags UNIQUE' },
 			lives: {},
 		}",
-	);
-	t.expect_val("[{ id: user:1, tags: ['one', 'two'] }]");
-	t.expect_error("Database index `test` already contains 'two', with record `user:1`");
+	)?;
+	t.expect_val("[{ id: user:1, tags: ['one', 'two'] }]")?;
+	t.expect_error("Database index `test` already contains 'two', with record `user:1`")?;
 	Ok(())
 }
 
@@ -915,8 +914,8 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 		CREATE user:3 SET account = 'apple', tags = ['two', 'three'];
 		CREATE user:4 SET account = 'tesla', tags = ['two', 'three'];
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(3);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -925,11 +924,15 @@ async fn define_statement_index_multiple_unique_embedded_multiple() -> Result<()
 			indexes: { test: 'DEFINE INDEX test ON user FIELDS account, tags UNIQUE' },
 			lives: {},
 		}",
-	);
-	t.expect_val("[{ id: user:1, account: 'apple', tags: ['one', 'two'] }]");
-	t.expect_val("[{ id: user:2, account: 'tesla', tags: ['one', 'two'] }]");
-	t.expect_error("Database index `test` already contains ['apple', 'two'], with record `user:1`");
-	t.expect_error("Database index `test` already contains ['tesla', 'two'], with record `user:2`");
+	)?;
+	t.expect_val("[{ id: user:1, account: 'apple', tags: ['one', 'two'] }]")?;
+	t.expect_val("[{ id: user:2, account: 'tesla', tags: ['one', 'two'] }]")?;
+	t.expect_error(
+		"Database index `test` already contains ['apple', 'two'], with record `user:1`",
+	)?;
+	t.expect_error(
+		"Database index `test` already contains ['tesla', 'two'], with record `user:2`",
+	)?;
 	Ok(())
 }
 
@@ -944,11 +947,11 @@ async fn define_statement_index_multiple_hnsw() -> Result<(), Error> {
 		DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12;
 		INFO FOR TABLE pts;
 	";
-	let mut t = Test::try_new(sql).await?;
-	t.skip_ok(2);
-	t.expect_error("The index 'hnsw_pts' already exists");
-	t.expect_val("None");
-	t.skip_ok(2);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(2)?;
+	t.expect_error("The index 'hnsw_pts' already exists")?;
+	t.expect_val("None")?;
+	t.skip_ok(2)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -959,7 +962,7 @@ async fn define_statement_index_multiple_hnsw() -> Result<(), Error> {
 			},
 			lives: {},
 		}",
-	);
+	)?;
 	Ok(())
 }
 
@@ -974,7 +977,7 @@ async fn define_statement_index_on_schemafull_without_permission() -> Result<(),
 	let mut res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	skip_ok(&mut res, 1);
+	skip_ok(&mut res, 1)?;
 	//
 	let tmp = res.remove(0).result;
 	let s = format!("{:?}", tmp);
@@ -1939,13 +1942,13 @@ async fn define_remove_analyzer() -> Result<(), Error> {
 		REMOVE ANALYZER example_blank;
 		REMOVE ANALYZER IF EXISTS example_blank;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The analyzer 'example_blank' already exists");
-	t.skip_ok(1);
-	t.expect_error("The analyzer 'example_blank' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The analyzer 'example_blank' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The analyzer 'example_blank' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -1959,13 +1962,13 @@ async fn define_remove_database() -> Result<(), Error> {
 		REMOVE DATABASE example;
 		REMOVE DATABASE IF EXISTS example;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The database 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The database 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The database 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The database 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -1979,13 +1982,13 @@ async fn define_remove_event() -> Result<(), Error> {
 		REMOVE EVENT example ON example;
 		REMOVE EVENT IF EXISTS example ON example;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The event 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The event 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The event 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The event 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -1999,13 +2002,13 @@ async fn define_remove_field() -> Result<(), Error> {
 		REMOVE FIELD example ON example;
 		REMOVE FIELD IF EXISTS example ON example;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The field 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The field 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The field 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The field 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2019,13 +2022,13 @@ async fn define_remove_function() -> Result<(), Error> {
 		REMOVE FUNCTION fn::example();
 		REMOVE FUNCTION IF EXISTS fn::example();
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The function 'fn::example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The function 'fn::example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The function 'fn::example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The function 'fn::example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2039,13 +2042,13 @@ async fn define_remove_indexes() -> Result<(), Error> {
 		REMOVE INDEX example ON example;
 		REMOVE INDEX IF EXISTS example ON example;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The index 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The index 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The index 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The index 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2059,13 +2062,13 @@ async fn define_remove_namespace() -> Result<(), Error> {
 		REMOVE NAMESPACE example;
 		REMOVE NAMESPACE IF EXISTS example;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The namespace 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The namespace 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The namespace 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The namespace 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2079,13 +2082,13 @@ async fn define_remove_param() -> Result<(), Error> {
 		REMOVE PARAM $example;
 		REMOVE PARAM IF EXISTS $example;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The param '$example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The param '$example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The param '$example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The param '$example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2099,13 +2102,13 @@ async fn define_remove_access() -> Result<(), Error> {
 		REMOVE ACCESS example ON DB;
 		REMOVE ACCESS IF EXISTS example ON DB;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The database access method 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The database access method 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The database access method 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The database access method 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2119,13 +2122,13 @@ async fn define_remove_tables() -> Result<(), Error> {
 		REMOVE TABLE example;
 		REMOVE TABLE IF EXISTS example;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The table 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The table 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The table 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The table 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2139,13 +2142,13 @@ async fn define_remove_users() -> Result<(), Error> {
 		REMOVE USER example ON ROOT;
 		REMOVE USER IF EXISTS example ON ROOT;
 	";
-	let mut t = Test::new(sql).await;
-	t.skip_ok(1);
-	t.expect_val("None");
-	t.expect_error("The root user 'example' already exists");
-	t.skip_ok(1);
-	t.expect_error("The root user 'example' does not exist");
-	t.expect_val("None");
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
+	t.expect_val("None")?;
+	t.expect_error("The root user 'example' already exists")?;
+	t.skip_ok(1)?;
+	t.expect_error("The root user 'example' does not exist")?;
+	t.expect_val("None")?;
 	Ok(())
 }
 
@@ -2257,12 +2260,12 @@ async fn define_table_relation_redefinition() -> Result<(), Error> {
 		DEFINE FIELD out ON TABLE likes TYPE record<person | thing | other>;
 		RELATE $person->likes->$other;
 	";
-	let mut t = Test::try_new(sql).await?;
-	t.skip_ok(4);
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }));
-	t.skip_ok(3);
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }));
-	t.skip_ok(3);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(4)?;
+	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+	t.skip_ok(3)?;
+	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+	t.skip_ok(3)?;
 	Ok(())
 }
 
@@ -2281,8 +2284,8 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 		INFO FOR TABLE likes;
 		INFO FOR DB;
 	";
-	let mut t = Test::try_new(sql).await?;
-	t.skip_ok(1);
+	let mut t = Test::new(sql).await?;
+	t.skip_ok(1)?;
 	t.expect_val("{
 			events: {},
 			fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<person> PERMISSIONS FULL' },
@@ -2290,7 +2293,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)?;
 	t.expect_val(
 		"{
 			accesses: {},
@@ -2301,8 +2304,8 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
-	);
-	t.skip_ok(2);
+	)?;
+	t.skip_ok(2)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -2311,7 +2314,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)?;
 	t.expect_val(
 		"{
 			accesses: {},
@@ -2322,8 +2325,8 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
-	);
-	t.skip_ok(2);
+	)?;
+	t.skip_ok(2)?;
 	t.expect_val(
 		"{
 			events: {},
@@ -2332,7 +2335,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)?;
 	t.expect_val(
 		"{
 			accesses: {},
@@ -2343,7 +2346,7 @@ async fn define_table_relation_redefinition_info() -> Result<(), Error> {
 			tables: { likes: 'DEFINE TABLE likes TYPE RELATION IN person OUT person | thing | other SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
-	);
+	)?;
 	Ok(())
 }
 
