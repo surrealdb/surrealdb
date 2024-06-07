@@ -2145,9 +2145,9 @@ async fn define_remove_users() -> Result<(), Error> {
 		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
 		DEFINE USER IF NOT EXISTS example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
 		DEFINE USER example ON ROOT PASSWORD \"example\" ROLES OWNER DURATION FOR TOKEN 15m, FOR SESSION 6h;
-		REMOVE USER IF EXISTS example;
-		REMOVE USER example;
-		REMOVE USER IF EXISTS example;
+		REMOVE USER IF EXISTS example ON ROOT;
+		REMOVE USER example ON ROOT;
+		REMOVE USER IF EXISTS example ON ROOT;
 	";
 	let mut t = Test::new(sql).await;
 	t.skip_ok(1);
