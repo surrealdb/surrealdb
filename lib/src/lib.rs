@@ -137,7 +137,7 @@ pub use api::Response;
 pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
-#[doc(inline)]
+#[doc(hidden)]
 pub use surrealdb_core::*;
 
 use uuid::Uuid;

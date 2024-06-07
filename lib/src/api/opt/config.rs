@@ -11,6 +11,8 @@ use crate::{dbs::Capabilities, iam::Level};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use super::capabilities::CapabilitiesBuilder;
+
 /// Configuration for server connection, including: strictness, notifications, query_timeout, transaction_timeout
 #[derive(Debug, Clone, Default)]
 pub struct Config {
@@ -120,8 +122,8 @@ impl Config {
 	}
 
 	/// Set the capabilities for the database
-	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
-		self.capabilities = capabilities;
+	pub fn capabilities(mut self, capabilities: CapabilitiesBuilder) -> Self {
+		self.capabilities = capabilities.build();
 		self
 	}
 
