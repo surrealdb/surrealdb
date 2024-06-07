@@ -184,7 +184,7 @@ async fn update_complex_with_input() -> Result<(), Error> {
 		CREATE product:test SET images = [' test.png '];
 	";
 	let mut t = Test::new(sql).await?;
-	t.skip_ok(2)?;
+	t.skip_ok(3)?;
 	t.expect_val(
 		"[
 			{
