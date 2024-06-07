@@ -62,6 +62,10 @@ impl std::str::FromStr for FuncTarget {
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let s = s.trim();
 
+		if s.is_empty() {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
 		if s.bytes().any(|x| !(x.is_ascii_alphabetic() || x == b':')) {
 			return Err(ParseFuncTargetError::InvalidName);
 		}
@@ -305,6 +309,14 @@ mod tests {
 	use test_log::test;
 
 	use super::*;
+
+	#[test]
+	fn test_invalid_func_target() {
+		FuncTarget::from_str("te::*st").unwrap_err();
+		FuncTarget::from_str("\0::st").unwrap_err();
+		FuncTarget::from_str("").unwrap_err();
+		FuncTarget::from_str("❤️").unwrap_err();
+	}
 
 	#[test]
 	fn test_func_target() {
