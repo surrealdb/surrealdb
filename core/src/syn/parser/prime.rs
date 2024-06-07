@@ -344,7 +344,6 @@ impl Parser<'_> {
 		match peek.kind {
 			t!("(") => {
 				self.pop_peek();
-				dbg!("called");
 				self.parse_inner_subquery(ctx, Some(peek.span)).await
 			}
 			t!("IF") => {
