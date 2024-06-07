@@ -42,7 +42,10 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				// consume any possible empty statements.
-				t!(";") => continue,
+				t!(";") => {
+					self.pop_peek();
+					continue;
+				}
 				t!("eof") => break,
 				_ => {
 					let stmt = ctx.run(|ctx| self.parse_stmt(ctx)).await?;
