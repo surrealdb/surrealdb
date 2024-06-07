@@ -55,10 +55,14 @@ impl DefineTableStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if table already exists
-		if self.if_not_exists && run.get_tb(opt.ns(), opt.db(), &self.name).await.is_ok() {
-			return Err(Error::TbAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_tb(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::TbAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
 		let key = crate::key::database::tb::new(opt.ns(), opt.db(), &self.name);

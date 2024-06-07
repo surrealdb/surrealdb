@@ -113,10 +113,14 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists && run.get_root_user(&self.name).await.is_ok() {
-					return Err(Error::UserRootAlreadyExists {
-						value: self.name.to_string(),
-					});
+				if run.get_root_user(&self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserRootAlreadyExists {
+							value: self.name.to_string(),
+						});
+					}
 				}
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
@@ -138,11 +142,15 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists && run.get_ns_user(opt.ns(), &self.name).await.is_ok() {
-					return Err(Error::UserNsAlreadyExists {
-						value: self.name.to_string(),
-						ns: opt.ns().into(),
-					});
+				if run.get_ns_user(opt.ns(), &self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserNsAlreadyExists {
+							value: self.name.to_string(),
+							ns: opt.ns().into(),
+						});
+					}
 				}
 				// Process the statement
 				let key = crate::key::namespace::us::new(opt.ns(), &self.name);
@@ -165,14 +173,16 @@ impl DefineUserStatement {
 				// Clear the cache
 				run.clear_cache();
 				// Check if user already exists
-				if self.if_not_exists
-					&& run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok()
-				{
-					return Err(Error::UserDbAlreadyExists {
-						value: self.name.to_string(),
-						ns: opt.ns().into(),
-						db: opt.db().into(),
-					});
+				if run.get_db_user(opt.ns(), opt.db(), &self.name).await.is_ok() {
+					if self.if_not_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(Error::UserDbAlreadyExists {
+							value: self.name.to_string(),
+							ns: opt.ns().into(),
+							db: opt.db().into(),
+						});
+					}
 				}
 				// Process the statement
 				let key = crate::key::database::us::new(opt.ns(), opt.db(), &self.name);

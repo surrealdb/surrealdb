@@ -39,12 +39,14 @@ impl DefineEventStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if event already exists
-		if self.if_not_exists
-			&& run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok()
-		{
-			return Err(Error::EvAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_tb_event(opt.ns(), opt.db(), &self.what, &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::EvAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
 		let key = crate::key::table::ev::new(opt.ns(), opt.db(), &self.what, &self.name);

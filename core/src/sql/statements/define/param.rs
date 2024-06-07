@@ -41,10 +41,14 @@ impl DefineParamStatement {
 		// Clear the cache
 		run.clear_cache();
 		// Check if param already exists
-		if self.if_not_exists && run.get_db_param(opt.ns(), opt.db(), &self.name).await.is_ok() {
-			return Err(Error::PaAlreadyExists {
-				value: self.name.to_string(),
-			});
+		if run.get_db_param(opt.ns(), opt.db(), &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::PaAlreadyExists {
+					value: self.name.to_string(),
+				});
+			}
 		}
 		// Process the statement
 		let key = crate::key::database::pa::new(opt.ns(), opt.db(), &self.name);

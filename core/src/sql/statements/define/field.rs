@@ -51,11 +51,14 @@ impl DefineFieldStatement {
 		run.clear_cache();
 		// Check if field already exists
 		let fd = self.name.to_string();
-		if self.if_not_exists && run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok()
-		{
-			return Err(Error::FdAlreadyExists {
-				value: fd,
-			});
+		if run.get_tb_field(opt.ns(), opt.db(), &self.what, &fd).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else {
+				return Err(Error::FdAlreadyExists {
+					value: fd,
+				});
+			}
 		}
 		// Process the statement
 		run.add_ns(opt.ns(), opt.strict).await?;

@@ -133,7 +133,7 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	skip_ok(res, 5);
+	skip_ok(res, 5)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -218,11 +218,11 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> 
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 29);
 	//
-	skip_ok(res, 2);
+	skip_ok(res, 2)?;
 	//
 	for i in 0..9 {
 		// Skip the UPDATE or DELETE statement
-		skip_ok(res, 1);
+		skip_ok(res, 1)?;
 		// Get the computed result
 		let comp = res.remove(0).result?;
 		// Get the projected result
