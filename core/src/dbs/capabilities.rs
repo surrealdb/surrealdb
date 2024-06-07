@@ -1,3 +1,4 @@
+use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::{collections::HashSet, sync::Arc};
@@ -13,8 +14,8 @@ pub trait Target {
 #[non_exhaustive]
 pub struct FuncTarget(pub String, pub Option<String>);
 
-impl std::fmt::Display for FuncTarget {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for FuncTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.1 {
 			Some(name) => write!(f, "{}:{}", self.0, name),
 			None => write!(f, "{}::*", self.0),
@@ -33,18 +34,52 @@ impl Target for FuncTarget {
 	}
 }
 
+#[derive(Debug, Clone)]
+pub enum ParseFuncTargetError {
+	InvalidWildcardFamily,
+	InvalidName,
+}
+
+impl fmt::Display for ParseFuncTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseFuncTargetError::InvalidName => {
+				write!(f, "invalid function target name")
+			}
+			ParseFuncTargetError::InvalidWildcardFamily => {
+				write!(
+					f,
+					"invalid function target wildcard family, only first part of function can be wildcarded"
+				)
+			}
+		}
+	}
+}
+
 impl std::str::FromStr for FuncTarget {
-	type Err = String;
+	type Err = ParseFuncTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		// 'family::*' is treated as 'family'. They both match all functions in the family.
-		let s = s.replace("::*", "");
+		let s = s.trim();
 
-		let target = match s.split_once("::") {
-			Some((family, name)) => Self(family.to_string(), Some(name.to_string())),
-			_ => Self(s.to_string(), None),
-		};
-		Ok(target)
+		if s.bytes().any(|x| !(x.is_ascii_alphabetic() || x == b':')) {
+			return Err(ParseFuncTargetError::InvalidName);
+		}
+
+		if let Some(s) = s.strip_suffix("::*") {
+			if s.contains("::") {
+				return Err(ParseFuncTargetError::InvalidWildcardFamily);
+			}
+
+			return Ok(FuncTarget(s.to_string(), None));
+		}
+
+		if let Some((first, rest)) = s.split_once("::") {
+			let rest = (!rest.is_empty()).then(|| rest.to_string());
+			Ok(FuncTarget(first.to_string(), rest))
+		} else {
+			Ok(FuncTarget(s.to_string(), None))
+		}
 	}
 }
 
@@ -56,8 +91,8 @@ pub enum NetTarget {
 }
 
 // impl display
-impl std::fmt::Display for NetTarget {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NetTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Host(host, Some(port)) => write!(f, "{}:{}", host, port),
 			Self::Host(host, None) => write!(f, "{}", host),
@@ -132,7 +167,7 @@ pub enum Targets<T: Target + Hash + Eq + PartialEq> {
 	All,
 }
 
-impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug + std::fmt::Display> Targets<T> {
+impl<T: Target + Hash + Eq + PartialEq + fmt::Debug + fmt::Display> Targets<T> {
 	fn matches(&self, elem: &T) -> bool {
 		match self {
 			Self::None => false,
@@ -142,8 +177,8 @@ impl<T: Target + Hash + Eq + PartialEq + std::fmt::Debug + std::fmt::Display> Ta
 	}
 }
 
-impl<T: Target + Hash + Eq + PartialEq + std::fmt::Display> std::fmt::Display for Targets<T> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<T> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::None => write!(f, "none"),
 			Self::All => write!(f, "all"),
@@ -169,8 +204,8 @@ pub struct Capabilities {
 	deny_net: Arc<Targets<NetTarget>>,
 }
 
-impl std::fmt::Display for Capabilities {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Capabilities {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
             "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}",

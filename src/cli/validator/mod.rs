@@ -100,7 +100,7 @@ pub(crate) fn func_targets(value: &str) -> Result<Targets<FuncTarget>, String> {
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
-		result.insert(FuncTarget::from_str(target)?);
+		result.insert(FuncTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))
