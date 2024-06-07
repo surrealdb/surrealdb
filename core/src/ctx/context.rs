@@ -1,6 +1,5 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use crate::dbs::capabilities::FuncTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification, Transaction};
@@ -25,7 +24,6 @@ use std::fmt::{self, Debug};
 	feature = "kv-speedb"
 ))]
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
