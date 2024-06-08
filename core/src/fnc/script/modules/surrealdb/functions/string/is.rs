@@ -15,6 +15,7 @@ impl_module_def!(
 	"email" => run,
 	"email" => run,
 	"hexadecimal" => run,
+	"html" => run,
 	"ip" => run,
 	"ipv4" => run,
 	"ipv6" => run,

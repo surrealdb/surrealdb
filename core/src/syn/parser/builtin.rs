@@ -273,6 +273,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::is::domain") => PathKind::Function,
 		UniCase::ascii("string::is::email") => PathKind::Function,
 		UniCase::ascii("string::is::hexadecimal") => PathKind::Function,
+		UniCase::ascii("string::is::html") => PathKind::Function,
 		UniCase::ascii("string::is::ip") => PathKind::Function,
 		UniCase::ascii("string::is::ipv4") => PathKind::Function,
 		UniCase::ascii("string::is::ipv6") => PathKind::Function,

@@ -210,6 +210,10 @@ pub mod is {
 		Ok(arg.chars().all(|x| char::is_ascii_hexdigit(&x)).into())
 	}
 
+	pub fn html((arg,): (String,)) -> Result<Value, Error> {
+		Ok(ammonia::is_html(arg.as_str()).into())
+	}
+
 	pub fn ip((arg,): (String,)) -> Result<Value, Error> {
 		Ok(arg.parse::<IpAddr>().is_ok().into())
 	}
@@ -519,6 +523,15 @@ mod tests {
 		assert_eq!(value, Value::Bool(true));
 
 		let value = super::is::hexadecimal((String::from("SurrealDB"),)).unwrap();
+		assert_eq!(value, Value::Bool(false));
+	}
+
+	#[test]
+	fn is_html() {
+		let value = super::is::html((String::from("<div>Hello world!</div>"),)).unwrap();
+		assert_eq!(value, Value::Bool(true));
+
+		let value = super::is::html((String::from("SurrealDB"),)).unwrap();
 		assert_eq!(value, Value::Bool(false));
 	}
 
