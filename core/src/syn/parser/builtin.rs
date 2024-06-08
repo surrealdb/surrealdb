@@ -167,6 +167,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("geo::hash::decode") => PathKind::Function,
 		UniCase::ascii("geo::hash::encode") => PathKind::Function,
 		//
+		UniCase::ascii("html::decode") => PathKind::Function,
+		UniCase::ascii("html::encode") => PathKind::Function,
 		UniCase::ascii("html::sanitize") => PathKind::Function,
 		//
 		UniCase::ascii("math::abs") => PathKind::Function,

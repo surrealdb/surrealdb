@@ -7,5 +7,7 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"html",
-	"sanitize" => run,
+	"decode" => run,
+	"encode" => run,
+	"sanitize" => run
 );
