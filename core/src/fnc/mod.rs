@@ -16,6 +16,7 @@ pub mod crypto;
 pub mod duration;
 pub mod encoding;
 pub mod geo;
+pub mod html;
 pub mod http;
 pub mod math;
 pub mod meta;
@@ -174,6 +175,8 @@ pub fn synchronous(
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
+		//
+		"html::sanitize" => html::sanitize,
 		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,

@@ -1677,6 +1677,24 @@ async fn function_parse_geo_hash_decode() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
+// html
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_sanitize_html() -> Result<(), Error> {
+	let sql = r#"
+		RETURN html::sanitize("XSS<script>attack</script>");
+	"#;
+	let mut test = Test::new(sql).await;
+	//
+	let tmp = test.next().result?;
+	let val = Value::from("XSS");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
 // math
 // --------------------------------------------------
 
