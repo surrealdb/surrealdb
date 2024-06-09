@@ -98,6 +98,7 @@ pub use self::explain::Explain;
 pub use self::expression::Expression;
 pub use self::fetch::Fetch;
 pub use self::fetch::Fetchs;
+pub use self::filter::Filter;
 pub use self::field::Field;
 pub use self::field::Fields;
 pub use self::function::Function;
