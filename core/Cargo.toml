@@ -90,7 +90,6 @@ geo = { version = "0.27.0", features = ["use-serde"] }
 geo-types = { version = "0.7.12", features = ["arbitrary"] }
 hashbrown = { version = "0.14.5", features = ["serde"] }
 hex = { version = "0.4.3" }
-html-escape = "0.2.13"
 indxdb = { version = "0.4.0", optional = true }
 ipnet = "2.9.0"
 js = { version = "0.6.2", package = "rquickjs", features = [
