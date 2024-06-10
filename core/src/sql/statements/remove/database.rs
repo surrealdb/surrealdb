@@ -26,6 +26,8 @@ impl RemoveDatabaseStatement {
 			opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 			// Claim transaction
 			let mut run = ctx.tx_lock().await;
+			// Remove index store
+			ctx.get_index_stores().database_removed(&mut run, opt.ns()?, &self.name).await?;
 			// Clear the cache
 			run.clear_cache();
 			// Get the definition
