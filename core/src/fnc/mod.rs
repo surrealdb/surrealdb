@@ -293,7 +293,6 @@ pub fn synchronous(
 		"string::is::domain" => string::is::domain,
 		"string::is::email" => string::is::email,
 		"string::is::hexadecimal" => string::is::hexadecimal,
-		"string::is::html" => string::is::html,
 		"string::is::ip" => string::is::ip,
 		"string::is::ipv4" => string::is::ipv4,
 		"string::is::ipv6" => string::is::ipv6,
