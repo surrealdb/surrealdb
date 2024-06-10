@@ -138,6 +138,7 @@ pub use api::Result;
 #[doc(inline)]
 pub use api::Surreal;
 #[doc(hidden)]
+#[deprecated]
 pub use surrealdb_core::*;
 
 use uuid::Uuid;
